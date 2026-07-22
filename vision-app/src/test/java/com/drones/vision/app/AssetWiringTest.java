@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.CategoryService;
@@ -10,11 +11,13 @@ import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.domain.port.out.FeedTransmitterPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
@@ -38,7 +41,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <p>Extended for docs/CYCLES-PLAN.md §1c: {@link SimulationService} and {@link
  * SimulationController} (the one-call, zero-hardware simulation entry point) are asserted here
  * too rather than in a new test class, since they are asset-model beans built directly on top of
- * {@link AssetService}.
+ * {@link AssetService}. Further extended for docs/CYCLES-PLAN.md §3: {@link FeedTransmitterPort}
+ * (backed by {@link RtspFeedTransmitter}) is asserted to resolve into {@link #simulationService}
+ * too — {@code transport=rtsp} simulations depend on it.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 class AssetWiringTest {
@@ -57,6 +62,9 @@ class AssetWiringTest {
 
     @Autowired
     private SimulationController simulationController;
+
+    @Autowired
+    private FeedTransmitterPort feedTransmitterPort;
 
     @Autowired
     private CategoryRepositoryPort categoryRepositoryPort;
@@ -90,5 +98,11 @@ class AssetWiringTest {
         assertNotNull(telemetryRepositoryPort, "TelemetryRepositoryPort bean must be registered");
         assertNotNull(auditTrailPort, "AuditTrailPort bean must be registered");
         assertNotNull(actingOwnership, "Ownership bean must be registered for CurrentUser to fall back to");
+    }
+
+    @Test
+    void rtspFeedTransmitterIsWiredAsTheFeedTransmitterPortBean() {
+        assertInstanceOf(RtspFeedTransmitter.class, feedTransmitterPort,
+                "docs/CYCLES-PLAN.md §3's transport=rtsp simulations need a real FeedTransmitterPort");
     }
 }

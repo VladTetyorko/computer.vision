@@ -106,7 +106,7 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 |---|---|---|---|---|
 | C1 | backend | `file` RX + `POST /api/simulations` | 1a (adapter-rtsp + rename ripple into vision-app), then 1b+1c (application, api, app) | ✅ done |
 | C2 | **UI** | Live telemetry OSD + map | one task (vision-web) | ✅ done |
-| C3 | backend | `FeedTransmitterPort` + RTSP TX | domain+adapter, then application+api+app | pending |
+| C3 | backend | `FeedTransmitterPort` + RTSP TX | domain+adapter, then application+api+app | ✅ done |
 | C4 | **UI** | Simulation wizard | one task (vision-web) | pending |
 
 **C5+ candidates** (re-propose when C4 closes): WEB-PLAN W6 leftovers + W7 hardening; `/map` overview tab (all assets on one map — referee's tournament view; geolocated detections join in Phase 2); mjpeg TX/RX pair (ESP32-CAM, Phase 4 pull-forward); flight replay (play a closed usage's trail + recording).

@@ -30,6 +30,8 @@ Framework-free domain: immutable models plus driven (`port.out`) ports.
 - `record DiscoveredDevice(String method, String name, URI address, CategoryId suggestedCategory, StreamDescriptor suggestedStream, Map<String,String> details)` — suggestedCategory/suggestedStream nullable (mechanism may lack enough info, e.g. ONVIF needs creds)
 - `record Event(String id, StreamId streamId, Instant at, EventType type, String message, Map<String,String> attributes)` — **streamId nullable** (device-level events); `static of(StreamId,EventType,String)` generates id+now()
 - `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING
+- `record FeedId(UUID value)` — `static random()`, `static of(String)`; identity for a transmitted feed (see `FeedTransmitterPort`)
+- `record FeedSpec(String protocol, URI source, Map<String,String> options)` — `protocol` lower-case-validated exactly like `StreamDescriptor.protocol`; `source`/`options` must not be `null` (no defaulting convenience ctor — follows `StreamDescriptor`'s closest precedent of validating rather than defaulting); `options` defensively copied via `Map.copyOf`
 - `record GeoPosition(double latitude, double longitude, Double altitudeMeters)` — lat [-90,90], lon [-180,180], altitude nullable
 - `record GroupId(UUID value)` — `static random()`, `static of(String)`
 - `enum LifecycleState` — ACTIVE, DEACTIVATED, **DELETED (soft)**. Nothing is ever destroyed: a deleted asset/device is hidden from listings and refuses to stream, but its record, usages and telemetry survive and the removal is reversible. Transitions: ACTIVE⇄DEACTIVATED; ACTIVE|DEACTIVATED→DELETED; DELETED→DEACTIVATED (restore — never straight back to ACTIVE)
@@ -55,6 +57,7 @@ Framework-free domain: immutable models plus driven (`port.out`) ports.
 - `DeviceDiscoveryPort`: `String method()` — stable lower-case key; `List<DiscoveredDevice> scan(Duration timeout)` — **blocking**, must self-time-box to ~timeout, empty list ≠ error
 - `DeviceRepositoryPort`: `Device save(Device)`; `Optional<Device> findById(DeviceId)`; `List<Device> findAll()`; `void deleteById(DeviceId)` — idempotent
 - `EventPublisherPort`: `void publish(Event)` — must not throw on ordinary delivery failure; called on hot pipeline path, must return quickly
+- `FeedTransmitterPort`: `boolean supports(FeedSpec)`; `StreamDescriptor start(FeedId, FeedSpec)` — blocking setup then background transmit, returns the descriptor the RX side (`VideoSourcePort`) can ingest from; `void stop(FeedId)` — idempotent. **TX (transmit) half** of the RX/TX doctrine (`docs/CYCLES-PLAN.md` §0): pushes a local media source over a real wire protocol so the platform's own RX adapters ingest it like real hardware — simulation infrastructure, unrelated to `StreamPublisherPort` (viewer-facing egress). Unrecoverable transmit failure just stops the feed, best-effort, no error channel (KISS)
 - `ModelRegistryPort`: `List<ModelRef> models()`; `void promote(ModelRef)` — must apply atomically (no partial-promotion reads)
 - `OverlayPort`: `VideoFrame render(AnnotatedFrame)` — synchronous, input frame never mutated, returns a distinct instance
 - `RecordingPort`: `void streamStarted(StreamId, Device)`; `void publish(StreamId, VideoFrame)` — must be cheap, no blocking I/O; `void streamEnded(StreamId)` — idempotent; method shape mirrors StreamPublisherPort but is a distinct port (durable storage vs live egress)
@@ -80,6 +83,7 @@ Framework-free domain: immutable models plus driven (`port.out`) ports.
 - `RecordingPort`'s method shape is identical to `StreamPublisherPort` (`streamStarted`/`publish`/`streamEnded`) but the two are deliberately separate interfaces/adapters (durable recording vs live viewer egress), enabled/disabled independently per stream.
 - `DetectionPort` itself applies no concurrency limit or queuing — `PipelineConfig.maxInFlightInferences` is enforced entirely by the caller (`vision-application`'s `StreamPipeline`), not this port.
 - `ScanRequest.methods()` (now in `vision-application`) empty means "all registered mechanisms", not "none".
+- `FeedSpec` has no null-defaulting convenience constructor for `options` (unlike some other records with a defaults ctor) — `StreamDescriptor` is the closest existing precedent for a `(protocol, URI, Map<String,String>)`-shaped record, and it validates (throws on `null` options) rather than defaulting, so `FeedSpec` follows that instead.
 
 ## Status
-Fully implemented. 127 tests, all passing (`./mvnw -B -pl vision-domain test`).
+Fully implemented, including `docs/CYCLES-PLAN.md` §3's `FeedId`/`FeedSpec`/`FeedTransmitterPort` (C3, domain half). 118 tests, all passing (`./mvnw -B -pl vision-domain test`).

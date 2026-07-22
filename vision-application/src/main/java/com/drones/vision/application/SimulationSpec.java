@@ -15,13 +15,39 @@ package com.drones.vision.application;
  * @param longitude    home-point longitude for the synthetic telemetry track, or {@code null} for
  *                     {@code SimulatedTelemetrySource}'s own default
  * @param autoStart    whether to start streaming immediately after creating the asset
+ * @param transport    how the video reaches its device — {@link SimulationTransport#DIRECT}
+ *                     (in-process playback) or {@link SimulationTransport#RTSP} (pushed over the
+ *                     wire via {@code FeedTransmitterPort} and ingested back, docs/CYCLES-PLAN.md
+ *                     §3); must not be {@code null}
  */
 public record SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
-                              boolean autoStart) {
+                              boolean autoStart, SimulationTransport transport) {
 
     public SimulationSpec {
         if (videoPath == null || videoPath.isBlank()) {
             throw new IllegalArgumentException("SimulationSpec videoPath must not be blank");
         }
+        if (transport == null) {
+            throw new IllegalArgumentException("SimulationSpec transport must not be null");
+        }
+    }
+
+    /**
+     * Convenience constructor defaulting {@link #transport()} to {@link SimulationTransport#DIRECT}
+     * — mirrors {@code Asset}/{@code Device}'s (vision-domain) N-1-arg convenience constructors
+     * that default a newly added field, rather than {@code AssetEdit}/{@code DeviceEdit}'s
+     * null-means-"leave unchanged" idiom, which only applies to partial-<em>edit</em> records
+     * (this is a creation command, so {@code null} can't mean "unchanged"). Keeps every
+     * pre-existing 5-arg call site source-compatible.
+     *
+     * @param displayName see the canonical constructor
+     * @param videoPath   see the canonical constructor
+     * @param latitude    see the canonical constructor
+     * @param longitude   see the canonical constructor
+     * @param autoStart   see the canonical constructor
+     */
+    public SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
+                           boolean autoStart) {
+        this(displayName, videoPath, latitude, longitude, autoStart, SimulationTransport.DIRECT);
     }
 }

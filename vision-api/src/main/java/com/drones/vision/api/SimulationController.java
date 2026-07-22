@@ -4,9 +4,12 @@ import com.drones.vision.api.dto.SimulationResponse;
 import com.drones.vision.api.dto.StartSimulationRequest;
 import com.drones.vision.application.SimulatedAsset;
 import com.drones.vision.application.SimulationService;
+import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -31,9 +34,12 @@ import java.util.Objects;
  *
  * <h2>Status codes</h2>
  * A bad {@code videoPath} (blank, or failing {@code SimulationService}'s filesystem checks —
- * missing, not a regular file, unreadable) surfaces as {@link IllegalArgumentException} → 400; an
- * unseeded {@code simulated} category surfaces as {@link IllegalStateException} → 409 — both via
- * {@link ApiExceptionHandler}, the same mapping every other controller here relies on.
+ * missing, not a regular file, unreadable), an unrecognized {@code transport} name, or
+ * (docs/CYCLES-PLAN.md §3) a {@code transport=rtsp} request no registered {@code
+ * FeedTransmitterPort} supports, all surface as {@link IllegalArgumentException} → 400; an
+ * unseeded {@code simulated} category surfaces as {@link IllegalStateException} → 409 — all via
+ * {@link ApiExceptionHandler}, the same mapping every other controller here relies on. {@link
+ * #stop} is idempotent and a malformed {@code assetId} (via {@code AssetId#of}) is the same 400.
  */
 @RestController
 public class SimulationController {
@@ -70,5 +76,19 @@ public class SimulationController {
 
     private String viewUrl(StreamId streamId) {
         return streamPublisherPort.viewUrl(streamId).map(URI::toString).orElse(null);
+    }
+
+    /**
+     * Stops a simulated asset's stream and, for a {@code transport=rtsp} simulation, its
+     * transmitted feed too (docs/CYCLES-PLAN.md §3) — idempotent, mirroring {@code
+     * AssetController}'s {@code DELETE /api/assets/{id}/stream}: an unknown or already-stopped
+     * asset is still a 204, not a 404.
+     *
+     * @param assetId canonical UUID string of the asset to stop
+     */
+    @DeleteMapping("/api/simulations/{assetId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void stop(@PathVariable String assetId) {
+        simulationService.stop(AssetId.of(assetId));
     }
 }

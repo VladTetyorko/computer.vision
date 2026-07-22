@@ -3,6 +3,7 @@ package com.drones.vision.api;
 import com.drones.vision.application.SimulatedAsset;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.SimulationSpec;
+import com.drones.vision.application.SimulationTransport;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
@@ -19,13 +20,17 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.net.URI;
 import java.util.Optional;
 
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -203,5 +208,84 @@ class SimulationControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
                 .andExpect(jsonPath("$.viewUrl").doesNotExist());
+    }
+
+    // ---- transport parsing ----
+
+    @Test
+    void simulateDefaultsTransportToDirectWhenFieldIsAbsent() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"videoPath\":\"/data/clips/drone.mp4\"}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertEquals(SimulationTransport.DIRECT, captor.getValue().transport());
+    }
+
+    @Test
+    void simulateParsesRtspTransportCaseInsensitively() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","transport":"RtSp"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertEquals(SimulationTransport.RTSP, captor.getValue().transport());
+    }
+
+    @Test
+    void simulateReturns400ForAnUnknownTransportAndNeverTouchesTheService() throws Exception {
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","transport":"udp"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value(
+                        allOf(containsString("udp"), containsString("DIRECT"), containsString("RTSP"))));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    // ---- DELETE /api/simulations/{assetId} ----
+
+    @Test
+    void deleteSimulationsReturns204AndStopsTheSimulation() throws Exception {
+        AssetId assetId = AssetId.random();
+
+        mockMvc.perform(delete("/api/simulations/{assetId}", assetId.value()))
+                .andExpect(status().isNoContent());
+
+        verify(simulationService).stop(assetId);
+    }
+
+    @Test
+    void deleteSimulationsIsIdempotent() throws Exception {
+        AssetId assetId = AssetId.random();
+
+        mockMvc.perform(delete("/api/simulations/{assetId}", assetId.value())).andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/simulations/{assetId}", assetId.value())).andExpect(status().isNoContent());
+
+        verify(simulationService, times(2)).stop(assetId);
+    }
+
+    @Test
+    void deleteSimulationsReturns400ForABadUuidAndNeverTouchesTheService() throws Exception {
+        mockMvc.perform(delete("/api/simulations/{assetId}", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(simulationService);
     }
 }

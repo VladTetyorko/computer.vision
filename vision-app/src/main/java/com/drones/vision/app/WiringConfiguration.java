@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.rtsp.FfmpegVideoSource;
+import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.SimulatedVideoSource;
 import com.drones.vision.api.HlsProxyController;
@@ -37,6 +38,7 @@ import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.FeedTransmitterPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
@@ -258,13 +260,27 @@ public class WiringConfiguration {
     }
 
     /**
-     * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §1b): turns a video
-     * file path into a registered {@code simulated}-category asset via {@link #assetService},
-     * reusing every rule it already enforces rather than duplicating asset creation here.
+     * TX (transmit) half of docs/CYCLES-PLAN.md §3's RX/TX doctrine: pushes a
+     * {@code transport=rtsp} simulation's video file to the same mediamtx sidecar {@link
+     * #streamPublisherPort} pushes viewer egress to — {@link VisionPublishProperties.Mediamtx#rtspBase()}
+     * is reused as-is rather than adding a new property, since it is already exactly "the mediamtx
+     * RTSP push target this app knows about" and both users push to the same mediamtx instance.
+     */
+    @Bean
+    public RtspFeedTransmitter rtspFeedTransmitter(VisionPublishProperties properties) {
+        return new RtspFeedTransmitter(properties.mediamtx().rtspBase());
+    }
+
+    /**
+     * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §1b, §3): turns a
+     * video file path into a registered {@code simulated}-category asset via {@link
+     * #assetService}, reusing every rule it already enforces rather than duplicating asset
+     * creation here. {@link #rtspFeedTransmitter} backs {@code transport=rtsp} simulations.
      */
     @Bean
     public SimulationService simulationService(AssetService assetService,
-                                                CategoryRepositoryPort categoryRepositoryPort) {
-        return new DefaultSimulationService(assetService, categoryRepositoryPort);
+                                                CategoryRepositoryPort categoryRepositoryPort,
+                                                FeedTransmitterPort rtspFeedTransmitter) {
+        return new DefaultSimulationService(assetService, categoryRepositoryPort, rtspFeedTransmitter);
     }
 }
