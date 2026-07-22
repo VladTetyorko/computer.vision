@@ -7,6 +7,15 @@ import { SettingsStore } from '../../core/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { type Device, type DiscoveredDevice, type ScanResult } from '../../core/api/models';
+import {
+  buildSimulationRequest,
+  buildSyntheticRegisterRequest,
+  findVideoDevice,
+  isSimulatedAsset,
+  mapSimulatedDevices,
+  type SimulateMode,
+  type SimulatedDeviceInfo,
+} from './simulate-logic';
 
 interface OptionRow {
   key: string;
@@ -15,6 +24,13 @@ interface OptionRow {
 
 /** Scan durations worth offering: long enough for mDNS, short enough to stay interactive. */
 const SCAN_TIMEOUTS = [2_000, 4_000, 8_000] as const;
+
+/** Shown under the mode selector — one sentence per mode, docs/CYCLES-PLAN.md §4's own wording. */
+const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
+  direct: 'Plays the file straight through the pipeline — the simplest way to see it work.',
+  rtsp: 'Rehearse the real protocol path: the platform transmits your file over RTSP and ingests it back like real hardware.',
+  synthetic: 'No file needed — registers a classic sim-protocol source instantly, the same one-click demo source as below.',
+};
 
 @Component({
   selector: 'vision-devices',
@@ -63,6 +79,37 @@ export class DevicesPage {
     return this.fleet.liveDeviceIds().has(device.id);
   }
 
+  // --- Simulate wizard (docs/CYCLES-PLAN.md §4) -----------------------------
+
+  protected readonly simulateOpen = signal(false);
+  protected readonly simName = signal('');
+  protected readonly simVideoPath = signal('');
+  protected readonly simMode = signal<SimulateMode>('direct');
+  protected readonly simLatitude = signal<number | null>(null);
+  protected readonly simLongitude = signal<number | null>(null);
+  protected readonly simAutoStart = signal(true);
+  protected readonly simSubmitting = signal(false);
+
+  /** deviceId → the simulated asset owning it; empty for a device that isn't simulated. */
+  protected readonly simulatedDevices = signal<ReadonlyMap<string, SimulatedDeviceInfo>>(new Map());
+  protected readonly busySimulatedAssetId = signal<string | null>(null);
+
+  protected readonly simModeHint = computed(() => SIMULATE_MODE_HINTS[this.simMode()]);
+
+  protected readonly simCanSubmit = computed(
+    () =>
+      !this.simSubmitting() &&
+      (this.simMode() === 'synthetic' || this.simVideoPath().trim().length > 0),
+  );
+
+  protected simulatedInfo(device: Device): SimulatedDeviceInfo | undefined {
+    return this.simulatedDevices().get(device.id);
+  }
+
+  constructor() {
+    void this.refreshSimulatedAssets();
+  }
+
   // --- Registration --------------------------------------------------------
 
   protected async submit(): Promise<void> {
@@ -94,11 +141,7 @@ export class DevicesPage {
   protected async registerSimulator(): Promise<void> {
     this.submitting.set(true);
     try {
-      await this.fleet.register({
-        name: 'sim-demo',
-        protocol: 'sim',
-        uri: 'sim://demo',
-      });
+      await this.fleet.register(buildSyntheticRegisterRequest(''));
     } finally {
       this.submitting.set(false);
     }
@@ -208,5 +251,123 @@ export class DevicesPage {
 
   protected watch(device: Device): Promise<boolean> {
     return this.router.navigate(['/live', device.id]);
+  }
+
+  // --- Simulate wizard -------------------------------------------------------
+
+  /** The page's "Refresh" button re-reads devices/streams *and* which of them are simulated. */
+  protected async refreshAll(): Promise<void> {
+    await Promise.all([this.fleet.refresh(), this.refreshSimulatedAssets()]);
+  }
+
+  protected toggleSimulate(): void {
+    this.simulateOpen.update((open) => !open);
+  }
+
+  protected async submitSimulate(): Promise<void> {
+    if (!this.simCanSubmit()) {
+      return;
+    }
+    this.simSubmitting.set(true);
+    try {
+      const mode = this.simMode();
+      if (mode === 'synthetic') {
+        await this.submitSyntheticSimulation();
+      } else {
+        await this.submitFileSimulation(mode);
+      }
+    } finally {
+      this.simSubmitting.set(false);
+    }
+  }
+
+  /** `synthetic` is just the existing register flow, so all zero-hardware entries live in one place. */
+  private async submitSyntheticSimulation(): Promise<void> {
+    const device = await this.fleet.register(buildSyntheticRegisterRequest(this.simName()));
+    if (!device) {
+      return; // failure already toasted by FleetStore.run()
+    }
+    this.toasts.ok(`Registered ${device.name} as a synthetic source.`);
+    this.closeSimulateForm();
+  }
+
+  private async submitFileSimulation(mode: 'direct' | 'rtsp'): Promise<void> {
+    const request = buildSimulationRequest({
+      name: this.simName(),
+      videoPath: this.simVideoPath(),
+      mode,
+      latitude: this.simLatitude(),
+      longitude: this.simLongitude(),
+      autoStart: this.simAutoStart(),
+    });
+    const response = await this.fleet.simulate(request);
+    if (!response) {
+      return; // failure already toasted by FleetStore.run()
+    }
+    this.closeSimulateForm();
+    await this.refreshSimulatedAssets();
+
+    if (!response.streamId) {
+      this.toasts.ok('Simulated asset created — start it from the device list when ready.');
+      return;
+    }
+
+    const deviceId = await this.resolveWatchTarget(response.assetId);
+    this.toasts.ok(
+      'Simulation started — now streaming.',
+      deviceId ? { label: 'Watch', onClick: () => void this.router.navigate(['/live', deviceId]) } : undefined,
+    );
+  }
+
+  /** The started simulation's watchable device — resolved from the freshly-created asset's devices. */
+  private async resolveWatchTarget(assetId: string): Promise<string | undefined> {
+    try {
+      const asset = await this.api.getAsset(assetId);
+      return findVideoDevice(asset.devices)?.id;
+    } catch {
+      return undefined; // best-effort — worst case the toast has no Watch action
+    }
+  }
+
+  protected async stopSimulatedAsset(info: SimulatedDeviceInfo): Promise<void> {
+    this.busySimulatedAssetId.set(info.assetId);
+    try {
+      const stopped = await this.fleet.stopSimulation(info.assetId);
+      if (stopped) {
+        this.toasts.ok(`Stopped simulation "${info.displayName}".`);
+        await this.refreshSimulatedAssets();
+      }
+    } finally {
+      this.busySimulatedAssetId.set(null);
+    }
+  }
+
+  /**
+   * Re-derives which devices belong to a `simulated`-category asset.
+   *
+   * One `listAssets()` call, then `getAsset()` only for the (usually few) simulated ones —
+   * cheap, and best-effort like `TelemetryStore`'s own asset lookups: the chip/stop action is
+   * enrichment, not a user-initiated action, so a failure here degrades silently rather than
+   * raising a toast.
+   */
+  private async refreshSimulatedAssets(): Promise<void> {
+    try {
+      const summaries = await this.api.listAssets();
+      const simulated = summaries.filter(isSimulatedAsset);
+      const details = await Promise.all(simulated.map((asset) => this.api.getAsset(asset.assetId)));
+      this.simulatedDevices.set(mapSimulatedDevices(details));
+    } catch {
+      // Silent-degrade — see doc comment above.
+    }
+  }
+
+  private closeSimulateForm(): void {
+    this.simulateOpen.set(false);
+    this.simName.set('');
+    this.simVideoPath.set('');
+    this.simMode.set('direct');
+    this.simLatitude.set(null);
+    this.simLongitude.set(null);
+    this.simAutoStart.set(true);
   }
 }

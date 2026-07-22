@@ -7,10 +7,99 @@
         source by hand.
       </p>
     </div>
-    <button type="button" class="btn secondary" (click)="fleet.refresh()" [disabled]="fleet.loading()">
-      Refresh
-    </button>
+    <div class="row">
+      <button type="button" class="btn" (click)="toggleSimulate()">
+        {{ simulateOpen() ? 'Close simulate' : 'Simulate a source' }}
+      </button>
+      <button type="button" class="btn secondary" (click)="refreshAll()" [disabled]="fleet.loading()">
+        Refresh
+      </button>
+    </div>
   </div>
+
+  <!-- ---- Simulate a source ---------------------------------------------- -->
+  @if (simulateOpen()) {
+    <section class="card" id="simulate-card">
+      <header>
+        <h2>Simulate a source</h2>
+        <span class="muted">Zero hardware — a file path in, a watchable device out</span>
+      </header>
+
+      <form class="simulate-form" (ngSubmit)="submitSimulate()">
+        <div class="field">
+          <label class="label" for="sim-name">Name</label>
+          <input
+            id="sim-name"
+            name="simName"
+            [(ngModel)]="simName"
+            placeholder="derived from the file name"
+          />
+        </div>
+
+        <div class="field wide">
+          <label class="label" for="sim-mode">Mode</label>
+          <select id="sim-mode" name="simMode" [(ngModel)]="simMode">
+            <option value="direct">Play file directly</option>
+            <option value="rtsp">Transmit over RTSP</option>
+            <option value="synthetic">Synthetic pattern</option>
+          </select>
+        </div>
+
+        @if (simMode() !== 'synthetic') {
+          <div class="field wide">
+            <label class="label" for="sim-video-path">Server-side video path</label>
+            <input
+              id="sim-video-path"
+              name="simVideoPath"
+              [(ngModel)]="simVideoPath"
+              placeholder="/srv/videos/flight.mp4"
+              required
+            />
+          </div>
+
+          <div class="field">
+            <label class="label" for="sim-lat">Home latitude</label>
+            <input
+              id="sim-lat"
+              name="simLatitude"
+              type="number"
+              step="any"
+              [(ngModel)]="simLatitude"
+              placeholder="optional"
+            />
+          </div>
+
+          <div class="field">
+            <label class="label" for="sim-lon">Home longitude</label>
+            <input
+              id="sim-lon"
+              name="simLongitude"
+              type="number"
+              step="any"
+              [(ngModel)]="simLongitude"
+              placeholder="optional"
+            />
+          </div>
+
+          <label class="field checkbox-field">
+            <input type="checkbox" name="simAutoStart" [(ngModel)]="simAutoStart" />
+            <span>Start streaming immediately</span>
+          </label>
+        }
+
+        <button type="submit" class="btn" [disabled]="!simCanSubmit()">
+          {{ simSubmitting() ? 'Simulating…' : 'Simulate' }}
+        </button>
+      </form>
+
+      <p class="muted hint">
+        {{ simModeHint() }}
+        @if (simMode() !== 'synthetic') {
+          The path must exist on the machine running the platform, not your browser.
+        }
+      </p>
+    </section>
+  }
 
   <!-- ---- Inventory ---------------------------------------------------- -->
   <section class="card">
@@ -63,6 +152,11 @@
                 } @else {
                   <span class="chip">Stopped</span>
                 }
+                @if (simulatedInfo(device); as simInfo) {
+                  <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">
+                    Simulated
+                  </span>
+                }
               </td>
               <td class="actions">
                 @if (isLive(device)) {
@@ -83,6 +177,16 @@
                     [disabled]="busyDeviceId() === device.id"
                   >
                     {{ busyDeviceId() === device.id ? 'Starting…' : 'Start' }}
+                  </button>
+                }
+                @if (simulatedInfo(device); as simInfo) {
+                  <button
+                    type="button"
+                    class="btn danger small"
+                    (click)="stopSimulatedAsset(simInfo)"
+                    [disabled]="busySimulatedAssetId() === simInfo.assetId"
+                  >
+                    {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
                   </button>
                 }
               </td>

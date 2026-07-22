@@ -9,6 +9,8 @@ import type {
   RegisterDeviceRequest,
   ScanRequest,
   ScanResult,
+  SimulationResponse,
+  StartSimulationRequest,
   StartStreamRequest,
   StartStreamResult,
   TelemetrySample,
@@ -78,6 +80,21 @@ export class VisionApi {
       this.http.get<TelemetrySample[]>(`/api/usages/${encodeURIComponent(usageId)}/telemetry`, {
         params: { limit },
       }),
+    );
+  }
+
+  // --- Simulation ------------------------------------------------------------
+  // Backs the "Simulate a source" wizard (docs/CYCLES-PLAN.md §4): a video file path in, a
+  // registered, categorized, optionally already-streaming asset out.
+
+  startSimulation(request: StartSimulationRequest): Promise<SimulationResponse> {
+    return firstValueFrom(this.http.post<SimulationResponse>('/api/simulations', request));
+  }
+
+  /** Idempotent — stops the asset's stream and, for `transport=rtsp`, its transmitted feed too. */
+  stopSimulation(assetId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>(`/api/simulations/${encodeURIComponent(assetId)}`),
     );
   }
 }

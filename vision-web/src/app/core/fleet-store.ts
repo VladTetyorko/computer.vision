@@ -6,6 +6,8 @@ import type {
   ActiveStream,
   Device,
   RegisterDeviceRequest,
+  SimulationResponse,
+  StartSimulationRequest,
   StartStreamRequest,
   StartStreamResult,
 } from './api/models';
@@ -110,6 +112,30 @@ export class FleetStore {
   async stop(streamId: string): Promise<boolean> {
     const result = await this.run(async () => {
       await this.api.stopStream(streamId);
+      await this.refresh({ quiet: true });
+      return true;
+    });
+    return result ?? false;
+  }
+
+  /**
+   * Creates a simulated asset (docs/CYCLES-PLAN.md §4) and refreshes the device/stream lists so
+   * the new device shows up immediately. Returns `null` on failure (already toasted by `run()`);
+   * the caller decides the specific success toast/Watch action since that depends on whether
+   * `autoStart` produced a `streamId` — this store only knows how to fail loudly once.
+   */
+  async simulate(request: StartSimulationRequest): Promise<SimulationResponse | null> {
+    return this.run(async () => {
+      const result = await this.api.startSimulation(request);
+      await this.refresh({ quiet: true });
+      return result;
+    });
+  }
+
+  /** Idempotent — stops a simulated asset's stream (and, for `transport=rtsp`, its feed). */
+  async stopSimulation(assetId: string): Promise<boolean> {
+    const result = await this.run(async () => {
+      await this.api.stopSimulation(assetId);
       await this.refresh({ quiet: true });
       return true;
     });

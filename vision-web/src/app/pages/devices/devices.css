@@ -15,6 +15,7 @@
 
 td.actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.4rem;
     justify-content: flex-end;
 }
@@ -43,6 +44,44 @@ td.actions {
     padding: 0.5rem 0.7rem;
     font-size: 0.82rem;
     margin-bottom: 0.75rem;
+}
+
+/* ---- Simulate wizard ----------------------------------------------------- */
+
+#simulate-card .hint {
+    margin: 0.75rem 0 0;
+}
+
+.simulate-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr auto;
+    gap: 0.6rem;
+    align-items: end;
+}
+
+.simulate-form .checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-direction: row;
+}
+
+.simulate-form .checkbox-field input {
+    width: auto;
+}
+
+.simulate-form button[type='submit'] {
+    justify-self: start;
+}
+
+@media (max-width: 900px) {
+    .simulate-form {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .simulate-form button {
+        grid-column: 1 / -1;
+    }
 }
 
 /* ---- Register form ------------------------------------------------------ */

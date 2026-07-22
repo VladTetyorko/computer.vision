@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { ToastService } from '../core/toast.service';
+import { ToastService, type ToastAction } from '../core/toast.service';
 
 @Component({
   selector: 'vision-toast-host',
@@ -9,6 +9,11 @@ import { ToastService } from '../core/toast.service';
       @for (toast of toasts.toasts(); track toast.id) {
         <div class="toast" [class]="toast.kind">
           <span>{{ toast.text }}</span>
+          @if (toast.action; as action) {
+            <button type="button" class="action" (click)="runAction(toast.id, action)">
+              {{ action.label }}
+            </button>
+          }
           <button type="button" aria-label="Dismiss" (click)="toasts.dismiss(toast.id)">×</button>
         </div>
       }
@@ -67,6 +72,14 @@ import { ToastService } from '../core/toast.service';
       opacity: 1;
     }
 
+    button.action {
+      opacity: 1;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-decoration: underline;
+      white-space: nowrap;
+    }
+
     @keyframes slide-in {
       from {
         opacity: 0;
@@ -77,4 +90,9 @@ import { ToastService } from '../core/toast.service';
 })
 export class ToastHost {
   protected readonly toasts = inject(ToastService);
+
+  protected runAction(toastId: number, action: ToastAction): void {
+    this.toasts.dismiss(toastId);
+    action.onClick();
+  }
 }

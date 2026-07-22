@@ -73,4 +73,18 @@ describe('VisionApi', () => {
     request.flush([]);
     await promise;
   });
+
+  it('starts a simulation', async () => {
+    const promise = api.startSimulation({ videoPath: '/videos/flight.mp4', transport: 'rtsp' });
+    const request = http.expectOne({ method: 'POST', url: '/api/simulations' });
+    expect(request.request.body).toEqual({ videoPath: '/videos/flight.mp4', transport: 'rtsp' });
+    request.flush({ assetId: 'a-1', streamId: 's-1' });
+    await expect(promise).resolves.toEqual({ assetId: 'a-1', streamId: 's-1' });
+  });
+
+  it('escapes the asset id when stopping a simulation', async () => {
+    const promise = api.stopSimulation('a/b c');
+    http.expectOne({ method: 'DELETE', url: '/api/simulations/a%2Fb%20c' }).flush(null);
+    await promise;
+  });
 });

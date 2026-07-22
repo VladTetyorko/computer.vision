@@ -187,3 +187,32 @@ export interface AssetDetails extends AssetSummary {
   readonly devices: readonly Device[];
   readonly recentUsages: readonly AssetUsage[];
 }
+
+/**
+ * Mirrors `dto.StartSimulationRequest` (docs/CYCLES-PLAN.md §1c, §3) — the one-call,
+ * zero-hardware "simulate a source" entry point. Optional fields are omitted, never sent as
+ * `null`, matching every other request DTO here; the backend's own defaults then apply
+ * (`autoStart` → `true`, `transport` → `"direct"`).
+ *
+ * `transport` is matched case-insensitively server-side, but this app always sends the fixed
+ * lowercase values: `"direct"` (in-process playback) or `"rtsp"` (pushed over the wire and
+ * ingested back, docs/CYCLES-PLAN.md §3 — rehearses the full protocol path).
+ */
+export interface StartSimulationRequest {
+  readonly displayName?: string;
+  readonly videoPath: string;
+  readonly latitude?: number;
+  readonly longitude?: number;
+  readonly autoStart?: boolean;
+  readonly transport?: 'direct' | 'rtsp';
+}
+
+/**
+ * Mirrors `dto.SimulationResponse`. `streamId`/`viewUrl` are absent when the simulation was not
+ * auto-started, or — for `viewUrl` — when the active publisher has no viewing endpoint.
+ */
+export interface SimulationResponse {
+  readonly assetId: string;
+  readonly streamId?: string;
+  readonly viewUrl?: string;
+}
