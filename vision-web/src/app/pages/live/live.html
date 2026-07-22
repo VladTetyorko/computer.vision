@@ -22,6 +22,14 @@
       </div>
     </div>
 
+    @if (hasTelemetry()) {
+      @if (telemetry.hasTelemetry()) {
+        <vision-telemetry-osd class="osd-strip" />
+      } @else {
+        <p class="muted hint osd-pending">No telemetry yet — waiting for the first sample.</p>
+      }
+    }
+
     <div class="layout">
       <div class="stage">
         <vision-player [src]="stream()?.viewUrl ?? null" />
@@ -110,11 +118,8 @@
 
         @if (hasTelemetry()) {
           <section class="card">
-            <header><h2>Telemetry</h2></header>
-            <p class="muted hint">
-              This device reports telemetry. The OSD and map arrive with
-              <code>adapter-mavlink</code> in Phase 4.
-            </p>
+            <header><h2>Map</h2></header>
+            <vision-live-map />
           </section>
         }
 

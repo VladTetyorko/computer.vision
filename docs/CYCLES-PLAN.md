@@ -105,7 +105,7 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | Cycle | Kind | Ships | Tasks (disjoint scopes) | Status |
 |---|---|---|---|---|
 | C1 | backend | `file` RX + `POST /api/simulations` | 1a (adapter-rtsp + rename ripple into vision-app), then 1b+1c (application, api, app) | pending |
-| C2 | **UI** | Live telemetry OSD + map | one task (vision-web) | pending |
+| C2 | **UI** | Live telemetry OSD + map | one task (vision-web) | ✅ done |
 | C3 | backend | `FeedTransmitterPort` + RTSP TX | domain+adapter, then application+api+app | pending |
 | C4 | **UI** | Simulation wizard | one task (vision-web) | pending |
 

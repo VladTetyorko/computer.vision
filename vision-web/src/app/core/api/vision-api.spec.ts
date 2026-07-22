@@ -45,4 +45,32 @@ describe('VisionApi', () => {
     request.flush({ devices: [], failedMethods: [] });
     await expect(promise).resolves.toEqual({ devices: [], failedMethods: [] });
   });
+
+  it('lists assets', async () => {
+    const promise = api.listAssets();
+    http.expectOne({ method: 'GET', url: '/api/assets' }).flush([]);
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it('fetches one asset by id', async () => {
+    const promise = api.getAsset('a-1');
+    http.expectOne({ method: 'GET', url: '/api/assets/a-1' }).flush({ assetId: 'a-1' });
+    await expect(promise).resolves.toMatchObject({ assetId: 'a-1' });
+  });
+
+  it('defaults a usage telemetry request to limit=200', async () => {
+    const promise = api.usageTelemetry('u-1');
+    const request = http.expectOne((r) => r.url === '/api/usages/u-1/telemetry');
+    expect(request.request.params.get('limit')).toBe('200');
+    request.flush([]);
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it('passes an explicit telemetry limit through', async () => {
+    const promise = api.usageTelemetry('u-1', 50);
+    const request = http.expectOne((r) => r.url === '/api/usages/u-1/telemetry');
+    expect(request.request.params.get('limit')).toBe('50');
+    request.flush([]);
+    await promise;
+  });
 });

@@ -1,0 +1,22 @@
+<div class="map-shell" [class.expanded]="expanded()">
+  <div class="map-host" #mapHost></div>
+
+  @if (!tilesOk()) {
+    <div class="badge offline-badge">Tiles unavailable — trail shown offline</div>
+  }
+
+  <div class="controls">
+    <button
+      type="button"
+      class="btn secondary small"
+      [class.active]="autoFollow()"
+      (click)="toggleFollow()"
+      title="Recenter on the drone as new positions arrive"
+    >
+      {{ autoFollow() ? 'Following' : 'Follow' }}
+    </button>
+    <button type="button" class="btn secondary small" (click)="toggleExpanded()">
+      {{ expanded() ? 'Collapse' : 'Expand' }}
+    </button>
+  </div>
+</div>

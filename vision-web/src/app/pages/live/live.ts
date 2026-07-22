@@ -1,15 +1,29 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { Player } from '../../ui/player';
 import { FleetStore } from '../../core/fleet-store';
 import { SettingsStore } from '../../core/settings-store';
+import { TelemetryStore } from '../../core/telemetry-store';
+import { TelemetryOsd } from './telemetry-osd';
+import { LiveMap } from './live-map';
 
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink],
+  imports: [Player, RouterLink, TelemetryOsd, LiveMap],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // Own instance per route activation: the telemetry poll starts/stops with this page
+  // (docs/CYCLES-PLAN.md §2) rather than as an app-wide singleton like `FleetStore`.
+  providers: [TelemetryStore],
 })
 export class LivePage {
   /** Bound from the route by `withComponentInputBinding()`. */
@@ -18,6 +32,7 @@ export class LivePage {
   private readonly router = inject(Router);
   protected readonly fleet = inject(FleetStore);
   protected readonly settings = inject(SettingsStore);
+  protected readonly telemetry = inject(TelemetryStore);
 
   protected readonly busy = signal(false);
 
@@ -38,6 +53,20 @@ export class LivePage {
   protected readonly optionPairs = computed(() =>
     Object.entries(this.device()?.options ?? {}).map(([key, value]) => ({ key, value })),
   );
+
+  constructor() {
+    // Only devices that declare TELEMETRY are worth looking up an asset/usage for at all —
+    // `hasTelemetry()` flips true once `FleetStore` has loaded the device, so this also covers
+    // the brief window before that first fetch resolves.
+    effect(() => {
+      const deviceId = this.deviceId();
+      if (this.hasTelemetry()) {
+        this.telemetry.track(deviceId);
+      } else {
+        this.telemetry.reset();
+      }
+    });
+  }
 
   protected async start(): Promise<void> {
     const device = this.device();

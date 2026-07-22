@@ -3,12 +3,15 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type {
   ActiveStream,
+  AssetDetails,
+  AssetSummary,
   Device,
   RegisterDeviceRequest,
   ScanRequest,
   ScanResult,
   StartStreamRequest,
   StartStreamResult,
+  TelemetrySample,
 } from './models';
 
 /**
@@ -56,5 +59,25 @@ export class VisionApi {
 
   scan(request: ScanRequest = {}): Promise<ScanResult> {
     return firstValueFrom(this.http.post<ScanResult>('/api/discovery/scan', request));
+  }
+
+  // --- Assets ----------------------------------------------------------------
+  // Backs the live telemetry OSD/map (docs/CYCLES-PLAN.md §2): a device's asset — and
+  // that asset's open usage — is looked up on demand, not polled by a fleet-wide store.
+
+  listAssets(): Promise<AssetSummary[]> {
+    return firstValueFrom(this.http.get<AssetSummary[]>('/api/assets'));
+  }
+
+  getAsset(assetId: string): Promise<AssetDetails> {
+    return firstValueFrom(this.http.get<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}`));
+  }
+
+  usageTelemetry(usageId: string, limit = 200): Promise<TelemetrySample[]> {
+    return firstValueFrom(
+      this.http.get<TelemetrySample[]>(`/api/usages/${encodeURIComponent(usageId)}/telemetry`, {
+        params: { limit },
+      }),
+    );
   }
 }

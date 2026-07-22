@@ -23,8 +23,8 @@ export type DeviceState = 'ACTIVE' | 'DEACTIVATED';
  * Mirrors `dto.DeviceResponse`.
  *
  * There is no `type` field: the `DeviceType` enum was removed server-side in favor of the
- * data-driven category model, which applies to `Asset`s, not raw devices (see
- * `dto.CategoryResponse`, `dto.AssetSummaryResponse` — not yet mirrored here, unused by this app).
+ * data-driven category model, which applies to `Asset`s, not raw devices (see `Category`,
+ * `AssetSummary`).
  */
 export interface Device {
   readonly id: string;
@@ -101,4 +101,89 @@ export interface ScanResult {
 export interface ApiErrorBody {
   readonly error: string;
   readonly message: string;
+}
+
+/**
+ * Mirrors `domain.model.LifecycleState` as surfaced by `dto.AssetSummaryResponse#state` /
+ * `dto.AssetDetailsResponse#state`. A separate axis from `AssetStatus`: "idle right now" and
+ * "withdrawn from service" are different facts. Unlike `DeviceState`, assets can also be
+ * `DELETED` (a soft delete — `GET /api/assets` excludes these unless queried otherwise, which
+ * this app never does).
+ */
+export type LifecycleState = 'ACTIVE' | 'DEACTIVATED' | 'DELETED';
+
+/** Mirrors `application.AssetStatus`, as surfaced by `dto.AssetSummaryResponse#status`. */
+export type AssetStatus = 'OFFLINE' | 'STREAMING';
+
+/**
+ * Mirrors `dto.GeoPositionResponse`. `altitudeMeters` is absent when the position carries no
+ * altitude reading.
+ */
+export interface GeoPosition {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly altitudeMeters?: number;
+}
+
+/**
+ * Mirrors `dto.CategoryResponse`. `parent` is absent for a top-level category.
+ * `attributeHints` are UI suggestions, not a rigid schema.
+ */
+export interface Category {
+  readonly slug: string;
+  readonly name: string;
+  readonly parent?: string;
+  readonly attributeHints: readonly string[];
+}
+
+/**
+ * Mirrors `dto.TelemetrySampleResponse`. Every field except `at` is absent when the underlying
+ * sample did not carry that reading — not every device reports every field.
+ */
+export interface TelemetrySample {
+  readonly at: string;
+  readonly latitude?: number;
+  readonly longitude?: number;
+  readonly altitudeMeters?: number;
+  readonly headingDegrees?: number;
+  readonly batteryPercent?: number;
+}
+
+/**
+ * Mirrors `dto.AssetUsageResponse`, embedded in `AssetDetails#recentUsages`. `endedAt` absent
+ * means the usage is still open — this is how the telemetry store finds the usage to poll.
+ */
+export interface AssetUsage {
+  readonly usageId: string;
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly startPosition?: GeoPosition;
+  readonly lastPosition?: GeoPosition;
+  readonly sampleCount: number;
+}
+
+/**
+ * Mirrors `dto.AssetSummaryResponse`, the shared field set `AssetDetails` extends. `lastUsedAt`
+ * and `lastKnownPosition` are absent for an asset that has never been used.
+ */
+export interface AssetSummary {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly category: string;
+  readonly categoryName: string;
+  readonly owner: string;
+  readonly status: AssetStatus;
+  readonly state: LifecycleState;
+  readonly lastUsedAt?: string;
+  readonly lastKnownPosition?: GeoPosition;
+  readonly attributes: Record<string, string>;
+}
+
+/**
+ * Mirrors `dto.AssetDetailsResponse`: `AssetSummary`'s fields plus the asset's resolved devices
+ * and recent usage history (newest first).
+ */
+export interface AssetDetails extends AssetSummary {
+  readonly devices: readonly Device[];
+  readonly recentUsages: readonly AssetUsage[];
 }

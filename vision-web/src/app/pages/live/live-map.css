@@ -1,0 +1,91 @@
+:host {
+  display: block;
+}
+
+.map-shell {
+  position: relative;
+  height: 220px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #0b0f14;
+  border: 1px solid var(--border);
+}
+
+/* Expanded to a full pane over the rest of the page — Leaflet is told to remeasure via
+   `invalidateSize()` in the component (see the `expanded` effect). */
+.map-shell.expanded {
+  position: fixed;
+  inset: 4.5rem 1rem 1rem 1rem;
+  height: auto;
+  z-index: 40;
+  box-shadow: var(--shadow);
+}
+
+.map-host {
+  position: absolute;
+  inset: 0;
+}
+
+.controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1000; /* above Leaflet's own panes */
+  display: flex;
+  gap: 0.35rem;
+}
+
+.controls .btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 1000;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-pill);
+  background: rgb(0 0 0 / 60%);
+  color: var(--warn);
+  font-size: 0.72rem;
+  backdrop-filter: blur(4px);
+}
+
+/* Everything below targets DOM that Leaflet creates itself (tiles, markers) rather than
+   anything Angular rendered from this component's own template, so Angular's emulated view
+   encapsulation never matches it without `::ng-deep` — see LiveMap's class doc. */
+
+:host ::ng-deep .vision-tiles {
+  /* OSM raster tiles, re-tinted dark to fit the ops-console look without a tile provider that
+     needs an API key. Overlay panes (marker, polyline) are untouched so their true colors
+     still read correctly against the map. */
+  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95) saturate(0.7);
+}
+
+:host ::ng-deep .leaflet-control-attribution {
+  background: rgb(0 0 0 / 55%);
+  color: var(--text-faint);
+}
+
+:host ::ng-deep .leaflet-control-attribution a {
+  color: var(--text-muted);
+}
+
+:host ::ng-deep .drone-arrow {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 18px solid var(--accent);
+  transform-origin: 50% 60%;
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
+}
+
+:host ::ng-deep .flag-glyph {
+  font-size: 16px;
+  line-height: 1;
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
+}

@@ -4,6 +4,15 @@
     flex-wrap: wrap;
 }
 
+.osd-strip {
+    display: block;
+    margin-bottom: 0.75rem;
+}
+
+.osd-pending {
+    margin: 0 0 0.75rem;
+}
+
 .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 320px;
