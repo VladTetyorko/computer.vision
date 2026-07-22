@@ -30,6 +30,13 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/settings/settings').then((m) => m.SettingsPage),
   },
   {
+    path: 'debug',
+    title: 'Debug · Vision',
+    // Rarely visited — don't spend an idle-time preload slot on it (core/idle-preload.ts).
+    data: { preload: false },
+    loadComponent: () => import('./pages/debug/debug').then((m) => m.DebugPage),
+  },
+  {
     path: '**',
     title: 'Not found · Vision',
     data: { preload: false },

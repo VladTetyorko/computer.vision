@@ -1,0 +1,203 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Debug</h1>
+      <p>
+        Raw HTTP against the Vision backend, for when an adapter misbehaves. The endpoint list
+        is a shortcut into the console below, not a guardrail — failures show up here, not as
+        a toast.
+      </p>
+    </div>
+  </div>
+
+  <!-- ---- Raw API console -------------------------------------------------- -->
+  <section class="card">
+    <header><h2>Raw API console</h2></header>
+
+    <div class="console-form">
+      <label class="field wide">
+        <span class="label">Endpoint</span>
+        <select
+          [value]="selectedEndpointId()"
+          (change)="selectEndpoint($any($event.target).value)"
+        >
+          <option value="">Custom…</option>
+          @for (endpoint of endpoints; track endpoint.id) {
+            <option [value]="endpoint.id">{{ endpoint.label }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field method">
+        <span class="label">Method</span>
+        <select [(ngModel)]="method" name="method">
+          @for (m of methods; track m) {
+            <option [value]="m">{{ m }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field wide">
+        <span class="label">Path</span>
+        <input
+          class="mono"
+          [(ngModel)]="path"
+          name="path"
+          placeholder="/api/devices"
+          spellcheck="false"
+        />
+      </label>
+    </div>
+
+    @if (showBody()) {
+      <label class="field">
+        <span class="label">Request body (JSON)</span>
+        <textarea
+          class="mono body-editor"
+          [(ngModel)]="body"
+          name="body"
+          rows="6"
+          spellcheck="false"
+        ></textarea>
+      </label>
+    }
+
+    <div class="row">
+      <button type="button" class="btn" (click)="send()" [disabled]="sending() || !path().trim()">
+        {{ sending() ? 'Sending…' : 'Send' }}
+      </button>
+    </div>
+
+    @if (response(); as result) {
+      <div class="response">
+        <div class="response-status row">
+          <span class="chip" [class.ok]="isOk(result.status)" [class.danger]="!isOk(result.status)">
+            {{ result.status || '—' }} {{ result.statusText }}
+          </span>
+          <span class="muted mono">{{ result.ms.toFixed(0) }} ms</span>
+          @if (!result.reached) {
+            <span class="chip danger">unreachable</span>
+          }
+        </div>
+
+        @if (headerEntries(result.headers).length > 0) {
+          <div class="headers row">
+            @for (header of headerEntries(result.headers); track header.key) {
+              <span class="chip mono">{{ header.key }}: {{ header.value }}</span>
+            }
+          </div>
+        }
+
+        <pre class="mono response-body">{{ formatted()?.text }}</pre>
+      </div>
+    }
+
+    @if (history().length > 0) {
+      <div class="history">
+        <h3>History (last {{ historyLimit }})</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Status</th>
+              <th>ms</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (entry of history(); track $index) {
+              <tr class="history-row" (click)="replay(entry)">
+                <td class="mono">{{ entry.method }}</td>
+                <td class="mono truncate">{{ entry.path }}</td>
+                <td>
+                  <span
+                    class="chip"
+                    [class.ok]="isOk(entry.status)"
+                    [class.danger]="!isOk(entry.status)"
+                  >
+                    {{ entry.status || '—' }}
+                  </span>
+                </td>
+                <td class="mono">{{ entry.ms }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+
+  <!-- ---- Health ------------------------------------------------------------ -->
+  <section class="card">
+    <header>
+      <h2>Health</h2>
+      <button
+        type="button"
+        class="btn secondary"
+        (click)="loadHealth()"
+        [disabled]="healthLoading()"
+      >
+        {{ healthLoading() ? 'Checking…' : 'Refresh' }}
+      </button>
+    </header>
+
+    @if (healthOverall(); as overall) {
+      <p class="row">
+        <span class="muted">Overall:</span>
+        <span class="chip" [class.ok]="overall === 'UP'" [class.danger]="overall !== 'UP'">
+          {{ overall }}
+        </span>
+      </p>
+    }
+
+    @if (healthComponents().length > 0) {
+      <ul class="health-list">
+        @for (component of healthComponents(); track component.name) {
+          <li>
+            <span>{{ component.name }}</span>
+            <span
+              class="chip"
+              [class.ok]="component.status === 'UP'"
+              [class.danger]="component.status !== 'UP'"
+            >
+              {{ component.status }}
+            </span>
+          </li>
+        }
+      </ul>
+    } @else if (healthResponse()) {
+      <p class="muted hint">No component-level detail exposed by this backend — see raw JSON.</p>
+    } @else if (!healthLoading()) {
+      <p class="muted">No health data yet.</p>
+    }
+
+    @if (healthRaw(); as raw) {
+      <details>
+        <summary class="muted">Raw JSON</summary>
+        <pre class="mono response-body">{{ raw.text }}</pre>
+      </details>
+    }
+  </section>
+
+  <!-- ---- Last scan ----------------------------------------------------------- -->
+  <section class="card">
+    <header>
+      <h2>Last scan</h2>
+      <button type="button" class="btn" (click)="runScan()" [disabled]="scanLoading()">
+        {{ scanLoading() ? 'Scanning…' : 'Run scan' }}
+      </button>
+    </header>
+
+    <p class="muted hint">
+      Posts an empty body to <code>/api/discovery/scan</code> — the same passive scanners as
+      Devices, shown here as the raw <code>ScanResultResponse</code>, including
+      <code>failedMethods</code>.
+    </p>
+
+    @if (scanFormatted(); as formatted) {
+      <pre class="mono response-body">{{ formatted.text }}</pre>
+    } @else {
+      <p class="muted faint">No scan run yet.</p>
+    }
+  </section>
+</div>

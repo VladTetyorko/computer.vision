@@ -328,7 +328,7 @@ Domain additions land in their own phase (below) — Phase 0–2 domain stays le
 - **ROS 2 bridge adapter** — robots publish images/subscribe to detections as ROS topics.
 - **Stream health watchdog** — auto-reconnect, device-offline events, uptime stats.
 - **Audio channel** — sound detection (e.g., drone motor anomaly) as a parallel analysis port.
-- **Simulation source adapter** — file/loop playback implementing `VideoSourcePort` for testing and demos without hardware (build this early; it makes every phase testable).
+- **Simulation source adapter** — file/loop playback implementing `VideoSourcePort` for testing and demos without hardware (build this early; it makes every phase testable). *Superseded by the TX/RX doctrine in [docs/CYCLES-PLAN.md](docs/CYCLES-PLAN.md): every protocol adapter grows an RX (ingest) half and a TX (`FeedTransmitterPort`) half that transmits a user-supplied file over the real protocol.*
 - **Audit trail** — immutable log of who viewed/controlled which device or stream and when (natural extension of the `Event` + `Principal` model).
 
 ---

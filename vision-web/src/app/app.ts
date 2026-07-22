@@ -26,6 +26,7 @@ export class App {
     { path: '/wall', label: 'Wall' },
     { path: '/devices', label: 'Devices' },
     { path: '/settings', label: 'Settings' },
+    { path: '/debug', label: 'Debug' },
   ];
 
   protected readonly liveCount = computed(() => this.fleet.streams().length);

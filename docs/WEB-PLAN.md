@@ -144,7 +144,7 @@ Named explicitly so it does not get skipped:
 | **W2** | **Devices** | **MVP: console parity, better** | ✅ done |
 | **W3** | **Live + Wall** | **Actually useful: connect and watch** | ✅ done |
 | W4 | Settings/profiles | Tunable without editing properties files | ✅ done |
-| W5 | Debug | Legacy console retired | pending |
+| W5 | Debug | Legacy console retired | ✅ done |
 | W6 | Optimization | Fast on a 30-tile wall | partly — splitting + budgets in place |
 | W7 | Hardening | Daily-driver quality | pending |
 

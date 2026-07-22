@@ -20,11 +20,21 @@ Angular SPA (driving adapter): the product UI — Wall/Devices/Live/Settings tab
 
 ### Routes (`app.routes.ts`) — one lazy `loadComponent` chunk each
 
-`/wall` (default) · `/devices` · `/live/:deviceId` · `/settings` · `**` → not-found. `/debug` (WEB-PLAN's raw API console) is **not implemented** — not in scope yet.
+`/wall` (default) · `/devices` · `/live/:deviceId` · `/settings` · `/debug` (`data: { preload: false }` — rarely visited, not worth an idle-preload slot) · `**` → not-found.
 
 ### Pages (`src/app/pages/**`) and shared UI (`src/app/ui/**`)
 
-`wall/` (grid of live tiles, density control, `IntersectionObserver`-suspended off-screen players) · `devices/` (inventory table, discovery scan, register form) · `live/` (single-device cockpit) · `settings/` (profiles, advanced mode) · `ui/player.ts` (`<vision-player>`, hls.js-backed) · `ui/toast-host.ts`.
+`wall/` (grid of live tiles, density control, `IntersectionObserver`-suspended off-screen players) · `devices/` (inventory table, discovery scan, register form) · `live/` (single-device cockpit) · `settings/` (profiles, advanced mode) · `debug/` (raw API console + health + last-scan — see below) · `ui/player.ts` (`<vision-player>`, hls.js-backed) · `ui/toast-host.ts`.
+
+### `src/app/pages/debug/**` — the raw API console (WEB-PLAN W5)
+
+Deliberately outside the "no component calls `fetch` directly" rule: this page's entire purpose is issuing raw, possibly-malformed requests and showing the raw failure, so `VisionApi`/`FleetStore`'s typed shapes and single-toast error handling would work against it.
+
+- `debug-api.service.ts` — `DebugApiService` (`@Injectable providedIn: 'root'`), the only thing in this module that touches `HttpClient` outside `core/api/`. `send({method, path, body?})` issues the request with `observe: 'response'`, `responseType: 'text'` (so any body — JSON or not — parses manually downstream) and returns `RawResponse { status, statusText, ms, headers, bodyText, reached }` for both success and error paths uniformly (a non-2xx is not a thrown exception here, it's data). `reached` is `false` only when the request never got a response at all (network failure / status 0). Request body text is sent as parsed JSON when it parses, verbatim otherwise — a malformed body is something this console must let you send, not reject client-side. Not used by any other page.
+- `debug-endpoints.ts` — pure, Angular-free: `DEBUG_ENDPOINTS`, one entry per route in vision-api/MODULE.md's controller table (14 total), each with `method`/`path`/`label` and (POSTs only) a pretty-printed `exampleBody`. `prefillForEndpoint(id)` is what the endpoint `<select>` uses to fill method/path/body; path templates carry `{placeholder}` segments through untouched for the user to hand-edit. `methodHasBody(method)` gates the body textarea (POST/PUT/PATCH).
+- `debug-response.ts` — pure: `formatResponseBody(text)` pretty-prints JSON with a raw-text fallback (never throws) plus an explicit `(empty body)` case; `isSuccessStatus(status)` for the 2xx badge.
+- `debug-history.ts` — pure: `pushHistoryEntry(history, entry, limit = 20)`, newest-first, capped, non-mutating. Backs the last-~20-requests log; clicking a row re-fills the form (`DebugPage.replay()`) but does not re-send.
+- `debug.ts`/`.html`/`.css` — `DebugPage`, three cards: the console above; Health (`GET /actuator/health` parsed for `status`/`components[].status`, up/down chips, raw JSON in a `<details>`); Last scan (`POST /api/discovery/scan` with `{}`, raw `ScanResultResponse` including `failedMethods`). All three reuse `DebugApiService.send()`.
 
 ## Conventions
 
@@ -41,4 +51,4 @@ Angular SPA (driving adapter): the product UI — Wall/Devices/Live/Settings tab
 
 ## Status
 
-Green: `./mvnw -B -pl vision-web clean install` passes twice from `clean`, production build succeeds within budget, **17/17 Vitest specs pass** (`api-error.spec.ts`, `core/api/vision-api.spec.ts`, `core/settings-store.spec.ts`). Implements WEB-PLAN W0–W4 (shell, API client, Devices tab, Live/Wall) minus the `/debug` tab (W5, not started) and Events/Studio (Phase 2/3). `DeviceType` was removed to match the server-side drop of that enum (categories are now asset-level data); `models.ts` and every consuming page (`devices`, `live`, `wall-tile`) were realigned in the same pass — no page currently reads `Asset`/`Category` endpoints, so those DTOs are intentionally not yet mirrored here.
+Green: `./mvnw -B -pl vision-web clean install` passes twice from `clean`, production build succeeds within budget, **38/38 Vitest specs pass** (`api-error.spec.ts`, `core/api/vision-api.spec.ts`, `core/settings-store.spec.ts`, `pages/debug/debug-endpoints.spec.ts`, `pages/debug/debug-response.spec.ts`, `pages/debug/debug-history.spec.ts`). Implements WEB-PLAN W0–W5 (shell, API client, Devices tab, Live/Wall, Settings/profiles, Debug tab) minus Events/Studio (Phase 2/3). `DeviceType` was removed to match the server-side drop of that enum (categories are now asset-level data); `models.ts` and every consuming page (`devices`, `live`, `wall-tile`) were realigned in the same pass — no page currently reads `Asset`/`Category` endpoints, so those DTOs are intentionally not yet mirrored here. The `/debug` route's lazy chunk is ~14 kB raw / ~4.3 kB transfer, well under the per-route budget headroom noted in WEB-PLAN §9; the app's initial bundle is unaffected since it is lazy-loaded and not idle-preloaded.
