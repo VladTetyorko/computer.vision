@@ -1,8 +1,10 @@
 package com.drones.vision.app;
 
+import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.SimulationService;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
@@ -32,6 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <p>{@code vision.publish.enabled=false} for determinism, same as {@link
  * SimStreamSmokeTest}/{@link DiscoveryWiringTest} — this test doesn't care about stream egress
  * and shouldn't depend on mediamtx being reachable.
+ *
+ * <p>Extended for docs/CYCLES-PLAN.md §1c: {@link SimulationService} and {@link
+ * SimulationController} (the one-call, zero-hardware simulation entry point) are asserted here
+ * too rather than in a new test class, since they are asset-model beans built directly on top of
+ * {@link AssetService}.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 class AssetWiringTest {
@@ -44,6 +51,12 @@ class AssetWiringTest {
 
     @Autowired
     private DeviceService deviceService;
+
+    @Autowired
+    private SimulationService simulationService;
+
+    @Autowired
+    private SimulationController simulationController;
 
     @Autowired
     private CategoryRepositoryPort categoryRepositoryPort;
@@ -69,6 +82,8 @@ class AssetWiringTest {
         assertNotNull(assetService, "AssetService bean must be registered");
         assertNotNull(categoryService, "CategoryService bean must be registered");
         assertNotNull(deviceService, "DeviceService bean must be registered");
+        assertNotNull(simulationService, "SimulationService bean must be registered");
+        assertNotNull(simulationController, "SimulationController must resolve its constructor dependencies");
         assertNotNull(categoryRepositoryPort, "CategoryRepositoryPort bean must be registered");
         assertNotNull(assetRepositoryPort, "AssetRepositoryPort bean must be registered");
         assertNotNull(assetUsageRepositoryPort, "AssetUsageRepositoryPort bean must be registered");

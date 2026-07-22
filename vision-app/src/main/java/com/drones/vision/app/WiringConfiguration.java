@@ -1,7 +1,7 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
-import com.drones.vision.adapter.rtsp.RtspVideoSource;
+import com.drones.vision.adapter.rtsp.FfmpegVideoSource;
 import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.SimulatedVideoSource;
 import com.drones.vision.api.HlsProxyController;
@@ -20,9 +20,11 @@ import com.drones.vision.application.AssetService;
 import com.drones.vision.application.DefaultAssetService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
+import com.drones.vision.application.DefaultSimulationService;
 import com.drones.vision.application.DefaultStreamService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.UsageTracker;
 import com.drones.vision.application.VideoSourceRegistry;
@@ -77,8 +79,8 @@ public class WiringConfiguration {
     }
 
     @Bean
-    public RtspVideoSource rtspVideoSource() {
-        return new RtspVideoSource();
+    public FfmpegVideoSource ffmpegVideoSource() {
+        return new FfmpegVideoSource();
     }
 
     @Bean
@@ -253,5 +255,16 @@ public class WiringConfiguration {
     @Bean
     public CategoryService categoryService(CategoryRepositoryPort categoryRepositoryPort) {
         return new DefaultCategoryService(categoryRepositoryPort);
+    }
+
+    /**
+     * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §1b): turns a video
+     * file path into a registered {@code simulated}-category asset via {@link #assetService},
+     * reusing every rule it already enforces rather than duplicating asset creation here.
+     */
+    @Bean
+    public SimulationService simulationService(AssetService assetService,
+                                                CategoryRepositoryPort categoryRepositoryPort) {
+        return new DefaultSimulationService(assetService, categoryRepositoryPort);
     }
 }

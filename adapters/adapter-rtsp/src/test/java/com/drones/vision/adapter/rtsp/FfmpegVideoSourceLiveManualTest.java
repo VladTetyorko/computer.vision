@@ -15,9 +15,9 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Documents how to manually exercise {@link RtspVideoSource} against a real
- * RTSP server. Not run in CI -- there is no live camera/RTSP server there --
- * hence {@code @Disabled}.
+ * Documents how to manually exercise {@link FfmpegVideoSource} against a
+ * real RTSP server. Not run in CI -- there is no live camera/RTSP server
+ * there -- hence {@code @Disabled}.
  *
  * <h2>Manual run</h2>
  * <ol>
@@ -26,15 +26,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>Publish a test stream into it with ffmpeg, looping a sample file:
  *       {@code ffmpeg -re -stream_loop -1 -i sample.mp4 -c copy -f rtsp rtsp://localhost:8554/mystream}</li>
  *   <li>Remove (or comment out) the {@code @Disabled} annotation below and run:
- *       {@code ./mvnw -pl adapters/adapter-rtsp test -Dtest=RtspVideoSourceLiveManualTest}</li>
+ *       {@code ./mvnw -pl adapters/adapter-rtsp test -Dtest=FfmpegVideoSourceLiveManualTest}</li>
  * </ol>
  */
-class RtspVideoSourceLiveManualTest {
+class FfmpegVideoSourceLiveManualTest {
 
     @Disabled("needs a live RTSP server at rtsp://localhost:8554/mystream -- see class javadoc for setup")
     @Test
     void connectsToALocalRtspServerAndReceivesFrames() throws InterruptedException {
-        RtspVideoSource source = new RtspVideoSource();
+        FfmpegVideoSource source = new FfmpegVideoSource();
         StreamId streamId = StreamId.random();
         StreamDescriptor descriptor = new StreamDescriptor("rtsp",
                 URI.create("rtsp://localhost:8554/mystream"),

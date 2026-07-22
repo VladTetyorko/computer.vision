@@ -18,23 +18,54 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.SubmissionPublisher;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * {@link VideoSourcePort} implementation for RTSP/RTP camera streams (IP
- * cameras, drone companions), backed by JavaCV/FFmpeg.
+ * {@link VideoSourcePort} implementation backed by JavaCV/FFmpeg — the
+ * platform's FFmpeg ingest adapter. Covers two protocols:
+ * <ul>
+ *   <li>{@code rtsp} — real RTSP/RTP camera streams (IP cameras, drone
+ *       companions)</li>
+ *   <li>{@code file} — a local video file played back as a simulated live
+ *       source (drone simulation with zero hardware): looped on request and
+ *       paced to its own native frame rate rather than decoded flat out</li>
+ * </ul>
  *
- * <p>Supports {@link StreamDescriptor#protocol()} {@code "rtsp"}. Recognized
- * {@link StreamDescriptor#options()} keys (all optional):
+ * <p>Supports {@link StreamDescriptor#protocol()} {@code "rtsp"} (any URI)
+ * and {@code "file"} (the {@link StreamDescriptor#uri()} scheme must itself
+ * be {@code file}). Recognized {@link StreamDescriptor#options()} keys (all
+ * optional):
  * <ul>
  *   <li>{@code rtsp_transport} — FFmpeg's {@code rtsp_transport} AVOption
- *       (e.g. {@code tcp}, {@code udp}); default {@value #DEFAULT_RTSP_TRANSPORT}</li>
+ *       (e.g. {@code tcp}, {@code udp}); default {@value #DEFAULT_RTSP_TRANSPORT}.
+ *       Only applied when the URI scheme is {@code rtsp}.</li>
  *   <li>{@code timeout} — socket/read timeout in <b>microseconds</b>, applied
  *       to both the RTSP demuxer's {@code timeout} option and the generic
  *       I/O {@code rw_timeout} option; default {@value #DEFAULT_TIMEOUT_MICROS}
- *       (10 seconds)</li>
+ *       (10 seconds). Only applied when the URI scheme is {@code rtsp}.</li>
+ *   <li>{@code loop} — {@code "true"}/{@code "false"}, default {@code false}
+ *       (malformed values fall back to the default). When {@code true}, a
+ *       graceful end-of-stream ({@link FFmpegFrameGrabber#grab()} returning
+ *       {@code null}) restarts the grabber instead of completing the
+ *       publisher, so a finite file loops indefinitely until {@link
+ *       #close(StreamId)} is called; the frame {@link VideoFrame#sequence()}
+ *       keeps increasing monotonically across loop restarts, it never
+ *       resets.</li>
  * </ul>
+ *
+ * <p><b>Real-time pacing:</b> decoding a local file is disk-bound, not
+ * time-bound, so left unthrottled it would blast through an entire clip far
+ * faster than a live camera ever could. Whenever the URI scheme is {@code
+ * file}, the grab loop paces itself against the media timeline: it tracks
+ * the delta between successive {@link FFmpegFrameGrabber#getTimestamp()}
+ * values (microseconds) and sleeps the difference between that delta and
+ * the wall-clock time actually spent since the previous frame, clamped to
+ * zero (never a negative sleep, and no drift compensation beyond this one
+ * monotonic baseline). The baseline resets on every loop restart, so the
+ * first frame of each pass through the file is never delayed. {@code rtsp}
+ * URIs are never paced — the network already paces a live camera.
  *
  * <p>Each {@link #open(StreamId, StreamDescriptor)} call starts one
  * dedicated platform thread (decoding is CPU-bound; virtual threads buy
@@ -54,21 +85,24 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>Plain class with no framework dependency — instantiated directly by
  * {@code vision-app}'s wiring configuration.
  */
-public final class RtspVideoSource implements VideoSourcePort {
+public final class FfmpegVideoSource implements VideoSourcePort {
 
-    private static final String PROTOCOL = "rtsp";
+    private static final String PROTOCOL_RTSP = "rtsp";
+    private static final String PROTOCOL_FILE = "file";
 
     static final String OPTION_RTSP_TRANSPORT = "rtsp_transport";
     static final String DEFAULT_RTSP_TRANSPORT = "tcp";
     static final String OPTION_TIMEOUT_MICROS = "timeout";
     static final String DEFAULT_TIMEOUT_MICROS = "10000000"; // 10s, in microseconds
+    static final String OPTION_LOOP = "loop";
+    static final boolean DEFAULT_LOOP = false;
 
     private static final int PUBLISHER_BUFFER_CAPACITY = 4;
     private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
 
     private final Map<StreamId, StreamRuntime> runtimes = new ConcurrentHashMap<>();
 
-    public RtspVideoSource() {
+    public FfmpegVideoSource() {
         ensureQuietLogging();
     }
 
@@ -120,13 +154,24 @@ public final class RtspVideoSource implements VideoSourcePort {
 
     @Override
     public boolean supports(StreamDescriptor descriptor) {
-        return descriptor != null && PROTOCOL.equals(descriptor.protocol());
+        if (descriptor == null) {
+            return false;
+        }
+        String protocol = descriptor.protocol();
+        if (PROTOCOL_RTSP.equals(protocol)) {
+            return true;
+        }
+        if (PROTOCOL_FILE.equals(protocol)) {
+            URI uri = descriptor.uri();
+            return uri != null && PROTOCOL_FILE.equalsIgnoreCase(uri.getScheme());
+        }
+        return false;
     }
 
     @Override
     public Flow.Publisher<VideoFrame> open(StreamId id, StreamDescriptor descriptor) {
         if (!supports(descriptor)) {
-            throw new IllegalArgumentException("RtspVideoSource does not support descriptor: " + descriptor);
+            throw new IllegalArgumentException("FfmpegVideoSource does not support descriptor: " + descriptor);
         }
         return openAny(id, descriptor.uri(), descriptor.options());
     }
@@ -139,9 +184,9 @@ public final class RtspVideoSource implements VideoSourcePort {
      * small local file without a live camera.
      *
      * @param id      identity to associate with the opened stream
-     * @param uri     resource to open; RTSP-specific grabber options (see
-     *                class javadoc) are only applied when {@code uri.getScheme()}
-     *                is {@code "rtsp"}
+     * @param uri     resource to open; RTSP-specific grabber options and
+     *                real-time pacing (see class javadoc) are only applied
+     *                based on {@code uri.getScheme()}
      * @param options adapter options, see class javadoc; may be empty
      * @return a per-open publisher of frames; see {@link VideoSourcePort} for
      *         delivery/backpressure semantics
@@ -176,6 +221,8 @@ public final class RtspVideoSource implements VideoSourcePort {
         private final StreamId streamId;
         private final URI uri;
         private final Map<String, String> options;
+        private final boolean loop;
+        private final boolean paced;
         private final SubmissionPublisher<VideoFrame> publisher =
                 new SubmissionPublisher<>(ForkJoinPool.commonPool(), PUBLISHER_BUFFER_CAPACITY);
         private final AtomicLong sequence = new AtomicLong();
@@ -187,6 +234,8 @@ public final class RtspVideoSource implements VideoSourcePort {
             this.streamId = streamId;
             this.uri = uri;
             this.options = options;
+            this.loop = booleanOption(options, OPTION_LOOP, DEFAULT_LOOP);
+            this.paced = PROTOCOL_FILE.equalsIgnoreCase(uri.getScheme());
         }
 
         void start() {
@@ -201,10 +250,31 @@ public final class RtspVideoSource implements VideoSourcePort {
             try {
                 grabber = newGrabber();
                 grabber.start();
+                // Real-time pacing baseline (file sources only, see class javadoc):
+                // -1 means "no previous frame yet" -- the next grabbed frame sets the
+                // baseline without sleeping, whether that is the very first frame or
+                // the first frame after a loop restart.
+                long pacingBaselineTimestampMicros = -1;
+                long pacingBaselineWallNanos = 0;
                 while (!stopRequested.get()) {
                     Frame frame = grabber.grab();
                     if (frame == null) {
+                        if (loop && !stopRequested.get()) {
+                            grabber.restart(); // stop() + start(): reopens the file from the beginning
+                            pacingBaselineTimestampMicros = -1; // reset pacing baseline across the loop restart
+                            continue;
+                        }
                         break; // end of stream (e.g. a file source ran out) -- graceful completion
+                    }
+                    if (paced) {
+                        long timestampMicros = grabber.getTimestamp();
+                        if (pacingBaselineTimestampMicros >= 0) {
+                            long targetDeltaMicros = timestampMicros - pacingBaselineTimestampMicros;
+                            long elapsedMicros = (System.nanoTime() - pacingBaselineWallNanos) / 1_000L;
+                            sleepMicros(targetDeltaMicros - elapsedMicros);
+                        }
+                        pacingBaselineTimestampMicros = timestampMicros;
+                        pacingBaselineWallNanos = System.nanoTime();
                     }
                     if (frame.image == null || frame.image.length == 0) {
                         continue; // audio/data-only frame: no pixel payload to publish
@@ -234,7 +304,7 @@ public final class RtspVideoSource implements VideoSourcePort {
         private FFmpegFrameGrabber newGrabber() {
             FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(resolveFilename(uri));
             grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
-            if ("rtsp".equalsIgnoreCase(uri.getScheme())) {
+            if (PROTOCOL_RTSP.equalsIgnoreCase(uri.getScheme())) {
                 String transport = options.getOrDefault(OPTION_RTSP_TRANSPORT, DEFAULT_RTSP_TRANSPORT);
                 grabber.setOption(OPTION_RTSP_TRANSPORT, transport);
                 String timeoutMicros = options.getOrDefault(OPTION_TIMEOUT_MICROS, DEFAULT_TIMEOUT_MICROS);
@@ -272,10 +342,44 @@ public final class RtspVideoSource implements VideoSourcePort {
         }
 
         private static String resolveFilename(URI uri) {
-            if ("file".equalsIgnoreCase(uri.getScheme())) {
+            if (PROTOCOL_FILE.equalsIgnoreCase(uri.getScheme())) {
                 return Paths.get(uri).toString();
             }
             return uri.toString();
+        }
+
+        /** Sleeps the given microsecond duration; clamps negative/zero to a no-op. */
+        private static void sleepMicros(long micros) {
+            if (micros <= 0) {
+                return;
+            }
+            try {
+                TimeUnit.MICROSECONDS.sleep(micros);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        /**
+         * Lenient boolean option parsing, matching this module's existing
+         * idiom for other options: missing/blank falls back to {@code
+         * defaultValue}, and so does anything that isn't (case-insensitively)
+         * {@code "true"} or {@code "false"} -- a malformed value is never
+         * allowed to crash stream setup.
+         */
+        private static boolean booleanOption(Map<String, String> options, String key, boolean defaultValue) {
+            String raw = options.get(key);
+            if (raw == null || raw.isBlank()) {
+                return defaultValue;
+            }
+            String trimmed = raw.trim();
+            if ("true".equalsIgnoreCase(trimmed)) {
+                return true;
+            }
+            if ("false".equalsIgnoreCase(trimmed)) {
+                return false;
+            }
+            return defaultValue; // malformed: keep the default rather than guessing
         }
     }
 }
