@@ -1,0 +1,254 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Devices</h1>
+      <p>
+        Everything Vision can pull frames from. Scan the network for candidates, or register a
+        source by hand.
+      </p>
+    </div>
+    <button type="button" class="btn secondary" (click)="fleet.refresh()" [disabled]="fleet.loading()">
+      Refresh
+    </button>
+  </div>
+
+  <!-- ---- Inventory ---------------------------------------------------- -->
+  <section class="card">
+    <header>
+      <h2>Registered</h2>
+      <span class="muted">{{ fleet.devices().length }} device(s)</span>
+    </header>
+
+    @if (fleet.devices().length === 0) {
+      <div class="empty">
+        <h3>No devices yet</h3>
+        <p>
+          Register the built-in simulated source to see the whole pipeline work without any
+          hardware — then scan for the real thing.
+        </p>
+        <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
+          Add the simulated source
+        </button>
+      </div>
+    } @else {
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Source</th>
+            <th>Capabilities</th>
+            <th>State</th>
+            <th aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (device of fleet.devices(); track device.id) {
+            <tr>
+              <td>
+                <div class="name">{{ device.name }}</div>
+                <div class="mono faint">{{ device.id }}</div>
+              </td>
+              <td class="source">
+                <span class="chip">{{ device.protocol }}</span>
+                <span class="mono muted truncate" [title]="device.uri">{{ device.uri }}</span>
+              </td>
+              <td>
+                @for (capability of device.capabilities; track capability) {
+                  <span class="chip">{{ capability }}</span>
+                }
+              </td>
+              <td>
+                @if (isLive(device)) {
+                  <span class="chip ok"><span class="dot live"></span>Live</span>
+                } @else {
+                  <span class="chip">Stopped</span>
+                }
+              </td>
+              <td class="actions">
+                @if (isLive(device)) {
+                  <button type="button" class="btn small" (click)="watch(device)">Watch</button>
+                  <button
+                    type="button"
+                    class="btn danger small"
+                    (click)="stop(device)"
+                    [disabled]="busyDeviceId() === device.id"
+                  >
+                    Stop
+                  </button>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn small"
+                    (click)="start(device)"
+                    [disabled]="busyDeviceId() === device.id"
+                  >
+                    {{ busyDeviceId() === device.id ? 'Starting…' : 'Start' }}
+                  </button>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+  </section>
+
+  <!-- ---- Discovery ----------------------------------------------------- -->
+  <section class="card">
+    <header>
+      <h2>Scan for devices</h2>
+      <div class="row">
+        <label class="row scan-timeout">
+          <span class="muted">Timeout</span>
+          <select [(ngModel)]="scanTimeout" name="scanTimeout" [disabled]="scanning()">
+            @for (timeout of scanTimeouts; track timeout) {
+              <option [value]="timeout">{{ timeout / 1000 }}s</option>
+            }
+          </select>
+        </label>
+        <button type="button" class="btn" (click)="scan()" [disabled]="scanning()">
+          {{ scanning() ? 'Scanning…' : 'Scan' }}
+        </button>
+      </div>
+    </header>
+
+    <p class="muted hint">
+      Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
+      enumeration. Nothing is port-scanned.
+    </p>
+
+    @if (scanResult(); as result) {
+      @if (result.failedMethods.length > 0) {
+        <div class="failed">
+          Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
+          errored, not because the network is empty.
+        </div>
+      }
+
+      @if (result.devices.length === 0) {
+        <div class="empty"><p>Nothing responded.</p></div>
+      } @else {
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Name</th>
+              <th>Address</th>
+              <th>Suggested category</th>
+              <th>Details</th>
+              <th aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (candidate of result.devices; track candidate.method + candidate.address) {
+              <tr>
+                <td><span class="chip accent">{{ candidate.method }}</span></td>
+                <td>{{ candidate.name }}</td>
+                <td class="mono muted truncate" [title]="candidate.address">
+                  {{ candidate.address }}
+                </td>
+                <td>
+                  @if (candidate.suggestedCategory) {
+                    {{ candidate.suggestedCategory }}
+                  } @else {
+                    <span class="faint">unknown</span>
+                  }
+                </td>
+                <td class="details">
+                  @for (pair of detailPairs(candidate.details); track pair.key) {
+                    <span class="chip" [title]="pair.value">{{ pair.key }}</span>
+                  }
+                </td>
+                <td class="actions">
+                  <button type="button" class="btn secondary small" (click)="useCandidate(candidate)">
+                    Use
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    } @else {
+      <div class="empty"><p class="faint">No scan run yet.</p></div>
+    }
+  </section>
+
+  <!-- ---- Register ------------------------------------------------------ -->
+  <section class="card" id="register-card" [class.highlighted]="highlighted()">
+    <header>
+      <h2>Register a device</h2>
+    </header>
+
+    <form class="register-form" (ngSubmit)="submit()">
+      <div class="field">
+        <label class="label" for="f-name">Name</label>
+        <input id="f-name" name="name" [(ngModel)]="name" placeholder="front-gate" required />
+      </div>
+
+      <div class="field">
+        <label class="label" for="f-protocol">Protocol</label>
+        <input id="f-protocol" name="protocol" [(ngModel)]="protocol" placeholder="rtsp" required />
+      </div>
+
+      <div class="field wide">
+        <label class="label" for="f-uri">URI</label>
+        <input
+          id="f-uri"
+          name="uri"
+          [(ngModel)]="uri"
+          placeholder="rtsp://user:pass@192.168.1.50:554/stream"
+          required
+        />
+      </div>
+
+      <button type="submit" class="btn" [disabled]="!canSubmit()">
+        {{ submitting() ? 'Registering…' : 'Register' }}
+      </button>
+    </form>
+
+    @if (settings.advancedMode()) {
+      <div class="advanced">
+        <div class="spread">
+          <h3>Stream options</h3>
+          <button type="button" class="btn secondary small" (click)="addOptionRow()">
+            Add option
+          </button>
+        </div>
+        <p class="muted hint">
+          Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
+          e.g. <code>rtsp_transport = tcp</code>.
+        </p>
+        @for (row of options(); track $index) {
+          <div class="option-row">
+            <input
+              [value]="row.key"
+              (input)="updateOptionKey($index, $any($event.target).value)"
+              placeholder="key"
+              [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
+            />
+            <input
+              [value]="row.value"
+              (input)="updateOptionValue($index, $any($event.target).value)"
+              placeholder="value"
+              [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
+            />
+            <button
+              type="button"
+              class="btn secondary small"
+              (click)="removeOptionRow($index)"
+              aria-label="Remove option"
+            >
+              ×
+            </button>
+          </div>
+        }
+      </div>
+    } @else {
+      <p class="muted hint">
+        Advanced stream options are hidden. Turn on advanced mode in
+        <a href="/settings">Settings</a> to edit them.
+      </p>
+    }
+  </section>
+</div>

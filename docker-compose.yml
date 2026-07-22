@@ -1,0 +1,64 @@
+# Phase 0 infra skeleton (see docs/PHASE0-PLAN.md §5, Task T4).
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose up
+#
+# Services:
+#   postgres    - detections/events/devices persistence (adapter-persistence, Phase 2+)
+#   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
+#   cv-service  - Python gRPC inference/training service (skeleton, Phase 0)
+#   vision-app  - Java application image; commented out, see note below (Phase 1)
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    ports:
+      - "8554:8554" # RTSP
+      - "8888:8888" # HLS
+
+  cv-service:
+    # Context is the repo root: the Dockerfile copies /proto (shared contract) in addition to /cv-service.
+    build:
+      context: .
+      dockerfile: cv-service/Dockerfile
+    ports:
+      - "50051:50051"
+
+  # vision-app: the Java application container. Not yet buildable — the Spring Boot
+  # image (vision-app module + Dockerfile) is delivered in Phase 1 (see
+  # docs/PHASE0-PLAN.md, roadmap §7 "Phase 1 — First light"). Uncomment and fill in
+  # `build`/`image` once that image exists.
+  #
+  # vision-app:
+  #   build: ./vision-app
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     cv-service:
+  #       condition: service_started
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+  #     SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+  #     SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+  #   ports:
+  #     - "8080:8080"
+
+volumes:
+  postgres-data:

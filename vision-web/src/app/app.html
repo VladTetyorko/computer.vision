@@ -1,0 +1,32 @@
+<header class="app-header">
+  <a class="brand" routerLink="/wall">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">Vision</span>
+  </a>
+
+  <nav class="tabs" aria-label="Sections">
+    @for (tab of tabs; track tab.path) {
+      <a class="tab" [routerLink]="tab.path" routerLinkActive="active">{{ tab.label }}</a>
+    }
+  </nav>
+
+  <div class="status" [title]="offline() ? 'Backend unreachable' : 'Backend reachable'">
+    @if (liveCount() > 0) {
+      <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
+    }
+    <span class="dot" [class.ok]="fleet.reachable() === true" [class.danger]="offline()"></span>
+  </div>
+</header>
+
+@if (offline()) {
+  <div class="offline-banner" role="status">
+    Cannot reach the Vision backend. Showing the last known state — start the app with
+    <code>./mvnw spring-boot:run -pl vision-app</code>.
+  </div>
+}
+
+<main>
+  <router-outlet />
+</main>
+
+<vision-toast-host />

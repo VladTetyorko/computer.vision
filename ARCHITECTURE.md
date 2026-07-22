@@ -59,18 +59,21 @@ The CV service is **replaceable**: the core only sees a `DetectionPort`. Later a
 ```
 vision/                                  (parent pom, dependency management)
 ├── vision-domain/                       Pure domain model. NO framework deps, no Spring.
-│   ├── model/        Device, StreamDescriptor, VideoFrame, Telemetry,
-│   │                 Detection, BoundingBox, TrackedObject, AnnotatedFrame, Event
+│   ├── model/        Asset, Device, DeviceCategory, StreamDescriptor, VideoFrame,
+│   │                 Telemetry, Detection, DetectionQuery, LifecycleState,
+│   │                 AuditEntry, Ownership, AssetUsage, Event
 │   └── port/
-│       ├── in/       (driving)  StartStreamUseCase, StopStreamUseCase,
-│       │             RegisterDeviceUseCase, TrainModelUseCase, QueryDetectionsUseCase
 │       └── out/      (driven)   VideoSourcePort, DetectionPort, OverlayPort,
 │                     StreamPublisherPort, RecordingPort, EventPublisherPort,
-│                     DeviceRepositoryPort, TelemetrySourcePort, ModelRegistryPort
+│                     DeviceRepositoryPort, TelemetrySourcePort, ModelRegistryPort,
+│                     AuditTrailPort
 │
-├── vision-application/                  Use-case implementations (services), pipeline
+├── vision-application/                  Services (the driving surface), pipeline
 │   │                                    orchestration, backpressure/frame-skip policy.
 │   │                                    Depends ONLY on vision-domain.
+│   │        AssetService, DeviceService, StreamService, CategoryService,
+│   │        DiscoveryService — one interface + one `Default*` implementation each,
+│   │        plus their command/read-model records (AssetSpec, DeviceEdit, …)
 │   └── pipeline/     StreamPipeline: source → decode → sample → detect →
 │                     track → overlay → fan-out (publish/record/events)
 │
@@ -106,6 +109,10 @@ vision/                                  (parent pom, dependency management)
     └── Dockerfile                       CUDA + CPU variants
 ```
 
+**There is no inbound-port package.** Driven (`*Port`) interfaces earn their keep — each has several real implementations (rtsp/sim/mjpeg sources, mediamtx/no-op publishers, in-memory→JPA repositories) and adapters are genuinely swapped behind them. Driving interfaces did not: one interface per operation meant one file, one import and one constructor parameter each to describe a single service doing several things, which pushed controllers past ten dependencies. They are collapsed into **one service interface + one implementation per area**, living beside each other in `vision-application`. See `.claude/skills/java-clean-code/SKILL.md` for the rule and its checklist.
+
+**The acting user is never a constructor dependency.** It varies per request, so it is resolved once at the API edge (`CurrentUser`, from the JWT once Spring Security lands) and passed down as a method parameter. Threading an `Ownership` through construction is what turned services into eight-argument classes.
+
 **Dependency rule (enforced with ArchUnit tests):**
 `vision-domain` ← `vision-application` ← adapters ← `vision-app`. Nothing points outward. Adapters never depend on each other — shared needs go into a port or the domain.
 
@@ -115,7 +122,10 @@ vision/                                  (parent pom, dependency management)
 
 | Concept | Description |
 |---|---|
-| `Device` | Registered source: id, type (DRONE, FPV, IP_CAM, ESP32, ROBOT), capabilities (video, telemetry, PTZ), connection descriptor |
+| `Asset` | **The user-facing object** — "my drone": displayName, category, `Ownership(userId, groupId)`, free-form attributes, wraps 1..n devices. Ownership and access scope live here; devices and all derived data inherit it |
+| `DeviceCategory` | Data-driven category (slug, name, optional parent, attribute hints) behind a repository — replaces the old `DeviceType` enum; new device kinds are data, not code |
+| `AssetUsage` | A "flight"/session: opened when the asset starts streaming, closed on stop; holds start/last `GeoPosition`, sample count; telemetry samples persist per usage (append-only, time-keyed) |
+| `Device` | Low-level connection endpoint: id, capabilities (video, telemetry, PTZ), connection descriptor. Plumbing under an Asset — users interact with assets, not devices |
 | `StreamDescriptor` | Protocol-agnostic "how to get frames": URI + codec hints. Produced by device registration/discovery |
 | `VideoFrame` | Timestamped decoded frame (or passthrough encoded packet) + source id |
 | `Telemetry` | GPS, altitude, attitude, battery, RSSI — merged into the pipeline by timestamp |
@@ -193,7 +203,44 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 
 ---
 
-## 6. Technology Choices
+## 6. Identity & Access Model (Multi-Tenancy)
+
+Three roles, assigned **per group** — the same person can hold different roles in different groups; effective access is the union of all assignments.
+
+| Role | Scope |
+|---|---|
+| `USER` | Only devices they own within that group |
+| `MANAGER` | All devices of all users in that group |
+| `SUPERUSER` | Everything in that group **and its descendant groups** — i.e. their managers' groups and those managers' users |
+
+### Model
+
+```mermaid
+flowchart TD
+    SU[Superuser<br/>role at parent group] --> G0[(Group: HQ)]
+    G0 --> G1[(Group: Team A)]
+    G0 --> G2[(Group: Team B)]
+    M1[Manager role at Team A] --> G1
+    M2[Manager role at Team B] --> G2
+    U1[User role at Team A<br/>owns Drone-1, Cam-3] --> G1
+    U2[User role at Team B<br/>owns ESP32-7] --> G2
+```
+
+- `UserAccount(userId, displayName, credentialsRef)`
+- `Group(groupId, name, parentGroupId)` — groups form a tree; `SUPERUSER` scope is the subtree closure (materialized-path or closure-table for cheap subtree queries).
+- `RoleAssignment(userId, groupId, role)` — many per user.
+- `Ownership(ownerUserId, groupId)` — added to `Device`; every device belongs to exactly one user within one group. Streams, detections, recordings, and events **inherit the scope of their device** — access to derived data is always decided by access to the device.
+
+### Enforcement (hexagonal placement)
+
+- **Authentication — edge only.** `vision-api` (Spring Security, JWT; OIDC-ready) authenticates requests and builds a `Principal(userId, roleAssignments)`. No security framework below the API adapter.
+- **Authorization — application layer, framework-free.** A pure `AccessPolicy` domain service answers `canView(principal, device)` / `canManage(principal, device)` / `visibleGroups(principal)`. Every use case takes the acting `Principal` as a parameter; repositories expose scope-aware queries (`findAllVisible(principal)`) so filtering happens in the store, not in memory (scales with device count).
+- **Scalability:** role checks are pure functions over `(Principal, Ownership)` — trivially cacheable; the JWT carries role assignments so per-request authorization needs no DB round-trip; subtree resolution is one indexed query.
+- **Until the identity phase** (see roadmap), a single implicit dev principal holds `SUPERUSER` on a root group — early phases stay simple, and retrofitting is just replacing that principal, because use cases take `Principal` from day one of the identity phase.
+
+Domain additions land in their own phase (below) — Phase 0–2 domain stays lean (KISS).
+
+## 7. Technology Choices
 
 | Area | Choice | Notes |
 |---|---|---|
@@ -204,6 +251,7 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 | WebRTC | Pion-based gateway or Janus/mediamtx sidecar | evaluate in Phase 4; don't hand-roll ICE/DTLS |
 | MAVLink | dronefleet/mavlink (Java) | typed message dialect support |
 | Persistence | PostgreSQL + JPA | detections, events, devices; TimescaleDB optional later |
+| Security | Spring Security + JWT (OIDC-ready) | authn at the API edge only; authz is a pure application-layer policy |
 | Messaging (internal) | Spring events → later MQTT/Kafka if scaling out | start simple (KISS) |
 | Python CV | ultralytics, OpenCV, PyTorch | ONNX export path for future in-JVM inference |
 | Packaging | Docker Compose (app + cv-service + postgres + mediamtx) | k8s later if needed |
@@ -211,7 +259,7 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 
 ---
 
-## 7. Roadmap
+## 8. Roadmap
 
 ### Phase 0 — Skeleton & contracts *(foundation)*
 - [ ] Convert to Maven multi-module per layout above (empty modules, parent dependencyManagement).
@@ -254,7 +302,14 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 - [ ] `adapter-notify`: webhook, MQTT, Telegram.
 - **Milestone: platform acts on what it sees.**
 
-### Phase 6 — Low latency & scale
+### Phase 6 — Identity & multi-tenancy
+- [ ] Domain: `UserAccount`, `Group` (tree), `RoleAssignment`, `Ownership` on `Device`; pure `AccessPolicy` service (see §6).
+- [ ] `vision-api`: Spring Security + JWT authentication; `Principal` propagated into every use case.
+- [ ] Scope-aware repository queries (`findAllVisible(principal)`); streams/detections/events inherit device scope.
+- [ ] Admin API + UI: manage groups, users, role assignments; migrate the implicit dev principal.
+- **Milestone: three accounts (user / manager / superuser) each see exactly their own scope — devices, streams, detections.**
+
+### Phase 7 — Low latency & scale
 - [ ] `adapter-webrtc` egress (sub-second viewing) and ingest (robots).
 - [ ] Object tracking (ByteTrack/OC-SORT) for stable ids + interpolation.
 - [ ] Multi-instance: externalize state, MQTT/Kafka event bus, CV service horizontal scaling.
@@ -262,7 +317,7 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 
 ---
 
-## 8. Ideas Backlog (beyond the roadmap)
+## 9. Ideas Backlog (beyond the roadmap)
 
 - **In-app labeling tool** — draw boxes on captured frames; feeds the training loop directly.
 - **Geolocation of detections** — project bounding box + drone GPS/attitude/camera intrinsics onto map coordinates; show detections on a map.
@@ -274,10 +329,11 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 - **Stream health watchdog** — auto-reconnect, device-offline events, uptime stats.
 - **Audio channel** — sound detection (e.g., drone motor anomaly) as a parallel analysis port.
 - **Simulation source adapter** — file/loop playback implementing `VideoSourcePort` for testing and demos without hardware (build this early; it makes every phase testable).
+- **Audit trail** — immutable log of who viewed/controlled which device or stream and when (natural extension of the `Event` + `Principal` model).
 
 ---
 
-## 9. Risks & Mitigations
+## 10. Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -289,7 +345,7 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 
 ---
 
-## 10. Testing Strategy
+## 11. Testing Strategy
 
 - **Domain/application:** plain JUnit, no Spring context; ports mocked.
 - **Adapter conformance kit:** shared test suite (`vision-adapter-tck`) run against every `VideoSourcePort` implementation using the simulation source and container fixtures (e.g., an RTSP server container serving a test file).

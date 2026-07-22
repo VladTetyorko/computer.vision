@@ -1,0 +1,174 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Settings</h1>
+      <p>Presets first, knobs behind them, raw values behind those — the same values throughout.</p>
+    </div>
+  </div>
+
+  <!-- ---- Disclosure mode ------------------------------------------------ -->
+  <section class="card">
+    <header><h2>Interface</h2></header>
+
+    <label class="toggle">
+      <input
+        type="checkbox"
+        [checked]="settings.advancedMode()"
+        (change)="toggleAdvanced($any($event.target).checked)"
+      />
+      <span>
+        <strong>Advanced mode</strong>
+        <span class="muted">
+          Reveals raw adapter options and per-stream internals everywhere in the app. This is an
+          account-level choice — turn it on once and it stays on.
+        </span>
+      </span>
+    </label>
+
+    <label class="setting">
+      <span class="label">Default tiles per row on the Wall</span>
+      <select [value]="settings.wallDensity()" (change)="setDensity($any($event.target).value)">
+        @for (density of [2, 3, 4, 5, 6]; track density) {
+          <option [value]="density">{{ density }}</option>
+        }
+      </select>
+    </label>
+  </section>
+
+  <!-- ---- Pipeline profiles ---------------------------------------------- -->
+  <section class="card">
+    <header>
+      <h2>Detection profile</h2>
+      @if (settings.isCustom()) {
+        <span class="chip warn">Custom (based on {{ settings.activeProfile().name }})</span>
+      } @else {
+        <span class="chip">{{ settings.activeProfile().name }}</span>
+      }
+    </header>
+
+    <p class="muted hint">
+      Applied to every stream you start. Changing a value does not lose the preset — it becomes a
+      custom profile you can save or revert.
+    </p>
+
+    <div class="profiles">
+      @for (profile of settings.profiles(); track profile.id) {
+        <button
+          type="button"
+          class="profile"
+          [class.selected]="profile.id === settings.activeProfileId()"
+          (click)="onProfileChange(profile.id)"
+        >
+          <span class="profile-name">{{ profile.name }}</span>
+          <span class="profile-desc muted">{{ profile.description }}</span>
+          <span class="profile-values mono faint">
+            conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps
+          </span>
+        </button>
+      }
+    </div>
+
+    <div class="knobs">
+      <label class="label" for="s-confidence">
+        Confidence threshold — {{ settings.effective().confidenceThreshold.toFixed(2) }}
+      </label>
+      <input
+        id="s-confidence"
+        type="range"
+        min="0.05"
+        max="0.95"
+        step="0.05"
+        [value]="settings.effective().confidenceThreshold"
+        (input)="onConfidence($any($event.target).value)"
+      />
+      <p class="muted hint">
+        Lower finds more objects and more false positives; higher is quieter but misses things.
+      </p>
+
+      <label class="label" for="s-fps">
+        Inference rate — {{ settings.effective().inferenceFps }} fps
+      </label>
+      <input
+        id="s-fps"
+        type="range"
+        min="1"
+        max="30"
+        step="1"
+        [value]="settings.effective().inferenceFps"
+        (input)="onFps($any($event.target).value)"
+      />
+      <p class="muted hint">
+        How often frames go to the detector. Video still passes through at full frame rate.
+      </p>
+    </div>
+
+    @if (deltaFromDefaults().length > 0) {
+      <div class="delta">
+        <strong>Differs from backend defaults:</strong>
+        {{ deltaFromDefaults().join(' · ') }}
+      </div>
+    } @else {
+      <div class="delta muted">Identical to the backend defaults.</div>
+    }
+
+    @if (settings.isCustom()) {
+      <div class="save-row">
+        <input
+          [value]="newProfileName()"
+          (input)="newProfileName.set($any($event.target).value)"
+          placeholder="Name this profile"
+          aria-label="New profile name"
+        />
+        <button type="button" class="btn" (click)="saveAs()" [disabled]="!newProfileName().trim()">
+          Save as new
+        </button>
+        <button type="button" class="btn secondary" (click)="settings.revertDraft()">Revert</button>
+      </div>
+    }
+
+    @if (customProfiles().length > 0) {
+      <div class="custom-list">
+        <h3>Your profiles</h3>
+        @for (profile of customProfiles(); track profile.id) {
+          <div class="custom-row">
+            <span>{{ profile.name }}</span>
+            <span class="mono faint">
+              conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps
+            </span>
+            <button
+              type="button"
+              class="btn danger small"
+              (click)="settings.deleteCustomProfile(profile.id)"
+            >
+              Delete
+            </button>
+          </div>
+        }
+      </div>
+    }
+  </section>
+
+  <!-- ---- System --------------------------------------------------------- -->
+  <section class="card">
+    <header><h2>System</h2></header>
+    <dl>
+      <dt>Backend</dt>
+      <dd>
+        @switch (fleet.reachable()) {
+          @case (true) { <span class="chip ok">reachable</span> }
+          @case (false) { <span class="chip danger">unreachable</span> }
+          @default { <span class="chip">checking…</span> }
+        }
+      </dd>
+      <dt>Devices</dt>
+      <dd>{{ fleet.devices().length }}</dd>
+      <dt>Active streams</dt>
+      <dd>{{ fleet.streams().length }}</dd>
+    </dl>
+    <p class="muted hint">
+      Phase-1 control plane: RTSP in, HLS out. Events, training and identity arrive in later
+      phases — see <code>ARCHITECTURE.md</code>.
+      The Phase-1 console remains at <a href="/legacy/">/legacy/</a>.
+    </p>
+  </section>
+</div>

@@ -1,0 +1,100 @@
+# vision-app
+
+Spring Boot assembly: the only module that knows about every adapter, wires ports to implementations, and holds runtime configuration/ArchUnit rules.
+
+**Depends on:** vision-domain, vision-application, adapter-simulation, adapter-rtsp, adapter-publish-hls, adapter-discovery, vision-api, vision-web (static-only jar), spring-boot-starter · test: spring-boot-starter-test, archunit-junit5
+**Used by:** nothing (leaf/assembly module; produces the runnable jar via spring-boot-maven-plugin)
+**Build/test:** `./mvnw -B -pl vision-app test` — green. Always `clean` first (see Gotchas). Requires the rest of the reactor already installed to the local repo (e.g. `./mvnw -B clean install -DskipTests -DskipWeb=true` once beforehand) since `-pl` alone doesn't build sibling modules from source.
+
+## Bean inventory
+
+`WiringConfiguration` (`@EnableConfigurationProperties(VisionPublishProperties.class)`):
+
+| Bean | Type | Implementation |
+|---|---|---|
+| `simulatedVideoSource` | `VideoSourcePort` | `SimulatedVideoSource` (adapter-simulation) |
+| `rtspVideoSource` | `VideoSourcePort` | `RtspVideoSource` (adapter-rtsp) |
+| `videoSourceRegistry` | `VideoSourceRegistry` | `new VideoSourceRegistry(List<VideoSourcePort>)` |
+| `deviceRepositoryPort` | `DeviceRepositoryPort` | `InMemoryDeviceRepository` (devsupport) |
+| `detectionRepositoryPort` | `DetectionRepositoryPort` | `InMemoryDetectionRepository` (devsupport) |
+| `eventPublisherPort` | `EventPublisherPort` | `LoggingEventPublisher` (devsupport) |
+| `streamPublisherPort` | `StreamPublisherPort` | `MediamtxStreamPublisher` if `vision.publish.enabled` else `NoopStreamPublisher` (devsupport); constructed with `mediamtx.rtspBase()` to push and `VisionPublishProperties#viewBase()` (**not** `mediamtx.hlsBase()`) as `hlsViewBase` — see below |
+| `hlsProxyUpstreamBase` | `URI` | `properties.mediamtx().hlsBase()` — the collaborator `HlsProxyController` (`vision-api`, component-scanned) needs; see Gotchas for why this is a bean rather than `HlsProxyController` being hand-constructed here |
+| `detectionPort` | `DetectionPort` | `NoopDetectionPort` (devsupport) |
+| `categoryRepositoryPort` | `CategoryRepositoryPort` | `InMemoryCategoryRepository` (devsupport, seeded) |
+| `assetRepositoryPort` | `AssetRepositoryPort` | `InMemoryAssetRepository` (devsupport) |
+| `assetUsageRepositoryPort` | `AssetUsageRepositoryPort` | `InMemoryAssetUsageRepository` (devsupport) |
+| `telemetryRepositoryPort` | `TelemetryRepositoryPort` | `InMemoryTelemetryRepository` (devsupport) |
+| `simulatedTelemetrySource` | `SimulatedTelemetrySource` (also a `TelemetrySourcePort`) | `new SimulatedTelemetrySource()` (adapter-simulation, real 1Hz cadence); collected into `usageTracker`'s `List<TelemetrySourcePort>` |
+| `deviceService` | `DeviceService` | `new DeviceService(deviceRepositoryPort, eventPublisherPort)` |
+| `usageTracker` | `UsageTracker` | `new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort, telemetryRepositoryPort, List<TelemetrySourcePort>)` |
+| `streamService` | `StreamService` | `new StreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker)` — the 7-arg ctor, wired with `usageTracker` |
+| `assetService` | `AssetService` (satisfies `CreateAssetUseCase`/`ListAssetsUseCase`/`GetAssetDetailsUseCase`) | `new AssetService(assetRepositoryPort, categoryRepositoryPort, deviceRepositoryPort, deviceService, assetUsageRepositoryPort, streamService, DevPrincipal.OWNERSHIP)` |
+| `assetStreamService` | `AssetStreamService` (satisfies `StartAssetStreamUseCase`/`StopAssetStreamUseCase`) | `new AssetStreamService(assetRepositoryPort, deviceRepositoryPort, streamService)` |
+| `categoryService` | `CategoryService` (satisfies `ListCategoriesUseCase`) | `new CategoryService(categoryRepositoryPort)` |
+
+`DiscoveryWiringConfiguration`: `onvifWsDiscoveryScanner`/`mdnsScanner`/`v4l2Scanner` (`DeviceDiscoveryPort`, each `@ConditionalOnProperty(vision.discovery.enabled, default true)`) and `discoveryService` (`ScanDevicesUseCase` → `new DiscoveryService(List<DeviceDiscoveryPort>)`) — **always** registered regardless of the property, since `DiscoveryController` needs it unconditionally; `DiscoveryService` tolerates an empty port list (degrades to an empty `ScanResult`).
+
+`VisionPublishProperties` (`@ConfigurationProperties(prefix="vision.publish")`): `enabled` (`@DefaultValue("true")`), `viewBase: URI` (`@DefaultValue("/hls")`, defaulted again in the compact ctor if null — the URL base actually handed to viewers, app-relative by default so mediamtx's own address is never exposed to browsers), `mediamtx: Mediamtx` (defaulted as a whole in the compact ctor if null); nested `Mediamtx(rtspBase: URI, hlsBase: URI)` defaulting to `rtsp://localhost:8554` / `http://localhost:8888` — **`hlsBase` is now purely the internal upstream `HlsProxyController` forwards to** (see `com.drones.vision.api.HlsProxyController`, vision-api), not a viewer-facing URL; that role moved to `viewBase`.
+
+`vision.discovery.enabled` (plain `boolean`, no `@ConfigurationProperties` record — read directly via `@ConditionalOnProperty` in `DiscoveryWiringConfiguration`, default `true`).
+
+## devsupport (`com.drones.vision.app.devsupport`)
+
+| Class | Port | Replaced by |
+|---|---|---|
+| `InMemoryDeviceRepository` | `DeviceRepositoryPort` | adapter-persistence (JPA/Postgres), Phase 2 |
+| `InMemoryDetectionRepository` | `DetectionRepositoryPort` | adapter-persistence (JPA/Postgres), Phase 2 |
+| `InMemoryCategoryRepository` | `CategoryRepositoryPort` | adapter-persistence (JPA/Postgres), Phase 2 — seeded at construction with `drone`, `fpv-drone`(parent `drone`), `ip-camera`, `esp32-cam`(parent `ip-camera`), `usb-camera`, `robot`, `simulated`, each with 2-4 `attributeHints` |
+| `InMemoryAssetRepository` | `AssetRepositoryPort` | adapter-persistence (JPA/Postgres), Phase 2 — `findByDeviceId` is a linear scan |
+| `InMemoryAssetUsageRepository` | `AssetUsageRepositoryPort` | adapter-persistence (JPA/Postgres, TimescaleDB-ready), Phase 2 — linear-scan queries |
+| `InMemoryTelemetryRepository` | `TelemetryRepositoryPort` | adapter-persistence (JPA/Postgres, TimescaleDB-ready), Phase 2 — one `CopyOnWriteArrayList` per `UsageId` |
+| `LoggingEventPublisher` | `EventPublisherPort` | message-broker-backed (MQTT/Kafka), Phase 7 |
+| `NoopDetectionPort` | `DetectionPort` | adapter-cv-grpc (gRPC to Python CV service), Phase 2 |
+| `NoopStreamPublisher` | `StreamPublisherPort` | already superseded by default (`adapter-publish-hls`'s `MediamtxStreamPublisher`); this is just the `vision.publish.enabled=false` fallback |
+
+`DevPrincipal` (not a port implementation — a wiring-only constant holder): `USER_ID`/`GROUP_ID`/`OWNERSHIP` fixed dev-mode identity, see "Dev principal" below.
+
+## application.properties
+
+`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:8888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true`.
+
+## HLS proxy (browsers never talk to mediamtx directly)
+
+mediamtx's own HLS port (default `8888`) routinely collides with other services already bound to that well-known port on a user's machine, which used to force per-machine `hls-base` configuration just to view a stream. As of this feature, `com.drones.vision.api.HlsProxyController` (vision-api, plain component-scanned `@RestController`) serves `GET /hls/{streamId}/**` by reverse-proxying to `hlsProxyUpstreamBase` (the `URI` bean above, sourced from `VisionPublishProperties.Mediamtx#hlsBase()`) — following mediamtx's cookie-pinning `302` redirects server-side and relaying its `Set-Cookie` back, so the browser only ever talks to this app's own origin. `WiringConfiguration#streamPublisherPort` hands `MediamtxStreamPublisher` `VisionPublishProperties#viewBase()` (default the app-relative `/hls`, matching `HlsProxyController`'s mapping) as `hlsViewBase` instead of `mediamtx.hlsBase()`, so `StreamPublisherPort#viewUrl` now returns app-relative URLs like `/hls/<streamId>/index.m3u8` by default rather than `http://<mediamtx-host>:<mediamtx-port>/...`.
+
+**Why `HlsProxyController` is wired via a plain `URI` bean, not hand-constructed in `WiringConfiguration`**: every other vision-api controller (`AssetController`, `DeviceController`, etc.) is a plain component-scanned `@RestController` with its use-case-port constructor args autowired by type from beans this configuration class defines — `WiringConfiguration` never constructs a controller instance itself. `HlsProxyController` follows that same pattern for consistency: if `WiringConfiguration` instead had an explicit `@Bean public HlsProxyController hlsProxyController(...)` method, Spring's classpath component-scan (which already covers `com.drones.vision.api`, since it's a sub-package of `@SpringBootApplication`'s base package) would *also* auto-register the same `@RestController`-annotated class as a second, competing bean definition — a `BeanDefinitionStoreException` at startup (self-conflicting bean name), since `@RestController`'s stereotype annotation must stay on the class for Spring MVC's `RequestMappingHandlerMapping` to recognize its `@GetMapping` method at all, regardless of how the bean instance is actually created. Supplying only its `URI` collaborator as a bean (autowired by type, exactly one candidate) sidesteps this entirely.
+
+## Test inventory
+
+- **ArchitectureTest** — 5 ArchUnit rules over `com.drones.vision..` (prod classes only): `domainDependsOnlyOnDomainAndJava`, `applicationDependsOnlyOnApplicationDomainAndJava`, `adaptersDoNotDependOnEachOther` (slices `com.drones.vision.adapter.(*)..`), `onlyAppMayDependOnAdapterPackages`, `domainAndApplicationAreSpringAnnotationFree`. No Spring context.
+- **SimStreamSmokeTest** — `@SpringBootTest(vision.publish.enabled=false)` + `@Import(RecordingPublisherConfig)`: a `@TestConfiguration` supplies an `@Primary` `RecordingStreamPublisher` (records frames + a `CountDownLatch` for "first frame") so it wins autowiring over the real `MediamtxStreamPublisher`/`NoopStreamPublisher`. The extended M4 scenario (docs/ASSET-MODEL-PLAN.md §4): creates an asset (category `drone`) with one `sim` `VIDEO` device and one `sim` `TELEMETRY` device via `CreateAssetUseCase`, starts it via `StartAssetStreamUseCase` (device `null` — resolves the single video-capable device), asserts a real frame from `SimulatedVideoSource` reaches the recorder within 5s **and** polls `TelemetryRepositoryPort.findByUsage` for ≥2 samples (bounded 15s wait at `SimulatedTelemetrySource`'s real 1Hz cadence — see Gotchas), stops via `StopAssetStreamUseCase`, then asserts the asset's most recent `AssetUsage` is closed (`endedAt` set) with both `startPosition`/`lastPosition` populated and `sampleCount >= 2`.
+- **AssetWiringTest** — `@SpringBootTest(vision.publish.enabled=false)`: asserts every M4 use-case/repository-port bean exists (`CreateAssetUseCase`, `ListAssetsUseCase`, `GetAssetDetailsUseCase`, `StartAssetStreamUseCase`, `StopAssetStreamUseCase`, `ListCategoriesUseCase`, `CategoryRepositoryPort`, `AssetRepositoryPort`, `AssetUsageRepositoryPort`, `TelemetryRepositoryPort`) via `@Autowired` + `assertNotNull` — mirrors `PublishWiringTest`/`DiscoveryWiringTest`'s per-concern wiring-test style; a missing bean would already fail context startup, so this is mostly a readable inventory.
+- **PublishWiringTest** — `@SpringBootTest` (default properties, mediamtx *enabled*): asserts `streamPublisherPort` is a `MediamtxStreamPublisher` and both sim+rtsp `VideoSourcePort` beans are registered (`List<VideoSourcePort>` autowired). Never calls `publish()`, so it stays green without mediamtx actually running (lazy RTSP connection). Also asserts the `HlsProxyController` bean exists (`@Autowired`, `assertNotNull`) and that `streamPublisherPort.viewUrl(streamId)` is app-relative (`/hls/<id>/index.m3u8`, a pure function of `VisionPublishProperties#viewBase()` — no mediamtx connection needed for this assertion either).
+- **DiscoveryWiringTest** — `@SpringBootTest(vision.publish.enabled=false)`, default discovery config: `@Autowired List<DeviceDiscoveryPort>`, asserts all 3 methods (`onvif`,`mdns`,`v4l2`) present.
+- **DiscoveryDisabledWiringTest** — `@SpringBootTest(vision.discovery.enabled=false, vision.publish.enabled=false)`: asserts the context still loads with **zero** `DeviceDiscoveryPort` beans and `ScanDevicesUseCase` degrades to an empty result. **Gotcha:** looks these up via `ApplicationContext.getBeansOfType(DeviceDiscoveryPort.class)`, not `@Autowired List<DeviceDiscoveryPort>` — a plain `@Autowired` collection field is required-by-default and throws `NoSuchBeanDefinitionException` at zero candidates (unlike a `@Bean` factory-method `List<>` parameter, which Spring happily supplies empty), which would defeat the point of asserting "nothing registered."
+- **VisionApplicationTests** — `@SpringBootTest(vision.publish.enabled=false)`, bare `contextLoads()`.
+
+## Dev principal
+
+docs/ASSET-MODEL-PLAN.md §0.3/§4: until the identity phase (ARCHITECTURE.md §6), a constant dev principal (`UserId`, `GroupId`) owns every asset — applied in the app layer, never hard-coded in domain. `com.drones.vision.app.devsupport.DevPrincipal` holds the fixed constants: `USER_ID` wraps `new UUID(0, 0)`, `GROUP_ID` wraps `new UUID(0, 1)`, and `OWNERSHIP` is `new Ownership(USER_ID, GROUP_ID)`. `WiringConfiguration#assetService` passes `DevPrincipal.OWNERSHIP` as `AssetService`'s `actingOwnership` constructor argument — every asset created through the running app is owned by this one fixed principal until Phase 6 introduces real accounts.
+
+## Gotchas
+
+- **Stale `target/` can lie.** This module's and its dependencies' `target/` directories can hold classes compiled *before* the asset-model refactor. A non-`clean` `mvn test`/`test-compile` here can report "Nothing to compile — all classes are up to date" and silently reuse pre-refactor classes, masking real compile failures. Always `mvn clean` before trusting a build result here; if a dependency (e.g. `vision-application`, `vision-api`) changed since the last full build, also re-run `./mvnw -B clean install -DskipTests -DskipWeb=true` at the repo root first so `-pl vision-app`'s local-repo-resolved dependencies aren't stale either.
+- `SimStreamSmokeTest` needs `vision.publish.enabled=false` for determinism even though `RecordingStreamPublisher`'s `@Primary` would already win autowiring — belt-and-suspenders against ever depending on mediamtx being reachable.
+- `SimulatedTelemetrySource`'s faster-than-1Hz test seam (`SimulatedTelemetrySource(long periodMillis)`, package-private in `com.drones.vision.adapter.simulation` — see adapter-simulation/MODULE.md) is **not reachable** from this module's `com.drones.vision.app` test package, and `WiringConfiguration` always wires the real public no-arg (1Hz) constructor. `SimStreamSmokeTest`'s telemetry assertions therefore poll `TelemetryRepositoryPort` at the real cadence with a bounded 15s wait rather than a fast interval — still fast in practice (the source's first sample fires with zero initial delay, the second ~1s later), but don't assume sub-second telemetry assertions are achievable here the way `SimulatedTelemetrySourceTest` achieves them in adapter-simulation.
+
+## Status
+
+**Green.** Verified with a from-`clean` `./mvnw -B -pl vision-app test` (run twice): 15 tests, all passing — `VisionApplicationTests` 1, `DiscoveryDisabledWiringTest` 2, `DiscoveryWiringTest` 1, `ArchitectureTest` 5, `SimStreamSmokeTest` 1, `AssetWiringTest` 1, `PublishWiringTest` 4 (was 2 — `hlsProxyControllerBeanExists` and `viewUrlIsAppRelativeNotMediamtxsOwnAddress` added for the HLS-proxy feature, see the HLS proxy section above).
+
+docs/ASSET-MODEL-PLAN.md **M4** ("Wiring, seed data, full verify, live demo", scope `vision-app/src/**`) is closed:
+
+1. `ListCategoriesUseCase` implementation added — `CategoryService` in vision-application (see vision-application/MODULE.md), not this module, since it holds no adapter-specific logic.
+2. devsupport gained `InMemoryCategoryRepository` (seeded per §4), `InMemoryAssetRepository`, `InMemoryAssetUsageRepository`, `InMemoryTelemetryRepository`, and `DevPrincipal` (fixed dev-mode `Ownership`).
+3. `WiringConfiguration` now wires all of it: the four new repository-port beans, `simulatedTelemetrySource` (a `TelemetrySourcePort` bean, collected into `usageTracker`'s `List<TelemetrySourcePort>`), `usageTracker`, `streamService` switched to `StreamService`'s 7-arg ctor (passing `usageTracker`), `assetService` (with `DevPrincipal.OWNERSHIP`), `assetStreamService`, `categoryService`. `AssetController`/`CategoryController` (vision-api, component-scanned) now resolve every constructor dependency.
+4. `SimStreamSmokeTest` rewritten for the extended M4 scenario (asset-first create/start/observe-frames-and-telemetry/stop/assert-closed-usage) — see Test inventory. The stale `DeviceType`/4-arg-`Registration` compile failure that previously blocked all 6 test classes in this module is gone.
+5. New `AssetWiringTest` asserts every M4 bean is registered.
+
+Full reactor: `./mvnw -B clean install -DskipTests -DskipWeb=true` succeeds (all 15 modules, main+test compile). Final `./mvnw -B clean verify` (with the Angular build, no `-DskipWeb`) is the last step of the M4 task — see the task's own report for that outcome, since it covers modules beyond this one's scope (notably `adapter-publish-hls`, being fixed by a parallel task).

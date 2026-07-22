@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>adapters</artifactId>
+    <packaging>pom</packaging>
+    <name>adapters</name>
+    <description>Aggregator for all outbound/inbound adapter modules.</description>
+
+    <modules>
+        <module>adapter-simulation</module>
+        <module>adapter-rtsp</module>
+        <module>adapter-publish-hls</module>
+        <module>adapter-cv-grpc</module>
+        <module>adapter-overlay</module>
+        <module>adapter-persistence</module>
+        <module>adapter-discovery</module>
+    </modules>
+
+</project>

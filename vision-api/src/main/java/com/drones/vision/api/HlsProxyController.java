@@ -1,0 +1,185 @@
+package com.drones.vision.api;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.io.IOException;
+import java.net.CookieManager;
+import java.net.CookiePolicy;
+import java.net.HttpCookie;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+
+/**
+ * Driving REST adapter that proxies HLS playback traffic through this app's
+ * own HTTP origin, so browsers never talk to the mediamtx sidecar directly.
+ *
+ * <p>This exists because mediamtx's own HLS port collides with other
+ * services commonly bound to the same well-known port on a user's machine
+ * (e.g. {@code 8888}), which previously forced per-machine {@code
+ * vision.publish.mediamtx.hls-base} configuration just to view a stream. By
+ * proxying HLS through this app's own origin under {@code /hls/**} (see
+ * {@link com.drones.vision.app.VisionPublishProperties#viewBase()} in {@code
+ * vision-app}, which defaults to the app-relative {@code /hls}), the
+ * mediamtx port becomes purely an internal implementation detail viewers
+ * never see or configure.
+ *
+ * <h2>Forwarding</h2>
+ * {@code GET /hls/{streamId}/**} forwards the request to {@code
+ * hlsUpstreamBase + "/" + <raw remainder after "/hls/">}, preserving the
+ * remainder exactly as received on the wire (via {@link
+ * HttpServletRequest#getRequestURI()}, which the servlet container never
+ * URL-decodes) so segment/playlist names are never decoded and re-encoded
+ * in transit. A request under {@code /hls} with no further path segment
+ * (e.g. {@code /hls} or {@code /hls/}) simply doesn't match this mapping and
+ * falls through to Spring's normal 404 handling.
+ *
+ * <h2>Redirects and cookies</h2>
+ * mediamtx pins HLS viewers to a specific internal node with a {@code
+ * Set-Cookie} on an initial {@code 302} redirect. This controller follows
+ * such redirects itself, server-side, via {@link
+ * java.net.http.HttpClient.Redirect#NORMAL} — the browser only ever sees
+ * this app's origin and a final {@code 200} — using a fresh {@link
+ * CookieManager} per incoming request (seeded from that request's own
+ * {@code Cookie} header) so cookies set partway through a redirect chain are
+ * carried to the next hop without leaking between unrelated browser
+ * requests. Every {@code Set-Cookie} observed across the whole redirect
+ * chain (via {@link HttpResponse#previousResponse()}) is relayed back to the
+ * browser, oldest hop first, so the browser (and thus its next request) ends
+ * up pinned the same way a direct client of mediamtx would be.
+ *
+ * <h2>Body size</h2>
+ * Bodies are buffered fully in memory ({@link HttpResponse.BodyHandlers#ofByteArray()})
+ * rather than streamed — acceptable at this scale (playlists are tiny,
+ * fMP4 segments are at most a few MB) and far simpler than a true streaming
+ * proxy.
+ *
+ * <h2>Failure handling</h2>
+ * Only a failure to reach the upstream at all (connection refused, DNS
+ * failure, timeout, broken redirect chain) is treated as an error, surfaced
+ * as {@link HlsUpstreamUnavailableException} and mapped to {@code 502} by
+ * {@link ApiExceptionHandler}. A normal non-2xx response actually received
+ * from upstream (e.g. {@code 404} for a not-yet-ready segment) is passed
+ * through verbatim, exactly as {@link #proxy} passes through the upstream's
+ * {@code Content-Type} and status on success — this controller adds no
+ * caching headers of its own beyond whatever upstream already sent.
+ */
+@RestController
+public class HlsProxyController {
+
+    private static final System.Logger LOG = System.getLogger(HlsProxyController.class.getName());
+    private static final String HLS_PREFIX = "/hls/";
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
+
+    private final URI hlsUpstreamBase;
+
+    /**
+     * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress that this
+     *                        controller forwards to, e.g. {@code http://localhost:18888};
+     *                        never exposed to browsers
+     */
+    public HlsProxyController(URI hlsUpstreamBase) {
+        this.hlsUpstreamBase = Objects.requireNonNull(hlsUpstreamBase, "hlsUpstreamBase must not be null");
+    }
+
+    @GetMapping("/hls/{streamId}/**")
+    public ResponseEntity<byte[]> proxy(@PathVariable String streamId, HttpServletRequest request) {
+        URI upstreamUri = buildUpstreamUri(request);
+        try {
+            HttpResponse<byte[]> upstreamResponse = fetch(upstreamUri, request.getHeader(HttpHeaders.COOKIE));
+
+            HttpHeaders headers = new HttpHeaders();
+            upstreamResponse.headers().firstValue("content-type")
+                    .ifPresent(contentType -> headers.add(HttpHeaders.CONTENT_TYPE, contentType));
+            collectSetCookies(upstreamResponse).forEach(setCookie -> headers.add(HttpHeaders.SET_COOKIE, setCookie));
+
+            return ResponseEntity.status(upstreamResponse.statusCode()).headers(headers).body(upstreamResponse.body());
+        } catch (IOException e) {
+            throw new HlsUpstreamUnavailableException(
+                    "Upstream HLS server unreachable for stream " + streamId + " at " + upstreamUri + ": "
+                            + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new HlsUpstreamUnavailableException(
+                    "Interrupted while fetching upstream HLS for stream " + streamId, e);
+        }
+    }
+
+    private URI buildUpstreamUri(HttpServletRequest request) {
+        String requestUri = request.getRequestURI(); // raw/undecoded, per servlet spec
+        String contextPath = request.getContextPath() == null ? "" : request.getContextPath();
+        String pathAfterContext = requestUri.substring(contextPath.length());
+        String remainder = pathAfterContext.substring(HLS_PREFIX.length()); // still raw, e.g. "<streamId>/index.m3u8"
+        String query = request.getQueryString(); // already raw/encoded, or null
+        String target = withoutTrailingSlash(hlsUpstreamBase.toString()) + "/" + remainder
+                + (query != null ? "?" + query : "");
+        return URI.create(target);
+    }
+
+    private HttpResponse<byte[]> fetch(URI upstreamUri, String cookieHeader) throws IOException, InterruptedException {
+        CookieManager cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
+        seedCookies(cookieManager, upstreamUri, cookieHeader);
+
+        HttpClient client = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .cookieHandler(cookieManager)
+                .connectTimeout(CONNECT_TIMEOUT)
+                .build();
+        HttpRequest httpRequest = HttpRequest.newBuilder(upstreamUri).timeout(REQUEST_TIMEOUT).GET().build();
+        return client.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
+    }
+
+    /** Seeds the per-request {@link CookieManager} from the browser's own {@code Cookie} header, so it rides along on the initial upstream request and any redirect hop that follows. */
+    private static void seedCookies(CookieManager cookieManager, URI upstreamUri, String cookieHeader) {
+        if (cookieHeader == null || cookieHeader.isBlank()) {
+            return;
+        }
+        for (String pair : cookieHeader.split(";")) {
+            String trimmed = pair.trim();
+            int eq = trimmed.indexOf('=');
+            if (eq <= 0) {
+                continue; // malformed pair; skip rather than fail the whole proxy request
+            }
+            String name = trimmed.substring(0, eq).trim();
+            String value = trimmed.substring(eq + 1).trim();
+            try {
+                HttpCookie cookie = new HttpCookie(name, value);
+                // HttpCookie(name, value) defaults to RFC 2965 version 1, which CookieManager
+                // then serializes back into an outgoing Cookie header using the legacy
+                // $Version="1"; name="value";$Path="/" syntax -- not what the browser actually
+                // sent and not what a plain HTTP server like mediamtx expects. Version 0 gets
+                // the modern "name=value" syntax real servers understand.
+                cookie.setVersion(0);
+                cookie.setPath("/");
+                cookieManager.getCookieStore().add(upstreamUri, cookie);
+            } catch (IllegalArgumentException e) {
+                LOG.log(System.Logger.Level.DEBUG, () -> "Skipping malformed incoming cookie: " + name);
+            }
+        }
+    }
+
+    /** Walks the whole redirect chain (oldest hop first) collecting every {@code Set-Cookie} value observed. */
+    private static List<String> collectSetCookies(HttpResponse<byte[]> response) {
+        List<String> setCookies = new ArrayList<>();
+        for (Optional<HttpResponse<byte[]>> hop = Optional.of(response); hop.isPresent(); hop = hop.get().previousResponse()) {
+            setCookies.addAll(0, hop.get().headers().allValues("set-cookie"));
+        }
+        return setCookies;
+    }
+
+    private static String withoutTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+}

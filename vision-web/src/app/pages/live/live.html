@@ -1,0 +1,141 @@
+<div class="page">
+  @if (device(); as d) {
+    <div class="page-head">
+      <div>
+        <h1>{{ d.name }}</h1>
+        <p>
+          <span class="chip">{{ d.protocol }}</span>
+          @for (capability of d.capabilities; track capability) {
+            <span class="chip">{{ capability }}</span>
+          }
+        </p>
+      </div>
+      <div class="row">
+        <a class="btn secondary" routerLink="/devices">All devices</a>
+        @if (live()) {
+          <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop</button>
+        } @else {
+          <button type="button" class="btn" (click)="start()" [disabled]="busy()">
+            {{ busy() ? 'Starting…' : 'Start stream' }}
+          </button>
+        }
+      </div>
+    </div>
+
+    <div class="layout">
+      <div class="stage">
+        <vision-player [src]="stream()?.viewUrl ?? null" />
+
+        @if (live() && !stream()?.viewUrl) {
+          <div class="notice">
+            The stream is running but the publisher returned no view URL. Start mediamtx
+            (<code>docker compose up -d mediamtx</code>) and restart the stream.
+          </div>
+        }
+      </div>
+
+      <aside class="side">
+        <section class="card">
+          <header><h2>Source</h2></header>
+          <dl>
+            <dt>URI</dt>
+            <dd class="mono">{{ d.uri }}</dd>
+            <dt>Device id</dt>
+            <dd class="mono">{{ d.id }}</dd>
+            @if (stream(); as s) {
+              <dt>Stream id</dt>
+              <dd class="mono">{{ s.streamId }}</dd>
+              <dt>Started</dt>
+              <dd>{{ s.startedAt }}</dd>
+            }
+          </dl>
+
+          @if (settings.advancedMode() && optionPairs().length > 0) {
+            <div class="options">
+              <h3>Options</h3>
+              @for (pair of optionPairs(); track pair.key) {
+                <div class="opt mono"><span>{{ pair.key }}</span><span>{{ pair.value }}</span></div>
+              }
+            </div>
+          }
+        </section>
+
+        <section class="card">
+          <header>
+            <h2>Detection</h2>
+            @if (settings.isCustom()) {
+              <span class="chip warn">Custom</span>
+            } @else {
+              <span class="chip">{{ settings.activeProfile().name }}</span>
+            }
+          </header>
+
+          <label class="label" for="confidence">
+            Confidence ≥ {{ settings.effective().confidenceThreshold.toFixed(2) }}
+          </label>
+          <input
+            id="confidence"
+            type="range"
+            min="0.05"
+            max="0.95"
+            step="0.05"
+            [value]="settings.effective().confidenceThreshold"
+            (input)="onConfidence($any($event.target).value)"
+          />
+
+          <label class="label" for="fps">
+            Inference {{ settings.effective().inferenceFps }} fps
+          </label>
+          <input
+            id="fps"
+            type="range"
+            min="1"
+            max="30"
+            step="1"
+            [value]="settings.effective().inferenceFps"
+            (input)="onFps($any($event.target).value)"
+          />
+
+          <p class="muted hint">
+            Applied the next time this stream starts. Video always passes through at full frame
+            rate — this is how often frames are sent for inference.
+          </p>
+
+          @if (settings.isCustom()) {
+            <button type="button" class="btn secondary small" (click)="settings.revertDraft()">
+              Revert to {{ settings.activeProfile().name }}
+            </button>
+          }
+        </section>
+
+        @if (hasTelemetry()) {
+          <section class="card">
+            <header><h2>Telemetry</h2></header>
+            <p class="muted hint">
+              This device reports telemetry. The OSD and map arrive with
+              <code>adapter-mavlink</code> in Phase 4.
+            </p>
+          </section>
+        }
+
+        @if (hasPtz()) {
+          <section class="card">
+            <header><h2>PTZ</h2></header>
+            <p class="muted hint">
+              This device supports PTZ. Controls arrive with <code>adapter-onvif</code> in Phase 4.
+            </p>
+          </section>
+        }
+      </aside>
+    </div>
+  } @else {
+    <div class="card empty">
+      <h3>Unknown device</h3>
+      <p>
+        No device with id <span class="mono">{{ deviceId() }}</span> is registered. It may have
+        been removed, or the backend may be unreachable.
+      </p>
+      <a class="btn" routerLink="/devices">Back to Devices</a>
+    </div>
+  }
+</div>

@@ -1,0 +1,56 @@
+package com.drones.vision.api.dto;
+
+import com.drones.vision.application.AssetSummary;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.time.Instant;
+import java.util.Map;
+
+/**
+ * Response body element for {@code GET /api/assets}, and the shared field
+ * set that {@link AssetDetailsResponse} extends with devices and usage
+ * history.
+ *
+ * <p>{@code lastUsedAt} and {@code lastKnownPosition} are omitted from the
+ * JSON entirely (rather than serialized as {@code null}) for an asset that
+ * has never been used. {@code owner} is the asset's {@code Ownership}'s
+ * {@code ownerId}, as a canonical UUID string — until the identity phase
+ * (ARCHITECTURE.md §6) this is always the constant dev principal.
+ *
+ * @param assetId           asset identity, as a canonical UUID string
+ * @param displayName       human-readable name (e.g. "my drone")
+ * @param category           the asset's category slug
+ * @param categoryName       human-readable name of the asset's category
+ * @param owner              the owning user's id, as a canonical UUID string
+ * @param status             {@code OFFLINE} or {@code STREAMING}, derived from active streams
+ * @param state              {@code ACTIVE} or {@code DEACTIVATED}; a separate axis from {@code status},
+ *                           since "idle right now" and "withdrawn from service" are different facts
+ * @param lastUsedAt         start time of the asset's most recent usage, or absent if never used
+ * @param lastKnownPosition  last known position across usages, or absent if none is known
+ * @param attributes         free-form key/value attributes
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record AssetSummaryResponse(String assetId, String displayName, String category, String categoryName,
+                                    String owner, String status, String state, Instant lastUsedAt,
+                                    GeoPositionResponse lastKnownPosition, Map<String, String> attributes) {
+
+    /**
+     * Maps an {@link AssetSummary} read model to its wire representation.
+     *
+     * @param summary the summary to map
+     * @return the response body element for {@code summary}
+     */
+    public static AssetSummaryResponse from(AssetSummary summary) {
+        return new AssetSummaryResponse(
+                summary.asset().id().value().toString(),
+                summary.asset().displayName(),
+                summary.asset().category().slug(),
+                summary.categoryName(),
+                summary.asset().ownership().ownerId().value().toString(),
+                summary.status().name(),
+                summary.asset().state().name(),
+                summary.lastUsedAt(),
+                GeoPositionResponse.from(summary.lastKnownPosition()),
+                summary.asset().attributes());
+    }
+}

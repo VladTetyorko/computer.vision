@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>vision-app</artifactId>
+    <name>vision-app</name>
+    <description>Spring Boot assembly: wiring, configuration, profiles. The only module that knows about all adapters.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-application</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-simulation</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-rtsp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-publish-hls</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-api</artifactId>
+        </dependency>
+        <!-- Static-only jar: the Angular bundle under META-INF/resources. -->
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

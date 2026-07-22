@@ -1,0 +1,48 @@
+package com.drones.vision.api.dto;
+
+import com.drones.vision.domain.model.DiscoveredDevice;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.util.Map;
+
+/**
+ * Response body element for {@code POST /api/discovery/scan}'s {@code
+ * devices} list.
+ *
+ * <p>{@code suggestedCategory}, {@code protocol}, and {@code uri} are
+ * omitted from the JSON entirely (rather than serialized as {@code null})
+ * when the discovery mechanism could not infer them. {@code protocol}/{@code
+ * uri} are flattened from {@link DiscoveredDevice#suggestedStream()} when
+ * present, so clients don't have to unwrap a nested stream object.
+ *
+ * @param method            the discovery mechanism that found this candidate (see {@code DeviceDiscoveryPort#method()})
+ * @param name              human-readable name or best-effort label for the candidate
+ * @param address           network or local address of the candidate, as a string
+ * @param suggestedCategory best-guess category slug, or absent if the mechanism cannot infer one
+ * @param protocol          the suggested stream's protocol key, or absent if no stream was suggested
+ * @param uri               the suggested stream's resource locator, as a string, or absent if no stream was suggested
+ * @param details           mechanism-specific extra info (e.g. raw scopes, service name)
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record DiscoveredDeviceResponse(String method, String name, String address, String suggestedCategory,
+                                        String protocol, String uri, Map<String, String> details) {
+
+    /**
+     * Maps a domain {@link DiscoveredDevice} to its wire representation.
+     *
+     * @param device the candidate to map
+     * @return the response body element for {@code device}
+     */
+    public static DiscoveredDeviceResponse from(DiscoveredDevice device) {
+        String protocol = device.suggestedStream() != null ? device.suggestedStream().protocol() : null;
+        String uri = device.suggestedStream() != null ? device.suggestedStream().uri().toString() : null;
+        return new DiscoveredDeviceResponse(
+                device.method(),
+                device.name(),
+                device.address().toString(),
+                device.suggestedCategory() != null ? device.suggestedCategory().slug() : null,
+                protocol,
+                uri,
+                device.details());
+    }
+}

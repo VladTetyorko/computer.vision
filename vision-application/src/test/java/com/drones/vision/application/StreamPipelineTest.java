@@ -1,0 +1,370 @@
+package com.drones.vision.application;
+
+import com.drones.vision.domain.model.BoundingBox;
+import com.drones.vision.domain.model.Capability;
+import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.Device;
+import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.EventType;
+import com.drones.vision.domain.model.ModelRef;
+import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.PixelFormat;
+import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.domain.port.out.DetectionPort;
+import com.drones.vision.domain.port.out.DetectionRepositoryPort;
+import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.StreamPublisherPort;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.net.URI;
+import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Flow;
+import java.util.function.LongSupplier;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class StreamPipelineTest {
+
+    private Device device;
+    private StreamId streamId;
+    private DetectionPort detectionPort;
+    private StreamPublisherPort streamPublisherPort;
+    private DetectionRepositoryPort detectionRepositoryPort;
+    private EventPublisherPort eventPublisher;
+
+    @BeforeEach
+    void setUp() {
+        streamId = StreamId.random();
+        device = new Device(DeviceId.random(), "cam", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://cam"), Map.of()));
+        detectionPort = mock(DetectionPort.class);
+        streamPublisherPort = mock(StreamPublisherPort.class);
+        detectionRepositoryPort = mock(DetectionRepositoryPort.class);
+        eventPublisher = mock(EventPublisherPort.class);
+    }
+
+    private static PipelineConfig config(int inferenceFps, int maxInFlight) {
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of());
+    }
+
+    private VideoFrame frame(long sequence) {
+        return new VideoFrame(streamId, sequence, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+    }
+
+    private DetectionResult emptyResult(long sequence) {
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO);
+    }
+
+    private DetectionResult nonEmptyResult(long sequence) {
+        Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new ModelRef("yolo", "latest"));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+    }
+
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher);
+    }
+
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, clock);
+    }
+
+    /**
+     * A deterministic synthetic clock advancing by exactly {@code 1/fps}
+     * seconds on every call, so a pipeline's frame-cadence measurement
+     * converges to precisely {@code fps} instead of depending on real
+     * wall-clock timing (which synchronous, in-test frame delivery does not
+     * resemble at all).
+     */
+    private static LongSupplier fixedFpsClock(double fps) {
+        long deltaNanos = Math.round(1_000_000_000.0 / fps);
+        return new LongSupplier() {
+            private long current = 0L;
+
+            @Override
+            public long getAsLong() {
+                long value = current;
+                current += deltaNanos;
+                return value;
+            }
+        };
+    }
+
+    @Test
+    void requestsExactlyOneFrameAtATime() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0), frame(1), frame(2)));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(30, 2)).start();
+
+        assertFalse(publisher.requestAmounts.isEmpty());
+        assertTrue(publisher.requestAmounts.stream().allMatch(n -> n == 1L),
+                "every request() call must ask for exactly one frame: " + publisher.requestAmounts);
+    }
+
+    @Test
+    void publishesEveryFrameRegardlessOfSampling() {
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2), frame(3));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(30, 2)).start();
+
+        for (VideoFrame f : frames) {
+            verify(streamPublisherPort).publish(streamId, f);
+        }
+    }
+
+    @Test
+    void samplesEveryNthFrameBasedOnMeasuredSourceFpsOnceWarmedUp() {
+        // inferenceFps=10 against a real (constant-cadence) 30fps source ->
+        // sample every 3rd frame (sequence % 3 == 0), same outcome the old
+        // hardcoded-30fps assumption produced -- but now driven by the
+        // *measured* rate via a synthetic 30fps clock (a synchronous test
+        // delivering frames back-to-back does not itself run at 30fps in
+        // wall-clock time, so the injectable clock seam is required for a
+        // deterministic assertion here).
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 9; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(10, 5), fixedFpsClock(30)).start();
+
+        verify(detectionPort, times(3)).detect(any(), any()); // sequences 0, 3, 6
+    }
+
+    @Test
+    void usesAssumedThirtyFpsDuringWarmupRegardlessOfActualSourceRate() {
+        // A slow, constant 5fps clock, but only 4 frames arrive -- fewer
+        // than StreamPipeline.WARMUP_FRAMES (5) -- so every one of them is
+        // still governed by the ASSUMED_SOURCE_FPS(30) fallback, not the
+        // (very different) measured rate: everyNth = round(30/10) = 3.
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2), frame(3));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(10, 5), fixedFpsClock(5)).start();
+
+        verify(detectionPort, times(2)).detect(any(), any()); // sequences 0, 3
+    }
+
+    @Test
+    void samplesEveryOtherFrameAfterWarmupWhenMeasuredRateIsSlowerThanAssumed() {
+        // 10fps source, inferenceFps=5. Warmup (frame indices 0-3, assumed
+        // 30fps) -> everyNth = round(30/5) = 6, sampling only sequence 0.
+        // Once WARMUP_FRAMES=5 frames have been observed (from frame index
+        // 4 onward), the measured 10fps takes over -> everyNth =
+        // round(10/5) = 2, sampling sequences 4, 6, 8.
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 10; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(5, 10), fixedFpsClock(10)).start();
+
+        verify(detectionPort, times(4)).detect(any(), any()); // sequences 0, 4, 6, 8
+    }
+
+    @Test
+    void clampsMeasuredFpsToTheConfiguredMaximum() {
+        // An absurdly fast synthetic clock (source far above any real
+        // camera) must clamp the measured rate to
+        // StreamPipeline.MAX_MEASURED_FPS (240) rather than an unbounded
+        // value. inferenceFps=60: warmup (frame indices 0-3) uses assumed
+        // 30fps -> everyNth = round(30/60) = 1 (every frame). From frame
+        // index 4 onward the clamped 240fps measurement applies -> everyNth
+        // = round(240/60) = 4, sampling sequences 4 and 8.
+        List<VideoFrame> frames = new ArrayList<>();
+        for (long i = 0; i < 10; i++) {
+            frames.add(frame(i));
+        }
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        pipeline(publisher, config(60, 10), fixedFpsClock(1_000_000)).start();
+
+        verify(detectionPort, times(6)).detect(any(), any()); // sequences 0,1,2,3 (warmup) + 4,8 (clamped-measured)
+    }
+
+    @Test
+    void nonPositiveClockDeltaDoesNotCorruptSamplingOrThrow() {
+        // A clock that never advances (duplicate/backward timestamps, e.g.
+        // clock skew) must not divide by zero or otherwise break sampling;
+        // the delta is simply ignored and the prior state is retained.
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+        LongSupplier stuckClock = () -> 42L;
+
+        pipeline(publisher, config(30, 5), stuckClock).start();
+
+        // Still within warmup (3 < WARMUP_FRAMES=5) so the assumed 30fps
+        // governs regardless -- everyNth = round(30/30) = 1, every frame
+        // sampled -- and nothing threw despite the degenerate clock.
+        verify(detectionPort, times(3)).detect(any(), any());
+    }
+
+    @Test
+    void boundsInFlightInferencesBySkippingRatherThanQueuing() {
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        // Never completes, so in-flight count never drains during this test.
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>());
+
+        pipeline(publisher, config(30, 1)).start(); // every frame sampled, at most 1 in flight
+
+        verify(detectionPort, times(1)).detect(any(), any());
+    }
+
+    @Test
+    void persistsAndEmitsDetectionEventOnlyForNonEmptyResults() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
+        pipeline.start();
+
+        verify(detectionRepositoryPort).save(result);
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher).publish(captor.capture());
+        assertEquals(EventType.DETECTION, captor.getValue().type());
+        assertEquals(streamId, captor.getValue().streamId());
+        assertEquals(result.detections(), pipeline.latestDetections());
+    }
+
+    @Test
+    void doesNotPersistOrEmitEventForEmptyResultsButStillUpdatesLatest() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
+        pipeline.start();
+
+        verify(detectionRepositoryPort, never()).save(any());
+        verify(eventPublisher, never()).publish(argThat(e -> e.type() == EventType.DETECTION));
+        assertTrue(pipeline.latestDetections().isEmpty());
+    }
+
+    @Test
+    void detectionFailureEmitsPipelineErrorAndStopsCleanly() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        CompletableFuture<DetectionResult> failed = new CompletableFuture<>();
+        failed.completeExceptionally(new RuntimeException("boom"));
+        when(detectionPort.detect(any(), any())).thenReturn(failed);
+
+        pipeline(publisher, config(30, 2)).start();
+
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher, atLeastOnce()).publish(captor.capture());
+        assertTrue(captor.getAllValues().stream().anyMatch(e -> e.type() == EventType.PIPELINE_ERROR));
+        verify(streamPublisherPort, times(1)).streamEnded(streamId);
+        assertTrue(publisher.cancelled, "subscription should be cancelled after a pipeline error");
+    }
+
+    @Test
+    void sourceErrorEmitsPipelineErrorAndStopsCleanly() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of());
+        publisher.errorAfterFrames(new RuntimeException("source dead"));
+
+        pipeline(publisher, config(30, 2)).start();
+
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher).publish(captor.capture());
+        assertEquals(EventType.PIPELINE_ERROR, captor.getValue().type());
+        verify(streamPublisherPort).streamEnded(streamId);
+    }
+
+    @Test
+    void closeIsIdempotent() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of());
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
+        pipeline.start();
+
+        pipeline.close();
+        pipeline.close();
+
+        verify(streamPublisherPort, times(1)).streamEnded(streamId);
+    }
+
+    /**
+     * Deterministic test double for {@code VideoSourcePort}'s {@code
+     * Flow.Publisher}: delivers frames synchronously, one per {@code
+     * request()} call, and records every requested amount so tests can
+     * assert on request(1)-at-a-time behavior. After all scripted frames are
+     * exhausted it stays silent (like a live source with no new data yet)
+     * unless {@link #errorAfterFrames} was configured.
+     */
+    private static final class ScriptedVideoPublisher implements Flow.Publisher<VideoFrame> {
+        private final List<VideoFrame> frames;
+        private final List<Long> requestAmounts = Collections.synchronizedList(new ArrayList<>());
+        private int index = 0;
+        private boolean signaled = false;
+        private Throwable errorAfterFrames;
+        volatile boolean cancelled = false;
+
+        ScriptedVideoPublisher(List<VideoFrame> frames) {
+            this.frames = frames;
+        }
+
+        void errorAfterFrames(Throwable throwable) {
+            this.errorAfterFrames = throwable;
+        }
+
+        @Override
+        public void subscribe(Flow.Subscriber<? super VideoFrame> subscriber) {
+            subscriber.onSubscribe(new Flow.Subscription() {
+                @Override
+                public void request(long n) {
+                    requestAmounts.add(n);
+                    if (index < frames.size()) {
+                        VideoFrame next = frames.get(index++);
+                        subscriber.onNext(next);
+                    } else if (!signaled && errorAfterFrames != null) {
+                        signaled = true;
+                        subscriber.onError(errorAfterFrames);
+                    }
+                }
+
+                @Override
+                public void cancel() {
+                    cancelled = true;
+                }
+            });
+        }
+    }
+}

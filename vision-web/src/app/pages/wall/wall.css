@@ -1,0 +1,38 @@
+.grid {
+    display: grid;
+    grid-template-columns: repeat(var(--columns, 3), minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+.density select {
+    width: 4.5rem;
+}
+
+.notice {
+    background: var(--warn-soft);
+    border: 1px solid #5a4413;
+    color: #ffd479;
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.75rem;
+    font-size: 0.82rem;
+    margin-bottom: 1rem;
+}
+
+.notice code {
+    font-family: var(--mono);
+    background: rgb(0 0 0 / 25%);
+    padding: 0.05rem 0.3rem;
+    border-radius: 4px;
+}
+
+@media (max-width: 1100px) {
+    .grid {
+        grid-template-columns: repeat(min(var(--columns, 3), 3), minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 700px) {
+    .grid {
+        grid-template-columns: 1fr;
+    }
+}

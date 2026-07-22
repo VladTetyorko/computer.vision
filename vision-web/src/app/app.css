@@ -1,0 +1,107 @@
+:host {
+    display: block;
+    min-height: 100%;
+}
+
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    height: var(--header-height);
+    padding: 0 1.25rem;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--text);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+/* An aperture-ish mark: a ring with a bright pupil. Cheap, recognisable at 16px. */
+.brand-mark {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    position: relative;
+}
+
+.brand-mark::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.tabs {
+    display: flex;
+    gap: 0.25rem;
+    height: 100%;
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    padding: 0 0.85rem;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab:hover {
+    color: var(--text);
+}
+
+.tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+.status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.offline-banner {
+    background: var(--warn-soft);
+    border-bottom: 1px solid #5a4413;
+    color: #ffd479;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.82rem;
+}
+
+.offline-banner code {
+    font-family: var(--mono);
+    background: rgb(0 0 0 / 25%);
+    padding: 0.05rem 0.3rem;
+    border-radius: 4px;
+}
+
+@media (max-width: 640px) {
+    .app-header {
+        gap: 0.75rem;
+        padding: 0 0.75rem;
+    }
+
+    .brand-name {
+        display: none;
+    }
+
+    .tab {
+        padding: 0 0.6rem;
+    }
+}

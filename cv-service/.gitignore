@@ -1,0 +1,14 @@
+# Generated protobuf/gRPC stubs - regenerate with scripts/gen_proto.sh
+# (see README.md). Never commit generated code.
+cv_service/gen/
+
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

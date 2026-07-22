@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+// Java <-> Python contract for the CV service (see ARCHITECTURE.md §1, §4 and
+// docs/PHASE0-PLAN.md §4 Task T3). This is the single source of truth for both
+// the vision-proto (Java/grpc-java) and cv-service (Python/grpcio) codegen.
+package vision.v1;
+
+import "google/protobuf/empty.proto";
+
+option java_multiple_files = true;
+option java_package = "com.drones.vision.proto.v1";
+
+// Wire encoding of the pixel data carried in a FrameRequest.
+enum ImageEncoding {
+  IMAGE_ENCODING_UNSPECIFIED = 0;
+  IMAGE_ENCODING_JPEG = 1;
+  IMAGE_ENCODING_BGR24 = 2;
+}
+
+// A single frame sent to the CV service for inference, plus which model to
+// run it against.
+message FrameRequest {
+  string stream_id = 1;
+  int64 sequence = 2;
+  int64 timestamp_millis = 3;
+  int32 width = 4;
+  int32 height = 5;
+  ImageEncoding encoding = 6;
+  bytes data = 7;
+  string model_id = 8;
+  string model_version = 9;
+  float confidence_threshold = 10;
+}
+
+// Normalized bounding box. Coordinates are in [0, 1] relative to frame
+// width/height, origin at the TOP-LEFT of the frame: (x, y) is the top-left
+// corner of the box, and the box extends right by `width` and down by
+// `height` (i.e. the box occupies [x, x+width] x [y, y+height]).
+message BoundingBox {
+  float x = 1;
+  float y = 2;
+  float width = 3;
+  float height = 4;
+}
+
+message Detection {
+  string label = 1;
+  float confidence = 2;
+  BoundingBox box = 3;
+}
+
+// Inference result for one frame.
+message DetectionResponse {
+  string stream_id = 1;
+  int64 sequence = 2;
+  int64 timestamp_millis = 3;
+  string model_id = 4;
+  string model_version = 5;
+  repeated Detection detections = 6;
+  int64 inference_millis = 7;
+}
+
+message TrainingJobSpec {
+  string base_model = 1;
+  string dataset_id = 2;
+  int32 epochs = 3;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  RUNNING = 1;
+  SUCCEEDED = 2;
+  FAILED = 3;
+}
+
+message TrainingProgress {
+  string job_id = 1;
+  int32 epoch = 2;
+  int32 total_epochs = 3;
+  float loss = 4;
+  float map50 = 5;
+  JobState state = 6;
+  string message = 7;
+}
+
+message ModelInfo {
+  string id = 1;
+  string version = 2;
+  string stage = 3;
+  map<string, float> metrics = 4;
+}
+
+message ModelList {
+  repeated ModelInfo models = 1;
+}
+
+message ModelRefMsg {
+  string id = 1;
+  string version = 2;
+}
+
+message Ack {
+  bool ok = 1;
+  string message = 2;
+}
+
+// Frame -> detections streaming inference.
+service Inference {
+  rpc DetectStream(stream FrameRequest) returns (stream DetectionResponse);
+}
+
+// Dataset training and model registry control plane.
+service Training {
+  rpc StartTraining(TrainingJobSpec) returns (stream TrainingProgress);
+  rpc ListModels(google.protobuf.Empty) returns (ModelList);
+  rpc PromoteModel(ModelRefMsg) returns (Ack);
+}

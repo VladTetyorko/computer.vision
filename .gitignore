@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Python (cv-service) ###
+__pycache__/
+*.pyc
+.venv/
+cv-service/cv_service/gen/
+
+### Environment ###
+.env

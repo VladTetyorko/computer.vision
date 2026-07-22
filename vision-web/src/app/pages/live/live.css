@@ -1,0 +1,87 @@
+.page-head p {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 1rem;
+    align-items: start;
+}
+
+.stage {
+    min-width: 0;
+}
+
+.notice {
+    margin-top: 0.75rem;
+    background: var(--warn-soft);
+    border: 1px solid #5a4413;
+    color: #ffd479;
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.75rem;
+    font-size: 0.82rem;
+}
+
+.notice code,
+.hint code {
+    font-family: var(--mono);
+    background: rgb(0 0 0 / 25%);
+    padding: 0.05rem 0.3rem;
+    border-radius: 4px;
+}
+
+dl {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.35rem 0.75rem;
+    margin: 0;
+    font-size: 0.82rem;
+}
+
+dt {
+    color: var(--text-muted);
+}
+
+dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.options {
+    margin-top: 0.9rem;
+    padding-top: 0.7rem;
+    border-top: 1px solid var(--border);
+}
+
+.options h3 {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+    margin-bottom: 0.4rem;
+}
+
+.opt {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.15rem 0;
+}
+
+.hint {
+    font-size: 0.78rem;
+    margin: 0.6rem 0 0.5rem;
+}
+
+input[type="range"] {
+    margin-bottom: 0.75rem;
+}
+
+@media (max-width: 900px) {
+    .layout {
+        grid-template-columns: 1fr;
+    }
+}

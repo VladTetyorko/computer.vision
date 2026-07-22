@@ -1,0 +1,138 @@
+package com.drones.vision.adapter.discovery.v4l2;
+
+import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.DiscoveredDevice;
+import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.domain.port.out.DeviceDiscoveryPort;
+
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+/**
+ * {@link DeviceDiscoveryPort} implementation for local V4L2 device
+ * enumeration: lists {@code /dev/videoN} nodes rather than probing a network.
+ *
+ * <p>For each {@code videoN} entry found directly under {@code devBase}
+ * (default {@code /dev}), a best-effort friendly name is read from {@code
+ * <sysBase>/class/video4linux/videoN/name} (default {@code sysBase} is
+ * {@code /sys}) when that file exists and is readable; otherwise the node
+ * name itself ({@code videoN}) is used. A missing/unreadable {@code devBase}
+ * (including simply not being Linux) yields an empty list rather than an
+ * exception -- there is nothing to enumerate.
+ *
+ * <p>Every candidate is a {@code "usb-camera"} {@link CategoryId} with a {@code "v4l2"}
+ * {@link DiscoveredDevice#suggestedStream()} whose URI is always the real
+ * {@code file:/dev/videoN} path -- regardless of the {@code devBase} used to
+ * enumerate it (that constructor parameter only redirects <em>where this
+ * scanner looks</em>, e.g. in tests; the produced candidate always points at
+ * the real device node a production host would have). Registering this
+ * candidate today is possible but the resulting device fails to start with
+ * a 400: there is no video-source adapter that supports the {@code "v4l2"}
+ * protocol yet. That lands with {@code adapter-usb} in Phase 4; returning
+ * the candidate now (rather than withholding it) is deliberate -- discovery
+ * should show what physically exists on the host even before every
+ * protocol is wired up.
+ *
+ * <p>Plain class, no framework dependency -- instantiated directly by {@code
+ * vision-app}'s wiring configuration.
+ */
+public final class V4l2Scanner implements DeviceDiscoveryPort {
+
+    private static final System.Logger LOG = System.getLogger(V4l2Scanner.class.getName());
+
+    private static final String METHOD = "v4l2";
+
+    private static final Path DEFAULT_DEV_BASE = Path.of("/dev");
+    private static final Path DEFAULT_SYS_BASE = Path.of("/sys");
+
+    private static final Pattern VIDEO_NODE_PATTERN = Pattern.compile("video(\\d+)");
+
+    private final Path devBase;
+    private final Path sysBase;
+
+    /** Enumerates the real {@code /dev} and {@code /sys} trees. */
+    public V4l2Scanner() {
+        this(DEFAULT_DEV_BASE, DEFAULT_SYS_BASE);
+    }
+
+    /**
+     * Test seam: enumerates fake {@code devBase}/{@code sysBase} trees
+     * (e.g. a JUnit {@code @TempDir}) instead of the real filesystem.
+     *
+     * @param devBase root under which {@code videoN} nodes are looked for directly
+     * @param sysBase root under which {@code class/video4linux/videoN/name} is looked for
+     */
+    public V4l2Scanner(Path devBase, Path sysBase) {
+        this.devBase = Objects.requireNonNull(devBase, "devBase must not be null");
+        this.sysBase = Objects.requireNonNull(sysBase, "sysBase must not be null");
+    }
+
+    @Override
+    public String method() {
+        return METHOD;
+    }
+
+    @Override
+    public List<DiscoveredDevice> scan(Duration timeout) {
+        Objects.requireNonNull(timeout, "timeout must not be null");
+        // Enumeration is local filesystem I/O and normally finishes almost
+        // instantly, but each entry is still checked against a deadline so a
+        // pathological filesystem cannot make this scanner stall the
+        // parallel scan past its bound.
+        long deadlineNanos = System.nanoTime() + (timeout.isNegative() ? 0L : timeout.toNanos());
+
+        List<Path> entries;
+        try (Stream<Path> listing = Files.list(devBase)) {
+            entries = listing.sorted().toList();
+        } catch (IOException | RuntimeException e) {
+            // Missing devBase, permission denied, not-a-directory, non-Linux
+            // layout, ... -- nothing found, never a scan failure.
+            LOG.log(System.Logger.Level.DEBUG, () -> "V4L2 enumeration of " + devBase + " yielded nothing: " + e);
+            return List.of();
+        }
+
+        List<DiscoveredDevice> devices = new ArrayList<>();
+        for (Path entry : entries) {
+            if (System.nanoTime() >= deadlineNanos) {
+                break;
+            }
+            String fileName = entry.getFileName().toString();
+            if (!VIDEO_NODE_PATTERN.matcher(fileName).matches()) {
+                continue;
+            }
+            devices.add(toDiscoveredDevice(fileName));
+        }
+        return List.copyOf(devices);
+    }
+
+    private DiscoveredDevice toDiscoveredDevice(String videoNodeName) {
+        URI uri = URI.create("file:/dev/" + videoNodeName);
+        String name = readFriendlyName(videoNodeName).orElse(videoNodeName);
+        StreamDescriptor stream = new StreamDescriptor("v4l2", uri, Map.of());
+        Map<String, String> details = Map.of("device", "/dev/" + videoNodeName);
+        return new DiscoveredDevice(METHOD, name, uri, new CategoryId("usb-camera"), stream, details);
+    }
+
+    private Optional<String> readFriendlyName(String videoNodeName) {
+        Path namePath = sysBase.resolve("class").resolve("video4linux").resolve(videoNodeName).resolve("name");
+        if (!Files.isReadable(namePath)) {
+            return Optional.empty();
+        }
+        try {
+            String content = Files.readString(namePath).trim();
+            return content.isBlank() ? Optional.empty() : Optional.of(content);
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+    }
+}

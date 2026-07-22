@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.drones</groupId>
+        <artifactId>vision</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>adapter-cv-grpc</artifactId>
+    <name>adapter-cv-grpc</name>
+    <description>Placeholder — gRPC client to the Python CV service, implemented in Phase 2.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>vision-proto</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>
