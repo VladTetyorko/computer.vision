@@ -35,7 +35,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +45,12 @@ services:
       retries: 10
 
   mediamtx:
-    image: bluenviron/mediamtx:latest
+    # Pinned, not :latest — mediamtx has shipped viewer-facing regressions in
+    # routine releases (e.g. #4022: WebRTC clients freeze on stream interruption,
+    # broken in v1.10.0, fixed later). 1.19.2 is the version V-a verified the
+    # MTX_HLS* defaults and WHEP behavior against. Bump deliberately, re-testing
+    # WHEP viewer reconnection on publish interruption when you do.
+    image: bluenviron/mediamtx:1.19.2
     restart: unless-stopped
     ports:
       - "8554:8554" # RTSP
