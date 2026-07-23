@@ -98,7 +98,28 @@ adapter-rtsp is really the *FFmpeg ingest* adapter — `resolveFilename(URI)` al
 
 ---
 
-## 5. Cycle order & status
+## 5. C5 — backend: mjpeg TX/RX pair (`adapter-mjpeg`)
+
+The second protocol under the §0 doctrine, pulled forward from Phase 4 (ESP32-CAM persona). New module `adapters/adapter-mjpeg`.
+
+- **RX — `MjpegVideoSource implements VideoSourcePort`**: protocol `"mjpeg"`, `http(s)` URIs. Hand-rolled `multipart/x-mixed-replace` parser over `java.net.http` (transparent, dependency-free on the read path — an ESP32-CAM's stream is exactly this): read boundary from `Content-Type`, extract JPEG parts, emit `VideoFrame`s with `PixelFormat.JPEG` **passthrough** (the pipeline already handles JPEG — the sim source emits it). Per-open runtime + `SubmissionPublisher`, drop-newest capacity 4, idempotent close — the module idioms of adapter-rtsp/simulation.
+- **TX — `MjpegFeedTransmitter implements FeedTransmitterPort`**: protocol `"mjpeg"`, `file:` source. JDK `com.sun.net.httpserver.HttpServer` on an ephemeral port serving `/feed-<id>` as `multipart/x-mixed-replace`; frames decoded from the file via JavaCV (`FFmpegFrameGrabber` → `Java2DFrameConverter` → `ImageIO` JPEG), looped + real-time paced (same approach as the rtsp pair). Returns `StreamDescriptor("mjpeg", http://127.0.0.1:<port>/feed-<id>)`.
+- **Round-trip IT needs no docker**: TX serves a generated file → RX ingests it → frames observed, looping proven — the pair verifies itself in-process.
+- Wiring + transport: `SimulationTransport` gains `MJPEG`; API accepts `"transport":"mjpeg"`; vision-app registers both beans (`MjpegVideoSource` into the source list, transmitter into a `List<FeedTransmitterPort>` — `DefaultSimulationService` picks by `supports()`, its `FeedTransmitterPort` dep generalizing to the list/registry per the `VideoSourceRegistry` precedent).
+
+**Done when:** `POST /api/simulations {"transport":"mjpeg", ...}` flows file → HTTP MJPEG wire → RX → pipeline → HLS, DELETE tears both down; smoke test proves it without docker. **Estimate: M — two tasks (module, then transport/wiring); risk: multipart edge cases (partial reads) — keep the parser boundary-tolerant and tested with chunked delivery.**
+
+## 6. C6 — UI: `/map` overview tab *(proposal & estimate)*
+
+**Proposal (referee / crew):** a **Map** tab showing the whole fleet on one map — the tournament overview. Every asset with a known position appears: `STREAMING` assets as live markers (position updates from their open usage's telemetry, short recent trail), `OFFLINE` assets dimmed at `lastKnownPosition` (crew: where to retrieve it). Marker popup: display name, category, status, battery when live, and a **Watch** action → `/live/:deviceId`. Auto-fit bounds on load; manual pan disables follow until re-enabled. Empty state points at the Simulate wizard.
+
+**No backend changes**: `GET /api/assets` (summaries carry `status` + `lastKnownPosition`) polled ~5 s, plus per-streaming-asset telemetry via the C2 store. Reuse the lazily-chunked Leaflet setup from C2 (shared lazy import — must stay out of the initial bundle; tab route idle-preload opt-out like Debug).
+
+**Done when:** two simulated drones (one streaming, one stopped) appear correctly — one moving with a trail, one dimmed static; tab lands after Wall; specs for the marker/status derivation logic; budgets green. **Estimate: S/M — 1 task (vision-web); risk: many live markers polling — cap concurrent telemetry polls (only streaming assets).**
+
+---
+
+## 7. Cycle order & status
 
 Execution follows the repo's delegation model: per-task scopes are disjoint; every task ends with its scoped build green and MODULE.md updated.
 
@@ -108,5 +129,10 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | C2 | **UI** | Live telemetry OSD + map | one task (vision-web) | ✅ done |
 | C3 | backend | `FeedTransmitterPort` + RTSP TX | domain+adapter, then application+api+app | ✅ done |
 | C4 | **UI** | Simulation wizard | one task (vision-web) | ✅ done |
+| C5 | backend | mjpeg TX/RX pair | new module, then transport/wiring | pending |
+| C6 | **UI** | `/map` overview tab | one task (vision-web) | pending |
+| C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | pending |
+| C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | pending |
+| C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | pending |
 
-**C5+ candidates** (re-propose when C4 closes): WEB-PLAN W6 leftovers + W7 hardening; `/map` overview tab (all assets on one map — referee's tournament view; geolocated detections join in Phase 2); mjpeg TX/RX pair (ESP32-CAM, Phase 4 pull-forward); flight replay (play a closed usage's trail + recording).
+C7–C9 execute **[MVP1-PLAN.md](MVP1-PLAN.md)** — the priority target ("the friends demo": simultaneous multi-protocol sources + map + live CV). Post-MVP candidates: WEB-PLAN W6 leftovers + W7 hardening (Playwright smoke in CI, keyboard, responsive); flight replay; MAVLink telemetry RX; geolocated detections on the map.
