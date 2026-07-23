@@ -12,3 +12,10 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Ultralytics YOLO weights - downloaded on demand (YOLO("yolo11n.pt") drops
+# them in the current working directory if not already cached) or baked into
+# the Docker image at build time. Never commit model weights.
+*.pt
+*.onnx
+*.engine

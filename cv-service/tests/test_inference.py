@@ -1,0 +1,226 @@
+"""Unit tests for cv_service.inference: decode paths + box mapping.
+
+These need the `cv` extra's opencv-python-headless/numpy installed (for
+decode_frame) but NOT ultralytics/torch -- YoloDetector tests inject a fake
+model object, and the "ultralytics missing" test forces an ImportError via
+sys.modules regardless of whether it's actually installed. See
+test_real_model.py for the real-weights integration test.
+"""
+
+from __future__ import annotations
+
+import sys
+import types
+
+import numpy as np
+import pytest
+
+from cv_service.inference import (
+    DEFAULT_CONFIDENCE,
+    ENCODING_BGR24,
+    ENCODING_JPEG,
+    ModelUnavailableError,
+    YoloDetector,
+    decode_frame,
+    map_detections,
+)
+
+
+class FakeBoxes:
+    def __init__(self, xyxy, conf, cls):
+        self.xyxy = xyxy
+        self.conf = conf
+        self.cls = cls
+
+
+class FakeResult:
+    def __init__(self, boxes, names):
+        self.boxes = boxes
+        self.names = names
+
+
+class FakeModel:
+    """Stand-in for `ultralytics.YOLO`: records calls, returns a fixed result."""
+
+    def __init__(self, result):
+        self._result = result
+        self.calls: list[dict] = []
+
+    def predict(self, frame, conf=None, verbose=None):
+        self.calls.append({"frame": frame, "conf": conf, "verbose": verbose})
+        return [self._result]
+
+
+# --- decode_frame ------------------------------------------------------
+
+
+def test_decode_bgr24_reshapes_raw_bytes(bgr_frame):
+    data = bgr_frame.tobytes()
+
+    decoded = decode_frame(width=4, height=3, encoding=ENCODING_BGR24, data=data)
+
+    assert decoded.shape == (3, 4, 3)
+    assert decoded.dtype == np.uint8
+    assert np.array_equal(decoded, bgr_frame)
+
+
+def test_decode_bgr24_wrong_length_raises():
+    with pytest.raises(ValueError, match="BGR24 frame data length"):
+        decode_frame(width=4, height=3, encoding=ENCODING_BGR24, data=b"\x00" * 10)
+
+
+def test_decode_jpeg_round_trips(jpeg_bytes):
+    decoded = decode_frame(width=4, height=3, encoding=ENCODING_JPEG, data=jpeg_bytes)
+
+    assert decoded.shape == (3, 4, 3)
+    assert decoded.dtype == np.uint8
+
+
+def test_decode_jpeg_invalid_bytes_raises():
+    with pytest.raises(ValueError, match="failed to decode JPEG"):
+        decode_frame(width=4, height=3, encoding=ENCODING_JPEG, data=b"not a jpeg")
+
+
+def test_decode_unsupported_encoding_raises():
+    with pytest.raises(ValueError, match="unsupported frame encoding"):
+        decode_frame(width=4, height=3, encoding="IMAGE_ENCODING_UNSPECIFIED", data=b"")
+
+
+# --- map_detections ------------------------------------------------------
+
+
+def test_map_detections_normalizes_to_top_left_xywh():
+    boxes = FakeBoxes(xyxy=[[10.0, 20.0, 50.0, 80.0]], conf=[0.9], cls=[0])
+    result = FakeResult(boxes=boxes, names={0: "person"})
+
+    detections = map_detections(result, frame_width=100, frame_height=200)
+
+    assert len(detections) == 1
+    detection = detections[0]
+    assert detection.label == "person"
+    assert detection.confidence == pytest.approx(0.9)
+    assert detection.x == pytest.approx(0.10)
+    assert detection.y == pytest.approx(0.10)
+    assert detection.width == pytest.approx(0.40)
+    assert detection.height == pytest.approx(0.30)
+
+
+def test_map_detections_multiple_boxes_preserve_order_and_labels():
+    boxes = FakeBoxes(
+        xyxy=[[0.0, 0.0, 10.0, 10.0], [5.0, 5.0, 15.0, 25.0]],
+        conf=[0.5, 0.75],
+        cls=[2, 0],
+    )
+    result = FakeResult(boxes=boxes, names={0: "person", 2: "car"})
+
+    detections = map_detections(result, frame_width=50, frame_height=50)
+
+    assert [d.label for d in detections] == ["car", "person"]
+    assert detections[0].confidence == pytest.approx(0.5)
+    assert detections[1].confidence == pytest.approx(0.75)
+
+
+def test_map_detections_empty_boxes_returns_empty_list():
+    boxes = FakeBoxes(xyxy=[], conf=[], cls=[])
+    result = FakeResult(boxes=boxes, names={})
+
+    assert map_detections(result, frame_width=100, frame_height=100) == []
+
+
+def test_map_detections_no_boxes_attribute_returns_empty_list():
+    result = types.SimpleNamespace(boxes=None, names={})
+
+    assert map_detections(result, frame_width=100, frame_height=100) == []
+
+
+def test_map_detections_clamps_out_of_frame_boxes():
+    # A box that overshoots the frame on every edge (rounding, edge object).
+    boxes = FakeBoxes(xyxy=[[-5.0, -5.0, 150.0, 250.0]], conf=[0.3], cls=[0])
+    result = FakeResult(boxes=boxes, names={0: "person"})
+
+    detections = map_detections(result, frame_width=100, frame_height=100)
+
+    detection = detections[0]
+    assert 0.0 <= detection.x <= 1.0
+    assert 0.0 <= detection.y <= 1.0
+    assert 0.0 <= detection.width <= 1.0
+    assert 0.0 <= detection.height <= 1.0
+    assert detection.x == pytest.approx(0.0)
+    assert detection.y == pytest.approx(0.0)
+    assert detection.width == pytest.approx(1.0)
+    assert detection.height == pytest.approx(1.0)
+
+
+# --- YoloDetector (fake model injected, no real ultralytics needed) -----
+
+
+def test_yolo_detector_detect_with_injected_model(bgr_frame):
+    boxes = FakeBoxes(xyxy=[[0.0, 0.0, 4.0, 3.0]], conf=[0.6], cls=[1])
+    result = FakeResult(boxes=boxes, names={1: "car"})
+    fake_model = FakeModel(result)
+    detector = YoloDetector(model_name="fake-model", model=fake_model)
+
+    detections, inference_millis = detector.detect(
+        width=4, height=3, encoding=ENCODING_BGR24, data=bgr_frame.tobytes()
+    )
+
+    assert detector.model_name == "fake-model"
+    assert len(detections) == 1
+    assert detections[0].label == "car"
+    assert isinstance(inference_millis, int)
+    assert inference_millis >= 0
+    assert fake_model.calls[0]["conf"] == DEFAULT_CONFIDENCE
+
+
+def test_yolo_detector_uses_explicit_confidence_threshold(bgr_frame):
+    boxes = FakeBoxes(xyxy=[], conf=[], cls=[])
+    result = FakeResult(boxes=boxes, names={})
+    fake_model = FakeModel(result)
+    detector = YoloDetector(model_name="fake-model", model=fake_model)
+
+    detector.detect(
+        width=4,
+        height=3,
+        encoding=ENCODING_BGR24,
+        data=bgr_frame.tobytes(),
+        confidence_threshold=0.7,
+    )
+
+    assert fake_model.calls[0]["conf"] == pytest.approx(0.7)
+
+
+def test_yolo_detector_zero_confidence_threshold_uses_default(bgr_frame):
+    boxes = FakeBoxes(xyxy=[], conf=[], cls=[])
+    result = FakeResult(boxes=boxes, names={})
+    fake_model = FakeModel(result)
+    detector = YoloDetector(model_name="fake-model", model=fake_model)
+
+    detector.detect(
+        width=4,
+        height=3,
+        encoding=ENCODING_BGR24,
+        data=bgr_frame.tobytes(),
+        confidence_threshold=0.0,
+    )
+
+    assert fake_model.calls[0]["conf"] == DEFAULT_CONFIDENCE
+
+
+def test_yolo_detector_missing_ultralytics_raises_model_unavailable(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ultralytics", None)
+
+    with pytest.raises(ModelUnavailableError, match="ultralytics is not installed"):
+        YoloDetector()
+
+
+def test_yolo_detector_model_load_failure_raises_model_unavailable(monkeypatch):
+    fake_ultralytics = types.ModuleType("ultralytics")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("no network access to download weights")
+
+    fake_ultralytics.YOLO = _boom
+    monkeypatch.setitem(sys.modules, "ultralytics", fake_ultralytics)
+
+    with pytest.raises(ModelUnavailableError, match="failed to load YOLO model"):
+        YoloDetector(model_name="yolo11n.pt")

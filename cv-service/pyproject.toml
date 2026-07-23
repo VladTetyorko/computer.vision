@@ -12,9 +12,28 @@ dependencies = [
 
 [project.optional-dependencies]
 # Phase 2: real inference backend (Ultralytics YOLO) + frame decoding.
+# `ultralytics` pulls in `torch` transitively; this service targets CPU-only
+# inference, so install with the PyTorch CPU wheel index to avoid pulling
+# multi-GB CUDA-bundled torch builds, e.g.:
+#   pip install -e '.[cv]' --extra-index-url https://download.pytorch.org/whl/cpu
+# (see Dockerfile, which uses the same index). Ultralytics/torch will still
+# use a GPU automatically if one happens to be present and the CUDA build is
+# installed instead -- nothing here requires CPU-only, it's just the
+# default/documented path for the demo target (a laptop, no GPU assumed).
+#
+# NOTE: don't add opencv-python-headless here even though we'd prefer it --
+# ultralytics hard-depends on plain `opencv-python` (the GUI-enabled build),
+# and pip has no notion that the two packages both provide `cv2` and
+# conflict; installing both leaves whichever installed last silently
+# overwriting the other's `cv2` files on disk. Let ultralytics pull
+# opencv-python transitively and satisfy its runtime shared-library needs at
+# the OS level instead (see Dockerfile: libgl1/libglib2.0-0).
 cv = [
     "ultralytics",
-    "opencv-python-headless",
+]
+# Test-only dependencies (not needed to run the service itself).
+dev = [
+    "pytest>=8.0,<9",
 ]
 
 [build-system]
@@ -23,3 +42,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["cv_service"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,11 +1,14 @@
-"""gRPC server for the Vision CV service (Phase 0 skeleton).
+"""gRPC server for the Vision CV service.
 
-* ``Inference.DetectStream`` is implemented as a working echo: for every
-  incoming ``FrameRequest`` it yields a ``DetectionResponse`` with the same
-  stream_id / sequence / timestamp_millis / model_id / model_version and an
-  empty ``detections`` list. No model runs yet - that is Phase 2 (see
-  ../../docs/PHASE0-PLAN.md). This lets the Java <-> Python gRPC wiring
-  (adapter-cv-grpc, StreamPipeline) be built and tested end-to-end now.
+* ``Inference.DetectStream`` runs real Ultralytics YOLO inference (see
+  ``cv_service/inference.py``) when the ``cv`` optional dependency group is
+  installed and the model loads successfully. If it isn't installed, or the
+  model can't be constructed (e.g. offline with no cached weights), the
+  servicer logs one clear warning at startup and falls back to the original
+  Phase 0 echo behavior: for every incoming ``FrameRequest`` it yields a
+  ``DetectionResponse`` with the same stream_id / sequence / timestamp_millis
+  / model_id / model_version and an empty ``detections`` list. Either way the
+  service never crash-loops for lack of a model.
 * ``Training`` rpcs (StartTraining, ListModels, PromoteModel) are not
   implemented yet and reply with ``UNIMPLEMENTED`` (Phase 3).
 
@@ -26,9 +29,12 @@ import sys
 import threading
 from concurrent import futures
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import TYPE_CHECKING, Iterable, Iterator, Optional
 
 import grpc
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance, see _build_default_detector
+    from cv_service.inference import YoloDetector
 
 # `protoc`'s Python codegen emits imports rooted at the proto package path
 # (e.g. `from vision.v1 import cv_pb2`), not at `cv_service.gen...`. So the
@@ -53,12 +59,54 @@ LOGGER = logging.getLogger("cv_service.server")
 DEFAULT_PORT = 50051
 
 
-class InferenceServicer(cv_pb2_grpc.InferenceServicer):
-    """Echo-stub implementation of the ``Inference`` service.
+def _build_default_detector() -> Optional["YoloDetector"]:
+    """Try to construct the default `YoloDetector`; `None` if unavailable.
 
-    Phase 0: always responds with zero detections. Real inference
-    (Ultralytics YOLO) lands in Phase 2 behind this same RPC shape.
+    Import is local (not at module top-level) so that this module -- and the
+    rest of the server -- stays importable even when the `cv` optional
+    dependency group isn't installed at all (its absence would otherwise
+    raise `ImportError` on `import cv2`/`ultralytics` at module load time).
     """
+    try:
+        from cv_service.inference import ModelUnavailableError, YoloDetector
+    except ImportError as exc:
+        LOGGER.warning(
+            "cv-service YOLO backend unavailable (%s); DetectStream will "
+            "serve the Phase 0 echo behavior (empty detections) until the "
+            "'cv' optional dependency group is installed.",
+            exc,
+        )
+        return None
+
+    try:
+        return YoloDetector()
+    except ModelUnavailableError as exc:
+        LOGGER.warning(
+            "YOLO model could not be loaded (%s); DetectStream will serve "
+            "the Phase 0 echo behavior (empty detections) until this is "
+            "fixed.",
+            exc,
+        )
+        return None
+
+
+class InferenceServicer(cv_pb2_grpc.InferenceServicer):
+    """Real-YOLO-when-available, echo-otherwise implementation of ``Inference``.
+
+    A `YoloDetector` (see `cv_service/inference.py`) is built once at
+    construction time. If that fails for any reason -- `ultralytics` not
+    installed, weights unavailable offline, etc. -- `detector` is `None` and
+    every frame gets the original Phase 0 echo response instead: the service
+    must never crash-loop for lack of a model.
+
+    Per-frame inference failures (bad frame bytes, a transient model error)
+    are also caught and degrade to an echo response for that one frame,
+    rather than tearing down the whole bidi stream.
+    """
+
+    def __init__(self, detector: Optional["YoloDetector"] = None) -> None:
+        self._detector = detector if detector is not None else _build_default_detector()
+        self._warned_model_ids: set[str] = set()
 
     def DetectStream(
         self,
@@ -66,15 +114,81 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         context: grpc.ServicerContext,
     ) -> Iterator["cv_pb2.DetectionResponse"]:
         for request in request_iterator:
+            if self._detector is None:
+                yield self._echo(request)
+                continue
+
+            self._warn_once_on_unknown_model(request.model_id)
+
+            try:
+                detections, inference_millis = self._detector.detect(
+                    width=request.width,
+                    height=request.height,
+                    encoding=cv_pb2.ImageEncoding.Name(request.encoding),
+                    data=request.data,
+                    confidence_threshold=request.confidence_threshold or None,
+                )
+            except Exception:  # noqa: BLE001 - one bad frame must not kill the stream
+                LOGGER.exception(
+                    "inference failed for stream_id=%s sequence=%s; echoing "
+                    "empty detections for this frame",
+                    request.stream_id,
+                    request.sequence,
+                )
+                yield self._echo(request)
+                continue
+
             yield cv_pb2.DetectionResponse(
                 stream_id=request.stream_id,
                 sequence=request.sequence,
                 timestamp_millis=request.timestamp_millis,
                 model_id=request.model_id,
                 model_version=request.model_version,
-                detections=[],
-                inference_millis=0,
+                detections=[
+                    cv_pb2.Detection(
+                        label=detection.label,
+                        confidence=detection.confidence,
+                        box=cv_pb2.BoundingBox(
+                            x=detection.x,
+                            y=detection.y,
+                            width=detection.width,
+                            height=detection.height,
+                        ),
+                    )
+                    for detection in detections
+                ],
+                inference_millis=inference_millis,
             )
+
+    def _warn_once_on_unknown_model(self, requested_model_id: str) -> None:
+        """Log-and-serve-default for a requested `model_id` (registry is Phase 3).
+
+        Warns at most once per distinct unknown `model_id` seen by this
+        servicer instance, to avoid spamming logs once per frame.
+        """
+        if not requested_model_id or requested_model_id == self._detector.model_name:
+            return
+        if requested_model_id in self._warned_model_ids:
+            return
+        self._warned_model_ids.add(requested_model_id)
+        LOGGER.info(
+            "model_id=%r requested but the model registry is Phase 3 work; "
+            "serving the default loaded model %r instead",
+            requested_model_id,
+            self._detector.model_name,
+        )
+
+    @staticmethod
+    def _echo(request: "cv_pb2.FrameRequest") -> "cv_pb2.DetectionResponse":
+        return cv_pb2.DetectionResponse(
+            stream_id=request.stream_id,
+            sequence=request.sequence,
+            timestamp_millis=request.timestamp_millis,
+            model_id=request.model_id,
+            model_version=request.model_version,
+            detections=[],
+            inference_millis=0,
+        )
 
 
 class TrainingServicer(cv_pb2_grpc.TrainingServicer):
