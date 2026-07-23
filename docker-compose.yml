@@ -1,18 +1,34 @@
-# Phase 0 infra skeleton (see docs/PHASE0-PLAN.md §5, Task T4).
+# Full demo stack (docs/MVP1-PLAN.md §C9 — see that section's exit criteria
+# checklist, folded into README.md's "Demo" section too).
 #
-# Usage:
-#   cp .env.example .env
-#   docker compose up
+# Usage (see README.md "Demo" for the full walkthrough):
+#   cp .env.example .env          # first time only
+#   ./mvnw -B package -DskipTests # builds vision-app/target/vision-app-*.jar (see ./Dockerfile)
+#   docker compose up -d
+#   scripts/demo.sh ~/Videos/your-clip.mp4
 #
 # Services:
-#   postgres    - detections/events/devices persistence (adapter-persistence, Phase 2+)
+#   postgres    - detections/events/devices persistence (adapter-persistence, Phase 2+ --
+#                 not wired into vision-app yet; every port still runs in-memory, so this
+#                 container is idle plumbing today, kept for forward compatibility)
 #   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
-#   cv-service  - Python gRPC inference/training service (skeleton, Phase 0)
-#   vision-app  - Java application image; commented out, see note below (Phase 1)
+#   cv-service  - Python gRPC YOLO inference service (docs/MVP1-PLAN.md §C7)
+#   vision-app  - the Java application (this repo's root ./Dockerfile)
+#
+# Resilience demo (docs/MVP1-PLAN.md §C9 exit criterion 4): the stack also
+# works with cv-service missing entirely --
+#   docker compose up -d --scale cv-service=0
+# -- Compose skips depends_on/healthy waits for a service explicitly scaled to
+# zero (verified against this Compose version), so vision-app still starts;
+# `vision.cv.enabled=true` but every gRPC call fails fast, and StreamPipeline's
+# outage policy (docs/MVP1-PLAN.md §C7 bullet 3) degrades to "video/telemetry
+# keep running, boxes just don't appear" -- exactly the same path a mid-demo
+# `docker compose stop cv-service` exercises (see README.md).
 
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -29,11 +45,17 @@ services:
 
   mediamtx:
     image: bluenviron/mediamtx:latest
+    restart: unless-stopped
     ports:
       - "8554:8554" # RTSP
       # Host 18888, not 8888: mediamtx's default HLS port collides with common
-      # dev services (seen in the wild: open-webui/uvicorn on 8888). Must match
-      # vision.publish.mediamtx.hls-base in vision-app's application.properties.
+      # dev services (seen in the wild: open-webui/uvicorn on 8888). Only
+      # matters for a host-run vision-app (Quickstart) -- inside this compose
+      # network, vision-app talks to mediamtx on its *own* 8888 (container
+      # ports aren't remapped between containers), see vision-app's
+      # VISION_PUBLISH_MEDIAMTX_HLS_BASE below. Must match
+      # vision.publish.mediamtx.hls-base's host-mode default in vision-app's
+      # application.properties.
       - "18888:8888" # HLS
 
   cv-service:
@@ -41,27 +63,51 @@ services:
     build:
       context: .
       dockerfile: cv-service/Dockerfile
+    restart: unless-stopped
     ports:
       - "50051:50051"
+    healthcheck:
+      # No grpcurl (or any grpc-health-checking tool) in the image -- a plain
+      # TCP connect from the stdlib is enough to prove the gRPC server is
+      # accepting connections, without adding a dependency just for this.
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 50051), timeout=3).close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      # Model load + Ultralytics' first-predict warmup (cv-service/MODULE.md
+      # "First-request latency") happen at process start, before the gRPC
+      # server is serving -- generous enough for that even on a slow machine.
+      start_period: 45s
 
-  # vision-app: the Java application container. Not yet buildable — the Spring Boot
-  # image (vision-app module + Dockerfile) is delivered in Phase 1 (see
-  # docs/PHASE0-PLAN.md, roadmap §7 "Phase 1 — First light"). Uncomment and fill in
-  # `build`/`image` once that image exists.
-  #
-  # vision-app:
-  #   build: ./vision-app
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     cv-service:
-  #       condition: service_started
-  #   environment:
-  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-  #     SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
-  #     SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
-  #   ports:
-  #     - "8080:8080"
+  vision-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mediamtx:
+        condition: service_started
+      cv-service:
+        condition: service_healthy
+    environment:
+      VISION_CV_ENABLED: "true"
+      VISION_CV_ENDPOINT: cv-service:50051
+      # Compose-internal addressing: mediamtx's *own* container ports (RTSP
+      # 8554, HLS 8888) -- not the 18888 host mapping above, which exists only
+      # for a host-run vision-app talking to mediamtx over localhost.
+      VISION_PUBLISH_MEDIAMTX_RTSP_BASE: rtsp://mediamtx:8554
+      VISION_PUBLISH_MEDIAMTX_HLS_BASE: http://mediamtx:8888
+    ports:
+      - "8080:8080"
+    volumes:
+      # scripts/demo.sh's clip arguments must be paths the vision-app *process*
+      # can read. In compose mode that's this container's filesystem, not the
+      # host's -- mount your clips directory here and pass the container-side
+      # path (e.g. /clips/my-clip.mp4) to demo.sh. Defaults to a sibling
+      # ./clips/ directory (create it, or point DEMO_CLIPS_DIR elsewhere); one
+      # line, always on, since an absent host directory just mounts empty and
+      # costs nothing.
+      - ${DEMO_CLIPS_DIR:-./clips}:/clips:ro
 
 volumes:
   postgres-data:

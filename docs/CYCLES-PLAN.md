@@ -223,7 +223,7 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | ✅ done |
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | ✅ done |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | ✅ done |
-| C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | pending |
+| C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | ✅ done |
 | CU-a | backend | fully synthetic simulation (no file) | §9 | pending |
 | CU-b | **UI** | fast & simple + map upgrades | §9, after C8 | pending |
 | CD-a | backend | telemetry deviceId in API | §11 | pending |
