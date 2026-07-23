@@ -87,6 +87,19 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     static final Duration SUSTAINED_DRIFT_WINDOW = Duration.ofSeconds(2);
     /** Bounds the underlying TCP connect/I/O for the RTSP push, in microseconds, so a dead mediamtx can't hang a publish call. */
     private static final String CONNECT_TIMEOUT_MICROS = "5000000";
+    /**
+     * x264 rate control is CRF (constant quality), not bitrate-targeted:
+     * without an explicit target, {@link FFmpegFrameRecorder} falls back to
+     * its ~400 kbps default — thumbnail-grade for 720p, which crushed both
+     * the video and the burned-in detection boxes into macroblocks
+     * (observed live). CRF keeps quality constant regardless of resolution;
+     * 21 is visually clean for surveillance-style footage.
+     */
+    static final String X264_CRF = "21";
+    /** VBV cap so a busy scene can't flood the network: CRF decides quality, this bounds the worst-case bitrate. */
+    static final String X264_MAXRATE_BITS_PER_SECOND = "6000000";
+    /** VBV buffer, conventionally 2× maxrate; with {@code tune=zerolatency} x264 still honors the cap per-frame. */
+    static final String X264_BUFSIZE_BITS = "12000000";
     private static final long INITIAL_BACKOFF_MS = 500L;
     private static final long MAX_BACKOFF_MS = 10_000L;
     private static final String HLS_PLAYLIST_SUFFIX = "/index.m3u8";
@@ -279,8 +292,15 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         recorder.setOption("timeout", CONNECT_TIMEOUT_MICROS);
         recorder.setVideoCodec(AV_CODEC_ID_H264);
         recorder.setVideoCodecName("libx264");
-        recorder.setVideoOption("preset", "ultrafast");
+        // veryfast, not ultrafast: at CRF rate control the preset trades CPU
+        // for compression efficiency, and ultrafast needs roughly double the
+        // bits for the same quality; veryfast is still comfortably real-time
+        // for a handful of 720p streams on CPU.
+        recorder.setVideoOption("preset", "veryfast");
         recorder.setVideoOption("tune", "zerolatency");
+        recorder.setVideoOption("crf", X264_CRF);
+        recorder.setVideoOption("maxrate", X264_MAXRATE_BITS_PER_SECOND);
+        recorder.setVideoOption("bufsize", X264_BUFSIZE_BITS);
         recorder.setFrameRate(frameRateFps);
         recorder.setGopSize((int) Math.round(frameRateFps * GOP_SECONDS));
         recorder.setPixelFormat(AV_PIX_FMT_YUV420P);

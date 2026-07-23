@@ -243,6 +243,24 @@ class MediamtxStreamPublisherTest {
         assertEquals(60, recorder.getGopSize()); // GOP_SECONDS(2) * measured fps, not the old fixed 15fps*2=30
     }
 
+    /**
+     * Regression guard for the pixelation bug: without an explicit rate
+     * control, {@link FFmpegFrameRecorder} encodes at its ~400 kbps default,
+     * which macroblocks 720p footage (and the detection boxes burned into
+     * it). CRF mode plus a VBV cap must reach the encoder's option map.
+     */
+    @Test
+    void configureRecorderUsesCrfRateControlNotTheDefault400kbps() {
+        FFmpegFrameRecorder recorder = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
+
+        MediamtxStreamPublisher.configureRecorder(recorder, 30.0);
+
+        assertEquals(MediamtxStreamPublisher.X264_CRF, recorder.getVideoOption("crf"));
+        assertEquals(MediamtxStreamPublisher.X264_MAXRATE_BITS_PER_SECOND, recorder.getVideoOption("maxrate"));
+        assertEquals(MediamtxStreamPublisher.X264_BUFSIZE_BITS, recorder.getVideoOption("bufsize"));
+        assertEquals("veryfast", recorder.getVideoOption("preset"));
+    }
+
     private static VideoFrame bgr24Frame(StreamId id, long sequence, Instant capturedAt) {
         int width = 8;
         int height = 8;
