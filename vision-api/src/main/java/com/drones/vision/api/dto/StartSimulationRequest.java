@@ -12,11 +12,21 @@ import java.util.stream.Collectors;
 
 /**
  * Request body for {@code POST /api/simulations} — the one-call, zero-hardware simulation entry
- * point (docs/CYCLES-PLAN.md §0-1, §3, §7).
+ * point (docs/CYCLES-PLAN.md §0-1, §3, §7, §9).
  *
  * @param displayName human-readable name; may be {@code null}/blank, in which case {@code
- *                     SimulationService} derives one from {@code videoPath}'s file name
- * @param videoPath   absolute path to a local video file on the server; must not be blank
+ *                     SimulationService} derives one from {@code videoPath}'s file name — or, when
+ *                     {@link #videoPath()} is itself absent, a generic synthetic name
+ *                     (docs/CYCLES-PLAN.md §9, CU-a)
+ * @param videoPath   absolute path to a local video file on the server; {@code null}/blank (the two
+ *                     are equivalent here, unlike {@link SimulationSpec}'s own stricter distinction)
+ *                     resolves to {@code null} — a fully synthetic simulation with no video file
+ *                     (docs/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations} with just a
+ *                     {@link #telemetry()} block (or nothing at all) is enough. A {@code null} path
+ *                     requires {@link #transport()} to be {@code "direct"} (the default) — {@code
+ *                     "rtsp"}/{@code "mjpeg"} have no in-process renderer output to push over the
+ *                     wire, so {@link SimulationSpec}'s own compact constructor rejects that
+ *                     combination
  * @param latitude    home-point latitude for the synthetic telemetry track; may be {@code null};
  *                    ignored when {@link #telemetry()} carries a route
  * @param longitude   home-point longitude for the synthetic telemetry track; may be {@code null};
@@ -36,16 +46,21 @@ public record StartSimulationRequest(String displayName, String videoPath, Doubl
 
     /**
      * Converts this request into a {@link SimulationSpec}, defaulting {@link #autoStart()} to
-     * {@code true} and {@link #transport()} to {@link SimulationTransport#DIRECT} when absent.
+     * {@code true}, {@link #transport()} to {@link SimulationTransport#DIRECT} when absent, and
+     * blank {@link #videoPath()} to {@code null} (docs/CYCLES-PLAN.md §9, CU-a — a fully synthetic
+     * simulation).
      *
      * @return the input for {@code SimulationService#simulate}
-     * @throws IllegalArgumentException if {@link #videoPath()} is blank, {@link #transport()}
-     *                                   doesn't match a known {@link SimulationTransport} name, or
-     *                                   {@link #telemetry()} is present but invalid (see {@link
+     * @throws IllegalArgumentException if {@link #transport()} doesn't match a known {@link
+     *                                   SimulationTransport} name, a {@code null}/blank {@link
+     *                                   #videoPath()} is combined with a non-{@code "direct"} {@link
+     *                                   #transport()} (docs/CYCLES-PLAN.md §9), or {@link
+     *                                   #telemetry()} is present but invalid (see {@link
      *                                   TelemetryRequest#toPlan()})
      */
     public SimulationSpec toSpec() {
-        return new SimulationSpec(displayName, videoPath, latitude, longitude, autoStart == null || autoStart,
+        return new SimulationSpec(displayName, videoPath == null || videoPath.isBlank() ? null : videoPath,
+                latitude, longitude, autoStart == null || autoStart,
                 parseTransport(transport), telemetry == null ? null : telemetry.toPlan());
     }
 

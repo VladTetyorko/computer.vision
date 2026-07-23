@@ -33,13 +33,19 @@ import java.util.Objects;
  * The acting user comes from {@link CurrentUser}, mirroring {@link AssetController}.
  *
  * <h2>Status codes</h2>
- * A bad {@code videoPath} (blank, or failing {@code SimulationService}'s filesystem checks —
- * missing, not a regular file, unreadable), an unrecognized {@code transport} name, or
+ * A bad {@code videoPath} (failing {@code SimulationService}'s filesystem checks — missing, not a
+ * regular file, unreadable), an unrecognized {@code transport} name, a {@code null}/blank {@code
+ * videoPath} combined with a non-{@code direct} {@code transport} (docs/CYCLES-PLAN.md §9, CU-a —
+ * a synthetic simulation has no in-process renderer output to push over the wire), or
  * (docs/CYCLES-PLAN.md §3, §5) a {@code transport=rtsp}/{@code mjpeg} request no registered {@code
  * FeedTransmitterPort} supports, all surface as {@link IllegalArgumentException} → 400; an
  * unseeded {@code simulated} category surfaces as {@link IllegalStateException} → 409 — all via
  * {@link ApiExceptionHandler}, the same mapping every other controller here relies on. {@link
  * #stop} is idempotent and a malformed {@code assetId} (via {@code AssetId#of}) is the same 400.
+ *
+ * <p>A {@code null}/blank {@code videoPath} with the default {@code direct} transport is not an
+ * error (docs/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations {}} yields a fully synthetic,
+ * moving simulated drone — no video file required.
  */
 @RestController
 public class SimulationController {

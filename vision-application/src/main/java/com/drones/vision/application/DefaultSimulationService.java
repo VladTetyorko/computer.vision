@@ -30,12 +30,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * The one implementation of {@link SimulationService}.
  *
  * <p>Builds one {@link AssetSpec} with two devices — a video device (either {@code "file"}-protocol,
- * played back in-process, or — for a wired {@link SimulationTransport} ({@link
- * SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG}) — pointing at a feed pushed out by
- * whichever {@link FeedTransmitterPort} {@link #feedTransmitters} selects for that transport) and a
- * {@code "sim"}-protocol telemetry device — and delegates the actual creation/streaming to {@link
- * AssetService}, so every rule {@code AssetService#create}/{@code #startStream} already enforces
- * (category validation, audit, device registration) applies here too instead of being duplicated.
+ * played back in-process; {@code "sim"}-protocol, the synthetic renderer, when {@link
+ * SimulationSpec#videoPath()} is {@code null} (docs/CYCLES-PLAN.md §9, CU-a); or — for a wired
+ * {@link SimulationTransport} ({@link SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG})
+ * — pointing at a feed pushed out by whichever {@link FeedTransmitterPort} {@link #feedTransmitters}
+ * selects for that transport) and a {@code "sim"}-protocol telemetry device — and delegates the
+ * actual creation/streaming to {@link AssetService}, so every rule {@code AssetService#create}/
+ * {@code #startStream} already enforces (category validation, audit, device registration) applies
+ * here too instead of being duplicated.
  *
  * <h2>Threading</h2>
  * {@link #feedByAsset} is the only mutable state, a {@link ConcurrentHashMap} safe for concurrent
@@ -52,6 +54,21 @@ public final class DefaultSimulationService implements SimulationService {
 
     /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the MJPEG transport (docs/CYCLES-PLAN.md §5). */
     private static final String FEED_PROTOCOL_MJPEG = "mjpeg";
+
+    /**
+     * {@code StreamDescriptor} protocol key for the synthetic renderer — used both for the
+     * telemetry device (always) and, since docs/CYCLES-PLAN.md §9 (CU-a), the video device of a
+     * spec with no {@link SimulationSpec#videoPath()}.
+     */
+    private static final String SIM_PROTOCOL = "sim";
+
+    /**
+     * Display name a fully synthetic simulation (docs/CYCLES-PLAN.md §9, CU-a — {@link
+     * SimulationSpec#videoPath()} {@code null}) falls back to when {@link
+     * SimulationSpec#displayName()} is absent/blank, mirroring how a video-path spec falls back to
+     * the file's own name.
+     */
+    static final String SYNTHETIC_DISPLAY_NAME = "Synthetic drone";
 
     /**
      * RTSP receive-side option key/value applied to a {@code transport=RTSP} video device's
@@ -93,7 +110,7 @@ public final class DefaultSimulationService implements SimulationService {
         Objects.requireNonNull(ownership, "ownership must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
 
-        Path videoPath = validateVideoPath(spec.videoPath());
+        Path videoPath = spec.videoPath() == null ? null : validateVideoPath(spec.videoPath());
         requireSimulatedCategorySeeded();
 
         String displayName = resolveDisplayName(spec.displayName(), videoPath);
@@ -102,16 +119,19 @@ public final class DefaultSimulationService implements SimulationService {
         FeedId feedId = wired ? FeedId.random() : null;
         FeedTransmitterPort transmitter = null;
         DeviceRegistration videoDevice;
-        if (feedId == null) {
-            videoDevice = videoDevice(displayName, videoPath);
-        } else {
+        if (wired) {
+            // spec's compact ctor guarantees videoPath != null whenever transport != DIRECT.
             WiredVideoDevice wiredDevice = wireVideoDevice(displayName, videoPath, feedId, spec.transport());
             videoDevice = wiredDevice.device();
             transmitter = wiredDevice.transmitter();
+        } else if (videoPath == null) {
+            videoDevice = syntheticVideoDevice(displayName);
+        } else {
+            videoDevice = videoDevice(displayName, videoPath);
         }
 
-        AssetSpec assetSpec = new AssetSpec(displayName, SIMULATED_CATEGORY,
-                Map.of("source", videoPath.toString()),
+        Map<String, String> attributes = videoPath == null ? Map.of() : Map.of("source", videoPath.toString());
+        AssetSpec assetSpec = new AssetSpec(displayName, SIMULATED_CATEGORY, attributes,
                 List.of(videoDevice, telemetryDevice(displayName, spec)));
 
         Asset asset;
@@ -212,10 +232,17 @@ public final class DefaultSimulationService implements SimulationService {
                 .orElseThrow(() -> new IllegalStateException("category 'simulated' is not seeded"));
     }
 
-    /** Derives a display name from the file name (extension stripped) when none was supplied. */
+    /**
+     * Derives a display name from the file name (extension stripped) when none was supplied, or —
+     * for a fully synthetic spec (docs/CYCLES-PLAN.md §9, CU-a — {@code videoPath == null}) —
+     * {@link #SYNTHETIC_DISPLAY_NAME}, since there is no file name to derive one from.
+     */
     private static String resolveDisplayName(String requested, Path videoPath) {
         if (requested != null && !requested.isBlank()) {
             return requested;
+        }
+        if (videoPath == null) {
+            return SYNTHETIC_DISPLAY_NAME;
         }
         String fileName = videoPath.getFileName().toString();
         int dot = fileName.lastIndexOf('.');
@@ -225,6 +252,20 @@ public final class DefaultSimulationService implements SimulationService {
     private static DeviceRegistration videoDevice(String displayName, Path videoPath) {
         return new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO),
                 new StreamDescriptor("file", videoPath.toUri(), Map.of("loop", "true")));
+    }
+
+    /**
+     * Builds a {@code "sim"}-protocol video device (docs/CYCLES-PLAN.md §9, CU-a) for a spec with no
+     * {@link SimulationSpec#videoPath()} — the same synthetic renderer {@link #telemetryDevice}
+     * already points a telemetry device at ({@code SimulatedVideoSource}, adapter-simulation), so a
+     * caller with zero hardware and no video file still gets a watchable, moving asset. Unlike
+     * {@link #videoDevice}'s {@code "file"}-protocol device, no {@code loop} option is set: the
+     * synthetic renderer runs forever on its own, with nothing to loop.
+     */
+    private static DeviceRegistration syntheticVideoDevice(String displayName) {
+        URI syntheticUri = URI.create(SIM_PROTOCOL + "://" + slug(displayName));
+        return new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO),
+                new StreamDescriptor(SIM_PROTOCOL, syntheticUri, Map.of()));
     }
 
     /**
@@ -312,9 +353,9 @@ public final class DefaultSimulationService implements SimulationService {
                 options.put(TELEMETRY_OPTION_LON, formatDouble(spec.longitude()));
             }
         }
-        URI telemetryUri = URI.create("sim://" + slug(displayName) + "-telemetry");
+        URI telemetryUri = URI.create(SIM_PROTOCOL + "://" + slug(displayName) + "-telemetry");
         return new DeviceRegistration(displayName + " · telemetry", Set.of(Capability.TELEMETRY),
-                new StreamDescriptor("sim", telemetryUri, options));
+                new StreamDescriptor(SIM_PROTOCOL, telemetryUri, options));
     }
 
     /** {@code lat,lon[,altM];lat,lon[,altM];…} — the format {@code RoutePlan} (adapter-simulation) parses. */

@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -146,21 +147,83 @@ class SimulationControllerTest {
 
     // ---- validation / error mapping ----
 
+    // ---- CU-a: fully synthetic simulation (no videoPath) ----
+
     @Test
-    void simulateReturns400ForBlankVideoPath() throws Exception {
+    void simulateTreatsABlankVideoPathAsAbsentAndBuildsAFullySyntheticSpec() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
         mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"videoPath\":\"\"}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertNull(captor.getValue().videoPath());
+    }
+
+    @Test
+    void simulateWithAnEmptyBodyBuildsAFullySyntheticSpec() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertNull(captor.getValue().videoPath());
+        assertEquals(SimulationTransport.DIRECT, captor.getValue().transport());
+    }
+
+    @Test
+    void simulateWithJustATelemetryBlockYieldsAFullySyntheticMovingDrone() throws Exception {
+        // docs/CYCLES-PLAN.md §9, CU-a: "POST /api/simulations {} with just a telemetry block
+        // yields a complete moving drone" -- the synthetic telemetry test in one call.
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        String body = """
+                {"telemetry":{"speedMps":15.0,
+                "route":[{"latitude":50.45,"longitude":30.52},{"latitude":50.46,"longitude":30.53}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        SimulationSpec spec = captor.getValue();
+        assertNull(spec.videoPath());
+        assertEquals(SimulationTransport.DIRECT, spec.transport());
+        assertEquals(2, spec.plan().route().size());
+    }
+
+    @Test
+    void simulateReturns400WhenRtspTransportHasNoVideoPath() throws Exception {
+        String body = """
+                {"transport":"rtsp"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value(allOf(containsString("RTSP"), containsString("videoPath"))));
 
         verifyNoInteractions(simulationService);
     }
 
     @Test
-    void simulateReturns400ForMissingVideoPath() throws Exception {
-        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content("{}"))
+    void simulateReturns400WhenMjpegTransportHasNoVideoPath() throws Exception {
+        String body = """
+                {"transport":"mjpeg"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value(allOf(containsString("MJPEG"), containsString("videoPath"))));
 
         verifyNoInteractions(simulationService);
     }

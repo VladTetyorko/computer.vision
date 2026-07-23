@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -280,6 +281,98 @@ class DefaultSimulationServiceTest {
         Map<String, String> options = telemetry.stream().options();
         assertEquals("11.0", options.get("lat"), "the plan's first waypoint must win over the bare latitude field");
         assertEquals("22.0", options.get("lon"), "the plan's first waypoint must win over the bare longitude field");
+    }
+
+    // --- CU-a: fully synthetic simulation (no videoPath) ---------------------------
+
+    @Test
+    void simulateWithNoVideoPathRegistersASimProtocolVideoDeviceWithNoLoopOption() {
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", null, null, null, false);
+
+        service.simulate(spec, ownership, actor);
+
+        AssetSpec created = capturedAssetSpec();
+        assertEquals(2, created.devices().size());
+        DeviceRegistration video = created.devices().get(0);
+        assertEquals("My Drone · video", video.name());
+        assertEquals(Set.of(Capability.VIDEO), video.capabilities());
+        assertEquals("sim", video.stream().protocol());
+        assertEquals(URI.create("sim://my-drone"), video.stream().uri());
+        assertEquals(Map.of(), video.stream().options(),
+                "a fully synthetic video device has no loop option -- the renderer runs forever on its own");
+        assertFalse(created.attributes().containsKey("source"), "no video file means no 'source' attribute");
+    }
+
+    @Test
+    void simulateWithNoVideoPathDerivesDisplayNameToSyntheticDroneWhenAbsent() {
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec(null, null, null, null, false);
+
+        service.simulate(spec, ownership, actor);
+
+        assertEquals("Synthetic drone", capturedAssetSpec().displayName());
+    }
+
+    @Test
+    void simulateWithNoVideoPathDerivesDisplayNameToSyntheticDroneWhenBlank() {
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("   ", null, null, null, false);
+
+        service.simulate(spec, ownership, actor);
+
+        assertEquals("Synthetic drone", capturedAssetSpec().displayName());
+    }
+
+    @Test
+    void simulateWithNoVideoPathUsesTheGivenDisplayNameWhenPresent() {
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Synthetic Drone", null, null, null, false);
+
+        service.simulate(spec, ownership, actor);
+
+        assertEquals("My Synthetic Drone", capturedAssetSpec().displayName());
+    }
+
+    @Test
+    void simulateWithNoVideoPathStillHonorsTelemetryLatLonOptions() {
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", null, 50.45, 30.52, false);
+
+        service.simulate(spec, ownership, actor);
+
+        DeviceRegistration telemetry = capturedAssetSpec().devices().get(1);
+        assertEquals(Map.of("lat", "50.45", "lon", "30.52"), telemetry.stream().options());
+    }
+
+    @Test
+    void simulationSpecRejectsRtspTransportWithoutVideoPath() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> new SimulationSpec("My Drone", null, null, null, false, SimulationTransport.RTSP));
+        assertTrue(thrown.getMessage().contains("RTSP") && thrown.getMessage().contains("videoPath"),
+                "expected message to name the transport and mention videoPath: " + thrown.getMessage());
+    }
+
+    @Test
+    void simulationSpecRejectsMjpegTransportWithoutVideoPath() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> new SimulationSpec("My Drone", null, null, null, false, SimulationTransport.MJPEG));
+        assertTrue(thrown.getMessage().contains("MJPEG") && thrown.getMessage().contains("videoPath"),
+                "expected message to name the transport and mention videoPath: " + thrown.getMessage());
+    }
+
+    @Test
+    void simulationSpecAllowsDirectTransportWithoutVideoPath() {
+        SimulationSpec spec = new SimulationSpec("My Drone", null, null, null, false, SimulationTransport.DIRECT);
+
+        assertNull(spec.videoPath());
+    }
+
+    @Test
+    void simulationSpecStillRejectsABlankVideoPathDistinctFromNull() {
+        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
+                () -> new SimulationSpec("My Drone", "   ", null, null, false));
+        assertTrue(thrown.getMessage().contains("blank"));
     }
 
     // --- autoStart ----------------------------------------------------------------

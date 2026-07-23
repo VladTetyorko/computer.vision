@@ -693,6 +693,7 @@ class AssetControllerTest {
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].deviceId").value(deviceId.value().toString()))
                 .andExpect(jsonPath("$[0].at").value("2026-07-20T10:00:00Z"))
                 .andExpect(jsonPath("$[0].latitude").value(50.45))
                 .andExpect(jsonPath("$[0].longitude").value(30.52))
@@ -701,6 +702,26 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$[0].batteryPercent").value(87.5));
 
         verify(telemetryRepositoryPort).findByUsage(usageId, 100);
+    }
+
+    @Test
+    void telemetryDistinguishesSamplesFromDifferentDeviceIds() throws Exception {
+        // docs/CYCLES-PLAN.md §11, CD-a: deviceId is what makes samples from two different
+        // telemetry devices on the same usage/asset distinguishable.
+        UsageId usageId = UsageId.random();
+        DeviceId deviceA = DeviceId.random();
+        DeviceId deviceB = DeviceId.random();
+        Telemetry sampleA = new Telemetry(deviceA, Instant.parse("2026-07-20T10:00:00Z"), 1.0, 2.0, null, null, null,
+                Map.of());
+        Telemetry sampleB = new Telemetry(deviceB, Instant.parse("2026-07-20T10:00:01Z"), 3.0, 4.0, null, null, null,
+                Map.of());
+        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sampleA, sampleB));
+
+        mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].deviceId").value(deviceA.value().toString()))
+                .andExpect(jsonPath("$[1].deviceId").value(deviceB.value().toString()));
     }
 
     @Test
