@@ -11,12 +11,18 @@
 
     <artifactId>adapter-overlay</artifactId>
     <name>adapter-overlay</name>
-    <description>Placeholder — frame annotation adapter (boxes/labels/telemetry OSD), implemented in Phase 2.</description>
+    <description>Detection/OSD overlay burn-in (Java2D): renders boxes/labels and a telemetry OSD onto video frames.</description>
 
     <dependencies>
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>vision-domain</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
