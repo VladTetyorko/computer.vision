@@ -181,7 +181,27 @@ Devices tab becomes the warehouse: table gains lifecycle chips (Active / Deactiv
 
 ---
 
-## 9. Cycle order & status
+## 9. CU — UI consolidation & map upgrades *(user-requested)*
+
+The map graduates from a tab you visit to the operator's home surface: combined with live video, styled for field conditions (night/relief), warmed in the background, and testable without any video file.
+
+### CU-a — backend (small): fully synthetic simulation
+
+`SimulationSpec.videoPath` becomes nullable: when absent, the video device is registered with the `sim` protocol (synthetic pattern renderer) instead of `file` — everything else (auto-start, transport must then be DIRECT → 400 otherwise, **telemetry flight plans**) works unchanged. `POST /api/simulations {}` with just a `telemetry` block yields a complete moving drone — the "synthetic telemetry test" in one call. Scope: vision-application + vision-api (+ tests, MODULE.mds). **Estimate: S.**
+
+### CU-b — UI: map × streams, layers, background loading, consolidation *(proposal & estimate)*
+
+1. **Map × streams:** clicking a streaming asset's marker (or rail row) docks a **live preview panel** beside the map — `<vision-player>` inline, with OSD summary and a "open full cockpit" link to `/live/:deviceId`. Position and video in one screen: the referee's verification view. Only one docked player at a time (bandwidth); closing undocks.
+2. **Map layers:** a layer switcher (chips or Leaflet layers control) — **Standard** (OSM), **Night** (CARTO Dark Matter — replaces the current always-on dark tint), **Relief** (OpenTopoMap), **Satellite** (Esri World Imagery); correct per-layer attribution; selection persisted in the settings store and shared by both the fleet map and the live-map inset; offline fallback (vector overlays without tiles) unchanged.
+3. **Background loading, not lazy-on-click:** drop `data: { preload: false }` from `/map` so the route chunk idle-preloads, and warm the Leaflet chunk itself on browser idle (`requestIdleCallback` → `importLeaflet()` from the shell/idle-preload hook). Initial bundle must stay unchanged — this is *background* loading after first paint, never eager bundling.
+4. **Synthetic telemetry test (UI):** the Simulate wizard's synthetic mode gains a "with flight plan" option using CU-a — one click places a moving synthetic drone on the map, no file needed. Surfaced also as an empty-state action on the Map tab ("Add a test drone").
+5. **Consolidation pass:** audit the three polling stores (`FleetStore`, `TelemetryStore`, `FleetMapStore`) — extract the shared poll-while-visible/backoff idiom into one helper; reuse the player component cleanly across wall-tile/live/map-panel; report what was merged and what was left alone (with reasons).
+
+**Done when:** map chunk + Leaflet are already warm when the user first clicks Map; night/relief/satellite layers switch and persist; a docked live preview plays next to a moving marker; a no-file synthetic drone with a route is one click; store duplication measurably reduced (summary lists the merges). **Estimate: M/L — one vision-web task after C8-b (to avoid vision-web collisions).**
+
+---
+
+## 10. Cycle order & status
 
 Execution follows the repo's delegation model: per-task scopes are disjoint; every task ends with its scoped build green and MODULE.md updated.
 
@@ -195,7 +215,7 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | C6 | **UI** | `/map` overview tab | one task (vision-web) | ✅ done |
 | CT-a | backend | telemetry flight plans (route/speed/checkpoints) | §7, adapter-simulation → application/api/app | ✅ done |
 | CT-b | **UI** | flight-plan editor (map picker) in wizard | §7, vision-web | pending |
-| CW-a | backend | warehouse REST surface + assign/unassign | §8, after CT-a | pending |
+| CW-a | backend | warehouse REST surface + assign/unassign | §8, after CT-a | ✅ done |
 | CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | ✅ done |
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | pending |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | pending |

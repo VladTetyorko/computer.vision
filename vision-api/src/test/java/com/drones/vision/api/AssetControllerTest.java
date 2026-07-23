@@ -1,6 +1,8 @@
 package com.drones.vision.api;
 
+import com.drones.vision.application.AssetDeletion;
 import com.drones.vision.application.AssetDetails;
+import com.drones.vision.application.AssetEdit;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssetSpec;
 import com.drones.vision.application.AssetStatus;
@@ -15,6 +17,7 @@ import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
@@ -45,12 +48,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -260,6 +265,269 @@ class AssetControllerTest {
         mockMvc.perform(get("/api/assets"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    void listExposesLifecycleAlongsideStatusAndPassesIncludeDeletedThrough() throws Exception {
+        Asset deleted = asset(videoDevice()).withState(LifecycleState.DELETED);
+        AssetSummary summary = new AssetSummary(deleted, "Drone", AssetStatus.OFFLINE, null, null);
+        when(assetService.assets(true)).thenReturn(List.of(summary));
+
+        mockMvc.perform(get("/api/assets").param("includeDeleted", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].lifecycle").value("DELETED"));
+
+        verify(assetService).assets(true);
+    }
+
+    // ---- PATCH /api/assets/{id} ----
+
+    @Test
+    void updateAppliesTheEditAndReturns200WithAssetDetails() throws Exception {
+        Device device = videoDevice();
+        Asset stored = asset(device);
+        stubExistingAsset(stored, device);
+
+        String body = """
+                {"displayName":"renamed drone"}
+                """;
+
+        mockMvc.perform(patch("/api/assets/{id}", stored.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetId").value(stored.id().value().toString()));
+
+        ArgumentCaptor<AssetEdit> captor = ArgumentCaptor.forClass(AssetEdit.class);
+        verify(assetService).update(eq(stored.id()), captor.capture(), any());
+        assertEquals("renamed drone", captor.getValue().displayName());
+    }
+
+    @Test
+    void updateReturns404ForUnknownAsset() throws Exception {
+        AssetId unknown = AssetId.random();
+        doThrow(new NoSuchElementException("Unknown asset: " + unknown.value()))
+                .when(assetService).update(eq(unknown), any(), any());
+
+        mockMvc.perform(patch("/api/assets/{id}", unknown.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"displayName\":\"x\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void updateReturns400ForAnUnknownCategory() throws Exception {
+        AssetId assetId = AssetId.random();
+        doThrow(new IllegalArgumentException("Unknown category: bogus"))
+                .when(assetService).update(eq(assetId), any(), any());
+
+        mockMvc.perform(patch("/api/assets/{id}", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"category\":\"bogus\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    // ---- POST /api/assets/{id}/state ----
+
+    @Test
+    void setStateMovesToDeactivatedAndReturns200() throws Exception {
+        Device device = videoDevice();
+        Asset stored = asset(device).withState(LifecycleState.DEACTIVATED);
+        stubExistingAsset(stored, device);
+
+        mockMvc.perform(post("/api/assets/{id}/state", stored.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DEACTIVATED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetId").value(stored.id().value().toString()));
+
+        verify(assetService).setState(stored.id(), LifecycleState.DEACTIVATED, ownerId);
+    }
+
+    @Test
+    void setStateReturns400ForAnUnrecognizedStateValueListingValidOnes() throws Exception {
+        mockMvc.perform(post("/api/assets/{id}/state", AssetId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DELETED\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Unknown state: DELETED (valid values: ACTIVE, DEACTIVATED)"));
+
+        verifyNoInteractions(assetService);
+    }
+
+    @Test
+    void setStateDeactivatedOnADeletedAssetRestoresItPerTheContract() throws Exception {
+        Device device = videoDevice();
+        Asset stored = asset(device).withState(LifecycleState.DEACTIVATED);
+        stubExistingAsset(stored, device);
+
+        mockMvc.perform(post("/api/assets/{id}/state", stored.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DEACTIVATED\"}"))
+                .andExpect(status().isOk());
+
+        verify(assetService).setState(stored.id(), LifecycleState.DEACTIVATED, ownerId);
+    }
+
+    @Test
+    void setStateActiveOnADeletedAssetReturns409() throws Exception {
+        AssetId assetId = AssetId.random();
+        doThrow(new IllegalStateException("Asset my drone is deleted; restore it before putting it back into service"))
+                .when(assetService).setState(eq(assetId), eq(LifecycleState.ACTIVE), any());
+
+        mockMvc.perform(post("/api/assets/{id}/state", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"ACTIVE\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
+    }
+
+    @Test
+    void setStateReturns404ForUnknownAsset() throws Exception {
+        AssetId unknown = AssetId.random();
+        doThrow(new NoSuchElementException("Unknown asset: " + unknown.value()))
+                .when(assetService).setState(eq(unknown), any(), any());
+
+        mockMvc.perform(post("/api/assets/{id}/state", unknown.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"ACTIVE\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    // ---- DELETE /api/assets/{id} ----
+
+    @Test
+    void deleteReturns200WithTheDeletionSummary() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(assetService.delete(eq(assetId), any()))
+                .thenReturn(new AssetDeletion(assetId, "my drone", 2, 5, 1));
+
+        mockMvc.perform(delete("/api/assets/{id}", assetId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetId").value(assetId.value().toString()))
+                .andExpect(jsonPath("$.displayName").value("my drone"))
+                .andExpect(jsonPath("$.devicesDeleted").value(2))
+                .andExpect(jsonPath("$.usagesRetained").value(5))
+                .andExpect(jsonPath("$.streamsStopped").value(1));
+    }
+
+    @Test
+    void deleteReturns404ForUnknownAsset() throws Exception {
+        AssetId unknown = AssetId.random();
+        when(assetService.delete(eq(unknown), any()))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
+
+        mockMvc.perform(delete("/api/assets/{id}", unknown.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    // ---- POST /api/assets/{id}/devices ----
+
+    @Test
+    void assignDeviceReturns200WithAssetDetails() throws Exception {
+        Device first = videoDevice();
+        Device second = videoDevice();
+        Asset stored = asset(first, second);
+        stubExistingAsset(stored, first, second);
+        DeviceId newDevice = DeviceId.random();
+
+        String body = "{\"deviceId\":\"" + newDevice.value() + "\"}";
+
+        mockMvc.perform(post("/api/assets/{id}/devices", stored.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetId").value(stored.id().value().toString()));
+
+        verify(assetService).assignDevice(stored.id(), newDevice, ownerId);
+    }
+
+    @Test
+    void assignDeviceReturns409WhenTheDeviceAlreadyBelongsToAnotherAsset() throws Exception {
+        AssetId assetId = AssetId.random();
+        DeviceId deviceId = DeviceId.random();
+        doThrow(new IllegalStateException("Device cam-1 already belongs to asset someone else's drone"))
+                .when(assetService).assignDevice(eq(assetId), eq(deviceId), any());
+
+        String body = "{\"deviceId\":\"" + deviceId.value() + "\"}";
+
+        mockMvc.perform(post("/api/assets/{id}/devices", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
+    }
+
+    @Test
+    void assignDeviceReturns404ForAnUnknownDevice() throws Exception {
+        AssetId assetId = AssetId.random();
+        DeviceId unknownDevice = DeviceId.random();
+        doThrow(new NoSuchElementException("Unknown device: " + unknownDevice.value()))
+                .when(assetService).assignDevice(eq(assetId), eq(unknownDevice), any());
+
+        String body = "{\"deviceId\":\"" + unknownDevice.value() + "\"}";
+
+        mockMvc.perform(post("/api/assets/{id}/devices", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void assignDeviceReturns400ForABlankDeviceId() throws Exception {
+        mockMvc.perform(post("/api/assets/{id}/devices", AssetId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"deviceId\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(assetService);
+    }
+
+    // ---- DELETE /api/assets/{id}/devices/{deviceId} ----
+
+    @Test
+    void unassignDeviceReturns200WithAssetDetails() throws Exception {
+        Device remaining = videoDevice();
+        Asset stored = asset(remaining);
+        stubExistingAsset(stored, remaining);
+        DeviceId toRemove = DeviceId.random();
+
+        mockMvc.perform(delete("/api/assets/{id}/devices/{deviceId}", stored.id().value(), toRemove.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetId").value(stored.id().value().toString()));
+
+        verify(assetService).unassignDevice(stored.id(), toRemove, ownerId);
+    }
+
+    @Test
+    void unassignDeviceReturns409WhenRemovingTheLastDevice() throws Exception {
+        AssetId assetId = AssetId.random();
+        DeviceId deviceId = DeviceId.random();
+        doThrow(new IllegalStateException("Asset my drone must keep at least one device; unassign refused"))
+                .when(assetService).unassignDevice(eq(assetId), eq(deviceId), any());
+
+        mockMvc.perform(delete("/api/assets/{id}/devices/{deviceId}", assetId.value(), deviceId.value()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
+    }
+
+    @Test
+    void unassignDeviceReturns400WhenTheDeviceDoesNotBelongToTheAsset() throws Exception {
+        AssetId assetId = AssetId.random();
+        DeviceId deviceId = DeviceId.random();
+        doThrow(new IllegalArgumentException("Device " + deviceId.value() + " does not belong to asset " + assetId.value()))
+                .when(assetService).unassignDevice(eq(assetId), eq(deviceId), any());
+
+        mockMvc.perform(delete("/api/assets/{id}/devices/{deviceId}", assetId.value(), deviceId.value()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void unassignDeviceReturns404ForAnUnknownAsset() throws Exception {
+        AssetId unknown = AssetId.random();
+        DeviceId deviceId = DeviceId.random();
+        doThrow(new NoSuchElementException("Unknown asset: " + unknown.value()))
+                .when(assetService).unassignDevice(eq(unknown), eq(deviceId), any());
+
+        mockMvc.perform(delete("/api/assets/{id}/devices/{deviceId}", unknown.value(), deviceId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
     }
 
     // ---- GET /api/assets/{id} ----

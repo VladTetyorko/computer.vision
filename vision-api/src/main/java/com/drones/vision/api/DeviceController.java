@@ -2,11 +2,11 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.DeviceResponse;
 import com.drones.vision.api.dto.RegisterDeviceRequest;
+import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.UpdateDeviceRequest;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.LifecycleState;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -99,37 +99,32 @@ public class DeviceController {
     }
 
     /**
-     * Takes a single source out of service, stopping its stream.
+     * Moves a device between {@code ACTIVE} and {@code DEACTIVATED} (docs/CYCLES-PLAN.md §8's
+     * pinned contract).
      *
-     * <p>Finer-grained than deactivating the whole asset: one broken camera on a drone that is
-     * otherwise flying can be silenced on its own.
+     * <p>Idempotent. {@code DEACTIVATED} on an already-{@code DELETED} device restores it —
+     * recovering a source never silently resumes streaming from it, so activating afterward is a
+     * second, deliberate step. Requesting {@code ACTIVE} on a deleted device is refused (409):
+     * restore first. Finer-grained than moving the whole asset: one broken camera on a drone that
+     * is otherwise flying can be silenced on its own.
      *
-     * @param id the device to deactivate
-     * @return the deactivated device
+     * @param id      the device to move
+     * @param request the state to move it to; {@code ACTIVE} or {@code DEACTIVATED}
+     * @return the device in its new state
      */
-    @PostMapping("/{id}/deactivate")
-    public DeviceResponse deactivate(@PathVariable String id) {
-        return setState(id, LifecycleState.DEACTIVATED);
-    }
-
-    /**
-     * Puts a deactivated source back into service.
-     *
-     * @param id the device to reactivate
-     * @return the reactivated device
-     */
-    @PostMapping("/{id}/activate")
-    public DeviceResponse activate(@PathVariable String id) {
-        return setState(id, LifecycleState.ACTIVE);
+    @PostMapping("/{id}/state")
+    public DeviceResponse setState(@PathVariable String id, @RequestBody SetLifecycleStateRequest request) {
+        Device updated = deviceService.setState(DeviceId.of(id), request.toLifecycleState(), currentUser.userId());
+        return DeviceResponse.from(updated);
     }
 
     /**
      * Removes a source from service and from view — a soft delete.
      *
      * <p>The stream stops and the device disappears from listings, but the record survives, so
-     * the usages and telemetry it produced stay attributable and the removal can be undone. It
-     * also remains a member of its asset, which is why removing an asset's <em>last</em> source
-     * needs no special case and is never refused.
+     * the usages and telemetry it produced stay attributable and the removal can be undone by
+     * {@link #setState}'s restore semantics. It also remains a member of its asset, which is why
+     * removing an asset's <em>last</em> source needs no special case and is never refused.
      *
      * @param id the device to delete
      * @return the device in its deleted state
@@ -137,23 +132,5 @@ public class DeviceController {
     @DeleteMapping("/{id}")
     public DeviceResponse delete(@PathVariable String id) {
         return DeviceResponse.from(deviceService.delete(DeviceId.of(id), currentUser.userId()));
-    }
-
-    /**
-     * Brings a soft-deleted source back, out of service.
-     *
-     * <p>Restores to {@code DEACTIVATED} rather than {@code ACTIVE}, so recovering a source never
-     * silently resumes streaming from it.
-     *
-     * @param id the device to restore
-     * @return the restored device
-     */
-    @PostMapping("/{id}/restore")
-    public DeviceResponse restore(@PathVariable String id) {
-        return setState(id, LifecycleState.DEACTIVATED);
-    }
-
-    private DeviceResponse setState(String id, LifecycleState state) {
-        return DeviceResponse.from(deviceService.setState(DeviceId.of(id), state, currentUser.userId()));
     }
 }

@@ -255,7 +255,61 @@ public final class DefaultAssetService implements AssetService {
         return stopped;
     }
 
+    // --- Device assignment (docs/CYCLES-PLAN.md §8) ---------------------------
+
+    @Override
+    public Asset assignDevice(AssetId id, DeviceId deviceId, UserId actor) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        Objects.requireNonNull(actor, "actor must not be null");
+        Asset asset = require(id);
+        Device device = requireDevice(deviceId);
+
+        if (device.isDeleted()) {
+            throw new IllegalArgumentException(
+                    "Device " + device.name() + " is deleted; restore it before assigning it to an asset");
+        }
+        assetRepository.findByDeviceId(deviceId).ifPresent(owner -> {
+            throw new IllegalStateException(
+                    "Device " + device.name() + " already belongs to asset " + owner.displayName());
+        });
+
+        Set<DeviceId> devices = new LinkedHashSet<>(asset.devices());
+        devices.add(deviceId);
+        Asset saved = assetRepository.save(asset.withDevices(devices));
+        audit(actor, AuditAction.UPDATED, saved, "Assigned " + device.name() + " to asset " + saved.displayName(),
+                Map.of("devices", asset.devices() + " → " + devices));
+        return saved;
+    }
+
+    @Override
+    public Asset unassignDevice(AssetId id, DeviceId deviceId, UserId actor) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        Objects.requireNonNull(actor, "actor must not be null");
+        Asset asset = require(id);
+
+        if (!asset.devices().contains(deviceId)) {
+            throw new IllegalArgumentException(
+                    "Device " + deviceId.value() + " does not belong to asset " + id.value());
+        }
+        Set<DeviceId> devices = new LinkedHashSet<>(asset.devices());
+        devices.remove(deviceId);
+        if (devices.isEmpty()) {
+            throw new IllegalStateException(
+                    "Asset " + asset.displayName() + " must keep at least one device; unassign refused");
+        }
+
+        Asset saved = assetRepository.save(asset.withDevices(devices));
+        audit(actor, AuditAction.UPDATED, saved, "Unassigned a device from asset " + saved.displayName(),
+                Map.of("devices", asset.devices() + " → " + devices));
+        return saved;
+    }
+
     // --- Helpers -------------------------------------------------------------
+
+    private Device requireDevice(DeviceId id) {
+        return deviceService.find(id)
+                .orElseThrow(() -> new NoSuchElementException("Unknown device: " + id.value()));
+    }
 
     private int countUsages(AssetId id) {
         return usageRepository.findRecentByAsset(id, ALL_USAGES).size();

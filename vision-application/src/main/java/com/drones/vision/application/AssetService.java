@@ -123,4 +123,32 @@ public interface AssetService {
      * @param id the asset to stop
      */
     void stopStream(AssetId id);
+
+    /**
+     * Assigns an existing, unowned device to this asset (docs/CYCLES-PLAN.md §8's pinned
+     * contract).
+     *
+     * @param id       the asset to assign the device to
+     * @param deviceId the device to assign
+     * @param actor    the user performing the assignment
+     * @return the updated asset
+     * @throws java.util.NoSuchElementException if no asset or device has that id
+     * @throws IllegalArgumentException         if the device is soft-deleted
+     * @throws IllegalStateException            if the device already belongs to an asset (naming it)
+     */
+    Asset assignDevice(AssetId id, DeviceId deviceId, UserId actor);
+
+    /**
+     * Removes one of this asset's devices, leaving the device itself untouched (docs/CYCLES-PLAN.md
+     * §8's pinned contract).
+     *
+     * @param id       the asset to unassign the device from
+     * @param deviceId the device to unassign
+     * @param actor    the user performing the change
+     * @return the updated asset
+     * @throws java.util.NoSuchElementException if no asset has that id
+     * @throws IllegalArgumentException         if the device does not belong to this asset
+     * @throws IllegalStateException            if the device is the asset's last remaining one
+     */
+    Asset unassignDevice(AssetId id, DeviceId deviceId, UserId actor);
 }

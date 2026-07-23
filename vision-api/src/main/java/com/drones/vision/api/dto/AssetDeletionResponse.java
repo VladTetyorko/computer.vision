@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.application.AssetDeletion;
 
 /**
- * Response body for {@code DELETE /api/assets/{id}}.
+ * Response body for {@code DELETE /api/assets/{id}} (docs/CYCLES-PLAN.md §8's pinned contract).
  *
  * <p>Returned instead of an empty {@code 204} so the caller can tell the user both what the
  * deletion reached — "removed my-drone and its 2 sources" — and, just as importantly, what it
@@ -16,8 +16,8 @@ import com.drones.vision.application.AssetDeletion;
  * @param usagesRetained how many recorded usages were kept
  * @param streamsStopped how many running streams had to be stopped first
  */
-public record DeletionSummaryResponse(String assetId, String displayName, int devicesDeleted, int usagesRetained,
-                                       int streamsStopped) {
+public record AssetDeletionResponse(String assetId, String displayName, int devicesDeleted, int usagesRetained,
+                                     int streamsStopped) {
 
     /**
      * Maps an {@link AssetDeletion} record to its wire representation.
@@ -25,8 +25,8 @@ public record DeletionSummaryResponse(String assetId, String displayName, int de
      * @param deletion the deletion record to map
      * @return the response body for {@code deletion}
      */
-    public static DeletionSummaryResponse from(AssetDeletion deletion) {
-        return new DeletionSummaryResponse(
+    public static AssetDeletionResponse from(AssetDeletion deletion) {
+        return new AssetDeletionResponse(
                 deletion.id().value().toString(),
                 deletion.displayName(),
                 deletion.devicesDeleted(),

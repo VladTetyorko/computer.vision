@@ -23,15 +23,16 @@ import java.util.Map;
  * @param categoryName       human-readable name of the asset's category
  * @param owner              the owning user's id, as a canonical UUID string
  * @param status             {@code OFFLINE} or {@code STREAMING}, derived from active streams
- * @param state              {@code ACTIVE} or {@code DEACTIVATED}; a separate axis from {@code status},
- *                           since "idle right now" and "withdrawn from service" are different facts
+ * @param lifecycle          {@code ACTIVE}, {@code DEACTIVATED}, or {@code DELETED} (docs/CYCLES-PLAN.md
+ *                           §8's pinned contract); a separate axis from {@code status}, since "idle
+ *                           right now" and "withdrawn from service" are different facts
  * @param lastUsedAt         start time of the asset's most recent usage, or absent if never used
  * @param lastKnownPosition  last known position across usages, or absent if none is known
  * @param attributes         free-form key/value attributes
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetSummaryResponse(String assetId, String displayName, String category, String categoryName,
-                                    String owner, String status, String state, Instant lastUsedAt,
+                                    String owner, String status, String lifecycle, Instant lastUsedAt,
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes) {
 
     /**

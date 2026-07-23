@@ -1,9 +1,11 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.dto.AssetDeletionResponse;
 import com.drones.vision.api.dto.AssetDetailsResponse;
 import com.drones.vision.api.dto.AssetSummaryResponse;
+import com.drones.vision.api.dto.AssignDeviceRequest;
 import com.drones.vision.api.dto.CreateAssetRequest;
-import com.drones.vision.api.dto.DeletionSummaryResponse;
+import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.StartAssetStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
@@ -12,7 +14,6 @@ import com.drones.vision.application.AssetService;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.UsageId;
@@ -111,64 +112,39 @@ public class AssetController {
     }
 
     /**
-     * Takes an asset out of service, stopping whatever it is streaming.
+     * Moves an asset between {@code ACTIVE} and {@code DEACTIVATED} (docs/CYCLES-PLAN.md §8's
+     * pinned contract).
      *
-     * <p>The reversible alternative to {@link #delete(String)}: devices, usage history and
-     * telemetry all survive, but the asset refuses to stream until reactivated.
+     * <p>Idempotent. {@code DEACTIVATED} on an already-{@code DELETED} asset restores it —
+     * recovering something that was deleted should not put it back on the air in the same
+     * action, so activating afterward is a second, deliberate step. Requesting {@code ACTIVE} on
+     * a deleted asset is refused (409): restore first.
      *
-     * @param id the asset to deactivate
-     * @return the full detail view of the deactivated asset
+     * @param id      the asset to move
+     * @param request the state to move it to; {@code ACTIVE} or {@code DEACTIVATED}
+     * @return the full detail view of the asset in its new state
      */
-    @PostMapping("/api/assets/{id}/deactivate")
-    public AssetDetailsResponse deactivate(@PathVariable String id) {
-        return setState(id, LifecycleState.DEACTIVATED);
-    }
-
-    /**
-     * Puts a deactivated asset back into service.
-     *
-     * @param id the asset to reactivate
-     * @return the full detail view of the reactivated asset
-     */
-    @PostMapping("/api/assets/{id}/activate")
-    public AssetDetailsResponse activate(@PathVariable String id) {
-        return setState(id, LifecycleState.ACTIVE);
+    @PostMapping("/api/assets/{id}/state")
+    public AssetDetailsResponse setState(@PathVariable String id, @RequestBody SetLifecycleStateRequest request) {
+        AssetId assetId = AssetId.of(id);
+        assetService.setState(assetId, request.toLifecycleState(), currentUser.userId());
+        return AssetDetailsResponse.from(assetService.details(assetId));
     }
 
     /**
      * Removes an asset and its sources from service and from view — a soft delete.
      *
      * <p>Streams stop, the asset and its devices are hidden, but nothing is destroyed: usages and
-     * telemetry are kept and the removal can be undone with {@link #restore(String)}. Returns 200
-     * with a summary of what was affected and what was preserved, rather than an empty 204.
+     * telemetry are kept and the removal can be undone by {@link #setState}'s restore semantics.
+     * Returns 200 with a summary of what was affected and what was preserved, rather than an
+     * empty 204.
      *
      * @param id the asset to delete
      * @return what the deletion affected, and what it kept
      */
     @DeleteMapping("/api/assets/{id}")
-    public DeletionSummaryResponse delete(@PathVariable String id) {
-        return DeletionSummaryResponse.from(assetService.delete(AssetId.of(id), currentUser.userId()));
-    }
-
-    /**
-     * Brings a soft-deleted asset back, out of service.
-     *
-     * <p>Restores to {@code DEACTIVATED}, never straight to {@code ACTIVE}: recovering something
-     * that was deleted should not put it back on the air in the same action. Activating is a
-     * second, deliberate step — and both are audited.
-     *
-     * @param id the asset to restore
-     * @return the full detail view of the restored asset
-     */
-    @PostMapping("/api/assets/{id}/restore")
-    public AssetDetailsResponse restore(@PathVariable String id) {
-        return setState(id, LifecycleState.DEACTIVATED);
-    }
-
-    private AssetDetailsResponse setState(String id, LifecycleState state) {
-        AssetId assetId = AssetId.of(id);
-        assetService.setState(assetId, state, currentUser.userId());
-        return AssetDetailsResponse.from(assetService.details(assetId));
+    public AssetDeletionResponse delete(@PathVariable String id) {
+        return AssetDeletionResponse.from(assetService.delete(AssetId.of(id), currentUser.userId()));
     }
 
     /**
@@ -229,6 +205,36 @@ public class AssetController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void stopStream(@PathVariable String id) {
         assetService.stopStream(AssetId.of(id));
+    }
+
+    /**
+     * Assigns an existing, unowned device to this asset (docs/CYCLES-PLAN.md §8's pinned
+     * contract).
+     *
+     * @param id      the asset to assign the device to, as a canonical UUID string
+     * @param request the device to assign
+     * @return the full detail view of the asset with the device now attached
+     */
+    @PostMapping("/api/assets/{id}/devices")
+    public AssetDetailsResponse assignDevice(@PathVariable String id, @RequestBody AssignDeviceRequest request) {
+        AssetId assetId = AssetId.of(id);
+        assetService.assignDevice(assetId, request.toDeviceId(), currentUser.userId());
+        return AssetDetailsResponse.from(assetService.details(assetId));
+    }
+
+    /**
+     * Removes one of this asset's devices, leaving the device itself untouched (docs/CYCLES-PLAN.md
+     * §8's pinned contract).
+     *
+     * @param id       the asset to unassign the device from, as a canonical UUID string
+     * @param deviceId the device to unassign, as a canonical UUID string
+     * @return the full detail view of the asset without the device
+     */
+    @DeleteMapping("/api/assets/{id}/devices/{deviceId}")
+    public AssetDetailsResponse unassignDevice(@PathVariable String id, @PathVariable String deviceId) {
+        AssetId assetId = AssetId.of(id);
+        assetService.unassignDevice(assetId, DeviceId.of(deviceId), currentUser.userId());
+        return AssetDetailsResponse.from(assetService.details(assetId));
     }
 
     /**

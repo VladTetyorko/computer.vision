@@ -1,11 +1,13 @@
 package com.drones.vision.api;
 
+import com.drones.vision.application.DeviceEdit;
 import com.drones.vision.application.DeviceRegistration;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.UserId;
@@ -19,16 +21,20 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -199,5 +205,170 @@ class DeviceControllerTest {
         mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    // ---- GET /api/devices?includeDeleted= ----
+
+    @Test
+    void listPassesIncludeDeletedThroughToTheService() throws Exception {
+        Device deleted = device().withState(LifecycleState.DELETED);
+        when(deviceService.devices(true)).thenReturn(List.of(device(), deleted));
+
+        mockMvc.perform(get("/api/devices").param("includeDeleted", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[1].state").value("DELETED"));
+
+        verify(deviceService).devices(true);
+    }
+
+    // ---- PATCH /api/devices/{id} ----
+
+    @Test
+    void updateAppliesTheEditAndReturns200WithDeviceResponse() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device updated = new Device(id, "renamed", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()));
+        when(deviceService.update(eq(id), any(), any())).thenReturn(updated);
+
+        String body = """
+                {"name":"renamed"}
+                """;
+
+        mockMvc.perform(patch("/api/devices/{id}", id.value()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id.value().toString()))
+                .andExpect(jsonPath("$.name").value("renamed"));
+
+        ArgumentCaptor<DeviceEdit> captor = ArgumentCaptor.forClass(DeviceEdit.class);
+        verify(deviceService).update(eq(id), captor.capture(), any());
+        assertEquals("renamed", captor.getValue().name());
+    }
+
+    @Test
+    void updateReturns400WhenProtocolIsSentWithoutUri() throws Exception {
+        String body = """
+                {"protocol":"rtsp"}
+                """;
+
+        mockMvc.perform(patch("/api/devices/{id}", DeviceId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void updateReturns404ForUnknownDevice() throws Exception {
+        DeviceId unknown = DeviceId.random();
+        when(deviceService.update(eq(unknown), any(), any()))
+                .thenThrow(new NoSuchElementException("Unknown device: " + unknown.value()));
+
+        mockMvc.perform(patch("/api/devices/{id}", unknown.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    // ---- POST /api/devices/{id}/state ----
+
+    @Test
+    void setStateMovesToDeactivatedAndReturns200() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device deactivated = device().withState(LifecycleState.DEACTIVATED);
+        when(deviceService.setState(eq(id), eq(LifecycleState.DEACTIVATED), any())).thenReturn(deactivated);
+
+        mockMvc.perform(post("/api/devices/{id}/state", id.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DEACTIVATED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("DEACTIVATED"));
+    }
+
+    @Test
+    void setStateAcceptsLowerCaseStateNames() throws Exception {
+        DeviceId id = DeviceId.random();
+        when(deviceService.setState(eq(id), eq(LifecycleState.ACTIVE), any())).thenReturn(device());
+
+        mockMvc.perform(post("/api/devices/{id}/state", id.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"active\"}"))
+                .andExpect(status().isOk());
+
+        verify(deviceService).setState(eq(id), eq(LifecycleState.ACTIVE), any());
+    }
+
+    @Test
+    void setStateReturns400ForAnUnrecognizedStateValueListingValidOnes() throws Exception {
+        mockMvc.perform(post("/api/devices/{id}/state", DeviceId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DELETED\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Unknown state: DELETED (valid values: ACTIVE, DEACTIVATED)"));
+
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void setStateDeactivatedOnADeletedDeviceRestoresItPerTheContract() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device restored = device().withState(LifecycleState.DEACTIVATED);
+        when(deviceService.setState(eq(id), eq(LifecycleState.DEACTIVATED), any())).thenReturn(restored);
+
+        mockMvc.perform(post("/api/devices/{id}/state", id.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"DEACTIVATED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("DEACTIVATED"));
+    }
+
+    @Test
+    void setStateActiveOnADeletedDeviceReturns409() throws Exception {
+        DeviceId id = DeviceId.random();
+        when(deviceService.setState(eq(id), eq(LifecycleState.ACTIVE), any()))
+                .thenThrow(new IllegalStateException("Source cam-1 is deleted; restore it before putting it back into service"));
+
+        mockMvc.perform(post("/api/devices/{id}/state", id.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"ACTIVE\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
+    }
+
+    @Test
+    void setStateReturns404ForUnknownDevice() throws Exception {
+        DeviceId unknown = DeviceId.random();
+        when(deviceService.setState(eq(unknown), any(), any()))
+                .thenThrow(new NoSuchElementException("Unknown device: " + unknown.value()));
+
+        mockMvc.perform(post("/api/devices/{id}/state", unknown.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"ACTIVE\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    // ---- DELETE /api/devices/{id} ----
+
+    @Test
+    void deleteReturns200WithTheDeviceInItsDeletedState() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device deleted = device().withState(LifecycleState.DELETED);
+        when(deviceService.delete(eq(id), any())).thenReturn(deleted);
+
+        mockMvc.perform(delete("/api/devices/{id}", id.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("DELETED"));
+    }
+
+    @Test
+    void deleteIsIdempotentPerTheServiceContract() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device alreadyDeleted = device().withState(LifecycleState.DELETED);
+        when(deviceService.delete(eq(id), any())).thenReturn(alreadyDeleted);
+
+        mockMvc.perform(delete("/api/devices/{id}", id.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("DELETED"));
+
+        mockMvc.perform(delete("/api/devices/{id}", id.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("DELETED"));
     }
 }

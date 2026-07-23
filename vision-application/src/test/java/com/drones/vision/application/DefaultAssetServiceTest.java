@@ -566,6 +566,124 @@ class DefaultAssetServiceTest {
         verify(streamService, never()).stop(any());
     }
 
+    // --- Assigning devices -----------------------------------------------------
+
+    @Test
+    void assignDeviceAddsAnUnownedDeviceAndAuditsUpdated() {
+        Device cam = device("cam-1");
+        Device newCam = device("cam-2");
+        Asset stored = asset(Set.of(cam.id()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        when(deviceService.find(newCam.id())).thenReturn(Optional.of(newCam));
+        when(assetRepository.findByDeviceId(newCam.id())).thenReturn(Optional.empty());
+
+        Asset updated = service.assignDevice(stored.id(), newCam.id(), actingUser);
+
+        assertEquals(Set.of(cam.id(), newCam.id()), updated.devices());
+        ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditTrail).record(captor.capture());
+        assertEquals(AuditAction.UPDATED, captor.getValue().action());
+    }
+
+    @Test
+    void assignDeviceThrowsForUnknownDevice() {
+        Asset stored = asset(Set.of(DeviceId.random()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        DeviceId unknown = DeviceId.random();
+        when(deviceService.find(unknown)).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.assignDevice(stored.id(), unknown, actingUser));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void assignDeviceRejectsADeletedDevice() {
+        Asset stored = asset(Set.of(DeviceId.random()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        Device deleted = device("gone").withState(LifecycleState.DELETED);
+        when(deviceService.find(deleted.id())).thenReturn(Optional.of(deleted));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.assignDevice(stored.id(), deleted.id(), actingUser));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void assignDeviceRefusesADeviceAlreadyOwnedByAnotherAsset() {
+        Asset stored = asset(Set.of(DeviceId.random()));
+        Asset other = asset(Set.of(DeviceId.random()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        Device owned = device("owned-elsewhere");
+        when(deviceService.find(owned.id())).thenReturn(Optional.of(owned));
+        when(assetRepository.findByDeviceId(owned.id())).thenReturn(Optional.of(other));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.assignDevice(stored.id(), owned.id(), actingUser));
+
+        assertTrue(thrown.getMessage().contains(other.displayName()));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void assignDeviceThrowsForUnknownAsset() {
+        AssetId unknown = AssetId.random();
+        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.assignDevice(unknown, DeviceId.random(), actingUser));
+    }
+
+    // --- Unassigning devices -----------------------------------------------------
+
+    @Test
+    void unassignDeviceRemovesItAndAuditsUpdated() {
+        Device first = device("cam-a");
+        Device second = device("cam-b");
+        Asset stored = asset(Set.of(first.id(), second.id()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+
+        Asset updated = service.unassignDevice(stored.id(), second.id(), actingUser);
+
+        assertEquals(Set.of(first.id()), updated.devices());
+        ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditTrail).record(captor.capture());
+        assertEquals(AuditAction.UPDATED, captor.getValue().action());
+    }
+
+    @Test
+    void unassignDeviceRejectsADeviceThatDoesNotBelongToTheAsset() {
+        Asset stored = asset(Set.of(DeviceId.random(), DeviceId.random()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+        DeviceId stranger = DeviceId.random();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.unassignDevice(stored.id(), stranger, actingUser));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void unassignDeviceRefusesToRemoveTheLastDevice() {
+        Device only = device("cam-only");
+        Asset stored = asset(Set.of(only.id()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.unassignDevice(stored.id(), only.id(), actingUser));
+
+        assertTrue(thrown.getMessage().contains("at least one device"));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void unassignDeviceThrowsForUnknownAsset() {
+        AssetId unknown = AssetId.random();
+        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.unassignDevice(unknown, DeviceId.random(), actingUser));
+    }
+
     private static AssetUsage usage(AssetId assetId) {
         return new AssetUsage(UsageId.random(), assetId, Instant.now(), null, null, null, 0);
     }
