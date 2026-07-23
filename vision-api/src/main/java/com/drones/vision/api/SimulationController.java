@@ -35,7 +35,7 @@ import java.util.Objects;
  * <h2>Status codes</h2>
  * A bad {@code videoPath} (blank, or failing {@code SimulationService}'s filesystem checks —
  * missing, not a regular file, unreadable), an unrecognized {@code transport} name, or
- * (docs/CYCLES-PLAN.md §3) a {@code transport=rtsp} request no registered {@code
+ * (docs/CYCLES-PLAN.md §3, §5) a {@code transport=rtsp}/{@code mjpeg} request no registered {@code
  * FeedTransmitterPort} supports, all surface as {@link IllegalArgumentException} → 400; an
  * unseeded {@code simulated} category surfaces as {@link IllegalStateException} → 409 — all via
  * {@link ApiExceptionHandler}, the same mapping every other controller here relies on. {@link
@@ -79,8 +79,8 @@ public class SimulationController {
     }
 
     /**
-     * Stops a simulated asset's stream and, for a {@code transport=rtsp} simulation, its
-     * transmitted feed too (docs/CYCLES-PLAN.md §3) — idempotent, mirroring {@code
+     * Stops a simulated asset's stream and, for a wired-transport ({@code rtsp}/{@code mjpeg})
+     * simulation, its transmitted feed too (docs/CYCLES-PLAN.md §3, §5) — idempotent, mirroring {@code
      * AssetController}'s {@code DELETE /api/assets/{id}/stream}: an unknown or already-stopped
      * asset is still a 204, not a 404.
      *

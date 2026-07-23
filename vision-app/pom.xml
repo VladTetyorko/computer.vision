@@ -32,6 +32,10 @@
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>
+            <artifactId>adapter-mjpeg</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
             <artifactId>adapter-publish-hls</artifactId>
         </dependency>
         <dependency>

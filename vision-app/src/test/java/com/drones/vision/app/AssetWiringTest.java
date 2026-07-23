@@ -1,11 +1,14 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.SimulationService;
+import com.drones.vision.domain.model.FeedSpec;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
@@ -17,8 +20,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Context test asserting {@link WiringConfiguration} registers every asset-model bean that
@@ -41,9 +49,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <p>Extended for docs/CYCLES-PLAN.md §1c: {@link SimulationService} and {@link
  * SimulationController} (the one-call, zero-hardware simulation entry point) are asserted here
  * too rather than in a new test class, since they are asset-model beans built directly on top of
- * {@link AssetService}. Further extended for docs/CYCLES-PLAN.md §3: {@link FeedTransmitterPort}
- * (backed by {@link RtspFeedTransmitter}) is asserted to resolve into {@link #simulationService}
- * too — {@code transport=rtsp} simulations depend on it.
+ * {@link AssetService}. Further extended for docs/CYCLES-PLAN.md §3: a {@link FeedTransmitterPort}
+ * (backed by {@link RtspFeedTransmitter}) was asserted to resolve directly — since docs/CYCLES-PLAN.md
+ * §5 generalized {@link #simulationService}'s single transmitter dependency into a {@link
+ * FeedTransmitterRegistry} (mirroring {@code VideoSourceRegistry}) once a second transmit protocol
+ * ({@code mjpeg}, backed by {@link MjpegFeedTransmitter}) exists alongside {@code rtsp}, this now
+ * autowires the whole {@code List<FeedTransmitterPort>} and asserts both adapters are present and
+ * that the registry it feeds resolves each by protocol.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 class AssetWiringTest {
@@ -64,7 +76,10 @@ class AssetWiringTest {
     private SimulationController simulationController;
 
     @Autowired
-    private FeedTransmitterPort feedTransmitterPort;
+    private List<FeedTransmitterPort> feedTransmitterPorts;
+
+    @Autowired
+    private FeedTransmitterRegistry feedTransmitterRegistry;
 
     @Autowired
     private CategoryRepositoryPort categoryRepositoryPort;
@@ -101,8 +116,19 @@ class AssetWiringTest {
     }
 
     @Test
-    void rtspFeedTransmitterIsWiredAsTheFeedTransmitterPortBean() {
-        assertInstanceOf(RtspFeedTransmitter.class, feedTransmitterPort,
+    void bothRtspAndMjpegFeedTransmittersAreWiredAsFeedTransmitterPortBeans() {
+        assertTrue(feedTransmitterPorts.stream().anyMatch(RtspFeedTransmitter.class::isInstance),
                 "docs/CYCLES-PLAN.md §3's transport=rtsp simulations need a real FeedTransmitterPort");
+        assertTrue(feedTransmitterPorts.stream().anyMatch(MjpegFeedTransmitter.class::isInstance),
+                "docs/CYCLES-PLAN.md §5's transport=mjpeg simulations need a real FeedTransmitterPort");
+    }
+
+    @Test
+    void feedTransmitterRegistryResolvesRtspAndMjpegByProtocol() {
+        FeedSpec rtspSpec = new FeedSpec("rtsp", URI.create("file:///tmp/clip.mp4"), Map.of());
+        FeedSpec mjpegSpec = new FeedSpec("mjpeg", URI.create("file:///tmp/clip.mp4"), Map.of());
+
+        assertInstanceOf(RtspFeedTransmitter.class, feedTransmitterRegistry.transmitterFor(rtspSpec));
+        assertInstanceOf(MjpegFeedTransmitter.class, feedTransmitterRegistry.transmitterFor(mjpegSpec));
     }
 }

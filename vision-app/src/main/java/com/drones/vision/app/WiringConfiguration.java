@@ -1,5 +1,7 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
+import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.rtsp.FfmpegVideoSource;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
@@ -25,6 +27,7 @@ import com.drones.vision.application.DefaultSimulationService;
 import com.drones.vision.application.DefaultStreamService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.UsageTracker;
@@ -83,6 +86,16 @@ public class WiringConfiguration {
     @Bean
     public FfmpegVideoSource ffmpegVideoSource() {
         return new FfmpegVideoSource();
+    }
+
+    /**
+     * RX half of the mjpeg TX/RX pair (docs/CYCLES-PLAN.md §5): ingests the {@code
+     * multipart/x-mixed-replace} HTTP stream served by {@link #mjpegFeedTransmitter} (or any real
+     * MJPEG camera, e.g. an ESP32-CAM) for {@code "mjpeg"}-protocol video devices.
+     */
+    @Bean
+    public MjpegVideoSource mjpegVideoSource() {
+        return new MjpegVideoSource();
     }
 
     @Bean
@@ -272,15 +285,42 @@ public class WiringConfiguration {
     }
 
     /**
-     * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §1b, §3): turns a
-     * video file path into a registered {@code simulated}-category asset via {@link
+     * TX half of the mjpeg TX/RX pair (docs/CYCLES-PLAN.md §5): serves a {@code transport=mjpeg}
+     * simulation's video file as an HTTP {@code multipart/x-mixed-replace} stream on its own
+     * ephemeral {@code 127.0.0.1} port — no constructor config needed, unlike {@link
+     * #rtspFeedTransmitter} (which needs a target base), since this transmitter serves its own
+     * server rather than pushing to an external one (see adapter-mjpeg/MODULE.md). {@code
+     * destroyMethod = "close"} so Spring shuts its shared {@code HttpServer}/dispatch pool down
+     * (releasing the ephemeral port) on context close — {@code stop(FeedId)} alone never does
+     * that, only {@link MjpegFeedTransmitter#close()} does.
+     */
+    @Bean(destroyMethod = "close")
+    public MjpegFeedTransmitter mjpegFeedTransmitter() {
+        return new MjpegFeedTransmitter();
+    }
+
+    /**
+     * Selects the {@link FeedTransmitterPort} adapter for a simulation's {@code transport}
+     * (docs/CYCLES-PLAN.md §5) — the TX-side mirror of {@link #videoSourceRegistry}, generalizing
+     * {@link #simulationService}'s single {@code FeedTransmitterPort} dependency (docs/CYCLES-PLAN.md
+     * §3) now that a second transmit protocol ({@code mjpeg}) exists alongside {@code rtsp}.
+     */
+    @Bean
+    public FeedTransmitterRegistry feedTransmitterRegistry(List<FeedTransmitterPort> feedTransmitters) {
+        return new FeedTransmitterRegistry(feedTransmitters);
+    }
+
+    /**
+     * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §1b, §3, §5): turns
+     * a video file path into a registered {@code simulated}-category asset via {@link
      * #assetService}, reusing every rule it already enforces rather than duplicating asset
-     * creation here. {@link #rtspFeedTransmitter} backs {@code transport=rtsp} simulations.
+     * creation here. {@link #feedTransmitterRegistry} backs {@code transport=rtsp}/{@code mjpeg}
+     * simulations, selecting {@link #rtspFeedTransmitter}/{@link #mjpegFeedTransmitter} by protocol.
      */
     @Bean
     public SimulationService simulationService(AssetService assetService,
                                                 CategoryRepositoryPort categoryRepositoryPort,
-                                                FeedTransmitterPort rtspFeedTransmitter) {
-        return new DefaultSimulationService(assetService, categoryRepositoryPort, rtspFeedTransmitter);
+                                                FeedTransmitterRegistry feedTransmitterRegistry) {
+        return new DefaultSimulationService(assetService, categoryRepositoryPort, feedTransmitterRegistry);
     }
 }

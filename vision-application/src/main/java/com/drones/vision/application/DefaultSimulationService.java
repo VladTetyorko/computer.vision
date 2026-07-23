@@ -30,11 +30,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * The one implementation of {@link SimulationService}.
  *
  * <p>Builds one {@link AssetSpec} with two devices — a video device (either {@code "file"}-protocol,
- * played back in-process, or — for {@link SimulationTransport#RTSP} — {@code "rtsp"}-protocol,
- * pointing at a feed pushed out by {@link FeedTransmitterPort}) and a {@code "sim"}-protocol
- * telemetry device — and delegates the actual creation/streaming to {@link AssetService}, so every
- * rule {@code AssetService#create}/{@code #startStream} already enforces (category validation,
- * audit, device registration) applies here too instead of being duplicated.
+ * played back in-process, or — for a wired {@link SimulationTransport} ({@link
+ * SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG}) — pointing at a feed pushed out by
+ * whichever {@link FeedTransmitterPort} {@link #feedTransmitters} selects for that transport) and a
+ * {@code "sim"}-protocol telemetry device — and delegates the actual creation/streaming to {@link
+ * AssetService}, so every rule {@code AssetService#create}/{@code #startStream} already enforces
+ * (category validation, audit, device registration) applies here too instead of being duplicated.
  *
  * <h2>Threading</h2>
  * {@link #feedByAsset} is the only mutable state, a {@link ConcurrentHashMap} safe for concurrent
@@ -49,6 +50,9 @@ public final class DefaultSimulationService implements SimulationService {
     /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the RTSP transport. */
     private static final String FEED_PROTOCOL_RTSP = "rtsp";
 
+    /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the MJPEG transport (docs/CYCLES-PLAN.md §5). */
+    private static final String FEED_PROTOCOL_MJPEG = "mjpeg";
+
     /**
      * RTSP receive-side option key/value applied to a {@code transport=RTSP} video device's
      * {@link StreamDescriptor}, on top of whatever {@link FeedTransmitterPort#start} returns.
@@ -59,26 +63,28 @@ public final class DefaultSimulationService implements SimulationService {
      * shape {@code transport=RTSP} creates — causes the transmitter's own grab/record loop to
      * silently stall for ~10s before mediamtx drops the now-stale publisher connection and the
      * transmitter's next {@code record()} fails with EPIPE. A short RX-side timeout (2s) reliably
-     * eliminates the contention.
+     * eliminates the contention. This is RTSP-specific: the mjpeg TX/RX pair has no such
+     * contention (see adapter-mjpeg/MODULE.md), so {@link SimulationTransport#MJPEG} never gets
+     * this augmentation.
      */
     private static final String RTSP_RX_TIMEOUT_OPTION = "timeout";
     static final String RTSP_RX_TIMEOUT_MICROS = "2000000";
 
-    /** See {@link #awaitFeedEstablished()}. */
+    /** See {@link #awaitFeedEstablished()}. RTSP-specific; MJPEG never pays this delay. */
     static final long RTSP_FEED_ESTABLISH_DELAY_MILLIS = 1000L;
 
     private final AssetService assetService;
     private final CategoryRepositoryPort categoryRepository;
-    private final FeedTransmitterPort feedTransmitter;
+    private final FeedTransmitterRegistry feedTransmitters;
 
-    /** Tracks which {@link FeedId} (if any) backs each RTSP-transport asset's transmitted feed. */
-    private final Map<AssetId, FeedId> feedByAsset = new ConcurrentHashMap<>();
+    /** Tracks which transmitter/{@link FeedId} pair (if any) backs each wired-transport asset's feed. */
+    private final Map<AssetId, TrackedFeed> feedByAsset = new ConcurrentHashMap<>();
 
     public DefaultSimulationService(AssetService assetService, CategoryRepositoryPort categoryRepository,
-                                     FeedTransmitterPort feedTransmitter) {
+                                     FeedTransmitterRegistry feedTransmitters) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.categoryRepository = Objects.requireNonNull(categoryRepository, "categoryRepository must not be null");
-        this.feedTransmitter = Objects.requireNonNull(feedTransmitter, "feedTransmitter must not be null");
+        this.feedTransmitters = Objects.requireNonNull(feedTransmitters, "feedTransmitters must not be null");
     }
 
     @Override
@@ -92,10 +98,17 @@ public final class DefaultSimulationService implements SimulationService {
 
         String displayName = resolveDisplayName(spec.displayName(), videoPath);
 
-        FeedId feedId = spec.transport() == SimulationTransport.RTSP ? FeedId.random() : null;
-        DeviceRegistration videoDevice = feedId == null
-                ? videoDevice(displayName, videoPath)
-                : rtspVideoDevice(displayName, videoPath, feedId);
+        boolean wired = spec.transport() != SimulationTransport.DIRECT;
+        FeedId feedId = wired ? FeedId.random() : null;
+        FeedTransmitterPort transmitter = null;
+        DeviceRegistration videoDevice;
+        if (feedId == null) {
+            videoDevice = videoDevice(displayName, videoPath);
+        } else {
+            WiredVideoDevice wiredDevice = wireVideoDevice(displayName, videoPath, feedId, spec.transport());
+            videoDevice = wiredDevice.device();
+            transmitter = wiredDevice.transmitter();
+        }
 
         AssetSpec assetSpec = new AssetSpec(displayName, SIMULATED_CATEGORY,
                 Map.of("source", videoPath.toString()),
@@ -105,23 +118,23 @@ public final class DefaultSimulationService implements SimulationService {
         try {
             asset = assetService.create(assetSpec, ownership, actor);
         } catch (RuntimeException e) {
-            stopFeedQuietly(feedId);
+            stopFeedQuietly(transmitter, feedId);
             throw e;
         }
         if (feedId != null) {
-            feedByAsset.put(asset.id(), feedId);
+            feedByAsset.put(asset.id(), new TrackedFeed(transmitter, feedId));
         }
 
         StreamId streamId = null;
         if (spec.autoStart()) {
-            if (feedId != null) {
+            if (spec.transport() == SimulationTransport.RTSP) {
                 awaitFeedEstablished();
             }
             try {
                 streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
             } catch (RuntimeException e) {
                 feedByAsset.remove(asset.id());
-                stopFeedQuietly(feedId);
+                stopFeedQuietly(transmitter, feedId);
                 throw e;
             }
         }
@@ -158,15 +171,15 @@ public final class DefaultSimulationService implements SimulationService {
     public void stop(AssetId assetId) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         assetService.stopStream(assetId);
-        FeedId feedId = feedByAsset.remove(assetId);
-        if (feedId != null) {
-            feedTransmitter.stop(feedId);
+        TrackedFeed tracked = feedByAsset.remove(assetId);
+        if (tracked != null) {
+            tracked.transmitter().stop(tracked.feedId());
         }
     }
 
-    private void stopFeedQuietly(FeedId feedId) {
+    private static void stopFeedQuietly(FeedTransmitterPort transmitter, FeedId feedId) {
         if (feedId != null) {
-            feedTransmitter.stop(feedId);
+            transmitter.stop(feedId);
         }
     }
 
@@ -215,22 +228,35 @@ public final class DefaultSimulationService implements SimulationService {
     }
 
     /**
-     * Starts a feed for {@code videoPath} via {@link #feedTransmitter} and registers a video
-     * device pointing at the descriptor it returns — augmented with the short RX-side {@code
-     * timeout} option {@link #RTSP_RX_TIMEOUT_MICROS} names, so this same-JVM RX (opened later,
-     * against this same descriptor, by whatever {@code VideoSourcePort} handles {@code "rtsp"})
-     * never contends with the transmitter's own grab/record loop.
+     * Starts a feed for {@code videoPath} via whichever {@link FeedTransmitterPort} {@link
+     * #feedTransmitters} selects for {@code transport}, and returns a video device pointing at the
+     * descriptor it returns. {@link SimulationTransport#RTSP}'s descriptor is augmented with the
+     * short RX-side {@code timeout} option ({@link #RTSP_RX_TIMEOUT_MICROS}) so this same-JVM RX
+     * (opened later against this same descriptor) never contends with the transmitter's own
+     * grab/record loop; {@link SimulationTransport#MJPEG}'s descriptor is registered as-is — the
+     * mjpeg TX/RX pair has no such contention (see adapter-mjpeg/MODULE.md).
      *
      * @throws IllegalArgumentException if no registered {@link FeedTransmitterPort} supports the
      *                                   built {@link FeedSpec}
      */
-    private DeviceRegistration rtspVideoDevice(String displayName, Path videoPath, FeedId feedId) {
-        FeedSpec feedSpec = new FeedSpec(FEED_PROTOCOL_RTSP, videoPath.toUri(), Map.of("loop", "true"));
-        if (!feedTransmitter.supports(feedSpec)) {
-            throw new IllegalArgumentException("FeedTransmitterPort does not support spec: " + feedSpec);
-        }
-        StreamDescriptor started = feedTransmitter.start(feedId, feedSpec);
-        return new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO), withRxTimeout(started));
+    private WiredVideoDevice wireVideoDevice(String displayName, Path videoPath, FeedId feedId,
+                                              SimulationTransport transport) {
+        FeedSpec feedSpec = new FeedSpec(feedProtocolFor(transport), videoPath.toUri(), Map.of("loop", "true"));
+        FeedTransmitterPort transmitter = feedTransmitters.transmitterFor(feedSpec);
+        StreamDescriptor started = transmitter.start(feedId, feedSpec);
+        StreamDescriptor descriptor = transport == SimulationTransport.RTSP ? withRxTimeout(started) : started;
+        DeviceRegistration device =
+                new DeviceRegistration(displayName + " · video", Set.of(Capability.VIDEO), descriptor);
+        return new WiredVideoDevice(device, transmitter);
+    }
+
+    /** The {@code FeedSpec}/{@code StreamDescriptor} protocol key a wired transport transmits over. */
+    private static String feedProtocolFor(SimulationTransport transport) {
+        return switch (transport) {
+            case RTSP -> FEED_PROTOCOL_RTSP;
+            case MJPEG -> FEED_PROTOCOL_MJPEG;
+            case DIRECT -> throw new IllegalStateException("DIRECT transport has no feed protocol");
+        };
     }
 
     /** Returns a copy of {@code descriptor} with the RX-side contention-fix timeout option added. */
@@ -239,6 +265,12 @@ public final class DefaultSimulationService implements SimulationService {
         options.put(RTSP_RX_TIMEOUT_OPTION, RTSP_RX_TIMEOUT_MICROS);
         return new StreamDescriptor(descriptor.protocol(), descriptor.uri(), options);
     }
+
+    /** A newly wired video device and the transmitter that started its feed, for post-create tracking. */
+    private record WiredVideoDevice(DeviceRegistration device, FeedTransmitterPort transmitter) {}
+
+    /** Which {@link FeedTransmitterPort} started a tracked asset's feed, so {@link #stop} stops it via the same adapter. */
+    private record TrackedFeed(FeedTransmitterPort transmitter, FeedId feedId) {}
 
     private static DeviceRegistration telemetryDevice(String displayName, SimulationSpec spec) {
         Map<String, String> options = new LinkedHashMap<>();

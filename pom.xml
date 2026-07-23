@@ -81,6 +81,11 @@
             </dependency>
             <dependency>
                 <groupId>com.drones</groupId>
+                <artifactId>adapter-mjpeg</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
                 <artifactId>adapter-publish-hls</artifactId>
                 <version>${project.version}</version>
             </dependency>

@@ -244,6 +244,23 @@ class SimulationControllerTest {
     }
 
     @Test
+    void simulateParsesMjpegTransportCaseInsensitively() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","transport":"MjPeG"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertEquals(SimulationTransport.MJPEG, captor.getValue().transport());
+    }
+
+    @Test
     void simulateReturns400ForAnUnknownTransportAndNeverTouchesTheService() throws Exception {
         String body = """
                 {"videoPath":"/data/clips/drone.mp4","transport":"udp"}
@@ -252,8 +269,8 @@ class SimulationControllerTest {
         mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
-                .andExpect(jsonPath("$.message").value(
-                        allOf(containsString("udp"), containsString("DIRECT"), containsString("RTSP"))));
+                .andExpect(jsonPath("$.message").value(allOf(containsString("udp"), containsString("DIRECT"),
+                        containsString("RTSP"), containsString("MJPEG"))));
 
         verifyNoInteractions(simulationService);
     }

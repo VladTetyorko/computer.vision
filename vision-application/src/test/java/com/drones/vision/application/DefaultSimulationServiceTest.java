@@ -50,6 +50,7 @@ class DefaultSimulationServiceTest {
     private AssetService assetService;
     private CategoryRepositoryPort categoryRepository;
     private FeedTransmitterPort feedTransmitter;
+    private FeedTransmitterPort mjpegTransmitter;
     private SimulationService service;
     private Ownership ownership;
     private UserId actor;
@@ -59,7 +60,9 @@ class DefaultSimulationServiceTest {
         assetService = mock(AssetService.class);
         categoryRepository = mock(CategoryRepositoryPort.class);
         feedTransmitter = mock(FeedTransmitterPort.class);
-        service = new DefaultSimulationService(assetService, categoryRepository, feedTransmitter);
+        mjpegTransmitter = mock(FeedTransmitterPort.class);
+        service = new DefaultSimulationService(assetService, categoryRepository,
+                new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter)));
         actor = UserId.random();
         ownership = new Ownership(actor, GroupId.random());
 
@@ -265,6 +268,7 @@ class DefaultSimulationServiceTest {
         DeviceRegistration video = capturedAssetSpec().devices().get(0);
         assertEquals("file", video.stream().protocol());
         verifyNoInteractions(feedTransmitter);
+        verifyNoInteractions(mjpegTransmitter);
     }
 
     @Test
@@ -294,6 +298,7 @@ class DefaultSimulationServiceTest {
         assertEquals(Map.of("timeout", "2000000"), video.stream().options(),
                 "the RX-side StreamDescriptor must carry the short-timeout contention fix (adapter-rtsp/MODULE.md "
                         + "Gotchas) on top of whatever the transmitter returned");
+        verifyNoInteractions(mjpegTransmitter);
     }
 
     @Test
@@ -307,6 +312,93 @@ class DefaultSimulationServiceTest {
 
         verifyNoInteractions(assetService);
         verify(feedTransmitter, never()).start(any(), any());
+    }
+
+    // --- mjpeg transport / registry selection --------------------------------------
+
+    @Test
+    void simulateWithMjpegTransportRegistersTheTransmitterReturnedDescriptorAsIs(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        URI feedTarget = URI.create("http://127.0.0.1:54321/feed-abc");
+        when(mjpegTransmitter.supports(any())).thenReturn(true);
+        when(mjpegTransmitter.start(any(), any()))
+                .thenReturn(new StreamDescriptor("mjpeg", feedTarget, Map.of()));
+        SimulationSpec spec =
+                new SimulationSpec("My Drone", file.toString(), null, null, false, SimulationTransport.MJPEG);
+
+        service.simulate(spec, ownership, actor);
+
+        ArgumentCaptor<FeedSpec> feedSpecCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(mjpegTransmitter).supports(feedSpecCaptor.capture());
+        verify(mjpegTransmitter).start(any(), eq(feedSpecCaptor.getValue()));
+        assertEquals("mjpeg", feedSpecCaptor.getValue().protocol());
+        assertEquals(file.toUri(), feedSpecCaptor.getValue().source());
+        assertEquals(Map.of("loop", "true"), feedSpecCaptor.getValue().options());
+
+        DeviceRegistration video = capturedAssetSpec().devices().get(0);
+        assertEquals("mjpeg", video.stream().protocol());
+        assertEquals(feedTarget, video.stream().uri());
+        assertEquals(Map.of(), video.stream().options(),
+                "the mjpeg StreamDescriptor must be registered as-is -- no RX-side timeout augmentation, "
+                        + "that fix is RTSP-specific (adapter-rtsp/MODULE.md Gotchas)");
+        // feedTransmitter (registered first) is still probed via supports() by the registry's
+        // linear scan, but must never actually be started for an mjpeg-transport simulation.
+        verify(feedTransmitter, never()).start(any(), any());
+    }
+
+    @Test
+    void simulateWithRtspTransportOnlyTouchesTheTransmitterThatSupportsIt(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        when(feedTransmitter.supports(any())).thenReturn(true);
+        when(feedTransmitter.start(any(), any()))
+                .thenReturn(new StreamDescriptor("rtsp", URI.create("rtsp://localhost:8554/feed-q"), Map.of()));
+        SimulationSpec spec =
+                new SimulationSpec("My Drone", file.toString(), null, null, false, SimulationTransport.RTSP);
+
+        service.simulate(spec, ownership, actor);
+
+        verifyNoInteractions(mjpegTransmitter);
+    }
+
+    @Test
+    void simulateThrowsWithAClearMessageWhenNoRegisteredTransmitterSupportsMjpeg(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        // Neither feedTransmitter nor mjpegTransmitter stubs supports() -> both default to false.
+        SimulationSpec spec =
+                new SimulationSpec("My Drone", file.toString(), null, null, false, SimulationTransport.MJPEG);
+
+        IllegalArgumentException thrown =
+                assertThrows(IllegalArgumentException.class, () -> service.simulate(spec, ownership, actor));
+        assertTrue(thrown.getMessage().contains("mjpeg"),
+                "expected message to name the unsupported protocol: " + thrown.getMessage());
+        verifyNoInteractions(assetService);
+        verify(feedTransmitter, never()).start(any(), any());
+        verify(mjpegTransmitter, never()).start(any(), any());
+    }
+
+    @Test
+    void stopStopsTheStreamAndTheTrackedFeedViaTheTransmitterThatStartedItForAnMjpegAsset(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        Asset created = stubCreate();
+        when(mjpegTransmitter.supports(any())).thenReturn(true);
+        when(mjpegTransmitter.start(any(), any()))
+                .thenReturn(new StreamDescriptor("mjpeg", URI.create("http://127.0.0.1:9999/feed-m"), Map.of()));
+        SimulationSpec spec =
+                new SimulationSpec("My Drone", file.toString(), null, null, false, SimulationTransport.MJPEG);
+        service.simulate(spec, ownership, actor);
+        ArgumentCaptor<FeedId> feedIdCaptor = ArgumentCaptor.forClass(FeedId.class);
+        verify(mjpegTransmitter).start(feedIdCaptor.capture(), any());
+
+        service.stop(created.id());
+
+        verify(assetService).stopStream(created.id());
+        verify(mjpegTransmitter).stop(feedIdCaptor.getValue());
+        verify(feedTransmitter, never()).stop(any());
     }
 
     @Test

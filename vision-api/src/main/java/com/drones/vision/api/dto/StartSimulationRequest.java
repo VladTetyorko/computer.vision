@@ -17,9 +17,10 @@ import java.util.stream.Collectors;
  * @param longitude   home-point longitude for the synthetic telemetry track; may be {@code null}
  * @param autoStart   whether to start streaming immediately; {@code null}/absent defaults to
  *                     {@code true} — most callers simulating a drone want to watch it right away
- * @param transport   {@code "direct"} (in-process playback) or {@code "rtsp"} (pushed over the
- *                     wire and ingested back, docs/CYCLES-PLAN.md §3), matched case-insensitively;
- *                     {@code null}/absent defaults to {@code "direct"} — today's behavior
+ * @param transport   {@code "direct"} (in-process playback), {@code "rtsp"}, or {@code "mjpeg"}
+ *                     (both pushed over the wire and ingested back, docs/CYCLES-PLAN.md §3, §5),
+ *                     matched case-insensitively; {@code null}/absent defaults to {@code "direct"}
+ *                     — today's behavior
  */
 public record StartSimulationRequest(String displayName, String videoPath, Double latitude, Double longitude,
                                       Boolean autoStart, String transport) {

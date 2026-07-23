@@ -40,6 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * running. {@code viewUrl} is a pure function of {@link
  * VisionPublishProperties#viewBase()}, so asserting it needs no running
  * mediamtx either.
+ *
+ * <p>Extended for docs/CYCLES-PLAN.md §5: {@code mjpeg} is asserted alongside {@code sim}/{@code
+ * rtsp} as a third registered {@link VideoSourcePort} protocol ({@code MjpegVideoSource},
+ * adapter-mjpeg) — the RX half of the mjpeg TX/RX pair.
  */
 @SpringBootTest
 class PublishWiringTest {
@@ -59,15 +63,19 @@ class PublishWiringTest {
     }
 
     @Test
-    void videoSourcesIncludeBothSimAndRtspAdapters() {
+    void videoSourcesIncludeSimRtspAndMjpegAdapters() {
         StreamDescriptor simDescriptor = new StreamDescriptor("sim", URI.create("sim://demo"), Map.of());
         StreamDescriptor rtspDescriptor =
                 new StreamDescriptor("rtsp", URI.create("rtsp://camera.local:554/stream"), Map.of());
+        StreamDescriptor mjpegDescriptor =
+                new StreamDescriptor("mjpeg", URI.create("http://camera.local/stream"), Map.of());
 
         assertTrue(videoSources.stream().anyMatch(source -> source.supports(simDescriptor)),
                 "expected a registered VideoSourcePort supporting the sim descriptor");
         assertTrue(videoSources.stream().anyMatch(source -> source.supports(rtspDescriptor)),
                 "expected a registered VideoSourcePort supporting the rtsp descriptor");
+        assertTrue(videoSources.stream().anyMatch(source -> source.supports(mjpegDescriptor)),
+                "expected a registered VideoSourcePort supporting the mjpeg descriptor (docs/CYCLES-PLAN.md §5)");
     }
 
     @Test

@@ -19,6 +19,7 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | vision-proto | `vision-proto/` | gRPC codegen from `proto/vision/v1/cv.proto` |
 | adapter-simulation | `adapters/adapter-simulation/` | Synthetic video + telemetry sources (`sim`) |
 | adapter-rtsp | `adapters/adapter-rtsp/` | RTSP/FFmpeg ingest |
+| adapter-mjpeg | `adapters/adapter-mjpeg/` | MJPEG HTTP ingest + TX simulator |
 | adapter-publish-hls | `adapters/adapter-publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
 | adapter-discovery | `adapters/adapter-discovery/` | ONVIF / mDNS / V4L2 scanners |
 | adapter-cv-grpc | `adapters/adapter-cv-grpc/` | Placeholder (Phase 2): DetectionPort via gRPC |
