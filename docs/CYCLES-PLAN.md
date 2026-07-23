@@ -196,7 +196,7 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | CT-a | backend | telemetry flight plans (route/speed/checkpoints) | §7, adapter-simulation → application/api/app | ✅ done |
 | CT-b | **UI** | flight-plan editor (map picker) in wizard | §7, vision-web | pending |
 | CW-a | backend | warehouse REST surface + assign/unassign | §8, after CT-a | pending |
-| CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | pending |
+| CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | ✅ done |
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | pending |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | pending |
 | C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | pending |

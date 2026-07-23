@@ -41,7 +41,7 @@ function asset(partial: Partial<AssetDetails>): AssetDetails {
     categoryName: 'Simulated',
     owner: 'owner-0',
     status: 'OFFLINE',
-    state: 'ACTIVE',
+    lifecycle: 'ACTIVE',
     attributes: {},
     devices: [],
     recentUsages: [],

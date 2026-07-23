@@ -134,3 +134,85 @@ td.actions {
         grid-column: 1 / -1;
     }
 }
+
+/* ---- Warehouse (docs/CYCLES-PLAN.md §8) ---------------------------------- */
+
+.toggle {
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.toggle input {
+    width: auto;
+}
+
+/* An archived device/asset stays legible but visually recedes from the active fleet. */
+tr.archived,
+.asset-card.archived {
+    opacity: 0.6;
+}
+
+.chip.faded {
+    background: transparent;
+}
+
+.inline-row td {
+    background: var(--panel-raised);
+}
+
+.inline-form,
+.inline-confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.inline-form input,
+.inline-form select {
+    width: auto;
+    min-width: 12rem;
+    flex: 1 1 12rem;
+}
+
+.inline-form.column,
+.inline-confirm.column {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.inline-confirm span {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+/* ---- Asset cards ---------------------------------------------------------- */
+
+.asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.75rem;
+}
+
+.asset-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.asset-card > header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.asset-card .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}

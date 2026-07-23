@@ -8,6 +8,15 @@
       </p>
     </div>
     <div class="row">
+      <label class="row toggle">
+        <input
+          type="checkbox"
+          name="showArchived"
+          [ngModel]="showArchived()"
+          (ngModelChange)="toggleShowArchived()"
+        />
+        <span>Show archived</span>
+      </label>
       <button type="button" class="btn" (click)="toggleSimulate()">
         {{ simulateOpen() ? 'Close simulate' : 'Simulate a source' }}
       </button>
@@ -101,14 +110,14 @@
     </section>
   }
 
-  <!-- ---- Inventory ---------------------------------------------------- -->
+  <!-- ---- Inventory (the warehouse, docs/CYCLES-PLAN.md §8) -------------- -->
   <section class="card">
     <header>
       <h2>Registered</h2>
-      <span class="muted">{{ fleet.devices().length }} device(s)</span>
+      <span class="muted">{{ warehouseRows().length }} device(s)</span>
     </header>
 
-    @if (fleet.devices().length === 0) {
+    @if (warehouseRows().length === 0) {
       <div class="empty">
         <h3>No devices yet</h3>
         <p>
@@ -127,59 +136,74 @@
             <th>Source</th>
             <th>Capabilities</th>
             <th>State</th>
+            <th>Owner</th>
             <th aria-label="Actions"></th>
           </tr>
         </thead>
         <tbody>
-          @for (device of fleet.devices(); track device.id) {
-            <tr>
+          @for (row of warehouseRows(); track row.device.id) {
+            <tr [class.archived]="row.archived">
               <td>
-                <div class="name">{{ device.name }}</div>
-                <div class="mono faint">{{ device.id }}</div>
+                <div class="name">{{ row.device.name }}</div>
+                <div class="mono faint">{{ row.device.id }}</div>
               </td>
               <td class="source">
-                <span class="chip">{{ device.protocol }}</span>
-                <span class="mono muted truncate" [title]="device.uri">{{ device.uri }}</span>
+                <span class="chip">{{ row.device.protocol }}</span>
+                <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
               </td>
               <td>
-                @for (capability of device.capabilities; track capability) {
+                @for (capability of row.device.capabilities; track capability) {
                   <span class="chip">{{ capability }}</span>
                 }
               </td>
               <td>
-                @if (isLive(device)) {
-                  <span class="chip ok"><span class="dot live"></span>Live</span>
-                } @else {
-                  <span class="chip">Stopped</span>
+                <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                  {{ lifecycleLabel(row.lifecycle) }}
+                </span>
+                @if (!row.archived) {
+                  @if (row.streaming) {
+                    <span class="chip ok"><span class="dot live"></span>Live</span>
+                  } @else {
+                    <span class="chip">Stopped</span>
+                  }
                 }
-                @if (simulatedInfo(device); as simInfo) {
+                @if (simulatedInfo(row.device); as simInfo) {
                   <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">
                     Simulated
                   </span>
                 }
               </td>
-              <td class="actions">
-                @if (isLive(device)) {
-                  <button type="button" class="btn small" (click)="watch(device)">Watch</button>
-                  <button
-                    type="button"
-                    class="btn danger small"
-                    (click)="stop(device)"
-                    [disabled]="busyDeviceId() === device.id"
-                  >
-                    Stop
-                  </button>
+              <td>
+                @if (row.owner; as owner) {
+                  <span class="mono muted truncate" [title]="owner.assetName">{{ owner.assetName }}</span>
                 } @else {
-                  <button
-                    type="button"
-                    class="btn small"
-                    (click)="start(device)"
-                    [disabled]="busyDeviceId() === device.id"
-                  >
-                    {{ busyDeviceId() === device.id ? 'Starting…' : 'Start' }}
-                  </button>
+                  <span class="faint">unassigned</span>
                 }
-                @if (simulatedInfo(device); as simInfo) {
+              </td>
+              <td class="actions">
+                @if (!row.archived) {
+                  @if (row.streaming) {
+                    <button type="button" class="btn small" (click)="watch(row.device)">Watch</button>
+                    <button
+                      type="button"
+                      class="btn danger small"
+                      (click)="stop(row.device)"
+                      [disabled]="busyDeviceId() === row.device.id"
+                    >
+                      Stop
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      class="btn small"
+                      (click)="start(row.device)"
+                      [disabled]="busyDeviceId() === row.device.id"
+                    >
+                      {{ busyDeviceId() === row.device.id ? 'Starting…' : 'Start' }}
+                    </button>
+                  }
+                }
+                @if (simulatedInfo(row.device); as simInfo) {
                   <button
                     type="button"
                     class="btn danger small"
@@ -189,11 +213,188 @@
                     {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
                   </button>
                 }
+                @for (action of deviceActionsFor(row); track action) {
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    [class.danger]="action === 'archive'"
+                    (click)="onDeviceAction(row, action)"
+                    [disabled]="busyDeviceId() === row.device.id"
+                  >
+                    {{ deviceActionLabel(action) }}
+                  </button>
+                }
               </td>
             </tr>
+            @if (rowActionMode(row.device.id); as mode) {
+              <tr class="inline-row">
+                <td colspan="6">
+                  @switch (mode) {
+                    @case ('rename') {
+                      <div class="inline-form">
+                        <input
+                          name="renameDraft"
+                          [ngModel]="renameDraft()"
+                          (ngModelChange)="renameDraft.set($event)"
+                          placeholder="device name"
+                          aria-label="New device name"
+                        />
+                        <button type="button" class="btn small" (click)="confirmRename(row.device)">
+                          Save
+                        </button>
+                        <button type="button" class="btn secondary small" (click)="cancelRowAction()">
+                          Cancel
+                        </button>
+                      </div>
+                    }
+                    @case ('archive') {
+                      <div class="inline-confirm">
+                        <span>
+                          Archive "{{ row.device.name }}"? It will stop streaming and be hidden
+                          from the default list — restore it any time from "Show archived".
+                        </span>
+                        <button
+                          type="button"
+                          class="btn danger small"
+                          (click)="confirmArchiveDevice(row.device)"
+                        >
+                          Confirm archive
+                        </button>
+                        <button type="button" class="btn secondary small" (click)="cancelRowAction()">
+                          Cancel
+                        </button>
+                      </div>
+                    }
+                    @case ('assign') {
+                      <div class="inline-form">
+                        <select
+                          name="assignDraft"
+                          [ngModel]="assignDraft()"
+                          (ngModelChange)="assignDraft.set($event)"
+                          aria-label="Choose an asset to assign this device to"
+                        >
+                          <option value="" disabled>Choose an asset…</option>
+                          @for (asset of assignableAssets(); track asset.assetId) {
+                            <option [value]="asset.assetId">{{ asset.displayName }}</option>
+                          }
+                        </select>
+                        <button
+                          type="button"
+                          class="btn small"
+                          [disabled]="!assignDraft()"
+                          (click)="confirmAssign(row.device)"
+                        >
+                          Assign
+                        </button>
+                        <button type="button" class="btn secondary small" (click)="cancelRowAction()">
+                          Cancel
+                        </button>
+                      </div>
+                    }
+                  }
+                </td>
+              </tr>
+            }
           }
         </tbody>
       </table>
+    }
+  </section>
+
+  <!-- ---- Assets (docs/CYCLES-PLAN.md §8) --------------------------------- -->
+  <section class="card">
+    <header>
+      <h2>Assets</h2>
+      <span class="muted">{{ assetRows().length }} asset(s)</span>
+    </header>
+
+    @if (assetRows().length === 0) {
+      <div class="empty">
+        <p class="faint">
+          No assets yet — assets appear once a device is filed under one, e.g. via "Simulate a
+          source".
+        </p>
+      </div>
+    } @else {
+      <div class="asset-grid">
+        @for (row of assetRows(); track row.asset.assetId) {
+          <div class="asset-card" [class.archived]="row.archived">
+            <header>
+              <div>
+                <div class="name">{{ row.asset.displayName }}</div>
+                <span class="muted">{{ row.asset.categoryName }}</span>
+              </div>
+              <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                {{ lifecycleLabel(row.lifecycle) }}
+              </span>
+            </header>
+
+            @switch (assetActionMode(row.asset.assetId)) {
+              @case ('rename') {
+                <div class="inline-form column">
+                  <input
+                    name="assetNameDraft"
+                    [ngModel]="assetNameDraft()"
+                    (ngModelChange)="assetNameDraft.set($event)"
+                    placeholder="display name"
+                    aria-label="New asset name"
+                  />
+                  <input
+                    name="assetCategoryDraft"
+                    [ngModel]="assetCategoryDraft()"
+                    (ngModelChange)="assetCategoryDraft.set($event)"
+                    placeholder="category slug"
+                    aria-label="New asset category"
+                  />
+                  <div class="row">
+                    <button type="button" class="btn small" (click)="confirmAssetEdit(row.asset)">
+                      Save
+                    </button>
+                    <button type="button" class="btn secondary small" (click)="cancelAssetAction()">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              }
+              @case ('archive') {
+                <div class="inline-confirm column">
+                  <span>
+                    Archive "{{ row.asset.displayName }}"? Its device(s) archive with it; usage
+                    history is kept and any running stream stops.
+                  </span>
+                  <div class="row">
+                    <button
+                      type="button"
+                      class="btn danger small"
+                      (click)="confirmArchiveAsset(row.asset)"
+                    >
+                      Confirm archive
+                    </button>
+                    <button type="button" class="btn secondary small" (click)="cancelAssetAction()">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              }
+              @default {
+                <div class="actions">
+                  @for (action of assetActionsFor(row); track action) {
+                    <button
+                      type="button"
+                      class="btn secondary small"
+                      [class.danger]="action === 'archive'"
+                      (click)="onAssetAction(row, action)"
+                      [disabled]="busyAssetId() === row.asset.assetId"
+                    >
+                      {{ assetActionLabel(action) }}
+                    </button>
+                  }
+                </div>
+              }
+            }
+          </div>
+        }
+      </div>
     }
   </section>
 

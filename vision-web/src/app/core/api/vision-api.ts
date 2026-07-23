@@ -3,12 +3,16 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type {
   ActiveStream,
+  AssetDeletionResponse,
   AssetDetails,
+  AssetEdit,
   AssetSummary,
   Device,
+  DeviceEdit,
   RegisterDeviceRequest,
   ScanRequest,
   ScanResult,
+  SettableLifecycleState,
   SimulationResponse,
   StartSimulationRequest,
   StartStreamRequest,
@@ -28,12 +32,39 @@ export class VisionApi {
 
   // --- Devices -------------------------------------------------------------
 
-  listDevices(): Promise<Device[]> {
-    return firstValueFrom(this.http.get<Device[]>('/api/devices'));
+  /**
+   * `includeDeleted` defaults to `false` (today's behavior, unchanged) and is only added to the
+   * query string when `true` — the warehouse page's "show archived" toggle (docs/CYCLES-PLAN.md
+   * §8's pinned contract).
+   */
+  listDevices(includeDeleted = false): Promise<Device[]> {
+    return firstValueFrom(
+      this.http.get<Device[]>('/api/devices', includeDeleted ? { params: { includeDeleted: true } } : {}),
+    );
   }
 
   registerDevice(request: RegisterDeviceRequest): Promise<Device> {
     return firstValueFrom(this.http.post<Device>('/api/devices', request));
+  }
+
+  // --- Devices — warehouse lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) --------------
+  // CW-a builds the server side of these in parallel with this UI; every call here degrades to
+  // one `FleetStore.run()` toast (via its thin wrappers) if it 404s before CW-a ships.
+
+  updateDevice(id: string, edit: DeviceEdit): Promise<Device> {
+    return firstValueFrom(this.http.patch<Device>(`/api/devices/${encodeURIComponent(id)}`, edit));
+  }
+
+  /** `DEACTIVATED` on a `DELETED` device is a restore; `DELETED` is reached only via `deleteDevice`. */
+  setDeviceState(id: string, state: SettableLifecycleState): Promise<Device> {
+    return firstValueFrom(
+      this.http.post<Device>(`/api/devices/${encodeURIComponent(id)}/state`, { state }),
+    );
+  }
+
+  /** Soft delete (archive) — idempotent. */
+  deleteDevice(id: string): Promise<Device> {
+    return firstValueFrom(this.http.delete<Device>(`/api/devices/${encodeURIComponent(id)}`));
   }
 
   // --- Streams -------------------------------------------------------------
@@ -67,8 +98,14 @@ export class VisionApi {
   // Backs the live telemetry OSD/map (docs/CYCLES-PLAN.md §2): a device's asset — and
   // that asset's open usage — is looked up on demand, not polled by a fleet-wide store.
 
-  listAssets(): Promise<AssetSummary[]> {
-    return firstValueFrom(this.http.get<AssetSummary[]>('/api/assets'));
+  /** `includeDeleted` defaults to `false` (today's behavior, unchanged) — see `listDevices`. */
+  listAssets(includeDeleted = false): Promise<AssetSummary[]> {
+    return firstValueFrom(
+      this.http.get<AssetSummary[]>(
+        '/api/assets',
+        includeDeleted ? { params: { includeDeleted: true } } : {},
+      ),
+    );
   }
 
   getAsset(assetId: string): Promise<AssetDetails> {
@@ -80,6 +117,42 @@ export class VisionApi {
       this.http.get<TelemetrySample[]>(`/api/usages/${encodeURIComponent(usageId)}/telemetry`, {
         params: { limit },
       }),
+    );
+  }
+
+  // --- Assets — warehouse lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) ---------------
+
+  updateAsset(id: string, edit: AssetEdit): Promise<AssetDetails> {
+    return firstValueFrom(this.http.patch<AssetDetails>(`/api/assets/${encodeURIComponent(id)}`, edit));
+  }
+
+  /** `DEACTIVATED` on a `DELETED` asset is a restore; `DELETED` is reached only via `deleteAsset`. */
+  setAssetState(id: string, state: SettableLifecycleState): Promise<AssetDetails> {
+    return firstValueFrom(
+      this.http.post<AssetDetails>(`/api/assets/${encodeURIComponent(id)}/state`, { state }),
+    );
+  }
+
+  /** Soft delete (archive) — idempotent. Reports what it retained, not just that it succeeded. */
+  deleteAsset(id: string): Promise<AssetDeletionResponse> {
+    return firstValueFrom(
+      this.http.delete<AssetDeletionResponse>(`/api/assets/${encodeURIComponent(id)}`),
+    );
+  }
+
+  /** Assigns an unowned device to an asset; 409 when the device is already owned elsewhere. */
+  assignDevice(assetId: string, deviceId: string): Promise<AssetDetails> {
+    return firstValueFrom(
+      this.http.post<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}/devices`, { deviceId }),
+    );
+  }
+
+  /** 409 when this is the asset's last device — every asset needs at least one. */
+  unassignDevice(assetId: string, deviceId: string): Promise<AssetDetails> {
+    return firstValueFrom(
+      this.http.delete<AssetDetails>(
+        `/api/assets/${encodeURIComponent(assetId)}/devices/${encodeURIComponent(deviceId)}`,
+      ),
     );
   }
 

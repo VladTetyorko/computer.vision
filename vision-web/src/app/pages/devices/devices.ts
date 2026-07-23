@@ -7,7 +7,13 @@ import { SettingsStore } from '../../core/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/device-logic';
-import { type Device, type DiscoveredDevice, type ScanResult } from '../../core/api/models';
+import {
+  type AssetSummary,
+  type Device,
+  type DiscoveredDevice,
+  type ScanResult,
+  type SettableLifecycleState,
+} from '../../core/api/models';
 import {
   buildSimulationRequest,
   buildSyntheticRegisterRequest,
@@ -16,6 +22,23 @@ import {
   type SimulateMode,
   type SimulatedDeviceInfo,
 } from './simulate-logic';
+import {
+  RESTORE_TARGET_STATE,
+  availableAssetActions,
+  availableDeviceActions,
+  buildAssetEdit,
+  buildAssetRows,
+  buildDeviceRenameEdit,
+  buildWarehouseRows,
+  filterAssetRowsByArchived,
+  filterRowsByArchived,
+  mapDeviceOwners,
+  type AssetLifecycleAction,
+  type AssetRow,
+  type DeviceLifecycleAction,
+  type DeviceOwner,
+  type WarehouseRow,
+} from './warehouse-logic';
 
 interface OptionRow {
   key: string;
@@ -30,6 +53,25 @@ const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
   direct: 'Plays the file straight through the pipeline — the simplest way to see it work.',
   rtsp: 'Rehearse the real protocol path: the platform transmits your file over RTSP and ingests it back like real hardware.',
   synthetic: 'No file needed — registers a classic sim-protocol source instantly, the same one-click demo source as below.',
+};
+
+/** Button labels for the warehouse action menus (docs/CYCLES-PLAN.md §8). */
+const DEVICE_ACTION_LABELS: Record<DeviceLifecycleAction, string> = {
+  rename: 'Rename',
+  activate: 'Activate',
+  deactivate: 'Deactivate',
+  archive: 'Archive',
+  restore: 'Restore',
+  assign: 'Assign to asset…',
+  unassign: 'Unassign',
+};
+
+const ASSET_ACTION_LABELS: Record<AssetLifecycleAction, string> = {
+  rename: 'Rename',
+  activate: 'Activate',
+  deactivate: 'Deactivate',
+  archive: 'Archive',
+  restore: 'Restore',
 };
 
 @Component({
@@ -106,8 +148,300 @@ export class DevicesPage {
     return this.simulatedDevices().get(device.id);
   }
 
+  // --- Warehouse (docs/CYCLES-PLAN.md §8) -----------------------------------
+  // Devices/assets lifecycle: rename, activate/deactivate, archive (soft delete)/restore, and
+  // device↔asset assignment. Every mutation goes through `FleetStore`'s `run()`-wrapped thin
+  // wrappers (mirroring how C4 added `simulate()`) so a 404 — CW-a, the backend half, is not
+  // live while this lands — degrades to exactly one toast, never a broken page.
+
+  protected readonly showArchived = signal(false);
+  /** Populated only while `showArchived` is on — `includeDeleted=true` returns *every* device. */
+  protected readonly allDevicesIncludingArchived = signal<readonly Device[]>([]);
+  protected readonly assets = signal<readonly AssetSummary[]>([]);
+  /** deviceId → owning asset, across every asset the page has loaded (not just simulated ones). */
+  protected readonly deviceOwners = signal<ReadonlyMap<string, DeviceOwner>>(new Map());
+  protected readonly busyAssetId = signal<string | null>(null);
+
+  /** One inline row/card open at a time per device — rename form, archive confirm, or assign picker. */
+  protected readonly rowAction = signal<{ deviceId: string; mode: 'rename' | 'archive' | 'assign' } | null>(
+    null,
+  );
+  protected readonly renameDraft = signal('');
+  protected readonly assignDraft = signal('');
+
+  protected readonly assetAction = signal<{ assetId: string; mode: 'rename' | 'archive' } | null>(null);
+  protected readonly assetNameDraft = signal('');
+  protected readonly assetCategoryDraft = signal('');
+
+  private readonly warehouseDevices = computed<readonly Device[]>(() =>
+    this.showArchived() ? this.allDevicesIncludingArchived() : this.fleet.devices(),
+  );
+
+  protected readonly warehouseRows = computed<readonly WarehouseRow[]>(() =>
+    filterRowsByArchived(
+      buildWarehouseRows(this.warehouseDevices(), this.deviceOwners(), this.fleet.liveDeviceIds()),
+      this.showArchived(),
+    ),
+  );
+
+  protected readonly assetRows = computed<readonly AssetRow[]>(() =>
+    filterAssetRowsByArchived(buildAssetRows(this.assets()), this.showArchived()),
+  );
+
+  /** Non-archived assets are always valid assign targets — a device's ownership is the only rule. */
+  protected readonly assignableAssets = computed(() =>
+    this.assetRows()
+      .filter((row) => !row.archived)
+      .map((row) => row.asset),
+  );
+
+  protected deviceActionsFor(row: WarehouseRow): readonly DeviceLifecycleAction[] {
+    return availableDeviceActions(row.lifecycle, !!row.owner);
+  }
+
+  protected assetActionsFor(row: AssetRow): readonly AssetLifecycleAction[] {
+    return availableAssetActions(row.lifecycle);
+  }
+
+  protected lifecycleLabel(state: WarehouseRow['lifecycle']): string {
+    switch (state) {
+      case 'ACTIVE':
+        return 'Active';
+      case 'DEACTIVATED':
+        return 'Deactivated';
+      case 'DELETED':
+        return 'Archived';
+    }
+  }
+
+  protected deviceActionLabel(action: DeviceLifecycleAction): string {
+    return DEVICE_ACTION_LABELS[action];
+  }
+
+  protected assetActionLabel(action: AssetLifecycleAction): string {
+    return ASSET_ACTION_LABELS[action];
+  }
+
+  protected onDeviceAction(row: WarehouseRow, action: DeviceLifecycleAction): void {
+    switch (action) {
+      case 'rename':
+        this.rowAction.set({ deviceId: row.device.id, mode: 'rename' });
+        this.renameDraft.set(row.device.name);
+        break;
+      case 'activate':
+        void this.setDeviceLifecycle(row.device, 'ACTIVE');
+        break;
+      case 'deactivate':
+        void this.setDeviceLifecycle(row.device, 'DEACTIVATED');
+        break;
+      case 'archive':
+        this.rowAction.set({ deviceId: row.device.id, mode: 'archive' });
+        break;
+      case 'restore':
+        void this.setDeviceLifecycle(row.device, RESTORE_TARGET_STATE);
+        break;
+      case 'assign':
+        this.rowAction.set({ deviceId: row.device.id, mode: 'assign' });
+        this.assignDraft.set('');
+        break;
+      case 'unassign':
+        if (row.owner) {
+          void this.unassignDevice(row.device, row.owner);
+        }
+        break;
+    }
+  }
+
+  /** `null` when no inline row is open for this device — lets the template use one `@switch`. */
+  protected rowActionMode(deviceId: string): 'rename' | 'archive' | 'assign' | null {
+    const active = this.rowAction();
+    return active && active.deviceId === deviceId ? active.mode : null;
+  }
+
+  protected cancelRowAction(): void {
+    this.rowAction.set(null);
+  }
+
+  protected async confirmRename(device: Device): Promise<void> {
+    const edit = buildDeviceRenameEdit(this.renameDraft(), device);
+    if (Object.keys(edit).length === 0) {
+      this.rowAction.set(null);
+      return;
+    }
+    await this.runDeviceAction(device.id, async () => {
+      const updated = await this.fleet.updateDevice(device.id, edit);
+      if (updated) {
+        this.rowAction.set(null);
+      }
+    });
+  }
+
+  protected async confirmArchiveDevice(device: Device): Promise<void> {
+    await this.runDeviceAction(device.id, async () => {
+      const archived = await this.fleet.deleteDevice(device.id);
+      if (archived) {
+        this.rowAction.set(null);
+      }
+    });
+  }
+
+  protected async confirmAssign(device: Device): Promise<void> {
+    const assetId = this.assignDraft();
+    if (!assetId) {
+      return;
+    }
+    await this.runDeviceAction(device.id, async () => {
+      const updated = await this.fleet.assignDevice(assetId, device.id);
+      if (updated) {
+        this.rowAction.set(null);
+      }
+    });
+  }
+
+  protected async unassignDevice(device: Device, owner: DeviceOwner): Promise<void> {
+    await this.runDeviceAction(device.id, () => this.fleet.unassignDevice(owner.assetId, device.id));
+  }
+
+  private async setDeviceLifecycle(device: Device, state: SettableLifecycleState): Promise<void> {
+    await this.runDeviceAction(device.id, () => this.fleet.setDeviceState(device.id, state));
+  }
+
+  /** Runs a device mutation with the row's busy indicator, then re-derives the warehouse view. */
+  private async runDeviceAction(deviceId: string, action: () => Promise<unknown>): Promise<void> {
+    this.busyDeviceId.set(deviceId);
+    try {
+      await action();
+      await this.refreshWarehouse();
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
+  protected onAssetAction(row: AssetRow, action: AssetLifecycleAction): void {
+    switch (action) {
+      case 'rename':
+        this.assetAction.set({ assetId: row.asset.assetId, mode: 'rename' });
+        this.assetNameDraft.set(row.asset.displayName);
+        this.assetCategoryDraft.set(row.asset.category);
+        break;
+      case 'activate':
+        void this.setAssetLifecycle(row.asset, 'ACTIVE');
+        break;
+      case 'deactivate':
+        void this.setAssetLifecycle(row.asset, 'DEACTIVATED');
+        break;
+      case 'archive':
+        this.assetAction.set({ assetId: row.asset.assetId, mode: 'archive' });
+        break;
+      case 'restore':
+        void this.setAssetLifecycle(row.asset, RESTORE_TARGET_STATE);
+        break;
+    }
+  }
+
+  /** `null` when no inline card is open for this asset — lets the template use one `@switch`. */
+  protected assetActionMode(assetId: string): 'rename' | 'archive' | null {
+    const active = this.assetAction();
+    return active && active.assetId === assetId ? active.mode : null;
+  }
+
+  protected cancelAssetAction(): void {
+    this.assetAction.set(null);
+  }
+
+  protected async confirmAssetEdit(asset: AssetSummary): Promise<void> {
+    const edit = buildAssetEdit({ displayName: this.assetNameDraft(), category: this.assetCategoryDraft() }, asset);
+    if (Object.keys(edit).length === 0) {
+      this.assetAction.set(null);
+      return;
+    }
+    await this.runAssetAction(asset.assetId, async () => {
+      const updated = await this.fleet.updateAsset(asset.assetId, edit);
+      if (updated) {
+        this.assetAction.set(null);
+      }
+    });
+  }
+
+  protected async confirmArchiveAsset(asset: AssetSummary): Promise<void> {
+    await this.runAssetAction(asset.assetId, async () => {
+      const result = await this.fleet.deleteAsset(asset.assetId);
+      if (result) {
+        this.assetAction.set(null);
+      }
+    });
+  }
+
+  private async setAssetLifecycle(asset: AssetSummary, state: SettableLifecycleState): Promise<void> {
+    await this.runAssetAction(asset.assetId, () => this.fleet.setAssetState(asset.assetId, state));
+  }
+
+  /** Runs an asset mutation with the card's busy indicator, then re-derives the warehouse view. */
+  private async runAssetAction(assetId: string, action: () => Promise<unknown>): Promise<void> {
+    this.busyAssetId.set(assetId);
+    try {
+      await action();
+      await this.refreshWarehouse();
+    } finally {
+      this.busyAssetId.set(null);
+    }
+  }
+
+  protected async toggleShowArchived(): Promise<void> {
+    this.showArchived.update((value) => !value);
+    await this.refreshWarehouse();
+  }
+
+  /**
+   * Re-reads whatever the warehouse view currently needs: the archived-inclusive device list
+   * (only while `showArchived` is on — it's a second, page-local fetch that deliberately never
+   * touches `FleetStore`'s own `devicesSignal`, so Wall/Live keep seeing only non-archived
+   * devices regardless of what this page's toggle is set to) and every asset plus its resolved
+   * devices (for the "owned by" column and the "Simulated" chip alike — one shared fetch now
+   * serves both, where `refreshSimulatedAssets` used to fetch details only for simulated assets).
+   */
+  private async refreshWarehouse(): Promise<void> {
+    await Promise.all([
+      this.showArchived() ? this.refreshArchivedDevices() : Promise.resolve(),
+      this.refreshWarehouseAssets(),
+    ]);
+  }
+
+  private async refreshArchivedDevices(): Promise<void> {
+    const devices = await this.fleet.listDevicesIncludingArchived();
+    if (devices) {
+      this.allDevicesIncludingArchived.set(devices);
+    }
+  }
+
+  /**
+   * Loads every asset (respecting `showArchived`) plus its resolved devices, deriving both the
+   * device→owner map (the warehouse table's "owned by" column and unassign action) and the
+   * `simulated`-category subset the C4 wizard's chip/stop-action already relies on — one fetch
+   * now serves both instead of two separate ones. Best-effort like `TelemetryStore`'s own asset
+   * lookups: this is enrichment for already-visible rows, not a user-initiated action, so a
+   * failure degrades silently rather than raising a toast.
+   */
+  private async refreshWarehouseAssets(): Promise<void> {
+    try {
+      const summaries = this.showArchived()
+        ? await this.fleet.listAssetsIncludingArchived()
+        : await this.api.listAssets();
+      if (!summaries) {
+        return; // failure already toasted by FleetStore.run() (only reachable when showArchived)
+      }
+      this.assets.set(summaries);
+
+      const details = await Promise.all(summaries.map((asset) => this.api.getAsset(asset.assetId)));
+      this.deviceOwners.set(mapDeviceOwners(details));
+      this.simulatedDevices.set(mapSimulatedDevices(details.filter(isSimulatedAsset)));
+    } catch {
+      // Silent-degrade — see doc comment above.
+    }
+  }
+
   constructor() {
-    void this.refreshSimulatedAssets();
+    void this.refreshWarehouse();
   }
 
   // --- Registration --------------------------------------------------------
@@ -255,9 +589,9 @@ export class DevicesPage {
 
   // --- Simulate wizard -------------------------------------------------------
 
-  /** The page's "Refresh" button re-reads devices/streams *and* which of them are simulated. */
+  /** The page's "Refresh" button re-reads devices/streams *and* the whole warehouse view. */
   protected async refreshAll(): Promise<void> {
-    await Promise.all([this.fleet.refresh(), this.refreshSimulatedAssets()]);
+    await Promise.all([this.fleet.refresh(), this.refreshWarehouse()]);
   }
 
   protected toggleSimulate(): void {
@@ -305,7 +639,7 @@ export class DevicesPage {
       return; // failure already toasted by FleetStore.run()
     }
     this.closeSimulateForm();
-    await this.refreshSimulatedAssets();
+    await this.refreshWarehouse();
 
     if (!response.streamId) {
       this.toasts.ok('Simulated asset created — start it from the device list when ready.');
@@ -335,29 +669,10 @@ export class DevicesPage {
       const stopped = await this.fleet.stopSimulation(info.assetId);
       if (stopped) {
         this.toasts.ok(`Stopped simulation "${info.displayName}".`);
-        await this.refreshSimulatedAssets();
+        await this.refreshWarehouse();
       }
     } finally {
       this.busySimulatedAssetId.set(null);
-    }
-  }
-
-  /**
-   * Re-derives which devices belong to a `simulated`-category asset.
-   *
-   * One `listAssets()` call, then `getAsset()` only for the (usually few) simulated ones —
-   * cheap, and best-effort like `TelemetryStore`'s own asset lookups: the chip/stop action is
-   * enrichment, not a user-initiated action, so a failure here degrades silently rather than
-   * raising a toast.
-   */
-  private async refreshSimulatedAssets(): Promise<void> {
-    try {
-      const summaries = await this.api.listAssets();
-      const simulated = summaries.filter(isSimulatedAsset);
-      const details = await Promise.all(simulated.map((asset) => this.api.getAsset(asset.assetId)));
-      this.simulatedDevices.set(mapSimulatedDevices(details));
-    } catch {
-      // Silent-degrade — see doc comment above.
     }
   }
 

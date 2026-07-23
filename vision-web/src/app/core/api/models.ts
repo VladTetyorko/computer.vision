@@ -14,17 +14,34 @@
 export type Capability = 'VIDEO' | 'TELEMETRY' | 'PTZ' | 'AUDIO';
 
 /**
- * Mirrors `domain.model.LifecycleState` as surfaced by `dto.DeviceResponse#state`.
- * A deactivated device refuses to stream.
+ * Mirrors `domain.model.LifecycleState` as surfaced by `dto.DeviceResponse#state` /
+ * `dto.AssetSummaryResponse#lifecycle` (docs/CYCLES-PLAN.md §8) — one axis shared by both
+ * devices and assets. A deactivated device/asset refuses to stream; `DELETED` is a soft
+ * delete/archive (hidden from default listings, recoverable via restore — see
+ * `SettableLifecycleState`).
  */
-export type DeviceState = 'ACTIVE' | 'DEACTIVATED';
+export type LifecycleState = 'ACTIVE' | 'DEACTIVATED' | 'DELETED';
+
+/**
+ * The only two states a client may request via `POST .../state` (docs/CYCLES-PLAN.md §8's
+ * pinned contract) — `DELETED` is reached only via the `DELETE` (archive) endpoints, and
+ * `DEACTIVATED` on an already-`DELETED` thing is how the contract spells "restore" (there is no
+ * direct `DELETED` → `ACTIVE` transition).
+ */
+export type SettableLifecycleState = Exclude<LifecycleState, 'DELETED'>;
+
+/** Mirrors the `{state}` body every `POST .../state` endpoint takes (docs/CYCLES-PLAN.md §8). */
+export interface SetLifecycleStateRequest {
+  readonly state: SettableLifecycleState;
+}
 
 /**
  * Mirrors `dto.DeviceResponse`.
  *
  * There is no `type` field: the `DeviceType` enum was removed server-side in favor of the
  * data-driven category model, which applies to `Asset`s, not raw devices (see `Category`,
- * `AssetSummary`).
+ * `AssetSummary`). `state` can now be `DELETED` too (docs/CYCLES-PLAN.md §8 — a device can be
+ * archived, e.g. as the last source of an asset, without the asset itself going away).
  */
 export interface Device {
   readonly id: string;
@@ -33,7 +50,22 @@ export interface Device {
   readonly protocol: string;
   readonly uri: string;
   readonly options: Record<string, string>;
-  readonly state: DeviceState;
+  readonly state: LifecycleState;
+}
+
+/**
+ * Mirrors `PATCH /api/devices/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every
+ * field optional, `@JsonInclude(NON_NULL)`-style — send only what actually changed. The backend
+ * requires `protocol`+`uri` together whenever either (or `options`) is present; the request
+ * builder in `pages/devices/warehouse-logic.ts` only ever populates `name` today (the UI's
+ * "Rename" action), but the type mirrors the full pinned shape for API-layer completeness.
+ */
+export interface DeviceEdit {
+  readonly name?: string;
+  readonly protocol?: string;
+  readonly uri?: string;
+  readonly options?: Record<string, string>;
+  readonly capabilities?: readonly Capability[];
 }
 
 /**
@@ -103,15 +135,6 @@ export interface ApiErrorBody {
   readonly message: string;
 }
 
-/**
- * Mirrors `domain.model.LifecycleState` as surfaced by `dto.AssetSummaryResponse#state` /
- * `dto.AssetDetailsResponse#state`. A separate axis from `AssetStatus`: "idle right now" and
- * "withdrawn from service" are different facts. Unlike `DeviceState`, assets can also be
- * `DELETED` (a soft delete — `GET /api/assets` excludes these unless queried otherwise, which
- * this app never does).
- */
-export type LifecycleState = 'ACTIVE' | 'DEACTIVATED' | 'DELETED';
-
 /** Mirrors `application.AssetStatus`, as surfaced by `dto.AssetSummaryResponse#status`. */
 export type AssetStatus = 'OFFLINE' | 'STREAMING';
 
@@ -165,6 +188,13 @@ export interface AssetUsage {
 /**
  * Mirrors `dto.AssetSummaryResponse`, the shared field set `AssetDetails` extends. `lastUsedAt`
  * and `lastKnownPosition` are absent for an asset that has never been used.
+ *
+ * `lifecycle` mirrors `AssetSummaryResponse#lifecycle` (docs/CYCLES-PLAN.md §8's pinned contract
+ * — CW-a exposes the asset's lifecycle state under this name, alongside the derived streaming
+ * `status`). It is typed optional rather than required: CW-a lands this field server-side in
+ * parallel with this UI, so a backend this app talks to before that ships simply omits it —
+ * every reader here treats an absent `lifecycle` as `'ACTIVE'` (see
+ * `pages/devices/warehouse-logic.ts`), never as a crash.
  */
 export interface AssetSummary {
   readonly assetId: string;
@@ -173,7 +203,7 @@ export interface AssetSummary {
   readonly categoryName: string;
   readonly owner: string;
   readonly status: AssetStatus;
-  readonly state: LifecycleState;
+  readonly lifecycle?: LifecycleState;
   readonly lastUsedAt?: string;
   readonly lastKnownPosition?: GeoPosition;
   readonly attributes: Record<string, string>;
@@ -186,6 +216,35 @@ export interface AssetSummary {
 export interface AssetDetails extends AssetSummary {
   readonly devices: readonly Device[];
   readonly recentUsages: readonly AssetUsage[];
+}
+
+/**
+ * Mirrors `PATCH /api/assets/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every field
+ * optional — send only what actually changed. Built by
+ * `pages/devices/warehouse-logic.ts#buildAssetEdit`.
+ */
+export interface AssetEdit {
+  readonly displayName?: string;
+  readonly category?: string;
+  readonly attributes?: Record<string, string>;
+}
+
+/** Mirrors `POST /api/assets/{id}/devices`'s body (docs/CYCLES-PLAN.md §8's pinned contract). */
+export interface AssignDeviceRequest {
+  readonly deviceId: string;
+}
+
+/**
+ * Mirrors `dto.AssetDeletionResponse` (docs/CYCLES-PLAN.md §8's pinned contract), the body of
+ * `DELETE /api/assets/{id}` — from `application.AssetDeletion`. Told to the user verbatim so an
+ * archive confirmation says what survived, not just that the asset is gone.
+ */
+export interface AssetDeletionResponse {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly devicesDeleted: number;
+  readonly usagesRetained: number;
+  readonly streamsStopped: number;
 }
 
 /**

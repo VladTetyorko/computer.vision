@@ -1,11 +1,18 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from './api/vision-api';
 import { describeHttpError } from './api-error';
 import { ToastService } from './toast.service';
 import type {
   ActiveStream,
+  AssetDeletionResponse,
+  AssetDetails,
+  AssetEdit,
+  AssetSummary,
   Device,
+  DeviceEdit,
   RegisterDeviceRequest,
+  SettableLifecycleState,
   SimulationResponse,
   StartSimulationRequest,
   StartStreamRequest,
@@ -98,6 +105,52 @@ export class FleetStore {
     });
   }
 
+  // --- Warehouse: device lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) ----------------
+  // Thin `run()`-wrapped wrappers, same seam as `register`/`start`/`stop` above and `simulate`
+  // below — chosen over a separate page-scoped store because `devicesSignal` already lives here
+  // and every mutation below changes what it should read afterward (a renamed/reactivated device
+  // refreshes in place; an archived one simply drops out of the default, non-archived listing —
+  // exactly what Wall/Live should see too). CW-a is not live while this lands: a 404 from any of
+  // these still produces exactly one toast via `run()`, never a crash.
+
+  async updateDevice(id: string, edit: DeviceEdit): Promise<Device | null> {
+    return this.run(async () => {
+      const device = await this.api.updateDevice(id, edit);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`Updated ${device.name}.`);
+      return device;
+    });
+  }
+
+  /** `DEACTIVATED` on a `DELETED` device is how the pinned contract spells "restore". */
+  async setDeviceState(id: string, state: SettableLifecycleState): Promise<Device | null> {
+    return this.run(async () => {
+      const device = await this.api.setDeviceState(id, state);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`${device.name} is now ${state.toLowerCase()}.`);
+      return device;
+    });
+  }
+
+  /** Soft delete (archive) — the device drops out of the default device listing afterward. */
+  async deleteDevice(id: string): Promise<Device | null> {
+    return this.run(async () => {
+      const device = await this.api.deleteDevice(id);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`Archived ${device.name}.`);
+      return device;
+    });
+  }
+
+  /**
+   * Read-only — deliberately does **not** write `devicesSignal` (so Wall/Live and the default
+   * device list stay exactly as archived-free as they are today); this only backs the warehouse
+   * table's "show archived" toggle. Still funnelled through `run()` for the one-toast rule.
+   */
+  async listDevicesIncludingArchived(): Promise<Device[] | null> {
+    return this.run(() => this.api.listDevices(true));
+  }
+
   async start(deviceId: string, request: StartStreamRequest = {}): Promise<StartStreamResult | null> {
     return this.run(async () => {
       const result = await this.api.startStream(deviceId, request);
@@ -140,6 +193,95 @@ export class FleetStore {
       return true;
     });
     return result ?? false;
+  }
+
+  // --- Warehouse: asset lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) -----------------
+  // Same seam as `simulate`/`stopSimulation` above: assets aren't tracked by a `FleetStore`
+  // signal (the Devices page fetches them ad hoc, as it already did for the C4 wizard's
+  // simulated-asset chips), but every mutation here can change what `devicesSignal` should read
+  // (deleting an asset also archives its devices, per `AssetDeletion#devicesDeleted`), so each
+  // still refreshes devices/streams on success.
+
+  async updateAsset(id: string, edit: AssetEdit): Promise<AssetDetails | null> {
+    return this.run(async () => {
+      const asset = await this.api.updateAsset(id, edit);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`Updated ${asset.displayName}.`);
+      return asset;
+    });
+  }
+
+  /** `DEACTIVATED` on a `DELETED` asset is how the pinned contract spells "restore". */
+  async setAssetState(id: string, state: SettableLifecycleState): Promise<AssetDetails | null> {
+    return this.run(async () => {
+      const asset = await this.api.setAssetState(id, state);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`${asset.displayName} is now ${state.toLowerCase()}.`);
+      return asset;
+    });
+  }
+
+  /**
+   * Soft delete (archive) — the success toast names what survived (docs/CYCLES-PLAN.md §8: an
+   * archive confirmation must say what's retained, not just that the asset is gone).
+   */
+  async deleteAsset(id: string): Promise<AssetDeletionResponse | null> {
+    return this.run(async () => {
+      const result = await this.api.deleteAsset(id);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(
+        `Archived ${result.displayName} — ${result.devicesDeleted} device(s) archived, ` +
+          `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
+      );
+      return result;
+    });
+  }
+
+  /**
+   * Read-only — mirrors `listDevicesIncludingArchived`: backs the warehouse asset section's
+   * "show archived" toggle without touching any signal Wall/Live read from.
+   */
+  async listAssetsIncludingArchived(): Promise<AssetSummary[] | null> {
+    return this.run(() => this.api.listAssets(true));
+  }
+
+  /** Assigns an unowned device to an asset. A device-already-owned 409 gets a specific toast. */
+  async assignDevice(assetId: string, deviceId: string): Promise<AssetDetails | null> {
+    try {
+      const asset = await this.api.assignDevice(assetId, deviceId);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`Assigned the device to ${asset.displayName}.`);
+      return asset;
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 409) {
+        this.toasts.error('That device already belongs to another asset — unassign it there first.');
+      } else {
+        this.toasts.error(describeHttpError(error));
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Unassigns a device from an asset. The ≥1-device invariant's 409 gets its own explanation —
+   * `describeHttpError`'s generic conflict sentence doesn't know *why* (docs/CYCLES-PLAN.md §8).
+   */
+  async unassignDevice(assetId: string, deviceId: string): Promise<AssetDetails | null> {
+    try {
+      const asset = await this.api.unassignDevice(assetId, deviceId);
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`Unassigned the device from ${asset.displayName}.`);
+      return asset;
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 409) {
+        this.toasts.error(
+          "Can't unassign — every asset needs at least one device. Assign a replacement first.",
+        );
+      } else {
+        this.toasts.error(describeHttpError(error));
+      }
+      return null;
+    }
   }
 
   /**

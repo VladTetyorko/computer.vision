@@ -17,7 +17,7 @@ function summaryFor(assetId: string): AssetSummary {
     categoryName: 'Drone',
     owner: 'owner-0',
     status: 'STREAMING',
-    state: 'ACTIVE',
+    lifecycle: 'ACTIVE',
     attributes: {},
   };
 }

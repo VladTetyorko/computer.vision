@@ -23,7 +23,7 @@ function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
     categoryName: 'Drone',
     owner: 'owner-0',
     status: 'OFFLINE',
-    state: 'ACTIVE',
+    lifecycle: 'ACTIVE',
     attributes: {},
     ...partial,
   };

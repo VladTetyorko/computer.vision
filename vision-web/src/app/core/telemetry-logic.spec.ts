@@ -21,7 +21,7 @@ function asset(partial: Partial<AssetDetails>): AssetDetails {
     categoryName: 'Drone',
     owner: 'owner-0',
     status: 'OFFLINE',
-    state: 'ACTIVE',
+    lifecycle: 'ACTIVE',
     attributes: {},
     devices: [],
     recentUsages: [],
