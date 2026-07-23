@@ -14,6 +14,11 @@ Companion to [ARCHITECTURE.md](../ARCHITECTURE.md), [CYCLES-PLAN.md](CYCLES-PLAN
 
 Top-level nav becomes job-oriented: **Fly** (operator cockpit) · **Command** (manager dashboard) · **Assets** (warehouse, today's Devices page) · **Settings**. `/wall`, `/map`, `/live/:id` remain as routes but Command absorbs Wall+Map's job and Fly absorbs Live's; existing pages stay functional during the transition (no capability loss, links keep working). No auth yet (deferred since MVP2): Fly/Command are views, not permissions — MVP4 puts login/roles in front of them using the existing Ownership model.
 
+## Build rules (user directives 2026-07-23)
+
+- **Reuse-first is binding, not advisory:** C-b/C-c compose existing components (player, OSD/telemetry panels, LiveMap, flight-plan dialog, events store/rail, LiveDock, stream-info panel, replay route, PollScheduler, settings store). A new component is justified only when no existing one covers the job after actually reading it — each new component the task creates must be justified in the final report.
+- **Map tiles are cached after first load.** Today every map view re-fetches raster tiles from the network (only ephemeral browser HTTP cache in between). Requirement: tiles seen once render from local cache afterwards — surviving reloads, and degrading gracefully to the existing offline-grid fallback only for never-seen tiles. Implementation constraint that rules out the "obvious" answer: a service worker requires a secure context, and LAN viewers use plain `http://<ip>:8080` — so ngsw/SW-based caching would silently not work for exactly the field-ops users who need it most. Prefer an IndexedDB-backed tile layer in `ui/leaflet-loader.ts` (intercept tile load → serve blob from IndexedDB if present → else fetch, render, store; bounded cache with LRU/size cap ~200–500MB and per-layer keying incl. zoom; respect tile-server usage policies — cache, don't bulk-prefetch). Lands in C-b (shared `leaflet-loader` infra, so Fly/Command/replay/detail maps all inherit it).
+
 ## Cycles
 
 | Cycle | Kind | Ships | Scope | Status |
