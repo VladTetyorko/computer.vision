@@ -46,13 +46,13 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
 
     /**
      * Reasonable defaults for a new stream: the latest {@code "yolo"} model,
-     * a 0.4 confidence threshold, 5 FPS inference sampling, at most 2
+     * a 0.4 confidence threshold, 10 FPS inference sampling, at most 2
      * in-flight inference calls, telemetry overlay on, and no label
      * filtering (all labels kept).
      *
      * @return a default {@code PipelineConfig}
      */
     public static PipelineConfig defaults() {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 5, 2, true, Set.of());
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 10, 2, true, Set.of());
     }
 }

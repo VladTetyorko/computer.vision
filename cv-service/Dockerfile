@@ -25,23 +25,43 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the base package plus the `cv` extra (Ultralytics YOLO, which
-# transitively pulls in opencv-python). `ultralytics` also pulls `torch`
-# transitively; --extra-index-url is additive (pip still resolves everything
-# else from PyPI) and steers pip to the CPU-only PyTorch wheels so the image
-# doesn't balloon with CUDA libraries this CPU-first service never uses.
+# transitively pulls in opencv-python) plus `openvino` (the export/runtime
+# backend used ONLY in this image -- deliberately NOT added to the `cv`
+# extra in pyproject.toml, so local/dev installs stay on plain PyTorch `.pt`
+# weights; see cv-service/MODULE.md Gotchas). `ultralytics` also pulls
+# `torch` transitively; --extra-index-url is additive (pip still resolves
+# everything else from PyPI) and steers pip to the CPU-only PyTorch wheels
+# so the image doesn't balloon with CUDA libraries this CPU-first service
+# never uses.
 RUN pip install --no-cache-dir \
       --extra-index-url https://download.pytorch.org/whl/cpu \
-      -e ".[cv]" \
+      -e ".[cv]" openvino \
     && ./scripts/gen_proto.sh
 
-# Default model (overridable at runtime via CV_MODEL, see
-# cv_service/inference.py). Pre-downloaded here so the container needs no
-# network access at runtime -- if this ever bloats/flakes the build, drop
-# this RUN line and the server will download the weights lazily on first
-# use instead (same CV_MODEL env var), at the cost of first-request latency
-# and requiring network egress from the running container.
-ENV CV_MODEL=yolo11n.pt
-RUN python -c "import os; from ultralytics import YOLO; YOLO(os.environ['CV_MODEL'])"
+# Default model: download the PyTorch weights, then export to OpenVINO IR
+# (~2-3x faster CPU inference than plain PyTorch -- see cv_service/inference.py
+# CP-a). `yolo export` writes the IR to `<stem>_openvino_model/` in the
+# current directory (same download-to-cwd behavior as the plain YOLO() load
+# below); CV_MODEL then points at that directory, which `ultralytics.YOLO(...)`
+# loads transparently, same call shape as a `.pt` path.
+#
+# COUPLING (must not drift): an OpenVINO-exported model has a FIXED input
+# size baked in at export time. The `imgsz` passed to `yolo export` below
+# MUST equal the runtime CV_IMGSZ (cv_service/inference.py's DEFAULT_IMGSZ,
+# currently 416) -- if you change one, change both, or inference silently
+# runs against the wrong size. Local/dev (non-Docker) keeps the plain `.pt`
+# weights, which have no such fixed-size constraint.
+#
+# Baking both the `.pt` source and the exported IR into the image means the
+# container needs no network access at runtime. If this export step ever
+# proves unbuildable (network/size), drop the `yolo export` line and leave
+# CV_MODEL=yolo11n.pt to fall back to plain PyTorch inference -- the server
+# will still start and detect correctly, just slower.
+ENV CV_IMGSZ=416
+RUN python -c "import os; from ultralytics import YOLO; YOLO('yolo11n.pt')" \
+    && yolo export model=yolo11n.pt format=openvino imgsz=${CV_IMGSZ} \
+    && test -d yolo11n_openvino_model
+ENV CV_MODEL=yolo11n_openvino_model
 
 EXPOSE 50051
 

@@ -43,6 +43,16 @@ DEFAULT_MODEL = "yolo11n.pt"
 # for "unset") a confidence_threshold.
 DEFAULT_CONFIDENCE = 0.25
 
+# Inference input size (pixels, square), overridable via the CV_IMGSZ env
+# var. Ultralytics' own default is 640; 416 trades a little accuracy for
+# meaningfully faster CPU inference (see docs/CYCLES-PLAN.md CP-a). Must be a
+# multiple of 32 by Ultralytics convention (320 is a valid smaller choice) --
+# not enforced here, an odd value just gets passed through to `predict()`.
+# The Docker image exports an OpenVINO model with a FIXED input size baked in
+# at export time (see Dockerfile) -- that export imgsz MUST equal the
+# runtime CV_IMGSZ, or inference silently runs against the wrong size.
+DEFAULT_IMGSZ = 416
+
 
 class ModelUnavailableError(RuntimeError):
     """Raised when the YOLO backend could not be constructed.
@@ -102,6 +112,26 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _parse_imgsz(raw: str | None) -> int:
+    """Parse the `CV_IMGSZ` env var into a positive int, default on garbage.
+
+    Inference size is a performance knob, not something a missing/malformed
+    env var should be able to crash the service over -- unset, non-numeric,
+    or non-positive values all silently fall back to `DEFAULT_IMGSZ`.
+    """
+    if not raw:
+        return DEFAULT_IMGSZ
+    try:
+        value = int(raw)
+    except ValueError:
+        LOGGER.warning("CV_IMGSZ=%r is not a valid integer; using default %d", raw, DEFAULT_IMGSZ)
+        return DEFAULT_IMGSZ
+    if value <= 0:
+        LOGGER.warning("CV_IMGSZ=%r must be positive; using default %d", raw, DEFAULT_IMGSZ)
+        return DEFAULT_IMGSZ
+    return value
+
+
 def map_detections(result: Any, frame_width: int, frame_height: int) -> list[Detection]:
     """Map one Ultralytics `Results` object to normalized `Detection`s.
 
@@ -142,40 +172,68 @@ class YoloDetector:
     """Loads an Ultralytics YOLO model once and runs detection on frames.
 
     Construction is the only place that can raise `ModelUnavailableError`
-    (missing `ultralytics`, or the model/weights couldn't be loaded -- e.g.
-    offline with no cached weights). Once constructed, `detect()` runs
-    on-device (CPU by default; Ultralytics picks CUDA automatically if
-    available, but nothing here requires it).
+    (missing `ultralytics`, the model/weights couldn't be loaded -- e.g.
+    offline with no cached weights -- or the construction-time warmup
+    inference failed). Once constructed, `detect()` runs on-device (CPU by
+    default; Ultralytics picks CUDA automatically if available, but nothing
+    here requires it).
     """
 
     def __init__(self, model_name: str | None = None, *, model: Any = None) -> None:
         self._model_name = model_name or os.environ.get("CV_MODEL", DEFAULT_MODEL)
+        self._imgsz = _parse_imgsz(os.environ.get("CV_IMGSZ"))
 
         if model is not None:
             # Test seam: inject a fake model, skip ultralytics entirely.
             self._model = model
-            return
+        else:
+            try:
+                from ultralytics import YOLO
+            except ImportError as exc:
+                raise ModelUnavailableError(
+                    "ultralytics is not installed; install the 'cv' extra "
+                    "(pip install -e '.[cv]') to enable real inference"
+                ) from exc
 
-        try:
-            from ultralytics import YOLO
-        except ImportError as exc:
-            raise ModelUnavailableError(
-                "ultralytics is not installed; install the 'cv' extra "
-                "(pip install -e '.[cv]') to enable real inference"
-            ) from exc
+            try:
+                self._model = YOLO(self._model_name)
+            except Exception as exc:  # noqa: BLE001 - any load failure means "unavailable"
+                raise ModelUnavailableError(
+                    f"failed to load YOLO model {self._model_name!r}: {exc}"
+                ) from exc
 
-        try:
-            self._model = YOLO(self._model_name)
-        except Exception as exc:  # noqa: BLE001 - any load failure means "unavailable"
-            raise ModelUnavailableError(
-                f"failed to load YOLO model {self._model_name!r}: {exc}"
-            ) from exc
+            LOGGER.info("loaded YOLO model %r", self._model_name)
 
-        LOGGER.info("loaded YOLO model %r", self._model_name)
+        self._warmup()
 
     @property
     def model_name(self) -> str:
         return self._model_name
+
+    @property
+    def imgsz(self) -> int:
+        return self._imgsz
+
+    def _warmup(self) -> None:
+        """Run one dummy `predict()` at construction time.
+
+        Ultralytics pays a ~1s one-time warmup cost on its *first* predict
+        call; without this, that cost lands on the first real frame instead,
+        which risks tripping adapter-cv-grpc's 2s response timeout and
+        forcing an outage-backoff teardown right at stream start (see
+        docs/CYCLES-PLAN.md CP-a). Runs for injected `model=` doubles too --
+        tests assert on this construction-time call. A failure here is
+        treated the same as a load failure: `ModelUnavailableError`, which
+        server.py's caller degrades to the echo path instead of crashing.
+        """
+        warmup_frame = np.zeros((self._imgsz, self._imgsz, 3), dtype=np.uint8)
+        try:
+            self._model.predict(warmup_frame, imgsz=self._imgsz, verbose=False)
+        except Exception as exc:  # noqa: BLE001 - any warmup failure means "unavailable"
+            raise ModelUnavailableError(
+                f"warmup inference failed for model {self._model_name!r}: {exc}"
+            ) from exc
+        LOGGER.info("warmup inference complete for model %r (imgsz=%d)", self._model_name, self._imgsz)
 
     def detect(
         self,
@@ -191,7 +249,7 @@ class YoloDetector:
         conf = confidence_threshold if confidence_threshold else DEFAULT_CONFIDENCE
 
         start = time.monotonic()
-        results = self._model.predict(frame, conf=conf, verbose=False)
+        results = self._model.predict(frame, conf=conf, imgsz=self._imgsz, verbose=False)
         inference_millis = int(round((time.monotonic() - start) * 1000))
 
         frame_height, frame_width = frame.shape[0], frame.shape[1]

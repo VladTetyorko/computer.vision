@@ -19,3 +19,8 @@ dist/
 *.pt
 *.onnx
 *.engine
+
+# OpenVINO export output (`yolo export ... format=openvino`, see Dockerfile)
+# -- Docker-only by convention, but ignore it in case anyone runs the export
+# locally by hand.
+*_openvino_model/

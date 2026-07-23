@@ -19,9 +19,23 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.ClientCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.plugins.jpeg.JPEGImageWriteParam;
+import javax.imageio.stream.ImageOutputStream;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
@@ -71,6 +85,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   at all — the frame's stream is never opened/touched.</li>
  * </ul>
  *
+ * <h2>Payload shrinking for large BGR24 frames</h2>
+ * A {@link PixelFormat#BGR24} frame wider than {@value #MAX_DETECT_WIDTH}px
+ * (the full-resolution raw frames the RTSP/file RX path produces, e.g.
+ * 1280&times;720 at ~2.7&nbsp;MB uncompressed) is downscaled to
+ * {@value #MAX_DETECT_WIDTH}px wide (aspect preserved, integer height
+ * rounding) and JPEG-encoded before being sent, as
+ * {@code IMAGE_ENCODING_JPEG} with the scaled width/height. {@code JPEG}
+ * frames and {@code BGR24} frames already {@value #MAX_DETECT_WIDTH}px wide
+ * or narrower pass through byte-identical, exactly as before this existed.
+ * Detections come back with box coordinates normalized to {@code [0,1]} and
+ * are correlated purely by {@code sequence} — {@link DetectionResult} never
+ * references the source frame's pixel dimensions — so <b>no coordinate
+ * mapping back to the original resolution is needed or performed</b>; the
+ * correlation/pending-map/session/teardown machinery below is entirely
+ * unaffected by this and does not need to know it happens.
+ *
  * <h2>Stream lifecycle</h2>
  * There is no idle eviction. Callers that know a stream has ended should call
  * {@link #streamEnded(StreamId)} to fail any still-pending futures for it and
@@ -81,9 +111,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * supplied by the caller.
  *
  * <h2>Threading</h2>
- * Plain class, no Spring. {@link #detect} never blocks: building the request,
- * looking up/opening the stream, and sending it are all non-blocking; the
- * returned stage completes later, on a gRPC executor thread.
+ * Plain class, no Spring. Looking up/opening the stream and sending the
+ * request are non-blocking; the returned stage completes later, on a gRPC
+ * executor thread. <b>One nuance to the "never blocks" story</b>: when the
+ * payload-shrinking path above applies, the downscale-and-JPEG-encode step
+ * runs synchronously on the calling thread, inside {@link #detect}, before
+ * the request is even built — it is CPU-bound work (no I/O), bounded at
+ * roughly 15ms for a 720p frame, and it *replaces* serializing/transmitting
+ * several megabytes of raw pixel data with encoding and sending a couple
+ * hundred KB, so net caller-thread cost versus the pre-existing fast path is
+ * roughly flat rather than new added latency. A conversion failure (the
+ * encoder throwing) fails only that one frame's returned stage — the
+ * session, if one already exists for the stream, is never touched, exactly
+ * like the existing malformed-response handling in {@code onResponse}.
  */
 public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
@@ -91,6 +131,19 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
     /** Per-pending-future response timeout — see class javadoc's "hung service" case. */
     static final long RESPONSE_TIMEOUT_SECONDS = 2;
+
+    /**
+     * Widest a {@link PixelFormat#BGR24} frame may be before it is
+     * downscaled and JPEG-encoded instead of sent raw — see class javadoc's
+     * "Payload shrinking" section. Package-private, adapter-internal (not a
+     * {@code PipelineConfig} knob): it tunes the wire payload, not detection
+     * behavior, and {@code cv-service}'s own inference input size
+     * (`CV_IMGSZ`, see `cv-service/MODULE.md`) is independent of it.
+     */
+    static final int MAX_DETECT_WIDTH = 640;
+
+    /** JPEG quality passed to the encoder for the downscale path above; ~0.8 balances size vs. detail. */
+    private static final float JPEG_QUALITY = 0.8f;
 
     private static final long CHANNEL_SHUTDOWN_TIMEOUT_SECONDS = 5;
 
@@ -133,8 +186,18 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
                     "Unsupported PixelFormat for gRPC inference: " + frame.format()));
         }
 
+        FrameRequest request;
+        try {
+            request = buildRequest(frame, config, encoding);
+        } catch (IOException | RuntimeException e) {
+            // Conversion (downscale/JPEG-encode) failure: fails only this frame's stage, exactly
+            // like a malformed response does for one pending future -- no session is created or
+            // touched here, so an already-open session for this stream (if any) is unaffected.
+            return CompletableFuture.failedFuture(e);
+        }
+
         StreamSession session = sessions.computeIfAbsent(frame.streamId(), StreamSession::new);
-        return session.send(frame, config, encoding);
+        return session.send(frame.sequence(), request);
     }
 
     /**
@@ -183,19 +246,95 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
         };
     }
 
-    private static FrameRequest buildRequest(VideoFrame frame, PipelineConfig config, ImageEncoding encoding) {
-        return FrameRequest.newBuilder()
+    /**
+     * Builds the wire request, downscaling+JPEG-re-encoding a {@code BGR24}
+     * frame wider than {@value #MAX_DETECT_WIDTH}px first (see class
+     * javadoc's "Payload shrinking" section). Everything else passes through
+     * unchanged. Runs synchronously on the caller thread.
+     *
+     * @throws IOException if the JPEG encoder fails (see {@link #encodeJpeg})
+     */
+    private static FrameRequest buildRequest(VideoFrame frame, PipelineConfig config, ImageEncoding encoding)
+            throws IOException {
+        FrameRequest.Builder builder = FrameRequest.newBuilder()
                 .setStreamId(frame.streamId().value().toString())
                 .setSequence(frame.sequence())
                 .setTimestampMillis(frame.capturedAt().toEpochMilli())
+                .setModelId(config.model().id())
+                .setModelVersion(config.model().version())
+                .setConfidenceThreshold((float) config.confidenceThreshold());
+
+        if (encoding == ImageEncoding.IMAGE_ENCODING_BGR24 && frame.width() > MAX_DETECT_WIDTH) {
+            return withDownscaledJpeg(builder, frame);
+        }
+
+        return builder
                 .setWidth(frame.width())
                 .setHeight(frame.height())
                 .setEncoding(encoding)
                 .setData(ByteString.copyFrom(frame.data()))
-                .setModelId(config.model().id())
-                .setModelVersion(config.model().version())
-                .setConfidenceThreshold((float) config.confidenceThreshold())
                 .build();
+    }
+
+    private static FrameRequest withDownscaledJpeg(FrameRequest.Builder builder, VideoFrame frame)
+            throws IOException {
+        int scaledWidth = MAX_DETECT_WIDTH;
+        int scaledHeight = Math.round((float) frame.height() * MAX_DETECT_WIDTH / frame.width());
+
+        BufferedImage source = wrapBgr24(frame.width(), frame.height(), frame.data());
+        BufferedImage scaled = new BufferedImage(scaledWidth, scaledHeight, BufferedImage.TYPE_3BYTE_BGR);
+        Graphics2D g = scaled.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(source, 0, 0, scaledWidth, scaledHeight, null);
+        } finally {
+            g.dispose();
+        }
+
+        byte[] jpeg = encodeJpeg(scaled);
+        return builder
+                .setWidth(scaledWidth)
+                .setHeight(scaledHeight)
+                .setEncoding(ImageEncoding.IMAGE_ENCODING_JPEG)
+                .setData(ByteString.copyFrom(jpeg))
+                .build();
+    }
+
+    /**
+     * Copies raw {@code BGR24} bytes into a fresh {@link BufferedImage#TYPE_3BYTE_BGR}'s
+     * backing array — the same packed-BGR-no-padding layout that format
+     * already carries, so this is a straight bulk copy, no per-pixel
+     * reordering. Same idiom as {@code adapter-overlay}'s
+     * {@code Java2DOverlayRenderer.renderBgr24}.
+     */
+    private static BufferedImage wrapBgr24(int width, int height, ByteBuffer data) {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_3BYTE_BGR);
+        byte[] pixels = ((DataBufferByte) image.getRaster().getDataBuffer()).getData();
+        data.get(pixels);
+        return image;
+    }
+
+    /** Encodes {@code image} as a JPEG at {@value #JPEG_QUALITY} quality via an explicit ImageWriter. */
+    private static byte[] encodeJpeg(BufferedImage image) throws IOException {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
+        if (!writers.hasNext()) {
+            throw new IOException("No JPEG ImageWriter available on this JVM");
+        }
+        ImageWriter writer = writers.next();
+        try {
+            JPEGImageWriteParam param = new JPEGImageWriteParam(null);
+            param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            param.setCompressionQuality(JPEG_QUALITY);
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            try (ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {
+                writer.setOutput(ios);
+                writer.write(null, new IIOImage(image, null, null), param);
+            }
+            return out.toByteArray();
+        } finally {
+            writer.dispose();
+        }
     }
 
     private static DetectionResult toDetectionResult(StreamId streamId, DetectionResponse response) {
@@ -246,8 +385,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
             this.streamId = streamId;
         }
 
-        CompletionStage<DetectionResult> send(VideoFrame frame, PipelineConfig config, ImageEncoding encoding) {
-            long sequence = frame.sequence();
+        CompletionStage<DetectionResult> send(long sequence, FrameRequest request) {
             CompletableFuture<DetectionResult> future = new CompletableFuture<>();
             pending.put(sequence, future);
             future.orTimeout(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -258,7 +396,6 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
                 }
             });
 
-            FrameRequest request = buildRequest(frame, config, encoding);
             synchronized (writeLock) {
                 try {
                     openIfNeeded().onNext(request);

@@ -8,6 +8,7 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
+import com.drones.vision.proto.v1.ImageEncoding;
 import com.drones.vision.proto.v1.InferenceGrpc;
 import io.grpc.BindableService;
 import io.grpc.ManagedChannel;
@@ -21,8 +22,12 @@ import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +35,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,6 +50,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -370,6 +377,92 @@ class GrpcDetectionPortTest {
         }
     }
 
+    @Test
+    void detectDownscalesWideBgr24FrameToJpegAtMaxDetectWidth() throws Exception {
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+        int width = 1280;
+        int height = 720;
+        byte[] pixels = new byte[width * height * 3];
+        new Random(1).nextBytes(pixels);
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                width, height, PixelFormat.BGR24, ByteBuffer.wrap(pixels));
+
+        port.detect(frame, PipelineConfig.defaults()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        FrameRequest sent = servicer.received.get(0L);
+        int expectedHeight = Math.round((float) height * GrpcDetectionPort.MAX_DETECT_WIDTH / width);
+        assertEquals(ImageEncoding.IMAGE_ENCODING_JPEG, sent.getEncoding());
+        assertEquals(GrpcDetectionPort.MAX_DETECT_WIDTH, sent.getWidth());
+        assertEquals(expectedHeight, sent.getHeight());
+
+        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(sent.getData().toByteArray()));
+        assertEquals(GrpcDetectionPort.MAX_DETECT_WIDTH, decoded.getWidth(), "captured JPEG must decode to the scaled width");
+        assertEquals(expectedHeight, decoded.getHeight(), "captured JPEG must decode to the scaled height");
+    }
+
+    @Test
+    void detectPassesBgr24FrameAtMaxDetectWidthThroughByteIdentical() throws Exception {
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+        int width = GrpcDetectionPort.MAX_DETECT_WIDTH; // exactly at the threshold -- not downscaled (only ">" triggers it)
+        int height = 480;
+        byte[] pixels = new byte[width * height * 3];
+        new Random(2).nextBytes(pixels);
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                width, height, PixelFormat.BGR24, ByteBuffer.wrap(pixels));
+
+        port.detect(frame, PipelineConfig.defaults()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        FrameRequest sent = servicer.received.get(0L);
+        assertEquals(ImageEncoding.IMAGE_ENCODING_BGR24, sent.getEncoding());
+        assertEquals(width, sent.getWidth());
+        assertEquals(height, sent.getHeight());
+        assertArrayEquals(pixels, sent.getData().toByteArray());
+    }
+
+    @Test
+    void detectPassesJpegFrameThroughByteIdentical() throws Exception {
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+        byte[] jpegBytes = {(byte) 0xFF, (byte) 0xD8, 1, 2, 3, 4, 5, (byte) 0xFF, (byte) 0xD9};
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                640, 480, PixelFormat.JPEG, ByteBuffer.wrap(jpegBytes));
+
+        port.detect(frame, PipelineConfig.defaults()).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        FrameRequest sent = servicer.received.get(0L);
+        assertEquals(ImageEncoding.IMAGE_ENCODING_JPEG, sent.getEncoding());
+        assertArrayEquals(jpegBytes, sent.getData().toByteArray());
+    }
+
+    @Test
+    void detectConversionFailureFailsOnlyThatFrameAndSubsequentGoodFrameOnSameStreamSucceeds() throws Exception {
+        GrpcDetectionPort port = newPort(new EchoServicer());
+        StreamId streamId = StreamId.random();
+        PipelineConfig config = PipelineConfig.defaults();
+
+        // Wide enough to trigger the downscale path, but with far too little data to fill
+        // width*height*3 bytes -- wrapBgr24's bulk ByteBuffer#get(byte[]) throws
+        // BufferUnderflowException, which buildRequest's catch turns into a failed frame stage
+        // *before* any StreamSession is created for this stream.
+        VideoFrame badFrame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
+                1280, 720, PixelFormat.BGR24, ByteBuffer.wrap(new byte[]{1, 2, 3, 4}));
+
+        CompletionStage<DetectionResult> failed = port.detect(badFrame, config);
+        ExecutionException ex = assertThrows(ExecutionException.class,
+                () -> failed.toCompletableFuture().get(1, TimeUnit.SECONDS));
+        assertInstanceOf(BufferUnderflowException.class, ex.getCause());
+
+        // No session was ever created for the failed frame, so this opens a fresh one and succeeds.
+        DetectionResult recovered = port.detect(frame(streamId, 1, PixelFormat.BGR24), config)
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertEquals(1L, recovered.frameSequence());
+    }
+
     // -- test servicers -------------------------------------------------
 
     /** Echoes stream/sequence/timestamp/model back with an empty detections list. */
@@ -426,6 +519,38 @@ class GrpcDetectionPortTest {
                             .setModelVersion("v3")
                             .addDetections(detection)
                             .setInferenceMillis(42)
+                            .build());
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // test double: nothing to clean up
+                }
+
+                @Override
+                public void onCompleted() {
+                    responseObserver.onCompleted();
+                }
+            };
+        }
+    }
+
+    /** Echoes back like {@link EchoServicer}, but also records the exact wire request it received, by sequence. */
+    private static final class CapturingServicer extends InferenceGrpc.InferenceImplBase {
+        final Map<Long, FrameRequest> received = new ConcurrentHashMap<>();
+
+        @Override
+        public StreamObserver<FrameRequest> detectStream(StreamObserver<DetectionResponse> responseObserver) {
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(FrameRequest request) {
+                    received.put(request.getSequence(), request);
+                    responseObserver.onNext(DetectionResponse.newBuilder()
+                            .setStreamId(request.getStreamId())
+                            .setSequence(request.getSequence())
+                            .setTimestampMillis(request.getTimestampMillis())
+                            .setModelId(request.getModelId())
+                            .setModelVersion(request.getModelVersion())
                             .build());
                 }
 

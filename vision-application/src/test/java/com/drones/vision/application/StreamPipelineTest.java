@@ -80,8 +80,19 @@ class StreamPipelineTest {
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
     }
 
+    private VideoFrame frameAt(long sequence, Instant capturedAt) {
+        return new VideoFrame(streamId, sequence, capturedAt, 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+    }
+
     private DetectionResult emptyResult(long sequence) {
         return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO);
+    }
+
+    private DetectionResult resultWithBoxX(long sequence, Instant capturedAt, double boxX) {
+        Detection detection = new Detection("person", 0.9, new BoundingBox(boxX, 0.10, 0.20, 0.20),
+                new ModelRef("yolo", "latest"));
+        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5));
     }
 
     private DetectionResult nonEmptyResult(long sequence) {
@@ -578,6 +589,96 @@ class StreamPipelineTest {
         // only the WARNING log is throttled to once per failure run via an internal latch, not
         // observed directly here since this suite doesn't assert on System.Logger output anywhere.
         verify(overlayPort, times(2)).render(any());
+    }
+
+    @Test
+    void overlayReceivesRawSingleResultDetectionsUnchangedWhenOnlyOneResultHasCompleted() {
+        // docs/CYCLES-PLAN.md §12 CP-c: with only one completed result (no "previous" yet), the
+        // DetectionExtrapolator passes it through as-is -- overlay behavior is unchanged from
+        // before the extrapolator existed.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99);
+        when(overlayPort.render(any())).thenReturn(rendered);
+
+        pipeline(publisher, config(1000, 5), overlayPort).start();
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort).render(captor.capture());
+        assertEquals(result.detections(), captor.getValue().detections());
+    }
+
+    @Test
+    void overlayExtrapolatesTheMatchedBoxBetweenTwoCompletedResultsInsteadOfFreezingAtTheLatestRawPosition() {
+        // docs/CYCLES-PLAN.md §12 CP-c: once a second result completes, the overlay for a
+        // subsequently-published frame shows a box moved along the measured velocity toward that
+        // frame's own capture time, not L's raw (now-stale) box position.
+        Instant t0 = Instant.parse("2024-01-01T00:00:00Z");
+        VideoFrame f0 = frameAt(0, t0);
+        VideoFrame f1 = frameAt(1, t0.plusMillis(100));
+        VideoFrame f2 = frameAt(2, t0.plusMillis(150));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1, f2));
+        DetectionResult previousResult = resultWithBoxX(0, t0, 0.10); // box center x = 0.20
+        DetectionResult latestResult = resultWithBoxX(1, t0.plusMillis(100), 0.14); // box center x = 0.24
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(previousResult))
+                .thenReturn(CompletableFuture.completedFuture(latestResult))
+                .thenReturn(CompletableFuture.completedFuture(latestResult)); // f2's own detect(): irrelevant here
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99);
+        when(overlayPort.render(any())).thenReturn(rendered);
+
+        pipeline(publisher, config(1000, 5), overlayPort).start();
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort, atLeastOnce()).render(captor.capture());
+        AnnotatedFrame forF2 = captor.getAllValues().stream()
+                .filter(annotated -> annotated.frame() == f2)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("overlay was never rendered for f2"));
+
+        // velocity = (0.24 - 0.20) / 0.1s = 0.4 units/s; 50ms past L -> center x + 0.02 -> box x = 0.16,
+        // strictly between L's raw box x (0.14) and a naive full-step continuation.
+        assertEquals(1, forF2.detections().size());
+        assertEquals(0.16, forF2.detections().get(0).box().x(), 1e-9);
+    }
+
+    @Test
+    void overlayFreezesExtrapolationAtTheCapForAFrameFarPastTheLatestResult() {
+        // docs/CYCLES-PLAN.md §12 CP-c: a frame published long after L (e.g. a stalled/outaged
+        // detector) must not run the box off screen -- extrapolation freezes at
+        // DetectionExtrapolator.MAX_EXTRAPOLATION_MILLIS past L's capture time.
+        Instant t0 = Instant.parse("2024-01-01T00:00:00Z");
+        VideoFrame f0 = frameAt(0, t0);
+        VideoFrame f1 = frameAt(1, t0.plusMillis(100));
+        VideoFrame f2 = frameAt(2, t0.plusSeconds(30)); // far beyond L.capturedAt + 800ms
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1, f2));
+        DetectionResult previousResult = resultWithBoxX(0, t0, 0.10); // box center x = 0.20
+        DetectionResult latestResult = resultWithBoxX(1, t0.plusMillis(100), 0.14); // box center x = 0.24
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(previousResult))
+                .thenReturn(CompletableFuture.completedFuture(latestResult))
+                .thenReturn(CompletableFuture.completedFuture(latestResult));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99);
+        when(overlayPort.render(any())).thenReturn(rendered);
+
+        pipeline(publisher, config(1000, 5), overlayPort).start();
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort, atLeastOnce()).render(captor.capture());
+        AnnotatedFrame forF2 = captor.getAllValues().stream()
+                .filter(annotated -> annotated.frame() == f2)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("overlay was never rendered for f2"));
+
+        // velocity 0.4 units/s, capped at 800ms past L -> center x + 0.32 -> box x = 0.46.
+        assertEquals(1, forF2.detections().size());
+        assertEquals(0.46, forF2.detections().get(0).box().x(), 1e-9);
     }
 
     /**

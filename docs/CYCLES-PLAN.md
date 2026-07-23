@@ -228,6 +228,9 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | CU-b | **UI** | fast & simple + map upgrades | §9, after C8 | pending |
 | CD-a | backend | telemetry deviceId in API | §11 | ✅ done |
 | CD-b | **UI** | asset-first Devices + detail page + self-recovering player | §11 | pending |
+| CP-a | backend | faster CPU inference (imgsz, warmup, OpenVINO image) | §12, cv-service | ✅ done |
+| CP-b | backend | downscale+JPEG detection payload | §12, adapter-cv-grpc | ✅ done |
+| CP-c | backend | inferenceFps 10 + box extrapolation | §12, vision-domain+application | ✅ done |
 
 C7–C9 execute **[MVP1-PLAN.md](MVP1-PLAN.md)** — the priority target ("the friends demo": simultaneous multi-protocol sources + map + live CV). Post-MVP candidates: WEB-PLAN W6 leftovers + W7 hardening (Playwright smoke in CI, keyboard, responsive); flight replay; MAVLink telemetry RX; geolocated detections on the map.
 
@@ -256,3 +259,42 @@ This is exactly the Asset model the domain already has (`Asset` = the user's "de
 **Estimate: CD-a S; CD-b L (one vision-web task; runs after CU-b or merged with it if scheduling allows — same module, no parallelism).**
 
 Map right-rail device list + left layer control are already CU-b items 5–6 — CD adds nothing map-side beyond the rail listing **all** assets (not only unpositioned ones).
+
+---
+
+## 12. CP — CV latency & box smoothness *(user-found issue, 2026-07-23)*
+
+User-observed: with live YOLO running, **bounding boxes stand still while the picture moves** — objects visibly walk out of their boxes. Diagnosis (verified against the code):
+
+- `StreamPipeline` burns `latestDetections()` — the most recently *completed* inference — onto every published frame. Each box is therefore as stale as the whole detection chain: sampling interval (`inferenceFps=5` default → up to 200 ms) **+** inference latency (`cv-service` runs YOLO11n in PyTorch on CPU at the default 640 px input with a bare `model.predict(frame, conf=…, verbose=False)` — typically 150–400 ms/frame) **+** transport.
+- `DetectStream` in `server.py` is a serial `for request in request_iterator: … yield` loop — one inference at a time per stream, so `maxInFlightInferences=2` only pipelines; effective detection rate ≈ 1/latency ≈ 2–4 Hz.
+- First `predict()` includes ~1 s Ultralytics warmup; adapter-cv-grpc's response timeout is 2 s, so a slow warmup can trip timeout → session teardown → outage backoff (1 s→10 s) — boxes *freeze entirely* right at stream start.
+- The RTSP/file RX path (`FfmpegVideoSource`) produces full-resolution raw `BGR24` frames; a sampled 720p frame is ~2.7 MB over gRPC plus a full-res decode/letterbox in Python.
+
+Fix in three **disjoint, parallel** backend tasks. Targets: single-frame CPU inference < 100 ms, detection updates ≥ 8 Hz, no start-of-stream freeze, and boxes that *track* between updates.
+
+### CP-a — cv-service: faster single-frame inference *(scope: `cv-service/` only)*
+
+1. **Inference size**: `YoloDetector` gains an `imgsz` (int) — from `CV_IMGSZ` env, default **416** (must be a multiple of 32; 320 is a valid user choice). Passed as `imgsz=` to every `model.predict(...)` call. Normalization is unaffected (Ultralytics rescales `xyxy` back to the input frame — already documented in `map_detections`).
+2. **Warmup at construction**: after loading the model, `YoloDetector.__init__` runs one dummy `predict` on a black `np.zeros((imgsz, imgsz, 3), dtype=np.uint8)` frame so the first *real* frame never pays the ~1 s warmup (which risks the Java side's 2 s timeout → outage backoff). A warmup failure raises `ModelUnavailableError` (→ echo fallback path, service never crash-loops). Applies to injected `model=` doubles too — tests assert the construction-time call and its `imgsz` kwarg.
+3. **OpenVINO backend in Docker**: Dockerfile exports at build time (`yolo export model=yolo11n.pt format=openvino imgsz=416` → `yolo11n_openvino_model/`) and sets `CV_MODEL` to the exported dir (`YOLO(...)` loads it transparently; ~2–3× on Intel CPUs vs PyTorch). Pin `openvino` in the image. **Exported models have a fixed input size — the export `imgsz` must equal the runtime `CV_IMGSZ`** (document in Dockerfile + MODULE.md). Local/dev runs keep `.pt` — no new mandatory dep in the `cv` extra. If the export step proves unbuildable (network/size), fall back to `.pt` in the image and report the deviation.
+4. Unit tests: `imgsz` kwarg reaches `predict`, `CV_IMGSZ` parsing (default/override/garbage→default), warmup call + warmup-failure → `ModelUnavailableError`. Verify the Docker image builds if docker is available.
+
+### CP-b — adapter-cv-grpc: shrink the detection payload *(scope: `adapters/adapter-cv-grpc/` only)*
+
+1. In `GrpcDetectionPort.detect`, before building the `FrameRequest`: a `BGR24` frame **wider than `MAX_DETECT_WIDTH=640`** (package-private constant) is downscaled to width 640 (aspect preserved) via Java2D (`TYPE_3BYTE_BGR` raster wrap → scaled draw) and JPEG-encoded (`ImageIO`, quality ~0.8), sent as `IMAGE_ENCODING_JPEG` with the scaled dimensions. Boxes are normalized `[0,1]` and `DetectionResult` references the source frame only by `(streamId, sequence, capturedAt)` — **no coordinate mapping back is needed**; the correlation/pending bookkeeping keyed by `sequence` is untouched.
+2. `JPEG` frames and small (≤640-wide) `BGR24` frames pass through exactly as today. Unsupported formats: unchanged fast-fail.
+3. Conversion runs synchronously on the caller thread — it *replaces* serializing ~2.7 MB of raw bytes with a ~15 ms encode of ~0.2 MB, so net caller-thread cost is roughly flat; note this against the "never blocks" wording in the class javadoc + MODULE.md.
+4. Tests (in-process server capture): 1280×720 `BGR24` → received request is JPEG, 640×360, decodable to those dimensions; 640-wide `BGR24` passes through as `BGR24`; JPEG passthrough byte-identical; failure semantics unchanged.
+
+### CP-c — smoother boxes + faster sampling *(scope: `vision-domain/` + `vision-application/`)*
+
+1. **`PipelineConfig.defaults()`: `inferenceFps` 5 → 10** (javadoc + tests; API DTOs merge explicit overrides onto defaults, so no api/app source change).
+2. **New `DetectionExtrapolator` (vision-application, package-private is fine)** — makes burned-in boxes *track* between detections instead of jumping. Framework-free, fully unit-testable:
+   - Keeps the two most recent results, previous `P` and latest `L` (`accept(DetectionResult)`; a result with `frameSequence` ≤ `L`'s is ignored — completions can land out of order).
+   - `List<Detection> at(Instant t)`: with only `L`, return `L.detections()` as-is. With `P` and `L`: match `L`'s detections to `P`'s greedily — same `label`, nearest box-center, gated at center distance ≤ **0.15** (normalized). Matched: velocity = Δcenter / (`L.capturedAt` − `P.capturedAt`), extrapolate the center to `t`, **capping the horizon at `MAX_EXTRAPOLATION_MILLIS=800` past `L.capturedAt`**; keep `L`'s box size; clamp so the resulting `BoundingBox` stays within its `[0,1]` invariants. Unmatched `L` detections: returned as-is. `P`-only detections: dropped. Beyond the cap (stale/outage): return `L.detections()` frozen — current behavior, no regression.
+   - Thread-safety: `accept`/`at` are `synchronized` (calls are per-sampled-frame and per-publish, never hot).
+3. **Wire into `StreamPipeline`**: every completed detection feeds `extrapolator.accept(result)`; `overlayIfNeeded` renders `extrapolator.at(frame.capturedAt())` instead of raw `latestDetections()` — same source-timestamp timebase as `DetectionResult.capturedAt`, no wall-clock mixing. `latestDetections()` (REST surface) keeps returning the raw latest result. No new config knob.
+4. Tests: extrapolator (matching, velocity math, gate, cap, clamp, single-result, out-of-order, empty-latest) + `StreamPipelineTest` additions (overlay receives extrapolated list; raw-when-single-result; frozen-past-cap).
+
+**Estimate: CP-a S–M; CP-b S; CP-c M. All three disjoint → run in parallel; integration verify (vision-app scoped tests + compose demo) after all land.** Not in scope (post-cycle candidates): parallel per-stream inference in `server.py`, GPU, client-side vector overlay (CD-b item 6 already covers that).

@@ -17,7 +17,7 @@ class PipelineConfigTest {
 
         assertEquals(new ModelRef("yolo", "latest"), defaults.model());
         assertEquals(0.4, defaults.confidenceThreshold());
-        assertEquals(5, defaults.inferenceFps());
+        assertEquals(10, defaults.inferenceFps());
         assertEquals(2, defaults.maxInFlightInferences());
         assertTrue(defaults.overlayTelemetry());
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");

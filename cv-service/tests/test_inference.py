@@ -17,6 +17,7 @@ import pytest
 
 from cv_service.inference import (
     DEFAULT_CONFIDENCE,
+    DEFAULT_IMGSZ,
     ENCODING_BGR24,
     ENCODING_JPEG,
     ModelUnavailableError,
@@ -40,15 +41,24 @@ class FakeResult:
 
 
 class FakeModel:
-    """Stand-in for `ultralytics.YOLO`: records calls, returns a fixed result."""
+    """Stand-in for `ultralytics.YOLO`: records calls, returns a fixed result.
+
+    `predict()` is called once at construction time too (warmup, see
+    `YoloDetector._warmup`) -- `calls[0]` is always the warmup call, real
+    `detect()` calls follow it.
+    """
 
     def __init__(self, result):
         self._result = result
         self.calls: list[dict] = []
 
-    def predict(self, frame, conf=None, verbose=None):
-        self.calls.append({"frame": frame, "conf": conf, "verbose": verbose})
+    def predict(self, frame, conf=None, imgsz=None, verbose=None):
+        self.calls.append({"frame": frame, "conf": conf, "imgsz": imgsz, "verbose": verbose})
         return [self._result]
+
+
+def _empty_fake_model() -> FakeModel:
+    return FakeModel(FakeResult(boxes=FakeBoxes(xyxy=[], conf=[], cls=[]), names={}))
 
 
 # --- decode_frame ------------------------------------------------------
@@ -169,7 +179,8 @@ def test_yolo_detector_detect_with_injected_model(bgr_frame):
     assert detections[0].label == "car"
     assert isinstance(inference_millis, int)
     assert inference_millis >= 0
-    assert fake_model.calls[0]["conf"] == DEFAULT_CONFIDENCE
+    # calls[0] is the construction-time warmup call; calls[-1] is this detect().
+    assert fake_model.calls[-1]["conf"] == DEFAULT_CONFIDENCE
 
 
 def test_yolo_detector_uses_explicit_confidence_threshold(bgr_frame):
@@ -186,7 +197,7 @@ def test_yolo_detector_uses_explicit_confidence_threshold(bgr_frame):
         confidence_threshold=0.7,
     )
 
-    assert fake_model.calls[0]["conf"] == pytest.approx(0.7)
+    assert fake_model.calls[-1]["conf"] == pytest.approx(0.7)
 
 
 def test_yolo_detector_zero_confidence_threshold_uses_default(bgr_frame):
@@ -203,7 +214,7 @@ def test_yolo_detector_zero_confidence_threshold_uses_default(bgr_frame):
         confidence_threshold=0.0,
     )
 
-    assert fake_model.calls[0]["conf"] == DEFAULT_CONFIDENCE
+    assert fake_model.calls[-1]["conf"] == DEFAULT_CONFIDENCE
 
 
 def test_yolo_detector_missing_ultralytics_raises_model_unavailable(monkeypatch):
@@ -224,3 +235,73 @@ def test_yolo_detector_model_load_failure_raises_model_unavailable(monkeypatch):
 
     with pytest.raises(ModelUnavailableError, match="failed to load YOLO model"):
         YoloDetector(model_name="yolo11n.pt")
+
+
+# --- imgsz / CV_IMGSZ -----------------------------------------------------
+
+
+def test_detect_passes_imgsz_kwarg_to_predict(bgr_frame, monkeypatch):
+    monkeypatch.delenv("CV_IMGSZ", raising=False)
+    fake_model = _empty_fake_model()
+    detector = YoloDetector(model_name="fake-model", model=fake_model)
+
+    detector.detect(width=4, height=3, encoding=ENCODING_BGR24, data=bgr_frame.tobytes())
+
+    assert fake_model.calls[-1]["imgsz"] == DEFAULT_IMGSZ
+
+
+def test_cv_imgsz_defaults_when_unset(monkeypatch):
+    monkeypatch.delenv("CV_IMGSZ", raising=False)
+    detector = YoloDetector(model_name="fake-model", model=_empty_fake_model())
+
+    assert detector.imgsz == DEFAULT_IMGSZ
+
+
+def test_cv_imgsz_honors_override(monkeypatch):
+    monkeypatch.setenv("CV_IMGSZ", "320")
+    detector = YoloDetector(model_name="fake-model", model=_empty_fake_model())
+
+    assert detector.imgsz == 320
+
+
+@pytest.mark.parametrize("garbage", ["not-a-number", "0", "-32", "  "])
+def test_cv_imgsz_garbage_falls_back_to_default(monkeypatch, garbage):
+    monkeypatch.setenv("CV_IMGSZ", garbage)
+    detector = YoloDetector(model_name="fake-model", model=_empty_fake_model())
+
+    assert detector.imgsz == DEFAULT_IMGSZ
+
+
+# --- warmup ----------------------------------------------------------------
+
+
+def test_warmup_runs_at_construction_with_configured_imgsz(monkeypatch):
+    monkeypatch.setenv("CV_IMGSZ", "320")
+    fake_model = _empty_fake_model()
+
+    YoloDetector(model_name="fake-model", model=fake_model)
+
+    assert len(fake_model.calls) == 1
+    warmup_call = fake_model.calls[0]
+    assert warmup_call["imgsz"] == 320
+    assert warmup_call["frame"].shape == (320, 320, 3)
+    assert warmup_call["frame"].dtype == np.uint8
+    assert not warmup_call["frame"].any()  # black (all-zero) frame
+
+
+def test_warmup_uses_default_imgsz_when_env_unset(monkeypatch):
+    monkeypatch.delenv("CV_IMGSZ", raising=False)
+    fake_model = _empty_fake_model()
+
+    YoloDetector(model_name="fake-model", model=fake_model)
+
+    assert fake_model.calls[0]["frame"].shape == (DEFAULT_IMGSZ, DEFAULT_IMGSZ, 3)
+
+
+def test_warmup_failure_raises_model_unavailable():
+    class BoomingModel:
+        def predict(self, *_args, **_kwargs):
+            raise RuntimeError("warmup exploded")
+
+    with pytest.raises(ModelUnavailableError, match="warmup inference failed"):
+        YoloDetector(model_name="fake-model", model=BoomingModel())

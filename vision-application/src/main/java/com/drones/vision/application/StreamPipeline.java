@@ -45,17 +45,24 @@ import java.util.function.LongSupplier;
  *       regardless of whether it is sampled for inference, and regardless of
  *       whether a detection outage (see below) is in progress — the video
  *       path never depends on the CV service being healthy.</li>
- *   <li><b>Overlay burn-in</b> (docs/MVP1-PLAN.md §C8): when an {@link
- *       OverlayPort} is configured (constructor argument, nullable — {@code
- *       null} keeps today's raw-publish behavior everywhere) and the latest
- *       completed detection result ({@link #latestDetections()}) is
- *       non-empty, each frame is rendered through {@link OverlayPort#render}
- *       — as an {@link AnnotatedFrame} carrying {@code latestDetections()}
- *       and a {@code null} telemetry sample, since this pipeline has no
- *       telemetry input yet — before being published; {@link
- *       PipelineConfig#overlayTelemetry()}'s telemetry-OSD gate cannot
- *       activate until a later task plumbs a telemetry input into this
- *       class, so today only detections-only burn-in ships. Without an
+ *   <li><b>Overlay burn-in</b> (docs/MVP1-PLAN.md §C8, smoothed per
+ *       docs/CYCLES-PLAN.md §12 CP-c): when an {@link OverlayPort} is
+ *       configured (constructor argument, nullable — {@code null} keeps
+ *       today's raw-publish behavior everywhere) and {@link
+ *       #extrapolator}'s boxes at this frame's capture time are non-empty,
+ *       each frame is rendered through {@link OverlayPort#render} — as an
+ *       {@link AnnotatedFrame} carrying the extrapolated detections and a
+ *       {@code null} telemetry sample, since this pipeline has no telemetry
+ *       input yet — before being published. The extrapolator tracks the two
+ *       most recently completed results and, between them, moves each
+ *       matched box toward where it is predicted to be at the publishing
+ *       frame's timestamp instead of freezing it at its last detected
+ *       position — see {@link DetectionExtrapolator} for the matching/
+ *       velocity/cap details; {@link #latestDetections()} (the REST-facing
+ *       surface) is unaffected, it always returns the raw latest result.
+ *       {@link PipelineConfig#overlayTelemetry()}'s telemetry-OSD gate
+ *       cannot activate until a later task plumbs a telemetry input into
+ *       this class, so today only detections-only burn-in ships. Without an
  *       {@code OverlayPort} (the default) or before any detection has
  *       completed, the raw frame is published unchanged, exactly as before
  *       this feature. A renderer that throws is treated as a purely
@@ -159,6 +166,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final EventPublisherPort eventPublisher;
     private final OverlayPort overlayPort;
     private final LongSupplier nanoTimeSource;
+    private final DetectionExtrapolator extrapolator = new DetectionExtrapolator();
 
     private final AtomicInteger inFlightInferences = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -260,10 +268,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @return the most recently completed detection result's detections, or
      *         an empty list if no inference has completed yet. Updated for
      *         every completed inference, including empty results, so callers
-     *         (e.g. a future overlay) never render stale boxes past the point
-     *         a tracked object disappeared. Left untouched while a detection
-     *         outage withholds frames from the detector, since no inference
-     *         actually ran.
+     *         never see stale boxes past the point a tracked object
+     *         disappeared. Left untouched while a detection outage withholds
+     *         frames from the detector, since no inference actually ran.
+     *         This is the raw, un-extrapolated result — the REST-facing
+     *         surface; overlay burn-in renders {@link #extrapolator}'s
+     *         smoothed boxes instead (docs/CYCLES-PLAN.md §12, CP-c), not
+     *         this method's output.
      */
     public List<Detection> latestDetections() {
         return latestDetections;
@@ -296,11 +307,18 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Renders {@code frame} through {@link #overlayPort} when one is configured and the latest
-     * completed detection result has something to draw, returning the raw {@code frame} otherwise
-     * (no overlay configured, or nothing detected yet). Detection is always run against the raw
-     * {@code frame}, never the rendered one — overlay is purely a publish-time presentation
-     * concern.
+     * Renders {@code frame} through {@link #overlayPort} when one is configured and {@link
+     * #extrapolator}'s boxes at {@code frame}'s capture time have something to draw, returning the
+     * raw {@code frame} otherwise (no overlay configured, or nothing detected yet). Detection is
+     * always run against the raw {@code frame}, never the rendered one — overlay is purely a
+     * publish-time presentation concern.
+     *
+     * <p>The detections passed to the renderer are {@link #extrapolator}'s output at {@code
+     * frame.capturedAt()} (docs/CYCLES-PLAN.md &sect;12, CP-c), not the raw {@link
+     * #latestDetections}, so burned-in boxes track between completed inferences instead of jumping
+     * — same source-timestamp timebase as {@code DetectionResult.capturedAt}, never mixed with wall
+     * clock. {@link #latestDetections()} (the REST-facing surface) is unaffected — it always
+     * returns the raw latest result.
      *
      * <p>A renderer exception is swallowed: overlay is cosmetic and must never be able to disrupt
      * the video path. The raw frame is published in that case, and at most one {@code WARNING} is
@@ -308,11 +326,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * succeeds) — never per frame — so a persistently broken renderer doesn't spam logs.
      */
     private VideoFrame overlayIfNeeded(VideoFrame frame) {
-        if (overlayPort == null || latestDetections.isEmpty()) {
+        if (overlayPort == null) {
+            return frame;
+        }
+        List<Detection> detections = extrapolator.at(frame.capturedAt());
+        if (detections.isEmpty()) {
             return frame;
         }
         try {
-            VideoFrame rendered = overlayPort.render(new AnnotatedFrame(frame, latestDetections, null));
+            VideoFrame rendered = overlayPort.render(new AnnotatedFrame(frame, detections, null));
             overlayFailureLogged = false;
             return rendered;
         } catch (RuntimeException e) {
@@ -491,6 +513,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     private void onDetectionResult(DetectionResult result) {
         latestDetections = result.detections();
+        extrapolator.accept(result);
         if (!result.detections().isEmpty()) {
             detectionRepositoryPort.save(result);
             eventPublisher.publish(Event.of(streamId, EventType.DETECTION,

@@ -37,7 +37,7 @@ Framework-free domain: immutable models plus driven (`port.out`) ports.
 - `enum LifecycleState` — ACTIVE, DEACTIVATED, **DELETED (soft)**. Nothing is ever destroyed: a deleted asset/device is hidden from listings and refuses to stream, but its record, usages and telemetry survive and the removal is reversible. Transitions: ACTIVE⇄DEACTIVATED; ACTIVE|DEACTIVATED→DELETED; DELETED→DEACTIVATED (restore — never straight back to ACTIVE)
 - `record ModelRef(String id, String version)`
 - `record Ownership(UserId ownerId, GroupId groupId)`
-- `record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter)` — inferenceFps/maxInFlightInferences>0; `static defaults()` = yolo/latest, 0.4, 5fps, 2 in-flight, telemetry on, no filter
+- `record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter)` — inferenceFps/maxInFlightInferences>0; `static defaults()` = yolo/latest, 0.4, 10fps, 2 in-flight, telemetry on, no filter (10fps since docs/CYCLES-PLAN.md §12, CP-c — was 5fps)
 - `enum PixelFormat` — BGR24, RGB24, YUV420P, JPEG, H264_PACKET, UNKNOWN
 - `record StreamDescriptor(String protocol, URI uri, Map<String,String> options)` — **protocol must be lower-case** (ctor throws otherwise)
 - `record StreamId(UUID value)` — `static random()`, `static of(String)`
@@ -86,4 +86,4 @@ Framework-free domain: immutable models plus driven (`port.out`) ports.
 - `FeedSpec` has no null-defaulting convenience constructor for `options` (unlike some other records with a defaults ctor) — `StreamDescriptor` is the closest existing precedent for a `(protocol, URI, Map<String,String>)`-shaped record, and it validates (throws on `null` options) rather than defaulting, so `FeedSpec` follows that instead.
 
 ## Status
-Fully implemented, including `docs/CYCLES-PLAN.md` §3's `FeedId`/`FeedSpec`/`FeedTransmitterPort` (C3, domain half). 118 tests, all passing (`./mvnw -B -pl vision-domain test`).
+Fully implemented, including `docs/CYCLES-PLAN.md` §3's `FeedId`/`FeedSpec`/`FeedTransmitterPort` (C3, domain half) and §12 CP-c's `PipelineConfig.defaults()` inference-rate bump (5fps→10fps, paired with `vision-application`'s new `DetectionExtrapolator` for box smoothness at the higher sample rate). 118 tests, all passing (`./mvnw -B -pl vision-domain test`).
