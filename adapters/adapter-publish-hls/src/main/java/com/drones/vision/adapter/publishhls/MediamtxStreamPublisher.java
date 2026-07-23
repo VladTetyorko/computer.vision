@@ -109,7 +109,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
 
     /**
      * Idempotent; lowers FFmpeg's native log threshold to {@code
-     * AV_LOG_WARNING} so recorder start/stop no longer dumps INFO-level
+     * AV_LOG_ERROR} so recorder start/stop no longer dumps INFO-level
      * banners to stdout/stderr -- only warnings and errors from the native
      * layer still print. Safe to call repeatedly (e.g. once per constructed
      * instance, including across many instances in a single test run): the
@@ -119,7 +119,10 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         if (quietLoggingConfigured) {
             return;
         }
-        avutil.av_log_set_level(avutil.AV_LOG_WARNING);
+        // ERROR, not WARNING: swscale's per-frame "deprecated pixel format used"
+        // warning on yuvj-tagged inputs is benign, unavoidable via JavaCV's
+        // high-level API, and drowns real logs. See FfmpegVideoSource (adapter-rtsp).
+        avutil.av_log_set_level(avutil.AV_LOG_ERROR);
         quietLoggingConfigured = true;
     }
 

@@ -138,7 +138,7 @@ public final class FfmpegVideoSource implements VideoSourcePort {
 
     /**
      * Idempotent; lowers FFmpeg's native log threshold to {@code
-     * AV_LOG_WARNING} so grabber start/stop no longer dumps INFO-level
+     * AV_LOG_ERROR} so grabber start/stop no longer dumps INFO-level
      * banners to stdout/stderr -- only warnings and errors from the native
      * layer still print. Safe to call repeatedly (e.g. once per constructed
      * instance, including across many instances in a single test run): the
@@ -148,7 +148,11 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         if (quietLoggingConfigured) {
             return;
         }
-        avutil.av_log_set_level(avutil.AV_LOG_WARNING);
+        // ERROR, not WARNING: decoding any yuvj-tagged media (MJPEG streams, many
+        // mp4s) makes swscale print "deprecated pixel format used, make sure you
+        // did set range correctly" once per converted frame -- a known-benign
+        // warning that JavaCV's high-level API offers no per-context way to avoid.
+        avutil.av_log_set_level(avutil.AV_LOG_ERROR);
         quietLoggingConfigured = true;
     }
 
