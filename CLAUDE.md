@@ -22,7 +22,7 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | adapter-mjpeg | `adapters/adapter-mjpeg/` | MJPEG HTTP ingest + TX simulator |
 | adapter-publish-hls | `adapters/adapter-publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
 | adapter-discovery | `adapters/adapter-discovery/` | ONVIF / mDNS / V4L2 scanners |
-| adapter-cv-grpc | `adapters/adapter-cv-grpc/` | Placeholder (Phase 2): DetectionPort via gRPC |
+| adapter-cv-grpc | `adapters/adapter-cv-grpc/` | DetectionPort via gRPC to cv-service |
 | adapter-overlay | `adapters/adapter-overlay/` | Placeholder (Phase 2): overlay rendering |
 | adapter-persistence | `adapters/adapter-persistence/` | Placeholder (Phase 2): JPA/Postgres |
 | vision-api | `vision-api/` | REST + static web console (driving adapter) |

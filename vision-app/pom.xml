@@ -40,6 +40,10 @@
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>
+            <artifactId>adapter-cv-grpc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
             <artifactId>adapter-discovery</artifactId>
         </dependency>
         <dependency>

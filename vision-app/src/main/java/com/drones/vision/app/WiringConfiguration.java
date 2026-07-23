@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
@@ -59,23 +60,27 @@ import java.util.List;
  * <p>This is the only place in the codebase allowed to know about both the
  * application layer ({@code vision-application}) and concrete adapters
  * ({@code adapter-simulation}, {@code adapter-rtsp}, {@code
- * adapter-publish-hls}, and the dev-support fallbacks in {@link
- * com.drones.vision.app.devsupport}) — enforced by {@code ArchitectureTest}.
- * {@code vision-domain} and {@code vision-application} themselves stay free
- * of Spring annotations; all {@code @Bean}/{@code @Configuration} wiring
- * lives here.
+ * adapter-publish-hls}, {@code adapter-cv-grpc}, and the dev-support
+ * fallbacks in {@link com.drones.vision.app.devsupport}) — enforced by
+ * {@code ArchitectureTest}. {@code vision-domain} and {@code
+ * vision-application} themselves stay free of Spring annotations; all
+ * {@code @Bean}/{@code @Configuration} wiring lives here.
  *
- * <p>Ports that don't yet have a real adapter (persistence, event bus,
- * CV inference) are wired to in-process dev-support fallbacks so the
- * platform runs end to end from Phase 0 onward; each fallback's javadoc
- * names the adapter that will replace it and in which phase. Stream egress
- * ({@link StreamPublisherPort}) is real as of Phase 1: {@link
- * #streamPublisherPort(VisionPublishProperties)} selects between the
- * mediamtx-backed publisher and the no-op fallback based on {@link
- * VisionPublishProperties}.
+ * <p>Ports that don't yet have a real adapter (persistence, event bus) are
+ * wired to in-process dev-support fallbacks so the platform runs end to end
+ * from Phase 0 onward; each fallback's javadoc names the adapter that will
+ * replace it and in which phase. Stream egress ({@link StreamPublisherPort})
+ * is real as of Phase 1: {@link #streamPublisherPort(VisionPublishProperties)}
+ * selects between the mediamtx-backed publisher and the no-op fallback based
+ * on {@link VisionPublishProperties}. CV inference ({@link DetectionPort})
+ * is real as of docs/MVP1-PLAN.md §C7: {@link #detectionPort(VisionCvProperties)}
+ * selects between {@code GrpcDetectionPort} (adapter-cv-grpc) and the no-op
+ * fallback based on {@link VisionCvProperties}; see {@link
+ * #eventPublisherPort(DetectionPort, VisionCvProperties)} for how the gRPC
+ * session's per-stream lifecycle is cleaned up.
  */
 @Configuration
-@EnableConfigurationProperties(VisionPublishProperties.class)
+@EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class})
 public class WiringConfiguration {
 
     @Bean
@@ -113,9 +118,26 @@ public class WiringConfiguration {
         return new InMemoryDetectionRepository();
     }
 
+    /**
+     * The base implementation is always {@link LoggingEventPublisher}. When {@link
+     * VisionCvProperties#enabled()} is {@code true} and {@link #detectionPort} resolved to a
+     * {@code GrpcDetectionPort} (it always does in that branch — see {@link #detectionPort}), the
+     * bean is instead a {@link DetectionSessionCleanupEventPublisher} wrapping it: {@code
+     * GrpcDetectionPort} keeps one open gRPC session per stream until told the stream ended, and
+     * neither {@code vision-application} nor {@code vision-domain} may reference a concrete
+     * adapter to make that call themselves, so this decorator is the wiring-layer seam that
+     * forwards a {@code STREAM_STOPPED} event's stream id into {@code
+     * GrpcDetectionPort#streamEnded} after delegating the event unchanged. With CV disabled, the
+     * decorator is never constructed and this is exactly {@link #eventPublisherPort}'s pre-C7
+     * behavior.
+     */
     @Bean
-    public EventPublisherPort eventPublisherPort() {
-        return new LoggingEventPublisher();
+    public EventPublisherPort eventPublisherPort(DetectionPort detectionPort, VisionCvProperties cvProperties) {
+        EventPublisherPort delegate = new LoggingEventPublisher();
+        if (cvProperties.enabled() && detectionPort instanceof GrpcDetectionPort grpcDetectionPort) {
+            return new DetectionSessionCleanupEventPublisher(delegate, grpcDetectionPort);
+        }
+        return delegate;
     }
 
     @Bean
@@ -189,8 +211,25 @@ public class WiringConfiguration {
         return properties.mediamtx().hlsBase();
     }
 
+    /**
+     * Selects the {@link DetectionPort} implementation per {@link VisionCvProperties#enabled()}
+     * (docs/MVP1-PLAN.md §C7 bullet 4): {@code true} wires {@code GrpcDetectionPort}
+     * (adapter-cv-grpc) against {@link VisionCvProperties#host()}/{@link
+     * VisionCvProperties#port()}; {@code false} (the default) keeps today's {@link
+     * NoopDetectionPort}. No explicit {@code destroyMethod} is declared here — {@code @Bean}'s
+     * default {@code "(inferred)"} destroy method already detects and calls a public no-arg
+     * {@code close()}/{@code shutdown()} on whichever concrete type the bean actually is at
+     * shutdown, so {@code GrpcDetectionPort#close()} (which shuts its gRPC channel down) still
+     * runs on context close without needing an explicit name — unlike an <em>explicit</em> {@code
+     * destroyMethod = "close"}, which this Spring version validates eagerly at bean-creation time
+     * and fails hard with {@code BeanDefinitionValidationException} for the branch where the bean
+     * is a {@link NoopDetectionPort} (no such method at all).
+     */
     @Bean
-    public DetectionPort detectionPort() {
+    public DetectionPort detectionPort(VisionCvProperties cvProperties) {
+        if (cvProperties.enabled()) {
+            return new GrpcDetectionPort(cvProperties.host(), cvProperties.port());
+        }
         return new NoopDetectionPort();
     }
 
