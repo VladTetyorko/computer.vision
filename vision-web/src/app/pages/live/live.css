@@ -34,6 +34,11 @@
     font-size: 0.82rem;
 }
 
+.detections-strip {
+    display: block;
+    margin-top: 0.75rem;
+}
+
 .notice code,
 .hint code {
     font-family: var(--mono);

@@ -44,6 +44,10 @@
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>
+            <artifactId>adapter-overlay</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
             <artifactId>adapter-discovery</artifactId>
         </dependency>
         <dependency>

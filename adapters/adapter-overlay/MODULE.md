@@ -2,7 +2,7 @@
 
 Frame annotation adapter: burns detection boxes/labels and a telemetry OSD onto video frames, pure Java2D.
 
-**Depends on:** vision-domain · **Used by:** none yet (`StreamPipeline` wiring is `docs/MVP1-PLAN.md` §C8 bullet 2, a later task)
+**Depends on:** vision-domain · **Used by:** vision-app (`WiringConfiguration#overlayRenderer`, threaded into `StreamPipeline` via `DefaultStreamService`, docs/MVP1-PLAN.md §C8 bullet 2)
 **Build/test:** `./mvnw -B -pl adapters/adapter-overlay test` — 10 tests, `Java2DOverlayRendererTest`, no docker/network needed.
 
 ## API surface
@@ -28,4 +28,4 @@ Frame annotation adapter: burns detection boxes/labels and a telemetry OSD onto 
 - Label bar / OSD block *pixel positions* are not asserted exactly in tests (only their fill color at deterministic, geometry-only-dependent probe points is) — their width/height depend on `FontMetrics`, which can vary slightly by JDK/fontconfig; only the box border (pure integer geometry, no font involved) is probed at exact pixel coordinates.
 
 ## Status
-`Java2DOverlayRenderer` implements `docs/MVP1-PLAN.md` §C8 bullet 1 in full (box burn-in, per-label palette, telemetry OSD, pass-through-never-throws for unsupported formats). Not yet wired into `StreamPipeline` (§C8 bullet 2, a later task) or the `PipelineConfig.overlayTelemetry` config flag that will gate the OSD in the pipeline — this renderer itself always draws the OSD when `telemetry != null` is passed to it; the pipeline-side decision of *whether* to pass telemetry is out of scope here.
+`Java2DOverlayRenderer` implements `docs/MVP1-PLAN.md` §C8 bullet 1 in full (box burn-in, per-label palette, telemetry OSD, pass-through-never-throws for unsupported formats). Now wired into `StreamPipeline` as of §C8 bullet 2 (`vision-app`'s `WiringConfiguration#overlayRenderer` bean, threaded through `DefaultStreamService`'s `OverlayPort` parameter) — see vision-application/MODULE.md's `StreamPipeline` entry for the burn-in/failure-handling behavior this adapter is driven by. `PipelineConfig.overlayTelemetry`'s OSD gate is still not reachable in practice: `StreamPipeline` has no telemetry input yet, so it always passes `telemetry=null` into `AnnotatedFrame` regardless of that flag — this renderer itself still always draws the OSD when `telemetry != null` is passed to it, but nothing upstream does that yet. Plumbing a telemetry input into `StreamPipeline` remains a later task.

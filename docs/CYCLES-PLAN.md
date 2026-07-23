@@ -189,15 +189,19 @@ The map graduates from a tab you visit to the operator's home surface: combined 
 
 `SimulationSpec.videoPath` becomes nullable: when absent, the video device is registered with the `sim` protocol (synthetic pattern renderer) instead of `file` — everything else (auto-start, transport must then be DIRECT → 400 otherwise, **telemetry flight plans**) works unchanged. `POST /api/simulations {}` with just a `telemetry` block yields a complete moving drone — the "synthetic telemetry test" in one call. Scope: vision-application + vision-api (+ tests, MODULE.mds). **Estimate: S.**
 
-### CU-b — UI: map × streams, layers, background loading, consolidation *(proposal & estimate)*
+### CU-b — UI: fast & simple + map upgrades *(proposal & estimate)*
 
-1. **Map × streams:** clicking a streaming asset's marker (or rail row) docks a **live preview panel** beside the map — `<vision-player>` inline, with OSD summary and a "open full cockpit" link to `/live/:deviceId`. Position and video in one screen: the referee's verification view. Only one docked player at a time (bandwidth); closing undocks.
-2. **Map layers:** a layer switcher (chips or Leaflet layers control) — **Standard** (OSM), **Night** (CARTO Dark Matter — replaces the current always-on dark tint), **Relief** (OpenTopoMap), **Satellite** (Esri World Imagery); correct per-layer attribution; selection persisted in the settings store and shared by both the fleet map and the live-map inset; offline fallback (vector overlays without tiles) unchanged.
-3. **Background loading, not lazy-on-click:** drop `data: { preload: false }` from `/map` so the route chunk idle-preloads, and warm the Leaflet chunk itself on browser idle (`requestIdleCallback` → `importLeaflet()` from the shell/idle-preload hook). Initial bundle must stay unchanged — this is *background* loading after first paint, never eager bundling.
-4. **Synthetic telemetry test (UI):** the Simulate wizard's synthetic mode gains a "with flight plan" option using CU-a — one click places a moving synthetic drone on the map, no file needed. Surfaced also as an empty-state action on the Map tab ("Add a test drone").
-5. **Consolidation pass:** audit the three polling stores (`FleetStore`, `TelemetryStore`, `FleetMapStore`) — extract the shared poll-while-visible/backoff idiom into one helper; reuse the player component cleanly across wall-tile/live/map-panel; report what was merged and what was left alone (with reasons).
+Guiding directive from the user: **make the UI fast and simple.** Fast = warm chunks, instant tab switches, fewer overlapping polls, skeletons over spinners. Simple = one entry point per user intent, video-first layouts, less stacked chrome. The implementing task must load the `frontend-design` skill for visual direction before touching styles.
 
-**Done when:** map chunk + Leaflet are already warm when the user first clicks Map; night/relief/satellite layers switch and persist; a docked live preview plays next to a moving marker; a no-file synthetic drone with a route is one click; store duplication measurably reduced (summary lists the merges). **Estimate: M/L — one vision-web task after C8-b (to avoid vision-web collisions).**
+1. **One "+ Add source" entry point (Devices simplification):** collapse the stacked register form / discovery scan / simulate card into a single progressive **Add source** flow (Register manually · Discover on network · Simulate — file / over RTSP / synthetic test drone). The warehouse table becomes the tab's single main surface. No capability lost; every current field still reachable inside its path.
+2. **Background loading, not lazy-on-click:** idle-preload ALL tab chunks (drop `/map`'s and — after weighing it — `/debug`'s `preload: false`), and warm the Leaflet chunk on browser idle (`requestIdleCallback` → `importLeaflet()`). Initial bundle unchanged — background loading after first paint, never eager bundling. Skeleton placeholders replace spinners on Devices/Map/Wall lists.
+3. **One poll scheduler:** extract the poll-while-visible idiom from `FleetStore`/`TelemetryStore`/`FleetMapStore` into a single shared helper (one timer authority, per-consumer cadence); report what was merged and what was deliberately left (with reasons). Player component reused cleanly across wall-tile/live/map-panel.
+4. **Live layout, video-first:** player dominant; OSD + detections strip in a collapsible right rail; map inset toggleable (keyboard shortcut) — density down, hierarchy up, nothing removed.
+5. **Map × streams:** clicking a streaming asset's marker (or rail row) docks a **live preview panel** beside the map — inline player + OSD summary + "open full cockpit" link. One docked player at a time (bandwidth); closing undocks.
+6. **Map layers:** switcher — **Standard** (OSM), **Night** (CARTO Dark Matter — replaces the always-on dark tint), **Relief** (OpenTopoMap), **Satellite** (Esri World Imagery); per-layer attribution; selection persisted in the settings store, shared by fleet map + live inset; offline fallback unchanged.
+7. **Synthetic telemetry test (UI):** synthetic mode gains "with flight plan" (CU-a) — one click places a moving test drone; also the Map tab's empty-state action ("Add a test drone").
+
+**Done when:** every tab click lands on a warm chunk; Devices is one table + one Add flow; night/relief/satellite layers switch and persist; a docked live preview plays next to a moving marker; a no-file test drone is one click; poll timers consolidated (summary lists merges); budgets green, initial bundle not grown. **Estimate: L — one vision-web task after C8-b (to avoid vision-web collisions).**
 
 ---
 
@@ -217,8 +221,37 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | CT-b | **UI** | flight-plan editor (map picker) in wizard | §7, vision-web | pending |
 | CW-a | backend | warehouse REST surface + assign/unassign | §8, after CT-a | ✅ done |
 | CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | ✅ done |
-| C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | pending |
-| C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | pending |
+| C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | ✅ done |
+| C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | ✅ done |
 | C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | pending |
+| CU-a | backend | fully synthetic simulation (no file) | §9 | pending |
+| CU-b | **UI** | fast & simple + map upgrades | §9, after C8 | pending |
+| CD-a | backend | telemetry deviceId in API | §11 | pending |
+| CD-b | **UI** | asset-first Devices + detail page + self-recovering player | §11 | pending |
 
 C7–C9 execute **[MVP1-PLAN.md](MVP1-PLAN.md)** — the priority target ("the friends demo": simultaneous multi-protocol sources + map + live CV). Post-MVP candidates: WEB-PLAN W6 leftovers + W7 hardening (Playwright smoke in CI, keyboard, responsive); flight replay; MAVLink telemetry RX; geolocated detections on the map.
+
+---
+
+## 11. CD — asset-first devices & resilient streaming *(from user-found issues, 2026-07-23)*
+
+User-reported issues, verbatim intent: the Devices page splits one drone into its plumbing rows (video device, telemetry device) — the pilot/manager must see **one entity with all its streams**; opening it shows position on a map, video, and telemetries; the only list-level buttons are **Watch / Open / Archive**; detail page carries characteristics, telemetry, ownership. Multiple telemetry sources per drone must be counted/shown/used **separately**. The app must stay stable toward thousands of devices. The map needs a device list on the right and layer control on the left. Streams in the browser must be **self-refreshing and self-recovering** — never a manual refresh.
+
+This is exactly the Asset model the domain already has (`Asset` = the user's "device"; `Device` = plumbing) — the UI just never made assets the primary surface. Cycle:
+
+### CD-a — backend gaps (vision-api, small)
+
+- `TelemetrySampleResponse` gains `deviceId` (the domain `Telemetry` already carries it — samples from different telemetry devices become distinguishable); `AssetDetailsResponse.devices` already lists capabilities per device, so per-source grouping is a pure UI concern after this one field.
+- Nothing else server-side: asset endpoints, usages, warehouse lifecycle all exist. **Estimate: S.**
+
+### CD-b — UI: asset-first Devices + asset detail page
+
+1. **Devices page becomes asset-first:** one row/card per **asset** (name, category chip, lifecycle, streaming status, device count, battery when live) with exactly **Watch · Open · Archive** at list level. Low-level devices (registration, per-device lifecycle, assign/unassign — the CW-b warehouse) move into a collapsed "Hardware" section of the detail page and an "Advanced" area of the list; nothing is lost, it just stops being the front door.
+2. **Asset detail page** (`/assets/:id`, the "Open" target): characteristics (attributes, category, ownership), live video (when streaming), map with current position + trail, **telemetry per source device** (one panel per TELEMETRY device, labeled, using CD-a's `deviceId`), usage history, and the Hardware section (devices with the full warehouse actions).
+3. **Multi-telemetry:** telemetry panels/count per asset derived by grouping samples by `deviceId`; the map marker uses the freshest source; per-source staleness shown.
+4. **Scalability posture (thousands of assets):** CDK virtual scroll on the asset list (WEB-PLAN W6 item, landed here); polling stays O(visible), never O(total) — only visible/streaming rows poll telemetry; document the current honest ceiling (in-memory repos server-side until adapter-persistence lands — noted, not solved here).
+5. **Self-recovering player ("stream-ready"):** upgrade `ui/player.ts` — before first attach, poll the playlist until ready (no error flash on fresh streams); on hls.js fatal error or stall (watchdog: no fragment progress for ~8s), destroy + reattach with capped exponential backoff, indefinitely while the page is open; visible state chip (`connecting… / live / reconnecting…`) instead of a dead player; recovery must also survive the backend restarting. Benefits every surface (wall tiles, live, map dock) since the player is shared.
+
+**Estimate: CD-a S; CD-b L (one vision-web task; runs after CU-b or merged with it if scheduling allows — same module, no parallelism).**
+
+Map right-rail device list + left layer control are already CU-b items 5–6 — CD adds nothing map-side beyond the rail listing **all** assets (not only unpositioned ones).

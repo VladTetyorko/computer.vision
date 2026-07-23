@@ -11,6 +11,7 @@ import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
 
@@ -47,6 +48,7 @@ public final class DefaultStreamService implements StreamService {
     private final DetectionRepositoryPort detectionRepositoryPort;
     private final EventPublisherPort eventPublisher;
     private final UsageTracker usageTracker;
+    private final OverlayPort overlayPort;
 
     private final ConcurrentHashMap<StreamId, RunningStream> activeStreams = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<DeviceId, StreamId> streamByDevice = new ConcurrentHashMap<>();
@@ -56,13 +58,29 @@ public final class DefaultStreamService implements StreamService {
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, null);
+                eventPublisher, null, null);
     }
 
     public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
                                  DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker) {
+        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, usageTracker, null);
+    }
+
+    /**
+     * Same as the 7-argument constructor, plus an {@link OverlayPort} collaborator threaded into
+     * every {@link StreamPipeline} this service starts (docs/MVP1-PLAN.md §C8 bullet 2).
+     *
+     * @param overlayPort nullable, following the same convention as {@code usageTracker}: {@code
+     *                     null} means no overlay rendering, exactly today's behavior.
+     */
+    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
+                                 DetectionRepositoryPort detectionRepositoryPort,
+                                 EventPublisherPort eventPublisher, UsageTracker usageTracker,
+                                 OverlayPort overlayPort) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -71,6 +89,7 @@ public final class DefaultStreamService implements StreamService {
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.usageTracker = usageTracker; // nullable: no-op usage tracking when absent
+        this.overlayPort = overlayPort; // nullable: no overlay rendering when absent
     }
 
     @Override
@@ -93,7 +112,7 @@ public final class DefaultStreamService implements StreamService {
             VideoSourcePort source = videoSourceRegistry.sourceFor(device.stream());
             Flow.Publisher<VideoFrame> publisher = source.open(streamId, device.stream());
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
-                    streamPublisherPort, detectionRepositoryPort, eventPublisher);
+                    streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort);
             activeStreams.put(streamId, new RunningStream(deviceId, source, pipeline, Instant.now()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,

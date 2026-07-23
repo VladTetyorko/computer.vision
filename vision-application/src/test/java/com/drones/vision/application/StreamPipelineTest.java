@@ -1,5 +1,6 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Detection;
@@ -17,6 +18,7 @@ import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,7 @@ import java.util.function.LongSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -45,6 +48,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class StreamPipelineTest {
@@ -97,9 +101,14 @@ class StreamPipelineTest {
                 detectionRepositoryPort, eventPublisher);
     }
 
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, OverlayPort overlayPort) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, overlayPort);
+    }
+
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, clock);
+                detectionRepositoryPort, eventPublisher, null, clock);
     }
 
     /**
@@ -115,7 +124,7 @@ class StreamPipelineTest {
      */
     private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, clock);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, clock);
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         return pipeline;
     }
@@ -488,6 +497,87 @@ class StreamPipelineTest {
         pipeline.close();
 
         verify(streamPublisherPort, times(1)).streamEnded(streamId);
+    }
+
+    @Test
+    void rawFramePublishedWhenNoOverlayPortConfiguredEvenWithNonEmptyDetections() {
+        // Baseline/regression: the 8-argument (no-overlay) constructor must behave exactly as it
+        // did before this feature -- overlayPort defaults to null, so a completed non-empty
+        // detection result never changes what gets published.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+
+        pipeline(publisher, config(30, 2)).start();
+
+        verify(streamPublisherPort).publish(streamId, f0);
+        verify(streamPublisherPort).publish(streamId, f1);
+    }
+
+    @Test
+    void rawFramePublishedWhenOverlayConfiguredButNoDetectionHasCompletedYet() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
+        OverlayPort overlayPort = mock(OverlayPort.class);
+
+        pipeline(publisher, config(30, 2), overlayPort).start();
+
+        verify(streamPublisherPort).publish(streamId, f);
+        verifyNoInteractions(overlayPort);
+    }
+
+    @Test
+    void overlayRendersOntoFrameOnceLatestDetectionsAreNonEmptyAndPublisherReceivesRendererOutput() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99); // a distinct instance standing in for the renderer's output
+        when(overlayPort.render(any())).thenReturn(rendered);
+
+        pipeline(publisher, config(30, 2), overlayPort).start();
+
+        // f0: published raw -- no detection has completed yet when it is published.
+        verify(streamPublisherPort).publish(streamId, f0);
+        // f1: latestDetections is non-empty by now (f0's detection completed synchronously), so
+        // the publisher receives the renderer's output instance, not the raw frame.
+        verify(streamPublisherPort).publish(streamId, rendered);
+        verify(streamPublisherPort, never()).publish(streamId, f1);
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort).render(captor.capture());
+        assertEquals(f1, captor.getValue().frame());
+        assertEquals(result.detections(), captor.getValue().detections());
+        assertNull(captor.getValue().telemetry(), "no telemetry input reaches StreamPipeline yet (see class javadoc)");
+    }
+
+    @Test
+    void rendererThrowIsSwallowedAndRawFrameKeepsPublishingWithoutClosingThePipeline() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        VideoFrame f2 = frame(2);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1, f2));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        when(overlayPort.render(any())).thenThrow(new RuntimeException("boom"));
+
+        pipeline(publisher, config(30, 2), overlayPort).start();
+
+        // f1 and f2 both attempt overlay (latestDetections is non-empty by then) and both throw,
+        // yet every frame is still published raw and the pipeline never closes -- overlay
+        // rendering is cosmetic and must never disrupt the video path.
+        verify(streamPublisherPort).publish(streamId, f0);
+        verify(streamPublisherPort).publish(streamId, f1);
+        verify(streamPublisherPort).publish(streamId, f2);
+        verify(streamPublisherPort, never()).streamEnded(streamId);
+        // Rendering is retried on every frame (unlike detection's outage/backoff skip policy) --
+        // only the WARNING log is throttled to once per failure run via an internal latch, not
+        // observed directly here since this suite doesn't assert on System.Logger output anywhere.
+        verify(overlayPort, times(2)).render(any());
     }
 
     /**

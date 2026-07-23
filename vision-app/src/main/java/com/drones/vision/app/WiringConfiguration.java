@@ -3,6 +3,7 @@ package com.drones.vision.app;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
+import com.drones.vision.adapter.overlay.Java2DOverlayRenderer;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.rtsp.FfmpegVideoSource;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
@@ -43,6 +44,7 @@ import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
@@ -116,6 +118,20 @@ public class WiringConfiguration {
     @Bean
     public DetectionRepositoryPort detectionRepositoryPort() {
         return new InMemoryDetectionRepository();
+    }
+
+    /**
+     * Burns detection boxes/labels (and, once a telemetry input reaches {@code
+     * com.drones.vision.application.StreamPipeline}, a telemetry OSD) onto published frames
+     * (docs/MVP1-PLAN.md §C8 bullets 1-2). Stateless, no constructor arguments — see
+     * adapter-overlay/MODULE.md for its pass-through-never-throws rules. Threaded into {@link
+     * #streamService} below; {@code StreamPipeline}'s own overlay failure handling means a
+     * broken/unsupported frame format here degrades to raw frames rather than breaking the video
+     * path.
+     */
+    @Bean
+    public OverlayPort overlayRenderer() {
+        return new Java2DOverlayRenderer();
     }
 
     /**
@@ -285,9 +301,10 @@ public class WiringConfiguration {
                                         StreamPublisherPort streamPublisherPort,
                                         DetectionRepositoryPort detectionRepositoryPort,
                                         EventPublisherPort eventPublisherPort,
-                                        UsageTracker usageTracker) {
+                                        UsageTracker usageTracker,
+                                        OverlayPort overlayPort) {
         return new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker);
+                streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort);
     }
 
     /**

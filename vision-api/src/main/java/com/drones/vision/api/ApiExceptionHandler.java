@@ -15,10 +15,12 @@ import java.util.NoSuchElementException;
  * <p>Determined by reading the real {@code vision-application}/{@code
  * vision-domain} sources rather than assuming a shape:
  * <ul>
- *   <li>{@code DeviceRegistration} and {@code
- *       PipelineConfig} validate their own inputs in compact constructors,
- *       throwing {@link IllegalArgumentException} — surfaced from bad
- *       registration input (blank name, unknown type, malformed uri, ...).</li>
+ *   <li>{@code DeviceRegistration}, {@code
+ *       PipelineConfig}, and {@code DetectionQuery} validate their own inputs
+ *       in compact constructors, throwing {@link IllegalArgumentException} —
+ *       surfaced from bad registration input (blank name, unknown type,
+ *       malformed uri, ...) as well as a non-positive {@code limit} on
+ *       {@code GET /api/streams/{streamId}/detections}.</li>
  *   <li>{@code VideoSourceRegistry.sourceFor} throws {@link
  *       UnsupportedProtocolException} when no adapter is registered for a
  *       device's protocol — surfaced from starting a stream, not from

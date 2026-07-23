@@ -1,5 +1,6 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
@@ -11,6 +12,7 @@ import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 
 import java.util.List;
@@ -43,11 +45,25 @@ import java.util.function.LongSupplier;
  *       regardless of whether it is sampled for inference, and regardless of
  *       whether a detection outage (see below) is in progress — the video
  *       path never depends on the CV service being healthy.</li>
- *   <li><b>Phase 2 seam:</b> overlay rendering is intentionally not wired in
- *       yet. Once {@code OverlayPort} lands, this is where a frame would be
- *       combined with {@link #latestDetections()} into an {@code
- *       AnnotatedFrame} and rendered before publishing, so inference FPS can
- *       keep scaling independently of video FPS.</li>
+ *   <li><b>Overlay burn-in</b> (docs/MVP1-PLAN.md §C8): when an {@link
+ *       OverlayPort} is configured (constructor argument, nullable — {@code
+ *       null} keeps today's raw-publish behavior everywhere) and the latest
+ *       completed detection result ({@link #latestDetections()}) is
+ *       non-empty, each frame is rendered through {@link OverlayPort#render}
+ *       — as an {@link AnnotatedFrame} carrying {@code latestDetections()}
+ *       and a {@code null} telemetry sample, since this pipeline has no
+ *       telemetry input yet — before being published; {@link
+ *       PipelineConfig#overlayTelemetry()}'s telemetry-OSD gate cannot
+ *       activate until a later task plumbs a telemetry input into this
+ *       class, so today only detections-only burn-in ships. Without an
+ *       {@code OverlayPort} (the default) or before any detection has
+ *       completed, the raw frame is published unchanged, exactly as before
+ *       this feature. A renderer that throws is treated as a purely
+ *       cosmetic failure, never a pipeline failure: the raw frame is
+ *       published instead, and at most one {@code WARNING} is logged per
+ *       failure run (a boolean latch, reset the next time rendering
+ *       succeeds) so a persistently broken renderer never spams logs on
+ *       every frame.</li>
  * </ul>
  *
  * <h2>Inference sampling</h2>
@@ -141,6 +157,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final StreamPublisherPort streamPublisherPort;
     private final DetectionRepositoryPort detectionRepositoryPort;
     private final EventPublisherPort eventPublisher;
+    private final OverlayPort overlayPort;
     private final LongSupplier nanoTimeSource;
 
     private final AtomicInteger inFlightInferences = new AtomicInteger();
@@ -148,6 +165,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     private volatile Flow.Subscription subscription;
     private volatile List<Detection> latestDetections = List.of();
+
+    // Only ever touched from within onNext(), which Flow.Subscriber's contract serializes
+    // (signals are never delivered concurrently) -- a plain (non-volatile) boolean latch is
+    // enough, exactly like the frame-cadence fields below. Suppresses repeated WARNING logs for
+    // a renderer that keeps throwing, without needing outage/backoff machinery: overlay failures
+    // are cosmetic, not a resilience concern like detection failures are.
+    private boolean overlayFailureLogged = false;
 
     // Frame-arrival cadence measurement state. Only ever touched from within
     // onNext(), which Flow.Subscriber's contract serializes (signals are
@@ -178,11 +202,28 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                            EventPublisherPort eventPublisher) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, System::nanoTime);
+                eventPublisher, null);
     }
 
     /**
-     * Test seam: same as the public constructor but with an injectable
+     * Same as the 8-argument constructor, plus an {@link OverlayPort} collaborator.
+     *
+     * @param overlayPort nullable — {@code null} (the other constructor's default) means overlay
+     *                     rendering never runs and every frame is published raw, exactly as
+     *                     before this collaborator existed; the caller ({@link
+     *                     DefaultStreamService}) follows the same nullable-collaborator
+     *                     convention as its own {@code usageTracker}.
+     */
+    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                           EventPublisherPort eventPublisher, OverlayPort overlayPort) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, System::nanoTime);
+    }
+
+    /**
+     * Test seam: same as the public constructors but with an injectable
      * nanotime source for the frame-cadence measurement and the detection
      * outage/backoff timing, so tests can drive both off a deterministic
      * synthetic clock instead of depending on real wall-clock timing.
@@ -190,7 +231,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, LongSupplier nanoTimeSource) {
+                   EventPublisherPort eventPublisher, OverlayPort overlayPort, LongSupplier nanoTimeSource) {
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -200,6 +241,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.detectionRepositoryPort =
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.overlayPort = overlayPort; // nullable: no-op overlay rendering when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
         this.sampleEveryNthFrame = everyNth(ASSUMED_SOURCE_FPS);
     }
@@ -240,7 +282,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         recordArrivalAndRecomputeSampling();
         try {
-            streamPublisherPort.publish(streamId, frame);
+            streamPublisherPort.publish(streamId, overlayIfNeeded(frame));
             if (frame.sequence() % sampleEveryNthFrame == 0) {
                 maybeDetect(frame);
             }
@@ -250,6 +292,36 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         if (!closed.get()) {
             subscription.request(1);
+        }
+    }
+
+    /**
+     * Renders {@code frame} through {@link #overlayPort} when one is configured and the latest
+     * completed detection result has something to draw, returning the raw {@code frame} otherwise
+     * (no overlay configured, or nothing detected yet). Detection is always run against the raw
+     * {@code frame}, never the rendered one — overlay is purely a publish-time presentation
+     * concern.
+     *
+     * <p>A renderer exception is swallowed: overlay is cosmetic and must never be able to disrupt
+     * the video path. The raw frame is published in that case, and at most one {@code WARNING} is
+     * logged per run of failures (a simple boolean latch, reset the next time rendering
+     * succeeds) — never per frame — so a persistently broken renderer doesn't spam logs.
+     */
+    private VideoFrame overlayIfNeeded(VideoFrame frame) {
+        if (overlayPort == null || latestDetections.isEmpty()) {
+            return frame;
+        }
+        try {
+            VideoFrame rendered = overlayPort.render(new AnnotatedFrame(frame, latestDetections, null));
+            overlayFailureLogged = false;
+            return rendered;
+        } catch (RuntimeException e) {
+            if (!overlayFailureLogged) {
+                overlayFailureLogged = true;
+                LOG.log(System.Logger.Level.WARNING, () -> "stream " + streamId.value()
+                        + " overlay rendering failed, publishing raw frames until it recovers: " + e.getMessage());
+            }
+            return frame;
         }
     }
 

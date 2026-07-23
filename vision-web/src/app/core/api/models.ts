@@ -275,3 +275,33 @@ export interface SimulationResponse {
   readonly streamId?: string;
   readonly viewUrl?: string;
 }
+
+/** Mirrors `dto.BoundingBoxResponse`. Each component is normalized [0,1] against frame dimensions. */
+export interface BoundingBox {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Mirrors `dto.DetectionResponse`, embedded in `DetectionResult#detections`. */
+export interface Detection {
+  readonly label: string;
+  readonly confidence: number;
+  readonly box: BoundingBox;
+  readonly modelId: string;
+  readonly modelVersion: string;
+}
+
+/**
+ * Mirrors `dto.DetectionResultResponse`, the body element of `GET
+ * /api/streams/{streamId}/detections` (docs/MVP1-PLAN.md §C8 bullet 3) — one completed inference
+ * result. Backs the Live page's detections strip (`core/detections-store.ts`).
+ */
+export interface DetectionResult {
+  readonly streamId: string;
+  readonly frameSequence: number;
+  readonly capturedAt: string;
+  readonly inferenceMillis: number;
+  readonly detections: readonly Detection[];
+}

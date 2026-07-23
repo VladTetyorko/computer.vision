@@ -3,9 +3,15 @@ package com.drones.vision.api;
 import com.drones.vision.application.ActiveStream;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.UnsupportedProtocolException;
+import com.drones.vision.domain.model.BoundingBox;
+import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.DetectionQuery;
+import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -37,6 +44,7 @@ class StreamControllerTest {
 
     private StreamService streamService;
     private StreamPublisherPort streamPublisherPort;
+    private DetectionRepositoryPort detectionRepositoryPort;
     private MockMvc mockMvc;
 
     private final DeviceId deviceId = DeviceId.random();
@@ -45,11 +53,18 @@ class StreamControllerTest {
     void setUp() {
         streamService = mock(StreamService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
+        detectionRepositoryPort = mock(DetectionRepositoryPort.class);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new StreamController(streamService, streamPublisherPort))
+                .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
+    }
+
+    private static DetectionResult detectionResult(StreamId streamId, long frameSequence, Instant capturedAt) {
+        Detection detection = new Detection("person", 0.87, new BoundingBox(0.1, 0.2, 0.3, 0.4),
+                new ModelRef("yolo", "latest"));
+        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detection), Duration.ofMillis(42));
     }
 
     @Test
@@ -229,5 +244,88 @@ class StreamControllerTest {
 
         mockMvc.perform(delete("/api/streams/{streamId}", streamId.value()))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void detectionsMapsRepositoryResultsAndUsesDefaultLimitOfFifty() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant capturedAt = Instant.parse("2026-07-23T10:00:00Z");
+        DetectionResult result = detectionResult(streamId, 7, capturedAt);
+        when(detectionRepositoryPort.query(any())).thenReturn(List.of(result));
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$[0].frameSequence").value(7))
+                .andExpect(jsonPath("$[0].capturedAt").value("2026-07-23T10:00:00Z"))
+                .andExpect(jsonPath("$[0].inferenceMillis").value(42))
+                .andExpect(jsonPath("$[0].detections", hasSize(1)))
+                .andExpect(jsonPath("$[0].detections[0].label").value("person"))
+                .andExpect(jsonPath("$[0].detections[0].confidence").value(0.87))
+                .andExpect(jsonPath("$[0].detections[0].box.x").value(0.1))
+                .andExpect(jsonPath("$[0].detections[0].box.y").value(0.2))
+                .andExpect(jsonPath("$[0].detections[0].box.width").value(0.3))
+                .andExpect(jsonPath("$[0].detections[0].box.height").value(0.4))
+                .andExpect(jsonPath("$[0].detections[0].modelId").value("yolo"))
+                .andExpect(jsonPath("$[0].detections[0].modelVersion").value("latest"));
+
+        ArgumentCaptor<DetectionQuery> captor = ArgumentCaptor.forClass(DetectionQuery.class);
+        verify(detectionRepositoryPort).query(captor.capture());
+        DetectionQuery query = captor.getValue();
+        assertEquals(streamId, query.streamId());
+        assertEquals(50, query.limit());
+        assertEquals(null, query.from());
+        assertEquals(null, query.to());
+        assertEquals(null, query.label());
+    }
+
+    @Test
+    void detectionsPassesExplicitLimitThrough() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(detectionRepositoryPort.query(any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()).param("limit", "5"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<DetectionQuery> captor = ArgumentCaptor.forClass(DetectionQuery.class);
+        verify(detectionRepositoryPort).query(captor.capture());
+        assertEquals(5, captor.getValue().limit());
+    }
+
+    @Test
+    void detectionsSortsResultsNewestFirstRegardlessOfRepositoryOrder() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant older = Instant.parse("2026-07-23T10:00:00Z");
+        Instant newer = Instant.parse("2026-07-23T10:00:05Z");
+        DetectionResult olderResult = detectionResult(streamId, 1, older);
+        DetectionResult newerResult = detectionResult(streamId, 2, newer);
+        // Deliberately returned oldest-first, to prove the controller sorts rather than trusting order.
+        when(detectionRepositoryPort.query(any())).thenReturn(List.of(olderResult, newerResult));
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].frameSequence").value(2))
+                .andExpect(jsonPath("$[1].frameSequence").value(1));
+    }
+
+    @Test
+    void detectionsReturns400ForNonPositiveLimit() throws Exception {
+        StreamId streamId = StreamId.random();
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()).param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void detectionsReturnsEmptyListForUnknownStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(detectionRepositoryPort.query(any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
     }
 }

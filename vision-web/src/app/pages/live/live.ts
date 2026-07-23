@@ -12,18 +12,20 @@ import { Player } from '../../ui/player';
 import { FleetStore } from '../../core/fleet-store';
 import { SettingsStore } from '../../core/settings-store';
 import { TelemetryStore } from '../../core/telemetry-store';
+import { DetectionsStore } from '../../core/detections-store';
 import { TelemetryOsd } from './telemetry-osd';
 import { LiveMap } from './live-map';
+import { DetectionsStrip } from './detections-strip';
 
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink, TelemetryOsd, LiveMap],
+  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // Own instance per route activation: the telemetry poll starts/stops with this page
-  // (docs/CYCLES-PLAN.md §2) rather than as an app-wide singleton like `FleetStore`.
-  providers: [TelemetryStore],
+  // Own instance per route activation: the telemetry/detections polls start/stop with this page
+  // (docs/CYCLES-PLAN.md §2, docs/MVP1-PLAN.md §C8) rather than as app-wide singletons like `FleetStore`.
+  providers: [TelemetryStore, DetectionsStore],
 })
 export class LivePage {
   /** Bound from the route by `withComponentInputBinding()`. */
@@ -33,6 +35,7 @@ export class LivePage {
   protected readonly fleet = inject(FleetStore);
   protected readonly settings = inject(SettingsStore);
   protected readonly telemetry = inject(TelemetryStore);
+  protected readonly detections = inject(DetectionsStore);
 
   protected readonly busy = signal(false);
 
@@ -64,6 +67,17 @@ export class LivePage {
         this.telemetry.track(deviceId);
       } else {
         this.telemetry.reset();
+      }
+    });
+
+    // Detections only make sense while a stream is actually running — there is no streamId to
+    // poll otherwise (docs/MVP1-PLAN.md §C8 bullet 4).
+    effect(() => {
+      const streamId = this.stream()?.streamId;
+      if (streamId) {
+        this.detections.track(streamId);
+      } else {
+        this.detections.reset();
       }
     });
   }

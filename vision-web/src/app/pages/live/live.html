@@ -40,6 +40,10 @@
             (<code>docker compose up -d mediamtx</code>) and restart the stream.
           </div>
         }
+
+        @if (live()) {
+          <vision-detections-strip class="detections-strip" />
+        }
       </div>
 
       <aside class="side">

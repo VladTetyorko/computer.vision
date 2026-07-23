@@ -7,6 +7,7 @@ import type {
   AssetDetails,
   AssetEdit,
   AssetSummary,
+  DetectionResult,
   Device,
   DeviceEdit,
   RegisterDeviceRequest,
@@ -85,6 +86,19 @@ export class VisionApi {
   stopStream(streamId: string): Promise<void> {
     return firstValueFrom(
       this.http.delete<void>(`/api/streams/${encodeURIComponent(streamId)}`),
+    );
+  }
+
+  /**
+   * Recent detection results for a stream, newest first (docs/MVP1-PLAN.md §C8 bullet 3) — backs
+   * the Live page's chip strip + CV status dot. An unknown/never-detected stream returns an empty
+   * array rather than 404ing, mirroring `usageTelemetry`'s precedent.
+   */
+  streamDetections(streamId: string, limit = 50): Promise<DetectionResult[]> {
+    return firstValueFrom(
+      this.http.get<DetectionResult[]>(`/api/streams/${encodeURIComponent(streamId)}/detections`, {
+        params: { limit },
+      }),
     );
   }
 
