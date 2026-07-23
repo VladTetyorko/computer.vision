@@ -31,7 +31,10 @@ services:
     image: bluenviron/mediamtx:latest
     ports:
       - "8554:8554" # RTSP
-      - "8888:8888" # HLS
+      # Host 18888, not 8888: mediamtx's default HLS port collides with common
+      # dev services (seen in the wild: open-webui/uvicorn on 8888). Must match
+      # vision.publish.mediamtx.hls-base in vision-app's application.properties.
+      - "18888:8888" # HLS
 
   cv-service:
     # Context is the repo root: the Dockerfile copies /proto (shared contract) in addition to /cv-service.
