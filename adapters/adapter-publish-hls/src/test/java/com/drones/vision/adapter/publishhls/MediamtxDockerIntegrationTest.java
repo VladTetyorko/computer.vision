@@ -181,6 +181,146 @@ class MediamtxDockerIntegrationTest {
         }
     }
 
+    /**
+     * Regression test for the user-visible slow-motion bug: the publisher used
+     * to configure its encoder with a fixed 15fps frame rate and quantize all
+     * timestamps onto that grid, so a 30fps source had every frame bumped into
+     * the next 15fps slot — the published timeline advanced at half wall-clock
+     * speed and viewers saw ~2x slow motion. With cadence now measured before
+     * the recorder starts, the received stream's media-timestamp span must
+     * track wall-clock time (ratio ~1.0), not stretch (~2.0 pre-fix).
+     *
+     * <p>Reads the stream back over RTSP in-process; per adapter-rtsp's
+     * documented same-JVM TX/RX contention gotcha, the reading grabber uses a
+     * short 2s timeout so it can never stall the publishing side.
+     */
+    @Test
+    @Timeout(value = 90, unit = TimeUnit.SECONDS)
+    void thirtyFpsSourcePlaysBackAtWallClockSpeedNotSlowMotion() throws Exception {
+        String containerName = "vision-publish-hls-it-" + java.util.UUID.randomUUID();
+        try {
+            startContainer(containerName);
+            int rtspPort = resolveHostPort(containerName, "8554/tcp");
+            awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
+
+            StreamPublisherPort publisher = new MediamtxStreamPublisher(
+                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"));
+            StreamId streamId = StreamId.random();
+            Device device = new Device(DeviceId.random(), "wallclock-it-camera",
+                    Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://wallclock-it"), Map.of()));
+            publisher.streamStarted(streamId, device);
+
+            AtomicBoolean keepPumping = new AtomicBoolean(true);
+            Thread pump = new Thread(() -> {
+                int width = 320;
+                int height = 240;
+                long sequence = 0;
+                while (keepPumping.get()) {
+                    byte[] data = new byte[width * height * 3];
+                    VideoFrame frame = new VideoFrame(streamId, sequence++, Instant.now(), width, height,
+                            PixelFormat.BGR24, ByteBuffer.wrap(data));
+                    publisher.publish(streamId, frame);
+                    try {
+                        Thread.sleep(1000L / 30);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }, "wallclock-it-frame-pump-30fps");
+            pump.setDaemon(true);
+            pump.start();
+            try {
+                double ratio = measureMediaToWallClockRatio(
+                        "rtsp://localhost:" + rtspPort + "/" + streamId.value(), 60, Duration.ofSeconds(60));
+                assertTrue(ratio > 0.6 && ratio < 1.5,
+                        "media-timestamp span over wall-clock span was " + ratio
+                                + " for a 30fps source; ~1.0 means real-time playback, ~2.0 is the "
+                                + "pre-fix slow-motion regression (fixed 15fps encoder grid)");
+            } finally {
+                keepPumping.set(false);
+                pump.join(Duration.ofSeconds(5).toMillis());
+            }
+            publisher.streamEnded(streamId);
+        } finally {
+            removeContainerQuietly(containerName);
+        }
+    }
+
+    /**
+     * Connects an RTSP reader (retrying until the publisher's push makes the
+     * path readable), then measures {@code videoFrames} received video frames:
+     * returns (last-first media timestamp) / (wall-clock elapsed between the
+     * same two frames).
+     */
+    private static double measureMediaToWallClockRatio(String rtspUrl, int videoFrames, Duration overallTimeout)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + overallTimeout.toMillis();
+        org.bytedeco.javacv.FFmpegFrameGrabber grabber = null;
+        try {
+            while (grabber == null) {
+                if (System.currentTimeMillis() >= deadline) {
+                    fail("RTSP reader could not connect to " + rtspUrl + " within " + overallTimeout);
+                }
+                org.bytedeco.javacv.FFmpegFrameGrabber candidate = new org.bytedeco.javacv.FFmpegFrameGrabber(rtspUrl);
+                candidate.setOption("rtsp_transport", "tcp");
+                // Same-JVM TX/RX: a long RX timeout can stall the in-process
+                // publisher (adapter-rtsp MODULE.md gotcha) -- keep it short.
+                candidate.setOption("timeout", "2000000");
+                try {
+                    candidate.start();
+                    grabber = candidate;
+                } catch (Exception notReadyYet) {
+                    candidate.release();
+                    Thread.sleep(500);
+                }
+            }
+            // FFmpeg's demuxer flushes an initial burst of buffered frames right
+            // after connect; anchoring the wall-clock measurement inside that
+            // burst compresses the denominator and inflates the ratio, so the
+            // first frames are skipped and only steady-state delivery is measured.
+            int burstSkipFrames = 15;
+            long firstTimestampMicros = -1;
+            long firstWallNanos = 0;
+            long lastTimestampMicros = -1;
+            long lastWallNanos = 0;
+            int skipped = 0;
+            int seen = 0;
+            while (seen < videoFrames && System.currentTimeMillis() < deadline) {
+                org.bytedeco.javacv.Frame frame = grabber.grab();
+                if (frame == null) {
+                    break;
+                }
+                if (frame.image == null) {
+                    continue;
+                }
+                if (skipped < burstSkipFrames) {
+                    skipped++;
+                    continue;
+                }
+                long ts = grabber.getTimestamp();
+                long now = System.nanoTime();
+                if (firstTimestampMicros < 0) {
+                    firstTimestampMicros = ts;
+                    firstWallNanos = now;
+                }
+                lastTimestampMicros = ts;
+                lastWallNanos = now;
+                seen++;
+            }
+            assertTrue(seen >= videoFrames / 2,
+                    "expected to receive at least " + (videoFrames / 2) + " video frames, got " + seen);
+            double mediaSpanMicros = lastTimestampMicros - firstTimestampMicros;
+            double wallSpanMicros = (lastWallNanos - firstWallNanos) / 1000.0;
+            assertTrue(wallSpanMicros > 0, "degenerate wall-clock span");
+            return mediaSpanMicros / wallSpanMicros;
+        } finally {
+            if (grabber != null) {
+                grabber.release();
+            }
+        }
+    }
+
     /** JUnit {@code @EnabledIf} condition: true iff the {@code docker} CLI can talk to a daemon. */
     static boolean dockerAvailable() {
         try {

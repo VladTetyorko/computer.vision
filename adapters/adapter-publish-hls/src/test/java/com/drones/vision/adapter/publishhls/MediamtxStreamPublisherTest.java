@@ -8,6 +8,7 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
 
+import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -169,6 +170,77 @@ class MediamtxStreamPublisherTest {
 
             publisher.streamEnded(id);
         }
+    }
+
+    // -- measured cadence (fixes 2x slow motion for non-15fps sources) -------
+
+    /**
+     * Regression test for the real bug this class was fixed for: the recorder
+     * used to always start at a fixed {@code DEFAULT_FRAME_RATE_FPS} (15.0),
+     * so a 30fps source got every timestamp bumped onto the 15fps grid and
+     * played back at half wall-clock speed. The recorder's connection is now
+     * deferred until {@code CADENCE_MEASUREMENT_FRAMES} frames have arrived
+     * (measured, not encoded) — verified here the same way the backoff test
+     * above verifies connection *timing*: a real local TCP server counts
+     * accepted connections, so the test observes the actual connect attempt
+     * directly instead of inferring it.
+     */
+    @Test
+    void publishDefersRealConnectionUntilCadenceMeasurementCompletes() throws IOException {
+        try (ServerSocket blackHole = new ServerSocket(0)) {
+            AtomicInteger connectionAttempts = new AtomicInteger();
+            Thread acceptor = new Thread(() -> {
+                while (!blackHole.isClosed()) {
+                    try (Socket accepted = blackHole.accept()) {
+                        connectionAttempts.incrementAndGet();
+                    } catch (IOException e) {
+                        return; // socket closed by the test; stop accepting
+                    }
+                }
+            });
+            acceptor.setDaemon(true);
+            acceptor.start();
+
+            MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                    URI.create("rtsp://localhost:" + blackHole.getLocalPort()), URI.create("http://localhost:8888"));
+            StreamId id = StreamId.random();
+            publisher.streamStarted(id, testDevice());
+
+            Instant base = Instant.now();
+            long thirtyFpsGapMillis = 33L;
+            int measurementFrames = MediamtxStreamPublisher.CADENCE_MEASUREMENT_FRAMES;
+
+            for (int i = 0; i < measurementFrames - 1; i++) {
+                publisher.publish(id, bgr24Frame(id, i, base.plusMillis(i * thirtyFpsGapMillis)));
+            }
+            assertEquals(0, connectionAttempts.get(),
+                    "no connection may be attempted before cadence measurement completes");
+
+            publisher.publish(id, bgr24Frame(id, measurementFrames - 1L,
+                    base.plusMillis((measurementFrames - 1L) * thirtyFpsGapMillis)));
+            assertEquals(1, connectionAttempts.get(),
+                    "the recorder must attempt its connection as soon as measurement completes");
+
+            publisher.streamEnded(id);
+        }
+    }
+
+    /**
+     * Unit-level check of the {@code configureRecorder} seam: whatever fps
+     * the pre-start cadence measurement produces must reach both {@code
+     * setFrameRate} and a proportionally-sized GOP (not the old fixed 15fps).
+     * Constructing an {@link FFmpegFrameRecorder} only assigns fields — no
+     * network I/O happens until {@code start()}, which this test never calls
+     * — so this needs neither a live mediamtx nor even a reachable socket.
+     */
+    @Test
+    void configureRecorderAppliesMeasuredFrameRateAndProportionalGop() {
+        FFmpegFrameRecorder recorder = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
+
+        MediamtxStreamPublisher.configureRecorder(recorder, 30.0);
+
+        assertEquals(30.0, recorder.getFrameRate());
+        assertEquals(60, recorder.getGopSize()); // GOP_SECONDS(2) * measured fps, not the old fixed 15fps*2=30
     }
 
     private static VideoFrame bgr24Frame(StreamId id, long sequence, Instant capturedAt) {
