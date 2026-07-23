@@ -87,6 +87,31 @@ describe('PollScheduler', () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  it('an `ignoreHidden` task keeps calling back while the tab is hidden', () => {
+    const scheduler = create();
+    const callback = vi.fn();
+    scheduler.schedule(2_000, callback, { ignoreHidden: true });
+
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    vi.advanceTimersByTime(6_000);
+
+    expect(callback).toHaveBeenCalledTimes(3);
+  });
+
+  it('a default task still pauses while an `ignoreHidden` sibling keeps running', () => {
+    const scheduler = create();
+    const paused = vi.fn();
+    const unpaused = vi.fn();
+    scheduler.schedule(1_000, paused);
+    scheduler.schedule(1_000, unpaused, { ignoreHidden: true });
+
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    vi.advanceTimersByTime(3_000);
+
+    expect(paused).not.toHaveBeenCalled();
+    expect(unpaused).toHaveBeenCalledTimes(3);
+  });
+
   it('an unrelated task keeps running after a sibling unsubscribes', () => {
     const scheduler = create();
     const a = vi.fn();

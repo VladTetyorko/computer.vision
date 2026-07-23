@@ -19,6 +19,18 @@ import java.util.Set;
  * streak of qualifying results opens/closes an event; see {@link
  * EventRuleConfig}.
  *
+ * <p>{@code overlayBurnIn} (docs/MVP2-PLAN.md §V, V-e) gates whether the
+ * application layer renders detection/telemetry overlays onto the published
+ * video at all. {@code true} (the default, current behavior) burns boxes/OSD
+ * into every published frame — the only thing an HLS-fallback viewer, an
+ * external player, or a future recording ever sees, since none of them run
+ * the SPA's own vector overlay. {@code false} skips rendering entirely: the
+ * app's own SPA viewers already draw the identical boxes as a client-side
+ * vector overlay (redundant burned pixels for them), so a stream whose only
+ * consumers are app viewers can trade that redundancy away for a cheaper
+ * encode path — see {@code StreamPipeline}'s javadoc for exactly what the
+ * skip saves.
+ *
  * @param model                  model to run
  * @param confidenceThreshold    minimum confidence to keep a detection, range [0,1]
  * @param inferenceFps           target inference sample rate; must be positive
@@ -26,10 +38,14 @@ import java.util.Set;
  * @param overlayTelemetry       whether telemetry should be burned into the overlay
  * @param labelFilter            labels to keep; empty means all labels; defensively copied
  * @param eventRule              debounce settings for {@link DetectionEvent} tracking
+ * @param overlayBurnIn          whether to render overlays onto published video at all
  */
 public record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps,
                               int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter,
-                              EventRuleConfig eventRule) {
+                              EventRuleConfig eventRule, boolean overlayBurnIn) {
+
+    /** Default for {@link #overlayBurnIn()} on every N-1-arg convenience constructor — unchanged behavior. */
+    public static final boolean DEFAULT_OVERLAY_BURN_IN = true;
 
     public PipelineConfig {
         if (model == null) {
@@ -56,9 +72,21 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     }
 
     /**
-     * Convenience constructor for callers that don't care about {@link #eventRule()} — defaults it
-     * to {@link EventRuleConfig#defaults()}, the same "N-1-arg convenience ctor" idiom used
-     * elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s 7-arg ctor).
+     * Convenience constructor for callers that don't care about {@link #overlayBurnIn()} — defaults
+     * it to {@link #DEFAULT_OVERLAY_BURN_IN} (unchanged behavior), the same "N-1-arg convenience
+     * ctor" idiom used elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s 7-arg ctor, this
+     * record's own 6-arg ctor below).
+     */
+    public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
+                           boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule) {
+        this(model, confidenceThreshold, inferenceFps, maxInFlightInferences, overlayTelemetry, labelFilter,
+                eventRule, DEFAULT_OVERLAY_BURN_IN);
+    }
+
+    /**
+     * Convenience constructor for callers that don't care about {@link #eventRule()} either —
+     * defaults it to {@link EventRuleConfig#defaults()}, chaining onto the 7-arg convenience ctor
+     * above (so {@link #overlayBurnIn()} also defaults to {@link #DEFAULT_OVERLAY_BURN_IN}).
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            boolean overlayTelemetry, Set<String> labelFilter) {
@@ -70,12 +98,13 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * Reasonable defaults for a new stream: the latest {@code "yolo"} model,
      * a 0.4 confidence threshold, 10 FPS inference sampling, at most 2
      * in-flight inference calls, telemetry overlay on, no label
-     * filtering (all labels kept), and {@link EventRuleConfig#defaults()}.
+     * filtering (all labels kept), {@link EventRuleConfig#defaults()}, and
+     * overlay burn-in on.
      *
      * @return a default {@code PipelineConfig}
      */
     public static PipelineConfig defaults() {
         return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 10, 2, true, Set.of(),
-                EventRuleConfig.defaults());
+                EventRuleConfig.defaults(), DEFAULT_OVERLAY_BURN_IN);
     }
 }

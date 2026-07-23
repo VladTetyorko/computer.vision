@@ -10,6 +10,8 @@ the fake stands in for `YoloDetector` entirely.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 import cv_service.server as server_module
@@ -121,12 +123,40 @@ def test_detect_stream_falls_back_to_echo_on_per_frame_failure():
     assert response.sequence == request.sequence
 
 
+class _PacedIterator:
+    """Yields `items` one at a time with a small delay before each.
+
+    V-d's `DetectStream` now reads frames on a background thread (see
+    `cv_service.server._StreamReader`) into a 1-slot latest-wins mailbox --
+    a plain `iter([...])` delivers all of its items essentially
+    instantaneously, which races that background thread against however
+    fast this test happens to get scheduled onto the mailbox, and can
+    legitimately (by design -- see `LatestOnlyMailbox`) drop items that a
+    slower, more realistic producer (a real network) would never have
+    bunched up in the first place. This iterator's small per-item delay
+    keeps the consumer always caught up before the next item exists, making
+    "every item is delivered, in order" deterministic again without
+    changing what's being tested.
+    """
+
+    def __init__(self, items, delay: float = 0.02) -> None:
+        self._items = iter(items)
+        self._delay = delay
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        time.sleep(self._delay)
+        return next(self._items)
+
+
 def test_multiple_requests_get_independent_responses():
     detector = FakeDetector()
     servicer = InferenceServicer(detector=detector)
 
     requests = [_make_request(sequence=i) for i in range(3)]
-    responses = list(servicer.DetectStream(iter(requests), context=None))
+    responses = list(servicer.DetectStream(_PacedIterator(requests), context=None))
 
     assert [r.sequence for r in responses] == [0, 1, 2]
 

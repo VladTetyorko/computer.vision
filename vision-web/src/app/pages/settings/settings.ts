@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { BUILT_IN_PROFILES, SettingsStore } from '../../core/settings-store';
 import { FleetStore } from '../../core/fleet-store';
+import { ToastService } from '../../core/toast.service';
 
 @Component({
   selector: 'vision-settings',
@@ -11,8 +12,20 @@ import { FleetStore } from '../../core/fleet-store';
 export class SettingsPage {
   protected readonly settings = inject(SettingsStore);
   protected readonly fleet = inject(FleetStore);
+  private readonly toasts = inject(ToastService);
 
   protected readonly newProfileName = signal('');
+
+  /**
+   * The browser's own grant, read once per render rather than tracked as a signal — this app has
+   * no precedent for polling `Notification.permission` for external changes (a user revoking the
+   * grant from browser chrome mid-session is a rare, refresh-recoverable edge case, not worth a
+   * new polling concern), and `'unsupported'` covers a browser/context with no `Notification`
+   * global at all (some embedded webviews, most notably).
+   */
+  protected notificationPermission(): NotificationPermission | 'unsupported' {
+    return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  }
 
   /** Backend defaults, for the "what does this preset change" comparison. */
   protected readonly defaults = BUILT_IN_PROFILES[0];
@@ -56,5 +69,34 @@ export class SettingsPage {
 
   protected setDensity(value: string): void {
     this.settings.wallDensity.set(Number(value));
+  }
+
+  /**
+   * Turning the toggle **off** never touches the browser permission — just this app's own opt-in.
+   * Turning it **on** is the one and only place `Notification.requestPermission()` is called
+   * (docs/MVP2-PLAN.md §E, E-b bullet 4): most browsers require a direct user gesture to show the
+   * permission prompt at all, and a settings checkbox click is exactly that — `core/events-store.ts`
+   * never calls `requestPermission()` itself, only reads whatever `Notification.permission` already
+   * is. A `'default'` grant prompts; `'denied'`/a post-prompt refusal leaves the setting off with an
+   * explanatory toast rather than silently flipping the checkbox back with no reason given.
+   */
+  protected async toggleEventNotifications(checked: boolean): Promise<void> {
+    if (!checked) {
+      this.settings.eventNotifications.set(false);
+      return;
+    }
+    if (typeof Notification === 'undefined') {
+      this.toasts.error('This browser does not support notifications.');
+      return;
+    }
+    let permission = Notification.permission;
+    if (permission === 'default') {
+      permission = await Notification.requestPermission();
+    }
+    if (permission === 'granted') {
+      this.settings.eventNotifications.set(true);
+    } else {
+      this.toasts.error('Notifications are blocked for this site — allow them in your browser settings first.');
+    }
   }
 }

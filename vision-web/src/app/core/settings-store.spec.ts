@@ -87,6 +87,27 @@ describe('SettingsStore', () => {
     expect(reloaded.mapLayer()).toBe('night');
   });
 
+  it('defaults event notifications to off and persists a change across reload', () => {
+    expect(store.eventNotifications()).toBe(false);
+
+    store.eventNotifications.set(true);
+    TestBed.tick();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.eventNotifications()).toBe(true);
+  });
+
+  it('ignores a corrupt persisted eventNotifications value rather than adopting it', () => {
+    localStorage.setItem('vision.settings.v1', JSON.stringify({ eventNotifications: 'yes' }));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.eventNotifications()).toBe(false);
+  });
+
   it('survives corrupt persisted settings', () => {
     localStorage.setItem('vision.settings.v1', '{not json');
     TestBed.resetTestingModule();

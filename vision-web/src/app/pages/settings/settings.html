@@ -35,6 +35,36 @@
     </label>
   </section>
 
+  <!-- ---- Notifications (docs/MVP2-PLAN.md §E, E-b bullet 4) -------------------------------- -->
+  <section class="card">
+    <header><h2>Notifications</h2></header>
+
+    <label class="toggle">
+      <input
+        type="checkbox"
+        [checked]="settings.eventNotifications()"
+        (change)="toggleEventNotifications($any($event.target).checked)"
+      />
+      <span>
+        <strong>Notify me about new detection events</strong>
+        <span class="muted">
+          Fires a browser notification the moment a new event opens, but only while this tab isn't
+          the one you're looking at — when it is, the Wall's Events rail already shows it live, so
+          a notification on top would just be noise. Turning this on will ask your browser for
+          permission if it hasn't already been granted.
+        </span>
+      </span>
+    </label>
+
+    @if (notificationPermission() === 'denied') {
+      <p class="muted hint">
+        Notifications are blocked for this site in your browser settings — allow them there first.
+      </p>
+    } @else if (notificationPermission() === 'unsupported') {
+      <p class="muted hint">This browser does not support notifications.</p>
+    }
+  </section>
+
   <!-- ---- Pipeline profiles ---------------------------------------------- -->
   <section class="card">
     <header>

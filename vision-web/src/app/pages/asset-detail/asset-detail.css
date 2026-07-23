@@ -180,3 +180,52 @@ td.actions {
     padding-bottom: 0.75rem;
     border-bottom: 1px solid var(--border);
 }
+
+/* ---- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) — mirrors pages/wall/wall.css's own rail rows,
+   minus the click affordance (this list is informational, not a navigation target). ------------ */
+
+.event-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.event-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.6rem;
+}
+
+.event-row.open {
+    border-color: var(--live);
+}
+
+.event-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.event-label {
+    font-weight: 600;
+    text-transform: capitalize;
+    font-size: 0.85rem;
+}
+
+.event-meta {
+    font-size: 0.72rem;
+}
+
+.event-time {
+    font-size: 0.72rem;
+    white-space: nowrap;
+}

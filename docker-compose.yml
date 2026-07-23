@@ -78,21 +78,43 @@ services:
       # true) advertises this *container's* own network-namespace IPs (e.g.
       # 172.x.x.x on the compose bridge network) -- unreachable from a
       # browser on the host. MTX_WEBRTCADDITIONALHOSTS makes mediamtx also
-      # advertise 127.0.0.1 (paired with the 1:1 UDP mapping above), which
-      # WHEP viewing needs to work at all through this compose stack.
+      # advertise an address the browser can actually reach (paired with the
+      # 1:1 UDP mapping above), which WHEP viewing needs to work at all
+      # through this compose stack.
       #
-      # LOCALHOST-ONLY LIMITATION, stated honestly: a browser on a *different*
-      # machine (e.g. a friend's laptop on the same LAN, per the MVP1 "friends
-      # demo" scenario) cannot use WebRTC/WHEP against this compose stack --
-      # its ICE candidates would still say 127.0.0.1, which resolves to that
-      # *other* machine's own loopback, not this host. Fix by adding this
-      # host's real LAN IP too (MTX_WEBRTCADDITIONALHOSTS: "127.0.0.1,192.168.x.x",
-      # mediamtx supports a comma-separated list) -- left at localhost-only
-      # here since the IP is host-specific and would need to be hand-edited
-      # per demo machine either way. HLS (the existing viewUrl) has no such
-      # limitation and remains the cross-host fallback; see adapter-publish-hls/
-      # MODULE.md and vision-app/MODULE.md for the full WHEP-in-Docker writeup.
-      MTX_WEBRTCADDITIONALHOSTS: "127.0.0.1"
+      # docs/MVP2-PLAN.md V-e: parametrized via VISION_WEBRTC_HOST (see
+      # .env.example) instead of a hardcoded 127.0.0.1 -- defaults to
+      # 127.0.0.1 (same-host-only, unchanged behavior) when unset. LAN
+      # operators should set VISION_WEBRTC_HOST to this machine's own LAN IP
+      # (e.g. "192.168.0.104") so phones/laptops on the LAN get sub-second
+      # WebRTC instead of always falling back to HLS -- find it with
+      # `hostname -I` (Linux), `ipconfig getifaddr en0` (macOS), or
+      # `ipconfig` (Windows, "IPv4 Address"). Off-LAN viewers (and anyone
+      # this isn't configured for) still transparently fall back to HLS,
+      # which has no such reachability limitation.
+      #
+      # Env-list encoding, VERIFIED (not assumed): mediamtx's own env-var
+      # loader splits list-typed fields on commas -- confirmed directly by
+      # the mediamtx maintainer for this exact variable (github.com/
+      # bluenviron/mediamtx discussions #3360: "in order to do it with
+      # environment variables it's enough to use commas:
+      # MTX_WEBRTCADDITIONALHOSTS=192.168.x.x,example.org"), consistent with
+      # internal/conf/env/env.go's generic string-slice handling
+      # (`strings.Split(ev, ",")`). So VISION_WEBRTC_HOST can itself be a
+      # comma-separated list (e.g. "127.0.0.1,192.168.0.104") -- a bare
+      # single value *replaces* the default 127.0.0.1 outright, it does not
+      # add to it, so an operator who wants both same-host and LAN viewers
+      # working simultaneously must list both explicitly.
+      #
+      # LOCALHOST-ONLY BY DEFAULT, LAN-reachable once configured: a browser
+      # on a *different* machine (e.g. a friend's laptop on the same LAN,
+      # per the MVP1 "friends demo" scenario) cannot use WebRTC/WHEP against
+      # this stack until VISION_WEBRTC_HOST names an address that machine
+      # can reach. HLS (the existing viewUrl) has no such limitation and
+      # remains the cross-host-reliable fallback; see adapter-publish-hls/
+      # MODULE.md and vision-app/MODULE.md ("WHEP viewing" section) for the
+      # full WHEP-in-Docker writeup.
+      MTX_WEBRTCADDITIONALHOSTS: "${VISION_WEBRTC_HOST:-127.0.0.1}"
       # docs/MVP2-PLAN.md V-a (glass-to-glass latency): mediamtx's own default
       # already *is* Low-Latency HLS (verified against the actual pulled
       # bluenviron/mediamtx:latest image, v1.19.2, by extracting its baked-in

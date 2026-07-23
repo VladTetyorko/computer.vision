@@ -75,6 +75,7 @@ interface PersistedSettings {
   customProfiles: PipelineProfile[];
   draft: PipelineSettings | null;
   mapLayer: MapLayerId;
+  eventNotifications: boolean;
 }
 
 const STORAGE_KEY = 'vision.settings.v1';
@@ -92,6 +93,17 @@ export class SettingsStore {
 
   /** The active base map layer — persisted, shared by the fleet map and the live map inset. */
   readonly mapLayer = signal<MapLayerId>(DEFAULT_MAP_LAYER);
+
+  /**
+   * Opt-in browser `Notification`s for newly-opened detection events (docs/MVP2-PLAN.md §E, E-b)
+   * — off by default, both because it's a permission-gated browser feature a user should
+   * deliberately turn on, and because `Notification.requestPermission()` must be called from a
+   * direct user gesture in most browsers, which only the Settings page's toggle can provide.
+   * `core/events-store.ts` still independently checks `Notification.permission === 'granted'`
+   * before ever firing one — flipping this signal alone (e.g. a stale/tampered persisted value)
+   * can never bypass the browser's own permission gate.
+   */
+  readonly eventNotifications = signal(false);
 
   readonly activeProfileId = signal(BUILT_IN_PROFILES[0].id);
   readonly customProfiles = signal<readonly PipelineProfile[]>([]);
@@ -192,6 +204,9 @@ export class SettingsStore {
       if (isMapLayerId(parsed.mapLayer)) {
         this.mapLayer.set(parsed.mapLayer);
       }
+      if (typeof parsed.eventNotifications === 'boolean') {
+        this.eventNotifications.set(parsed.eventNotifications);
+      }
       if (Array.isArray(parsed.customProfiles)) {
         this.customProfiles.set(parsed.customProfiles);
       }
@@ -215,6 +230,7 @@ export class SettingsStore {
       customProfiles: [...this.customProfiles()],
       draft: this.draftSignal(),
       mapLayer: this.mapLayer(),
+      eventNotifications: this.eventNotifications(),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   }

@@ -121,3 +121,30 @@
   width: 100%;
   justify-content: center;
 }
+
+/* ---- Event markers (docs/MVP2-PLAN.md §E, E-b bullet 3) ----------------------------------- */
+
+:host ::ng-deep .event-marker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--warn);
+  border: 2px solid rgb(0 0 0 / 55%);
+  box-shadow: 0 0 0 2px rgb(255 179 64 / 25%);
+}
+
+:host ::ng-deep .event-marker-open .event-marker-dot {
+  background: var(--live);
+  animation: event-marker-pulse 2s ease-in-out infinite;
+}
+
+@keyframes event-marker-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+:host ::ng-deep .event-popup .event-asset-btn {
+  margin-top: 0.15rem;
+  width: 100%;
+  justify-content: center;
+}

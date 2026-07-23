@@ -18,6 +18,24 @@ interface Task {
   readonly periodMs: number;
   nextDueAt: number;
   readonly callback: () => void;
+  readonly ignoreHidden: boolean;
+}
+
+export interface ScheduleOptions {
+  /**
+   * Runs this task even while `document.hidden` is `true`, instead of pausing like every other
+   * task (see the class doc's "pause, never drop" contract). Defaults to `false` — every existing
+   * caller is unaffected.
+   *
+   * **The one documented user** is `core/events-store.ts`'s global detection-events poll
+   * (docs/MVP2-PLAN.md §E, E-b): its whole reason to exist is noticing a newly-opened event *while
+   * the tab is in the background*, so it can fire a browser `Notification` — a task that pauses
+   * the instant the tab backgrounds could never detect anything to notify about, since by
+   * definition it would only ever observe new data while already visible. Every other poller in
+   * this app has the opposite goal (don't burn battery/network on a tab nobody is looking at) and
+   * must keep the default.
+   */
+  readonly ignoreHidden?: boolean;
 }
 
 /**
@@ -55,8 +73,13 @@ export class PollScheduler {
    * function — call it on `DestroyRef.onDestroy`/`reset()`/tracker teardown, exactly where a
    * `clearInterval(handle)` used to go.
    */
-  schedule(periodMs: number, callback: () => void): () => void {
-    const task: Task = { periodMs, nextDueAt: Date.now() + periodMs, callback };
+  schedule(periodMs: number, callback: () => void, options: ScheduleOptions = {}): () => void {
+    const task: Task = {
+      periodMs,
+      nextDueAt: Date.now() + periodMs,
+      callback,
+      ignoreHidden: options.ignoreHidden ?? false,
+    };
     this.tasks.add(task);
     this.ensureTicking();
     return () => {
@@ -82,11 +105,12 @@ export class PollScheduler {
   }
 
   private tick(): void {
-    if (!shouldPoll(document.hidden)) {
-      return; // every due task just waits for the next visible tick — none are dropped
-    }
+    const paused = !shouldPoll(document.hidden);
     const now = Date.now();
     for (const task of this.tasks) {
+      if (paused && !task.ignoreHidden) {
+        continue; // waits for the next visible tick — due time untouched, nothing is dropped
+      }
       if (now >= task.nextDueAt) {
         task.nextDueAt = now + task.periodMs;
         task.callback();

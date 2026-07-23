@@ -18,11 +18,13 @@ import com.drones.vision.domain.model.PipelineConfig;
  * @param deviceId            the device to stream from, as a canonical UUID string; {@code null} means "the asset's single video-capable device"
  * @param confidenceThreshold overrides {@link PipelineConfig#confidenceThreshold()} if present
  * @param inferenceFps        overrides {@link PipelineConfig#inferenceFps()} if present
+ * @param overlayBurnIn       overrides {@link PipelineConfig#overlayBurnIn()} if present (docs/MVP2-PLAN.md §V, V-e)
  */
-public record StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps) {
+public record StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
+                                       Boolean overlayBurnIn) {
 
     /** No body: no explicit device, use every default from {@link PipelineConfig#defaults()}. */
-    public static final StartAssetStreamRequest EMPTY = new StartAssetStreamRequest(null, null, null);
+    public static final StartAssetStreamRequest EMPTY = new StartAssetStreamRequest(null, null, null, null);
 
     /**
      * Parses {@link #deviceId()}, if present.
@@ -35,11 +37,12 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
     }
 
     /**
-     * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()} onto {@link PipelineConfig#defaults()}.
+     * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()} onto
+     * {@link PipelineConfig#defaults()}.
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
-        return new StartStreamRequest(confidenceThreshold, inferenceFps).mergeOntoDefaults();
+        return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn).mergeOntoDefaults();
     }
 }

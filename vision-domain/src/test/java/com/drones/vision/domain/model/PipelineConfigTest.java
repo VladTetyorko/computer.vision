@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,22 +24,36 @@ class PipelineConfigTest {
         assertTrue(defaults.overlayTelemetry());
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
+        assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
     }
 
     @Test
-    void sixArgConvenienceConstructorDefaultsEventRule() {
+    void sixArgConvenienceConstructorDefaultsEventRuleAndOverlayBurnIn() {
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of());
 
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
+        assertTrue(config.overlayBurnIn());
     }
 
     @Test
-    void sevenArgConstructorAcceptsAnExplicitEventRule() {
+    void sevenArgConstructorAcceptsAnExplicitEventRuleAndDefaultsOverlayBurnIn() {
         EventRuleConfig customRule = new EventRuleConfig(Set.of("dog"), 0.7, 5, Duration.ofSeconds(10));
 
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule);
 
         assertEquals(customRule, config.eventRule());
+        assertTrue(config.overlayBurnIn());
+    }
+
+    @Test
+    void eightArgConstructorAcceptsAnExplicitOverlayBurnIn() {
+        EventRuleConfig customRule = EventRuleConfig.defaults();
+
+        PipelineConfig config =
+                new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule, false);
+
+        assertEquals(customRule, config.eventRule());
+        assertFalse(config.overlayBurnIn());
     }
 
     @Test
@@ -46,7 +61,7 @@ class PipelineConfigTest {
         ModelRef model = new ModelRef("yolo", "1");
 
         assertThrows(IllegalArgumentException.class,
-                () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null));
+                () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null, true));
     }
 
     @Test

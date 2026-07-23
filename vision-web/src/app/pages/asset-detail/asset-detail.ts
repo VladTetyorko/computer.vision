@@ -7,9 +7,11 @@ import { ToastService } from '../../core/toast.service';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry-store';
 import { DetectionsStore } from '../../core/detections-store';
+import { EventsStore } from '../../core/events-store';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/device-logic';
 import { ageSeconds, isStale } from '../../core/telemetry-logic';
+import { filterEvents, relativeTimeLabel } from '../../core/events-logic';
 import {
   RESTORE_TARGET_STATE,
   availableAssetActions,
@@ -24,13 +26,26 @@ import { Player, type BoxesMode, type Transport } from '../../ui/player';
 import { StreamInfoPanel } from '../../ui/stream-info-panel';
 import { LiveMap } from '../../ui/live-map';
 import { freshestSample, groupTelemetryByDevice, telemetryDevices } from './asset-detail-logic';
-import type { AssetDetails, AssetUsage, Device, SettableLifecycleState, TelemetrySample } from '../../core/api/models';
+import type {
+  AssetDetails,
+  AssetUsage,
+  DetectionEvent,
+  Device,
+  SettableLifecycleState,
+  TelemetrySample,
+} from '../../core/api/models';
 
 /** Asset characteristics/usages are re-read at this cadence — matches `FleetStore`'s own poll. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
 /** How often per-device sample-age readouts tick, independent of the telemetry poll cadence. */
 const CLOCK_TICK_MS = 1_000;
+
+/** How often the per-stream events feed is re-read while this asset is actively streaming. */
+const STREAM_EVENTS_POLL_INTERVAL_MS = 5_000;
+
+/** Matches `EventController.DEFAULT_LIMIT`. */
+const STREAM_EVENTS_LIMIT = 50;
 
 /**
  * The asset detail page (`/assets/:id`, docs/CYCLES-PLAN.md §11, CD-b item 2) — the "Open" target
@@ -70,6 +85,7 @@ export class AssetDetailPage {
   protected readonly settings = inject(SettingsStore);
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
+  protected readonly events = inject(EventsStore);
 
   protected readonly asset = signal<AssetDetails | undefined>(undefined);
   protected readonly loading = signal(true);
@@ -84,6 +100,20 @@ export class AssetDetailPage {
     return device ? this.fleet.streamFor(device.id) : undefined;
   });
   protected readonly live = computed(() => this.stream() !== undefined);
+
+  // --- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
+  // Per the plan's own scoping: the per-stream feed while this asset is actively streaming (a
+  // dedicated small poll below, mirroring `DetectionsStore`'s own per-stream cadence), else recent
+  // events matched by `assetId` from the shared global feed — never both, since a per-stream feed
+  // is strictly more precise than filtering the global one once a `streamId` is known.
+
+  private readonly streamEventsSignal = signal<readonly DetectionEvent[]>([]);
+
+  protected readonly displayedEvents = computed(() =>
+    this.live()
+      ? this.streamEventsSignal()
+      : filterEvents(this.events.events(), { assetId: this.assetId() }),
+  );
 
   protected readonly assetTelemetryDevices = computed(() => telemetryDevices(this.asset()?.devices ?? []));
   protected readonly telemetryByDevice = computed(() => groupTelemetryByDevice(this.telemetry.samples()));
@@ -151,13 +181,50 @@ export class AssetDetailPage {
       }
     });
 
+    // The per-stream events feed only makes sense while there is a streamId to ask about — an
+    // immediate fetch on transition, then `stopStreamEventsPoll` below keeps it fresh.
+    effect(() => {
+      const streamId = this.stream()?.streamId;
+      if (streamId) {
+        void this.pollStreamEvents(streamId);
+      } else {
+        this.streamEventsSignal.set([]);
+      }
+    });
+
+    // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own doc
+    // comment: this is one of exactly three pages that keeps the shared global events poll alive.
+    this.events.activate();
+
     const scheduler = inject(PollScheduler);
     const stopAssetPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => void this.refresh());
     const stopClock = scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
+    const stopStreamEventsPoll = scheduler.schedule(STREAM_EVENTS_POLL_INTERVAL_MS, () => {
+      const streamId = this.stream()?.streamId;
+      if (streamId) {
+        void this.pollStreamEvents(streamId);
+      }
+    });
     inject(DestroyRef).onDestroy(() => {
+      this.events.release();
       stopAssetPoll();
       stopClock();
+      stopStreamEventsPoll();
     });
+  }
+
+  private async pollStreamEvents(streamId: string): Promise<void> {
+    try {
+      const results = await this.api.streamEvents(streamId, STREAM_EVENTS_LIMIT);
+      this.streamEventsSignal.set(results);
+    } catch {
+      // Silent-degrade — same convention as every other poll on this page (enrichment, not a
+      // user-initiated action).
+    }
+  }
+
+  protected relativeTime(event: DetectionEvent): string {
+    return relativeTimeLabel(event.lastSeen, this.nowSignal());
   }
 
   private async load(assetId: string): Promise<void> {

@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { FleetStore } from '../../core/fleet-store';
+import { EventsStore } from '../../core/events-store';
 import { buildTestDroneRequest } from '../devices/simulate-logic';
 import { FlightPlanDialog } from '../../ui/flight-plan-dialog';
 import { buildTelemetryRequest, type FlightPlanForm } from '../../ui/flight-plan-logic';
@@ -39,7 +40,17 @@ import type { AssetSummary } from '../../core/api/models';
 export class MapPage {
   private readonly router = inject(Router);
   private readonly fleet = inject(FleetStore);
+  private readonly events = inject(EventsStore);
   protected readonly mapStore = inject(FleetMapStore);
+
+  constructor() {
+    // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own doc
+    // comment: this is one of exactly three pages that keeps the shared events poll alive, which
+    // is what backs `FleetMap`'s own event-marker layer (it injects `EventsStore` directly, since
+    // this page already owns the activate/release lifecycle for it).
+    this.events.activate();
+    inject(DestroyRef).onDestroy(() => this.events.release());
+  }
 
   protected readonly isEmpty = computed(() => this.mapStore.assets().length === 0);
 
@@ -93,6 +104,11 @@ export class MapPage {
 
   protected openAsset(assetId: string): Promise<boolean> {
     return this.router.navigate(['/assets', assetId]);
+  }
+
+  /** `FleetMap`'s event-popup "Open asset" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
+  protected openEventAsset(assetId: string): Promise<boolean> {
+    return this.openAsset(assetId);
   }
 
   /**

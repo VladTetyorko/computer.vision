@@ -4,6 +4,7 @@ import {
   DestroyRef,
   ElementRef,
   afterNextRender,
+  computed,
   effect,
   inject,
   output,
@@ -12,6 +13,9 @@ import {
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
 import { SettingsStore, type MapLayerId } from '../../core/settings-store';
+import { EventsStore } from '../../core/events-store';
+import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../core/events-logic';
+import type { DetectionEvent } from '../../core/api/models';
 import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../../ui/leaflet-loader';
 import { FleetMapStore } from './map-store';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from './map-logic';
@@ -70,6 +74,19 @@ function escapeHtml(value: string): string {
  * leaves both navigation and docking to `MapPage`. **Preview** (docs/CYCLES-PLAN.md §9, CU-b item
  * 5) additionally fires straight from a marker click for `live` markers (bypassing the popup) —
  * the popup's own Preview button exists for discoverability, not as the only way in.
+ *
+ * **Event markers** (docs/MVP2-PLAN.md §E, E-b bullet 3): a second, independent marker layer for
+ * every position-carrying `DetectionEvent` (`EventsStore.events()`, injected directly rather than
+ * activated/released here — `MapPage` owns that lifecycle, see its own doc comment), capped to the
+ * most recent `MAX_EVENT_MARKERS` (`selectEventMarkers`). These never participate in auto-fit
+ * (`fitToMarkers` only ever looks at `store.markers()`, unchanged) — a stray old event elsewhere on
+ * the map must never yank the fleet view away from where the assets actually are. A popup shows
+ * label/confidence/first-and-last-seen and, per the plan's own honestly-scoped fallback, an **Open
+ * asset** button when `assetId` resolved — R-b's replay route needs a `usageId` that
+ * `AssetUsageResponse` does not expose (no way to resolve *which* usage was open at the event's
+ * `firstSeen` from any current API — see the module's own MODULE.md Gotcha for the full trace),
+ * so linking to a specific replay moment was rejected as unbuildable this cycle, not merely
+ * skipped.
  */
 @Component({
   selector: 'vision-fleet-map',
@@ -80,6 +97,7 @@ function escapeHtml(value: string): string {
 export class FleetMap {
   protected readonly store = inject(FleetMapStore);
   protected readonly settings = inject(SettingsStore);
+  protected readonly events = inject(EventsStore);
 
   /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
   protected readonly layers = MAP_LAYERS;
@@ -94,15 +112,22 @@ export class FleetMap {
    */
   readonly preview = output<string>();
 
+  /** Emits the assetId behind an event popup's "Open asset" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
+  readonly openEventAsset = output<string>();
+
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
   protected readonly autoFit = signal(true);
   protected readonly tilesOk = signal(true);
 
+  /** Position-carrying events worth plotting, most recent first, capped — see class doc. */
+  protected readonly eventMarkers = computed(() => selectEventMarkers(this.events.events()));
+
   private leaflet: typeof Leaflet | null = null;
   private map: Leaflet.Map | null = null;
   private tileLayer: Leaflet.TileLayer | null = null;
   private readonly markerHandles = new Map<string, MarkerHandle>();
+  private readonly eventMarkerHandles = new Map<string, Leaflet.Marker>();
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
   private generation = 0;
@@ -130,6 +155,11 @@ export class FleetMap {
         }
       }
     });
+
+    // Event markers are their own independent layer — deliberately excluded from the auto-fit
+    // fingerprint/bounds above (see class doc): a stray old event elsewhere must never yank the
+    // fleet view away from where the assets actually are.
+    effect(() => this.applyEventMarkers(this.eventMarkers()));
 
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
@@ -162,8 +192,8 @@ export class FleetMap {
       }
     });
 
-    map.getContainer().addEventListener('click', (event) => {
-      const target = event.target as HTMLElement | null;
+    map.getContainer().addEventListener('click', (clickEvent) => {
+      const target = clickEvent.target as HTMLElement | null;
       const watchBtn = target?.closest<HTMLElement>('.watch-btn');
       if (watchBtn?.dataset['assetId']) {
         this.watch.emit(watchBtn.dataset['assetId']);
@@ -172,6 +202,11 @@ export class FleetMap {
       const previewBtn = target?.closest<HTMLElement>('.preview-btn');
       if (previewBtn?.dataset['assetId']) {
         this.preview.emit(previewBtn.dataset['assetId']);
+        return;
+      }
+      const eventAssetBtn = target?.closest<HTMLElement>('.event-asset-btn');
+      if (eventAssetBtn?.dataset['assetId']) {
+        this.openEventAsset.emit(eventAssetBtn.dataset['assetId']);
       }
     });
 
@@ -182,6 +217,7 @@ export class FleetMap {
       this.lastFitFingerprint = fingerprintMarkers(markers);
       this.fitToMarkers(markers);
     }
+    this.applyEventMarkers(this.eventMarkers());
   }
 
   private applyMarkers(markers: readonly FleetMarker[]): void {
@@ -253,6 +289,84 @@ export class FleetMap {
     this.markerHandles.delete(assetId);
   }
 
+  // --- Event markers (docs/MVP2-PLAN.md §E, E-b bullet 3) — see class doc ---------------------
+
+  private applyEventMarkers(events: readonly DetectionEvent[]): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return; // map chunk/instance not ready yet — `initMap()` re-applies once it is
+    }
+
+    const seen = new Set<string>();
+    for (const event of events) {
+      seen.add(event.id);
+      this.upsertEventMarker(L, map, event);
+    }
+    for (const id of [...this.eventMarkerHandles.keys()]) {
+      if (!seen.has(id)) {
+        this.eventMarkerHandles.get(id)?.remove();
+        this.eventMarkerHandles.delete(id);
+      }
+    }
+  }
+
+  private upsertEventMarker(L: typeof Leaflet, map: Leaflet.Map, event: DetectionEvent): void {
+    if (!event.position) {
+      return; // `selectEventMarkers` already filters these out — defensive, never expected here
+    }
+    const point = L.latLng(event.position.latitude, event.position.longitude);
+    let marker = this.eventMarkerHandles.get(event.id);
+    const html = this.eventPopupHtml(event);
+
+    if (!marker) {
+      marker = L.marker(point, { icon: this.eventMarkerIcon(L, event), keyboard: false, zIndexOffset: -100 })
+        .addTo(map)
+        .bindPopup(html);
+      this.eventMarkerHandles.set(event.id, marker);
+    } else {
+      marker.setLatLng(point);
+      marker.setIcon(this.eventMarkerIcon(L, event));
+      const popup = marker.getPopup();
+      if (popup) {
+        popup.setContent(html); // updates in place without closing an already-open popup
+      } else {
+        marker.bindPopup(html);
+      }
+    }
+  }
+
+  private eventMarkerIcon(L: typeof Leaflet, event: DetectionEvent): Leaflet.DivIcon {
+    return L.divIcon({
+      className: `event-marker ${event.state === 'OPEN' ? 'event-marker-open' : 'event-marker-closed'}`,
+      html: '<div class="event-marker-dot"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+  }
+
+  private eventPopupHtml(event: DetectionEvent): string {
+    const nowMs = Date.now();
+    const rows: string[] = [
+      `<div class="popup-title">${escapeHtml(capitalizeLabel(event.label))} detected</div>`,
+      `<span class="chip ${event.state === 'OPEN' ? 'ok' : ''}">${event.state === 'OPEN' ? 'Open' : 'Closed'}</span>`,
+      `<div class="popup-row">Peak confidence ${escapeHtml(formatConfidence(event.peakConfidence))}</div>`,
+      `<div class="popup-row faint">First seen ${escapeHtml(relativeTimeLabel(event.firstSeen, nowMs))}</div>`,
+      `<div class="popup-row faint">Last seen ${escapeHtml(relativeTimeLabel(event.lastSeen, nowMs))}</div>`,
+    ];
+    if (event.assetId) {
+      rows.push(
+        `<button type="button" class="btn small event-asset-btn" data-asset-id="${escapeHtml(event.assetId)}">Open asset</button>`,
+      );
+    } else {
+      // Honest gap (docs/MVP2-PLAN.md §E, E-b bullet 3): no assetId resolved, and no current API
+      // can turn a firstSeen instant back into a usageId to link a replay moment either — see the
+      // class doc comment.
+      rows.push('<div class="popup-row faint">No asset resolved for this event.</div>');
+    }
+    return `<div class="fleet-popup event-popup">${rows.join('')}</div>`;
+  }
+
   private fitToMarkers(markers: readonly FleetMarker[]): void {
     const L = this.leaflet;
     if (!L || !this.map || markers.length === 0) {
@@ -322,6 +436,10 @@ export class FleetMap {
     for (const assetId of [...this.markerHandles.keys()]) {
       this.removeMarker(assetId);
     }
+    for (const marker of this.eventMarkerHandles.values()) {
+      marker.remove();
+    }
+    this.eventMarkerHandles.clear();
     this.map?.remove();
     this.map = null;
     this.tileLayer = null;

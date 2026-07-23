@@ -207,4 +207,32 @@ describe('VisionApi', () => {
       .flush({ assetId: 'a/1' });
     await promise;
   });
+
+  // --- Detection events (docs/MVP2-PLAN.md §E, E-a/E-b) --------------------------------------
+
+  it('lists recent events with a default limit and no sinceMs on the first poll', async () => {
+    const promise = api.events();
+    const request = http.expectOne((r) => r.url === '/api/events');
+    expect(request.request.params.get('limit')).toBe('50');
+    expect(request.request.params.has('sinceMs')).toBe(false);
+    request.flush([]);
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it('passes sinceMs through once a cursor exists', async () => {
+    const promise = api.events(1_700_000_000_000, 25);
+    const request = http.expectOne((r) => r.url === '/api/events');
+    expect(request.request.params.get('sinceMs')).toBe('1700000000000');
+    expect(request.request.params.get('limit')).toBe('25');
+    request.flush([]);
+    await promise;
+  });
+
+  it('lists one stream\'s events', async () => {
+    const promise = api.streamEvents('s-1');
+    const request = http.expectOne((r) => r.url === '/api/streams/s-1/events');
+    expect(request.request.params.get('limit')).toBe('50');
+    request.flush([]);
+    await expect(promise).resolves.toEqual([]);
+  });
 });

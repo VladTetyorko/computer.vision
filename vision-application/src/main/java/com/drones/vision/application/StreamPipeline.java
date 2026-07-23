@@ -46,9 +46,11 @@ import java.util.function.LongSupplier;
  *       whether a detection outage (see below) is in progress — the video
  *       path never depends on the CV service being healthy.</li>
  *   <li><b>Overlay burn-in</b> (docs/MVP1-PLAN.md §C8, smoothed per
- *       docs/CYCLES-PLAN.md §12 CP-c): when an {@link OverlayPort} is
- *       configured (constructor argument, nullable — {@code null} keeps
- *       today's raw-publish behavior everywhere) and {@link
+ *       docs/CYCLES-PLAN.md §12 CP-c; optional per docs/MVP2-PLAN.md §V,
+ *       V-e): when an {@link OverlayPort} is configured (constructor
+ *       argument, nullable — {@code null} keeps today's raw-publish behavior
+ *       everywhere) and {@link PipelineConfig#overlayBurnIn()} is {@code
+ *       true} (the default) and {@link
  *       #extrapolator}'s boxes at this frame's capture time are non-empty,
  *       each frame is rendered through {@link OverlayPort#render} — as an
  *       {@link AnnotatedFrame} carrying the extrapolated detections and a
@@ -338,11 +340,25 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Renders {@code frame} through {@link #overlayPort} when one is configured and {@link
-     * #extrapolator}'s boxes at {@code frame}'s capture time have something to draw, returning the
-     * raw {@code frame} otherwise (no overlay configured, or nothing detected yet). Detection is
-     * always run against the raw {@code frame}, never the rendered one — overlay is purely a
-     * publish-time presentation concern.
+     * Renders {@code frame} through {@link #overlayPort} when one is configured, {@link
+     * PipelineConfig#overlayBurnIn()} is {@code true}, and {@link #extrapolator}'s boxes at {@code
+     * frame}'s capture time have something to draw, returning the raw {@code frame} otherwise (no
+     * overlay configured, burn-in disabled, or nothing detected yet). Detection is always run
+     * against the raw {@code frame}, never the rendered one — overlay is purely a publish-time
+     * presentation concern.
+     *
+     * <p><b>What {@code overlayBurnIn=false} actually skips</b> (docs/MVP2-PLAN.md §V, V-e): the
+     * {@link #extrapolator}{@code .at(...)} lookup (matching/extrapolation math) below, {@link
+     * OverlayPort#render}'s Java2D work (decode/allocate a fresh image, draw boxes/OSD, re-encode),
+     * and the extra {@link VideoFrame} instance {@code render} returns — every publish falls
+     * straight through to the raw, already-decoded frame. This is the pipeline's only burn-in
+     * decision point, so it gates telemetry-OSD burn-in identically to detection-box burn-in once a
+     * telemetry input exists here (today neither runs without a configured {@link #overlayPort}
+     * regardless of this flag, since telemetry is always passed as {@code null} — see the class
+     * javadoc). What it does <b>not</b> skip: {@link #extrapolator}{@code .accept} (called from
+     * {@link #onDetectionResult}, independent of this method) keeps running either way — it is
+     * cheap (bookkeeping over at most two results) and turning it off per-config would only save
+     * that bookkeeping, not the Java2D/copy cost this flag exists to avoid.
      *
      * <p>The detections passed to the renderer are {@link #extrapolator}'s output at {@code
      * frame.capturedAt()} (docs/CYCLES-PLAN.md &sect;12, CP-c), not the raw {@link
@@ -357,7 +373,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * succeeds) — never per frame — so a persistently broken renderer doesn't spam logs.
      */
     private VideoFrame overlayIfNeeded(VideoFrame frame) {
-        if (overlayPort == null) {
+        if (overlayPort == null || !config.overlayBurnIn()) {
             return frame;
         }
         List<Detection> detections = extrapolator.at(frame.capturedAt());

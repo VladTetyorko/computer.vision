@@ -7,6 +7,7 @@ import type {
   AssetDetails,
   AssetEdit,
   AssetSummary,
+  DetectionEvent,
   DetectionResult,
   Device,
   DeviceEdit,
@@ -211,6 +212,35 @@ export class VisionApi {
   stopSimulation(assetId: string): Promise<void> {
     return firstValueFrom(
       this.http.delete<void>(`/api/simulations/${encodeURIComponent(assetId)}`),
+    );
+  }
+
+  // --- Detection events (docs/MVP2-PLAN.md §E, E-a/E-b) ----------------------------------------
+  // `EventController`'s polling contract: newest-first by `lastSeen`, `sinceMs` a nullable cursor
+  // (see `core/events-store.ts` for how the poll loop advances it).
+
+  /**
+   * Recent detection events across every stream, newest-first by `lastSeen`. `sinceMs` is only
+   * added to the query string when given — `EventController#recent`'s own `sinceMs` param is
+   * nullable, `null` meaning no lower bound (the first poll of a session).
+   */
+  events(sinceMs?: number, limit = 50): Promise<DetectionEvent[]> {
+    const params: Record<string, number> = { limit };
+    if (sinceMs !== undefined) {
+      params['sinceMs'] = sinceMs;
+    }
+    return firstValueFrom(this.http.get<DetectionEvent[]>('/api/events', { params }));
+  }
+
+  /**
+   * One stream's detection events, newest-first by `lastSeen`. An unknown/never-alerted stream
+   * returns an empty array rather than 404ing, mirroring `streamDetections`'s own precedent.
+   */
+  streamEvents(streamId: string, limit = 50): Promise<DetectionEvent[]> {
+    return firstValueFrom(
+      this.http.get<DetectionEvent[]>(`/api/streams/${encodeURIComponent(streamId)}/events`, {
+        params: { limit },
+      }),
     );
   }
 }

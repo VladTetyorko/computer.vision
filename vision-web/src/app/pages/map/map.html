@@ -35,7 +35,12 @@
     </div>
   } @else {
     <div class="map-layout">
-      <vision-fleet-map class="map-panel" (watch)="onWatch($event)" (preview)="onPreview($event)" />
+      <vision-fleet-map
+        class="map-panel"
+        (watch)="onWatch($event)"
+        (preview)="onPreview($event)"
+        (openEventAsset)="openEventAsset($event)"
+      />
 
       @if (dockedAssetId(); as assetId) {
         @if (dockedDeviceId(); as deviceId) {

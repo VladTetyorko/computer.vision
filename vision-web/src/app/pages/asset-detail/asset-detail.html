@@ -190,6 +190,34 @@
         </section>
       }
 
+      <!-- ---- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ----------------------------------- -->
+      <section class="card span-2">
+        <header>
+          <h2>Events</h2>
+          <span class="muted">
+            {{ live() ? 'live stream feed' : 'recent, from the global feed' }}
+          </span>
+        </header>
+        @if (displayedEvents().length === 0) {
+          <p class="muted hint">
+            No detection events recorded {{ live() ? 'for this stream yet' : 'for this asset yet' }}.
+          </p>
+        } @else {
+          <ul class="event-list">
+            @for (event of displayedEvents(); track event.id) {
+              <li class="event-row" [class.open]="event.state === 'OPEN'">
+                <span class="dot" [class.live]="event.state === 'OPEN'"></span>
+                <span class="event-main">
+                  <span class="event-label">{{ event.label }}</span>
+                  <span class="event-meta muted">{{ (event.peakConfidence * 100).toFixed(0) }}% confidence</span>
+                </span>
+                <span class="event-time faint">{{ relativeTime(event) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+
       <!-- ---- Usage history ----------------------------------------------------------------- -->
       <section class="card span-2">
         <header>

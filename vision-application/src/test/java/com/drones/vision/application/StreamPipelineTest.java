@@ -8,6 +8,7 @@ import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.EventRuleConfig;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
@@ -74,6 +75,11 @@ class StreamPipelineTest {
 
     private static PipelineConfig config(int inferenceFps, int maxInFlight) {
         return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of());
+    }
+
+    private static PipelineConfig config(int inferenceFps, int maxInFlight, boolean overlayBurnIn) {
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, maxInFlight, true, Set.of(),
+                EventRuleConfig.defaults(), overlayBurnIn);
     }
 
     private VideoFrame frame(long sequence) {
@@ -603,6 +609,25 @@ class StreamPipelineTest {
         assertEquals(f1, captor.getValue().frame());
         assertEquals(result.detections(), captor.getValue().detections());
         assertNull(captor.getValue().telemetry(), "no telemetry input reaches StreamPipeline yet (see class javadoc)");
+    }
+
+    @Test
+    void overlayNeverInvokedAndFramesPublishRawWhenOverlayBurnInIsDisabled() {
+        // docs/MVP2-PLAN.md §V, V-e: an OverlayPort is configured and detections are non-empty --
+        // exactly the condition overlayRendersOntoFrame...() above proves triggers rendering -- but
+        // PipelineConfig#overlayBurnIn() is false, so the renderer must never even be called and
+        // every frame publishes as the raw, unmodified instance the source produced.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+
+        pipeline(publisher, config(30, 2, false), overlayPort).start();
+
+        verify(streamPublisherPort).publish(streamId, f0);
+        verify(streamPublisherPort).publish(streamId, f1);
+        verifyNoInteractions(overlayPort);
     }
 
     @Test

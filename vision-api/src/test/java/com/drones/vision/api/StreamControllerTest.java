@@ -29,6 +29,7 @@ import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -188,6 +189,31 @@ class StreamControllerTest {
         PipelineConfig config = captor.getValue();
         assertEquals(defaults.confidenceThreshold(), config.confidenceThreshold());
         assertEquals(15, config.inferenceFps());
+    }
+
+    @Test
+    void startMergesOverlayBurnInOverrideOntoDefaults() throws Exception {
+        // docs/MVP2-PLAN.md §V, V-e: overlayBurnIn is per-stream settable exactly like
+        // confidenceThreshold/inferenceFps above.
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"overlayBurnIn":false}
+                """;
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        PipelineConfig defaults = PipelineConfig.defaults();
+        PipelineConfig config = captor.getValue();
+        assertFalse(config.overlayBurnIn());
+        assertEquals(defaults.confidenceThreshold(), config.confidenceThreshold());
+        assertEquals(defaults.inferenceFps(), config.inferenceFps());
     }
 
     @Test

@@ -386,3 +386,37 @@ export interface UsageTimeline {
   readonly telemetry: readonly TelemetrySample[];
   readonly detections: readonly DetectionResult[];
 }
+
+/** Mirrors `domain.model.DetectionEventState` as surfaced by `dto.DetectionEventResponse#state`. */
+export type DetectionEventState = 'OPEN' | 'CLOSED';
+
+/**
+ * Mirrors `dto.DetectionEventResponse`, the body element of `GET /api/events` /
+ * `GET /api/streams/{streamId}/events` (docs/MVP2-PLAN.md §E, E-a/E-b) — one debounced detection
+ * event ("a person was seen for a while"), distinct from the raw per-frame `DetectionResult` the
+ * Live page's chip strip already reads.
+ *
+ * `assetId` is absent when the owning asset couldn't be resolved (a device with no asset, or one
+ * whose asset had no open usage yet at open time — see the Java doc comment this mirrors).
+ * `position` is absent when no telemetry was available at open time; it is stamped once, at open,
+ * and never updated afterward even if the event stays open for a while (again mirroring the
+ * backend's own documented behavior) — a marker plotted from it is "where it started", not "where
+ * it is now".
+ *
+ * **No pipeline-error events here.** `EventPublisherPort`'s generic `Event`s (`PIPELINE_ERROR`
+ * etc., the docs/MVP2-PLAN.md §U-info ask) are not exposed by this API — E-a's own MODULE.md
+ * documents that port as fire-and-forget/write-only with no read side at all. `core/events-store.ts`
+ * and every page reading it are detection events only, labeled as such; the player state chip
+ * (docs/CYCLES-PLAN.md §11 item 5 / docs/MVP2-PLAN.md §V, V-b) stays the connectivity surface.
+ */
+export interface DetectionEvent {
+  readonly id: string;
+  readonly streamId: string;
+  readonly assetId?: string;
+  readonly label: string;
+  readonly peakConfidence: number;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+  readonly state: DetectionEventState;
+  readonly position?: GeoPosition;
+}

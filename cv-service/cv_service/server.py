@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING, Iterable, Iterator, Optional
 
 import grpc
 
+from cv_service.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
+
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance, see _build_default_detector
     from cv_service.inference import YoloDetector
 
@@ -90,6 +92,83 @@ def _build_default_detector() -> Optional["YoloDetector"]:
         return None
 
 
+class _StreamReader:
+    """Background thread draining the *rest* of a `DetectStream`
+    request_iterator into a `LatestOnlyMailbox`, decoupling *receiving*
+    frames over the network from *inferring* on them -- one instance per
+    active `DetectStream` call, started only after the stream's first frame
+    has already been claimed directly by the consumer (see `DetectStream`):
+    there's nothing to overlap with before the first frame's inference even
+    begins, and starting the reader any earlier lets it race the consumer's
+    very first `next()`/`get()` call for that same first frame -- confirmed
+    empirically to actually happen (not just theoretical) with a
+    zero-latency in-memory iterator, which is exactly what this module's own
+    tests use; a real network is never that instantaneous, but the reader
+    shouldn't depend on that to behave correctly.
+
+    Without this, `for request in request_iterator: infer(request); yield`
+    means the next frame's bytes only start being read off the network
+    *after* the current frame's inference has finished and its response has
+    been handed back to gRPC -- inference and network transfer never
+    overlap. With a dedicated reader thread continuously pulling from
+    `request_iterator` into a 1-slot latest-wins mailbox, the consumer
+    thread (the one gRPC actually drives as the `DetectStream` generator)
+    can be inside `detect()` for frame N while frame N+1 is already arriving
+    in the background; if frame N+2 also arrives before the consumer catches
+    up, N+1 is silently dropped (never inferred, never yields a response) --
+    see `LatestOnlyMailbox`. See MODULE.md "V-d: per-stream concurrency" for
+    the full design writeup, including why drops are expected to be rare in
+    practice (the Java caller's own sampling/in-flight cap).
+    """
+
+    def __init__(self, request_iterator: Iterable["cv_pb2.FrameRequest"]) -> None:
+        self._iterator = request_iterator
+        self._mailbox: LatestOnlyMailbox["cv_pb2.FrameRequest"] = LatestOnlyMailbox()
+        self._error: Optional[BaseException] = None
+        self._thread = threading.Thread(
+            target=self._run, name="cv-detectstream-reader", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            for request in self._iterator:
+                self._mailbox.put(request)
+        except Exception as exc:  # noqa: BLE001 - re-surfaced to the consumer via next()
+            self._error = exc
+        finally:
+            self._mailbox.close()
+
+    def next(self) -> Optional["cv_pb2.FrameRequest"]:
+        """Block for the next (latest) frame; `None` once the stream ends.
+
+        Re-raises whatever `request_iterator` itself raised, once the
+        mailbox has been drained -- mirrors what iterating it directly would
+        have done, just from the consumer's thread instead of the reader's.
+        """
+        request = self._mailbox.get()
+        if request is not None:
+            return request
+        if self._error is not None:
+            raise self._error
+        return None
+
+    def stop(self) -> None:
+        """Best-effort: stop queueing further frames for a consumer that's
+        going away (client cancel, or the generator returning/raising).
+
+        Does not (and cannot) interrupt a blocking read already in progress
+        on `request_iterator` -- gRPC itself unblocks that on its own once
+        the call ends (verified empirically: cancelling a call unblocks a
+        *background* thread's `next(request_iterator)` within milliseconds,
+        the same as it would the main thread), at which point `_run`'s `for`
+        loop ends and the thread exits on its own. This just guards against
+        a frame that arrives right at teardown being queued into a mailbox
+        nobody will ever drain again.
+        """
+        self._mailbox.close()
+
+
 class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     """Real-YOLO-when-available, echo-otherwise implementation of ``Inference``.
 
@@ -102,25 +181,62 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     Per-frame inference failures (bad frame bytes, a transient model error)
     are also caught and degrade to an echo response for that one frame,
     rather than tearing down the whole bidi stream.
+
+    **Concurrency (V-d):** when a detector is loaded, each `DetectStream`
+    call spawns a `_StreamReader` background thread so frame receipt and
+    inference overlap within that one stream (see its docstring), and every
+    `detect()` call is gated by `inference_gate` (default: the process-wide
+    `InferenceGate`, shared across every `InferenceServicer` instance/stream)
+    so the number of *concurrent* inferences across all streams stays
+    bounded regardless of how many streams are open. The echo-only path (no
+    detector) skips both -- there's nothing to overlap or bound without a
+    model in the loop, so it stays the plain synchronous loop it always was.
     """
 
-    def __init__(self, detector: Optional["YoloDetector"] = None) -> None:
+    def __init__(
+        self,
+        detector: Optional["YoloDetector"] = None,
+        *,
+        inference_gate: Optional[InferenceGate] = None,
+    ) -> None:
         self._detector = detector if detector is not None else _build_default_detector()
         self._warned_model_ids: set[str] = set()
+        self._inference_gate = inference_gate if inference_gate is not None else process_gate()
 
     def DetectStream(
         self,
         request_iterator: Iterable["cv_pb2.FrameRequest"],
         context: grpc.ServicerContext,
     ) -> Iterator["cv_pb2.DetectionResponse"]:
-        for request in request_iterator:
-            if self._detector is None:
+        if self._detector is None:
+            for request in request_iterator:
                 yield self._echo(request)
-                continue
+            return
 
-            self._warn_once_on_unknown_model(request.model_id)
+        # Claim the first frame directly and synchronously -- see
+        # _StreamReader's docstring for why the background reader thread
+        # only starts on the *rest* of the stream, not this one.
+        try:
+            first_request = next(request_iterator)
+        except StopIteration:
+            return
 
-            try:
+        reader = _StreamReader(request_iterator)
+        try:
+            yield self._handle_request(first_request)
+            while True:
+                request = reader.next()
+                if request is None:
+                    return
+                yield self._handle_request(request)
+        finally:
+            reader.stop()
+
+    def _handle_request(self, request: "cv_pb2.FrameRequest") -> "cv_pb2.DetectionResponse":
+        self._warn_once_on_unknown_model(request.model_id)
+
+        try:
+            with self._inference_gate.acquire():
                 detections, inference_millis = self._detector.detect(
                     width=request.width,
                     height=request.height,
@@ -128,37 +244,36 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     data=request.data,
                     confidence_threshold=request.confidence_threshold or None,
                 )
-            except Exception:  # noqa: BLE001 - one bad frame must not kill the stream
-                LOGGER.exception(
-                    "inference failed for stream_id=%s sequence=%s; echoing "
-                    "empty detections for this frame",
-                    request.stream_id,
-                    request.sequence,
-                )
-                yield self._echo(request)
-                continue
-
-            yield cv_pb2.DetectionResponse(
-                stream_id=request.stream_id,
-                sequence=request.sequence,
-                timestamp_millis=request.timestamp_millis,
-                model_id=request.model_id,
-                model_version=request.model_version,
-                detections=[
-                    cv_pb2.Detection(
-                        label=detection.label,
-                        confidence=detection.confidence,
-                        box=cv_pb2.BoundingBox(
-                            x=detection.x,
-                            y=detection.y,
-                            width=detection.width,
-                            height=detection.height,
-                        ),
-                    )
-                    for detection in detections
-                ],
-                inference_millis=inference_millis,
+        except Exception:  # noqa: BLE001 - one bad frame must not kill the stream
+            LOGGER.exception(
+                "inference failed for stream_id=%s sequence=%s; echoing "
+                "empty detections for this frame",
+                request.stream_id,
+                request.sequence,
             )
+            return self._echo(request)
+
+        return cv_pb2.DetectionResponse(
+            stream_id=request.stream_id,
+            sequence=request.sequence,
+            timestamp_millis=request.timestamp_millis,
+            model_id=request.model_id,
+            model_version=request.model_version,
+            detections=[
+                cv_pb2.Detection(
+                    label=detection.label,
+                    confidence=detection.confidence,
+                    box=cv_pb2.BoundingBox(
+                        x=detection.x,
+                        y=detection.y,
+                        width=detection.width,
+                        height=detection.height,
+                    ),
+                )
+                for detection in detections
+            ],
+            inference_millis=inference_millis,
+        )
 
     def _warn_once_on_unknown_model(self, requested_model_id: str) -> None:
         """Log-and-serve-default for a requested `model_id` (registry is Phase 3).
