@@ -40,7 +40,9 @@ import java.util.function.LongSupplier;
  *       live feed when this subscriber isn't ready (latest-wins), per {@code
  *       VideoSourcePort}'s contract.</li>
  *   <li>Every frame is forwarded to {@link StreamPublisherPort#publish}
- *       regardless of whether it is sampled for inference.</li>
+ *       regardless of whether it is sampled for inference, and regardless of
+ *       whether a detection outage (see below) is in progress — the video
+ *       path never depends on the CV service being healthy.</li>
  *   <li><b>Phase 2 seam:</b> overlay rendering is intentionally not wired in
  *       yet. Once {@code OverlayPort} lands, this is where a frame would be
  *       combined with {@link #latestDetections()} into an {@code
@@ -74,12 +76,39 @@ import java.util.function.LongSupplier;
  * Event} only when non-empty, so uneventful frames don't spam storage/events.
  *
  * <h2>Error handling &amp; lifecycle</h2>
- * Any failure on the source ({@link #onError}) or from a detection call
- * publishes a single {@code PIPELINE_ERROR} event and stops the pipeline
- * cleanly (cancels the subscription, signals {@link
- * StreamPublisherPort#streamEnded}). {@link #close()} is idempotent and safe
- * to call from any thread, including concurrently with an in-flight {@code
- * onNext}.
+ * Two failure classes are handled very differently, on purpose: a CV service
+ * outage must never take the video path down with it.
+ * <ul>
+ *   <li><b>Source errors</b> ({@link #onError}) and any {@code
+ *       RuntimeException} thrown synchronously while publishing a frame are
+ *       fatal: one {@code PIPELINE_ERROR} event is published and the
+ *       pipeline stops cleanly (cancels the subscription, signals {@link
+ *       StreamPublisherPort#streamEnded}).</li>
+ *   <li><b>Detection failures</b> (an exceptionally-completed {@link
+ *       java.util.concurrent.CompletionStage} from {@link
+ *       DetectionPort#detect}, including timeouts) never close the pipeline
+ *       and never touch the video path. The first failure enters a
+ *       detection <i>outage</i>: exactly one {@code PIPELINE_ERROR} event is
+ *       published (naming the cause) and, until recovery, sampled frames are
+ *       withheld from {@link #detectionPort} entirely — they are skipped
+ *       just like the in-flight bound skips frames, and likewise never
+ *       queued — while an exponential backoff (starting at {@link
+ *       #INITIAL_BACKOFF_NANOS}, doubling, capped at {@link
+ *       #MAX_BACKOFF_NANOS}) counts down. Once the backoff deadline
+ *       passes, exactly one probe inference is attempted (never more than
+ *       one concurrently, even if several sampled frames land inside the
+ *       same window): success ends the outage (logged via {@link
+ *       System.Logger}, no additional event) and detection resumes
+ *       normally; failure doubles the backoff and the outage continues,
+ *       still under the single original event — subsequent failures during
+ *       an outage, whether from the probe or from a call that was already
+ *       in flight when the outage began, are counted but never raise a
+ *       second event. A successful detection, whether or not it followed an
+ *       outage, always resets the backoff back to its initial interval. A
+ *       later, independent outage raises its own new single event.</li>
+ * </ul>
+ * {@link #close()} is idempotent and safe to call from any thread, including
+ * concurrently with an in-flight {@code onNext}.
  */
 public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCloseable {
 
@@ -95,6 +124,14 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /** Sanity clamp bounds for the measured source frame rate. */
     static final double MIN_MEASURED_FPS = 1.0;
     static final double MAX_MEASURED_FPS = 240.0;
+
+    /** Backoff before the first retry probe after a detection outage begins (1s). */
+    static final long INITIAL_BACKOFF_NANOS = 1_000_000_000L;
+
+    /** Cap the exponential backoff doubles up to while an outage's probes keep failing (10s). */
+    static final long MAX_BACKOFF_NANOS = 10_000_000_000L;
+
+    private static final System.Logger LOG = System.getLogger(StreamPipeline.class.getName());
 
     private final StreamId streamId;
     private final Device device;
@@ -121,6 +158,21 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile double measuredFps = -1.0;
     private volatile long sampleEveryNthFrame;
 
+    // Detection-outage state. Unlike the frame-cadence fields above, this is
+    // genuinely touched from multiple threads without serialization: onNext
+    // (submitting a new sample) races with detect() completion callbacks
+    // (which may land on an arbitrary executor thread). All reads/writes go
+    // through the synchronized blocks below rather than volatile/Atomic
+    // fields, because entering an outage, doubling the backoff, and reading
+    // the backoff deadline must be observed as a single consistent unit --
+    // see maybeDetect()/outageDecision()'s javadoc for the race this avoids.
+    private final Object outageLock = new Object();
+    private boolean inOutage = false;
+    private boolean probeInFlight = false;
+    private long backoffNanos = INITIAL_BACKOFF_NANOS;
+    private long nextProbeAtNanos = 0L;
+    private long outageFailureCount = 0L;
+
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                            Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
@@ -131,9 +183,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Test seam: same as the public constructor but with an injectable
-     * nanotime source for the frame-cadence measurement, so tests can drive
-     * deterministic synthetic frame rates instead of depending on real
-     * wall-clock timing.
+     * nanotime source for the frame-cadence measurement and the detection
+     * outage/backoff timing, so tests can drive both off a deterministic
+     * synthetic clock instead of depending on real wall-clock timing.
      */
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
@@ -167,7 +219,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         an empty list if no inference has completed yet. Updated for
      *         every completed inference, including empty results, so callers
      *         (e.g. a future overlay) never render stale boxes past the point
-     *         a tracked object disappeared.
+     *         a tracked object disappeared. Left untouched while a detection
+     *         outage withholds frames from the detector, since no inference
+     *         actually ran.
      */
     public List<Detection> latestDetections() {
         return latestDetections;
@@ -234,22 +288,133 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         return Math.max(min, Math.min(max, value));
     }
 
+    /** Outcome of consulting outage state for a newly-sampled frame, see {@link #outageDecision()}. */
+    private enum OutageDecision {
+        /** No outage in progress: fall through to the normal in-flight-bounded path. */
+        NORMAL,
+        /** An outage is in progress but the backoff hasn't elapsed, or a probe is already outstanding. */
+        SKIP,
+        /** The backoff deadline has passed and no probe is outstanding: send exactly this one frame as a probe. */
+        PROBE
+    }
+
     private void maybeDetect(VideoFrame frame) {
-        if (inFlightInferences.get() >= config.maxInFlightInferences()) {
-            return; // bounded in-flight: skip this sample rather than queue it
+        switch (outageDecision()) {
+            case SKIP -> {
+                // still backing off, or a probe is already in flight: never counted as in-flight
+            }
+            case PROBE -> submitDetection(frame, true);
+            case NORMAL -> {
+                if (inFlightInferences.get() >= config.maxInFlightInferences()) {
+                    return; // bounded in-flight: skip this sample rather than queue it
+                }
+                inFlightInferences.incrementAndGet();
+                submitDetection(frame, false);
+            }
         }
-        inFlightInferences.incrementAndGet();
+    }
+
+    /**
+     * Consults and, where it decides {@link OutageDecision#PROBE}, mutates
+     * outage state under {@link #outageLock} in a single atomic step —
+     * checking {@code nextProbeAtNanos} and claiming {@code probeInFlight}
+     * together, rather than as two separate lock-free reads, is what
+     * prevents a second concurrent probe from starting (or the very first
+     * backoff window from being skipped by a racing thread that observes
+     * {@code inOutage} freshly flipped {@code true} before its paired
+     * backoff fields are visible).
+     */
+    private OutageDecision outageDecision() {
+        synchronized (outageLock) {
+            if (!inOutage) {
+                return OutageDecision.NORMAL;
+            }
+            if (probeInFlight || nanoTimeSource.getAsLong() < nextProbeAtNanos) {
+                return OutageDecision.SKIP;
+            }
+            probeInFlight = true;
+            return OutageDecision.PROBE;
+        }
+    }
+
+    private void submitDetection(VideoFrame frame, boolean isProbe) {
         detectionPort.detect(frame, config).whenComplete((result, error) -> {
-            inFlightInferences.decrementAndGet();
+            if (isProbe) {
+                clearProbeInFlight();
+            } else {
+                inFlightInferences.decrementAndGet();
+            }
             if (closed.get()) {
                 return;
             }
             if (error != null) {
-                handleError(unwrap(error));
-                return;
+                onDetectionFailure(unwrap(error), isProbe);
+            } else {
+                onDetectionSuccess(result);
             }
-            onDetectionResult(result);
         });
+    }
+
+    private void clearProbeInFlight() {
+        synchronized (outageLock) {
+            probeInFlight = false;
+        }
+    }
+
+    /**
+     * Handles a failed inference. The first failure (from any in-flight
+     * call, probe or not) enters the outage and is the only one that raises
+     * a {@code PIPELINE_ERROR} event; every later failure while already in
+     * outage is counted silently, and only a failed <b>probe</b> doubles the
+     * backoff (capped at {@link #MAX_BACKOFF_NANOS}) and reschedules the
+     * next probe — a stray failure from a call that was already in flight
+     * when the outage began must not perturb a backoff a probe may have
+     * already advanced.
+     */
+    private void onDetectionFailure(Throwable throwable, boolean isProbe) {
+        boolean enteringOutage;
+        synchronized (outageLock) {
+            enteringOutage = !inOutage;
+            if (enteringOutage) {
+                inOutage = true;
+                backoffNanos = INITIAL_BACKOFF_NANOS;
+                outageFailureCount = 0;
+                nextProbeAtNanos = nanoTimeSource.getAsLong() + backoffNanos;
+            } else {
+                outageFailureCount++;
+                if (isProbe) {
+                    backoffNanos = Math.min(backoffNanos * 2, MAX_BACKOFF_NANOS);
+                    nextProbeAtNanos = nanoTimeSource.getAsLong() + backoffNanos;
+                }
+            }
+        }
+        if (enteringOutage) {
+            eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
+                    "detection outage: " + describeFailure(throwable)));
+        }
+    }
+
+    /**
+     * Handles a successful inference (normal sample or outage-ending probe
+     * alike). Always resets the backoff to its initial interval, and —
+     * exactly when this success followed an active outage — clears the
+     * outage and logs a recovery line (no second event is emitted; {@code
+     * PIPELINE_ERROR} is reserved for the outage's start).
+     */
+    private void onDetectionSuccess(DetectionResult result) {
+        boolean recovered;
+        long failuresDuringOutage;
+        synchronized (outageLock) {
+            recovered = inOutage;
+            failuresDuringOutage = outageFailureCount;
+            inOutage = false;
+            backoffNanos = INITIAL_BACKOFF_NANOS;
+        }
+        if (recovered) {
+            LOG.log(System.Logger.Level.INFO, () -> "stream " + streamId.value() + " detection recovered after "
+                    + failuresDuringOutage + " failed attempt(s) during the outage");
+        }
+        onDetectionResult(result);
     }
 
     private void onDetectionResult(DetectionResult result) {
@@ -273,10 +438,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     private void handleError(Throwable throwable) {
         if (closed.compareAndSet(false, true)) {
-            eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
-                    throwable == null ? "unknown error" : String.valueOf(throwable.getMessage())));
+            eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR, describeFailure(throwable)));
             doClose();
         }
+    }
+
+    private static String describeFailure(Throwable throwable) {
+        return throwable == null ? "unknown error" : String.valueOf(throwable.getMessage());
     }
 
     /**

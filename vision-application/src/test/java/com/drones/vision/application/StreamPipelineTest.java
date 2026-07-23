@@ -86,6 +86,12 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
     }
 
+    private static CompletableFuture<DetectionResult> failedFuture(String message) {
+        CompletableFuture<DetectionResult> future = new CompletableFuture<>();
+        future.completeExceptionally(new RuntimeException(message));
+        return future;
+    }
+
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher);
@@ -94,6 +100,62 @@ class StreamPipelineTest {
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher, clock);
+    }
+
+    /**
+     * Test seam for the outage/backoff tests below: drives {@link
+     * StreamPipeline#onNext} directly (bypassing {@link
+     * StreamPipeline#start()} and the {@code request()}-driven {@link
+     * ScriptedVideoPublisher}), so the test can advance {@code clock}
+     * precisely between individual frame arrivals -- something a
+     * synchronous, recursively-delivering publisher offers no seam for.
+     * {@code config}'s {@code inferenceFps} is expected to be large enough
+     * (see call sites) that the sampling interval is always exactly 1,
+     * decoupling these tests from the unrelated frame-cadence measurement.
+     */
+    private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, clock);
+        pipeline.onSubscribe(NOOP_SUBSCRIPTION);
+        return pipeline;
+    }
+
+    private static final Flow.Publisher<VideoFrame> NO_OP_SOURCE = subscriber -> { };
+
+    private static final Flow.Subscription NOOP_SUBSCRIPTION = new Flow.Subscription() {
+        @Override
+        public void request(long n) {
+            // manually-driven tests never rely on re-request; nothing to do
+        }
+
+        @Override
+        public void cancel() {
+            // not asserted on by the manually-driven tests
+        }
+    };
+
+    /**
+     * A clock the test fully controls: it never advances on its own (unlike
+     * {@link #fixedFpsClock}) -- only an explicit {@link #advance} call moves
+     * it forward, so a test can position "now" exactly relative to a
+     * detection-outage backoff deadline between individual {@code onNext}
+     * calls.
+     */
+    private static final class SettableClock implements LongSupplier {
+        private long now;
+
+        SettableClock(long initial) {
+            this.now = initial;
+        }
+
+        @Override
+        public long getAsLong() {
+            return now;
+        }
+
+        void advance(long nanos) {
+            now += nanos;
+        }
     }
 
     /**
@@ -281,19 +343,126 @@ class StreamPipelineTest {
     }
 
     @Test
-    void detectionFailureEmitsPipelineErrorAndStopsCleanly() {
-        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
-        CompletableFuture<DetectionResult> failed = new CompletableFuture<>();
-        failed.completeExceptionally(new RuntimeException("boom"));
-        when(detectionPort.detect(any(), any())).thenReturn(failed);
+    void detectionFailureDoesNotClosePipelineAndVideoKeepsFlowing() {
+        // Resilience policy (docs/MVP1-PLAN.md §C7): a failing/absent CV
+        // service must never kill or degrade the video path. One
+        // PIPELINE_ERROR event still marks the outage, but frames keep
+        // publishing and the subscription is never cancelled.
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        when(detectionPort.detect(any(), any())).thenReturn(failedFuture("boom"));
 
-        pipeline(publisher, config(30, 2)).start();
+        pipeline(publisher, config(1000, 2)).start();
+
+        for (VideoFrame f : frames) {
+            verify(streamPublisherPort).publish(streamId, f);
+        }
+        verify(streamPublisherPort, never()).streamEnded(streamId);
+        assertFalse(publisher.cancelled, "a detection failure must not cancel the source subscription");
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher, atLeastOnce()).publish(captor.capture());
+        assertEquals(1, captor.getAllValues().stream().filter(e -> e.type() == EventType.PIPELINE_ERROR).count());
+    }
+
+    @Test
+    void backoffDoublesOnEachFailedProbeUpToTheCapAndEmitsExactlyOneEvent() {
+        // Every sampled frame while in outage either produces no detect()
+        // call at all (still backing off) or exactly one (the probe once
+        // the deadline passes); a failed probe doubles the backoff, capped
+        // at StreamPipeline.MAX_BACKOFF_NANOS -- and however many probes
+        // fail, only the very first failure ever raised PIPELINE_ERROR.
+        SettableClock clock = new SettableClock(0L);
+        when(detectionPort.detect(any(), any())).thenAnswer(invocation -> failedFuture("cv down"));
+
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), clock);
+
+        pipeline.onNext(frame(0)); // first failure: enters the outage, backoff = INITIAL_BACKOFF_NANOS
+        int expectedDetectCalls = 1;
+        verify(detectionPort, times(expectedDetectCalls)).detect(any(), any());
+
+        long activeBackoff = StreamPipeline.INITIAL_BACKOFF_NANOS;
+        long sequence = 1;
+        while (activeBackoff < StreamPipeline.MAX_BACKOFF_NANOS) {
+            // One nanosecond short of the deadline: still skipped, no new detect() call.
+            clock.advance(activeBackoff - 1);
+            pipeline.onNext(frame(sequence++));
+            verify(detectionPort, times(expectedDetectCalls)).detect(any(), any());
+
+            // Crossing the deadline: exactly one probe, which fails and doubles the backoff (capped).
+            clock.advance(1);
+            pipeline.onNext(frame(sequence++));
+            expectedDetectCalls++;
+            verify(detectionPort, times(expectedDetectCalls)).detect(any(), any());
+
+            activeBackoff = Math.min(activeBackoff * 2, StreamPipeline.MAX_BACKOFF_NANOS);
+        }
+
+        // Backoff is now capped: one more full cap-length wait still yields exactly one further
+        // probe -- never sooner, and the cap never grows past MAX_BACKOFF_NANOS.
+        clock.advance(StreamPipeline.MAX_BACKOFF_NANOS - 1);
+        pipeline.onNext(frame(sequence++));
+        verify(detectionPort, times(expectedDetectCalls)).detect(any(), any());
+
+        clock.advance(1);
+        pipeline.onNext(frame(sequence));
+        expectedDetectCalls++;
+        verify(detectionPort, times(expectedDetectCalls)).detect(any(), any());
 
         ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
         verify(eventPublisher, atLeastOnce()).publish(captor.capture());
-        assertTrue(captor.getAllValues().stream().anyMatch(e -> e.type() == EventType.PIPELINE_ERROR));
+        assertEquals(1, captor.getAllValues().stream().filter(e -> e.type() == EventType.PIPELINE_ERROR).count());
+    }
+
+    @Test
+    void recoveringProbeResumesDetectionResetsBackoffAndANewOutageEmitsANewEvent() {
+        SettableClock clock = new SettableClock(0L);
+        DetectionResult recovered = nonEmptyResult(2);
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(failedFuture("cv down"))                           // frame(0): enters outage
+                .thenReturn(failedFuture("still down"))                       // probe 1: fails, backoff -> 2s
+                .thenReturn(CompletableFuture.completedFuture(recovered))     // probe 2: succeeds, recovers
+                .thenReturn(CompletableFuture.completedFuture(emptyResult(3))) // resumed normal detection
+                .thenReturn(failedFuture("down again"));                     // a brand-new outage
+
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), clock);
+
+        pipeline.onNext(frame(0)); // t=0: fails -> outage begins, backoff=1s, deadline=1s
+        clock.advance(StreamPipeline.INITIAL_BACKOFF_NANOS); // t=1s: cross the deadline
+        pipeline.onNext(frame(1)); // probe fails -> backoff doubles to 2s, deadline=3s
+        clock.advance(2 * StreamPipeline.INITIAL_BACKOFF_NANOS); // t=3s: cross the doubled deadline
+        pipeline.onNext(frame(2)); // probe succeeds -> recovers, backoff reset to 1s
+        assertEquals(recovered.detections(), pipeline.latestDetections());
+
+        pipeline.onNext(frame(3)); // no clock advance needed: back on the normal (non-outage) path
+        verify(detectionPort, times(4)).detect(any(), any());
+
+        pipeline.onNext(frame(4)); // fails again -> a brand-new outage
+        // Exactly one *reset* (1s) window later -- a stale leftover 2s backoff would still be
+        // short of its deadline here, so this only passes if the reset actually took effect.
+        clock.advance(StreamPipeline.INITIAL_BACKOFF_NANOS);
+        pipeline.onNext(frame(5));
+        verify(detectionPort, times(6)).detect(any(), any());
+
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher, times(3)).publish(captor.capture());
+        List<EventType> types = captor.getAllValues().stream().map(Event::type).toList();
+        assertEquals(List.of(EventType.PIPELINE_ERROR, EventType.DETECTION, EventType.PIPELINE_ERROR), types);
+    }
+
+    @Test
+    void lateDetectionFailureAfterCloseIsASilentNoOp() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        CompletableFuture<DetectionResult> pending = new CompletableFuture<>(); // never completes during start()
+        when(detectionPort.detect(any(), any())).thenReturn(pending);
+
+        StreamPipeline pipeline = pipeline(publisher, config(1000, 2));
+        pipeline.start();
+        pipeline.close();
+
+        pending.completeExceptionally(new RuntimeException("late failure"));
+
+        verify(eventPublisher, never()).publish(argThat(e -> e.type() == EventType.PIPELINE_ERROR));
         verify(streamPublisherPort, times(1)).streamEnded(streamId);
-        assertTrue(publisher.cancelled, "subscription should be cancelled after a pipeline error");
     }
 
     @Test
