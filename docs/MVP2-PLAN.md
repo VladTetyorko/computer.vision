@@ -225,3 +225,23 @@ Tests: 336 → 397 (61 new: 40 `events-logic.spec.ts` + 14 `events-store.spec.ts
 ## Explicitly deferred (MVP3+)
 
 Multi-user auth/login (ownership model already exists — activate when someone besides friends uses it); recording video files (mediamtx can record — needs storage strategy); WebRTC *ingest*; ONVIF PTZ control; mobile layout hardening beyond W7's responsive pass.
+
+## S — stream stability *(user feedback 2026-07-23, post-MVP2)*
+
+User-reported: (1) stopping a stream from /live freezes the Angular app; (2) a started stream must stay alive aggressively — source hiccups, viewer navigating away, or the browser being closed must never end it; only an explicit Stop may.
+
+Reality check: viewing is already decoupled server-side (a browser leaving never stops the pipeline), but **source failure is terminal today** — every VideoSourcePort self-closes on I/O error (`closeExceptionally`) and nothing restarts it; the ESP32's one-client flakiness makes this visible. And the /live stop freeze is a real UI defect.
+
+### S-a — backend: source supervision & auto-restart *(scope: vision-application, vision-app wiring if needed)*
+
+- StreamPipeline (or a supervisor around the source subscription): on source error/complete while the stream was NOT explicitly stopped, emit PIPELINE_ERROR event (existing publisher), then re-open the video source with capped exponential backoff (1s→30s, indefinitely); telemetry sources likewise. Usage stays open across restarts (same usageId/streamId); publisher session survives or re-establishes.
+- Explicit stop (API) must cleanly cancel supervision (no zombie retry loops), and remains the ONLY way a stream ends.
+- Tests: source dies → pipeline recovers on next successful open (fake source failing N times); explicit stop during backoff cancels; usage continuity.
+- **Done when:** pulling the ESP32's power mid-stream and plugging it back yields a self-recovered live stream with the same usage, no UI action. **Estimate: M.**
+
+### S-b — UI: stop-freeze fix + stopped-state handling *(scope: vision-web)*
+
+- Diagnose and fix the /live stop freeze (suspects: player teardown vs reconnect watchdog racing a now-404 playlist / WHEP peer-connection close hanging the main thread / a snap-to-live or rAF loop surviving destroy).
+- A deliberately stopped stream must render a terminal "stream stopped" state (player recovery machine gains an explicit stopped input) — never an infinite reconnect loop against a gone stream; Watch surfaces reflect it.
+- Tests: recovery-reducer stopped-state transitions; teardown idempotence logic.
+- **Done when:** stopping from /live is instant and navigable, and stopped streams show a calm terminal state everywhere. **Estimate: S/M.**
