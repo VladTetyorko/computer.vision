@@ -17,16 +17,34 @@ export const routes: Routes = [
   {
     path: 'map',
     title: 'Map · Vision',
-    // Its own lazy chunk like every route, but not worth an idle-preload slot: it isn't the
-    // first tab a user lands on and the Leaflet chunk it pulls in on visit is sizeable
-    // (docs/CYCLES-PLAN.md §6, same rationale as Debug's opt-out).
-    data: { preload: false },
+    // Every tab chunk is now idle-preloaded (docs/CYCLES-PLAN.md §9, CU-b item 2) — "fast" means
+    // every tab click lands on a warm chunk, not just the ones visited first. The Leaflet chunk
+    // this route pulls in on visit gets its own separate idle warmup, see `core/leaflet-warmup.ts`.
     loadComponent: () => import('./pages/map/map').then((m) => m.MapPage),
   },
   {
     path: 'devices',
     title: 'Devices · Vision',
     loadComponent: () => import('./pages/devices/devices').then((m) => m.DevicesPage),
+  },
+  {
+    path: 'assets/:assetId',
+    title: 'Asset · Vision',
+    // The Devices page's asset-first list "Open" target (docs/CYCLES-PLAN.md §11, CD-b item 2).
+    // Param named `:assetId` (not `:id`) so it matches `AssetDetailPage.assetId`'s own input name
+    // exactly — `withComponentInputBinding()` binds a route param to a component input only when
+    // the names match (docs/MVP2-PLAN.md §V, V-b — fixed a long-flagged Gotcha; see that entry in
+    // vision-web/MODULE.md for how this was silently broken before and what fixing it restores).
+    loadComponent: () => import('./pages/asset-detail/asset-detail').then((m) => m.AssetDetailPage),
+  },
+  {
+    path: 'assets/:assetId/replay/:usageId',
+    title: 'Replay · Vision',
+    // The asset detail page's usage history "Replay" target for a finished usage
+    // (docs/MVP2-PLAN.md §R, R-b) — its own lazy chunk, not a nav tab. Param names match
+    // `ReplayPage`'s input names exactly (`assetId`/`usageId`) so `withComponentInputBinding()`
+    // binds them — see that component's own doc comment.
+    loadComponent: () => import('./pages/replay/replay').then((m) => m.ReplayPage),
   },
   {
     path: 'live/:deviceId',
@@ -41,8 +59,8 @@ export const routes: Routes = [
   {
     path: 'debug',
     title: 'Debug · Vision',
-    // Rarely visited — don't spend an idle-time preload slot on it (core/idle-preload.ts).
-    data: { preload: false },
+    // Idle-preloaded too as of docs/CYCLES-PLAN.md §9, CU-b item 2 — weighed against its own
+    // small chunk size (~14 kB raw) and decided the same "every tab lands warm" way as `/map`.
     loadComponent: () => import('./pages/debug/debug').then((m) => m.DebugPage),
   },
   {

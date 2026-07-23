@@ -7,6 +7,7 @@ import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
@@ -49,6 +50,7 @@ public final class DefaultStreamService implements StreamService {
     private final EventPublisherPort eventPublisher;
     private final UsageTracker usageTracker;
     private final OverlayPort overlayPort;
+    private final DetectionEventRepositoryPort detectionEventRepositoryPort;
 
     private final ConcurrentHashMap<StreamId, RunningStream> activeStreams = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<DeviceId, StreamId> streamByDevice = new ConcurrentHashMap<>();
@@ -81,6 +83,32 @@ public final class DefaultStreamService implements StreamService {
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker,
                                  OverlayPort overlayPort) {
+        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, usageTracker, overlayPort, null);
+    }
+
+    /**
+     * Same as the 8-argument constructor, plus a {@link DetectionEventRepositoryPort} collaborator
+     * (docs/MVP2-PLAN.md §E, E-a): when present, every {@link StreamPipeline} this service starts
+     * is given a fresh, per-stream {@link DetectionEventEngine} built from {@code config}'s {@link
+     * com.drones.vision.domain.model.PipelineConfig#eventRule()}, {@code usageTracker} (for
+     * asset/position resolution), and this port.
+     *
+     * @param detectionEventRepositoryPort nullable, following the same convention as {@code
+     *                                      overlayPort}/{@code usageTracker}: {@code null} means
+     *                                      no debounced {@code DetectionEvent} tracking on any
+     *                                      stream this service starts. Deliberately the only new
+     *                                      constructor parameter for this feature rather than
+     *                                      duplicating {@code AssetRepositoryPort}/{@code
+     *                                      AssetUsageRepositoryPort} here — {@code usageTracker}
+     *                                      already holds both and now exposes the two read
+     *                                      methods {@link DetectionEventEngine} needs.
+     */
+    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
+                                 DetectionRepositoryPort detectionRepositoryPort,
+                                 EventPublisherPort eventPublisher, UsageTracker usageTracker,
+                                 OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -90,6 +118,7 @@ public final class DefaultStreamService implements StreamService {
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.usageTracker = usageTracker; // nullable: no-op usage tracking when absent
         this.overlayPort = overlayPort; // nullable: no overlay rendering when absent
+        this.detectionEventRepositoryPort = detectionEventRepositoryPort; // nullable: no event tracking when absent
     }
 
     @Override
@@ -111,14 +140,17 @@ public final class DefaultStreamService implements StreamService {
         try {
             VideoSourcePort source = videoSourceRegistry.sourceFor(device.stream());
             Flow.Publisher<VideoFrame> publisher = source.open(streamId, device.stream());
+            DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
+                    : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
+                            detectionEventRepositoryPort);
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
-                    streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort);
+                    streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine);
             activeStreams.put(streamId, new RunningStream(deviceId, source, pipeline, Instant.now()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
             if (usageTracker != null) {
-                usageTracker.onStreamStarted(deviceId);
+                usageTracker.onStreamStarted(deviceId, streamId);
             }
             return streamId;
         } catch (RuntimeException e) {

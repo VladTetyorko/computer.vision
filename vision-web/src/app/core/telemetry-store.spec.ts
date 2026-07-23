@@ -48,7 +48,7 @@ describe('TelemetryStore', () => {
       devices: [{ id: 'dev-1' } as never],
       recentUsages: [{ usageId: 'u-1', startedAt: '2026-07-22T00:00:00Z', sampleCount: 1 }],
     };
-    const sample: TelemetrySample = { at: '2026-07-22T00:00:01Z', latitude: 10, longitude: 20 };
+    const sample: TelemetrySample = { deviceId: 'dev-1', at: '2026-07-22T00:00:01Z', latitude: 10, longitude: 20 };
     const api = stubApi({
       listAssets: vi.fn().mockResolvedValue([summaryFor('a-1')]),
       getAsset: vi.fn().mockResolvedValue(asset),
@@ -107,7 +107,7 @@ describe('TelemetryStore', () => {
       devices: [{ id: 'dev-4' } as never],
       recentUsages: [{ usageId: 'u-4', startedAt: '2026-07-22T00:00:00Z', sampleCount: 1 }],
     };
-    const sample: TelemetrySample = { at: '2026-07-22T00:00:01Z', latitude: 1, longitude: 2 };
+    const sample: TelemetrySample = { deviceId: 'dev-4', at: '2026-07-22T00:00:01Z', latitude: 1, longitude: 2 };
     const api = stubApi({
       listAssets: vi.fn().mockResolvedValue([summaryFor('a-4')]),
       getAsset: vi.fn().mockResolvedValue(asset),

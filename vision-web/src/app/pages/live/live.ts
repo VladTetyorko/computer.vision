@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -8,18 +9,19 @@ import {
   signal,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { Player } from '../../ui/player';
+import { Player, type BoxesMode, type Transport } from '../../ui/player';
+import { StreamInfoPanel } from '../../ui/stream-info-panel';
 import { FleetStore } from '../../core/fleet-store';
 import { SettingsStore } from '../../core/settings-store';
 import { TelemetryStore } from '../../core/telemetry-store';
 import { DetectionsStore } from '../../core/detections-store';
 import { TelemetryOsd } from './telemetry-osd';
-import { LiveMap } from './live-map';
+import { LiveMap } from '../../ui/live-map';
 import { DetectionsStrip } from './detections-strip';
 
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip],
+  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip, StreamInfoPanel],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -38,6 +40,26 @@ export class LivePage {
   protected readonly detections = inject(DetectionsStore);
 
   protected readonly busy = signal(false);
+
+  /**
+   * Video-first layout (docs/CYCLES-PLAN.md §9, CU-b item 4): the player is the dominant surface;
+   * OSD + detections strip + settings all live in a right rail that collapses to give the player
+   * the full width. `mapInsetVisible` is a second, independent toggle — the map inset can be
+   * hidden even while the rail stays open — with a keyboard shortcut (`M`, ignored while typing
+   * in a form field) alongside its own button, since it is the one panel worth a fast toggle
+   * mid-flight.
+   */
+  protected readonly railOpen = signal(true);
+  protected readonly mapInsetVisible = signal(true);
+
+  /** The player's own measured seconds-behind-live, piped into `StreamInfoPanel` — see its doc comment. */
+  protected readonly latencySeconds = signal<number | null>(null);
+
+  /** The player's own live transport (docs/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
+  protected readonly transport = signal<Transport>('hls');
+
+  /** Per-tile "boxes: overlay/burned/off" toggle (docs/CYCLES-PLAN.md §11 item 6) — defaults to overlay. */
+  protected readonly boxesMode = signal<BoxesMode>('overlay');
 
   protected readonly device = computed(() => this.fleet.device(this.deviceId()));
   protected readonly stream = computed(() => this.fleet.streamFor(this.deviceId()));
@@ -80,6 +102,44 @@ export class LivePage {
         this.detections.reset();
       }
     });
+
+    // `M` toggles the map inset (docs/CYCLES-PLAN.md §9, CU-b item 4) — ignored while a form
+    // field has focus (typing "m" into the name/URI fields elsewhere in the app must not fight
+    // this) and while the device has no telemetry to show a map for in the first place.
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== 'm' || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) {
+        return;
+      }
+      if (this.hasTelemetry()) {
+        this.toggleMapInset();
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+    inject(DestroyRef).onDestroy(() => document.removeEventListener('keydown', onKeydown));
+  }
+
+  protected toggleRail(): void {
+    this.railOpen.update((open) => !open);
+  }
+
+  protected onLatency(seconds: number | null): void {
+    this.latencySeconds.set(seconds);
+  }
+
+  protected onTransport(transport: Transport): void {
+    this.transport.set(transport);
+  }
+
+  protected setBoxesMode(mode: BoxesMode): void {
+    this.boxesMode.set(mode);
+  }
+
+  protected toggleMapInset(): void {
+    this.mapInsetVisible.update((visible) => !visible);
   }
 
   protected async start(): Promise<void> {

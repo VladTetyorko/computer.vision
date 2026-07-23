@@ -11,6 +11,7 @@ import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
@@ -73,7 +74,7 @@ class UsageTrackerTest {
         when(assetRepository.findByDeviceId(deviceId)).thenReturn(Optional.empty());
         UsageTracker tracker = tracker(List.of());
 
-        tracker.onStreamStarted(deviceId);
+        tracker.onStreamStarted(deviceId, StreamId.random());
         tracker.onStreamStopped(deviceId);
 
         verify(usageRepository, never()).save(any());
@@ -89,15 +90,18 @@ class UsageTrackerTest {
         when(assetRepository.findByDeviceId(telemetry.id())).thenReturn(Optional.of(asset));
         when(deviceRepository.findById(telemetry.id())).thenReturn(Optional.of(telemetry));
         UsageTracker tracker = tracker(List.of());
+        StreamId camStreamId = StreamId.random();
 
-        tracker.onStreamStarted(cam.id());
-        tracker.onStreamStarted(telemetry.id());
+        tracker.onStreamStarted(cam.id(), camStreamId);
+        tracker.onStreamStarted(telemetry.id(), StreamId.random());
 
         ArgumentCaptor<AssetUsage> openCaptor = ArgumentCaptor.forClass(AssetUsage.class);
         verify(usageRepository, times(1)).save(openCaptor.capture());
         AssetUsage opened = openCaptor.getValue();
         assertEquals(asset.id(), opened.assetId());
         assertNull(opened.endedAt());
+        assertEquals(camStreamId, opened.streamId(),
+                "the usage must be stamped with the FIRST device's streamId, not any later one");
 
         // First stop: the asset still has one active device, usage must stay open.
         tracker.onStreamStopped(cam.id());
@@ -110,6 +114,7 @@ class UsageTrackerTest {
         AssetUsage closed = allSaves.getAllValues().get(1);
         assertEquals(opened.id(), closed.id());
         assertTrue(closed.endedAt() != null && !closed.endedAt().isBefore(closed.startedAt()));
+        assertEquals(camStreamId, closed.streamId(), "closing must preserve the recorded streamId");
     }
 
     @Test
@@ -118,10 +123,12 @@ class UsageTrackerTest {
         Asset asset = asset(Set.of(cam.id()));
         when(assetRepository.findByDeviceId(cam.id())).thenReturn(Optional.of(asset));
         UsageTracker tracker = tracker(List.of());
+        StreamId firstStreamId = StreamId.random();
+        StreamId secondStreamId = StreamId.random();
 
-        tracker.onStreamStarted(cam.id());
+        tracker.onStreamStarted(cam.id(), firstStreamId);
         tracker.onStreamStopped(cam.id());
-        tracker.onStreamStarted(cam.id());
+        tracker.onStreamStarted(cam.id(), secondStreamId);
 
         ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
         verify(usageRepository, times(3)).save(captor.capture());
@@ -130,6 +137,8 @@ class UsageTrackerTest {
         assertTrue(firstOpen.endedAt() == null);
         assertTrue(secondOpen.endedAt() == null);
         assertTrue(!firstOpen.id().equals(secondOpen.id()), "a new stop/start cycle must open a new usage");
+        assertEquals(firstStreamId, firstOpen.streamId());
+        assertEquals(secondStreamId, secondOpen.streamId());
     }
 
     @Test
@@ -142,7 +151,7 @@ class UsageTrackerTest {
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
-        tracker.onStreamStarted(telemetryDevice.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
 
         Telemetry sample1 = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
         source.emit(telemetryDevice.id(), sample1);
@@ -180,7 +189,7 @@ class UsageTrackerTest {
 
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
-        tracker.onStreamStarted(telemetryDevice.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
 
         Telemetry batteryOnly = new Telemetry(telemetryDevice.id(), Instant.now(), null, null, null, null, 88.0, Map.of());
         source.emit(telemetryDevice.id(), batteryOnly);
@@ -203,9 +212,82 @@ class UsageTrackerTest {
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
-        tracker.onStreamStarted(cam.id());
+        tracker.onStreamStarted(cam.id(), StreamId.random());
 
         assertTrue(source.openedDevices.isEmpty(), "a video-only device must never be subscribed for telemetry");
+    }
+
+    @Test
+    void resolveAssetReturnsTheOwningAssetId() {
+        Device cam = videoDevice("cam-1");
+        Asset asset = asset(Set.of(cam.id()));
+        when(assetRepository.findByDeviceId(cam.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+
+        assertEquals(Optional.of(asset.id()), tracker.resolveAsset(cam.id()));
+    }
+
+    @Test
+    void resolveAssetIsEmptyForAnUnownedDevice() {
+        DeviceId deviceId = DeviceId.random();
+        when(assetRepository.findByDeviceId(deviceId)).thenReturn(Optional.empty());
+        UsageTracker tracker = tracker(List.of());
+
+        assertEquals(Optional.empty(), tracker.resolveAsset(deviceId));
+    }
+
+    @Test
+    void latestPositionIsEmptyBeforeAnyUsageHasEverOpened() {
+        UsageTracker tracker = tracker(List.of());
+
+        assertEquals(Optional.empty(), tracker.latestPosition(AssetId.random()));
+    }
+
+    @Test
+    void latestPositionIsEmptyWhileTheOpenUsageHasNoPositionedSampleYet() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        UsageTracker tracker = tracker(List.of(new ScriptedTelemetrySource(d -> true)));
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        assertEquals(Optional.empty(), tracker.latestPosition(asset.id()));
+    }
+
+    @Test
+    void latestPositionReflectsTheFreshestTelemetrySampleOnTheOpenUsage() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        source.emit(telemetryDevice.id(), telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0));
+        assertEquals(Optional.of(new GeoPosition(50.0, 30.0, null)), tracker.latestPosition(asset.id()));
+
+        source.emit(telemetryDevice.id(), telemetry(telemetryDevice.id(), 50.001, 30.001, 94.9));
+        assertEquals(Optional.of(new GeoPosition(50.001, 30.001, null)), tracker.latestPosition(asset.id()));
+    }
+
+    @Test
+    void latestPositionIsEmptyOnceTheUsageHasClosed() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        source.emit(telemetryDevice.id(), telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0));
+
+        tracker.onStreamStopped(telemetryDevice.id());
+
+        assertEquals(Optional.empty(), tracker.latestPosition(asset.id()),
+                "no currently open usage means no honest 'freshest' position to report");
     }
 
     private static Telemetry telemetry(DeviceId deviceId, double lat, double lon, double battery) {

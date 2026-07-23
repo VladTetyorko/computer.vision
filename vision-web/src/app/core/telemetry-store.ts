@@ -1,14 +1,8 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from './api/vision-api';
 import type { AssetDetails, TelemetrySample } from './api/models';
-import {
-  ageSeconds,
-  deriveTrail,
-  findOwningAsset,
-  isStale,
-  selectOpenUsage,
-  shouldPoll,
-} from './telemetry-logic';
+import { PollScheduler } from './poll-scheduler';
+import { ageSeconds, deriveTrail, findOwningAsset, isStale, selectOpenUsage } from './telemetry-logic';
 
 /** How often a tracked usage's telemetry is re-read while polling is active. */
 const POLL_INTERVAL_MS = 2_000;
@@ -37,12 +31,13 @@ const TELEMETRY_LIMIT = 200;
 @Injectable()
 export class TelemetryStore {
   private readonly api = inject(VisionApi);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly samplesSignal = signal<readonly TelemetrySample[]>([]);
   private readonly nowSignal = signal(Date.now());
 
-  private pollHandle: ReturnType<typeof setInterval> | null = null;
-  private readonly clockHandle: ReturnType<typeof setInterval>;
+  private stopPollingFn: (() => void) | null = null;
+  private readonly stopClock: () => void;
 
   /** Bumped on every `track`/`reset` so a stale async lookup can tell it has been superseded. */
   private generation = 0;
@@ -67,9 +62,9 @@ export class TelemetryStore {
   readonly stale = computed(() => isStale(this.sampleAgeSeconds()));
 
   constructor() {
-    this.clockHandle = setInterval(() => this.nowSignal.set(Date.now()), CLOCK_TICK_MS);
+    this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(() => {
-      clearInterval(this.clockHandle);
+      this.stopClock();
       this.stopPolling();
     });
   }
@@ -107,11 +102,7 @@ export class TelemetryStore {
     if (generation !== this.generation) {
       return;
     }
-    this.pollHandle = setInterval(() => {
-      if (shouldPoll(document.hidden)) {
-        void this.pollOnce(usageId);
-      }
-    }, POLL_INTERVAL_MS);
+    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.pollOnce(usageId));
   }
 
   /** A device belongs to at most one asset; that asset's open usage is what we poll. */
@@ -138,9 +129,9 @@ export class TelemetryStore {
   }
 
   private stopPolling(): void {
-    if (this.pollHandle !== null) {
-      clearInterval(this.pollHandle);
-      this.pollHandle = null;
+    if (this.stopPollingFn !== null) {
+      this.stopPollingFn();
+      this.stopPollingFn = null;
     }
   }
 }

@@ -2,6 +2,7 @@ package com.drones.vision.domain.model;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -21,6 +22,31 @@ class PipelineConfigTest {
         assertEquals(2, defaults.maxInFlightInferences());
         assertTrue(defaults.overlayTelemetry());
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");
+        assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
+    }
+
+    @Test
+    void sixArgConvenienceConstructorDefaultsEventRule() {
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of());
+
+        assertEquals(EventRuleConfig.defaults(), config.eventRule());
+    }
+
+    @Test
+    void sevenArgConstructorAcceptsAnExplicitEventRule() {
+        EventRuleConfig customRule = new EventRuleConfig(Set.of("dog"), 0.7, 5, Duration.ofSeconds(10));
+
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule);
+
+        assertEquals(customRule, config.eventRule());
+    }
+
+    @Test
+    void rejectsNullEventRule() {
+        ModelRef model = new ModelRef("yolo", "1");
+
+        assertThrows(IllegalArgumentException.class,
+                () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null));
     }
 
     @Test

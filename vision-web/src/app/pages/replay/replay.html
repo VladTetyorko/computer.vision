@@ -1,0 +1,171 @@
+<div class="page">
+  @if (loading() && !timeline()) {
+    <div class="page-head">
+      <div class="skeleton-line title"></div>
+    </div>
+    <div class="card skeleton-card"></div>
+  } @else if (notFound()) {
+    <div class="card empty">
+      <h3>Replay unavailable</h3>
+      <p>{{ errorMessage() }}</p>
+      <a class="btn" [routerLink]="['/assets', assetId()]">Back to asset</a>
+    </div>
+  } @else if (usageOpen()) {
+    <div class="card empty">
+      <h3>This flight is still in progress</h3>
+      <p>
+        Replay is for finished flights — this usage hasn't ended yet, so there's nothing fixed to
+        scrub through. Watch it live instead.
+      </p>
+      @if (videoDeviceId(); as deviceId) {
+        <a class="btn" [routerLink]="['/live', deviceId]">Watch live</a>
+      } @else {
+        <a class="btn" [routerLink]="['/assets', assetId()]">Back to asset</a>
+      }
+    </div>
+  } @else if (timeline(); as t) {
+    <div class="page-head">
+      <div>
+        <a class="back-link" [routerLink]="['/assets', assetId()]">← {{ asset()?.displayName ?? 'Asset' }}</a>
+        <h1>Flight replay</h1>
+        <p>
+          {{ clockLabel(fromMs()) }} – {{ clockLabel(toMs()) }}
+          <span class="muted">({{ totalLabel() }} flight)</span>
+        </p>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <!-- ---- Map --------------------------------------------------------------------------- -->
+      <section class="card span-2">
+        <header>
+          <h2>Position</h2>
+          <span class="muted mono">at {{ clockLabel(atMs()) }}</span>
+        </header>
+        @if (fullTrail().length === 0) {
+          <p class="muted hint">No position data recorded for this flight.</p>
+        } @else {
+          <vision-replay-map
+            [fullTrail]="fullTrail()"
+            [trail]="trail()"
+            [markerPosition]="markerPosition()"
+            [markerHeadingDegrees]="markerSample()?.headingDegrees"
+          />
+        }
+      </section>
+
+      <!-- ---- Scrub bar + transport ----------------------------------------------------------- -->
+      <section class="card span-2 scrub-card">
+        <header>
+          <h2>Playback</h2>
+          <span class="muted mono">{{ elapsedLabel() }} / {{ totalLabel() }}</span>
+        </header>
+
+        <div class="row transport">
+          <button type="button" class="btn" (click)="togglePlay()">
+            {{ playing() ? 'Pause' : atMs() >= toMs() ? 'Replay' : 'Play' }}
+          </button>
+          <div class="row speeds" role="group" aria-label="Playback speed">
+            @for (s of speeds; track s) {
+              <button type="button" class="btn secondary small" [class.active]="speed() === s" (click)="setSpeed(s)">
+                {{ s }}×
+              </button>
+            }
+          </div>
+        </div>
+
+        <div class="scrub-track">
+          @if (detectionBuckets().length > 0) {
+            <div class="density-strip" aria-hidden="true">
+              @for (bucket of detectionBuckets(); track bucket.atMs) {
+                <button
+                  type="button"
+                  class="density-marker"
+                  [style.left.%]="bucketPercent(bucket)"
+                  [style.--density]="bucket.count / maxBucketCount()"
+                  [title]="bucket.count + ' detection(s) near ' + clockLabel(bucket.atMs)"
+                  (click)="jumpTo(bucket.atMs)"
+                ></button>
+              }
+            </div>
+          }
+          <input
+            type="range"
+            class="scrub-input"
+            [min]="fromMs()"
+            [max]="toMs()"
+            [step]="scrubStepMs()"
+            [value]="atMs()"
+            (input)="onScrub($any($event.target).value)"
+            aria-label="Scrub position"
+          />
+        </div>
+
+        @if (t.detections.length === 0) {
+          <p class="muted hint">No detections recorded for this flight.</p>
+        }
+      </section>
+
+      <!-- ---- Telemetry at scrub time ----------------------------------------------------------- -->
+      <section class="card span-2">
+        <header><h2>Telemetry at scrub time</h2></header>
+        @if (assetTelemetryDevices().length === 0) {
+          <p class="muted hint">This asset has no telemetry-capable device.</p>
+        } @else {
+          <div class="telemetry-grid">
+            @for (device of assetTelemetryDevices(); track device.id) {
+              <div class="telemetry-panel">
+                <div class="panel-name truncate">{{ device.name }}</div>
+                @if (sampleAtScrubFor(device.id); as sample) {
+                  <p class="faint sample-time mono">reading at {{ clockLabel(sampleTimeMs(sample)) }}</p>
+                  <dl class="facts">
+                    <div class="fact">
+                      <dt>Position</dt>
+                      <dd class="mono">
+                        @if (sample.latitude !== undefined && sample.longitude !== undefined) {
+                          {{ sample.latitude.toFixed(5) }}, {{ sample.longitude.toFixed(5) }}
+                        } @else { — }
+                      </dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Altitude</dt>
+                      <dd>{{ sample.altitudeMeters !== undefined ? sample.altitudeMeters.toFixed(0) + ' m' : '—' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Heading</dt>
+                      <dd>{{ sample.headingDegrees !== undefined ? sample.headingDegrees.toFixed(0) + '°' : '—' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Battery</dt>
+                      <dd>{{ sample.batteryPercent !== undefined ? sample.batteryPercent.toFixed(0) + '%' : '—' }}</dd>
+                    </div>
+                  </dl>
+                } @else {
+                  <p class="muted hint">No telemetry recorded from this device.</p>
+                }
+              </div>
+            }
+          </div>
+        }
+      </section>
+
+      <!-- ---- Detections at scrub time ---------------------------------------------------------- -->
+      <section class="card span-2">
+        <header><h2>Detections at scrub time</h2></header>
+        @if (t.detections.length === 0) {
+          <p class="muted hint">No detections recorded for this flight.</p>
+        } @else if (!detectionIsNear()) {
+          <p class="muted hint">No detection data near this moment.</p>
+        } @else if (nearestDetection()!.detections.length === 0) {
+          <p class="muted hint">Nothing detected at this instant.</p>
+        } @else {
+          <div class="row chips-wrap">
+            @for (d of nearestDetection()!.detections; track d.label) {
+              <span class="chip">{{ d.label }} · {{ d.confidence.toFixed(2) }}</span>
+            }
+          </div>
+        }
+      </section>
+    </div>
+  }
+</div>

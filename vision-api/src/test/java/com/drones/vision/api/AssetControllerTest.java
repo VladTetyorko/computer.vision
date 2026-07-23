@@ -628,6 +628,42 @@ class AssetControllerTest {
     }
 
     @Test
+    void startStreamReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
+        Device device = videoDevice();
+        Asset asset = asset(device);
+
+        StreamId streamId = StreamId.random();
+        when(assetService.startStream(eq(asset.id()), isNull(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:18889/" + streamId.value() + "/whep")));
+
+        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.viewUrl")
+                        .value("http://localhost:8888/" + streamId.value() + "/index.m3u8"))
+                .andExpect(jsonPath("$.whepUrl")
+                        .value("http://localhost:18889/" + streamId.value() + "/whep"));
+    }
+
+    @Test
+    void startStreamOmitsWhepUrlWhenPublisherHasNoWebRtcEndpoint() throws Exception {
+        Device device = videoDevice();
+        Asset asset = asset(device);
+
+        StreamId streamId = StreamId.random();
+        when(assetService.startStream(eq(asset.id()), isNull(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.whepUrl").doesNotExist());
+    }
+
+    @Test
     void startStreamReturns400WhenDeviceIsAmbiguous() throws Exception {
         Device device = videoDevice();
         Asset asset = asset(device);

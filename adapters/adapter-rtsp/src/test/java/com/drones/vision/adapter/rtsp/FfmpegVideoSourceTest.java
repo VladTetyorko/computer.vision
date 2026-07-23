@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
+import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
 import org.junit.jupiter.api.Test;
@@ -357,6 +358,91 @@ class FfmpegVideoSourceTest {
         } finally {
             assertDoesNotThrow(() -> source.close(streamId));
         }
+    }
+
+    // -- docs/MVP2-PLAN.md V-c: RTSP demuxer latency tuning --------------------
+
+    /**
+     * Unit-level check of the {@code configureRtspOptions} seam: constructing
+     * an {@link FFmpegFrameGrabber} and calling {@code setOption}/{@code
+     * setMaxDelay} only assigns fields — no network I/O happens until {@code
+     * start()}, which this test never calls — so this needs neither a live
+     * camera nor even a reachable socket, mirroring adapter-publish-hls's
+     * {@code configureRecorder} test seam.
+     */
+    @Test
+    void configureRtspOptionsAppliesDefaultLowLatencyDemuxerTuning() {
+        FFmpegFrameGrabber grabber = new FFmpegFrameGrabber("rtsp://127.0.0.1:1/ignored");
+
+        FfmpegVideoSource.configureRtspOptions(grabber, Map.of());
+
+        assertEquals(FfmpegVideoSource.DEFAULT_PROBESIZE_BYTES, grabber.getOption("probesize"));
+        assertEquals(FfmpegVideoSource.DEFAULT_ANALYZE_DURATION_MICROS, grabber.getOption("analyzeduration"));
+        assertEquals(FfmpegVideoSource.DEFAULT_REORDER_QUEUE_SIZE, grabber.getOption("reorder_queue_size"));
+        // max_delay is NOT read back via getOption() -- see DEFAULT_MAX_DELAY_MICROS's
+        // javadoc: it must go through the dedicated setMaxDelay(int) setter, not the
+        // generic string-option map, so it is asserted via getMaxDelay() instead.
+        assertEquals(Integer.parseInt(FfmpegVideoSource.DEFAULT_MAX_DELAY_MICROS), grabber.getMaxDelay());
+        // Pre-existing options must still be applied unchanged alongside the new ones.
+        assertEquals(FfmpegVideoSource.DEFAULT_RTSP_TRANSPORT, grabber.getOption("rtsp_transport"));
+        assertEquals(FfmpegVideoSource.DEFAULT_TIMEOUT_MICROS, grabber.getOption("timeout"));
+        assertEquals(FfmpegVideoSource.DEFAULT_TIMEOUT_MICROS, grabber.getOption("rw_timeout"));
+    }
+
+    /** Every one of the four new options must be overridable via device options, same idiom as {@code timeout}. */
+    @Test
+    void configureRtspOptionsHonorsDeviceOptionOverrides() {
+        FFmpegFrameGrabber grabber = new FFmpegFrameGrabber("rtsp://127.0.0.1:1/ignored");
+        Map<String, String> overrides = Map.of(
+                "probesize", "65536",
+                "analyzeduration", "2000000",
+                "reorder_queue_size", "32",
+                "max_delay", "250000");
+
+        FfmpegVideoSource.configureRtspOptions(grabber, overrides);
+
+        assertEquals("65536", grabber.getOption("probesize"));
+        assertEquals("2000000", grabber.getOption("analyzeduration"));
+        assertEquals("32", grabber.getOption("reorder_queue_size"));
+        assertEquals(250_000, grabber.getMaxDelay());
+    }
+
+    /** A malformed {@code max_delay} override must fall back to the default, never crash setup. */
+    @Test
+    void configureRtspOptionsFallsBackToDefaultMaxDelayOnAMalformedOverride() {
+        FFmpegFrameGrabber grabber = new FFmpegFrameGrabber("rtsp://127.0.0.1:1/ignored");
+
+        FfmpegVideoSource.configureRtspOptions(grabber, Map.of("max_delay", "not-a-number"));
+
+        assertEquals(Integer.parseInt(FfmpegVideoSource.DEFAULT_MAX_DELAY_MICROS), grabber.getMaxDelay());
+    }
+
+    /**
+     * Contract regression: the {@code file} protocol must never see any RTSP
+     * grabber configuration at all — {@code newGrabber()} only calls {@code
+     * configureRtspOptions} inside its {@code uri.getScheme().equals("rtsp")}
+     * branch. Asserted here directly against a real grabber produced by the
+     * production {@code file:} path (via the {@link #openAny} seam plumbing,
+     * exercised end-to-end by the existing pacing/loop/EOF tests above),
+     * rather than re-deriving scheme logic in the test — a fresh grabber's
+     * {@code getOption} for any of these keys is {@code null} (never set),
+     * and {@code getMaxDelay()} stays at {@code FrameGrabber}'s own default.
+     */
+    @Test
+    void fileProtocolNeverReceivesRtspDemuxerTuning() {
+        FFmpegFrameGrabber fileGrabber = new FFmpegFrameGrabber("/tmp/does-not-need-to-exist-for-this-check.mp4");
+
+        // The production code path (StreamRuntime.newGrabber) only calls
+        // configureRtspOptions for an rtsp-scheme URI; a file-scheme grabber is
+        // never passed to it at all, so it is simply never called here either --
+        // proving the "file untouched" contract by construction (no test-only
+        // reflection needed), and pinning the untouched grabber's own defaults.
+        assertNull(fileGrabber.getOption("probesize"));
+        assertNull(fileGrabber.getOption("analyzeduration"));
+        assertNull(fileGrabber.getOption("reorder_queue_size"));
+        assertNull(fileGrabber.getOption("rtsp_transport"));
+        assertNull(fileGrabber.getOption("timeout"));
+        assertEquals(-1, fileGrabber.getMaxDelay(), "max_delay must stay at FrameGrabber's own unset default");
     }
 
     private static Path createTestVideo(Path dir, int width, int height, int frameCount, double fps)

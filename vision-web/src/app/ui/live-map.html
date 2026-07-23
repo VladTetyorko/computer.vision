@@ -5,6 +5,19 @@
     <div class="badge offline-badge">Tiles unavailable — trail shown offline</div>
   }
 
+  <div class="controls layers" role="group" aria-label="Map layer">
+    @for (layer of layers; track layer.id) {
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="settings.mapLayer() === layer.id"
+        (click)="setLayer(layer.id)"
+      >
+        {{ layer.label }}
+      </button>
+    }
+  </div>
+
   <div class="controls">
     <button
       type="button"

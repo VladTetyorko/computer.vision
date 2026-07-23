@@ -29,6 +29,6 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
         double confidence = confidenceThreshold != null ? confidenceThreshold : defaults.confidenceThreshold();
         int fps = inferenceFps != null ? inferenceFps : defaults.inferenceFps();
         return new PipelineConfig(defaults.model(), confidence, fps, defaults.maxInFlightInferences(),
-                defaults.overlayTelemetry(), defaults.labelFilter());
+                defaults.overlayTelemetry(), defaults.labelFilter(), defaults.eventRule());
     }
 }

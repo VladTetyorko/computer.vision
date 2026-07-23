@@ -72,8 +72,11 @@ import java.util.Optional;
  * {@link ApiExceptionHandler}. A normal non-2xx response actually received
  * from upstream (e.g. {@code 404} for a not-yet-ready segment) is passed
  * through verbatim, exactly as {@link #proxy} passes through the upstream's
- * {@code Content-Type} and status on success — this controller adds no
- * caching headers of its own beyond whatever upstream already sent.
+ * {@code Content-Type}, {@code Cache-Control}, and status on success — this
+ * controller adds no caching headers of its own, and forwards (rather than
+ * drops) whatever caching header mediamtx itself sent (docs/MVP2-PLAN.md
+ * V-a proxy audit), so mediamtx's own {@code no-cache} on live LL-HLS
+ * playlists reaches the browser instead of silently vanishing.
  */
 @RestController
 public class HlsProxyController {
@@ -103,6 +106,18 @@ public class HlsProxyController {
             HttpHeaders headers = new HttpHeaders();
             upstreamResponse.headers().firstValue("content-type")
                     .ifPresent(contentType -> headers.add(HttpHeaders.CONTENT_TYPE, contentType));
+            // docs/MVP2-PLAN.md V-a proxy audit: mediamtx marks every LL-HLS live media
+            // playlist response "Cache-Control: no-cache" (never cacheable — the whole point
+            // of polling/blocking-reloading it) and completed segments/older non-LL playlists
+            // "public, max-age=<segment-duration>" (genuinely safe to cache, they're immutable
+            // once named). Forwarding it verbatim, rather than silently dropping it as before,
+            // is what makes "adds no caching to live playlists" true by construction instead of
+            // by the accident of the browser also receiving no Last-Modified/ETag to key a
+            // heuristic cache on — a stock (non-lowLatencyMode) hls.js still re-polls the exact
+            // same index.m3u8 URL on a timer pre-V-b, which a browser HTTP cache CAN legally
+            // serve stale without this header, silently freezing the live edge.
+            upstreamResponse.headers().firstValue("cache-control")
+                    .ifPresent(cacheControl -> headers.add(HttpHeaders.CACHE_CONTROL, cacheControl));
             collectSetCookies(upstreamResponse).forEach(setCookie -> headers.add(HttpHeaders.SET_COOKIE, setCookie));
 
             return ResponseEntity.status(upstreamResponse.statusCode()).headers(headers).body(upstreamResponse.body());

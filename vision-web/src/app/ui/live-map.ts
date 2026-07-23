@@ -10,9 +10,10 @@ import {
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
-import { TelemetryStore } from '../../core/telemetry-store';
-import type { GeoPosition, TelemetrySample } from '../../core/api/models';
-import { darkTileLayer, droneDivIcon, ensureLeafletStylesheet, importLeaflet } from '../../ui/leaflet-loader';
+import { TelemetryStore } from '../core/telemetry-store';
+import type { GeoPosition, TelemetrySample } from '../core/api/models';
+import { SettingsStore, type MapLayerId } from '../core/settings-store';
+import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from './leaflet-loader';
 
 const DEFAULT_ZOOM = 17;
 
@@ -20,12 +21,17 @@ const DEFAULT_ZOOM = 17;
 const EXPAND_TRANSITION_MS = 260;
 
 /**
- * Live map inset for `/live/:deviceId` (docs/CYCLES-PLAN.md §2, UX-DESIGN §5.2): drone marker
- * rotated to heading, breadcrumb trail of the current usage, start-point flag, auto-follow
- * toggle, and an expand-to-full-pane control.
+ * Live single-asset map inset: drone marker rotated to heading, breadcrumb trail of the current
+ * usage, start-point flag, auto-follow toggle, and an expand-to-full-pane control. DI-shares
+ * whichever `TelemetryStore` instance its host page provides (docs/CYCLES-PLAN.md §2, UX-DESIGN
+ * §5.2) — originally built for `/live/:deviceId`, reused as-is by the asset detail page
+ * (docs/CYCLES-PLAN.md §11, CD-b item 2) once that page needed the identical map. Lives in `ui/`
+ * (moved from `pages/live/`, CD-b) rather than `pages/live/` because of that second host — this
+ * codebase has no precedent for one page importing another page's module (see
+ * `core/device-logic.ts`'s doc comment for the original precedent that established this).
  *
  * **Leaflet loads only here** (well, here and `pages/map/fleet-map.ts`, docs/CYCLES-PLAN.md §6 —
- * the shared bootstrap lives in `ui/leaflet-loader.ts`). The live route is already its own lazy
+ * the shared bootstrap lives in `ui/leaflet-loader.ts`). Each host route is already its own lazy
  * chunk; `initMap()`'s call to `importLeaflet()` — a *dynamic* `import('leaflet')` under the
  * hood, not a static one — additionally keeps Leaflet out of that chunk's own parse cost until a
  * telemetry-capable device is actually being viewed. Mirrors `ui/player.ts`'s `import('hls.js')`
@@ -35,7 +41,7 @@ const EXPAND_TRANSITION_MS = 260;
  * **Zoneless gotcha (the risk CYCLES-PLAN.md §2 called out):** Leaflet is purely imperative and
  * is never bound in the template. `map`/`marker`/`trailLine`/`startFlag` are plain fields,
  * created once in `initMap()` and mutated from `effect()`s that read the `TelemetryStore`
- * injected from `LivePage`'s DI — Angular never re-renders Leaflet's own DOM.
+ * injected from the host page's DI — Angular never re-renders Leaflet's own DOM.
  *
  * **Offline fallback.** `.map-shell` has a dark background by default (live-map.css), and
  * Leaflet's marker/overlay panes are independent of the tile pane, so a tile fetch failure (no
@@ -52,6 +58,10 @@ const EXPAND_TRANSITION_MS = 260;
 })
 export class LiveMap {
   protected readonly store = inject(TelemetryStore);
+  protected readonly settings = inject(SettingsStore);
+
+  /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
+  protected readonly layers = MAP_LAYERS;
 
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
@@ -61,6 +71,7 @@ export class LiveMap {
 
   private leaflet: typeof Leaflet | null = null;
   private map: Leaflet.Map | null = null;
+  private tileLayer: Leaflet.TileLayer | null = null;
   private marker: Leaflet.Marker | null = null;
   private startFlag: Leaflet.Marker | null = null;
   private trailLine: Leaflet.Polyline | null = null;
@@ -76,6 +87,11 @@ export class LiveMap {
       const follow = this.autoFollow();
       this.applyTelemetry(trail, latest, follow);
     });
+
+    // Swaps the tile layer whenever the persisted choice changes (docs/CYCLES-PLAN.md §9, CU-b
+    // item 6) — a no-op until `initMap()` has created `this.map` (it applies the initial layer
+    // itself once the Leaflet chunk lands, same pattern as the telemetry effect above).
+    effect(() => this.applyLayer(this.settings.mapLayer()));
 
     // Leaflet sizes itself from the DOM at creation time; expanding/collapsing the inset
     // resizes that DOM out from under it, so it must be told to remeasure. `invalidateSize()`
@@ -99,6 +115,10 @@ export class LiveMap {
     this.expanded.update((value) => !value);
   }
 
+  protected setLayer(id: MapLayerId): void {
+    this.settings.mapLayer.set(id);
+  }
+
   private async initMap(): Promise<void> {
     const generation = ++this.generation;
     const L = await importLeaflet();
@@ -111,7 +131,7 @@ export class LiveMap {
     const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
     this.map = map;
 
-    darkTileLayer(L, (ok) => this.tilesOk.set(ok)).addTo(map);
+    this.applyLayer(this.settings.mapLayer());
 
     this.trailLine = L.polyline([], { color: '#4f8cff', weight: 3, opacity: 0.85 }).addTo(map);
     this.marker = L.marker([0, 0], {
@@ -174,6 +194,17 @@ export class LiveMap {
     }
   }
 
+  /** Swaps the active base layer — a no-op until the map exists (`initMap()` re-applies once it does). */
+  private applyLayer(layerId: MapLayerId): void {
+    const L = this.leaflet;
+    if (!L || !this.map) {
+      return;
+    }
+    this.tileLayer?.remove();
+    this.tileLayer = mapLayerTileLayer(L, layerId, (ok) => this.tilesOk.set(ok));
+    this.tileLayer.addTo(this.map);
+  }
+
   private droneIcon(headingDegrees: number): Leaflet.DivIcon {
     return droneDivIcon(this.leaflet!, headingDegrees);
   }
@@ -191,6 +222,7 @@ export class LiveMap {
     this.generation++;
     this.map?.remove();
     this.map = null;
+    this.tileLayer = null;
     this.marker = null;
     this.trailLine = null;
     this.startFlag = null;

@@ -10,9 +10,18 @@ import java.time.Instant;
  * sample count — so lists render without touching the underlying telemetry
  * trail; individual samples persist separately, keyed by this usage's id,
  * via {@code TelemetryRepositoryPort} and are fetched only on demand. Usages
- * are append-only and time-keyed (TimescaleDB-ready). {@code endedAt} and
- * the position fields are nullable — an open usage has no end time and may
- * not yet have received a telemetry sample.
+ * are append-only and time-keyed (TimescaleDB-ready). {@code endedAt}, the
+ * position fields, and {@code streamId} are nullable — an open usage has no
+ * end time and may not yet have received a telemetry sample.
+ *
+ * <p>{@code streamId} (docs/MVP2-PLAN.md §R, R-a2) is the {@link StreamId} of
+ * the video stream whose start opened this usage — recorded once, at open
+ * time, by {@code UsageTracker} (vision-application), and never changed
+ * afterward for the life of the usage. It exists purely so a finished usage
+ * can be joined back to its {@link DetectionResult}s (keyed by {@code
+ * StreamId}) for flight replay ({@code ReplayService}); a usage opened
+ * before this field existed, or opened by an asset with no video device,
+ * carries {@code null} here — honestly, not as an error.
  *
  * @param id            typed usage identity
  * @param assetId       the asset this usage belongs to
@@ -21,9 +30,10 @@ import java.time.Instant;
  * @param startPosition position at the first received sample, or {@code null} if none yet
  * @param lastPosition  position at the most recently received sample, or {@code null} if none yet
  * @param sampleCount   number of telemetry samples received during this usage; must not be negative
+ * @param streamId      the stream whose start opened this usage, or {@code null} for a legacy/streamless usage
  */
 public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
-                          GeoPosition lastPosition, long sampleCount) {
+                          GeoPosition lastPosition, long sampleCount, StreamId streamId) {
 
     public AssetUsage {
         if (id == null) {
@@ -45,13 +55,22 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
     }
 
     /**
+     * Convenience constructor for a usage with no recorded stream (legacy rows, or callers that
+     * predate {@code streamId} — see the class javadoc).
+     */
+    public AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
+                       GeoPosition lastPosition, long sampleCount) {
+        this(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, null);
+    }
+
+    /**
      * Returns a copy of this usage closed at the given instant.
      *
      * @param endedAt when the usage was closed; must not be before {@code startedAt}
      * @return a new {@code AssetUsage} with {@code endedAt} set
      */
     public AssetUsage closed(Instant endedAt) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount);
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId);
     }
 
     /**
@@ -62,7 +81,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      * @return a new {@code AssetUsage} with the positions replaced
      */
     public AssetUsage withPositions(GeoPosition startPosition, GeoPosition lastPosition) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount);
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId);
     }
 
     /**
@@ -72,6 +91,6 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      * @return a new {@code AssetUsage} with {@code sampleCount} replaced
      */
     public AssetUsage withSampleCount(long sampleCount) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount);
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId);
     }
 }

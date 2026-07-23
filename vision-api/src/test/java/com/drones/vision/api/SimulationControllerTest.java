@@ -275,6 +275,65 @@ class SimulationControllerTest {
                 .andExpect(jsonPath("$.viewUrl").doesNotExist());
     }
 
+    // ---- docs/MVP2-PLAN.md §L: whepUrl beside viewUrl ----
+
+    @Test
+    void simulateReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(assetId, streamId));
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("/hls/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:18889/" + streamId.value() + "/whep")));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.viewUrl").value("/hls/" + streamId.value() + "/index.m3u8"))
+                .andExpect(jsonPath("$.whepUrl").value("http://localhost:18889/" + streamId.value() + "/whep"));
+    }
+
+    @Test
+    void simulateOmitsWhepUrlWhenPublisherHasNoWebRtcEndpoint() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(simulationService.simulate(any(), any(), any()))
+                .thenReturn(new SimulatedAsset(AssetId.random(), streamId));
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("/hls/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.viewUrl").value("/hls/" + streamId.value() + "/index.m3u8"))
+                .andExpect(jsonPath("$.whepUrl").doesNotExist());
+    }
+
+    @Test
+    void simulateOmitsWhepUrlAlongsideStreamIdAndViewUrlWhenNotAutoStarted() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(assetId, null));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","autoStart":false}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.whepUrl").doesNotExist());
+
+        verifyNoInteractions(streamPublisherPort);
+    }
+
     // ---- transport parsing ----
 
     @Test

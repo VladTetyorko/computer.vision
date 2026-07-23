@@ -1,16 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetDetails, AssetUsage, TelemetrySample } from './api/models';
+import type { AssetDetails, AssetUsage, Device, TelemetrySample } from './api/models';
 import {
   ageSeconds,
   deriveTrail,
   findOwningAsset,
+  groupTelemetryByDevice,
   isStale,
   selectOpenUsage,
   shouldPoll,
+  telemetryDevices,
 } from './telemetry-logic';
 
 function usage(partial: Partial<AssetUsage>): AssetUsage {
   return { usageId: 'u-0', startedAt: '2026-07-22T00:00:00Z', sampleCount: 0, ...partial };
+}
+
+function device(partial: Partial<Device> = {}): Device {
+  return {
+    id: 'dev-0',
+    name: 'device',
+    capabilities: ['VIDEO'],
+    protocol: 'sim',
+    uri: 'sim://demo',
+    options: {},
+    state: 'ACTIVE',
+    ...partial,
+  };
 }
 
 function asset(partial: Partial<AssetDetails>): AssetDetails {
@@ -61,7 +76,7 @@ describe('selectOpenUsage', () => {
 
 describe('deriveTrail', () => {
   function sample(partial: Partial<TelemetrySample>): TelemetrySample {
-    return { at: '2026-07-22T00:00:00Z', ...partial };
+    return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
   }
 
   it('keeps chronological order and maps lat/lon/altitude', () => {
@@ -89,6 +104,44 @@ describe('deriveTrail', () => {
 
   it('returns an empty trail when no sample carries a position', () => {
     expect(deriveTrail([sample({ batteryPercent: 50 })])).toEqual([]);
+  });
+});
+
+describe('groupTelemetryByDevice', () => {
+  function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
+    return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
+  }
+
+  it('groups samples by deviceId, preserving order within each group', () => {
+    const samples = [
+      sample({ deviceId: 'gps-1', at: '2026-07-22T00:00:00Z' }),
+      sample({ deviceId: 'gps-2', at: '2026-07-22T00:00:01Z' }),
+      sample({ deviceId: 'gps-1', at: '2026-07-22T00:00:02Z' }),
+    ];
+    const grouped = groupTelemetryByDevice(samples);
+    expect(grouped.size).toBe(2);
+    expect(grouped.get('gps-1')?.map((s) => s.at)).toEqual([
+      '2026-07-22T00:00:00Z',
+      '2026-07-22T00:00:02Z',
+    ]);
+    expect(grouped.get('gps-2')?.map((s) => s.at)).toEqual(['2026-07-22T00:00:01Z']);
+  });
+
+  it('returns an empty map for no samples', () => {
+    expect(groupTelemetryByDevice([]).size).toBe(0);
+  });
+});
+
+describe('telemetryDevices', () => {
+  it('keeps only TELEMETRY-capable devices', () => {
+    const video = device({ id: 'd1', capabilities: ['VIDEO'] });
+    const gps = device({ id: 'd2', capabilities: ['TELEMETRY'] });
+    const both = device({ id: 'd3', capabilities: ['VIDEO', 'TELEMETRY'] });
+    expect(telemetryDevices([video, gps, both]).map((d) => d.id)).toEqual(['d2', 'd3']);
+  });
+
+  it('returns an empty array when no device reports telemetry', () => {
+    expect(telemetryDevices([device({ capabilities: ['VIDEO'] })])).toEqual([]);
   });
 });
 

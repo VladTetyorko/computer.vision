@@ -1,0 +1,75 @@
+package com.drones.vision.adapter.persistence;
+
+import com.drones.vision.adapter.persistence.entity.DeviceEntity;
+import com.drones.vision.domain.model.Device;
+import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.domain.port.out.DeviceRepositoryPort;
+
+import jakarta.persistence.EntityManagerFactory;
+
+import java.net.URI;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * {@link DeviceRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}).
+ *
+ * <p>{@link #save} is an upsert (merge-by-id); {@link #deleteById} is a real hard delete of the
+ * row (idempotent — a missing id is simply a no-op), matching {@code InMemoryDeviceRepository}'s
+ * {@code Map#remove} semantics exactly. Soft-delete (a device's {@code LifecycleState}) is just a
+ * field value here, round-tripped like any other column — nothing in this class treats
+ * {@code DELETED} specially, exactly like the in-memory reference implementation.
+ */
+public final class JpaDeviceRepository implements DeviceRepositoryPort {
+
+    private final JpaOperations jpa;
+
+    public JpaDeviceRepository(EntityManagerFactory entityManagerFactory) {
+        this.jpa = new JpaOperations(entityManagerFactory);
+    }
+
+    @Override
+    public Device save(Device device) {
+        DeviceEntity saved = jpa.write(em -> em.merge(toEntity(device)));
+        return toDomain(saved);
+    }
+
+    @Override
+    public Optional<Device> findById(DeviceId id) {
+        return jpa.read(em -> Optional.ofNullable(em.find(DeviceEntity.class, id.value())))
+                .map(JpaDeviceRepository::toDomain);
+    }
+
+    @Override
+    public List<Device> findAll() {
+        return jpa.read(em -> em.createQuery("select d from DeviceEntity d", DeviceEntity.class)
+                        .getResultList())
+                .stream()
+                .map(JpaDeviceRepository::toDomain)
+                .toList();
+    }
+
+    @Override
+    public void deleteById(DeviceId id) {
+        jpa.write(em -> {
+            DeviceEntity existing = em.find(DeviceEntity.class, id.value());
+            if (existing != null) {
+                em.remove(existing);
+            }
+            return null;
+        });
+    }
+
+    private static DeviceEntity toEntity(Device device) {
+        StreamDescriptor stream = device.stream();
+        return new DeviceEntity(device.id().value(), device.name(), device.capabilities(),
+                stream.protocol(), stream.uri().toString(), stream.options(), device.state());
+    }
+
+    private static Device toDomain(DeviceEntity entity) {
+        StreamDescriptor stream = new StreamDescriptor(entity.streamProtocol(), URI.create(entity.streamUri()),
+                entity.streamOptions());
+        return new Device(new DeviceId(entity.id()), entity.name(), entity.capabilities(), stream, entity.state());
+    }
+}

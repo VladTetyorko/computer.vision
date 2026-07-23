@@ -57,6 +57,18 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * locking; different streams are tracked independently in a {@link
  * ConcurrentHashMap} since their pipelines run on different threads.
  *
+ * <h2>Latency measurement (docs/MVP2-PLAN.md V-c)</h2>
+ * Every write to the encoder measures capture→encode lag — {@code now -
+ * videoFrame.capturedAt()} at the moment the frame is handed to {@code
+ * FFmpegFrameRecorder.record} — into a small per-stream rolling window
+ * ({@link StreamState#lagTracker}, see {@link LagTracker}). A p50/p95
+ * summary is logged at {@code INFO} at most once every {@value
+ * #LAG_LOG_INTERVAL_MILLIS}ms per stream; every frame's own lag is logged at
+ * {@code DEBUG}. This covers only the capture→ingest→pipeline→overlay→
+ * publisher-handoff span — see this module's MODULE.md for how to read it
+ * together with the player's own "behind live" estimate (V-b) to see the
+ * full glass-to-glass picture.
+ *
  * <p>Plain class with no framework dependency — instantiated directly by
  * {@code vision-app}'s wiring configuration.
  */
@@ -72,7 +84,18 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
      * this is not the assumption it used to be.
      */
     static final double DEFAULT_FRAME_RATE_FPS = 15.0;
-    private static final int GOP_SECONDS = 2;
+    /**
+     * docs/MVP2-PLAN.md V-a: an HLS segment can never be shorter than the
+     * keyframe interval it's cut on, so this bounds how low mediamtx's own
+     * {@code hlsSegmentDuration} (compose {@code MTX_HLSSEGMENTDURATION},
+     * see docker-compose.yml) can usefully go — 1s here matches mediamtx's
+     * own 1s default/configured segment duration exactly. Was 2s, which
+     * forced ~2s (or coarser, once VBV/network jitter is added) segments
+     * regardless of mediamtx's own configuration, the single biggest
+     * contributor to the "5-10s of latency" previously documented in
+     * README.md's Quickstart.
+     */
+    private static final int GOP_SECONDS = 1;
     /** Number of frames whose {@code capturedAt} deltas are sampled to measure a stream's source cadence before its recorder starts. */
     static final int CADENCE_MEASUREMENT_FRAMES = 5;
     /** Sanity clamp bounds for the measured source frame rate handed to {@code setFrameRate}. */
@@ -85,6 +108,15 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     static final double DRIFT_EWMA_ALPHA = 0.2;
     /** How long the drift ratio must stay outside bounds, continuously, before it is logged (not a single blip). */
     static final Duration SUSTAINED_DRIFT_WINDOW = Duration.ofSeconds(2);
+    /**
+     * docs/MVP2-PLAN.md V-c: ring-buffer capacity for {@link StreamState#lagTracker}.
+     * 150 samples covers several seconds' worth of frames at typical 15-30fps
+     * sources — enough for a stable p50/p95 read between periodic log lines
+     * without holding an unbounded or needlessly large history.
+     */
+    static final int LAG_TRACKER_WINDOW_SIZE = 150;
+    /** docs/MVP2-PLAN.md V-c: minimum wall-clock gap between a stream's periodic capture→encode lag summary logs. */
+    static final long LAG_LOG_INTERVAL_MILLIS = Duration.ofSeconds(30).toMillis();
     /** Bounds the underlying TCP connect/I/O for the RTSP push, in microseconds, so a dead mediamtx can't hang a publish call. */
     private static final String CONNECT_TIMEOUT_MICROS = "5000000";
     /**
@@ -100,22 +132,42 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     static final String X264_MAXRATE_BITS_PER_SECOND = "6000000";
     /** VBV buffer, conventionally 2× maxrate; with {@code tune=zerolatency} x264 still honors the cap per-frame. */
     static final String X264_BUFSIZE_BITS = "12000000";
+    /**
+     * Disables x264's adaptive scene-cut keyframe insertion (default
+     * threshold 40, inherited from the {@code veryfast} preset if left
+     * unset). docs/MVP2-PLAN.md V-a: mediamtx cuts a new HLS segment at the
+     * first keyframe at-or-after its configured {@code hlsSegmentDuration},
+     * so a closed, strictly periodic GOP (one keyframe every {@link
+     * #GOP_SECONDS} exactly, never early) keeps segment boundaries — and
+     * therefore segment durations — predictable; scene-cut-triggered early
+     * keyframes are the standard live/adaptive-streaming footgun this
+     * avoids (recommended practice for HLS/DASH authoring generally, not
+     * specific to this codebase).
+     */
+    static final String X264_SCENECUT_THRESHOLD = "0";
     private static final long INITIAL_BACKOFF_MS = 500L;
     private static final long MAX_BACKOFF_MS = 10_000L;
     private static final String HLS_PLAYLIST_SUFFIX = "/index.m3u8";
+    private static final String WHEP_PATH_SUFFIX = "/whep";
 
     private final URI rtspPushBase;
     private final URI hlsViewBase;
+    private final URI whepViewBase;
     private final Map<StreamId, StreamState> streams = new ConcurrentHashMap<>();
 
     /**
      * @param rtspPushBase base RTSP URL of the mediamtx sidecar to push to, e.g. {@code rtsp://localhost:8554}
      * @param hlsViewBase  base HTTP URL of mediamtx's HLS egress, e.g. {@code http://localhost:8888}
+     * @param whepViewBase base HTTP URL of mediamtx's WebRTC/WHEP egress, e.g. {@code http://localhost:8889};
+     *                     unlike {@code hlsViewBase} (which {@code vision-app} typically points at an
+     *                     app-relative proxy path, see {@link #viewUrl}'s javadoc), this is handed to
+     *                     viewers verbatim — see {@link #whepUrl}
      */
-    public MediamtxStreamPublisher(URI rtspPushBase, URI hlsViewBase) {
+    public MediamtxStreamPublisher(URI rtspPushBase, URI hlsViewBase, URI whepViewBase) {
         ensureQuietLogging();
         this.rtspPushBase = Objects.requireNonNull(rtspPushBase, "rtspPushBase must not be null");
         this.hlsViewBase = Objects.requireNonNull(hlsViewBase, "hlsViewBase must not be null");
+        this.whepViewBase = Objects.requireNonNull(whepViewBase, "whepViewBase must not be null");
     }
 
     // -- native log quieting --------------------------------------------------
@@ -228,6 +280,24 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         return Optional.of(URI.create(withoutTrailingSlash(hlsViewBase.toString()) + "/" + id.value() + HLS_PLAYLIST_SUFFIX));
     }
 
+    /**
+     * mediamtx serves WHEP for every published path with no extra
+     * configuration, at {@code {whepViewBase}/{streamId}/whep} — mirrors
+     * {@link #viewUrl}'s formatting (same trailing-slash tolerance) but,
+     * per this port's {@code whepUrl} contract, {@code whepViewBase} is
+     * never an app-relative proxy path: it is handed to the viewer verbatim,
+     * since a WHEP session is a POST/SDP exchange plus ICE, not a byte
+     * stream a reverse proxy can forward transparently the way {@code
+     * HlsProxyController} (vision-api) does for HLS segments.
+     */
+    @Override
+    public Optional<URI> whepUrl(StreamId id) {
+        if (id == null) {
+            return Optional.empty();
+        }
+        return Optional.of(URI.create(withoutTrailingSlash(whepViewBase.toString()) + "/" + id.value() + WHEP_PATH_SUFFIX));
+    }
+
     // -- publish machinery --------------------------------------------------
 
     /**
@@ -246,7 +316,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
             }
             Frame frame = FrameConverter.toFrame(videoFrame);
             state.recorder = startRecorder(id, frame.imageWidth, frame.imageHeight, state.measuredFrameRateFps());
-            writeFrame(state, videoFrame, frame);
+            writeFrame(id, state, videoFrame, frame);
             return;
         }
 
@@ -256,10 +326,36 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
                     + "the encoder is not restarted mid-stream (known limitation, see MODULE.md), so playback "
                     + "speed may be off until the stream is restarted");
         }
-        writeFrame(state, videoFrame, FrameConverter.toFrame(videoFrame));
+        writeFrame(id, state, videoFrame, FrameConverter.toFrame(videoFrame));
     }
 
-    private static void writeFrame(StreamState state, VideoFrame videoFrame, Frame frame) throws Exception {
+    /**
+     * Writes one frame to the encoder and, immediately before doing so,
+     * measures docs/MVP2-PLAN.md V-c's capture→encode lag: {@code now -
+     * videoFrame.capturedAt()}, i.e. everything upstream of this handoff
+     * (capture, ingest decode, {@code StreamPipeline}, overlay burn-in, and
+     * this class's own measurement/backoff bookkeeping) — never anything
+     * downstream (mediamtx segmenting, HLS/WHEP transport, player buffering;
+     * see this module's MODULE.md for how to combine this with the player's
+     * own "behind live" estimate to see the full glass-to-glass split).
+     * Recording a sample is an {@code O(1)} array write ({@link
+     * LagTracker#record}) — negligible per-frame overhead — and the DEBUG log
+     * below only builds its message when DEBUG is actually enabled ({@link
+     * System.Logger#log(System.Logger.Level, java.util.function.Supplier)}'s
+     * lazy-supplier form, the same idiom this class already uses for its
+     * INFO/WARNING logs).
+     */
+    private static void writeFrame(StreamId id, StreamState state, VideoFrame videoFrame, Frame frame) throws Exception {
+        long nowEpochMs = System.currentTimeMillis();
+        long lagMillis = nowEpochMs - videoFrame.capturedAt().toEpochMilli();
+        state.lagTracker.record(lagMillis);
+        LOG.log(System.Logger.Level.DEBUG, () -> "Stream " + id.value() + ": capture→encode lag " + lagMillis
+                + "ms (frame " + videoFrame.sequence() + ")");
+        if (state.shouldLogLag(nowEpochMs)) {
+            LOG.log(System.Logger.Level.INFO, () -> "Stream " + id.value() + ": capture→encode lag p50/p95 ~"
+                    + state.lagTracker.p50() + "/" + state.lagTracker.p95() + "ms (n=" + state.lagTracker.sampleCount() + ")");
+        }
+
         state.recorder.setTimestamp(state.nextTimestampMicros(videoFrame.capturedAt(), state.measuredFrameRateFps()));
         state.recorder.record(frame);
     }
@@ -285,6 +381,22 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
      * this method deliberately doesn't call it, so a test can assert the
      * exact frame rate/GOP handed to a real recorder without needing a live
      * connection.
+     *
+     * <p><b>Latency audit (docs/MVP2-PLAN.md V-a):</b> {@code tune=zerolatency}
+     * (verified against x264's own source) already expands to {@code
+     * --bframes 0 --no-mbtree --sync-lookahead 0 --rc-lookahead 0
+     * --force-cfr}, i.e. zero B-frames and zero rate-control/frame-type
+     * lookahead — there is no reordering delay between a frame being
+     * captured and it leaving the encoder. {@link
+     * FFmpegFrameRecorder#setMaxBFrames} is set to {@code 0} anyway, purely
+     * as redundant, independently-testable documentation of that fact (not
+     * a behavior change — {@code tune} already forces it) in case a future
+     * edit ever changes {@code tune} without re-deriving the consequence.
+     * {@code maxrate}/{@code bufsize} (the CRF fix, commit a963521) are left
+     * untouched: VBV bufsize bounds instantaneous bitrate *variance* for the
+     * rate controller, it is not a frame-reordering/output-delay buffer —
+     * with zero lookahead each frame is written essentially as soon as it's
+     * encoded, so this does not regress latency.
      */
     static void configureRecorder(FFmpegFrameRecorder recorder, double frameRateFps) {
         recorder.setFormat("rtsp");
@@ -301,6 +413,8 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         recorder.setVideoOption("crf", X264_CRF);
         recorder.setVideoOption("maxrate", X264_MAXRATE_BITS_PER_SECOND);
         recorder.setVideoOption("bufsize", X264_BUFSIZE_BITS);
+        recorder.setVideoOption("sc_threshold", X264_SCENECUT_THRESHOLD);
+        recorder.setMaxBFrames(0);
         recorder.setFrameRate(frameRateFps);
         recorder.setGopSize((int) Math.round(frameRateFps * GOP_SECONDS));
         recorder.setPixelFormat(AV_PIX_FMT_YUV420P);
@@ -385,6 +499,13 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         private double driftEwmaFps = -1.0;
         private Instant driftStartedAt;
         private boolean driftAlreadyLogged = false;
+
+        // -- docs/MVP2-PLAN.md V-c: capture→encode lag measurement --------------
+        // Package-private, not private, mirroring `recorder` above: the owning
+        // MediamtxStreamPublisher.writeFrame reads/writes it directly, no
+        // getter ceremony needed for a per-stream, single-writer field.
+        final LagTracker lagTracker = new LagTracker(LAG_TRACKER_WINDOW_SIZE);
+        private long nextLagLogAtEpochMs = 0L;
 
         boolean readyToRetry() {
             return System.currentTimeMillis() >= nextRetryAtEpochMs;
@@ -566,6 +687,29 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
                 return true;
             }
             return false;
+        }
+
+        /**
+         * Gate for the periodic per-stream capture→encode lag summary log
+         * (docs/MVP2-PLAN.md V-c): {@code true} at most once per {@value
+         * MediamtxStreamPublisher#LAG_LOG_INTERVAL_MILLIS}ms of wall-clock
+         * time, and never on the very first call — that call only
+         * establishes the baseline, since logging immediately would report a
+         * single-sample "p50/p95" before the rolling window holds anything
+         * meaningful. Millisecond epoch, not {@link Instant}, matching this
+         * class's own {@link #readyToRetry()}/{@link #scheduleRetry()}
+         * backoff-timing idiom.
+         */
+        boolean shouldLogLag(long nowEpochMs) {
+            if (nextLagLogAtEpochMs == 0L) {
+                nextLagLogAtEpochMs = nowEpochMs + LAG_LOG_INTERVAL_MILLIS;
+                return false;
+            }
+            if (nowEpochMs < nextLagLogAtEpochMs) {
+                return false;
+            }
+            nextLagLogAtEpochMs = nowEpochMs + LAG_LOG_INTERVAL_MILLIS;
+            return true;
         }
 
         private static double clamp(double value, double min, double max) {

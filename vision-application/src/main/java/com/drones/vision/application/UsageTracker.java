@@ -7,6 +7,7 @@ import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
@@ -34,14 +35,18 @@ import java.util.concurrent.Flow;
  *
  * <h2>Lifecycle</h2>
  * <ul>
- *   <li>{@link #onStreamStarted(DeviceId)} — resolves the device's owning
- *       asset; if this is the asset's <b>first</b> currently-active device,
- *       opens a new {@link AssetUsage} (persisted via {@link
- *       AssetUsageRepositoryPort}) and subscribes to a {@link
- *       TelemetrySourcePort} for each of the asset's {@link
- *       Capability#TELEMETRY}-capable devices that a registered source
- *       supports. An asset with several devices starting streams in
- *       succession still opens exactly <b>one</b> usage.</li>
+ *   <li>{@link #onStreamStarted(DeviceId, StreamId)} — resolves the device's
+ *       owning asset; if this is the asset's <b>first</b> currently-active
+ *       device, opens a new {@link AssetUsage} (persisted via {@link
+ *       AssetUsageRepositoryPort}), stamping it with the given {@code
+ *       streamId} (docs/MVP2-PLAN.md §R, R-a2 — the live stream that opened
+ *       it, later joined against {@link com.drones.vision.domain.model.DetectionResult}
+ *       for replay), and subscribes to a {@link TelemetrySourcePort} for
+ *       each of the asset's {@link Capability#TELEMETRY}-capable devices
+ *       that a registered source supports. An asset with several devices
+ *       starting streams in succession still opens exactly <b>one</b> usage,
+ *       carrying the <b>first</b> device's {@code streamId} — later devices'
+ *       stream ids are not recorded.</li>
  *   <li>Each telemetry sample received while a usage is open is persisted via
  *       {@link TelemetryRepositoryPort#save} and folds into the usage's cheap
  *       summary — {@code startPosition} (the first sample carrying a
@@ -91,10 +96,14 @@ public final class UsageTracker {
      * Notifies the tracker that a device's stream has started.
      *
      * @param deviceId the device whose stream started
+     * @param streamId the id of the stream that started; recorded onto the {@link AssetUsage}
+     *                 only when this call is the one that opens it (the asset's first
+     *                 currently-active device) — see the class javadoc
      */
-    public void onStreamStarted(DeviceId deviceId) {
+    public void onStreamStarted(DeviceId deviceId, StreamId streamId) {
         Objects.requireNonNull(deviceId, "deviceId must not be null");
-        assetRepository.findByDeviceId(deviceId).ifPresent(this::deviceStreamStarted);
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        assetRepository.findByDeviceId(deviceId).ifPresent(asset -> deviceStreamStarted(asset, streamId));
     }
 
     /**
@@ -107,14 +116,50 @@ public final class UsageTracker {
         assetRepository.findByDeviceId(deviceId).ifPresent(this::deviceStreamStopped);
     }
 
-    private void deviceStreamStarted(Asset asset) {
+    /**
+     * Resolves the asset that owns {@code deviceId}, if any — best-effort, used by {@code
+     * DetectionEventEngine} (docs/MVP2-PLAN.md §E, E-a) to stamp a {@code DetectionEvent}'s {@code
+     * assetId} at open time.
+     *
+     * @param deviceId the device to resolve
+     * @return the owning asset's id, or {@link Optional#empty()} if the device has no owning asset
+     */
+    public Optional<AssetId> resolveAsset(DeviceId deviceId) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        return assetRepository.findByDeviceId(deviceId).map(Asset::id);
+    }
+
+    /**
+     * Best-effort freshest known position for {@code assetId}'s currently open usage
+     * (docs/MVP2-PLAN.md §E, E-a) — the same {@code lastPosition} an {@link AssetUsage}
+     * accumulates as telemetry samples arrive (see {@link #applySample}), read back rather than
+     * queried fresh from {@link TelemetryRepositoryPort} directly, which has no "give me the
+     * latest sample" shape to ask for one. Empty when the asset has no currently open usage, or
+     * the open usage has not yet received a positioned telemetry sample.
+     *
+     * @param assetId the asset to inspect
+     * @return the freshest position, or {@link Optional#empty()} if unavailable
+     */
+    public Optional<GeoPosition> latestPosition(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Tracking tracking = trackingByAsset.get(assetId);
+        if (tracking == null) {
+            return Optional.empty();
+        }
+        synchronized (tracking) {
+            return tracking.usage == null ? Optional.empty() : Optional.ofNullable(tracking.usage.lastPosition());
+        }
+    }
+
+    private void deviceStreamStarted(Asset asset, StreamId streamId) {
         Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
         boolean openedNow;
         synchronized (tracking) {
             tracking.activeDevices++;
             openedNow = tracking.activeDevices == 1;
             if (openedNow) {
-                AssetUsage usage = new AssetUsage(UsageId.random(), asset.id(), Instant.now(), null, null, null, 0);
+                AssetUsage usage =
+                        new AssetUsage(UsageId.random(), asset.id(), Instant.now(), null, null, null, 0, streamId);
                 tracking.usage = usageRepository.save(usage);
             }
         }

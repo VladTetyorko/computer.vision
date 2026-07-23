@@ -66,6 +66,27 @@ describe('SettingsStore', () => {
     expect(store.activeProfile().id).toBe(BUILT_IN_PROFILES[0].id);
   });
 
+  it('defaults the map layer to night and persists a change across reload', () => {
+    expect(store.mapLayer()).toBe('night');
+
+    store.mapLayer.set('satellite');
+    TestBed.tick(); // flushes the `effect()` that persists settings to localStorage
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.mapLayer()).toBe('satellite');
+  });
+
+  it('ignores a corrupt persisted map layer rather than adopting it', () => {
+    localStorage.setItem('vision.settings.v1', JSON.stringify({ mapLayer: 'lunar' }));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.mapLayer()).toBe('night');
+  });
+
   it('survives corrupt persisted settings', () => {
     localStorage.setItem('vision.settings.v1', '{not json');
     TestBed.resetTestingModule();

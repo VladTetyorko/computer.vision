@@ -20,11 +20,13 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | adapter-simulation | `adapters/adapter-simulation/` | Synthetic video + telemetry sources (`sim`) |
 | adapter-rtsp | `adapters/adapter-rtsp/` | RTSP/FFmpeg ingest |
 | adapter-mjpeg | `adapters/adapter-mjpeg/` | MJPEG HTTP ingest + TX simulator |
+| adapter-mavlink | `adapters/adapter-mavlink/` | MAVLink 2 UDP telemetry ingest + TX flight-plan simulator |
+| adapter-v4l2 | `adapters/adapter-v4l2/` | USB/V4L2 local camera ingest (RX only) |
 | adapter-publish-hls | `adapters/adapter-publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
 | adapter-discovery | `adapters/adapter-discovery/` | ONVIF / mDNS / V4L2 scanners |
 | adapter-cv-grpc | `adapters/adapter-cv-grpc/` | DetectionPort via gRPC to cv-service |
 | adapter-overlay | `adapters/adapter-overlay/` | Detection/OSD overlay burn-in (Java2D) |
-| adapter-persistence | `adapters/adapter-persistence/` | Placeholder (Phase 2): JPA/Postgres |
+| adapter-persistence | `adapters/adapter-persistence/` | JPA/Postgres repositories (opt-in via `vision.persistence.enabled`) |
 | vision-api | `vision-api/` | REST + static web console (driving adapter) |
 | vision-app | `vision-app/` | Spring Boot assembly, wiring, devsupport, ArchUnit |
 | vision-web | `vision-web/` | Angular 21 SPA (built into the jar via frontend-maven-plugin; `-DskipWeb` to skip) |

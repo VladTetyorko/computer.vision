@@ -11,7 +11,8 @@ import {
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
-import { darkTileLayer, droneDivIcon, ensureLeafletStylesheet, importLeaflet } from '../../ui/leaflet-loader';
+import { SettingsStore, type MapLayerId } from '../../core/settings-store';
+import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../../ui/leaflet-loader';
 import { FleetMapStore } from './map-store';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from './map-logic';
 
@@ -46,7 +47,7 @@ function escapeHtml(value: string): string {
  * `FleetMapStore.markers()` plots, a breadcrumb trail per streaming asset, popups with a Watch
  * action, and auto-fit-to-bounds that a manual pan/zoom disables until "Recenter" is clicked.
  *
- * **Leaflet loads only here and in `pages/live/live-map.ts`** — both dynamically `import`
+ * **Leaflet loads only here and in `ui/live-map.ts`** — both dynamically `import`
  * (via `ui/leaflet-loader.ts#importLeaflet`) inside `initMap()`, called from `afterNextRender`,
  * so the ~38 kB gz Leaflet chunk is fetched only once this page is actually visited, same as the
  * live cockpit's map inset.
@@ -61,12 +62,14 @@ function escapeHtml(value: string): string {
  * only disables auto-fit when that flag is *not* set, so it reliably fires only for actual
  * drag/scroll/zoom-button/keyboard interaction, never for our own recentering.
  *
- * **Watch action:** popups are raw HTML (Leaflet popups aren't Angular templates), so the Watch
- * button inside one is wired via a single delegated click listener on the map container rather
- * than one Angular event binding per popup — matches the imperative-Leaflet approach used
+ * **Watch/Preview actions:** popups are raw HTML (Leaflet popups aren't Angular templates), so
+ * both buttons inside one are wired via a single delegated click listener on the map container
+ * rather than one Angular event binding per popup — matches the imperative-Leaflet approach used
  * throughout this component. Resolving *which* device to navigate to is `FleetMapStore`'s job
- * (`resolveWatchDevice`); this component only emits the chosen `assetId` via `watch` and leaves
- * navigation to `MapPage`, which already injects the `Router` for its own "no position" rail.
+ * (`resolveWatchDevice`); this component only emits the chosen `assetId` via `watch`/`preview` and
+ * leaves both navigation and docking to `MapPage`. **Preview** (docs/CYCLES-PLAN.md §9, CU-b item
+ * 5) additionally fires straight from a marker click for `live` markers (bypassing the popup) —
+ * the popup's own Preview button exists for discoverability, not as the only way in.
  */
 @Component({
   selector: 'vision-fleet-map',
@@ -76,9 +79,20 @@ function escapeHtml(value: string): string {
 })
 export class FleetMap {
   protected readonly store = inject(FleetMapStore);
+  protected readonly settings = inject(SettingsStore);
+
+  /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
+  protected readonly layers = MAP_LAYERS;
 
   /** Emits the assetId behind a popup's Watch button; `MapPage` resolves the device and navigates. */
   readonly watch = output<string>();
+
+  /**
+   * Emits the assetId behind a streaming marker click or its popup's Preview button
+   * (docs/CYCLES-PLAN.md §9, CU-b item 5); `MapPage` docks a live preview panel beside the map.
+   * Only ever emitted for `live` markers — an offline asset has nothing to preview.
+   */
+  readonly preview = output<string>();
 
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
@@ -87,6 +101,7 @@ export class FleetMap {
 
   private leaflet: typeof Leaflet | null = null;
   private map: Leaflet.Map | null = null;
+  private tileLayer: Leaflet.TileLayer | null = null;
   private readonly markerHandles = new Map<string, MarkerHandle>();
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
@@ -94,6 +109,11 @@ export class FleetMap {
 
   constructor() {
     afterNextRender(() => void this.initMap());
+
+    // Swaps the tile layer whenever the persisted choice changes (docs/CYCLES-PLAN.md §9, CU-b
+    // item 6) — a no-op until `initMap()` has created `this.map` (it applies the initial layer
+    // itself once the Leaflet chunk lands).
+    effect(() => this.applyLayer(this.settings.mapLayer()));
 
     // Redraws every marker (position/icon/popup/trail) on every store update — including the 1s
     // clock tick that only changes `sampleAgeSeconds` — cheap DOM mutation either way. Whether
@@ -134,7 +154,7 @@ export class FleetMap {
     const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
     this.map = map;
 
-    darkTileLayer(L, (ok) => this.tilesOk.set(ok)).addTo(map);
+    this.applyLayer(this.settings.mapLayer());
 
     map.on('movestart zoomstart', () => {
       if (!this.suppressAutoFitDisable) {
@@ -144,10 +164,14 @@ export class FleetMap {
 
     map.getContainer().addEventListener('click', (event) => {
       const target = event.target as HTMLElement | null;
-      const button = target?.closest<HTMLElement>('.watch-btn');
-      const assetId = button?.dataset['assetId'];
-      if (assetId) {
-        this.watch.emit(assetId);
+      const watchBtn = target?.closest<HTMLElement>('.watch-btn');
+      if (watchBtn?.dataset['assetId']) {
+        this.watch.emit(watchBtn.dataset['assetId']);
+        return;
+      }
+      const previewBtn = target?.closest<HTMLElement>('.preview-btn');
+      if (previewBtn?.dataset['assetId']) {
+        this.preview.emit(previewBtn.dataset['assetId']);
       }
     });
 
@@ -185,6 +209,17 @@ export class FleetMap {
 
     if (!handle) {
       const leafletMarker = L.marker(point, { icon: this.iconFor(L, marker), keyboard: false }).addTo(map);
+      // Clicking a *streaming* marker directly docks the preview panel (docs/CYCLES-PLAN.md §9,
+      // CU-b item 5) — in addition to (not instead of) the popup Leaflet opens on the same click,
+      // which still carries the Preview/Open-full-cockpit buttons for discoverability. `live` is
+      // re-read from the store at click time rather than captured from this closure's `marker`,
+      // since a marker can transition offline long after this listener was attached.
+      leafletMarker.on('click', () => {
+        const current = this.store.markers().find((candidate) => candidate.assetId === marker.assetId);
+        if (current?.live) {
+          this.preview.emit(marker.assetId);
+        }
+      });
       handle = { marker: leafletMarker, trailLine: null };
       this.markerHandles.set(marker.assetId, handle);
     } else {
@@ -229,6 +264,21 @@ export class FleetMap {
     this.suppressAutoFitDisable = false;
   }
 
+  protected setLayer(id: MapLayerId): void {
+    this.settings.mapLayer.set(id);
+  }
+
+  /** Swaps the active base layer — a no-op until the map exists (`initMap()` re-applies once it does). */
+  private applyLayer(layerId: MapLayerId): void {
+    const L = this.leaflet;
+    if (!L || !this.map) {
+      return;
+    }
+    this.tileLayer?.remove();
+    this.tileLayer = mapLayerTileLayer(L, layerId, (ok) => this.tilesOk.set(ok));
+    this.tileLayer.addTo(this.map);
+  }
+
   private iconFor(L: typeof Leaflet, marker: FleetMarker): Leaflet.DivIcon {
     if (marker.live) {
       return droneDivIcon(L, marker.headingDegrees ?? 0, 'fleet-drone-marker');
@@ -256,8 +306,13 @@ export class FleetMap {
     if (marker.sampleAgeSeconds !== undefined) {
       rows.push(`<div class="popup-row faint">Updated ${marker.sampleAgeSeconds.toFixed(0)}s ago</div>`);
     }
+    if (marker.live) {
+      rows.push(
+        `<button type="button" class="btn small secondary preview-btn" data-asset-id="${escapeHtml(marker.assetId)}">Preview</button>`,
+      );
+    }
     rows.push(
-      `<button type="button" class="btn small watch-btn" data-asset-id="${escapeHtml(marker.assetId)}">Watch</button>`,
+      `<button type="button" class="btn small watch-btn" data-asset-id="${escapeHtml(marker.assetId)}">Open full cockpit</button>`,
     );
     return `<div class="fleet-popup">${rows.join('')}</div>`;
   }
@@ -269,5 +324,6 @@ export class FleetMap {
     }
     this.map?.remove();
     this.map = null;
+    this.tileLayer = null;
   }
 }

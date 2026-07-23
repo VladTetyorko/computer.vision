@@ -8,9 +8,10 @@
 #   scripts/demo.sh ~/Videos/your-clip.mp4
 #
 # Services:
-#   postgres    - detections/events/devices persistence (adapter-persistence, Phase 2+ --
-#                 not wired into vision-app yet; every port still runs in-memory, so this
-#                 container is idle plumbing today, kept for forward compatibility)
+#   postgres    - fleet persistence (categories/devices/assets, adapter-persistence,
+#                 docs/MVP2-PLAN.md P-a): vision-app below wires VISION_PERSISTENCE_ENABLED=true
+#                 against it, Flyway-migrated on first use. History (usages/telemetry/
+#                 detections) is P-b, still in-memory for now.
 #   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
 #   cv-service  - Python gRPC YOLO inference service (docs/MVP1-PLAN.md §C7)
 #   vision-app  - the Java application (this repo's root ./Dockerfile)
@@ -57,6 +58,73 @@ services:
       # vision.publish.mediamtx.hls-base's host-mode default in vision-app's
       # application.properties.
       - "18888:8888" # HLS
+      # WHEP (docs/MVP2-PLAN.md L-a): same collision-avoidance rationale and
+      # host/container split as HLS above -- host 18889, container's own
+      # default 8889 unaffected. Unlike HLS, WHEP has no vision-app-side
+      # proxy, so *browsers* hit this mapped port directly; must match
+      # vision.publish.mediamtx.whep-base's host-mode default in vision-app's
+      # application.properties.
+      - "18889:8889" # WHEP (WebRTC signaling: POST offer / HTTP)
+      # WebRTC media (ICE/UDP). This one CANNOT be renumbered like the two
+      # above: mediamtx bakes its own listening port (mediamtx.yml's default
+      # webrtcLocalUDPAddress ":8189") into the ICE candidates it sends the
+      # browser, and Docker's host<->container port mapping doesn't rewrite
+      # SDP/ICE payloads -- so the host port here must equal the container
+      # port or the browser will try to reach a UDP port nothing is actually
+      # listening on.
+      - "8189:8189/udp" # WebRTC media (ICE/RTP)
+    environment:
+      # mediamtx's default ICE candidate gathering (webrtcIPsFromInterfaces:
+      # true) advertises this *container's* own network-namespace IPs (e.g.
+      # 172.x.x.x on the compose bridge network) -- unreachable from a
+      # browser on the host. MTX_WEBRTCADDITIONALHOSTS makes mediamtx also
+      # advertise 127.0.0.1 (paired with the 1:1 UDP mapping above), which
+      # WHEP viewing needs to work at all through this compose stack.
+      #
+      # LOCALHOST-ONLY LIMITATION, stated honestly: a browser on a *different*
+      # machine (e.g. a friend's laptop on the same LAN, per the MVP1 "friends
+      # demo" scenario) cannot use WebRTC/WHEP against this compose stack --
+      # its ICE candidates would still say 127.0.0.1, which resolves to that
+      # *other* machine's own loopback, not this host. Fix by adding this
+      # host's real LAN IP too (MTX_WEBRTCADDITIONALHOSTS: "127.0.0.1,192.168.x.x",
+      # mediamtx supports a comma-separated list) -- left at localhost-only
+      # here since the IP is host-specific and would need to be hand-edited
+      # per demo machine either way. HLS (the existing viewUrl) has no such
+      # limitation and remains the cross-host fallback; see adapter-publish-hls/
+      # MODULE.md and vision-app/MODULE.md for the full WHEP-in-Docker writeup.
+      MTX_WEBRTCADDITIONALHOSTS: "127.0.0.1"
+      # docs/MVP2-PLAN.md V-a (glass-to-glass latency): mediamtx's own default
+      # already *is* Low-Latency HLS (verified against the actual pulled
+      # bluenviron/mediamtx:latest image, v1.19.2, by extracting its baked-in
+      # mediamtx.yml -- hlsVariant: lowLatency, hlsSegmentDuration: 1s,
+      # hlsPartDuration: 200ms, hlsSegmentCount: 7, all already exactly these
+      # values). These four are set explicitly anyway, not because compose
+      # needs to change mediamtx's behavior today, but so a future upstream
+      # image update can never silently regress this stack back to
+      # multi-second HLS by changing its defaults out from under us -- the
+      # latency budget is now pinned at the compose level, not inherited.
+      #   - MTX_HLSVARIANT=lowLatency: CMAF fMP4 muxing with #EXT-X-PART
+      #     entries (blocking playlist reload via _HLS_msn/_HLS_part), the
+      #     prerequisite for any low-latency HLS playback at all.
+      #   - MTX_HLSSEGMENTDURATION=1s: matches adapter-publish-hls's encoder
+      #     GOP (MediamtxStreamPublisher.GOP_SECONDS=1, see its MODULE.md) --
+      #     a segment can never be shorter than the keyframe interval it's
+      #     cut on, so the two must be kept in lock-step by hand; if the GOP
+      #     is ever changed, this must change with it.
+      #   - MTX_HLSPARTDURATION=200ms: the sub-second delivery granularity
+      #     LL-HLS clients (not the stock hls.js this app ships pre-V-b) can
+      #     fast-follow on, well inside one 1s GOP/segment.
+      #   - MTX_HLSSEGMENTCOUNT=7: the *minimum* mediamtx's own lowLatency
+      #     variant accepts -- it refuses to start below 7 (verified against
+      #     gohlslib's muxer validation, the library mediamtx's HLS server is
+      #     built on). Pinned at exactly the floor rather than left higher:
+      #     more segments only means a longer scrub-back window and more
+      #     RAM/CDN cache held for a live-only demo stream, not a latency
+      #     change either way.
+      MTX_HLSVARIANT: "lowLatency"
+      MTX_HLSSEGMENTDURATION: "1s"
+      MTX_HLSPARTDURATION: "200ms"
+      MTX_HLSSEGMENTCOUNT: "7"
 
   cv-service:
     # Context is the repo root: the Dockerfile copies /proto (shared contract) in addition to /cv-service.
@@ -89,6 +157,8 @@ services:
         condition: service_started
       cv-service:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
       VISION_CV_ENABLED: "true"
       VISION_CV_ENDPOINT: cv-service:50051
@@ -97,6 +167,28 @@ services:
       # for a host-run vision-app talking to mediamtx over localhost.
       VISION_PUBLISH_MEDIAMTX_RTSP_BASE: rtsp://mediamtx:8554
       VISION_PUBLISH_MEDIAMTX_HLS_BASE: http://mediamtx:8888
+      # Deliberately NOT mirroring the compose-internal-hostname pattern above
+      # (docs/MVP2-PLAN.md L-a): rtsp-base/hls-base are consumed by vision-app
+      # itself (server-side), so the compose-internal "mediamtx" hostname is
+      # correct and resolvable from inside this container. whep-base is
+      # different -- vision-app never connects to it, it only hands the URL
+      # to the *browser* (see VisionPublishProperties's "WHEP has no third
+      # base" javadoc), and "mediamtx" is not resolvable from the host where
+      # the browser runs. So this stays the same host-mapped-port value as
+      # application.properties' own default (http://localhost:18889) even
+      # though vision-app is containerized here -- set explicitly (rather
+      # than left to the default) so this reasoning is visible at the compose
+      # level, not just in source.
+      VISION_PUBLISH_MEDIAMTX_WHEP_BASE: http://localhost:18889
+      # docs/MVP2-PLAN.md P-a: wire fleet persistence (categories/devices/
+      # assets) against the postgres service above -- compose-internal
+      # hostname/port, not the host-mapped ${POSTGRES_PORT} below (same
+      # container-vs-host addressing split as mediamtx's ports). Credentials
+      # come straight from .env (see .env.example) via compose interpolation.
+      VISION_PERSISTENCE_ENABLED: "true"
+      VISION_PERSISTENCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      VISION_PERSISTENCE_USERNAME: ${POSTGRES_USER}
+      VISION_PERSISTENCE_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "8080:8080"
     volumes:

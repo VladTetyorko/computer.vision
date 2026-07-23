@@ -38,11 +38,14 @@ import java.util.Objects;
  * Driving REST adapter for the asset-first control-plane flow: create an
  * asset (with its device(s)) in one call, list/inspect assets as the read
  * models the UI leads with, and start/stop streaming at the asset level.
- * Also exposes a usage's telemetry trail (for a future map/trail view).
+ * Also exposes a usage's raw telemetry trail (unwindowed, un-downsampled — see
+ * {@link #telemetry}). For a windowed, downsampled, 404-on-unknown-usage replay view (telemetry
+ * plus, in future, detections), see {@link UsageTimelineController} instead (docs/MVP2-PLAN.md
+ * §R, R-a) — the two endpoints live on separate controllers, see that class's javadoc for why.
  *
  * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and two driven ports
- * used read-only: {@link StreamPublisherPort} (resolving {@code viewUrl}, exactly like {@link
- * StreamController}) and {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
+ * used read-only: {@link StreamPublisherPort} (resolving {@code viewUrl}/{@code whepUrl}, exactly
+ * like {@link StreamController}) and {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
  * is no service method for "read a usage's telemetry trail" yet, so this controller reads the
  * driven port directly, the same precedent {@link StreamController} already sets for {@code
  * viewUrl}). Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this
@@ -178,7 +181,7 @@ public class AssetController {
      *
      * @param id      the asset to stream from, as a canonical UUID string
      * @param request optional overrides; {@code null}/absent means use every default
-     * @return the started stream's id and (if available) its viewer URL
+     * @return the started stream's id and (if available) its viewer URLs
      */
     @PostMapping("/api/assets/{id}/stream")
     @ResponseStatus(HttpStatus.CREATED)
@@ -190,7 +193,7 @@ public class AssetController {
         PipelineConfig config = effective.mergeOntoDefaults();
 
         StreamId streamId = assetService.startStream(assetId, device, config);
-        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId));
+        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
     }
 
     /**
@@ -244,6 +247,11 @@ public class AssetController {
      * its driven-port contract), not a 404 — this endpoint has no service
      * method of its own to layer "unknown usage" validation onto.
      *
+     * <p>Unwindowed and undownsampled — every sample up to {@code limit}, earliest first (see
+     * {@link TelemetryRepositoryPort#findByUsage}'s gotcha). {@link UsageTimelineController}'s
+     * {@code GET /api/usages/{usageId}/timeline} is the endpoint actually meant for replaying a
+     * long flight.
+     *
      * @param usageId the usage id, as a canonical UUID string
      * @param limit   maximum number of samples to return; defaults to 100
      * @return the usage's telemetry samples
@@ -258,5 +266,9 @@ public class AssetController {
 
     private String viewUrl(StreamId streamId) {
         return streamPublisherPort.viewUrl(streamId).map(URI::toString).orElse(null);
+    }
+
+    private String whepUrl(StreamId streamId) {
+        return streamPublisherPort.whepUrl(streamId).map(URI::toString).orElse(null);
     }
 }

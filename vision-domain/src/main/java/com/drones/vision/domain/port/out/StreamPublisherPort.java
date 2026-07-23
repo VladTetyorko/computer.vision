@@ -78,4 +78,25 @@ public interface StreamPublisherPort {
     default Optional<URI> viewUrl(StreamId id) {
         return Optional.empty();
     }
+
+    /**
+     * Where a viewer can watch the published stream over WebRTC (a <a
+     * href="https://www.rfc-editor.org/rfc/rfc9484">WHEP</a> endpoint URL),
+     * sub-second latency vs. {@link #viewUrl}'s HLS (docs/MVP2-PLAN.md §L).
+     *
+     * <p>Unlike {@link #viewUrl}, a WHEP URL is never proxied through the
+     * app: consuming it means POSTing an SDP offer and then exchanging ICE
+     * candidates directly with the media server, which a simple byte-level
+     * HTTP reverse proxy cannot do — so implementations that expose one
+     * return the media server's own origin URL directly, not an app-relative
+     * one. Callers must be prepared for {@link Optional#empty()} (e.g. a
+     * no-op/dev-support publisher, or a media server with WebRTC egress
+     * disabled) and fall back to {@link #viewUrl}.
+     *
+     * @param id the stream to look up
+     * @return the WHEP URL, or {@link Optional#empty()} if this publisher has no WebRTC viewing endpoint
+     */
+    default Optional<URI> whepUrl(StreamId id) {
+        return Optional.empty();
+    }
 }

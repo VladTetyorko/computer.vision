@@ -9,8 +9,8 @@
       <div class="row summary muted">
         <span class="chip ok">{{ mapStore.buckets().streaming.length }} streaming</span>
         <span class="chip">{{ mapStore.buckets().offline.length }} offline</span>
-        @if (noPositionAssets().length > 0) {
-          <span class="chip warn">{{ noPositionAssets().length }} no position</span>
+        @if (mapStore.buckets().noPosition.length > 0) {
+          <span class="chip warn">{{ mapStore.buckets().noPosition.length }} no position</span>
         }
       </div>
     }
@@ -21,33 +21,67 @@
       <h3>No assets registered yet</h3>
       <p>
         Register a device or simulate one from the Devices tab and it appears here as soon as it
-        reports a position.
+        reports a position — or place a moving test drone right now, no hardware or file needed.
       </p>
-      <a class="btn" routerLink="/devices">Go to Devices</a>
+      <div class="row empty-actions">
+        <a class="btn secondary" routerLink="/devices">Go to Devices</a>
+        <button type="button" class="btn" (click)="addTestDrone()" [disabled]="addingTestDrone()">
+          {{ addingTestDrone() ? 'Placing…' : 'Add a test drone' }}
+        </button>
+        <button type="button" class="btn secondary" (click)="openFlightPlanDialog()" [disabled]="addingTestDrone()">
+          Draw a flight plan…
+        </button>
+      </div>
     </div>
   } @else {
     <div class="map-layout">
-      <vision-fleet-map class="map-panel" (watch)="onWatch($event)" />
+      <vision-fleet-map class="map-panel" (watch)="onWatch($event)" (preview)="onPreview($event)" />
 
-      @if (noPositionAssets().length > 0) {
+      @if (dockedAssetId(); as assetId) {
+        @if (dockedDeviceId(); as deviceId) {
+          <vision-live-dock class="dock-panel" [deviceId]="deviceId" [marker]="dockedMarker()" (close)="closeDock()" />
+        }
+      }
+
+      @if (railAssets().length > 0) {
         <aside class="rail card">
-          <h3>No position yet</h3>
+          <h3>Assets ({{ railAssets().length }})</h3>
           <ul>
-            @for (asset of noPositionAssets(); track asset.assetId) {
+            @for (asset of railAssets(); track asset.assetId) {
               <li class="rail-item">
                 <div class="rail-item-main">
                   <span class="rail-name truncate">{{ asset.displayName }}</span>
-                  <span class="chip" [class.ok]="asset.status === 'STREAMING'">
-                    {{ asset.status === 'STREAMING' ? 'Streaming' : 'Offline' }}
-                  </span>
+                  @switch (bucketFor(asset)) {
+                    @case ('streaming') {
+                      <span class="chip ok"><span class="dot live"></span>Streaming</span>
+                    }
+                    @case ('offline') {
+                      <span class="chip">Offline</span>
+                    }
+                    @case ('noPosition') {
+                      <span class="chip warn">No position</span>
+                    }
+                  }
                 </div>
                 <div class="rail-item-meta muted">{{ asset.categoryName }}</div>
-                <button type="button" class="btn secondary small" (click)="onWatch(asset.assetId)">Watch</button>
+                <div class="row rail-actions">
+                  <button type="button" class="btn secondary small" (click)="onWatch(asset.assetId)">Watch</button>
+                  @if (asset.status === 'STREAMING') {
+                    <button type="button" class="btn secondary small" (click)="onPreview(asset.assetId)">
+                      Preview
+                    </button>
+                  }
+                  <button type="button" class="btn secondary small" (click)="openAsset(asset.assetId)">Open</button>
+                </div>
               </li>
             }
           </ul>
         </aside>
       }
     </div>
+  }
+
+  @if (flightPlanDialogOpen()) {
+    <vision-flight-plan-dialog (saved)="onFlightPlanSaved($event)" (cancelled)="onFlightPlanCancelled()" />
   }
 </div>

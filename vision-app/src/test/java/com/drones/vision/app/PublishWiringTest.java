@@ -44,6 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Extended for docs/CYCLES-PLAN.md §5: {@code mjpeg} is asserted alongside {@code sim}/{@code
  * rtsp} as a third registered {@link VideoSourcePort} protocol ({@code MjpegVideoSource},
  * adapter-mjpeg) — the RX half of the mjpeg TX/RX pair.
+ *
+ * <p>Extended for docs/MVP2-PLAN.md X-b: {@code v4l2} (adapter-v4l2's {@code V4l2VideoSource})
+ * is asserted as a fourth registered protocol, using the exact descriptor shape {@code
+ * adapter-discovery}'s {@code V4l2Scanner} emits ({@code file:/dev/videoN}), not the plan's
+ * originally-proposed {@code "usb"}/{@code v4l2://} shape — see adapter-v4l2/MODULE.md.
  */
 @SpringBootTest
 class PublishWiringTest {
@@ -78,6 +83,21 @@ class PublishWiringTest {
                 "expected a registered VideoSourcePort supporting the mjpeg descriptor (docs/CYCLES-PLAN.md §5)");
     }
 
+    /**
+     * docs/MVP2-PLAN.md X-b: the descriptor shape here is deliberately {@code
+     * adapter-discovery}'s real {@code V4l2Scanner} emission ({@code protocol="v4l2"}, {@code
+     * uri=file:/dev/videoN}), not the plan's originally-proposed {@code "usb"}/{@code v4l2://}
+     * shape — see adapter-v4l2/MODULE.md for the full deviation writeup.
+     */
+    @Test
+    void videoSourcesIncludeTheV4l2AdapterUsingDiscoverysActualDescriptorShape() {
+        StreamDescriptor v4l2Descriptor = new StreamDescriptor("v4l2", URI.create("file:/dev/video0"), Map.of());
+
+        assertTrue(videoSources.stream().anyMatch(source -> source.supports(v4l2Descriptor)),
+                "expected a registered VideoSourcePort supporting the v4l2 descriptor "
+                        + "(docs/MVP2-PLAN.md X-b, matching adapter-discovery's V4l2Scanner emission)");
+    }
+
     @Test
     void hlsProxyControllerBeanExists() {
         assertNotNull(hlsProxyController, "expected HlsProxyController to be wired so /hls/** is actually served");
@@ -93,5 +113,23 @@ class PublishWiringTest {
         assertEquals("/hls/" + streamId.value() + "/index.m3u8", viewUrl.get().toString(),
                 "viewUrl must be this app's own /hls/** route, per VisionPublishProperties#viewBase's default "
                         + "-- mediamtx's own hls-base must never reach a viewer");
+    }
+
+    /**
+     * docs/MVP2-PLAN.md §L: unlike {@code viewUrl}, {@code whepUrl} is deliberately mediamtx's own
+     * address, not app-relative (see {@code VisionPublishProperties}'s "WHEP has no third base"
+     * javadoc section) — the default is the host-mode {@code whep-base} in {@code
+     * application.properties} (port 18889, matching {@code docker-compose.yml}'s host mapping).
+     */
+    @Test
+    void whepUrlIsMediamtxsOwnAddressPerHostModeDefault() {
+        StreamId streamId = StreamId.random();
+
+        Optional<URI> whepUrl = streamPublisherPort.whepUrl(streamId);
+
+        assertTrue(whepUrl.isPresent());
+        assertEquals("http://localhost:18889/" + streamId.value() + "/whep", whepUrl.get().toString(),
+                "whepUrl must be VisionPublishProperties.Mediamtx#whepBase's default, handed to the "
+                        + "viewer verbatim -- WHEP has no app-relative proxy the way HLS does");
     }
 }

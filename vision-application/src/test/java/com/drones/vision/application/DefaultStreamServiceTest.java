@@ -9,6 +9,7 @@ import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
@@ -186,9 +187,9 @@ class DefaultStreamServiceTest {
         StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
 
-        withTracker.start(device.id(), PipelineConfig.defaults());
+        StreamId streamId = withTracker.start(device.id(), PipelineConfig.defaults());
 
-        verify(usageTracker).onStreamStarted(device.id());
+        verify(usageTracker).onStreamStarted(device.id(), streamId);
     }
 
     @Test
@@ -208,6 +209,32 @@ class DefaultStreamServiceTest {
         // service (built in setUp) uses the six-argument constructor: no UsageTracker at all.
         // Nothing to verify a mock against here -- this test documents/protects the nullable-collaborator
         // contract by asserting start/stop still work without one (a NullPointerException would fail it).
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+        assertDoesNotThrow(() -> service.stop(streamId));
+    }
+
+    @Test
+    void startWithADetectionEventRepositoryPortConfiguredDoesNotThrow() {
+        // docs/MVP2-PLAN.md §E, E-a: the nine-argument constructor threads a fresh, per-stream
+        // DetectionEventEngine into every StreamPipeline it starts. Full rule-engine behavior is
+        // covered by DetectionEventEngineTest/StreamPipelineTest; this is the wiring seam,
+        // mirroring usageTrackerIsNeverTouchedWhenNoneIsConfigured's "must not NPE" style for the
+        // opposite (configured) direction.
+        DetectionEventRepositoryPort detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
+        StreamService withEvents = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null,
+                detectionEventRepositoryPort);
+
+        StreamId streamId = withEvents.start(device.id(), PipelineConfig.defaults());
+
+        assertDoesNotThrow(() -> withEvents.stop(streamId));
+    }
+
+    @Test
+    void startWithoutADetectionEventRepositoryPortNeverConstructsAnEventEngine() {
+        // service (built in setUp) uses the six-argument constructor: no DetectionEventRepositoryPort
+        // at all. Nothing to verify a mock against here -- documents/protects the same
+        // nullable-collaborator contract as usageTrackerIsNeverTouchedWhenNoneIsConfigured.
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
         assertDoesNotThrow(() -> service.stop(streamId));
     }

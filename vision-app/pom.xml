@@ -36,6 +36,14 @@
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>
+            <artifactId>adapter-mavlink</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-v4l2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
             <artifactId>adapter-publish-hls</artifactId>
         </dependency>
         <dependency>
@@ -49,6 +57,10 @@
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>adapter-discovery</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-persistence</artifactId>
         </dependency>
         <dependency>
             <groupId>com.drones</groupId>

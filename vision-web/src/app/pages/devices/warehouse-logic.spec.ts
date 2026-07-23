@@ -1,18 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetDetails, AssetSummary, Device } from '../../core/api/models';
 import {
-  RESTORE_TARGET_STATE,
-  availableAssetActions,
-  availableDeviceActions,
-  buildAssetEdit,
+  buildAssetListRows,
   buildAssetRows,
-  buildDeviceRenameEdit,
   buildWarehouseRows,
+  filterAssetListRowsByArchived,
   filterAssetRowsByArchived,
   filterRowsByArchived,
   mapDeviceOwners,
-  type AssetEditForm,
 } from './warehouse-logic';
+
+/**
+ * The lifecycle-action-menu/edit-builder tests (`availableDeviceActions`, `availableAssetActions`,
+ * `buildDeviceRenameEdit`, `buildAssetEdit`, `RESTORE_TARGET_STATE`) moved to
+ * `core/warehouse-logic.spec.ts` alongside the functions themselves (docs/CYCLES-PLAN.md §11,
+ * CD-b) — this file keeps only the Devices-page-specific view-model builders.
+ */
 
 function device(partial: Partial<Device> = {}): Device {
   return {
@@ -48,111 +51,6 @@ function assetDetails(partial: Partial<AssetDetails> = {}): AssetDetails {
     ...partial,
   };
 }
-
-describe('RESTORE_TARGET_STATE', () => {
-  it('is DEACTIVATED — the contract has no direct DELETED to ACTIVE transition', () => {
-    expect(RESTORE_TARGET_STATE).toBe('DEACTIVATED');
-  });
-});
-
-describe('availableDeviceActions', () => {
-  it('offers rename/deactivate/archive/assign for an unowned ACTIVE device', () => {
-    expect(availableDeviceActions('ACTIVE', false)).toEqual([
-      'rename',
-      'deactivate',
-      'archive',
-      'assign',
-    ]);
-  });
-
-  it('offers unassign instead of assign for an owned ACTIVE device', () => {
-    expect(availableDeviceActions('ACTIVE', true)).toEqual([
-      'rename',
-      'deactivate',
-      'archive',
-      'unassign',
-    ]);
-  });
-
-  it('offers rename/activate/archive for a DEACTIVATED device, regardless of ownership', () => {
-    expect(availableDeviceActions('DEACTIVATED', false)).toEqual(['rename', 'activate', 'archive']);
-    expect(availableDeviceActions('DEACTIVATED', true)).toEqual(['rename', 'activate', 'archive']);
-  });
-
-  it('offers only restore for a DELETED device', () => {
-    expect(availableDeviceActions('DELETED', false)).toEqual(['restore']);
-    expect(availableDeviceActions('DELETED', true)).toEqual(['restore']);
-  });
-});
-
-describe('availableAssetActions', () => {
-  it('offers rename/deactivate/archive for ACTIVE', () => {
-    expect(availableAssetActions('ACTIVE')).toEqual(['rename', 'deactivate', 'archive']);
-  });
-
-  it('offers rename/activate/archive for DEACTIVATED', () => {
-    expect(availableAssetActions('DEACTIVATED')).toEqual(['rename', 'activate', 'archive']);
-  });
-
-  it('offers only restore for DELETED', () => {
-    expect(availableAssetActions('DELETED')).toEqual(['restore']);
-  });
-});
-
-describe('buildDeviceRenameEdit', () => {
-  it('includes the trimmed name when it differs from the original', () => {
-    expect(buildDeviceRenameEdit('  front gate  ', { name: 'old-name' })).toEqual({
-      name: 'front gate',
-    });
-  });
-
-  it('omits name when blank', () => {
-    expect(buildDeviceRenameEdit('   ', { name: 'old-name' })).toEqual({});
-  });
-
-  it('omits name when unchanged from the original', () => {
-    expect(buildDeviceRenameEdit('old-name', { name: 'old-name' })).toEqual({});
-  });
-
-  it('never sends null', () => {
-    const edit = buildDeviceRenameEdit('', { name: 'old-name' });
-    expect(edit.name).toBeUndefined();
-    expect('name' in edit).toBe(false);
-  });
-});
-
-describe('buildAssetEdit', () => {
-  const original = { displayName: 'My Drone', category: 'drone' };
-
-  function form(partial: Partial<AssetEditForm> = {}): AssetEditForm {
-    return { displayName: original.displayName, category: original.category, ...partial };
-  }
-
-  it('omits both fields when nothing changed', () => {
-    expect(buildAssetEdit(form(), original)).toEqual({});
-  });
-
-  it('includes only the changed displayName', () => {
-    expect(buildAssetEdit(form({ displayName: '  Renamed Drone  ' }), original)).toEqual({
-      displayName: 'Renamed Drone',
-    });
-  });
-
-  it('includes only the changed category', () => {
-    expect(buildAssetEdit(form({ category: 'camera' }), original)).toEqual({ category: 'camera' });
-  });
-
-  it('includes both when both changed', () => {
-    expect(buildAssetEdit(form({ displayName: 'Renamed', category: 'camera' }), original)).toEqual({
-      displayName: 'Renamed',
-      category: 'camera',
-    });
-  });
-
-  it('omits a field blanked out to whitespace rather than sending an empty string', () => {
-    expect(buildAssetEdit(form({ displayName: '   ' }), original)).toEqual({});
-  });
-});
 
 describe('mapDeviceOwners', () => {
   it('maps each device id to its owning asset', () => {
@@ -267,6 +165,73 @@ describe('filterAssetRowsByArchived', () => {
 
   it('keeps archived cards when showArchived is true', () => {
     expect(filterAssetRowsByArchived(rows, true).map((r) => r.asset.assetId)).toEqual([
+      'active',
+      'archived',
+    ]);
+  });
+});
+
+describe('buildAssetListRows (docs/CYCLES-PLAN.md §11, CD-b item 1 — the asset-first primary list)', () => {
+  it('derives deviceCount from the resolved device list', () => {
+    const asset = assetDetails({ devices: [device({ id: 'd1' }), device({ id: 'd2' })] });
+    const rows = buildAssetListRows([asset], new Set());
+    expect(rows[0].deviceCount).toBe(2);
+  });
+
+  it('marks streaming true when any of the asset devices is live', () => {
+    const asset = assetDetails({ devices: [device({ id: 'd1' }), device({ id: 'd2' })] });
+    const rows = buildAssetListRows([asset], new Set(['d2']));
+    expect(rows[0].streaming).toBe(true);
+  });
+
+  it('marks streaming false when none of the asset devices is live', () => {
+    const asset = assetDetails({ devices: [device({ id: 'd1' })] });
+    const rows = buildAssetListRows([asset], new Set(['other-device']));
+    expect(rows[0].streaming).toBe(false);
+  });
+
+  it('resolves watchDeviceId to the first VIDEO-capable device', () => {
+    const telemetryOnly = device({ id: 'd1', capabilities: ['TELEMETRY'] });
+    const video = device({ id: 'd2', capabilities: ['VIDEO'] });
+    const rows = buildAssetListRows([assetDetails({ devices: [telemetryOnly, video] })], new Set());
+    expect(rows[0].watchDeviceId).toBe('d2');
+  });
+
+  it('leaves watchDeviceId undefined when the asset has no VIDEO-capable device', () => {
+    const rows = buildAssetListRows(
+      [assetDetails({ devices: [device({ id: 'd1', capabilities: ['TELEMETRY'] })] })],
+      new Set(),
+    );
+    expect(rows[0].watchDeviceId).toBeUndefined();
+  });
+
+  it('defaults a missing lifecycle to ACTIVE, same as buildAssetRows', () => {
+    const rows = buildAssetListRows([assetDetails({ lifecycle: undefined })], new Set());
+    expect(rows[0].lifecycle).toBe('ACTIVE');
+    expect(rows[0].archived).toBe(false);
+  });
+
+  it('marks a DELETED asset archived', () => {
+    const rows = buildAssetListRows([assetDetails({ lifecycle: 'DELETED' })], new Set());
+    expect(rows[0].archived).toBe(true);
+  });
+});
+
+describe('filterAssetListRowsByArchived', () => {
+  const rows = buildAssetListRows(
+    [
+      assetDetails({ assetId: 'active', lifecycle: 'ACTIVE' }),
+      assetDetails({ assetId: 'archived', lifecycle: 'DELETED' }),
+    ],
+    new Set(),
+  );
+
+  it('hides archived rows when showArchived is false', () => {
+    expect(filterAssetListRowsByArchived(rows, false).map((r) => r.asset.assetId)).toEqual(['active']);
+  });
+
+  it('keeps archived rows when showArchived is true', () => {
+    expect(filterAssetListRowsByArchived(rows, true).map((r) => r.asset.assetId)).toEqual([
       'active',
       'archived',
     ]);

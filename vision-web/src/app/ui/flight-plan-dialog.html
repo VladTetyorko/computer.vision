@@ -1,0 +1,117 @@
+<div class="backdrop" role="dialog" aria-modal="true" aria-label="Flight plan editor" (click)="cancel()">
+  <div class="dialog" (click)="$event.stopPropagation()">
+    <header class="dialog-head">
+      <div>
+        <h2>Flight plan</h2>
+        <p class="muted hint">Click the map to add a waypoint. Drag a marker to move it.</p>
+      </div>
+      <button type="button" class="btn secondary small" (click)="cancel()" aria-label="Close flight plan editor">×</button>
+    </header>
+
+    <div class="dialog-body">
+      <div class="map-pane">
+        <div #mapHost class="map-host"></div>
+        @if (!tilesOk()) {
+          <div class="tiles-warning">Map tiles unavailable — waypoints still work, just no basemap.</div>
+        }
+        <div class="controls layers" role="group" aria-label="Map layer">
+          @for (layer of layers; track layer.id) {
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="settings.mapLayer() === layer.id"
+              (click)="setLayer(layer.id)"
+            >
+              {{ layer.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="plan-pane">
+        <div class="row field-row">
+          <div class="field">
+            <label class="label" for="plan-speed">Speed (m/s)</label>
+            <input
+              id="plan-speed"
+              name="planSpeed"
+              type="number"
+              min="0.1"
+              step="0.1"
+              [ngModel]="speedMps()"
+              (ngModelChange)="speedMps.set($event)"
+            />
+          </div>
+          <div class="field">
+            <label class="label" for="plan-mode">Route mode</label>
+            <select id="plan-mode" name="planRouteMode" [ngModel]="routeMode()" (ngModelChange)="routeMode.set($event)">
+              <option value="loop">Loop — return to start</option>
+              <option value="bounce">Bounce — there and back</option>
+              <option value="once">Once — hold at the end</option>
+            </select>
+          </div>
+        </div>
+
+        <h3>Waypoints ({{ waypoints().length }})</h3>
+
+        @if (waypoints().length === 0) {
+          <p class="muted hint">No waypoints yet — click the map to add one.</p>
+        } @else {
+          <ol class="waypoint-list">
+            @for (waypoint of waypoints(); track $index) {
+              <li class="waypoint-row">
+                <span class="waypoint-index">{{ $index + 1 }}</span>
+                <span class="waypoint-coords mono truncate">
+                  {{ waypoint.latitude.toFixed(5) }}, {{ waypoint.longitude.toFixed(5) }}
+                </span>
+                <input
+                  type="number"
+                  class="waypoint-alt"
+                  step="1"
+                  [value]="waypoint.altitudeMeters ?? ''"
+                  (input)="setAltitude($index, $any($event.target).value)"
+                  placeholder="alt m"
+                  [attr.aria-label]="'Waypoint ' + ($index + 1) + ' altitude, meters'"
+                />
+                <button
+                  type="button"
+                  class="btn secondary small"
+                  (click)="removeAt($index)"
+                  [attr.aria-label]="'Remove waypoint ' + ($index + 1)"
+                >
+                  Remove
+                </button>
+              </li>
+            }
+          </ol>
+        }
+
+        @if (!canSave()) {
+          <p class="muted hint">Add at least 2 waypoints to save a route.</p>
+        }
+
+        <details class="manual-entry">
+          <summary>Enter coordinates manually</summary>
+          <p class="muted hint">One waypoint per line: <code>lat,lon</code> or <code>lat,lon,altitudeMeters</code>.</p>
+          <textarea
+            rows="5"
+            name="planManualText"
+            [ngModel]="manualText()"
+            (ngModelChange)="manualText.set($event)"
+          ></textarea>
+          <div class="row manual-actions">
+            <button type="button" class="btn secondary small" (click)="loadCurrentIntoManualText()">
+              Load current waypoints
+            </button>
+            <button type="button" class="btn secondary small" (click)="applyManualText()">Apply</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <footer class="dialog-foot">
+      <button type="button" class="btn secondary" (click)="cancel()">Cancel</button>
+      <button type="button" class="btn" [disabled]="!canSave()" (click)="save()">Save flight plan</button>
+    </footer>
+  </div>
+</div>

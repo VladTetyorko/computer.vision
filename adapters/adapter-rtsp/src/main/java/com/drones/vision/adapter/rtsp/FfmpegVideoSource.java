@@ -53,6 +53,15 @@ import java.util.concurrent.atomic.AtomicLong;
  *       #close(StreamId)} is called; the frame {@link VideoFrame#sequence()}
  *       keeps increasing monotonically across loop restarts, it never
  *       resets.</li>
+ *   <li>{@code probesize}, {@code analyzeduration}, {@code
+ *       reorder_queue_size}, {@code max_delay} — docs/MVP2-PLAN.md V-c
+ *       low-latency RTSP demuxer tuning; see {@link #OPTION_PROBESIZE_BYTES}/
+ *       {@link #OPTION_ANALYZE_DURATION_MICROS}/{@link
+ *       #OPTION_REORDER_QUEUE_SIZE}/{@link #OPTION_MAX_DELAY_MICROS}'s own
+ *       javadoc for each option's verified FFmpeg default, this class's
+ *       tightened default, and the rationale. Only applied when the URI
+ *       scheme is {@code rtsp} — never {@code file} (paced local-file
+ *       playback is not the live-network case this tuning targets).</li>
  * </ul>
  *
  * <p><b>Real-time pacing:</b> decoding a local file is disk-bound, not
@@ -96,6 +105,114 @@ public final class FfmpegVideoSource implements VideoSourcePort {
     static final String DEFAULT_TIMEOUT_MICROS = "10000000"; // 10s, in microseconds
     static final String OPTION_LOOP = "loop";
     static final boolean DEFAULT_LOOP = false;
+
+    // -- docs/MVP2-PLAN.md V-c: low-latency RTSP demuxer tuning (rtsp scheme only, never file) --
+    // Every default below was verified against FFmpeg 6.1.1's own source
+    // (libavformat/options_table.h, demux.c, rtsp.c) rather than assumed from
+    // common blog-post folklore -- see each constant's javadoc and this
+    // module's MODULE.md "V-c: RTSP demuxer latency tuning" section for the
+    // full writeup, including one genuine correction to a commonly-repeated
+    // claim (max_delay's "7 second default").
+
+    /**
+     * FFmpeg's own {@code probesize} AVOption ({@code
+     * libavformat/options_table.h}) defaults to 5,000,000 bytes (5MB) --
+     * verified against FFmpeg 6.1.1's source, not assumed. This bounds how
+     * many raw bytes {@code avformat_find_stream_info} (called by {@link
+     * FFmpegFrameGrabber#start()}) is willing to buffer while probing for
+     * stream parameters (confirmed a real, not cosmetic, byte cap: {@code
+     * libavformat/demux.c}'s {@code read_frame_internal} logs "Probe buffer
+     * size limit ... reached" and stops once {@code read_size >= probesize}).
+     * RTSP already learns codec identity from its SDP {@code DESCRIBE}
+     * response before any RTP packets are read, so a single-video-stream
+     * camera needs nowhere near 5MB of probing; bounding it down shortens how
+     * long a slow/high-bitrate source can stall connect-time probing. Device
+     * option key matches FFmpeg's own AVOption name, same idiom as {@link
+     * #OPTION_RTSP_TRANSPORT}/{@link #OPTION_TIMEOUT_MICROS} above.
+     */
+    static final String OPTION_PROBESIZE_BYTES = "probesize";
+    static final String DEFAULT_PROBESIZE_BYTES = "32768"; // 32 KiB, vs. FFmpeg's 5,000,000-byte (5MB) default
+
+    /**
+     * FFmpeg's {@code analyzeduration} AVOption defaults to {@code 0}
+     * ("unset"), which {@code libavformat/demux.c}'s {@code
+     * avformat_find_stream_info} then resolves to {@code 5*AV_TIME_BASE} =
+     * 5,000,000us (5s) for most formats -- <b>and, verified against the same
+     * source, a full {@code 7*AV_TIME_BASE} = 7,000,000us (7s) specifically
+     * when the payload is detected as {@code mpeg}/{@code mpegts}</b>, a
+     * common RTSP payload for many IP cameras and drone companions. This is
+     * the real source of the "several-second RTSP connect stall" this task
+     * set out to fix -- not, as it turns out, {@code max_delay} (see {@link
+     * #DEFAULT_MAX_DELAY_MICROS} below for why). Bounding this down is the
+     * single biggest connect-time lever of the four options in this block.
+     */
+    static final String OPTION_ANALYZE_DURATION_MICROS = "analyzeduration";
+    static final String DEFAULT_ANALYZE_DURATION_MICROS = "1000000"; // 1s, vs. FFmpeg's 5s (up to 7s for mpegts) default
+
+    /**
+     * FFmpeg's RTSP-demuxer-private {@code reorder_queue_size} AVOption
+     * caps how many RTP packets the demuxer buffers to reorder out-of-order
+     * arrivals. Verified against FFmpeg 6.1.1's {@code libavformat/rtsp.c}
+     * ({@code ff_rtsp_open_transport_ctx}): left unset (its own default,
+     * {@code -1}), this resolves <i>adaptively</i> -- {@code 0} packets when
+     * {@code rtsp_transport=tcp} (this module's own default, see {@link
+     * #DEFAULT_RTSP_TRANSPORT} -- TCP already guarantees in-order delivery,
+     * so a reorder queue buys nothing) or FFmpeg's own {@code
+     * RTP_REORDER_QUEUE_DEFAULT_SIZE} = 500 packets for {@code udp}.
+     * <p>Pinned at {@code 0} here: for this module's actual TCP-default path
+     * that is a no-op -- documents, doesn't change, today's behavior (same
+     * spirit as {@code MediamtxStreamPublisher}'s {@code setMaxBFrames(0)},
+     * docs/MVP2-PLAN.md V-a) -- but it is a genuine guard against a silent
+     * multi-hundred-packet buffer if a device option ever overrides {@link
+     * #OPTION_RTSP_TRANSPORT} to {@code udp}: without this pin, that source
+     * would inherit the 500-packet default, which at typical RTP packet
+     * rates can mean seconds of demuxer-side buffering. <b>Trade-off, stated
+     * honestly</b>: a {@code udp} source on a genuinely lossy/jittery link
+     * also loses that 500-packet reorder tolerance if this pin is left in
+     * place -- override {@code reorder_queue_size} back up via the same
+     * device-option map for that case; this module does not attempt to
+     * auto-detect it.
+     */
+    static final String OPTION_REORDER_QUEUE_SIZE = "reorder_queue_size";
+    static final String DEFAULT_REORDER_QUEUE_SIZE = "0"; // packets; pins this module's already-TCP-implied default
+
+    /**
+     * Bounds (microseconds) how long the RTSP demuxer waits for a
+     * straggling/out-of-order RTP packet before force-delivering what it
+     * already has ({@code libavformat/rtsp.c}'s {@code ff_rtsp_fetch_packet}:
+     * {@code wait_end = first_queue_time + max_delay}).
+     * <p><b>Must be applied via {@link FFmpegFrameGrabber#setMaxDelay(int)},
+     * not {@link FFmpegFrameGrabber#setOption}</b> -- verified against
+     * JavaCV 1.5.10's own source ({@code FFmpegFrameGrabber#startUnsafe}):
+     * although {@code max_delay} is a valid generic AVOption that {@code
+     * setOption} would apply during {@code avformat_open_input}, JavaCV
+     * unconditionally overwrites it immediately afterwards with {@code
+     * oc.max_delay(this.maxDelay)} -- the grabber's own {@code maxDelay}
+     * Java field, default {@code -1} -- silently discarding anything set the
+     * {@code setOption} way. This is exactly the "check how options are set
+     * -- setOption vs specific setters" pitfall docs/MVP2-PLAN.md V-c's brief
+     * warns about, caught by reading JavaCV's source rather than assuming.
+     * <p><b>Deliberately not the commonly-cited "500ms, vs. a 7s default".</b>
+     * Verified against {@code rtsp.c}: the RTSP demuxer's own built-in
+     * default (unset {@code max_delay < 0}) already resolves to {@code
+     * DEFAULT_REORDERING_DELAY} = 100,000us (100ms) -- not several seconds.
+     * The real "7 second" figure is genuine (see {@link
+     * #DEFAULT_ANALYZE_DURATION_MICROS} above) but belongs to {@code
+     * analyzeduration}'s mpegts-payload branch, not this option. Explicitly
+     * setting 500ms here would have <i>loosened</i>, not tightened, the
+     * demuxer's own already-tight default. This constant instead pins the
+     * value at that already-good 100ms -- living documentation against a
+     * future FFmpeg version silently changing {@code DEFAULT_REORDERING_DELAY}
+     * (same intent as {@link #DEFAULT_REORDER_QUEUE_SIZE} above), not a
+     * behavior change. Going tighter than 100ms was considered and rejected:
+     * {@code wait_end} is what gives a jittery/far source's late RTP packets
+     * a chance to arrive before the demuxer gives up and force-delivers
+     * (logging FFmpeg's own "max delay reached" warning) -- shrinking it
+     * further trades a little latency for materially worse robustness on
+     * exactly the non-ideal links this task asked to reason about.
+     */
+    static final String OPTION_MAX_DELAY_MICROS = "max_delay";
+    static final String DEFAULT_MAX_DELAY_MICROS = "100000"; // 100ms; pins rtsp.c's own DEFAULT_REORDERING_DELAY
 
     private static final int PUBLISHER_BUFFER_CAPACITY = 4;
     private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
@@ -220,6 +337,59 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         }
     }
 
+    /**
+     * Applies this class's RTSP-only grabber options — the pre-existing
+     * {@code rtsp_transport}/{@code timeout}/{@code rw_timeout} plus
+     * docs/MVP2-PLAN.md V-c's low-latency demuxer tuning ({@code
+     * probesize}/{@code analyzeduration}/{@code reorder_queue_size}/{@code
+     * max_delay}, see each constant's javadoc above for the verified
+     * FFmpeg/JavaCV facts behind its value). Package-private test seam,
+     * mirroring {@code MediamtxStreamPublisher.configureRecorder}
+     * (adapter-publish-hls): constructing an {@link FFmpegFrameGrabber} and
+     * calling {@code setOption}/{@code setMaxDelay} only assigns fields — no
+     * native/network I/O happens until {@link FFmpegFrameGrabber#start()},
+     * which this method deliberately never calls — so a test can assert the
+     * exact options a real grabber would be started with, without a live
+     * camera or RTSP server.
+     *
+     * <p>Called only from the {@code uri.getScheme().equals("rtsp")} branch
+     * of {@link StreamRuntime#newGrabber()} — a {@code file} source must
+     * never have any of these applied (paced local-file playback is not the
+     * live-network case this tuning targets).
+     */
+    static void configureRtspOptions(FFmpegFrameGrabber grabber, Map<String, String> options) {
+        String transport = options.getOrDefault(OPTION_RTSP_TRANSPORT, DEFAULT_RTSP_TRANSPORT);
+        grabber.setOption(OPTION_RTSP_TRANSPORT, transport);
+        String timeoutMicros = options.getOrDefault(OPTION_TIMEOUT_MICROS, DEFAULT_TIMEOUT_MICROS);
+        grabber.setOption(OPTION_TIMEOUT_MICROS, timeoutMicros);
+        grabber.setOption("rw_timeout", timeoutMicros);
+
+        grabber.setOption(OPTION_PROBESIZE_BYTES, options.getOrDefault(OPTION_PROBESIZE_BYTES, DEFAULT_PROBESIZE_BYTES));
+        grabber.setOption(OPTION_ANALYZE_DURATION_MICROS,
+                options.getOrDefault(OPTION_ANALYZE_DURATION_MICROS, DEFAULT_ANALYZE_DURATION_MICROS));
+        grabber.setOption(OPTION_REORDER_QUEUE_SIZE,
+                options.getOrDefault(OPTION_REORDER_QUEUE_SIZE, DEFAULT_REORDER_QUEUE_SIZE));
+        // Not setOption: see DEFAULT_MAX_DELAY_MICROS's javadoc -- JavaCV overwrites
+        // an AVOption-dict "max_delay" with its own maxDelay field right after open.
+        grabber.setMaxDelay(intOption(options, OPTION_MAX_DELAY_MICROS, DEFAULT_MAX_DELAY_MICROS));
+    }
+
+    /**
+     * Lenient integer option parsing, matching this module's existing
+     * lenient-parsing idiom for other options ({@code StreamRuntime}'s
+     * {@code booleanOption}): missing/blank falls back to {@code
+     * defaultValue}, and so does a malformed (non-integer) value — a bad
+     * device-option override must never crash stream setup.
+     */
+    private static int intOption(Map<String, String> options, String key, String defaultValue) {
+        String raw = options.getOrDefault(key, defaultValue);
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return Integer.parseInt(defaultValue); // malformed device override: keep the (well-formed) default
+        }
+    }
+
     /** Per-open runtime: a dedicated grab thread feeding a {@link SubmissionPublisher}. */
     private static final class StreamRuntime {
         private final StreamId streamId;
@@ -315,11 +485,7 @@ public final class FfmpegVideoSource implements VideoSourcePort {
             FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(resolveFilename(uri));
             grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
             if (PROTOCOL_RTSP.equalsIgnoreCase(uri.getScheme())) {
-                String transport = options.getOrDefault(OPTION_RTSP_TRANSPORT, DEFAULT_RTSP_TRANSPORT);
-                grabber.setOption(OPTION_RTSP_TRANSPORT, transport);
-                String timeoutMicros = options.getOrDefault(OPTION_TIMEOUT_MICROS, DEFAULT_TIMEOUT_MICROS);
-                grabber.setOption(OPTION_TIMEOUT_MICROS, timeoutMicros);
-                grabber.setOption("rw_timeout", timeoutMicros);
+                configureRtspOptions(grabber, options);
             }
             return grabber;
         }

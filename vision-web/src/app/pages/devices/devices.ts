@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ScrollingModule } from '@angular/cdk/scrolling';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet-store';
@@ -7,16 +8,20 @@ import { SettingsStore } from '../../core/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/device-logic';
+import { FlightPlanDialog } from '../../ui/flight-plan-dialog';
+import { buildTelemetryRequest, type FlightPlanForm } from '../../ui/flight-plan-logic';
 import {
-  type AssetSummary,
+  type AssetDetails,
   type Device,
   type DiscoveredDevice,
   type ScanResult,
   type SettableLifecycleState,
+  type TelemetryPlanRequest,
 } from '../../core/api/models';
 import {
   buildSimulationRequest,
   buildSyntheticRegisterRequest,
+  buildTestDroneRequest,
   isSimulatedAsset,
   mapSimulatedDevices,
   type SimulateMode,
@@ -24,17 +29,14 @@ import {
 } from './simulate-logic';
 import {
   RESTORE_TARGET_STATE,
-  availableAssetActions,
   availableDeviceActions,
-  buildAssetEdit,
-  buildAssetRows,
+  buildAssetListRows,
   buildDeviceRenameEdit,
   buildWarehouseRows,
-  filterAssetRowsByArchived,
+  filterAssetListRowsByArchived,
   filterRowsByArchived,
   mapDeviceOwners,
-  type AssetLifecycleAction,
-  type AssetRow,
+  type AssetListRow,
   type DeviceLifecycleAction,
   type DeviceOwner,
   type WarehouseRow,
@@ -52,8 +54,12 @@ const SCAN_TIMEOUTS = [2_000, 4_000, 8_000] as const;
 const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
   direct: 'Plays the file straight through the pipeline — the simplest way to see it work.',
   rtsp: 'Rehearse the real protocol path: the platform transmits your file over RTSP and ingests it back like real hardware.',
-  synthetic: 'No file needed — registers a classic sim-protocol source instantly, the same one-click demo source as below.',
+  synthetic: 'No file needed — registers a still, pattern-only test source with no telemetry.',
+  testDrone: 'No file needed — places a moving drone on a circular flight path around a home point, watchable immediately.',
 };
+
+/** The Add-source flow's three top-level entry points (docs/CYCLES-PLAN.md §9, CU-b item 1). */
+type AddSourceMethod = 'register' | 'discover' | 'simulate';
 
 /** Button labels for the warehouse action menus (docs/CYCLES-PLAN.md §8). */
 const DEVICE_ACTION_LABELS: Record<DeviceLifecycleAction, string> = {
@@ -66,17 +72,9 @@ const DEVICE_ACTION_LABELS: Record<DeviceLifecycleAction, string> = {
   unassign: 'Unassign',
 };
 
-const ASSET_ACTION_LABELS: Record<AssetLifecycleAction, string> = {
-  rename: 'Rename',
-  activate: 'Activate',
-  deactivate: 'Deactivate',
-  archive: 'Archive',
-  restore: 'Restore',
-};
-
 @Component({
   selector: 'vision-devices',
-  imports: [FormsModule],
+  imports: [FormsModule, ScrollingModule, FlightPlanDialog],
   templateUrl: './devices.html',
   styleUrl: './devices.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -121,9 +119,37 @@ export class DevicesPage {
     return this.fleet.liveDeviceIds().has(device.id);
   }
 
-  // --- Simulate wizard (docs/CYCLES-PLAN.md §4) -----------------------------
+  // --- Add source (docs/CYCLES-PLAN.md §9, CU-b item 1) -----------------------
+  // One progressive flow replaces the old stacked Register/Discover/Simulate cards: an entry
+  // button opens a single card; `addSourceMethod` (null = the method picker) narrows it to
+  // whichever path the user picked, each reusing the exact fields/logic the old standalone cards
+  // had — no capability lost, everything just moved behind one door instead of three.
 
-  protected readonly simulateOpen = signal(false);
+  protected readonly addSourceOpen = signal(false);
+  protected readonly addSourceMethod = signal<AddSourceMethod | null>(null);
+
+  protected toggleAddSource(): void {
+    this.addSourceOpen.update((open) => !open);
+    if (!this.addSourceOpen()) {
+      this.addSourceMethod.set(null);
+    }
+  }
+
+  protected chooseMethod(method: AddSourceMethod): void {
+    this.addSourceMethod.set(method);
+  }
+
+  protected backToMethods(): void {
+    this.addSourceMethod.set(null);
+  }
+
+  private closeAddSource(): void {
+    this.addSourceOpen.set(false);
+    this.addSourceMethod.set(null);
+  }
+
+  // --- Simulate wizard (docs/CYCLES-PLAN.md §4, §9) -----------------------------
+
   protected readonly simName = signal('');
   protected readonly simVideoPath = signal('');
   protected readonly simMode = signal<SimulateMode>('direct');
@@ -138,14 +164,58 @@ export class DevicesPage {
 
   protected readonly simModeHint = computed(() => SIMULATE_MODE_HINTS[this.simMode()]);
 
+  /** Only `direct`/`rtsp` need a server-side file path; `synthetic`/`testDrone` need nothing but a name. */
+  protected readonly simNeedsVideoPath = computed(
+    () => this.simMode() === 'direct' || this.simMode() === 'rtsp',
+  );
+
+  /** `testDrone` carries a home point like `direct`/`rtsp`; `synthetic` (no telemetry) does not. */
+  protected readonly simNeedsHomePoint = computed(() => this.simMode() !== 'synthetic');
+
   protected readonly simCanSubmit = computed(
-    () =>
-      !this.simSubmitting() &&
-      (this.simMode() === 'synthetic' || this.simVideoPath().trim().length > 0),
+    () => !this.simSubmitting() && (!this.simNeedsVideoPath() || this.simVideoPath().trim().length > 0),
   );
 
   protected simulatedInfo(device: Device): SimulatedDeviceInfo | undefined {
     return this.simulatedDevices().get(device.id);
+  }
+
+  // --- Flight-plan editor (docs/CYCLES-PLAN.md §7, CT-b) --------------------------------------
+  // The map-based waypoint editor replaces raw home-lat/lon fields for the Simulate step's
+  // telemetry-accepting modes (direct/rtsp/testDrone); `flightPlan` holds the editor's own draft
+  // shape, serialized to the wire `telemetry` field only at submit time (`currentTelemetryRequest`).
+
+  protected readonly flightPlanDialogOpen = signal(false);
+  protected readonly flightPlan = signal<FlightPlanForm | undefined>(undefined);
+
+  protected readonly flightPlanSummary = computed(() => {
+    const plan = this.flightPlan();
+    if (!plan) {
+      return null;
+    }
+    return `${plan.waypoints.length} waypoints · ${plan.routeMode}`;
+  });
+
+  protected openFlightPlanDialog(): void {
+    this.flightPlanDialogOpen.set(true);
+  }
+
+  protected onFlightPlanSaved(plan: FlightPlanForm): void {
+    this.flightPlan.set(plan);
+    this.flightPlanDialogOpen.set(false);
+  }
+
+  protected onFlightPlanCancelled(): void {
+    this.flightPlanDialogOpen.set(false);
+  }
+
+  protected clearFlightPlan(): void {
+    this.flightPlan.set(undefined);
+  }
+
+  private currentTelemetryRequest(): TelemetryPlanRequest | undefined {
+    const plan = this.flightPlan();
+    return plan ? buildTelemetryRequest(plan) : undefined;
   }
 
   // --- Warehouse (docs/CYCLES-PLAN.md §8) -----------------------------------
@@ -157,7 +227,14 @@ export class DevicesPage {
   protected readonly showArchived = signal(false);
   /** Populated only while `showArchived` is on — `includeDeleted=true` returns *every* device. */
   protected readonly allDevicesIncludingArchived = signal<readonly Device[]>([]);
-  protected readonly assets = signal<readonly AssetSummary[]>([]);
+  /**
+   * Every asset the page has loaded, as full `AssetDetails` (not just `AssetSummary`) — the
+   * asset-first primary list needs each asset's resolved device count/owner-of-video-device
+   * (docs/CYCLES-PLAN.md §11, CD-b item 1), and the Advanced table already needed the same fetch
+   * for its "owned by" column and the "Simulated" chip, so one shared fetch now serves all three
+   * (see `refreshWarehouseAssets` below) rather than a second, asset-list-specific one.
+   */
+  protected readonly assets = signal<readonly AssetDetails[]>([]);
   /** deviceId → owning asset, across every asset the page has loaded (not just simulated ones). */
   protected readonly deviceOwners = signal<ReadonlyMap<string, DeviceOwner>>(new Map());
   protected readonly busyAssetId = signal<string | null>(null);
@@ -169,9 +246,11 @@ export class DevicesPage {
   protected readonly renameDraft = signal('');
   protected readonly assignDraft = signal('');
 
-  protected readonly assetAction = signal<{ assetId: string; mode: 'rename' | 'archive' } | null>(null);
-  protected readonly assetNameDraft = signal('');
-  protected readonly assetCategoryDraft = signal('');
+  /** Advanced/raw-devices table — collapsed by default (docs/CYCLES-PLAN.md §11 item 1). */
+  protected readonly advancedDevicesOpen = signal(false);
+
+  /** The list-level asset row's one destructive action — an inline confirm, mirroring the Advanced table's idiom. */
+  protected readonly archiveConfirmAssetId = signal<string | null>(null);
 
   private readonly warehouseDevices = computed<readonly Device[]>(() =>
     this.showArchived() ? this.allDevicesIncludingArchived() : this.fleet.devices(),
@@ -184,23 +263,25 @@ export class DevicesPage {
     ),
   );
 
-  protected readonly assetRows = computed<readonly AssetRow[]>(() =>
-    filterAssetRowsByArchived(buildAssetRows(this.assets()), this.showArchived()),
+  /**
+   * The page's primary surface (docs/CYCLES-PLAN.md §11 item 1): one row per asset, exactly
+   * Watch · Open · Archive. CDK virtual scroll (`asset-viewport` in the template) keeps rendering
+   * cost `O(visible rows)` regardless of how many assets exist (item 4) — the *fetch* behind this
+   * list is not O(visible) (`refreshWarehouseAssets` below resolves every asset's devices, not
+   * just the ones currently scrolled into view), a known, documented ceiling tied to the backend's
+   * in-memory repositories rather than something this cycle solves (see MODULE.md Status).
+   */
+  protected readonly assetListRows = computed<readonly AssetListRow[]>(() =>
+    filterAssetListRowsByArchived(buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()), this.showArchived()),
   );
 
   /** Non-archived assets are always valid assign targets — a device's ownership is the only rule. */
   protected readonly assignableAssets = computed(() =>
-    this.assetRows()
-      .filter((row) => !row.archived)
-      .map((row) => row.asset),
+    this.assets().filter((asset) => (asset.lifecycle ?? 'ACTIVE') !== 'DELETED'),
   );
 
   protected deviceActionsFor(row: WarehouseRow): readonly DeviceLifecycleAction[] {
     return availableDeviceActions(row.lifecycle, !!row.owner);
-  }
-
-  protected assetActionsFor(row: AssetRow): readonly AssetLifecycleAction[] {
-    return availableAssetActions(row.lifecycle);
   }
 
   protected lifecycleLabel(state: WarehouseRow['lifecycle']): string {
@@ -218,8 +299,43 @@ export class DevicesPage {
     return DEVICE_ACTION_LABELS[action];
   }
 
-  protected assetActionLabel(action: AssetLifecycleAction): string {
-    return ASSET_ACTION_LABELS[action];
+  protected trackAssetRow(_index: number, row: AssetListRow): string {
+    return row.asset.assetId;
+  }
+
+  protected toggleAdvancedDevices(): void {
+    this.advancedDevicesOpen.update((open) => !open);
+  }
+
+  // --- Asset-first list actions (docs/CYCLES-PLAN.md §11 item 1) -----------------------------
+
+  protected watchAsset(row: AssetListRow): Promise<boolean> | undefined {
+    return row.watchDeviceId ? this.router.navigate(['/live', row.watchDeviceId]) : undefined;
+  }
+
+  protected openAsset(row: AssetListRow): Promise<boolean> {
+    return this.router.navigate(['/assets', row.asset.assetId]);
+  }
+
+  protected requestArchiveAsset(row: AssetListRow): void {
+    this.archiveConfirmAssetId.set(row.asset.assetId);
+  }
+
+  protected cancelArchiveAsset(): void {
+    this.archiveConfirmAssetId.set(null);
+  }
+
+  protected async confirmArchiveAsset(assetId: string): Promise<void> {
+    this.busyAssetId.set(assetId);
+    try {
+      const result = await this.fleet.deleteAsset(assetId);
+      if (result) {
+        this.archiveConfirmAssetId.set(null);
+        await this.refreshWarehouse();
+      }
+    } finally {
+      this.busyAssetId.set(null);
+    }
   }
 
   protected onDeviceAction(row: WarehouseRow, action: DeviceLifecycleAction): void {
@@ -317,76 +433,6 @@ export class DevicesPage {
     }
   }
 
-  protected onAssetAction(row: AssetRow, action: AssetLifecycleAction): void {
-    switch (action) {
-      case 'rename':
-        this.assetAction.set({ assetId: row.asset.assetId, mode: 'rename' });
-        this.assetNameDraft.set(row.asset.displayName);
-        this.assetCategoryDraft.set(row.asset.category);
-        break;
-      case 'activate':
-        void this.setAssetLifecycle(row.asset, 'ACTIVE');
-        break;
-      case 'deactivate':
-        void this.setAssetLifecycle(row.asset, 'DEACTIVATED');
-        break;
-      case 'archive':
-        this.assetAction.set({ assetId: row.asset.assetId, mode: 'archive' });
-        break;
-      case 'restore':
-        void this.setAssetLifecycle(row.asset, RESTORE_TARGET_STATE);
-        break;
-    }
-  }
-
-  /** `null` when no inline card is open for this asset — lets the template use one `@switch`. */
-  protected assetActionMode(assetId: string): 'rename' | 'archive' | null {
-    const active = this.assetAction();
-    return active && active.assetId === assetId ? active.mode : null;
-  }
-
-  protected cancelAssetAction(): void {
-    this.assetAction.set(null);
-  }
-
-  protected async confirmAssetEdit(asset: AssetSummary): Promise<void> {
-    const edit = buildAssetEdit({ displayName: this.assetNameDraft(), category: this.assetCategoryDraft() }, asset);
-    if (Object.keys(edit).length === 0) {
-      this.assetAction.set(null);
-      return;
-    }
-    await this.runAssetAction(asset.assetId, async () => {
-      const updated = await this.fleet.updateAsset(asset.assetId, edit);
-      if (updated) {
-        this.assetAction.set(null);
-      }
-    });
-  }
-
-  protected async confirmArchiveAsset(asset: AssetSummary): Promise<void> {
-    await this.runAssetAction(asset.assetId, async () => {
-      const result = await this.fleet.deleteAsset(asset.assetId);
-      if (result) {
-        this.assetAction.set(null);
-      }
-    });
-  }
-
-  private async setAssetLifecycle(asset: AssetSummary, state: SettableLifecycleState): Promise<void> {
-    await this.runAssetAction(asset.assetId, () => this.fleet.setAssetState(asset.assetId, state));
-  }
-
-  /** Runs an asset mutation with the card's busy indicator, then re-derives the warehouse view. */
-  private async runAssetAction(assetId: string, action: () => Promise<unknown>): Promise<void> {
-    this.busyAssetId.set(assetId);
-    try {
-      await action();
-      await this.refreshWarehouse();
-    } finally {
-      this.busyAssetId.set(null);
-    }
-  }
-
   protected async toggleShowArchived(): Promise<void> {
     this.showArchived.update((value) => !value);
     await this.refreshWarehouse();
@@ -415,10 +461,11 @@ export class DevicesPage {
   }
 
   /**
-   * Loads every asset (respecting `showArchived`) plus its resolved devices, deriving both the
-   * device→owner map (the warehouse table's "owned by" column and unassign action) and the
-   * `simulated`-category subset the C4 wizard's chip/stop-action already relies on — one fetch
-   * now serves both instead of two separate ones. Best-effort like `TelemetryStore`'s own asset
+   * Loads every asset (respecting `showArchived`) plus its resolved devices, then stores the full
+   * `AssetDetails` list (not just the lighter `AssetSummary`) — the primary asset list needs each
+   * asset's device count/watch-target (`buildAssetListRows`), and the same fetch already served
+   * the device→owner map and the `simulated`-category subset the C4 wizard's chip/stop-action
+   * relies on, so one round now serves all three. Best-effort like `TelemetryStore`'s own asset
    * lookups: this is enrichment for already-visible rows, not a user-initiated action, so a
    * failure degrades silently rather than raising a toast.
    */
@@ -430,9 +477,9 @@ export class DevicesPage {
       if (!summaries) {
         return; // failure already toasted by FleetStore.run() (only reachable when showArchived)
       }
-      this.assets.set(summaries);
 
       const details = await Promise.all(summaries.map((asset) => this.api.getAsset(asset.assetId)));
+      this.assets.set(details);
       this.deviceOwners.set(mapDeviceOwners(details));
       this.simulatedDevices.set(mapSimulatedDevices(details.filter(isSimulatedAsset)));
     } catch {
@@ -460,6 +507,7 @@ export class DevicesPage {
       });
       if (device) {
         this.resetForm();
+        this.closeAddSource();
       }
     } finally {
       this.submitting.set(false);
@@ -534,16 +582,17 @@ export class DevicesPage {
     }
   }
 
-  /** Fills the register form from a discovery candidate; the user still confirms. */
+  /** Fills the register form from a discovery candidate and switches to it; the user still confirms. */
   protected useCandidate(candidate: DiscoveredDevice): void {
     this.name.set(candidate.name);
     this.protocol.set(candidate.protocol ?? '');
     this.uri.set(candidate.uri ?? candidate.address);
     this.options.set([]);
 
+    this.addSourceMethod.set('register');
     this.highlighted.set(true);
     setTimeout(() => this.highlighted.set(false), 1_600);
-    document.getElementById('register-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById('add-source-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     if (!candidate.uri) {
       this.toasts.info(
@@ -594,21 +643,23 @@ export class DevicesPage {
     await Promise.all([this.fleet.refresh(), this.refreshWarehouse()]);
   }
 
-  protected toggleSimulate(): void {
-    this.simulateOpen.update((open) => !open);
-  }
-
   protected async submitSimulate(): Promise<void> {
     if (!this.simCanSubmit()) {
       return;
     }
     this.simSubmitting.set(true);
     try {
-      const mode = this.simMode();
-      if (mode === 'synthetic') {
-        await this.submitSyntheticSimulation();
-      } else {
-        await this.submitFileSimulation(mode);
+      switch (this.simMode()) {
+        case 'synthetic':
+          await this.submitSyntheticSimulation();
+          break;
+        case 'testDrone':
+          await this.submitTestDroneSimulation();
+          break;
+        case 'direct':
+        case 'rtsp':
+          await this.submitFileSimulation(this.simMode() as 'direct' | 'rtsp');
+          break;
       }
     } finally {
       this.simSubmitting.set(false);
@@ -625,6 +676,22 @@ export class DevicesPage {
     this.closeSimulateForm();
   }
 
+  /**
+   * `testDrone` (docs/CYCLES-PLAN.md §9, CU-b item 7): a fully synthetic, moving VIDEO+TELEMETRY
+   * device — CU-a's no-`videoPath` simulation — reached from the same wizard as the file-backed
+   * modes, sharing this method's watch-resolution/toast shape with `submitFileSimulation`.
+   */
+  private async submitTestDroneSimulation(): Promise<void> {
+    const request = buildTestDroneRequest({
+      name: this.simName(),
+      latitude: this.simLatitude(),
+      longitude: this.simLongitude(),
+      autoStart: this.simAutoStart(),
+      telemetry: this.currentTelemetryRequest(),
+    });
+    await this.startFileOrSyntheticSimulation(request);
+  }
+
   private async submitFileSimulation(mode: 'direct' | 'rtsp'): Promise<void> {
     const request = buildSimulationRequest({
       name: this.simName(),
@@ -633,7 +700,13 @@ export class DevicesPage {
       latitude: this.simLatitude(),
       longitude: this.simLongitude(),
       autoStart: this.simAutoStart(),
+      telemetry: this.currentTelemetryRequest(),
     });
+    await this.startFileOrSyntheticSimulation(request);
+  }
+
+  /** Shared by `submitFileSimulation`/`submitTestDroneSimulation` — both post to `/api/simulations`. */
+  private async startFileOrSyntheticSimulation(request: Parameters<FleetStore['simulate']>[0]): Promise<void> {
     const response = await this.fleet.simulate(request);
     if (!response) {
       return; // failure already toasted by FleetStore.run()
@@ -677,12 +750,13 @@ export class DevicesPage {
   }
 
   private closeSimulateForm(): void {
-    this.simulateOpen.set(false);
+    this.closeAddSource();
     this.simName.set('');
     this.simVideoPath.set('');
     this.simMode.set('direct');
     this.simLatitude.set(null);
     this.simLongitude.set(null);
     this.simAutoStart.set(true);
+    this.flightPlan.set(undefined);
   }
 }

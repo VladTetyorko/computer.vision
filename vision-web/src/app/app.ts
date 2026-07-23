@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, afterNextRender, computed, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { FleetStore } from './core/fleet-store';
+import { LeafletWarmup } from './core/leaflet-warmup';
 import { ToastHost } from './ui/toast-host';
 
 interface Tab {
@@ -32,4 +33,10 @@ export class App {
 
   protected readonly liveCount = computed(() => this.fleet.streams().length);
   protected readonly offline = computed(() => this.fleet.reachable() === false);
+
+  constructor() {
+    // Warms the Leaflet chunk on idle (docs/CYCLES-PLAN.md §9, CU-b item 2) — after render so it
+    // never competes with first paint or the initial fleet fetch.
+    afterNextRender(() => inject(LeafletWarmup).schedule());
+  }
 }

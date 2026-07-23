@@ -93,6 +93,41 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.viewUrl").doesNotExist());
     }
 
+    // ---- docs/MVP2-PLAN.md §L: whepUrl beside viewUrl ----
+
+    @Test
+    void startReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:18889/" + streamId.value() + "/whep")));
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.viewUrl")
+                        .value("http://localhost:8888/" + streamId.value() + "/index.m3u8"))
+                .andExpect(jsonPath("$.whepUrl")
+                        .value("http://localhost:18889/" + streamId.value() + "/whep"));
+    }
+
+    @Test
+    void startOmitsWhepUrlWhenPublisherHasNoWebRtcEndpoint() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.viewUrl")
+                        .value("http://localhost:8888/" + streamId.value() + "/index.m3u8"))
+                .andExpect(jsonPath("$.whepUrl").doesNotExist());
+    }
+
     @Test
     void startUsesPipelineConfigDefaultsWhenBodyAbsent() throws Exception {
         StreamId streamId = StreamId.random();
@@ -214,6 +249,38 @@ class StreamControllerTest {
         mockMvc.perform(get("/api/streams"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].viewUrl").doesNotExist());
+    }
+
+    @Test
+    void listReturnsActiveStreamsWithWhepUrlWhenPresent() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant startedAt = Instant.parse("2026-07-22T10:00:00Z");
+        when(streamService.streams())
+                .thenReturn(List.of(new ActiveStream(streamId, deviceId, startedAt)));
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:18889/" + streamId.value() + "/whep")));
+
+        mockMvc.perform(get("/api/streams"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].whepUrl")
+                        .value("http://localhost:18889/" + streamId.value() + "/whep"));
+    }
+
+    @Test
+    void listOmitsWhepUrlWhenAbsent() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant startedAt = Instant.parse("2026-07-22T10:00:00Z");
+        when(streamService.streams())
+                .thenReturn(List.of(new ActiveStream(streamId, deviceId, startedAt)));
+        when(streamPublisherPort.viewUrl(streamId))
+                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
+        when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/streams"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].whepUrl").doesNotExist());
     }
 
     @Test

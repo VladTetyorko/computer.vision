@@ -1,11 +1,14 @@
 import type * as Leaflet from 'leaflet';
+import type { MapLayerId } from '../core/settings-store';
 
 /**
- * Leaflet bootstrap bits shared by every map in this app (`pages/live/live-map.ts`,
+ * Leaflet bootstrap bits shared by every map in this app (`ui/live-map.ts`,
  * docs/CYCLES-PLAN.md §2; `pages/map/fleet-map.ts`, docs/CYCLES-PLAN.md §6): the dynamic import,
- * the runtime stylesheet injection, and the dark tile layer factory. Pulled out of `live-map.ts`
- * when the `/map` tab needed the identical setup — intra-app DRY (unlike the cross-adapter rule
- * in the Java side of this repo, nothing here stops two Angular pages sharing a plain module).
+ * the runtime stylesheet injection, and the switchable base-layer tile factory
+ * (docs/CYCLES-PLAN.md §9, CU-b item 6 — `MAP_LAYERS`/`mapLayerTileLayer`). Pulled out of
+ * `live-map.ts` when the `/map` tab needed the identical setup — intra-app DRY (unlike the
+ * cross-adapter rule in the Java side of this repo, nothing here stops two Angular pages sharing
+ * a plain module).
  *
  * Each *host component* still owns its own dynamic `import('leaflet')` call site conceptually —
  * calling `importLeaflet()` from `initMap()` — so this module changes nothing about where the
@@ -18,12 +21,68 @@ import type * as Leaflet from 'leaflet';
 const LEAFLET_STYLESHEET_ID = 'vision-leaflet-css';
 const LEAFLET_STYLESHEET_HREF = '/leaflet/leaflet.css';
 
-/** Class applied to the OSM tile layer's own DOM so a component's `::ng-deep` CSS filter can re-tint it dark without touching overlay panes. */
-export const DARK_TILE_CLASS = 'vision-tiles';
+/**
+ * One definition per switchable base layer (docs/CYCLES-PLAN.md §9, CU-b item 6): **Standard**
+ * (plain OSM raster), **Night** (CARTO Dark Matter — real dark tiles, replacing the CSS `invert()`
+ * filter every map used to apply unconditionally), **Relief** (OpenTopoMap, contour shading), and
+ * **Satellite** (Esri World Imagery). Each carries its own attribution text, shown by Leaflet's
+ * attribution control automatically whenever that layer is the one added to the map. Selection is
+ * `SettingsStore.mapLayer` — persisted, one choice shared by `LiveMap` and `FleetMap` alike.
+ */
+export interface MapLayerDef {
+  readonly id: MapLayerId;
+  readonly label: string;
+  readonly url: string;
+  readonly attribution: string;
+  readonly maxZoom: number;
+}
 
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const OSM_ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const CARTO_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
+  '&copy; <a href="https://carto.com/attributions">CARTO</a>';
+const OPENTOPOMAP_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
+  '<a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)';
+const ESRI_ATTRIBUTION =
+  'Tiles &copy; Esri &mdash; Esri, DigitalGlobe, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN, and the GIS User Community';
+
+export const MAP_LAYERS: readonly MapLayerDef[] = [
+  {
+    id: 'standard',
+    label: 'Standard',
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: OSM_ATTRIBUTION,
+    maxZoom: 19,
+  },
+  {
+    id: 'night',
+    label: 'Night',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution: CARTO_ATTRIBUTION,
+    maxZoom: 20,
+  },
+  {
+    id: 'relief',
+    label: 'Relief',
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    attribution: OPENTOPOMAP_ATTRIBUTION,
+    maxZoom: 17,
+  },
+  {
+    id: 'satellite',
+    label: 'Satellite',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: ESRI_ATTRIBUTION,
+    maxZoom: 19,
+  },
+];
+
+/** Looks up a layer definition by id, falling back to `standard` for an unrecognized/stale one. */
+export function mapLayerDef(id: MapLayerId): MapLayerDef {
+  return MAP_LAYERS.find((layer) => layer.id === id) ?? MAP_LAYERS[0];
+}
 
 /**
  * Dynamically imports Leaflet, normalizing the UMD default/namespace split so callers don't
@@ -55,16 +114,20 @@ export function ensureLeafletStylesheet(): void {
 }
 
 /**
- * The dark-tinted OSM raster tile layer every map in this app uses — offline-safe (a tile fetch
- * failure just leaves the host's own dark background showing through; `onStatus` reports which
- * so the host can show a small "tiles unavailable" badge, as `live-map.ts` already does).
+ * Builds the tile layer for `layerId` (docs/CYCLES-PLAN.md §9, CU-b item 6) — offline-safe (a
+ * tile fetch failure just leaves the host's own dark background showing through; `onStatus`
+ * reports which, so the host can show a small "tiles unavailable" badge, as `live-map.ts` already
+ * does). Callers create a fresh instance per layer switch — swapping which `TileLayer` is
+ * `addTo(map)` is how `LiveMap`/`FleetMap` change the active base layer, and Leaflet's own
+ * attribution control follows whichever instance is currently added.
  */
-export function darkTileLayer(L: typeof Leaflet, onStatus: (ok: boolean) => void): Leaflet.TileLayer {
-  const tiles = L.tileLayer(OSM_TILE_URL, {
-    maxZoom: 19,
-    className: DARK_TILE_CLASS,
-    attribution: OSM_ATTRIBUTION,
-  });
+export function mapLayerTileLayer(
+  L: typeof Leaflet,
+  layerId: MapLayerId,
+  onStatus: (ok: boolean) => void,
+): Leaflet.TileLayer {
+  const def = mapLayerDef(layerId);
+  const tiles = L.tileLayer(def.url, { maxZoom: def.maxZoom, attribution: def.attribution });
   tiles.on('tileerror', () => onStatus(false));
   tiles.on('load', () => onStatus(true));
   return tiles;

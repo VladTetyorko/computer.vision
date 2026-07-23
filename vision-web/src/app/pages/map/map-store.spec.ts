@@ -90,7 +90,7 @@ describe('FleetMapStore', () => {
       status: 'STREAMING',
       lastKnownPosition: { latitude: 1, longitude: 2 },
     });
-    const sample: TelemetrySample = { at: '2026-07-22T00:00:00Z', latitude: 9, longitude: 8, headingDegrees: 45 };
+    const sample: TelemetrySample = { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', latitude: 9, longitude: 8, headingDegrees: 45 };
     const api = stubApi({
       listAssets: vi.fn().mockResolvedValue([streaming]),
       getAsset: vi.fn().mockResolvedValue(
@@ -144,7 +144,7 @@ describe('FleetMapStore', () => {
       lastKnownPosition: { latitude: 1, longitude: 2 },
     });
     const nowOffline = { ...streaming, status: 'OFFLINE' as const };
-    const sample: TelemetrySample = { at: '2026-07-22T00:00:00Z', latitude: 9, longitude: 8 };
+    const sample: TelemetrySample = { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', latitude: 9, longitude: 8 };
     const listAssets = vi.fn().mockResolvedValueOnce([streaming]).mockResolvedValue([nowOffline]);
     const api = stubApi({
       listAssets,

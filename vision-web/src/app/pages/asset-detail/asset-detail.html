@@ -1,0 +1,366 @@
+<div class="page">
+  @if (loading() && !asset()) {
+    <div class="page-head">
+      <div class="skeleton-line title"></div>
+    </div>
+    <div class="card skeleton-card"></div>
+  } @else if (notFound()) {
+    <div class="card empty">
+      <h3>Unknown asset</h3>
+      <p>
+        No asset with id <span class="mono">{{ assetId() }}</span> was found. It may have been
+        archived, or the backend may be unreachable.
+      </p>
+      <a class="btn" routerLink="/devices">Back to Devices</a>
+    </div>
+  } @else if (asset(); as a) {
+    <div class="page-head">
+      <div>
+        @if (editingAsset()) {
+          <div class="inline-form column edit-asset">
+            <input
+              [value]="nameDraft()"
+              (input)="nameDraft.set($any($event.target).value)"
+              placeholder="Display name"
+              aria-label="Display name"
+            />
+            <input
+              [value]="categoryDraft()"
+              (input)="categoryDraft.set($any($event.target).value)"
+              placeholder="Category slug"
+              aria-label="Category"
+            />
+            <div class="row">
+              <button type="button" class="btn small" (click)="confirmEditAsset()" [disabled]="busy()">Save</button>
+              <button type="button" class="btn secondary small" (click)="cancelEditAsset()">Cancel</button>
+            </div>
+          </div>
+        } @else {
+          <h1>{{ a.displayName }}</h1>
+          <p>
+            <span class="chip">{{ a.categoryName }}</span>
+            <span class="chip" [class.ok]="lifecycle() === 'ACTIVE'" [class.faded]="archived()">
+              {{ lifecycle() }}
+            </span>
+            @if (live()) {
+              <span class="chip ok"><span class="dot live"></span>Streaming</span>
+            }
+          </p>
+        }
+      </div>
+      <div class="row">
+        <a class="btn secondary" routerLink="/devices">All devices</a>
+        @if (videoDevice(); as vd) {
+          @if (live()) {
+            <button type="button" class="btn secondary" (click)="watch()">Open full cockpit</button>
+            <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop</button>
+          } @else {
+            <button type="button" class="btn" (click)="start()" [disabled]="busy()">
+              {{ busy() ? 'Starting…' : 'Start stream' }}
+            </button>
+          }
+        }
+        @for (action of assetActions(); track action) {
+          @if (action !== 'rename') {
+            <button
+              type="button"
+              class="btn secondary"
+              [class.danger]="action === 'archive'"
+              (click)="onAssetAction(action)"
+              [disabled]="busy()"
+            >
+              {{ action === 'activate' ? 'Activate' : action === 'deactivate' ? 'Deactivate' : action === 'restore' ? 'Restore' : 'Archive' }}
+            </button>
+          }
+        }
+        @if (!editingAsset() && assetActions().includes('rename')) {
+          <button type="button" class="btn secondary" (click)="onAssetAction('rename')">Rename</button>
+        }
+      </div>
+    </div>
+
+    @if (archiveConfirmOpen()) {
+      <section class="card inline-confirm-card">
+        <p>
+          Archive "{{ a.displayName }}"? Its device(s) archive with it; usage history is kept and
+          any running stream stops.
+        </p>
+        <div class="row">
+          <button type="button" class="btn danger small" (click)="confirmArchiveAsset()" [disabled]="busy()">
+            Confirm archive
+          </button>
+          <button type="button" class="btn secondary small" (click)="cancelArchive()">Cancel</button>
+        </div>
+      </section>
+    }
+
+    <div class="detail-grid">
+      <!-- ---- Live video ------------------------------------------------------------------ -->
+      <section class="card span-2">
+        <header>
+          <h2>Video</h2>
+          @if (live()) {
+            <div class="row boxes-toggle" role="group" aria-label="Detection boxes">
+              <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'overlay'" (click)="setBoxesMode('overlay')">Overlay</button>
+              <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'burned'" (click)="setBoxesMode('burned')">Burned</button>
+              <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'off'" (click)="setBoxesMode('off')">Off</button>
+            </div>
+          }
+        </header>
+        @if (videoDevice()) {
+          <vision-player
+            [src]="stream()?.viewUrl ?? null"
+            [whepUrl]="stream()?.whepUrl ?? null"
+            [detections]="detections.results()"
+            [boxesMode]="boxesMode()"
+            (latencyChanged)="onLatency($event)"
+            (transportChanged)="onTransport($event)"
+          />
+        } @else {
+          <div class="empty">
+            <p class="faint">This asset has no video-capable device.</p>
+          </div>
+        }
+      </section>
+
+      <!-- ---- Stream info (docs/MVP2-PLAN.md §U-info) -------------------------------------- -->
+      @if (videoDevice(); as vd) {
+        <section class="card">
+          <header><h2>Stream</h2></header>
+          <vision-stream-info [deviceId]="vd.id" [latencySeconds]="latencySeconds()" [transport]="transport()" />
+        </section>
+      }
+
+      <!-- ---- Map (docs/CYCLES-PLAN.md §11 item 2–3) --------------------------------------- -->
+      @if (assetTelemetryDevices().length > 0) {
+        <section class="card span-2">
+          <header>
+            <h2>Position</h2>
+            @if (freshestSourceName(); as source) {
+              <span class="muted">source: {{ source }}</span>
+            }
+          </header>
+          <vision-live-map />
+        </section>
+      }
+
+      <!-- ---- Telemetry per source device (docs/CYCLES-PLAN.md §11 item 3) ----------------- -->
+      @if (assetTelemetryDevices().length > 0) {
+        <section class="card span-2">
+          <header><h2>Telemetry</h2></header>
+          <div class="telemetry-grid">
+            @for (device of assetTelemetryDevices(); track device.id) {
+              <div class="telemetry-panel" [class.stale]="deviceStale(device.id)">
+                <div class="panel-name truncate">{{ device.name }}</div>
+                @if (latestSampleFor(device.id); as sample) {
+                  <dl class="facts">
+                    <div class="fact">
+                      <dt>Position</dt>
+                      <dd class="mono">
+                        @if (sample.latitude !== undefined && sample.longitude !== undefined) {
+                          {{ sample.latitude.toFixed(5) }}, {{ sample.longitude.toFixed(5) }}
+                        } @else { — }
+                      </dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Altitude</dt>
+                      <dd>{{ sample.altitudeMeters !== undefined ? sample.altitudeMeters.toFixed(0) + ' m' : '—' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Heading</dt>
+                      <dd>{{ sample.headingDegrees !== undefined ? sample.headingDegrees.toFixed(0) + '°' : '—' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Battery</dt>
+                      <dd>{{ sample.batteryPercent !== undefined ? sample.batteryPercent.toFixed(0) + '%' : '—' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Sample</dt>
+                      <dd [class.stale-text]="deviceStale(device.id)">
+                        {{ deviceSampleAgeSeconds(device.id)?.toFixed(0) ?? '—' }}s ago
+                      </dd>
+                    </div>
+                  </dl>
+                } @else {
+                  <p class="muted hint">No telemetry yet from this device.</p>
+                }
+              </div>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- ---- Usage history ----------------------------------------------------------------- -->
+      <section class="card span-2">
+        <header>
+          <h2>Usage history</h2>
+          <span class="muted">{{ a.recentUsages.length }} usage(s)</span>
+        </header>
+        @if (a.recentUsages.length === 0) {
+          <p class="muted hint">No recorded usage yet — starts once this asset first streams.</p>
+        } @else {
+          <table>
+            <thead>
+              <tr>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th>Samples</th>
+                <th aria-label="Actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (usage of a.recentUsages; track usage.usageId) {
+                <tr>
+                  <td class="mono">{{ usage.startedAt }}</td>
+                  <td>{{ usageDuration(usage) }}</td>
+                  <td>
+                    @if (usage.endedAt) {
+                      <span class="chip">Ended</span>
+                    } @else {
+                      <span class="chip ok"><span class="dot live"></span>Ongoing</span>
+                    }
+                  </td>
+                  <td>{{ usage.sampleCount }}</td>
+                  <td class="actions">
+                    @if (usage.endedAt) {
+                      <!-- Finished usages only (docs/MVP2-PLAN.md §R, R-b) — an open usage is
+                           still growing, so replaying it isn't meaningful; watch it live instead. -->
+                      <a class="btn secondary small" [routerLink]="['/assets', a.assetId, 'replay', usage.usageId]">
+                        Replay
+                      </a>
+                    } @else if (videoDevice(); as vd) {
+                      <a class="btn secondary small" [routerLink]="['/live', vd.id]">Watch live</a>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </section>
+
+      <!-- ---- Characteristics ----------------------------------------------------------------- -->
+      <section class="card">
+        <header><h2>Characteristics</h2></header>
+        <dl class="facts">
+          <div class="fact"><dt>Owner</dt><dd class="mono">{{ a.owner }}</dd></div>
+          <div class="fact"><dt>Category</dt><dd>{{ a.categoryName }}</dd></div>
+          @if (a.lastUsedAt) {
+            <div class="fact"><dt>Last used</dt><dd class="mono">{{ a.lastUsedAt }}</dd></div>
+          }
+        </dl>
+        @if (detailPairs(a.attributes).length > 0) {
+          <dl class="facts">
+            @for (pair of detailPairs(a.attributes); track pair.key) {
+              <div class="fact"><dt>{{ pair.key }}</dt><dd>{{ pair.value }}</dd></div>
+            }
+          </dl>
+        } @else {
+          <p class="muted hint">No extra attributes recorded.</p>
+        }
+      </section>
+
+      <!-- ---- Hardware (docs/CYCLES-PLAN.md §11 item 2 — full warehouse actions) -------------- -->
+      <section class="card span-2">
+        <header>
+          <h2>Hardware</h2>
+          <button type="button" class="btn secondary small" (click)="openAssign()">Attach a device</button>
+        </header>
+
+        @if (assignOpen()) {
+          <div class="inline-form assign-form">
+            @if (loadingAssignable()) {
+              <span class="muted">Loading unowned devices…</span>
+            } @else if (assignableDevices().length === 0) {
+              <span class="muted">No unowned devices available — register or discover one first.</span>
+            } @else {
+              <select name="assignDraft" [value]="assignDraft()" (change)="assignDraft.set($any($event.target).value)" aria-label="Choose a device to attach">
+                <option value="" disabled selected>Choose a device…</option>
+                @for (device of assignableDevices(); track device.id) {
+                  <option [value]="device.id">{{ device.name }} ({{ device.protocol }})</option>
+                }
+              </select>
+              <button type="button" class="btn small" [disabled]="!assignDraft() || busy()" (click)="confirmAssign()">Attach</button>
+            }
+            <button type="button" class="btn secondary small" (click)="cancelAssign()">Cancel</button>
+          </div>
+        }
+
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Source</th>
+              <th>Capabilities</th>
+              <th>State</th>
+              <th aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (device of a.devices; track device.id) {
+              <tr>
+                <td>
+                  <div class="name">{{ device.name }}</div>
+                  <div class="mono faint">{{ device.id }}</div>
+                </td>
+                <td class="source">
+                  <span class="chip">{{ device.protocol }}</span>
+                  <span class="mono muted truncate" [title]="device.uri">{{ device.uri }}</span>
+                </td>
+                <td>
+                  @for (capability of device.capabilities; track capability) {
+                    <span class="chip">{{ capability }}</span>
+                  }
+                </td>
+                <td>
+                  <span class="chip" [class.ok]="device.state === 'ACTIVE'" [class.faded]="device.state === 'DELETED'">
+                    {{ device.state }}
+                  </span>
+                  @if (fleet.liveDeviceIds().has(device.id)) {
+                    <span class="chip ok"><span class="dot live"></span>Live</span>
+                  }
+                </td>
+                <td class="actions">
+                  @for (action of deviceActionsFor(device); track action) {
+                    <button
+                      type="button"
+                      class="btn secondary small"
+                      [class.danger]="action === 'archive'"
+                      (click)="onDeviceAction(device, action)"
+                      [disabled]="busyDeviceId() === device.id"
+                    >
+                      {{ action }}
+                    </button>
+                  }
+                </td>
+              </tr>
+              @if (rowActionMode(device.id); as mode) {
+                <tr class="inline-row">
+                  <td colspan="5">
+                    @switch (mode) {
+                      @case ('rename') {
+                        <div class="inline-form">
+                          <input [value]="renameDraft()" (input)="renameDraft.set($any($event.target).value)" placeholder="device name" aria-label="New device name" />
+                          <button type="button" class="btn small" (click)="confirmRename(device)">Save</button>
+                          <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
+                        </div>
+                      }
+                      @case ('archive') {
+                        <div class="inline-confirm">
+                          <span>Archive "{{ device.name }}"? It stops streaming and is hidden from the default list.</span>
+                          <button type="button" class="btn danger small" (click)="confirmArchiveDevice(device)">Confirm archive</button>
+                          <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
+                        </div>
+                      }
+                    }
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </section>
+    </div>
+  }
+</div>

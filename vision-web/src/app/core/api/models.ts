@@ -80,12 +80,21 @@ export interface RegisterDeviceRequest {
   readonly capabilities?: readonly Capability[];
 }
 
-/** Mirrors `dto.ActiveStreamResponse`. `viewUrl` is absent when no publisher is wired. */
+/**
+ * Mirrors `dto.ActiveStreamResponse`. `viewUrl`/`whepUrl` are each independently absent when the
+ * active publisher has no such viewing endpoint wired.
+ *
+ * `whepUrl` (docs/MVP2-PLAN.md §L, L-a) is mediamtx's own **absolute origin URL** for the WebRTC
+ * (WHEP) viewing endpoint — unlike `viewUrl`, which can be app-relative (`HlsProxyController`
+ * reverse-proxies HLS byte fetches), WHEP is a POST/SDP + ICE exchange a stateless proxy cannot
+ * forward, so this is never app-relative and must never be proxied — POST straight to it.
+ */
 export interface ActiveStream {
   readonly streamId: string;
   readonly deviceId: string;
   readonly startedAt: string;
   readonly viewUrl?: string;
+  readonly whepUrl?: string;
 }
 
 /** Mirrors `dto.StartStreamRequest` — both fields fall back to `PipelineConfig.defaults()`. */
@@ -94,10 +103,11 @@ export interface StartStreamRequest {
   readonly inferenceFps?: number;
 }
 
-/** Mirrors `dto.StartStreamResponse`. */
+/** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as `ActiveStream#whepUrl`. */
 export interface StartStreamResult {
   readonly streamId: string;
   readonly viewUrl?: string;
+  readonly whepUrl?: string;
 }
 
 /**
@@ -160,10 +170,16 @@ export interface Category {
 }
 
 /**
- * Mirrors `dto.TelemetrySampleResponse`. Every field except `at` is absent when the underlying
- * sample did not carry that reading — not every device reports every field.
+ * Mirrors `dto.TelemetrySampleResponse`. Every field except `deviceId`/`at` is absent when the
+ * underlying sample did not carry that reading — not every device reports every field.
+ *
+ * `deviceId` (docs/CYCLES-PLAN.md §11, CD-a) is never absent — every `Telemetry` sample carries
+ * the telemetry device it came from, which is what makes multi-telemetry grouping possible (an
+ * asset's usage can mix samples from more than one TELEMETRY-capable device; see
+ * `pages/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`).
  */
 export interface TelemetrySample {
+  readonly deviceId: string;
   readonly at: string;
   readonly latitude?: number;
   readonly longitude?: number;
@@ -248,32 +264,77 @@ export interface AssetDeletionResponse {
 }
 
 /**
- * Mirrors `dto.StartSimulationRequest` (docs/CYCLES-PLAN.md §1c, §3) — the one-call,
- * zero-hardware "simulate a source" entry point. Optional fields are omitted, never sent as
- * `null`, matching every other request DTO here; the backend's own defaults then apply
- * (`autoStart` → `true`, `transport` → `"direct"`).
+ * Mirrors `dto.StartSimulationRequest.RouteMode` values (docs/CYCLES-PLAN.md §7, CT-a's
+ * `application.RouteMode`), matched case-insensitively server-side but always sent lowercase here.
+ * `loop` (default, end→start closing leg) / `bounce` (retrace backwards) / `once` (hold at the end
+ * waypoint, still emitting).
+ */
+export type RouteMode = 'loop' | 'bounce' | 'once';
+
+/**
+ * Mirrors `dto.StartSimulationRequest.WaypointRequest` — one checkpoint on a flight plan's route.
+ * `altitudeMeters` omitted (not `null`) when this checkpoint carries none.
+ */
+export interface WaypointRequest {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly altitudeMeters?: number;
+}
+
+/**
+ * Mirrors `dto.StartSimulationRequest.TelemetryRequest` (docs/CYCLES-PLAN.md §7, CT-a's pinned
+ * contract) — a configurable flight plan replacing the bare circular home-point track. `route`
+ * must carry at least 2 waypoints (`ui/flight-plan-logic.ts#canSavePlan`/`buildTelemetryRequest`
+ * enforce this client-side before a request is ever built); `speedMps`/`routeMode` omitted defer
+ * to the adapter's own defaults (`12.0`/`"loop"`).
+ */
+export interface TelemetryPlanRequest {
+  readonly speedMps?: number;
+  readonly routeMode?: RouteMode;
+  readonly route: readonly WaypointRequest[];
+}
+
+/**
+ * Mirrors `dto.StartSimulationRequest` (docs/CYCLES-PLAN.md §1c, §3, §7, §9). Optional fields are
+ * omitted, never sent as `null`, matching every other request DTO here; the backend's own
+ * defaults then apply (`autoStart` → `true`, `transport` → `"direct"`).
+ *
+ * `videoPath` is optional (docs/CYCLES-PLAN.md §9, CU-a): omitting it entirely registers a fully
+ * synthetic VIDEO+TELEMETRY device instead of a `file`-backed one — a moving test drone with no
+ * video file at all (`pages/devices/simulate-logic.ts#buildTestDroneRequest`). A `null`/absent
+ * `videoPath` requires `transport` to stay `"direct"` (the default) — the backend 400s otherwise,
+ * since `"rtsp"`/`"mjpeg"` have no in-process renderer output to push over the wire.
  *
  * `transport` is matched case-insensitively server-side, but this app always sends the fixed
  * lowercase values: `"direct"` (in-process playback) or `"rtsp"` (pushed over the wire and
  * ingested back, docs/CYCLES-PLAN.md §3 — rehearses the full protocol path).
+ *
+ * `telemetry` (docs/CYCLES-PLAN.md §7, CT-a/CT-b) is an optional flight plan replacing the bare
+ * `latitude`/`longitude` circular home-point track; when present, `latitude`/`longitude` are
+ * still accepted but ignored server-side (`StartSimulationRequest`'s own Javadoc) —
+ * `ui/flight-plan-dialog.ts` is the UI that builds this field.
  */
 export interface StartSimulationRequest {
   readonly displayName?: string;
-  readonly videoPath: string;
+  readonly videoPath?: string;
   readonly latitude?: number;
   readonly longitude?: number;
   readonly autoStart?: boolean;
   readonly transport?: 'direct' | 'rtsp';
+  readonly telemetry?: TelemetryPlanRequest;
 }
 
 /**
- * Mirrors `dto.SimulationResponse`. `streamId`/`viewUrl` are absent when the simulation was not
- * auto-started, or — for `viewUrl` — when the active publisher has no viewing endpoint.
+ * Mirrors `dto.SimulationResponse`. `streamId`/`viewUrl`/`whepUrl` are absent when the simulation
+ * was not auto-started, or — for `viewUrl`/`whepUrl`, each independently — when the active
+ * publisher has no such viewing endpoint (see `ActiveStream#whepUrl`'s doc comment for the
+ * absolute-origin/never-proxied rule `whepUrl` follows here too).
  */
 export interface SimulationResponse {
   readonly assetId: string;
   readonly streamId?: string;
   readonly viewUrl?: string;
+  readonly whepUrl?: string;
 }
 
 /** Mirrors `dto.BoundingBoxResponse`. Each component is normalized [0,1] against frame dimensions. */
@@ -304,4 +365,24 @@ export interface DetectionResult {
   readonly capturedAt: string;
   readonly inferenceMillis: number;
   readonly detections: readonly Detection[];
+}
+
+/**
+ * Mirrors `dto.UsageTimelineResponse`, the body of `GET /api/usages/{usageId}/timeline`
+ * (docs/MVP2-PLAN.md §R, R-a/R-a2 — flight replay). No `NON_NULL`-style optionality: `from`/`to`
+ * are always resolved server-side (defaulted from the usage's own `startedAt`/`endedAt`, or "now"
+ * for an open usage's `to`), and both list fields are always present, possibly empty.
+ *
+ * `telemetry` is ascending by `at`, downsampled to the request's `maxPoints` (equidistant
+ * thinning that always keeps the first/last sample — `ReplayService`, vision-application).
+ * `detections` is ascending by `capturedAt`; real for usages opened after R-a2's
+ * `AssetUsage.streamId` link, honestly `[]` for a legacy or streamless usage — see
+ * `pages/replay/replay.ts`'s empty-state handling.
+ */
+export interface UsageTimeline {
+  readonly usage: AssetUsage;
+  readonly from: string;
+  readonly to: string;
+  readonly telemetry: readonly TelemetrySample[];
+  readonly detections: readonly DetectionResult[];
 }

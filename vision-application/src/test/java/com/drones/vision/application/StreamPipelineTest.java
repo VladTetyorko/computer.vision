@@ -37,6 +37,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
 import java.util.function.LongSupplier;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -117,9 +118,15 @@ class StreamPipelineTest {
                 detectionRepositoryPort, eventPublisher, overlayPort);
     }
 
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
+                                     DetectionEventEngine eventEngine) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, eventEngine);
+    }
+
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, clock);
+                detectionRepositoryPort, eventPublisher, null, null, clock);
     }
 
     /**
@@ -135,7 +142,7 @@ class StreamPipelineTest {
      */
     private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, clock);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, clock);
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         return pipeline;
     }
@@ -360,6 +367,38 @@ class StreamPipelineTest {
         verify(detectionRepositoryPort, never()).save(any());
         verify(eventPublisher, never()).publish(argThat(e -> e.type() == EventType.DETECTION));
         assertTrue(pipeline.latestDetections().isEmpty());
+    }
+
+    @Test
+    void feedsEveryCompletedResultToTheEventEngineWhenConfigured() {
+        // docs/MVP2-PLAN.md §E, E-a: DetectionEventEngine needs empty results too (that is exactly
+        // what "absent" looks like for its debounce rule), so both must reach accept(), not just
+        // the non-empty one that detectionRepositoryPort/eventPublisher care about above.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        DetectionResult nonEmpty = nonEmptyResult(0);
+        DetectionResult empty = emptyResult(1);
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(nonEmpty))
+                .thenReturn(CompletableFuture.completedFuture(empty));
+        DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
+
+        pipeline(publisher, config(30, 2), eventEngine).start();
+
+        verify(eventEngine).accept(nonEmpty);
+        verify(eventEngine).accept(empty);
+    }
+
+    @Test
+    void neverTouchesTheEventEngineWhenNoneIsConfigured() {
+        // Documents/protects the nullable-collaborator contract: every constructor that doesn't
+        // mention eventEngine must default it to null without ever NPE-ing on a completed result.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+
+        assertDoesNotThrow(() -> pipeline(publisher, config(30, 2)).start());
     }
 
     @Test

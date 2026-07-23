@@ -2,6 +2,7 @@ import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core'
 import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from './api/vision-api';
 import { describeHttpError } from './api-error';
+import { PollScheduler } from './poll-scheduler';
 import { ToastService } from './toast.service';
 import type {
   ActiveStream,
@@ -33,6 +34,7 @@ const POLL_INTERVAL_MS = 5_000;
 export class FleetStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly devicesSignal = signal<readonly Device[]>([]);
   private readonly streamsSignal = signal<readonly ActiveStream[]>([]);
@@ -53,12 +55,10 @@ export class FleetStore {
 
   constructor() {
     void this.refresh();
-    const handle = setInterval(() => {
-      if (!document.hidden) {
-        void this.refresh({ quiet: true });
-      }
-    }, POLL_INTERVAL_MS);
-    inject(DestroyRef).onDestroy(() => clearInterval(handle));
+    // Poll-while-visible now runs off the app's one shared timer (docs/CYCLES-PLAN.md §9, CU-b
+    // item 3 — `PollScheduler`) rather than this store's own `setInterval`.
+    const unsubscribe = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.refresh({ quiet: true }));
+    inject(DestroyRef).onDestroy(unsubscribe);
   }
 
   /** The stream currently running for a device, if any. */

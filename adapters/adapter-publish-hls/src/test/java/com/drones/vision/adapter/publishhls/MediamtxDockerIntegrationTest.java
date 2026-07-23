@@ -72,7 +72,8 @@ class MediamtxDockerIntegrationTest {
             awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
 
             StreamPublisherPort publisher = new MediamtxStreamPublisher(
-                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:" + hlsPort));
+                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:" + hlsPort),
+                    URI.create("http://localhost:8889")); // WHEP not exercised by this HLS-focused test
             StreamId streamId = StreamId.random();
             Device device = new Device(DeviceId.random(), "docker-it-camera",
                     Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://docker-it"), Map.of()));
@@ -83,8 +84,9 @@ class MediamtxDockerIntegrationTest {
             // A real pipeline publishes continuously; mediamtx only serves HLS while frames
             // keep arriving (mediamtx tears the muxer down once the RTSP source goes idle), so
             // this pumps frames at ~15fps for as long as it takes the playlist to become
-            // fetchable (capped by PLAYLIST_TIMEOUT below), well past the ~2s/30-frame GOP
-            // boundary a single short burst would need to close its first HLS segment.
+            // fetchable (capped by PLAYLIST_TIMEOUT below), well past the ~1s/15-frame GOP
+            // boundary (docs/MVP2-PLAN.md V-a) a single short burst would need to close its
+            // first HLS segment.
             Thread pump = startFramePump(publisher, streamId, keepPumping);
             try {
                 long elapsedMs = pollUntilFetchable(playlistUrl, PLAYLIST_TIMEOUT);
@@ -143,7 +145,8 @@ class MediamtxDockerIntegrationTest {
             awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
 
             StreamPublisherPort publisher = new MediamtxStreamPublisher(
-                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"));
+                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"),
+                    URI.create("http://localhost:8889")); // WHEP not exercised by this HLS-focused test
             StreamId streamId = StreamId.random();
             Device device = new Device(DeviceId.random(), "bursty-it-camera",
                     Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://bursty-it"), Map.of()));
@@ -204,7 +207,8 @@ class MediamtxDockerIntegrationTest {
             awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
 
             StreamPublisherPort publisher = new MediamtxStreamPublisher(
-                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"));
+                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"),
+                    URI.create("http://localhost:8889")); // WHEP not exercised by this HLS-focused test
             StreamId streamId = StreamId.random();
             Device device = new Device(DeviceId.random(), "wallclock-it-camera",
                     Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://wallclock-it"), Map.of()));

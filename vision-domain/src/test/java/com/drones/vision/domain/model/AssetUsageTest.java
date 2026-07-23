@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -91,5 +92,49 @@ class AssetUsageTest {
 
         assertEquals(5, updated.sampleCount());
         assertEquals(0, usage.sampleCount(), "original instance must be unchanged");
+    }
+
+    @Test
+    void streamIdIsNullByDefaultViaTheSevenArgConvenienceConstructor() {
+        AssetUsage usage = openUsage();
+
+        assertNull(usage.streamId(), "a usage built via the legacy 7-arg constructor has no stream link");
+    }
+
+    @Test
+    void streamIdIsCarriedByTheEightArgCanonicalConstructor() {
+        StreamId streamId = StreamId.random();
+
+        AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
+                streamId);
+
+        assertEquals(streamId, usage.streamId());
+    }
+
+    @Test
+    void closedWithPositionsAndWithSampleCountAllPreserveStreamId() {
+        StreamId streamId = StreamId.random();
+        AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), Instant.now(), null, null, null, 0,
+                streamId);
+
+        AssetUsage closed = usage.closed(usage.startedAt().plusSeconds(30));
+        AssetUsage repositioned = usage.withPositions(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null));
+        AssetUsage resampled = usage.withSampleCount(7);
+
+        assertEquals(streamId, closed.streamId());
+        assertEquals(streamId, repositioned.streamId());
+        assertEquals(streamId, resampled.streamId());
+    }
+
+    @Test
+    void equalityDistinguishesUsagesThatDifferOnlyByStreamId() {
+        UsageId id = UsageId.random();
+        AssetId assetId = AssetId.random();
+        Instant startedAt = Instant.now();
+
+        AssetUsage withoutStream = new AssetUsage(id, assetId, startedAt, null, null, null, 0);
+        AssetUsage withStream = new AssetUsage(id, assetId, startedAt, null, null, null, 0, StreamId.random());
+
+        assertNotEquals(withoutStream, withStream);
     }
 }

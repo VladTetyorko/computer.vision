@@ -36,6 +36,16 @@ import java.net.URI;
  * WiringConfiguration} passes as {@code MediamtxStreamPublisher}'s {@code
  * hlsViewBase} constructor argument instead of {@link Mediamtx#hlsBase()}.
  *
+ * <h2>WHEP has no third base (docs/MVP2-PLAN.md §L)</h2>
+ * {@link Mediamtx#whepBase()} does <b>not</b> get the same internal/viewer-facing split as HLS: a
+ * WHEP session is a POST/SDP exchange plus ICE, not a byte stream {@code HlsProxyController}-style
+ * reverse proxying can forward transparently, so {@code MediamtxStreamPublisher#whepUrl} is built
+ * straight from {@link Mediamtx#whepBase()} and handed to the viewer verbatim — there is no
+ * app-relative {@code /whep} proxy route. This means {@link Mediamtx#whepBase()} must already be an
+ * address the *browser* can reach (not just this app's own JVM), which is the opposite assumption
+ * from {@link Mediamtx#hlsBase()}; see {@code docker-compose.yml}'s comments for how that plays out
+ * for a fully-containerized run.
+ *
  * @param enabled  whether to publish to mediamtx; default {@code true}
  * @param viewBase URL base handed to viewers for HLS playback, e.g. via
  *                 {@code StreamPublisherPort#viewUrl}; app-relative by
@@ -52,7 +62,8 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
 
     public VisionPublishProperties {
         if (mediamtx == null) {
-            mediamtx = new Mediamtx(URI.create(Mediamtx.DEFAULT_RTSP_BASE), URI.create(Mediamtx.DEFAULT_HLS_BASE));
+            mediamtx = new Mediamtx(URI.create(Mediamtx.DEFAULT_RTSP_BASE), URI.create(Mediamtx.DEFAULT_HLS_BASE),
+                    URI.create(Mediamtx.DEFAULT_WHEP_BASE));
         }
         if (viewBase == null) {
             viewBase = URI.create(DEFAULT_VIEW_BASE);
@@ -65,11 +76,22 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
      * @param hlsBase  internal address where mediamtx serves HLS, used only as the upstream
      *                 {@code HlsProxyController} forwards to — viewers never see it directly;
      *                 e.g. {@code http://localhost:8888}; default {@value Mediamtx#DEFAULT_HLS_BASE}
+     * @param whepBase mediamtx's WebRTC/WHEP egress base (docs/MVP2-PLAN.md §L), e.g. {@code
+     *                 http://localhost:8889}; default {@value Mediamtx#DEFAULT_WHEP_BASE}.
+     *                 <b>Unlike {@code hlsBase}</b>, this is not an internal-only address behind a
+     *                 proxy: {@code WiringConfiguration} hands it straight to
+     *                 {@code MediamtxStreamPublisher} as the base {@code whepUrl} is built from, and
+     *                 that URL goes to the browser verbatim (a WHEP session cannot be proxied the
+     *                 way HLS segments are — see {@code StreamPublisherPort#whepUrl}'s javadoc) — so
+     *                 this must already be an address the *viewer's* browser can reach, not just
+     *                 this app's own JVM.
      */
     public record Mediamtx(@DefaultValue(Mediamtx.DEFAULT_RTSP_BASE) URI rtspBase,
-                            @DefaultValue(Mediamtx.DEFAULT_HLS_BASE) URI hlsBase) {
+                            @DefaultValue(Mediamtx.DEFAULT_HLS_BASE) URI hlsBase,
+                            @DefaultValue(Mediamtx.DEFAULT_WHEP_BASE) URI whepBase) {
 
         static final String DEFAULT_RTSP_BASE = "rtsp://localhost:8554";
         static final String DEFAULT_HLS_BASE = "http://localhost:8888";
+        static final String DEFAULT_WHEP_BASE = "http://localhost:8889";
     }
 }

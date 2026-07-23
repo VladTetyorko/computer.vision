@@ -3,8 +3,8 @@
     <div>
       <h1>Devices</h1>
       <p>
-        Everything Vision can pull frames from. Scan the network for candidates, or register a
-        source by hand.
+        Everything Vision can pull frames from. "+ Add source" covers every way in — register by
+        hand, scan the network, or simulate one with no hardware at all.
       </p>
     </div>
     <div class="row">
@@ -17,8 +17,8 @@
         />
         <span>Show archived</span>
       </label>
-      <button type="button" class="btn" (click)="toggleSimulate()">
-        {{ simulateOpen() ? 'Close simulate' : 'Simulate a source' }}
+      <button type="button" class="btn" (click)="toggleAddSource()">
+        {{ addSourceOpen() ? 'Close' : '+ Add source' }}
       </button>
       <button type="button" class="btn secondary" (click)="refreshAll()" [disabled]="fleet.loading()">
         Refresh
@@ -26,94 +26,402 @@
     </div>
   </div>
 
-  <!-- ---- Simulate a source ---------------------------------------------- -->
-  @if (simulateOpen()) {
-    <section class="card" id="simulate-card">
+  <!-- ---- Add source (docs/CYCLES-PLAN.md §9, CU-b item 1) ---------------- -->
+  @if (addSourceOpen()) {
+    <section class="card add-source" id="add-source-card" [class.highlighted]="highlighted()">
       <header>
-        <h2>Simulate a source</h2>
-        <span class="muted">Zero hardware — a file path in, a watchable device out</span>
+        <div class="row">
+          @if (addSourceMethod()) {
+            <button type="button" class="btn secondary small back-btn" (click)="backToMethods()" aria-label="Back">
+              ‹
+            </button>
+          }
+          <h2>Add a source</h2>
+        </div>
+        <span class="muted">Every current way in, one door</span>
       </header>
 
-      <form class="simulate-form" (ngSubmit)="submitSimulate()">
-        <div class="field">
-          <label class="label" for="sim-name">Name</label>
-          <input
-            id="sim-name"
-            name="simName"
-            [(ngModel)]="simName"
-            placeholder="derived from the file name"
-          />
+      @if (!addSourceMethod()) {
+        <div class="method-grid">
+          <button type="button" class="method-tile" (click)="chooseMethod('register')">
+            <span class="method-glyph glyph-register" aria-hidden="true"></span>
+            <span class="method-title">Register manually</span>
+            <span class="method-sub">Type in a protocol and URI you already know.</span>
+          </button>
+          <button type="button" class="method-tile" (click)="chooseMethod('discover')">
+            <span class="method-glyph glyph-discover" aria-hidden="true"></span>
+            <span class="method-title">Discover on network</span>
+            <span class="method-sub">Scan for ONVIF, mDNS, and local V4L2 candidates.</span>
+          </button>
+          <button type="button" class="method-tile" (click)="chooseMethod('simulate')">
+            <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
+            <span class="method-title">Simulate</span>
+            <span class="method-sub">Zero hardware — a file, an RTSP rehearsal, or a moving test drone.</span>
+          </button>
         </div>
+      }
 
-        <div class="field wide">
-          <label class="label" for="sim-mode">Mode</label>
-          <select id="sim-mode" name="simMode" [(ngModel)]="simMode">
-            <option value="direct">Play file directly</option>
-            <option value="rtsp">Transmit over RTSP</option>
-            <option value="synthetic">Synthetic pattern</option>
-          </select>
-        </div>
+      @switch (addSourceMethod()) {
+        @case ('register') {
+          <form class="register-form" (ngSubmit)="submit()">
+            <div class="field">
+              <label class="label" for="f-name">Name</label>
+              <input id="f-name" name="name" [(ngModel)]="name" placeholder="front-gate" required />
+            </div>
 
-        @if (simMode() !== 'synthetic') {
-          <div class="field wide">
-            <label class="label" for="sim-video-path">Server-side video path</label>
-            <input
-              id="sim-video-path"
-              name="simVideoPath"
-              [(ngModel)]="simVideoPath"
-              placeholder="/srv/videos/flight.mp4"
-              required
-            />
-          </div>
+            <div class="field">
+              <label class="label" for="f-protocol">Protocol</label>
+              <input id="f-protocol" name="protocol" [(ngModel)]="protocol" placeholder="rtsp" required />
+            </div>
 
-          <div class="field">
-            <label class="label" for="sim-lat">Home latitude</label>
-            <input
-              id="sim-lat"
-              name="simLatitude"
-              type="number"
-              step="any"
-              [(ngModel)]="simLatitude"
-              placeholder="optional"
-            />
-          </div>
+            <div class="field wide">
+              <label class="label" for="f-uri">URI</label>
+              <input
+                id="f-uri"
+                name="uri"
+                [(ngModel)]="uri"
+                placeholder="rtsp://user:pass@192.168.1.50:554/stream"
+                required
+              />
+            </div>
 
-          <div class="field">
-            <label class="label" for="sim-lon">Home longitude</label>
-            <input
-              id="sim-lon"
-              name="simLongitude"
-              type="number"
-              step="any"
-              [(ngModel)]="simLongitude"
-              placeholder="optional"
-            />
-          </div>
+            <button type="submit" class="btn" [disabled]="!canSubmit()">
+              {{ submitting() ? 'Registering…' : 'Register' }}
+            </button>
+          </form>
 
-          <label class="field checkbox-field">
-            <input type="checkbox" name="simAutoStart" [(ngModel)]="simAutoStart" />
-            <span>Start streaming immediately</span>
-          </label>
+          @if (settings.advancedMode()) {
+            <div class="advanced">
+              <div class="spread">
+                <h3>Stream options</h3>
+                <button type="button" class="btn secondary small" (click)="addOptionRow()">
+                  Add option
+                </button>
+              </div>
+              <p class="muted hint">
+                Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
+                e.g. <code>rtsp_transport = tcp</code>.
+              </p>
+              @for (row of options(); track $index) {
+                <div class="option-row">
+                  <input
+                    [value]="row.key"
+                    (input)="updateOptionKey($index, $any($event.target).value)"
+                    placeholder="key"
+                    [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
+                  />
+                  <input
+                    [value]="row.value"
+                    (input)="updateOptionValue($index, $any($event.target).value)"
+                    placeholder="value"
+                    [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
+                  />
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    (click)="removeOptionRow($index)"
+                    aria-label="Remove option"
+                  >
+                    ×
+                  </button>
+                </div>
+              }
+            </div>
+          } @else {
+            <p class="muted hint">
+              Advanced stream options are hidden. Turn on advanced mode in
+              <a href="/settings">Settings</a> to edit them.
+            </p>
+          }
         }
 
-        <button type="submit" class="btn" [disabled]="!simCanSubmit()">
-          {{ simSubmitting() ? 'Simulating…' : 'Simulate' }}
-        </button>
-      </form>
+        @case ('discover') {
+          <div class="row scan-row">
+            <label class="row scan-timeout">
+              <span class="muted">Timeout</span>
+              <select [(ngModel)]="scanTimeout" name="scanTimeout" [disabled]="scanning()">
+                @for (timeout of scanTimeouts; track timeout) {
+                  <option [value]="timeout">{{ timeout / 1000 }}s</option>
+                }
+              </select>
+            </label>
+            <button type="button" class="btn" (click)="scan()" [disabled]="scanning()">
+              {{ scanning() ? 'Scanning…' : 'Scan' }}
+            </button>
+          </div>
 
-      <p class="muted hint">
-        {{ simModeHint() }}
-        @if (simMode() !== 'synthetic') {
-          The path must exist on the machine running the platform, not your browser.
+          <p class="muted hint">
+            Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
+            enumeration. Nothing is port-scanned.
+          </p>
+
+          @if (scanResult(); as result) {
+            @if (result.failedMethods.length > 0) {
+              <div class="failed">
+                Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
+                errored, not because the network is empty.
+              </div>
+            }
+
+            @if (result.devices.length === 0) {
+              <div class="empty"><p>Nothing responded.</p></div>
+            } @else {
+              <table>
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th>Suggested category</th>
+                    <th>Details</th>
+                    <th aria-label="Actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (candidate of result.devices; track candidate.method + candidate.address) {
+                    <tr>
+                      <td><span class="chip accent">{{ candidate.method }}</span></td>
+                      <td>{{ candidate.name }}</td>
+                      <td class="mono muted truncate" [title]="candidate.address">
+                        {{ candidate.address }}
+                      </td>
+                      <td>
+                        @if (candidate.suggestedCategory) {
+                          {{ candidate.suggestedCategory }}
+                        } @else {
+                          <span class="faint">unknown</span>
+                        }
+                      </td>
+                      <td class="details">
+                        @for (pair of detailPairs(candidate.details); track pair.key) {
+                          <span class="chip" [title]="pair.value">{{ pair.key }}</span>
+                        }
+                      </td>
+                      <td class="actions">
+                        <button type="button" class="btn secondary small" (click)="useCandidate(candidate)">
+                          Use
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+          } @else {
+            <div class="empty"><p class="faint">No scan run yet.</p></div>
+          }
         }
-      </p>
+
+        @case ('simulate') {
+          <form class="simulate-form" (ngSubmit)="submitSimulate()">
+            <div class="field">
+              <label class="label" for="sim-name">Name</label>
+              <input
+                id="sim-name"
+                name="simName"
+                [(ngModel)]="simName"
+                placeholder="derived from the file name"
+              />
+            </div>
+
+            <div class="field wide">
+              <label class="label" for="sim-mode">Mode</label>
+              <select id="sim-mode" name="simMode" [(ngModel)]="simMode">
+                <option value="direct">Play a file directly</option>
+                <option value="rtsp">Transmit a file over RTSP</option>
+                <option value="testDrone">Test drone (moving, no file)</option>
+                <option value="synthetic">Synthetic pattern (still, no telemetry)</option>
+              </select>
+            </div>
+
+            @if (simNeedsVideoPath()) {
+              <div class="field wide">
+                <label class="label" for="sim-video-path">Server-side video path</label>
+                <input
+                  id="sim-video-path"
+                  name="simVideoPath"
+                  [(ngModel)]="simVideoPath"
+                  placeholder="/srv/videos/flight.mp4"
+                  required
+                />
+              </div>
+            }
+
+            @if (simNeedsHomePoint()) {
+              <div class="field wide flight-plan-field">
+                <span class="label">Flight plan</span>
+                @if (flightPlanSummary(); as summary) {
+                  <div class="row flight-plan-summary">
+                    <span class="chip accent">{{ summary }}</span>
+                    <button type="button" class="btn secondary small" (click)="openFlightPlanDialog()">
+                      Edit
+                    </button>
+                    <button type="button" class="btn secondary small" (click)="clearFlightPlan()">
+                      Clear
+                    </button>
+                  </div>
+                } @else {
+                  <div class="row flight-plan-summary">
+                    <button type="button" class="btn secondary small" (click)="openFlightPlanDialog()">
+                      Draw flight plan on map
+                    </button>
+                    <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
+                  </div>
+                }
+              </div>
+
+              <details class="field wide home-point-fallback">
+                <summary>Home point (used only without a flight plan)</summary>
+                <div class="row">
+                  <div class="field">
+                    <label class="label" for="sim-lat">Home latitude</label>
+                    <input
+                      id="sim-lat"
+                      name="simLatitude"
+                      type="number"
+                      step="any"
+                      [(ngModel)]="simLatitude"
+                      placeholder="optional"
+                    />
+                  </div>
+
+                  <div class="field">
+                    <label class="label" for="sim-lon">Home longitude</label>
+                    <input
+                      id="sim-lon"
+                      name="simLongitude"
+                      type="number"
+                      step="any"
+                      [(ngModel)]="simLongitude"
+                      placeholder="optional"
+                    />
+                  </div>
+                </div>
+              </details>
+
+              <label class="field checkbox-field">
+                <input type="checkbox" name="simAutoStart" [(ngModel)]="simAutoStart" />
+                <span>Start streaming immediately</span>
+              </label>
+            }
+
+            <button type="submit" class="btn" [disabled]="!simCanSubmit()">
+              {{ simSubmitting() ? 'Simulating…' : 'Simulate' }}
+            </button>
+          </form>
+
+          <p class="muted hint">
+            {{ simModeHint() }}
+            @if (simNeedsVideoPath()) {
+              The path must exist on the machine running the platform, not your browser.
+            }
+          </p>
+        }
+      }
     </section>
   }
 
-  <!-- ---- Inventory (the warehouse, docs/CYCLES-PLAN.md §8) -------------- -->
+  <!-- ---- Assets: the primary surface (docs/CYCLES-PLAN.md §11, CD-b item 1) ------------- -->
+  <!-- One row per asset — exactly Watch · Open · Archive. CDK virtual scroll keeps rendering
+       O(visible rows) toward the "thousands of assets" posture (item 4); low-level device
+       plumbing lives in the collapsed Advanced section below and the asset detail page's own
+       Hardware section — nothing lost, just no longer the front door. -->
   <section class="card">
     <header>
-      <h2>Registered</h2>
+      <h2>Assets</h2>
+      <span class="muted">{{ assetListRows().length }} asset(s)</span>
+    </header>
+
+    @if (assetListRows().length === 0) {
+      <div class="empty">
+        <h3>No assets yet</h3>
+        <p>
+          Register the built-in simulated source to see the whole pipeline work without any
+          hardware — then scan for the real thing, or place a moving test drone from "+ Add
+          source" → Simulate.
+        </p>
+        <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
+          Add the simulated source
+        </button>
+      </div>
+    } @else {
+      <div class="asset-list-head">
+        <span>Name</span>
+        <span>Status</span>
+        <span aria-hidden="true"></span>
+      </div>
+      <cdk-virtual-scroll-viewport itemSize="60" class="asset-viewport">
+        <div
+          *cdkVirtualFor="let row of assetListRows(); trackBy: trackAssetRow"
+          class="asset-row"
+          [class.archived]="row.archived"
+        >
+          <div class="asset-row-main">
+            <span class="name truncate">{{ row.asset.displayName }}</span>
+            <span class="chip">{{ row.asset.categoryName }}</span>
+          </div>
+          <div class="asset-row-status">
+            <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+              {{ lifecycleLabel(row.lifecycle) }}
+            </span>
+            @if (!row.archived) {
+              @if (row.streaming) {
+                <span class="chip ok"><span class="dot live"></span>Live</span>
+              } @else {
+                <span class="chip">Offline</span>
+              }
+            }
+            <span class="muted device-count">{{ row.deviceCount }} device(s)</span>
+          </div>
+          <div class="asset-row-actions">
+            @if (!row.archived && row.watchDeviceId) {
+              <button type="button" class="btn small" (click)="watchAsset(row)">Watch</button>
+            }
+            @if (!row.archived) {
+              <button type="button" class="btn secondary small" (click)="openAsset(row)">Open</button>
+              <button
+                type="button"
+                class="btn danger small"
+                (click)="requestArchiveAsset(row)"
+                [disabled]="busyAssetId() === row.asset.assetId"
+              >
+                Archive
+              </button>
+            }
+          </div>
+        </div>
+      </cdk-virtual-scroll-viewport>
+
+      @if (archiveConfirmAssetId(); as archivingId) {
+        <div class="inline-confirm archive-confirm-panel">
+          <span>
+            Archive this asset? Its device(s) archive with it; usage history is kept and any
+            running stream stops.
+          </span>
+          <button
+            type="button"
+            class="btn danger small"
+            (click)="confirmArchiveAsset(archivingId)"
+            [disabled]="busyAssetId() === archivingId"
+          >
+            Confirm archive
+          </button>
+          <button type="button" class="btn secondary small" (click)="cancelArchiveAsset()">Cancel</button>
+        </div>
+      }
+    }
+  </section>
+
+  <!-- ---- Advanced: raw devices (docs/CYCLES-PLAN.md §11, CD-b item 1 — demoted, not deleted) -->
+  <section class="card">
+    <button type="button" class="btn secondary small advanced-toggle" (click)="toggleAdvancedDevices()">
+      {{ advancedDevicesOpen() ? 'Hide' : 'Show' }} advanced (raw devices)
+    </button>
+
+    @if (advancedDevicesOpen()) {
+    <div class="advanced-devices">
+    <header>
+      <h2>Registered devices</h2>
       <span class="muted">{{ warehouseRows().length }} device(s)</span>
     </header>
 
@@ -299,261 +607,18 @@
         </tbody>
       </table>
     }
-  </section>
-
-  <!-- ---- Assets (docs/CYCLES-PLAN.md §8) --------------------------------- -->
-  <section class="card">
-    <header>
-      <h2>Assets</h2>
-      <span class="muted">{{ assetRows().length }} asset(s)</span>
-    </header>
-
-    @if (assetRows().length === 0) {
-      <div class="empty">
-        <p class="faint">
-          No assets yet — assets appear once a device is filed under one, e.g. via "Simulate a
-          source".
-        </p>
-      </div>
-    } @else {
-      <div class="asset-grid">
-        @for (row of assetRows(); track row.asset.assetId) {
-          <div class="asset-card" [class.archived]="row.archived">
-            <header>
-              <div>
-                <div class="name">{{ row.asset.displayName }}</div>
-                <span class="muted">{{ row.asset.categoryName }}</span>
-              </div>
-              <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                {{ lifecycleLabel(row.lifecycle) }}
-              </span>
-            </header>
-
-            @switch (assetActionMode(row.asset.assetId)) {
-              @case ('rename') {
-                <div class="inline-form column">
-                  <input
-                    name="assetNameDraft"
-                    [ngModel]="assetNameDraft()"
-                    (ngModelChange)="assetNameDraft.set($event)"
-                    placeholder="display name"
-                    aria-label="New asset name"
-                  />
-                  <input
-                    name="assetCategoryDraft"
-                    [ngModel]="assetCategoryDraft()"
-                    (ngModelChange)="assetCategoryDraft.set($event)"
-                    placeholder="category slug"
-                    aria-label="New asset category"
-                  />
-                  <div class="row">
-                    <button type="button" class="btn small" (click)="confirmAssetEdit(row.asset)">
-                      Save
-                    </button>
-                    <button type="button" class="btn secondary small" (click)="cancelAssetAction()">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              }
-              @case ('archive') {
-                <div class="inline-confirm column">
-                  <span>
-                    Archive "{{ row.asset.displayName }}"? Its device(s) archive with it; usage
-                    history is kept and any running stream stops.
-                  </span>
-                  <div class="row">
-                    <button
-                      type="button"
-                      class="btn danger small"
-                      (click)="confirmArchiveAsset(row.asset)"
-                    >
-                      Confirm archive
-                    </button>
-                    <button type="button" class="btn secondary small" (click)="cancelAssetAction()">
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              }
-              @default {
-                <div class="actions">
-                  @for (action of assetActionsFor(row); track action) {
-                    <button
-                      type="button"
-                      class="btn secondary small"
-                      [class.danger]="action === 'archive'"
-                      (click)="onAssetAction(row, action)"
-                      [disabled]="busyAssetId() === row.asset.assetId"
-                    >
-                      {{ assetActionLabel(action) }}
-                    </button>
-                  }
-                </div>
-              }
-            }
-          </div>
-        }
-      </div>
+    </div>
     }
   </section>
 
-  <!-- ---- Discovery ----------------------------------------------------- -->
-  <section class="card">
-    <header>
-      <h2>Scan for devices</h2>
-      <div class="row">
-        <label class="row scan-timeout">
-          <span class="muted">Timeout</span>
-          <select [(ngModel)]="scanTimeout" name="scanTimeout" [disabled]="scanning()">
-            @for (timeout of scanTimeouts; track timeout) {
-              <option [value]="timeout">{{ timeout / 1000 }}s</option>
-            }
-          </select>
-        </label>
-        <button type="button" class="btn" (click)="scan()" [disabled]="scanning()">
-          {{ scanning() ? 'Scanning…' : 'Scan' }}
-        </button>
-      </div>
-    </header>
+  @if (flightPlanDialogOpen()) {
+    <vision-flight-plan-dialog
+      [homeLatitude]="simLatitude()"
+      [homeLongitude]="simLongitude()"
+      [initialPlan]="flightPlan() ?? null"
+      (saved)="onFlightPlanSaved($event)"
+      (cancelled)="onFlightPlanCancelled()"
+    />
+  }
 
-    <p class="muted hint">
-      Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
-      enumeration. Nothing is port-scanned.
-    </p>
-
-    @if (scanResult(); as result) {
-      @if (result.failedMethods.length > 0) {
-        <div class="failed">
-          Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
-          errored, not because the network is empty.
-        </div>
-      }
-
-      @if (result.devices.length === 0) {
-        <div class="empty"><p>Nothing responded.</p></div>
-      } @else {
-        <table>
-          <thead>
-            <tr>
-              <th>Method</th>
-              <th>Name</th>
-              <th>Address</th>
-              <th>Suggested category</th>
-              <th>Details</th>
-              <th aria-label="Actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (candidate of result.devices; track candidate.method + candidate.address) {
-              <tr>
-                <td><span class="chip accent">{{ candidate.method }}</span></td>
-                <td>{{ candidate.name }}</td>
-                <td class="mono muted truncate" [title]="candidate.address">
-                  {{ candidate.address }}
-                </td>
-                <td>
-                  @if (candidate.suggestedCategory) {
-                    {{ candidate.suggestedCategory }}
-                  } @else {
-                    <span class="faint">unknown</span>
-                  }
-                </td>
-                <td class="details">
-                  @for (pair of detailPairs(candidate.details); track pair.key) {
-                    <span class="chip" [title]="pair.value">{{ pair.key }}</span>
-                  }
-                </td>
-                <td class="actions">
-                  <button type="button" class="btn secondary small" (click)="useCandidate(candidate)">
-                    Use
-                  </button>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      }
-    } @else {
-      <div class="empty"><p class="faint">No scan run yet.</p></div>
-    }
-  </section>
-
-  <!-- ---- Register ------------------------------------------------------ -->
-  <section class="card" id="register-card" [class.highlighted]="highlighted()">
-    <header>
-      <h2>Register a device</h2>
-    </header>
-
-    <form class="register-form" (ngSubmit)="submit()">
-      <div class="field">
-        <label class="label" for="f-name">Name</label>
-        <input id="f-name" name="name" [(ngModel)]="name" placeholder="front-gate" required />
-      </div>
-
-      <div class="field">
-        <label class="label" for="f-protocol">Protocol</label>
-        <input id="f-protocol" name="protocol" [(ngModel)]="protocol" placeholder="rtsp" required />
-      </div>
-
-      <div class="field wide">
-        <label class="label" for="f-uri">URI</label>
-        <input
-          id="f-uri"
-          name="uri"
-          [(ngModel)]="uri"
-          placeholder="rtsp://user:pass@192.168.1.50:554/stream"
-          required
-        />
-      </div>
-
-      <button type="submit" class="btn" [disabled]="!canSubmit()">
-        {{ submitting() ? 'Registering…' : 'Register' }}
-      </button>
-    </form>
-
-    @if (settings.advancedMode()) {
-      <div class="advanced">
-        <div class="spread">
-          <h3>Stream options</h3>
-          <button type="button" class="btn secondary small" (click)="addOptionRow()">
-            Add option
-          </button>
-        </div>
-        <p class="muted hint">
-          Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
-          e.g. <code>rtsp_transport = tcp</code>.
-        </p>
-        @for (row of options(); track $index) {
-          <div class="option-row">
-            <input
-              [value]="row.key"
-              (input)="updateOptionKey($index, $any($event.target).value)"
-              placeholder="key"
-              [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
-            />
-            <input
-              [value]="row.value"
-              (input)="updateOptionValue($index, $any($event.target).value)"
-              placeholder="value"
-              [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
-            />
-            <button
-              type="button"
-              class="btn secondary small"
-              (click)="removeOptionRow($index)"
-              aria-label="Remove option"
-            >
-              ×
-            </button>
-          </div>
-        }
-      </div>
-    } @else {
-      <p class="muted hint">
-        Advanced stream options are hidden. Turn on advanced mode in
-        <a href="/settings">Settings</a> to edit them.
-      </p>
-    }
-  </section>
 </div>

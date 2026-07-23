@@ -31,7 +31,7 @@ import java.util.Objects;
  * Driving REST adapter for starting, stopping, and listing stream pipelines.
  *
  * <p>Constructor-injected with {@link StreamService} plus {@link
- * StreamPublisherPort}, used read-only here to resolve {@code viewUrl} for
+ * StreamPublisherPort}, used read-only here to resolve {@code viewUrl}/{@code whepUrl} for
  * whichever publisher is currently wired in ({@code vision-app} decides
  * which implementation that is). Per the hexagonal dependency rule
  * (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends only on
@@ -74,7 +74,7 @@ public class StreamController {
      *
      * @param deviceId the device to stream from
      * @param request  optional overrides; {@code null}/absent means use every default
-     * @return the started stream's id and (if available) its viewer URL
+     * @return the started stream's id and (if available) its viewer URLs
      */
     @PostMapping("/api/devices/{deviceId}/stream")
     @ResponseStatus(HttpStatus.CREATED)
@@ -82,19 +82,19 @@ public class StreamController {
                                       @RequestBody(required = false) StartStreamRequest request) {
         PipelineConfig config = (request == null ? StartStreamRequest.EMPTY : request).mergeOntoDefaults();
         StreamId streamId = streamService.start(DeviceId.of(deviceId), config);
-        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId));
+        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
     }
 
     /**
      * Lists streams currently active on this instance.
      *
-     * @return the active streams, each with its viewer URL if available
+     * @return the active streams, each with its viewer URLs if available
      */
     @GetMapping("/api/streams")
     public List<ActiveStreamResponse> list() {
         return streamService.streams().stream()
                 .map(s -> new ActiveStreamResponse(s.streamId().value().toString(), s.deviceId().value().toString(),
-                        s.startedAt(), viewUrl(s.streamId())))
+                        s.startedAt(), viewUrl(s.streamId()), whepUrl(s.streamId())))
                 .toList();
     }
 
@@ -141,5 +141,9 @@ public class StreamController {
 
     private String viewUrl(StreamId streamId) {
         return streamPublisherPort.viewUrl(streamId).map(URI::toString).orElse(null);
+    }
+
+    private String whepUrl(StreamId streamId) {
+        return streamPublisherPort.whepUrl(streamId).map(URI::toString).orElse(null);
     }
 }

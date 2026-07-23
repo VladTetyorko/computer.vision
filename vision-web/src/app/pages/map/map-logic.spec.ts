@@ -30,7 +30,7 @@ function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
 }
 
 function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
-  return { at: '2026-07-22T00:00:00Z', ...partial };
+  return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
 }
 
 describe('bucketForAsset', () => {

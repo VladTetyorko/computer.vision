@@ -1,10 +1,17 @@
-import type { AssetDetails, AssetUsage, GeoPosition, TelemetrySample } from './api/models';
+import type { AssetDetails, AssetUsage, Device, GeoPosition, TelemetrySample } from './api/models';
 
 /**
  * Pure derivations behind `TelemetryStore` (docs/CYCLES-PLAN.md §2), split out so the
  * open-usage/trail/staleness logic can be unit-tested without touching HTTP, timers, or
  * Leaflet — mirrors the `pages/debug/debug-*.ts` split (pure logic, injectable orchestrates).
  */
+
+/**
+ * Re-exported from `core/poll-scheduler.ts`, which is now its canonical home (docs/CYCLES-PLAN.md
+ * §9, CU-b item 3 — the shared poll scheduler). Kept here too so the existing
+ * `telemetry-logic.ts#shouldPoll` import path every caller already used keeps working verbatim.
+ */
+export { shouldPoll } from './poll-scheduler';
 
 /**
  * The asset (if any) whose devices include `deviceId`.
@@ -63,7 +70,39 @@ export function isStale(age: number | undefined): boolean {
   return age !== undefined && age > STALE_AFTER_SECONDS;
 }
 
-/** Background polling pauses while the tab is hidden — the same idiom as `FleetStore`. */
-export function shouldPoll(documentHidden: boolean): boolean {
-  return !documentHidden;
+/**
+ * Groups one usage's mixed-source telemetry samples by `deviceId` (docs/CYCLES-PLAN.md §11,
+ * CD-a — every sample carries the telemetry device it came from), preserving each device's own
+ * samples in their original (chronological) order — the same order `deriveTrail`/callers already
+ * assume for the flat list.
+ *
+ * Originally `pages/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`; moved here in
+ * docs/MVP2-PLAN.md §R (R-b) when the replay cockpit (`pages/replay/replay-logic.ts`) needed the
+ * identical per-device split for its own telemetry-at-scrub-time panels — this codebase has no
+ * precedent for one page importing another page's module (see `core/device-logic.ts`'s doc
+ * comment for the original precedent this follows), so a shared `core/` home was used instead.
+ * `asset-detail-logic.ts` re-exports this so its own existing import site keeps working verbatim.
+ */
+export function groupTelemetryByDevice(
+  samples: readonly TelemetrySample[],
+): ReadonlyMap<string, readonly TelemetrySample[]> {
+  const byDevice = new Map<string, TelemetrySample[]>();
+  for (const sample of samples) {
+    const existing = byDevice.get(sample.deviceId);
+    if (existing) {
+      existing.push(sample);
+    } else {
+      byDevice.set(sample.deviceId, [sample]);
+    }
+  }
+  return byDevice;
+}
+
+/**
+ * Every `TELEMETRY`-capable device on an asset — the panels a per-device grouped view renders
+ * one-per, including a device that has reported no sample yet. Moved here alongside
+ * `groupTelemetryByDevice` — see that function's doc comment for why.
+ */
+export function telemetryDevices(devices: readonly Device[]): readonly Device[] {
+  return devices.filter((device) => device.capabilities.includes('TELEMETRY'));
 }

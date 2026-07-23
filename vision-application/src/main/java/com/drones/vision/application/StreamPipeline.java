@@ -98,6 +98,13 @@ import java.util.function.LongSupplier;
  * DetectionRepositoryPort} and announced via a {@code DETECTION} {@link
  * Event} only when non-empty, so uneventful frames don't spam storage/events.
  *
+ * <p><b>Debounced detection events</b> (docs/MVP2-PLAN.md §E, E-a): every completed result —
+ * empty or not — also feeds an optional {@link DetectionEventEngine} ({@code eventEngine},
+ * nullable, same convention as {@code overlayPort}), which collapses a tracked label's
+ * consecutive-qualifying-results streak into an open/close {@code DetectionEvent} lifecycle. This
+ * is a separate concern from {@link #latestDetections()}/overlay burn-in: the engine only ever
+ * reads results, it never influences what gets published or returned from this class.
+ *
  * <h2>Error handling &amp; lifecycle</h2>
  * Two failure classes are handled very differently, on purpose: a CV service
  * outage must never take the video path down with it.
@@ -165,6 +172,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionRepositoryPort detectionRepositoryPort;
     private final EventPublisherPort eventPublisher;
     private final OverlayPort overlayPort;
+    private final DetectionEventEngine eventEngine;
     private final LongSupplier nanoTimeSource;
     private final DetectionExtrapolator extrapolator = new DetectionExtrapolator();
 
@@ -227,7 +235,28 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                            EventPublisherPort eventPublisher, OverlayPort overlayPort) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, System::nanoTime);
+                eventPublisher, overlayPort, null);
+    }
+
+    /**
+     * Same as the 9-argument constructor, plus a {@link DetectionEventEngine} collaborator
+     * (docs/MVP2-PLAN.md §E, E-a) fed every completed detection result alongside {@link
+     * #extrapolator}.
+     *
+     * @param eventEngine nullable — {@code null} (the other constructors' default) means no
+     *                     debounced {@code DetectionEvent} tracking runs for this pipeline, the
+     *                     same nullable-collaborator convention as {@code overlayPort}/{@code
+     *                     usageTracker}. Deliberately a single bundled collaborator rather than
+     *                     three more raw ports (asset/usage/event-store) on this constructor —
+     *                     see {@code DefaultStreamService}'s wiring for why.
+     */
+    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                           EventPublisherPort eventPublisher, OverlayPort overlayPort,
+                           DetectionEventEngine eventEngine) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, eventEngine, System::nanoTime);
     }
 
     /**
@@ -239,7 +268,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, OverlayPort overlayPort, LongSupplier nanoTimeSource) {
+                   EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
+                   LongSupplier nanoTimeSource) {
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -250,6 +280,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.overlayPort = overlayPort; // nullable: no-op overlay rendering when absent
+        this.eventEngine = eventEngine; // nullable: no detection-event tracking when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
         this.sampleEveryNthFrame = everyNth(ASSUMED_SOURCE_FPS);
     }
@@ -514,6 +545,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private void onDetectionResult(DetectionResult result) {
         latestDetections = result.detections();
         extrapolator.accept(result);
+        if (eventEngine != null) {
+            eventEngine.accept(result);
+        }
         if (!result.detections().isEmpty()) {
             detectionRepositoryPort.save(result);
             eventPublisher.publish(Event.of(streamId, EventType.DETECTION,

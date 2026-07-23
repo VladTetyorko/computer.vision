@@ -1,0 +1,33 @@
+<div class="map-shell">
+  <div class="map-host" #mapHost></div>
+
+  @if (!tilesOk()) {
+    <div class="badge offline-badge">Tiles unavailable — trail shown offline</div>
+  }
+
+  <div class="controls layers" role="group" aria-label="Map layer">
+    @for (layer of layers; track layer.id) {
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="settings.mapLayer() === layer.id"
+        (click)="setLayer(layer.id)"
+      >
+        {{ layer.label }}
+      </button>
+    }
+  </div>
+
+  <div class="controls">
+    <button
+      type="button"
+      class="btn secondary small"
+      [class.active]="autoFollow()"
+      (click)="toggleFollow()"
+      title="Recenter on the marker as the scrub position moves"
+    >
+      {{ autoFollow() ? 'Following' : 'Follow' }}
+    </button>
+    <button type="button" class="btn secondary small" (click)="refit()">Fit route</button>
+  </div>
+</div>

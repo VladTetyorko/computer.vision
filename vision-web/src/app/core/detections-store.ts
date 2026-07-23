@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from './api/vision-api';
 import type { DetectionResult } from './api/models';
-import { shouldPoll } from './telemetry-logic';
+import { PollScheduler } from './poll-scheduler';
 import { cvStatus, deriveChips } from './detections-logic';
 
 /** How often a tracked stream's recent detections are re-read while polling is active. */
@@ -16,12 +16,12 @@ const DETECTIONS_LIMIT = 50;
 /**
  * Tracks one stream's recent detections for the Live page's chip strip + CV status dot
  * (docs/MVP1-PLAN.md §C8 bullet 4): polls `GET /api/streams/{streamId}/detections` every 2s
- * while visible — the same poll/pause-on-hidden idiom as `TelemetryStore`, reusing its
- * `shouldPoll` helper directly rather than duplicating it (`core/telemetry-logic.ts`).
+ * while visible — the same poll/pause-on-hidden idiom as `TelemetryStore`, running off the same
+ * shared `PollScheduler` (docs/CYCLES-PLAN.md §9, CU-b item 3) rather than its own `setInterval`.
  *
  * **Component-provided, not `providedIn: 'root'`.** `LivePage` lists this in its own
- * `providers`, so a fresh instance — and its poll timer — starts/stops with the route, exactly
- * like `TelemetryStore`.
+ * `providers`, so a fresh instance — and its poll registration — starts/stops with the route,
+ * exactly like `TelemetryStore`.
  *
  * **Errors silent-degrade, no toast.** A failed or empty poll just leaves `results` at its
  * last-known value; the CV status dot naturally reads `'off'` once that value goes stale
@@ -30,12 +30,13 @@ const DETECTIONS_LIMIT = 50;
 @Injectable()
 export class DetectionsStore {
   private readonly api = inject(VisionApi);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly resultsSignal = signal<readonly DetectionResult[]>([]);
   private readonly nowSignal = signal(Date.now());
 
-  private pollHandle: ReturnType<typeof setInterval> | null = null;
-  private readonly clockHandle: ReturnType<typeof setInterval>;
+  private stopPollingFn: (() => void) | null = null;
+  private readonly stopClock: () => void;
 
   /** Bumped on every `track`/`reset` so a stale in-flight poll can tell it has been superseded. */
   private generation = 0;
@@ -49,9 +50,9 @@ export class DetectionsStore {
   readonly status = computed(() => cvStatus(this.resultsSignal()[0]?.capturedAt, this.nowSignal()));
 
   constructor() {
-    this.clockHandle = setInterval(() => this.nowSignal.set(Date.now()), CLOCK_TICK_MS);
+    this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(() => {
-      clearInterval(this.clockHandle);
+      this.stopClock();
       this.stopPolling();
     });
   }
@@ -67,11 +68,7 @@ export class DetectionsStore {
     this.resultsSignal.set([]);
 
     void this.pollOnce(streamId, generation);
-    this.pollHandle = setInterval(() => {
-      if (shouldPoll(document.hidden)) {
-        void this.pollOnce(streamId, generation);
-      }
-    }, POLL_INTERVAL_MS);
+    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.pollOnce(streamId, generation));
   }
 
   /** Stops polling and clears results — call when there is no stream left to track. */
@@ -93,9 +90,9 @@ export class DetectionsStore {
   }
 
   private stopPolling(): void {
-    if (this.pollHandle !== null) {
-      clearInterval(this.pollHandle);
-      this.pollHandle = null;
+    if (this.stopPollingFn !== null) {
+      this.stopPollingFn();
+      this.stopPollingFn = null;
     }
   }
 }

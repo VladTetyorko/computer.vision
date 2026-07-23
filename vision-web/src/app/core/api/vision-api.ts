@@ -19,6 +19,7 @@ import type {
   StartStreamRequest,
   StartStreamResult,
   TelemetrySample,
+  UsageTimeline,
 } from './models';
 
 /**
@@ -131,6 +132,34 @@ export class VisionApi {
       this.http.get<TelemetrySample[]>(`/api/usages/${encodeURIComponent(usageId)}/telemetry`, {
         params: { limit },
       }),
+    );
+  }
+
+  /**
+   * The flight-replay window for one usage (docs/MVP2-PLAN.md §R, R-a/R-b — `UsageTimelineController`,
+   * windowed + downsampled, unlike `usageTelemetry` above). `fromMs`/`toMs`/`maxPoints` are each
+   * only added to the query string when given — omitting all three (`pages/replay/replay.ts`'s
+   * only call site) lets the server default the window to the usage's own bounds and thin to its
+   * own `DEFAULT_MAX_POINTS`; the replay cockpit instead always asks for `maxPoints: 2000` (the
+   * server's clamp ceiling) once, up front, then scrubs entirely against the in-memory result —
+   * no re-fetch per drag frame.
+   */
+  usageTimeline(
+    usageId: string,
+    options: { readonly fromMs?: number; readonly toMs?: number; readonly maxPoints?: number } = {},
+  ): Promise<UsageTimeline> {
+    const params: Record<string, number> = {};
+    if (options.fromMs !== undefined) {
+      params['fromMs'] = options.fromMs;
+    }
+    if (options.toMs !== undefined) {
+      params['toMs'] = options.toMs;
+    }
+    if (options.maxPoints !== undefined) {
+      params['maxPoints'] = options.maxPoints;
+    }
+    return firstValueFrom(
+      this.http.get<UsageTimeline>(`/api/usages/${encodeURIComponent(usageId)}/timeline`, { params }),
     );
   }
 

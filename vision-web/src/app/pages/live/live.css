@@ -4,24 +4,54 @@
     flex-wrap: wrap;
 }
 
-.osd-strip {
-    display: block;
-    margin-bottom: 0.75rem;
-}
-
-.osd-pending {
-    margin: 0 0 0.75rem;
-}
-
 .layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr) auto 320px;
+    gap: 0.75rem;
     align-items: start;
+}
+
+.layout.rail-collapsed {
+    grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .stage {
     min-width: 0;
+}
+
+/* A slim, deliberately narrow tab between stage and rail (docs/CYCLES-PLAN.md §9, CU-b item 4)
+   rather than a full-width "hide details" button competing with the page-head chrome — it reads
+   as part of the rail's edge, the same way a drawer handle does. */
+.rail-toggle {
+    align-self: stretch;
+    width: 1.1rem;
+    min-height: 12rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--text-faint);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.rail-toggle:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+}
+
+.side {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.side .card {
+    margin-bottom: 0;
 }
 
 .notice {
@@ -34,17 +64,18 @@
     font-size: 0.82rem;
 }
 
-.detections-strip {
-    display: block;
-    margin-top: 0.75rem;
-}
-
 .notice code,
 .hint code {
     font-family: var(--mono);
     background: rgb(0 0 0 / 25%);
     padding: 0.05rem 0.3rem;
     border-radius: 4px;
+}
+
+.key-hint {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    opacity: 0.75;
 }
 
 dl {
@@ -90,12 +121,28 @@ dd {
     margin: 0.6rem 0 0.5rem;
 }
 
+/* Detection boxes toggle (docs/CYCLES-PLAN.md §11 item 6) */
+.boxes-toggle {
+    gap: 0.3rem;
+}
+
+.boxes-toggle .btn.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: #a9c8ff;
+}
+
 input[type="range"] {
     margin-bottom: 0.75rem;
 }
 
 @media (max-width: 900px) {
-    .layout {
+    .layout,
+    .layout.rail-collapsed {
         grid-template-columns: 1fr;
+    }
+
+    .rail-toggle {
+        display: none;
     }
 }

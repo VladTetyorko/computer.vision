@@ -27,6 +27,15 @@
   gap: 0.35rem;
 }
 
+/* The layer switcher sits opposite Recenter (docs/CYCLES-PLAN.md §9, CU-b item 6) — left rather
+   than right, matching where CD (§11) plans to add this map's device-list/layer-control chrome. */
+.controls.layers {
+  left: 0.5rem;
+  right: auto;
+  flex-wrap: wrap;
+  max-width: calc(100% - 1rem);
+}
+
 .controls .btn.active {
   background: var(--accent);
   color: var(--accent-text);
@@ -51,10 +60,6 @@
    encapsulation never matches it without `::ng-deep` — mirrors `live-map.css`. `.chip`/`.btn`
    used inside popup HTML are *not* redeclared here: those come from the global `styles.css`,
    which (unlike this component's scoped stylesheet) already applies everywhere unconditionally. */
-
-:host ::ng-deep .vision-tiles {
-  filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.95) saturate(0.7);
-}
 
 :host ::ng-deep .leaflet-control-attribution {
   background: rgb(0 0 0 / 55%);
@@ -110,7 +115,8 @@
   color: var(--text-faint);
 }
 
-:host ::ng-deep .fleet-popup .watch-btn {
+:host ::ng-deep .fleet-popup .watch-btn,
+:host ::ng-deep .fleet-popup .preview-btn {
   margin-top: 0.15rem;
   width: 100%;
   justify-content: center;

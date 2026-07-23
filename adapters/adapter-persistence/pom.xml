@@ -11,12 +11,58 @@
 
     <artifactId>adapter-persistence</artifactId>
     <name>adapter-persistence</name>
-    <description>Placeholder — JPA/Postgres persistence adapter, implemented in Phase 2.</description>
+    <description>JPA/Postgres persistence adapter for the fleet-side (categories, devices, assets) and history (usages, telemetry, detections) repository ports.</description>
 
     <dependencies>
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>vision-domain</artifactId>
+        </dependency>
+
+        <!-- JPA/Hibernate: versions come from spring-boot-dependencies (this
+             module's grandparent POM), no root-pom pin needed, same as
+             postgresql/flyway/testcontainers below. -->
+        <dependency>
+            <groupId>org.hibernate.orm</groupId>
+            <artifactId>hibernate-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- Attributes/hints columns are jsonb, mapped via Hibernate's native
+             JdbcTypeCode(SqlTypes.JSON) support, which auto-detects a Jackson
+             ObjectMapper on the classpath (Jackson 3 / tools.jackson, per
+             house convention — Hibernate 7.4 ships Jackson3JsonFormatMapper). -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

@@ -74,6 +74,24 @@ describe('VisionApi', () => {
     await promise;
   });
 
+  it('fetches a usage timeline with no query params by default', async () => {
+    const promise = api.usageTimeline('u-1');
+    const request = http.expectOne((r) => r.url === '/api/usages/u-1/timeline');
+    expect(request.request.params.keys()).toEqual([]);
+    request.flush({ usage: { usageId: 'u-1' }, from: 'f', to: 't', telemetry: [], detections: [] });
+    await expect(promise).resolves.toMatchObject({ from: 'f', to: 't' });
+  });
+
+  it('passes fromMs/toMs/maxPoints through when given', async () => {
+    const promise = api.usageTimeline('u-1', { fromMs: 1_000, toMs: 2_000, maxPoints: 2_000 });
+    const request = http.expectOne((r) => r.url === '/api/usages/u-1/timeline');
+    expect(request.request.params.get('fromMs')).toBe('1000');
+    expect(request.request.params.get('toMs')).toBe('2000');
+    expect(request.request.params.get('maxPoints')).toBe('2000');
+    request.flush({ usage: { usageId: 'u-1' }, from: 'f', to: 't', telemetry: [], detections: [] });
+    await promise;
+  });
+
   it('starts a simulation', async () => {
     const promise = api.startSimulation({ videoPath: '/videos/flight.mp4', transport: 'rtsp' });
     const request = http.expectOne({ method: 'POST', url: '/api/simulations' });

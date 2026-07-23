@@ -18,6 +18,8 @@
         <module>adapter-simulation</module>
         <module>adapter-rtsp</module>
         <module>adapter-mjpeg</module>
+        <module>adapter-mavlink</module>
+        <module>adapter-v4l2</module>
         <module>adapter-publish-hls</module>
         <module>adapter-cv-grpc</module>
         <module>adapter-overlay</module>

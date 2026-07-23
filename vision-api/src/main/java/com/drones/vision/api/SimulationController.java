@@ -24,8 +24,8 @@ import java.util.Objects;
  * already-streaming asset out.
  *
  * <p>Constructor-injected with {@link SimulationService}, {@link CurrentUser}, and one driven port
- * used read-only — {@link StreamPublisherPort}, to resolve {@code viewUrl} exactly like {@link
- * AssetController}/{@link StreamController} already do. Per the hexagonal dependency rule
+ * used read-only — {@link StreamPublisherPort}, to resolve {@code viewUrl}/{@code whepUrl} exactly
+ * like {@link AssetController}/{@link StreamController} already do. Per the hexagonal dependency rule
  * (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends only on {@code vision-domain}
  * and {@code vision-application} — never on an adapter.
  *
@@ -67,7 +67,7 @@ public class SimulationController {
      * ({@link StartSimulationRequest#autoStart()} defaults to {@code true}).
      *
      * @param request the video file and home point to simulate
-     * @return the created asset's id, and — if streaming — its stream id and viewer URL
+     * @return the created asset's id, and — if streaming — its stream id and viewer URLs
      */
     @PostMapping("/api/simulations")
     @ResponseStatus(HttpStatus.CREATED)
@@ -77,11 +77,16 @@ public class SimulationController {
         StreamId streamId = simulated.streamId();
         return new SimulationResponse(simulated.assetId().value().toString(),
                 streamId == null ? null : streamId.value().toString(),
-                streamId == null ? null : viewUrl(streamId));
+                streamId == null ? null : viewUrl(streamId),
+                streamId == null ? null : whepUrl(streamId));
     }
 
     private String viewUrl(StreamId streamId) {
         return streamPublisherPort.viewUrl(streamId).map(URI::toString).orElse(null);
+    }
+
+    private String whepUrl(StreamId streamId) {
+        return streamPublisherPort.whepUrl(streamId).map(URI::toString).orElse(null);
     }
 
     /**

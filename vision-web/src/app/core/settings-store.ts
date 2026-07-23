@@ -51,12 +51,30 @@ export interface PipelineSettings {
   readonly inferenceFps: number;
 }
 
+/**
+ * The four base map layers (docs/CYCLES-PLAN.md §9, CU-b item 6) — shared by the fleet map
+ * (`pages/map/fleet-map.ts`) and the live cockpit's map inset (`ui/live-map.ts`) via this
+ * one persisted choice, rather than each map remembering its own. Definitions (tile URL,
+ * attribution, max zoom) live in `ui/leaflet-loader.ts#MAP_LAYERS`, keyed by this id — this file
+ * only owns *which one is selected*, not the tile-provider details.
+ */
+export type MapLayerId = 'standard' | 'night' | 'relief' | 'satellite';
+
+/**
+ * `night` (CARTO Dark Matter) rather than `standard` (plain OSM) — this console is dark by
+ * default (docs/UX-DESIGN.md §7.7), and `night` is the true-dark-tile replacement for what used
+ * to be an always-on CSS invert filter over OSM, so it is the closer match to the app's existing
+ * look out of the box.
+ */
+const DEFAULT_MAP_LAYER: MapLayerId = 'night';
+
 interface PersistedSettings {
   advancedMode: boolean;
   wallDensity: number;
   activeProfileId: string;
   customProfiles: PipelineProfile[];
   draft: PipelineSettings | null;
+  mapLayer: MapLayerId;
 }
 
 const STORAGE_KEY = 'vision.settings.v1';
@@ -71,6 +89,9 @@ export class SettingsStore {
 
   /** Wall tiles per row. */
   readonly wallDensity = signal(3);
+
+  /** The active base map layer — persisted, shared by the fleet map and the live map inset. */
+  readonly mapLayer = signal<MapLayerId>(DEFAULT_MAP_LAYER);
 
   readonly activeProfileId = signal(BUILT_IN_PROFILES[0].id);
   readonly customProfiles = signal<readonly PipelineProfile[]>([]);
@@ -168,6 +189,9 @@ export class SettingsStore {
       if (typeof parsed.wallDensity === 'number') {
         this.wallDensity.set(parsed.wallDensity);
       }
+      if (isMapLayerId(parsed.mapLayer)) {
+        this.mapLayer.set(parsed.mapLayer);
+      }
       if (Array.isArray(parsed.customProfiles)) {
         this.customProfiles.set(parsed.customProfiles);
       }
@@ -190,7 +214,14 @@ export class SettingsStore {
       activeProfileId: this.activeProfileId(),
       customProfiles: [...this.customProfiles()],
       draft: this.draftSignal(),
+      mapLayer: this.mapLayer(),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   }
+}
+
+const MAP_LAYER_IDS: readonly MapLayerId[] = ['standard', 'night', 'relief', 'satellite'];
+
+function isMapLayerId(value: unknown): value is MapLayerId {
+  return typeof value === 'string' && (MAP_LAYER_IDS as readonly string[]).includes(value);
 }

@@ -217,6 +217,54 @@ class StreamStateTest {
         assertEquals(1, triggeredCount, "sustained drift must be reported exactly once per stream");
     }
 
+    // -- docs/MVP2-PLAN.md V-c: capture→encode lag summary log gating --------
+
+    @Test
+    void firstShouldLogLagCallEstablishesBaselineWithoutLogging() {
+        MediamtxStreamPublisher.StreamState state = new MediamtxStreamPublisher.StreamState();
+
+        assertFalse(state.shouldLogLag(1_000L), "the very first call must only establish the baseline");
+    }
+
+    @Test
+    void shouldLogLagStaysFalseUntilTheIntervalElapses() {
+        MediamtxStreamPublisher.StreamState state = new MediamtxStreamPublisher.StreamState();
+        long start = 1_000L;
+        state.shouldLogLag(start);
+
+        assertFalse(state.shouldLogLag(start + 1),
+                "must not log again immediately after the baseline call");
+        assertFalse(state.shouldLogLag(start + MediamtxStreamPublisher.LAG_LOG_INTERVAL_MILLIS - 1),
+                "must not log 1ms before the interval elapses");
+    }
+
+    @Test
+    void shouldLogLagFiresOnceIntervalElapsesThenResetsForTheNextWindow() {
+        MediamtxStreamPublisher.StreamState state = new MediamtxStreamPublisher.StreamState();
+        long start = 1_000L;
+        state.shouldLogLag(start);
+
+        long dueAt = start + MediamtxStreamPublisher.LAG_LOG_INTERVAL_MILLIS;
+        assertTrue(state.shouldLogLag(dueAt), "must fire exactly at the interval boundary");
+        assertFalse(state.shouldLogLag(dueAt + 1), "must not fire again immediately after logging");
+        assertTrue(state.shouldLogLag(dueAt + MediamtxStreamPublisher.LAG_LOG_INTERVAL_MILLIS),
+                "must fire again once a full interval has elapsed since the last log");
+    }
+
+    // -- docs/MVP2-PLAN.md V-c: lagTracker is a plain per-stream accumulator --
+
+    @Test
+    void lagTrackerAccumulatesSamplesRecordedOnTheState() {
+        MediamtxStreamPublisher.StreamState state = new MediamtxStreamPublisher.StreamState();
+
+        state.lagTracker.record(10L);
+        state.lagTracker.record(20L);
+        state.lagTracker.record(30L);
+
+        assertEquals(3, state.lagTracker.sampleCount());
+        assertEquals(20L, state.lagTracker.p50());
+    }
+
     private static boolean feedMeasurementSamples(MediamtxStreamPublisher.StreamState state, Duration gap) {
         Instant cursor = Instant.now();
         boolean complete = false;

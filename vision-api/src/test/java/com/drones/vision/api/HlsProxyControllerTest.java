@@ -85,6 +85,60 @@ class HlsProxyControllerTest {
         assertEquals("/stream-1/seg%20ment.mp4", receivedPath.get());
     }
 
+    /**
+     * docs/MVP2-PLAN.md V-a proxy audit: mediamtx marks live LL-HLS media
+     * playlists {@code Cache-Control: no-cache} — before this fix that
+     * header was silently dropped rather than forwarded, which risked a
+     * stock (pre-lowLatencyMode) hls.js polling loop getting served a stale
+     * cached playlist by the browser's own HTTP cache instead of a fresh
+     * one each poll.
+     */
+    @Test
+    void cacheControlIsForwardedFromUpstreamNotAddedOrDropped() throws Exception {
+        byte[] body = "#EXTM3U\n#EXT-X-VERSION:3\n".getBytes(StandardCharsets.UTF_8);
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.getResponseHeaders().add("Cache-Control", "no-cache");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "no-cache"));
+    }
+
+    /**
+     * LL-HLS's blocking playlist reload protocol is entirely query-string
+     * driven ({@code _HLS_msn}/{@code _HLS_part}/{@code _HLS_skip}) — the
+     * proxy must forward it untouched for mediamtx's blocking-wait logic to
+     * resolve the request against the right segment/part.
+     */
+    @Test
+    void llHlsBlockingReloadQueryParametersAreForwardedUntouched() throws Exception {
+        byte[] body = "#EXTM3U\n#EXT-X-VERSION:9\n".getBytes(StandardCharsets.UTF_8);
+        AtomicReference<String> receivedQuery = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            receivedQuery.set(exchange.getRequestURI().getRawQuery());
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8?_HLS_msn=42&_HLS_part=3&_HLS_skip=YES", "stream-1"))
+                .andExpect(status().isOk());
+
+        assertEquals("_HLS_msn=42&_HLS_part=3&_HLS_skip=YES", receivedQuery.get());
+    }
+
     @Test
     void cookieIsForwardedUpstreamAndSetCookieIsRelayedBackToTheBrowser() throws Exception {
         byte[] body = "segment-bytes".getBytes(StandardCharsets.UTF_8);

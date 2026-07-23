@@ -145,6 +145,10 @@ public final class MjpegVideoSource implements VideoSourcePort {
             boolean errored = false;
             try {
                 HttpClient client = HttpClient.newBuilder()
+                        // HTTP/1.1 only: the default HTTP/2 preference adds "Upgrade: h2c" +
+                        // "HTTP2-Settings" headers to plain-http requests, which embedded MJPEG
+                        // servers (ESP32-CAM et al.) reject with 400 Bad Request.
+                        .version(HttpClient.Version.HTTP_1_1)
                         .connectTimeout(Duration.ofMillis(timeoutMillis))
                         .build();
                 HttpRequest request = HttpRequest.newBuilder(uri).GET().build();

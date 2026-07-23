@@ -218,21 +218,21 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | C5 | backend | mjpeg TX/RX pair | new module, then transport/wiring | ✅ done |
 | C6 | **UI** | `/map` overview tab | one task (vision-web) | ✅ done |
 | CT-a | backend | telemetry flight plans (route/speed/checkpoints) | §7, adapter-simulation → application/api/app | ✅ done |
-| CT-b | **UI** | flight-plan editor (map picker) in wizard | §7, vision-web | pending |
+| CT-b | **UI** | flight-plan editor (map picker) in wizard | §7, vision-web | ✅ done |
 | CW-a | backend | warehouse REST surface + assign/unassign | §8, after CT-a | ✅ done |
 | CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | ✅ done |
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | ✅ done |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | ✅ done |
 | C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | ✅ done |
 | CU-a | backend | fully synthetic simulation (no file) | §9 | ✅ done |
-| CU-b | **UI** | fast & simple + map upgrades | §9, after C8 | pending |
+| CU-b | **UI** | fast & simple + map upgrades | §9, after C8 | ✅ done |
 | CD-a | backend | telemetry deviceId in API | §11 | ✅ done |
-| CD-b | **UI** | asset-first Devices + detail page + self-recovering player | §11 | pending |
+| CD-b | **UI** | asset-first Devices + detail page + self-recovering player | §11 | ✅ done |
 | CP-a | backend | faster CPU inference (imgsz, warmup, OpenVINO image) | §12, cv-service | ✅ done |
 | CP-b | backend | downscale+JPEG detection payload | §12, adapter-cv-grpc | ✅ done |
 | CP-c | backend | inferenceFps 10 + box extrapolation | §12, vision-domain+application | ✅ done |
 
-C7–C9 execute **[MVP1-PLAN.md](MVP1-PLAN.md)** — the priority target ("the friends demo": simultaneous multi-protocol sources + map + live CV). Post-MVP candidates: WEB-PLAN W6 leftovers + W7 hardening (Playwright smoke in CI, keyboard, responsive); flight replay; MAVLink telemetry RX; geolocated detections on the map.
+C7–C9 execute **[MVP1-PLAN.md](MVP1-PLAN.md)** — the priority target ("the friends demo": simultaneous multi-protocol sources + map + live CV) — complete. The pending UI cycles above (CT-b, CU-b, CD-b) and all post-MVP candidates are folded into **[MVP2-PLAN.md](MVP2-PLAN.md)** (persistence, WebRTC viewing, flight replay, MAVLink + V4L2 protocols, detection events).
 
 ---
 

@@ -3,6 +3,7 @@ import type {
   AssetSummary,
   RegisterDeviceRequest,
   StartSimulationRequest,
+  TelemetryPlanRequest,
 } from '../../core/api/models';
 
 /**
@@ -20,12 +21,22 @@ import type {
 /** The category `DefaultSimulationService` creates every simulated asset under. */
 export const SIMULATED_CATEGORY = 'simulated';
 
-/** The three zero-hardware entry points the wizard offers. */
-export type SimulateMode = 'direct' | 'rtsp' | 'synthetic';
+/**
+ * The four zero-hardware entry points the Add-source flow's Simulate step offers. `testDrone`
+ * (docs/CYCLES-PLAN.md §9, CU-b item 7) is CU-a's fully synthetic simulation — no video file, a
+ * VIDEO+TELEMETRY device moving along a circular home-point track — distinct from `synthetic`,
+ * which registers a plain VIDEO-only `sim`-protocol device with no telemetry at all (the
+ * pre-existing quick-add). `direct`/`rtsp` play a real file through the pipeline.
+ */
+export type SimulateMode = 'direct' | 'rtsp' | 'synthetic' | 'testDrone';
 
 /**
  * Form state for the file-based modes (`direct`/`rtsp`). `synthetic` never reaches this shape —
  * it carries no file path or home position at all, see `buildSyntheticRegisterRequest`.
+ *
+ * `telemetry` (docs/CYCLES-PLAN.md §7, CT-b) is the already-serialized wire shape from
+ * `ui/flight-plan-logic.ts#buildTelemetryRequest` — the flight-plan dialog builds it, this module
+ * only threads it through to the request, exactly like it already does for `latitude`/`longitude`.
  */
 export interface FileSimulateForm {
   readonly name: string;
@@ -34,6 +45,7 @@ export interface FileSimulateForm {
   readonly latitude: number | null;
   readonly longitude: number | null;
   readonly autoStart: boolean;
+  readonly telemetry?: TelemetryPlanRequest;
 }
 
 /**
@@ -42,7 +54,9 @@ export interface FileSimulateForm {
  * Name and position are trimmed and omitted (not sent as `null`) when blank/absent — the same
  * `@JsonInclude(NON_NULL)` convention every request DTO in this app follows — so the backend's
  * own defaults (derive a name from the file, no home position) apply instead of a caller
- * accidentally overriding them with an empty string or `null`.
+ * accidentally overriding them with an empty string or `null`. `latitude`/`longitude` are still
+ * sent even when `telemetry` carries a route (the backend ignores them in that case per
+ * `StartSimulationRequest`'s own Javadoc) — this function doesn't need to know which one wins.
  */
 export function buildSimulationRequest(form: FileSimulateForm): StartSimulationRequest {
   const displayName = form.name.trim();
@@ -53,6 +67,40 @@ export function buildSimulationRequest(form: FileSimulateForm): StartSimulationR
     ...(displayName.length > 0 ? { displayName } : {}),
     ...(form.latitude !== null ? { latitude: form.latitude } : {}),
     ...(form.longitude !== null ? { longitude: form.longitude } : {}),
+    ...(form.telemetry ? { telemetry: form.telemetry } : {}),
+  };
+}
+
+/**
+ * Form state for the `testDrone` mode (docs/CYCLES-PLAN.md §9, CU-b item 7): a home point
+ * (optional — the backend defaults it when absent) and whether to start streaming immediately.
+ * No `videoPath` — `StartSimulationRequest.videoPath` is optional precisely so this mode can omit
+ * it entirely (CU-a, vision-api). `telemetry` (docs/CYCLES-PLAN.md §7, CT-b) is the flight-plan
+ * dialog's serialized route, same convention as `FileSimulateForm#telemetry`.
+ */
+export interface TestDroneForm {
+  readonly name: string;
+  readonly latitude: number | null;
+  readonly longitude: number | null;
+  readonly autoStart: boolean;
+  readonly telemetry?: TelemetryPlanRequest;
+}
+
+/**
+ * Builds the `POST /api/simulations` body for the `testDrone` mode — the one-click "moving test
+ * drone, no file" entry point (docs/CYCLES-PLAN.md §9, CU-a/CU-b): `videoPath` is omitted
+ * entirely (not even blank), which is what tells the backend to register a fully synthetic
+ * VIDEO+TELEMETRY device instead of a `file`-backed one. Name/position follow the same
+ * trim-and-omit-when-blank convention as `buildSimulationRequest`.
+ */
+export function buildTestDroneRequest(form: TestDroneForm): StartSimulationRequest {
+  const displayName = form.name.trim();
+  return {
+    autoStart: form.autoStart,
+    ...(displayName.length > 0 ? { displayName } : {}),
+    ...(form.latitude !== null ? { latitude: form.latitude } : {}),
+    ...(form.longitude !== null ? { longitude: form.longitude } : {}),
+    ...(form.telemetry ? { telemetry: form.telemetry } : {}),
   };
 }
 

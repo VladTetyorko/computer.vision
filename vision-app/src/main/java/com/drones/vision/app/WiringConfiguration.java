@@ -1,6 +1,8 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
+import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
+import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
 import com.drones.vision.adapter.overlay.Java2DOverlayRenderer;
@@ -9,15 +11,11 @@ import com.drones.vision.adapter.rtsp.FfmpegVideoSource;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.SimulatedVideoSource;
+import com.drones.vision.adapter.v4l2.V4l2VideoSource;
 import com.drones.vision.api.HlsProxyController;
 import com.drones.vision.app.devsupport.DevPrincipal;
-import com.drones.vision.app.devsupport.InMemoryAssetRepository;
-import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryAuditTrail;
-import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
-import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
-import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
-import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.app.devsupport.NoopStreamPublisher;
@@ -25,11 +23,13 @@ import com.drones.vision.application.AssetService;
 import com.drones.vision.application.DefaultAssetService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
+import com.drones.vision.application.DefaultReplayService;
 import com.drones.vision.application.DefaultSimulationService;
 import com.drones.vision.application.DefaultStreamService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
+import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.UsageTracker;
@@ -39,6 +39,7 @@ import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
@@ -68,9 +69,9 @@ import java.util.List;
  * vision-application} themselves stay free of Spring annotations; all
  * {@code @Bean}/{@code @Configuration} wiring lives here.
  *
- * <p>Ports that don't yet have a real adapter (persistence, event bus) are
- * wired to in-process dev-support fallbacks so the platform runs end to end
- * from Phase 0 onward; each fallback's javadoc names the adapter that will
+ * <p>Ports that don't yet have a real adapter (event bus) are wired to
+ * in-process dev-support fallbacks so the platform runs end to end from
+ * Phase 0 onward; each fallback's javadoc names the adapter that will
  * replace it and in which phase. Stream egress ({@link StreamPublisherPort})
  * is real as of Phase 1: {@link #streamPublisherPort(VisionPublishProperties)}
  * selects between the mediamtx-backed publisher and the no-op fallback based
@@ -80,6 +81,16 @@ import java.util.List;
  * fallback based on {@link VisionCvProperties}; see {@link
  * #eventPublisherPort(DetectionPort, VisionCvProperties)} for how the gRPC
  * session's per-stream lifecycle is cleaned up.
+ *
+ * <p>Fleet persistence (docs/MVP2-PLAN.md P-a: {@code CategoryRepositoryPort}/{@code
+ * DeviceRepositoryPort}/{@code AssetRepositoryPort}) and history persistence (docs/MVP2-PLAN.md
+ * P-b: {@code AssetUsageRepositoryPort}/{@code TelemetryRepositoryPort}/{@code
+ * DetectionRepositoryPort}) are both wired in the sibling {@link PersistenceWiringConfiguration}
+ * instead of here — same split-out-by-concern precedent as {@link DiscoveryWiringConfiguration} —
+ * selecting between {@code adapter-persistence}'s JPA implementations and the devsupport
+ * in-memory fallbacks per {@link VisionPersistenceProperties#enabled()}. {@code AuditTrailPort}
+ * ({@link #auditTrailPort} below) stays unconditionally in-memory — it was never in either
+ * cycle's scope.
  */
 @Configuration
 @EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class})
@@ -105,19 +116,21 @@ public class WiringConfiguration {
         return new MjpegVideoSource();
     }
 
+    /**
+     * USB/V4L2 local camera ingest (docs/MVP2-PLAN.md X-b), RX only (a local capture device has
+     * no wire to transmit to -- same as {@code sim}/{@code file}). Supports protocol {@code
+     * "v4l2"} with a {@code file:} URI naming a {@code /dev/videoN} node -- the exact shape
+     * {@code adapter-discovery}'s {@code V4l2Scanner} emits, not the docs/MVP2-PLAN.md brief's
+     * originally-proposed {@code "usb"}/{@code v4l2://} shape; see adapter-v4l2/MODULE.md.
+     */
+    @Bean
+    public V4l2VideoSource v4l2VideoSource() {
+        return new V4l2VideoSource();
+    }
+
     @Bean
     public VideoSourceRegistry videoSourceRegistry(List<VideoSourcePort> videoSources) {
         return new VideoSourceRegistry(videoSources);
-    }
-
-    @Bean
-    public DeviceRepositoryPort deviceRepositoryPort() {
-        return new InMemoryDeviceRepository();
-    }
-
-    @Bean
-    public DetectionRepositoryPort detectionRepositoryPort() {
-        return new InMemoryDetectionRepository();
     }
 
     /**
@@ -156,26 +169,6 @@ public class WiringConfiguration {
         return delegate;
     }
 
-    @Bean
-    public CategoryRepositoryPort categoryRepositoryPort() {
-        return new InMemoryCategoryRepository();
-    }
-
-    @Bean
-    public AssetRepositoryPort assetRepositoryPort() {
-        return new InMemoryAssetRepository();
-    }
-
-    @Bean
-    public AssetUsageRepositoryPort assetUsageRepositoryPort() {
-        return new InMemoryAssetUsageRepository();
-    }
-
-    @Bean
-    public TelemetryRepositoryPort telemetryRepositoryPort() {
-        return new InMemoryTelemetryRepository();
-    }
-
     /**
      * Synthetic 1&nbsp;Hz {@link TelemetrySourcePort}, collected (alongside
      * any other registered {@code TelemetrySourcePort} beans) into {@link
@@ -186,6 +179,18 @@ public class WiringConfiguration {
     @Bean
     public SimulatedTelemetrySource simulatedTelemetrySource() {
         return new SimulatedTelemetrySource();
+    }
+
+    /**
+     * RX half of the MAVLink TX/RX pair (docs/MVP2-PLAN.md X-a): ingests MAVLink 2 telemetry over
+     * UDP — from a real telemetry radio, ArduPilot/PX4 SITL, or {@link #mavlinkFeedTransmitter} —
+     * for {@code "mavlink"}-protocol telemetry devices. Collected (alongside {@link
+     * #simulatedTelemetrySource} and any other registered {@code TelemetrySourcePort} beans) into
+     * {@link #usageTracker}'s {@code List<TelemetrySourcePort>}.
+     */
+    @Bean
+    public MavlinkTelemetrySource mavlinkTelemetrySource() {
+        return new MavlinkTelemetrySource();
     }
 
     /**
@@ -202,12 +207,17 @@ public class WiringConfiguration {
      * — the latter is now purely the internal upstream {@link
      * #hlsProxyUpstreamBase} forwards to, never handed to viewers. See
      * {@link VisionPublishProperties}'s javadoc for the full rationale.
+     *
+     * <p>{@code whepViewBase} is {@link VisionPublishProperties.Mediamtx#whepBase()} directly
+     * (docs/MVP2-PLAN.md §L) — unlike {@code hlsViewBase}, WHEP has no app-relative proxy
+     * counterpart, so this must already be an address the viewer's browser can reach; see {@link
+     * VisionPublishProperties}'s "WHEP has no third base" javadoc section.
      */
     @Bean
     public StreamPublisherPort streamPublisherPort(VisionPublishProperties properties) {
         if (properties.enabled()) {
             VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
-            return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase());
+            return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(), mediamtx.whepBase());
         }
         return new NoopStreamPublisher();
     }
@@ -269,12 +279,23 @@ public class WiringConfiguration {
     }
 
     /**
-     * Append-only record of who changed the fleet. In-memory until
-     * {@code adapter-persistence} lands — see {@link InMemoryAuditTrail}.
+     * Append-only record of who changed the fleet. In-memory, unconditionally — {@code
+     * AuditTrailPort} was out of scope for both docs/MVP2-PLAN.md P-a and P-b (see this class's
+     * javadoc); see {@link InMemoryAuditTrail}.
      */
     @Bean
     public AuditTrailPort auditTrailPort() {
         return new InMemoryAuditTrail();
+    }
+
+    /**
+     * Debounced detection events (docs/MVP2-PLAN.md §E, E-a). In-memory, unconditionally — like
+     * {@link #auditTrailPort}, persistence was explicitly out of scope for this feature (deferred
+     * to a future persistence cycle); see {@link InMemoryDetectionEventRepository}.
+     */
+    @Bean
+    public DetectionEventRepositoryPort detectionEventRepositoryPort() {
+        return new InMemoryDetectionEventRepository();
     }
 
     /**
@@ -302,9 +323,11 @@ public class WiringConfiguration {
                                         DetectionRepositoryPort detectionRepositoryPort,
                                         EventPublisherPort eventPublisherPort,
                                         UsageTracker usageTracker,
-                                        OverlayPort overlayPort) {
+                                        OverlayPort overlayPort,
+                                        DetectionEventRepositoryPort detectionEventRepositoryPort) {
         return new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort);
+                streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort,
+                detectionEventRepositoryPort);
     }
 
     /**
@@ -326,6 +349,20 @@ public class WiringConfiguration {
     @Bean
     public CategoryService categoryService(CategoryRepositoryPort categoryRepositoryPort) {
         return new DefaultCategoryService(categoryRepositoryPort);
+    }
+
+    /**
+     * Flight replay (docs/MVP2-PLAN.md §R, R-a/R-a2): the read side behind {@code
+     * UsageTimelineController} (vision-api, component-scanned) — the one bean R-a's own writeup
+     * flagged as missing, closed here. All three collaborators are already wired above/in {@link
+     * PersistenceWiringConfiguration}, so this is a one-line assembly, mirroring {@link
+     * #categoryService}'s shape.
+     */
+    @Bean
+    public ReplayService replayService(AssetUsageRepositoryPort assetUsageRepositoryPort,
+                                        TelemetryRepositoryPort telemetryRepositoryPort,
+                                        DetectionRepositoryPort detectionRepositoryPort) {
+        return new DefaultReplayService(assetUsageRepositoryPort, telemetryRepositoryPort, detectionRepositoryPort);
     }
 
     /**
@@ -353,6 +390,22 @@ public class WiringConfiguration {
     @Bean(destroyMethod = "close")
     public MjpegFeedTransmitter mjpegFeedTransmitter() {
         return new MjpegFeedTransmitter();
+    }
+
+    /**
+     * TX half of the MAVLink TX/RX pair (docs/MVP2-PLAN.md X-a): emits a synthetic MAVLink 2
+     * telemetry stream (HEARTBEAT/SYS_STATUS/GLOBAL_POSITION_INT) driven by a flight route, for
+     * zero-hardware rehearsal of {@link #mavlinkTelemetrySource} (or any real MAVLink ground
+     * station). No constructor config, like {@link #mjpegFeedTransmitter} — unlike {@code rtsp}/
+     * {@code mjpeg}, the destination is per-feed ({@link com.drones.vision.domain.model.FeedSpec#source()}
+     * is itself the {@code udp://host:port} to push to), not a shared base; see
+     * adapter-mavlink/MODULE.md for the full reasoning. Not yet reachable via {@link
+     * #simulationService}/{@code SimulationTransport} — that dispatch integration is a follow-up,
+     * out of X-a's scope; this bean is independently usable via the plain device/asset APIs today.
+     */
+    @Bean
+    public MavlinkFeedTransmitter mavlinkFeedTransmitter() {
+        return new MavlinkFeedTransmitter();
     }
 
     /**

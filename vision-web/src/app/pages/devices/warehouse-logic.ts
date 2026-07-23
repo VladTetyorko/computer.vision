@@ -1,120 +1,35 @@
-import type {
-  AssetDetails,
-  AssetEdit,
-  AssetSummary,
-  Device,
-  DeviceEdit,
-  LifecycleState,
-  SettableLifecycleState,
-} from '../../core/api/models';
+import type { AssetDetails, AssetSummary, Device, LifecycleState } from '../../core/api/models';
+import { findVideoDevice } from '../../core/device-logic';
 
 /**
- * Pure logic behind the Devices page's warehouse view (docs/CYCLES-PLAN.md §8): the
- * lifecycle-action state machine for a device/asset row, partial-edit request builders, and the
- * device+asset → warehouse-row view model. Split out so it is unit-testable without HTTP or the
- * router — mirrors `pages/devices/simulate-logic.ts` and `core/telemetry-logic.ts`.
+ * Pure logic behind the Devices page's warehouse view (docs/CYCLES-PLAN.md §8, §11): the
+ * device+asset → view-model builders this page's table/list rendering needs. Split out so it is
+ * unit-testable without HTTP or the router — mirrors `pages/devices/simulate-logic.ts` and
+ * `core/telemetry-logic.ts`.
  *
+ * The generic lifecycle-action-menu state machine and edit-request builders
+ * (`availableDeviceActions`/`availableAssetActions`/`buildDeviceRenameEdit`/`buildAssetEdit`/
+ * `RESTORE_TARGET_STATE`) moved to `core/warehouse-logic.ts` in docs/CYCLES-PLAN.md §11 (CD-b) —
+ * the new asset detail page needs them too, and this codebase has no precedent for one page
+ * importing another page's module (see `core/device-logic.ts`'s doc comment). Re-exported here so
+ * every import site this page already had keeps working verbatim.
+ */
+export {
+  RESTORE_TARGET_STATE,
+  availableAssetActions,
+  availableDeviceActions,
+  buildAssetEdit,
+  buildDeviceRenameEdit,
+  type AssetEditForm,
+  type AssetLifecycleAction,
+  type DeviceLifecycleAction,
+} from '../../core/warehouse-logic';
+
+/**
  * The pinned REST contract (docs/CYCLES-PLAN.md §8) is coded against verbatim even though CW-a
  * (the backend half) is not live while this lands: every mutation this logic feeds goes through
  * `FleetStore`'s `run()` funnel, so a 404 today degrades to one toast, never a crash.
  */
-
-/**
- * `DEACTIVATED` on an already-`DELETED` thing is how the pinned contract spells "restore" — there
- * is no direct `DELETED` → `ACTIVE` transition (`POST .../state` with `state: "ACTIVE"` on a
- * deleted device/asset is a 409). Every "Restore" action in the UI sends this target state.
- */
-export const RESTORE_TARGET_STATE: SettableLifecycleState = 'DEACTIVATED';
-
-/** Actions a device's row action menu can offer. */
-export type DeviceLifecycleAction =
-  | 'rename'
-  | 'activate'
-  | 'deactivate'
-  | 'archive'
-  | 'restore'
-  | 'assign'
-  | 'unassign';
-
-/** Actions an asset card's action menu can offer. */
-export type AssetLifecycleAction = 'rename' | 'activate' | 'deactivate' | 'archive' | 'restore';
-
-/**
- * Which actions a device's row offers for a given lifecycle state, further narrowed by whether an
- * asset currently owns it. Mirrors the literal per-state matrix docs/CYCLES-PLAN.md §8 pins:
- * `ACTIVE` gets the assign/unassign slot (resolved by ownership — assigning an already-owned
- * device makes no sense, nor does unassigning one nobody owns); `DEACTIVATED` does not carry that
- * slot at all (reactivate first); `DELETED` offers only `restore`.
- */
-export function availableDeviceActions(
-  state: LifecycleState,
-  owned: boolean,
-): readonly DeviceLifecycleAction[] {
-  switch (state) {
-    case 'ACTIVE':
-      return ['rename', 'deactivate', 'archive', owned ? 'unassign' : 'assign'];
-    case 'DEACTIVATED':
-      return ['rename', 'activate', 'archive'];
-    case 'DELETED':
-      return ['restore'];
-  }
-}
-
-/**
- * Which actions an asset card offers for a given lifecycle state — the same three-state shape as
- * devices, minus the assign/unassign slot (that lives on the device row, not the asset card).
- */
-export function availableAssetActions(state: LifecycleState): readonly AssetLifecycleAction[] {
-  switch (state) {
-    case 'ACTIVE':
-      return ['rename', 'deactivate', 'archive'];
-    case 'DEACTIVATED':
-      return ['rename', 'activate', 'archive'];
-    case 'DELETED':
-      return ['restore'];
-  }
-}
-
-/**
- * Builds `PATCH /api/devices/{id}`'s body for the Rename action — omits `name` entirely (rather
- * than sending a `null`/unchanged value) when the trimmed input is blank or equal to what the
- * device already has, so a no-op rename never hits the network.
- */
-export function buildDeviceRenameEdit(name: string, original: Pick<Device, 'name'>): DeviceEdit {
-  const trimmed = name.trim();
-  return trimmed.length > 0 && trimmed !== original.name ? { name: trimmed } : {};
-}
-
-/** Form state for the asset rename/re-category card. */
-export interface AssetEditForm {
-  readonly displayName: string;
-  readonly category: string;
-}
-
-/**
- * Builds `PATCH /api/assets/{id}`'s body — each of `displayName`/`category` is included only when
- * trimmed and different from the asset's current value; an untouched or blanked-out field is
- * omitted rather than sent as `null` or an empty string, the same `@JsonInclude(NON_NULL)`
- * convention every request builder in this app follows.
- */
-export function buildAssetEdit(
-  form: AssetEditForm,
-  original: Pick<AssetSummary, 'displayName' | 'category'>,
-): AssetEdit {
-  const edit: { displayName?: string; category?: string } = {};
-
-  const displayName = form.displayName.trim();
-  if (displayName.length > 0 && displayName !== original.displayName) {
-    edit.displayName = displayName;
-  }
-
-  const category = form.category.trim();
-  if (category.length > 0 && category !== original.category) {
-    edit.category = category;
-  }
-
-  return edit;
-}
 
 /** Enough about a device's owning asset to render an "owned by" column and an unassign action. */
 export interface DeviceOwner {
@@ -140,7 +55,7 @@ export function mapDeviceOwners(assets: readonly AssetDetails[]): ReadonlyMap<st
   return owners;
 }
 
-/** One row of the warehouse device table: a device plus everything its row needs to render. */
+/** One row of the Advanced/raw-devices table: a device plus everything its row needs to render. */
 export interface WarehouseRow {
   readonly device: Device;
   readonly lifecycle: LifecycleState;
@@ -151,7 +66,8 @@ export interface WarehouseRow {
 
 /**
  * Devices + who owns them + who's currently streaming, combined into one row per device — the
- * warehouse table's view model.
+ * Advanced/raw-devices table's view model (docs/CYCLES-PLAN.md §11 demoted this from the page's
+ * primary surface to a collapsed "Advanced" area; the row shape itself is unchanged from CW-b).
  */
 export function buildWarehouseRows(
   devices: readonly Device[],
@@ -175,7 +91,7 @@ export function filterRowsByArchived(
   return showArchived ? rows : rows.filter((row) => !row.archived);
 }
 
-/** One card in the asset section: an asset plus its resolved (possibly absent) lifecycle. */
+/** One card in the (pre-CD-b) asset section: an asset plus its resolved (possibly absent) lifecycle. */
 export interface AssetRow {
   readonly asset: AssetSummary;
   readonly lifecycle: LifecycleState;
@@ -199,5 +115,48 @@ export function filterAssetRowsByArchived(
   rows: readonly AssetRow[],
   showArchived: boolean,
 ): readonly AssetRow[] {
+  return showArchived ? rows : rows.filter((row) => !row.archived);
+}
+
+/**
+ * One row of the Devices page's *primary* asset list (docs/CYCLES-PLAN.md §11, CD-b item 1): an
+ * asset plus exactly what the list-level "Watch · Open · Archive" actions need — `watchDeviceId`
+ * is the device `Watch` navigates to (`undefined` when the asset has no VIDEO-capable device at
+ * all, in which case the list hides the Watch button), `deviceCount`/`streaming` are the row's
+ * status decoration. Built from `AssetDetails` (not just `AssetSummary`) because `deviceCount`
+ * needs the resolved device list — the page already fetches `AssetDetails` for every asset for the
+ * Advanced table's "owned by" column, so this reuses that same fetch rather than a second one.
+ */
+export interface AssetListRow {
+  readonly asset: AssetSummary;
+  readonly lifecycle: LifecycleState;
+  readonly archived: boolean;
+  readonly deviceCount: number;
+  readonly streaming: boolean;
+  readonly watchDeviceId?: string;
+}
+
+export function buildAssetListRows(
+  assets: readonly AssetDetails[],
+  liveDeviceIds: ReadonlySet<string>,
+): readonly AssetListRow[] {
+  return assets.map((asset) => {
+    const lifecycle = asset.lifecycle ?? 'ACTIVE';
+    return {
+      asset,
+      lifecycle,
+      archived: lifecycle === 'DELETED',
+      deviceCount: asset.devices.length,
+      streaming: asset.devices.some((device) => liveDeviceIds.has(device.id)),
+      watchDeviceId: findVideoDevice(asset.devices)?.id,
+    };
+  });
+}
+
+/** Hides archived asset rows unless the "show archived" toggle is on — mirrors `filterAssetRowsByArchived`. */
+export function filterAssetListRowsByArchived(
+  rows: readonly AssetListRow[],
+  showArchived: boolean,
+): readonly AssetListRow[] {
   return showArchived ? rows : rows.filter((row) => !row.archived);
 }
