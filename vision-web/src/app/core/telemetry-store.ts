@@ -102,7 +102,9 @@ export class TelemetryStore {
     if (generation !== this.generation) {
       return;
     }
-    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.pollOnce(usageId));
+    // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
+    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(usageId));
   }
 
   /** A device belongs to at most one asset; that asset's open usage is what we poll. */

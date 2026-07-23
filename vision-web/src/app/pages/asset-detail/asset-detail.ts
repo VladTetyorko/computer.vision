@@ -101,6 +101,14 @@ export class AssetDetailPage {
   });
   protected readonly live = computed(() => this.stream() !== undefined);
 
+  // --- Deliberately-stopped state (docs/MVP2-PLAN.md §S, S-b) — mirrors `LivePage`'s own pair
+  // exactly (see its doc comment for the full reasoning): this page's own Stop action, plus
+  // "this page watched it go live, then it disappeared from the streams list" (someone else's
+  // stop, or this page's own — both read the same way once it's gone).
+  private readonly explicitlyStopped = signal(false);
+  private readonly hasBeenLive = signal(false);
+  protected readonly stopped = computed(() => this.explicitlyStopped() || (this.hasBeenLive() && !this.live()));
+
   // --- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
   // Per the plan's own scoping: the per-stream feed while this asset is actively streaming (a
   // dedicated small poll below, mirroring `DetectionsStore`'s own per-stream cadence), else recent
@@ -162,6 +170,13 @@ export class AssetDetailPage {
       void this.load(id);
     });
 
+    // Latches once `live()` is ever observed true — see `stopped`'s own doc comment above.
+    effect(() => {
+      if (this.live()) {
+        this.hasBeenLive.set(true);
+      }
+    });
+
     // Any device on the asset resolves the same owning-asset/open-usage pair — see class doc.
     effect(() => {
       const devices = this.asset()?.devices ?? [];
@@ -196,14 +211,15 @@ export class AssetDetailPage {
     // comment: this is one of exactly three pages that keeps the shared global events poll alive.
     this.events.activate();
 
+    // Every poll registration below returns its own promise (not `void`-discarded) so
+    // `PollScheduler`'s in-flight guard can skip a tick while the previous one is still pending,
+    // rather than piling another request on top of a slow/hung backend (docs/MVP2-PLAN.md §S, S-b).
     const scheduler = inject(PollScheduler);
-    const stopAssetPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => void this.refresh());
+    const stopAssetPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refresh());
     const stopClock = scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     const stopStreamEventsPoll = scheduler.schedule(STREAM_EVENTS_POLL_INTERVAL_MS, () => {
       const streamId = this.stream()?.streamId;
-      if (streamId) {
-        void this.pollStreamEvents(streamId);
-      }
+      return streamId ? this.pollStreamEvents(streamId) : undefined;
     });
     inject(DestroyRef).onDestroy(() => {
       this.events.release();
@@ -273,6 +289,7 @@ export class AssetDetailPage {
     this.busy.set(true);
     try {
       await this.fleet.start(device.id, this.settings.effective());
+      this.explicitlyStopped.set(false); // a fresh attach — see `stopped`'s own doc comment
     } finally {
       this.busy.set(false);
     }
@@ -286,6 +303,7 @@ export class AssetDetailPage {
     this.busy.set(true);
     try {
       await this.fleet.stop(stream.streamId);
+      this.explicitlyStopped.set(true);
     } finally {
       this.busy.set(false);
     }

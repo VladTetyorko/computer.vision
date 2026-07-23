@@ -77,7 +77,9 @@ export class FleetMapStore {
 
   constructor() {
     void this.refresh();
-    this.stopAssetPolling = this.scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => void this.refresh());
+    // Returns `refresh()`'s own promise so `PollScheduler`'s in-flight guard applies — see
+    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    this.stopAssetPolling = this.scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refresh());
     this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
@@ -143,8 +145,10 @@ export class FleetMapStore {
       if (tracker.generation !== generation || !this.trackers.has(assetId)) {
         return;
       }
+      // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
+      // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
       tracker.stopPolling = this.scheduler.schedule(TELEMETRY_POLL_INTERVAL_MS, () =>
-        void this.pollTelemetry(assetId, usageId),
+        this.pollTelemetry(assetId, usageId),
       );
     } catch {
       // best-effort — see class doc; this asset's marker just falls back to lastKnownPosition

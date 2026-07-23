@@ -17,6 +17,7 @@ import com.drones.vision.domain.port.out.StreamPublisherPort;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -99,6 +100,11 @@ import java.util.function.LongSupplier;
  * volatile} field ({@link #latestDetections()}); it is persisted via {@link
  * DetectionRepositoryPort} and announced via a {@code DETECTION} {@link
  * Event} only when non-empty, so uneventful frames don't spam storage/events.
+ *
+ * <p>The most recently <b>published</b> frame is likewise kept in a {@code volatile} field ({@link
+ * #latestFrame()}, docs/MVP3-PLAN.md C-a) — the same instance {@link StreamPublisherPort#publish}
+ * was just handed (post-overlay burn-in when one was drawn), a latest-wins reference swap with no
+ * per-frame copy. This is what backs the manager dashboard's per-stream JPEG snapshot endpoint.
  *
  * <p><b>Debounced detection events</b> (docs/MVP2-PLAN.md §E, E-a): every completed result —
  * empty or not — also feeds an optional {@link DetectionEventEngine} ({@code eventEngine},
@@ -183,6 +189,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     private volatile Flow.Subscription subscription;
     private volatile List<Detection> latestDetections = List.of();
+    private volatile VideoFrame latestFrame;
 
     // Only ever touched from within onNext(), which Flow.Subscriber's contract serializes
     // (signals are never delivered concurrently) -- a plain (non-volatile) boolean latch is
@@ -313,6 +320,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         return latestDetections;
     }
 
+    /**
+     * @return the most recently published frame — post-overlay burn-in when one was drawn, exactly
+     *         the instance handed to {@link StreamPublisherPort#publish} (docs/MVP3-PLAN.md C-a) —
+     *         or {@link Optional#empty()} before the first frame has published. A latest-wins
+     *         reference swap, same single-{@code volatile}-field convention as {@link
+     *         #latestDetections()}: no copy per frame, no buffering, and safe to read from any
+     *         thread (e.g. the HTTP thread serving a snapshot request) concurrently with {@link
+     *         #onNext}.
+     */
+    public Optional<VideoFrame> latestFrame() {
+        return Optional.ofNullable(latestFrame);
+    }
+
     @Override
     public void onSubscribe(Flow.Subscription subscription) {
         this.subscription = subscription;
@@ -326,7 +346,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         recordArrivalAndRecomputeSampling();
         try {
-            streamPublisherPort.publish(streamId, overlayIfNeeded(frame));
+            VideoFrame published = overlayIfNeeded(frame);
+            latestFrame = published;
+            streamPublisherPort.publish(streamId, published);
             if (frame.sequence() % sampleEveryNthFrame == 0) {
                 maybeDetect(frame);
             }

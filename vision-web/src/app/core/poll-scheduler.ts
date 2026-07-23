@@ -17,8 +17,15 @@ const TICK_MS = 1_000;
 interface Task {
   readonly periodMs: number;
   nextDueAt: number;
-  readonly callback: () => void;
+  readonly callback: () => void | Promise<void>;
   readonly ignoreHidden: boolean;
+  /** True while a previously-returned promise from `callback` hasn't settled yet — see `tick`. */
+  inFlight: boolean;
+}
+
+/** Narrows a callback's return value without assuming every caller returns a real `Promise`. */
+function isThenable(value: void | Promise<void>): value is Promise<void> {
+  return typeof value === 'object' && value !== null && typeof (value as Promise<void>).then === 'function';
 }
 
 export interface ScheduleOptions {
@@ -72,13 +79,24 @@ export class PollScheduler {
    * itself, then relying on the interval only for the *next* one). Returns an unsubscribe
    * function — call it on `DestroyRef.onDestroy`/`reset()`/tracker teardown, exactly where a
    * `clearInterval(handle)` used to go.
+   *
+   * **In-flight guard (docs/MVP2-PLAN.md §S, S-b).** If `callback` returns a `Promise`, this task
+   * is skipped on every due tick until that promise settles — a slow/hung backend then degrades
+   * one task to stale data instead of firing an unbounded, ever-growing pile of overlapping HTTP
+   * requests against it (every poller in this app calls a `VisionApi` method that returns a
+   * `Promise`, so every real poll registration gets this for free; a synchronous clock-tick
+   * callback, e.g. `() => this.nowSignal.set(Date.now())`, returns `void` and is entirely
+   * unaffected — there is nothing to wait on). Settling with a rejection still clears the guard
+   * (a `catch`-swallowing poller — this app's own silent-degrade convention — must not wedge
+   * itself forever just because one request failed).
    */
-  schedule(periodMs: number, callback: () => void, options: ScheduleOptions = {}): () => void {
+  schedule(periodMs: number, callback: () => void | Promise<void>, options: ScheduleOptions = {}): () => void {
     const task: Task = {
       periodMs,
       nextDueAt: Date.now() + periodMs,
       callback,
       ignoreHidden: options.ignoreHidden ?? false,
+      inFlight: false,
     };
     this.tasks.add(task);
     this.ensureTicking();
@@ -111,10 +129,29 @@ export class PollScheduler {
       if (paused && !task.ignoreHidden) {
         continue; // waits for the next visible tick — due time untouched, nothing is dropped
       }
+      if (task.inFlight) {
+        continue; // the previous invocation hasn't settled yet — see `schedule`'s in-flight guard
+      }
       if (now >= task.nextDueAt) {
         task.nextDueAt = now + task.periodMs;
-        task.callback();
+        this.run(task);
       }
     }
+  }
+
+  private run(task: Task): void {
+    const result = task.callback();
+    if (!isThenable(result)) {
+      return;
+    }
+    task.inFlight = true;
+    result.then(
+      () => {
+        task.inFlight = false;
+      },
+      () => {
+        task.inFlight = false; // a rejected poll still frees the next tick — see `schedule`'s doc.
+      },
+    );
   }
 }

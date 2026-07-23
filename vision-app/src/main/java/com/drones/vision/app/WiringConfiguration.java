@@ -23,12 +23,14 @@ import com.drones.vision.application.AssetService;
 import com.drones.vision.application.DefaultAssetService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
+import com.drones.vision.application.DefaultFleetSummaryService;
 import com.drones.vision.application.DefaultReplayService;
 import com.drones.vision.application.DefaultSimulationService;
 import com.drones.vision.application.DefaultStreamService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
+import com.drones.vision.application.FleetSummaryService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.StreamService;
@@ -363,6 +365,19 @@ public class WiringConfiguration {
                                         TelemetryRepositoryPort telemetryRepositoryPort,
                                         DetectionRepositoryPort detectionRepositoryPort) {
         return new DefaultReplayService(assetUsageRepositoryPort, telemetryRepositoryPort, detectionRepositoryPort);
+    }
+
+    /**
+     * The manager dashboard's single aggregated read (docs/MVP3-PLAN.md C-a): the read side behind
+     * {@code FleetController} (vision-api, component-scanned) — a one-line assembly over four
+     * already-wired collaborators, mirroring {@link #replayService}'s shape.
+     */
+    @Bean
+    public FleetSummaryService fleetSummaryService(AssetService assetService, StreamService streamService,
+                                                     UsageTracker usageTracker,
+                                                     DetectionEventRepositoryPort detectionEventRepositoryPort) {
+        return new DefaultFleetSummaryService(assetService, streamService, usageTracker,
+                detectionEventRepositoryPort);
     }
 
     /**

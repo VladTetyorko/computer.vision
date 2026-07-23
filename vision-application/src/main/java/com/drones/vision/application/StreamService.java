@@ -3,8 +3,10 @@ package com.drones.vision.application;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.VideoFrame;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -50,4 +52,16 @@ public interface StreamService {
      * @return an immutable snapshot, for deriving asset status
      */
     Set<DeviceId> activeDeviceIds();
+
+    /**
+     * The most recently published frame on a running stream (docs/MVP3-PLAN.md C-a) — post-overlay
+     * burn-in when one was drawn, exactly the instance the pipeline last handed to {@link
+     * com.drones.vision.domain.port.out.StreamPublisherPort#publish}. Backs the per-stream JPEG
+     * snapshot endpoint.
+     *
+     * @param streamId the stream to inspect
+     * @return the frame, or {@link Optional#empty()} if {@code streamId} is unknown/not running on
+     *         this instance, or it is but hasn't published a frame yet
+     */
+    Optional<VideoFrame> latestFrame(StreamId streamId);
 }

@@ -111,6 +111,7 @@
           <vision-player
             [src]="stream()?.viewUrl ?? null"
             [whepUrl]="stream()?.whepUrl ?? null"
+            [stopped]="stopped()"
             [detections]="detections.results()"
             [boxesMode]="boxesMode()"
             (latencyChanged)="onLatency($event)"

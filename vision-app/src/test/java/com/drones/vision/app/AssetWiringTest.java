@@ -5,11 +5,13 @@ import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.api.EventController;
+import com.drones.vision.api.FleetController;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
+import com.drones.vision.application.FleetSummaryService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.domain.model.FeedSpec;
@@ -79,6 +81,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * here too, for the same "small, focused, asset-model-adjacent bean" reasoning as {@link
  * ReplayService} above, and {@link EventController} is asserted to resolve its constructor
  * dependency, mirroring {@link SimulationController}'s own assertion.
+ *
+ * <p>Further extended for docs/MVP3-PLAN.md C-a: {@link FleetSummaryService} is asserted here too,
+ * for the same "small, focused, asset-model-adjacent bean" reasoning as {@link ReplayService}
+ * above, and {@link FleetController} is asserted to resolve its constructor dependency, mirroring
+ * {@link EventController}'s own assertion.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 class AssetWiringTest {
@@ -109,6 +116,14 @@ class AssetWiringTest {
     /** docs/MVP2-PLAN.md E-a: {@code GET /api/events}/{@code GET /api/streams/{id}/events}. */
     @Autowired
     private EventController eventController;
+
+    /** docs/MVP3-PLAN.md C-a: the manager dashboard's aggregated fleet read. */
+    @Autowired
+    private FleetSummaryService fleetSummaryService;
+
+    /** docs/MVP3-PLAN.md C-a: {@code GET /api/fleet/summary}. */
+    @Autowired
+    private FleetController fleetController;
 
     @Autowired
     private List<FeedTransmitterPort> feedTransmitterPorts;
@@ -154,6 +169,8 @@ class AssetWiringTest {
         assertNotNull(actingOwnership, "Ownership bean must be registered for CurrentUser to fall back to");
         assertNotNull(detectionEventRepositoryPort, "DetectionEventRepositoryPort bean must be registered (docs/MVP2-PLAN.md E-a)");
         assertNotNull(eventController, "EventController must resolve its constructor dependency (docs/MVP2-PLAN.md E-a)");
+        assertNotNull(fleetSummaryService, "FleetSummaryService bean must be registered (docs/MVP3-PLAN.md C-a)");
+        assertNotNull(fleetController, "FleetController must resolve its constructor dependency (docs/MVP3-PLAN.md C-a)");
     }
 
     @Test

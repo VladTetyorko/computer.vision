@@ -65,6 +65,19 @@ export class LivePage {
   protected readonly stream = computed(() => this.fleet.streamFor(this.deviceId()));
   protected readonly live = computed(() => this.stream() !== undefined);
 
+  // --- Deliberately-stopped state (docs/MVP2-PLAN.md §S, S-b) ---------------------------------
+  // `explicitlyStopped` is this page's own Stop action; `hasBeenLive` tracks whether *this page
+  // instance* ever saw the stream live at all. Combined, `stopped` covers both the reported bug
+  // (click Stop → calm terminal state, not a reconnect storm) and "someone else stopped it" —
+  // `FleetStore`'s poll flips `live()` false on its own next tick, which this page has no
+  // separate way to tell apart from "was deliberately stopped", so it's treated the same: once a
+  // stream this page was watching disappears from the streams list, it is gone, not struggling.
+  // A device that has simply never been started (`hasBeenLive` still `false`) stays the existing
+  // plain `idle`/"Not streaming" state — that is not "stopped", it's "never asked to play".
+  private readonly explicitlyStopped = signal(false);
+  private readonly hasBeenLive = signal(false);
+  protected readonly stopped = computed(() => this.explicitlyStopped() || (this.hasBeenLive() && !this.live()));
+
   /**
    * Capability-driven panels: a fixed camera and a drone are not the same viewing
    * experience, and `Device.capabilities` already says which is which
@@ -80,6 +93,13 @@ export class LivePage {
   );
 
   constructor() {
+    // Latches once `live()` is ever observed true — see `stopped`'s own doc comment above.
+    effect(() => {
+      if (this.live()) {
+        this.hasBeenLive.set(true);
+      }
+    });
+
     // Only devices that declare TELEMETRY are worth looking up an asset/usage for at all —
     // `hasTelemetry()` flips true once `FleetStore` has loaded the device, so this also covers
     // the brief window before that first fetch resolves.
@@ -150,6 +170,7 @@ export class LivePage {
     this.busy.set(true);
     try {
       await this.fleet.start(device.id, this.settings.effective());
+      this.explicitlyStopped.set(false); // a fresh attach — see `stopped`'s own doc comment
     } finally {
       this.busy.set(false);
     }
@@ -163,6 +184,7 @@ export class LivePage {
     this.busy.set(true);
     try {
       await this.fleet.stop(stream.streamId);
+      this.explicitlyStopped.set(true);
     } finally {
       this.busy.set(false);
     }

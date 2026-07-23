@@ -68,7 +68,9 @@ export class DetectionsStore {
     this.resultsSignal.set([]);
 
     void this.pollOnce(streamId, generation);
-    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.pollOnce(streamId, generation));
+    // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
+    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(streamId, generation));
   }
 
   /** Stops polling and clears results — call when there is no stream left to track. */

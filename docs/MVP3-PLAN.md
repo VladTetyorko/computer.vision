@@ -23,7 +23,7 @@ Top-level nav becomes job-oriented: **Fly** (operator cockpit) · **Command** (m
 
 | Cycle | Kind | Ships | Scope | Status |
 |---|---|---|---|---|
-| C-a | backend | stream snapshots (`GET /api/streams/{id}/snapshot.jpg`) + fleet summary (`GET /api/fleet/summary`) | vision-application, vision-api, vision-app | pending |
+| C-a | backend | stream snapshots (`GET /api/streams/{id}/snapshot.jpg`) + fleet summary (`GET /api/fleet/summary`) | vision-application, vision-api, vision-app | ✅ done |
 | C-b | **UI** | Fly: the operator cockpit page | vision-web | pending |
 | C-c | **UI** | Command: the manager dashboard | vision-web, after C-b | pending |
 
@@ -32,6 +32,42 @@ Top-level nav becomes job-oriented: **Fly** (operator cockpit) · **Command** (m
 - **Snapshots:** StreamPipeline already holds the latest published frame (or can retain one cheaply) — expose it as JPEG: `GET /api/streams/{id}/snapshot` (image/jpeg, the overlay-burned frame if burn-in on, else raw; 404 when not streaming; no caching). Manager thumbnails poll this at ~1/5s per *visible* tile — orders of magnitude cheaper than HLS players.
 - **Fleet summary:** one aggregated endpoint for the Command page: per-category asset counts by lifecycle × streaming state, plus the attention-relevant per-asset facts in one response (assetId, name, category, lifecycle, streaming?, battery?, telemetryAgeMs?, openEventCount, sourceState) — server-side join of what the SPA today assembles from 4 polls; capped/paged for 100+; browser polls ONE endpoint.
 - **Done when:** a curl fetches a JPEG of a live stream and one JSON that answers "who needs attention" for the whole fleet. **Estimate: M.**
+
+**Done note (for C-b/C-c to build against):**
+
+**1. `GET /api/streams/{streamId}/snapshot`** (note: no `.jpg` suffix — a plain path segment, `Content-Type: image/jpeg` on the response is what tells the browser what it is, consistent with every other id-suffixed path in this API)
+- 200, body = JPEG bytes, `Content-Type: image/jpeg`, `Cache-Control: no-store`.
+- Downscaled to at most **480px wide** (`SnapshotJpegEncoder.MAX_SNAPSHOT_WIDTH`, vision-api), aspect-preserving. A frame that's already JPEG-encoded and already ≤480px wide (adapter-simulation/adapter-mjpeg's typical case) passes through untouched — cheap by default, not just at the cap.
+- 404 (`{"error":"NOT_FOUND", ...}`) when the stream id is unknown **or** is running but hasn't published a frame yet — both are indistinguishable `Optional.empty()` from `StreamService#latestFrame`. 400 for a malformed stream-id UUID.
+- The frame is exactly what the pipeline last published — **post-overlay burn-in** when `PipelineConfig#overlayBurnIn()` is on (the default), i.e. the same detection boxes a live viewer sees.
+- Poll cost: one JPEG encode per request, on the caller's thread, no server-side caching — cheap enough for the plan's "~1/5s per visible tile" budget, but C-c should still only poll tiles actually on screen (virtualization), not the whole fleet at once.
+
+**2. `GET /api/fleet/summary?includeArchived=`** (note the query param name — deliberately `includeArchived`, not `includeDeleted` like every other list endpoint; see vision-api/MODULE.md's Conventions for why)
+- 200, body:
+  ```json
+  {
+    "categories": [
+      {"categoryId": "drone", "categoryName": "Drone", "total": 5, "active": 4, "deactivated": 1, "deleted": 0, "streaming": 2}
+    ],
+    "assets": [
+      {
+        "assetId": "…", "displayName": "…", "categoryId": "drone", "categoryName": "Drone",
+        "lifecycle": "ACTIVE", "streaming": true, "streamId": "…",
+        "batteryPercent": 42.0, "telemetryAgeMs": 3100, "openEventCount": 1
+      }
+    ],
+    "totalAssets": 5
+  }
+  ```
+- `categories`: one row per category actually present, sorted by slug; **never capped** — reflects the true fleet regardless of the `assets` list's own cap below.
+- `assets`: sorted by `displayName` (case-insensitive), capped at **500** (`DefaultFleetSummaryService.MAX_ASSETS_IN_SUMMARY`) — comfortably past the "3–100 pilots" scale this cycle targets. Compare `assets.length` to `totalAssets` to detect truncation; no cursor/offset param exists yet (not needed at this scale — add one if a future fleet genuinely exceeds 500).
+- `streamId`/`batteryPercent`/`telemetryAgeMs` are **omitted from the JSON entirely** (not `null`) when unavailable — check for key presence, not `!== null`.
+- `batteryPercent`/`telemetryAgeMs` are derived from the **last telemetry sample ever received**, not scoped to "currently streaming" — an asset that just landed still reports a real (growing) `telemetryAgeMs`, which is exactly the staleness signal the attention queue wants.
+- `openEventCount` counts `OPEN` `DetectionEvent`s for that asset among the fleet's 2,000 most-recently-updated events (`DefaultFleetSummaryService.OPEN_EVENTS_SCAN_LIMIT`) — effectively exhaustive at demo scale, honestly documented as not exhaustive at extreme scale.
+- **No `sourceState` field exists** — there is no honest "reconnecting"/"degraded" read available anywhere in the backend today (`EventPublisherPort` is write-only; `SupervisedPublisher`'s outage state is private to `DefaultStreamService`). C-c's attention-queue design should key severity off `batteryPercent < 20`/`telemetryAgeMs` staleness/`openEventCount > 0` only — not assume a source-health signal exists.
+- 400 for a malformed `includeArchived` value (not boolean-parseable); no other failure case (an empty fleet is 200 with empty arrays).
+
+Scope note: both endpoints are read-only additions; nothing about existing endpoints changed. `vision-domain` was untouched — every new type is an application-layer read model or a vision-api DTO.
 
 ### C-b — UI: Fly (operator cockpit) *(scope: vision-web)*
 

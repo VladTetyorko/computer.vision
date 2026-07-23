@@ -112,6 +112,56 @@ describe('PollScheduler', () => {
     expect(unpaused).toHaveBeenCalledTimes(3);
   });
 
+  // --- In-flight guard (docs/MVP2-PLAN.md §S, S-b) ---------------------------------------------
+  // Without this, a hung/slow backend turns "N pollers × M elapsed ticks" into an unbounded pile
+  // of overlapping HTTP requests — every real poller in this app already returns its own promise
+  // from `callback` (see e.g. `FleetStore`'s registration), so this guard applies to all of them.
+
+  it('skips a due tick while the previous promise-returning call is still pending', async () => {
+    const scheduler = create();
+    let resolveFirst!: () => void;
+    const callback = vi.fn(() => new Promise<void>((resolve) => (resolveFirst = resolve)));
+    scheduler.schedule(1_000, callback);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(callback).toHaveBeenCalledTimes(1); // fired, still pending
+
+    await vi.advanceTimersByTimeAsync(3_000); // three more due ticks while it's in flight
+    expect(callback).toHaveBeenCalledTimes(1); // none of them fired a second overlapping call
+
+    resolveFirst();
+    await vi.advanceTimersByTimeAsync(0); // let the microtask that clears `inFlight` run
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(callback).toHaveBeenCalledTimes(2); // resumes on the next due tick once settled
+  });
+
+  it('a rejected promise still clears the in-flight guard — a failed poll is not stuck forever', async () => {
+    const scheduler = create();
+    let rejectFirst!: (error: unknown) => void;
+    const callback = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => (rejectFirst = reject)))
+      .mockResolvedValue(undefined);
+    scheduler.schedule(1_000, callback);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(callback).toHaveBeenCalledTimes(1);
+
+    rejectFirst(new Error('boom'));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(callback).toHaveBeenCalledTimes(2);
+  });
+
+  it('a synchronous (non-promise) callback is unaffected by the guard — fires on every due tick', () => {
+    const scheduler = create();
+    const callback = vi.fn(); // returns `undefined`, e.g. a clock-tick registration
+    scheduler.schedule(1_000, callback);
+
+    vi.advanceTimersByTime(3_000);
+    expect(callback).toHaveBeenCalledTimes(3);
+  });
+
   it('an unrelated task keeps running after a sibling unsubscribes', () => {
     const scheduler = create();
     const a = vi.fn();

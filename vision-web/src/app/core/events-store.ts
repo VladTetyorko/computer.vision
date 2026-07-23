@@ -68,7 +68,9 @@ export class EventsStore {
     this.activeConsumers++;
     if (this.activeConsumers === 1) {
       void this.pollOnce();
-      this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.pollOnce(), {
+      // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
+      // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+      this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(), {
         ignoreHidden: true,
       });
     }

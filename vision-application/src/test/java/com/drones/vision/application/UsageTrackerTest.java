@@ -29,9 +29,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -66,6 +69,16 @@ class UsageTrackerTest {
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources) {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources);
+    }
+
+    /**
+     * docs/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
+     * backoff instead of production's real 1s-30s one, via the package-private test-seam
+     * constructor -- so supervision tests complete quickly and deterministically.
+     */
+    private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
+        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+                TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
     }
 
     @Test
@@ -142,7 +155,7 @@ class UsageTrackerTest {
     }
 
     @Test
-    void telemetrySamplesArePersistedAndFoldedIntoTheUsageSummary() {
+    void telemetrySamplesArePersistedAndFoldedIntoTheUsageSummary() throws InterruptedException {
         Device telemetryDevice = telemetryDevice("tel-1");
         Asset asset = asset(Set.of(telemetryDevice.id()));
         when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
@@ -177,7 +190,73 @@ class UsageTrackerTest {
         verify(telemetryRepository).save(usageAfterSecond.id(), sample2);
 
         tracker.onStreamStopped(telemetryDevice.id());
-        assertTrue(source.closedDevices.contains(telemetryDevice.id()), "telemetry must be unsubscribed/closed on usage close");
+        // docs/MVP2-PLAN.md §S, S-a: the actual close() call now runs on a background thread (same
+        // fix as DefaultStreamService's own stop() -- see that class's javadoc), so this must be
+        // awaited rather than checked synchronously right after onStreamStopped returns.
+        assertTrue(source.closeLatch.await(1, TimeUnit.SECONDS), "telemetry must be unsubscribed/closed on usage close");
+        assertTrue(source.closedDevices.contains(telemetryDevice.id()));
+    }
+
+    @Test
+    void telemetrySourceFailureTriggersASupervisedReopenAndTheUsageStaysOpenThroughout() throws InterruptedException {
+        // docs/MVP2-PLAN.md §S, S-a: a telemetry source error/completion must never end telemetry
+        // for the usage -- it is retried (proven here by a second open() call), and the same usage
+        // (never closed/reopened) keeps accumulating samples once the new subscription is flowing.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        CountDownLatch reopened = new CountDownLatch(1);
+        AtomicInteger openCount = new AtomicInteger();
+        source.onOpen = () -> {
+            if (openCount.incrementAndGet() == 2) {
+                reopened.countDown();
+            }
+        };
+        UsageTracker tracker = trackerWithFastRetry(List.of(source));
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        assertEquals(1, openCount.get());
+
+        source.currentPublisher(telemetryDevice.id()).error(new RuntimeException("radio dropout"));
+
+        assertTrue(reopened.await(2, TimeUnit.SECONDS), "the telemetry source must be reopened after a failure");
+
+        Telemetry sample = telemetry(telemetryDevice.id(), 12.0, 34.0, 80.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        ArgumentCaptor<AssetUsage> captor = ArgumentCaptor.forClass(AssetUsage.class);
+        verify(usageRepository, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        AssetUsage latest = captor.getValue();
+        assertNull(latest.endedAt(), "the usage must still be open -- a source reconnect must never close/reopen it");
+        assertEquals(1, latest.sampleCount(), "the sample folded through the reconnected publisher into the SAME usage");
+        assertEquals(new GeoPosition(12.0, 34.0, null), latest.lastPosition());
+    }
+
+    @Test
+    void explicitStopDuringTelemetryBackoffCancelsThePendingRetryAndNoFurtherOpenEverHappens() throws InterruptedException {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        AtomicInteger openCount = new AtomicInteger();
+        source.onOpen = openCount::incrementAndGet;
+        UsageTracker tracker = trackerWithFastRetry(List.of(source));
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        assertEquals(1, openCount.get());
+
+        source.currentPublisher(telemetryDevice.id()).error(new RuntimeException("radio dropout"));
+        tracker.onStreamStopped(telemetryDevice.id());
+
+        // Give the (now-cancelled) 20ms backoff window plenty of time to have fired if it hadn't
+        // actually been cancelled.
+        Thread.sleep(300);
+        assertEquals(1, openCount.get(), "no further reopen may happen once the usage has been explicitly closed");
     }
 
     @Test
@@ -290,6 +369,53 @@ class UsageTrackerTest {
                 "no currently open usage means no honest 'freshest' position to report");
     }
 
+    @Test
+    void latestTelemetryIsEmptyBeforeAnyUsageHasEverOpened() {
+        UsageTracker tracker = tracker(List.of());
+
+        assertEquals(Optional.empty(), tracker.latestTelemetry(AssetId.random()));
+    }
+
+    @Test
+    void latestTelemetryReflectsTheFreshestSample() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        Telemetry sample1 = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample1);
+        assertEquals(Optional.of(sample1), tracker.latestTelemetry(asset.id()));
+
+        Telemetry sample2 = telemetry(telemetryDevice.id(), 50.001, 30.001, 94.9);
+        source.emit(telemetryDevice.id(), sample2);
+        assertEquals(Optional.of(sample2), tracker.latestTelemetry(asset.id()));
+    }
+
+    @Test
+    void latestTelemetryStaysAnsweredAfterTheUsageCloses() {
+        // docs/MVP3-PLAN.md C-a: unlike latestPosition (scoped to the currently open usage),
+        // latestTelemetry is deliberately still answered once streaming stops -- staleness is most
+        // useful exactly once an asset has gone quiet.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        tracker.onStreamStopped(telemetryDevice.id());
+
+        assertEquals(Optional.of(sample), tracker.latestTelemetry(asset.id()),
+                "the last sample must still be reported once the usage has closed");
+    }
+
     private static Telemetry telemetry(DeviceId deviceId, double lat, double lon, double battery) {
         return new Telemetry(deviceId, Instant.now(), lat, lon, null, 0.0, battery, Map.of());
     }
@@ -318,6 +444,10 @@ class UsageTrackerTest {
         private final Map<DeviceId, ScriptedPublisher> publishers = new ConcurrentHashMap<>();
         final List<DeviceId> openedDevices = new CopyOnWriteArrayList<>();
         final List<DeviceId> closedDevices = new CopyOnWriteArrayList<>();
+        /** Counts down on every {@link #close}; docs/MVP2-PLAN.md §S, S-a moved the real close() call onto a background thread, so tests await this instead of checking synchronously. */
+        final CountDownLatch closeLatch = new CountDownLatch(1);
+        /** Test hook invoked at the end of every {@link #open}, e.g. to count/signal a supervised reopen (docs/MVP2-PLAN.md §S, S-a). */
+        volatile Runnable onOpen;
 
         ScriptedTelemetrySource(java.util.function.Predicate<Device> supportsPredicate) {
             this.supportsPredicate = supportsPredicate;
@@ -332,6 +462,11 @@ class UsageTrackerTest {
         public Flow.Publisher<Telemetry> open(Device device) {
             openedDevices.add(device.id());
             ScriptedPublisher publisher = new ScriptedPublisher();
+            // Fired from ScriptedPublisher.subscribe(), not from here: SupervisedPublisher calls
+            // open() and then subscribe() on its result as two separate steps, so signalling
+            // "reopened" from open() alone would race a test's very next emit() against
+            // subscribe() not having run yet.
+            publisher.onSubscribed = onOpen;
             publishers.put(device.id(), publisher);
             return publisher;
         }
@@ -339,6 +474,7 @@ class UsageTrackerTest {
         @Override
         public void close(DeviceId id) {
             closedDevices.add(id);
+            closeLatch.countDown();
         }
 
         void emit(DeviceId deviceId, Telemetry sample) {
@@ -347,11 +483,18 @@ class UsageTrackerTest {
                 publisher.emit(sample);
             }
         }
+
+        /** The publisher returned by the most recent {@link #open} call for {@code deviceId} (docs/MVP2-PLAN.md §S, S-a: lets a test fail the *current* open, whichever attempt it is). */
+        ScriptedPublisher currentPublisher(DeviceId deviceId) {
+            return publishers.get(deviceId);
+        }
     }
 
     private static final class ScriptedPublisher implements Flow.Publisher<Telemetry> {
         private volatile Flow.Subscriber<? super Telemetry> subscriber;
         private volatile boolean cancelled;
+        /** Test hook, set by {@code ScriptedTelemetrySource#open}: fires once {@link #subscriber} is guaranteed non-null. */
+        volatile Runnable onSubscribed;
 
         @Override
         public void subscribe(Flow.Subscriber<? super Telemetry> subscriber) {
@@ -367,12 +510,24 @@ class UsageTrackerTest {
                     cancelled = true;
                 }
             });
+            Runnable hook = onSubscribed;
+            if (hook != null) {
+                hook.run();
+            }
         }
 
         void emit(Telemetry sample) {
             Flow.Subscriber<? super Telemetry> s = subscriber;
             if (s != null && !cancelled) {
                 s.onNext(sample);
+            }
+        }
+
+        /** docs/MVP2-PLAN.md §S, S-a: simulates this open's telemetry source failing/disconnecting. */
+        void error(Throwable t) {
+            Flow.Subscriber<? super Telemetry> s = subscriber;
+            if (s != null) {
+                s.onError(t);
             }
         }
     }

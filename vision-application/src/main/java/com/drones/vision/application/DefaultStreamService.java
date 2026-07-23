@@ -20,9 +20,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Flow;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * The one implementation of {@link StreamService}: one supervised pipeline per stream.
@@ -35,6 +37,21 @@ import java.util.concurrent.Flow;
  * <p>A stream refuses to start for a device that is not in service. That check lives here rather
  * than only in a controller so every path into streaming — asset-level start, a future scheduler,
  * a test — honours deactivation.
+ *
+ * <h2>Source supervision (docs/MVP2-PLAN.md &sect;S, S-a)</h2>
+ * {@link #start} never hands the source adapter's own {@link VideoSourcePort#open} result straight
+ * to {@link StreamPipeline}; it wraps it in a {@link SupervisedPublisher} first. A started stream
+ * therefore survives a source I/O error or unexpected completion on its own — {@link
+ * StreamPipeline} itself is completely unaware this is happening (it only ever sees the normal
+ * {@code onSubscribe}/{@code onNext} traffic the wrapper forwards), so its own detection-outage
+ * machinery, {@code latestDetections()}, and the {@link com.drones.vision.domain.port.out.StreamPublisherPort}
+ * session it opened via {@code streamStarted} are all completely untouched by a reconnect —
+ * {@code streamStarted}/{@code streamEnded} fire exactly once each, at {@link #start}/{@link #stop}
+ * respectively, never again in between. {@link UsageTracker#onStreamStarted}/{@code
+ * onStreamStopped} are likewise called exactly once each per {@link #start}/{@link #stop} — a
+ * reconnect never touches usage tracking at all, so the same {@code usageId} (and the {@code
+ * streamId} it was opened with) stays open across every retry. Only an explicit {@link #stop} ever
+ * ends a stream; see that method's own javadoc for how it cancels supervision.
  *
  * <h2>Threading</h2>
  * Safe for concurrent use. A failed start unwinds both indexes before rethrowing, so a botched
@@ -51,6 +68,22 @@ public final class DefaultStreamService implements StreamService {
     private final UsageTracker usageTracker;
     private final OverlayPort overlayPort;
     private final DetectionEventRepositoryPort detectionEventRepositoryPort;
+    private final long sourceInitialBackoffNanos;
+    private final long sourceMaxBackoffNanos;
+
+    /**
+     * One dedicated daemon thread scheduling every stream's supervised-reopen retries
+     * (docs/MVP2-PLAN.md §S, S-a). Shared, not per-stream: a demo/small-fleet stream count keeps
+     * this thread's actual work trivial (each retry just calls {@code VideoSourcePort#open}, which
+     * every registered adapter today returns from quickly — see {@link SupervisedPublisher}'s own
+     * javadoc), and this class has no {@code close()}/shutdown lifecycle of its own to hook a
+     * per-instance teardown into; the thread is daemon so it never blocks JVM exit.
+     */
+    private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "stream-supervisor");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final ConcurrentHashMap<StreamId, RunningStream> activeStreams = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<DeviceId, StreamId> streamByDevice = new ConcurrentHashMap<>();
@@ -109,6 +142,23 @@ public final class DefaultStreamService implements StreamService {
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker,
                                  OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort) {
+        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort,
+                SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS);
+    }
+
+    /**
+     * Test seam: same as the 9-argument constructor, with explicit (typically much smaller) source
+     * reopen backoff bounds so supervision-related tests don't have to wait out a real 1s-30s
+     * backoff. Production always uses the 9-argument constructor's defaults
+     * ({@link SupervisedPublisher#INITIAL_BACKOFF_NANOS}/{@link SupervisedPublisher#MAX_BACKOFF_NANOS}).
+     */
+    DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+                          DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
+                          DetectionRepositoryPort detectionRepositoryPort,
+                          EventPublisherPort eventPublisher, UsageTracker usageTracker,
+                          OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -119,6 +169,8 @@ public final class DefaultStreamService implements StreamService {
         this.usageTracker = usageTracker; // nullable: no-op usage tracking when absent
         this.overlayPort = overlayPort; // nullable: no overlay rendering when absent
         this.detectionEventRepositoryPort = detectionEventRepositoryPort; // nullable: no event tracking when absent
+        this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
+        this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
     }
 
     @Override
@@ -139,13 +191,21 @@ public final class DefaultStreamService implements StreamService {
 
         try {
             VideoSourcePort source = videoSourceRegistry.sourceFor(device.stream());
-            Flow.Publisher<VideoFrame> publisher = source.open(streamId, device.stream());
+            // docs/MVP2-PLAN.md §S, S-a: never hand the adapter's own open() result straight to the
+            // pipeline -- wrap it so a source I/O error/completion is retried with backoff instead
+            // of ending the stream. See SupervisedPublisher's own javadoc and this class's javadoc
+            // for exactly what does/doesn't get re-invoked across a reconnect.
+            SupervisedPublisher<VideoFrame> supervisedSource = new SupervisedPublisher<>(
+                    () -> source.open(streamId, device.stream()),
+                    cause -> eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
+                            "video source disconnected, reconnecting" + describeCauseSuffix(cause))),
+                    retryScheduler, sourceInitialBackoffNanos, sourceMaxBackoffNanos);
             DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
                     : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
                             detectionEventRepositoryPort);
-            StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
+            StreamPipeline pipeline = new StreamPipeline(streamId, device, config, supervisedSource, detectionPort,
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine);
-            activeStreams.put(streamId, new RunningStream(deviceId, source, pipeline, Instant.now()));
+            activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pipeline, Instant.now()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
@@ -160,6 +220,20 @@ public final class DefaultStreamService implements StreamService {
         }
     }
 
+    /**
+     * Stops a stream: the only path that ever ends one (docs/MVP2-PLAN.md §S, S-a — a source
+     * failure alone never does, see {@link #start}). Returns promptly: the stream is removed from
+     * every listing and {@link SupervisedPublisher#stop() supervision is cancelled} synchronously
+     * before this method returns, but the actual pipeline/source teardown — which some adapters'
+     * {@code close()} can block on for a long time (e.g. joining a native capture thread; see
+     * {@code adapter-rtsp}'s {@code FfmpegVideoSource}, up to 20s) — runs on a background thread
+     * instead of the caller's. This is a deliberate fix for a real bug: that teardown used to run
+     * synchronously right here, so a slow adapter blocked whatever thread called this method (a
+     * Spring MVC request thread for {@code DELETE /api/streams/{id}}) for as long as it took,
+     * which — combined with the browser's small per-origin connection limit queuing every other
+     * poll request behind the stuck one — was the actual root cause of the reported "/live stop
+     * freezes the app" bug, not anything in the frontend.
+     */
     @Override
     public void stop(StreamId streamId) {
         Objects.requireNonNull(streamId, "streamId must not be null");
@@ -168,12 +242,32 @@ public final class DefaultStreamService implements StreamService {
             return; // unknown or already-stopped stream: no-op, per the interface contract
         }
         streamByDevice.remove(active.deviceId(), streamId);
-        active.pipeline().close();
-        active.source().close(streamId);
+        active.supervisedSource().stop(); // fast, in-memory: no further reopen attempt is ever made
         eventPublisher.publish(Event.of(streamId, EventType.STREAM_STOPPED, "Stream stopped"));
         if (usageTracker != null) {
             usageTracker.onStreamStopped(active.deviceId());
         }
+        teardownAsync(active.pipeline(), active.source(), streamId);
+    }
+
+    /**
+     * Releases the pipeline's subscription ({@link StreamPipeline#close()}, which also signals
+     * {@link com.drones.vision.domain.port.out.StreamPublisherPort#streamEnded}) and the underlying
+     * source ({@link VideoSourcePort#close}) off the calling thread — see {@link #stop}'s javadoc
+     * for why. A fire-and-forget virtual thread, the same idiom {@link DefaultDiscoveryService}
+     * already uses for its own scan calls: cheap, effectively daemon (a virtual thread never blocks
+     * JVM exit), never tracked or interrupted — there is nothing further to do with it once
+     * started, and both calls are already idempotent/best-effort by their own contracts.
+     */
+    private static void teardownAsync(StreamPipeline pipeline, VideoSourcePort source, StreamId streamId) {
+        Thread.ofVirtual().name("stream-teardown-" + streamId.value()).start(() -> {
+            pipeline.close();
+            source.close(streamId);
+        });
+    }
+
+    private static String describeCauseSuffix(Throwable cause) {
+        return cause == null ? "" : ": " + cause.getMessage();
     }
 
     @Override
@@ -188,8 +282,15 @@ public final class DefaultStreamService implements StreamService {
         return Set.copyOf(streamByDevice.keySet());
     }
 
+    @Override
+    public Optional<VideoFrame> latestFrame(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : active.pipeline().latestFrame();
+    }
+
     /** What this service holds per running stream; distinct from the {@link ActiveStream} read model. */
-    private record RunningStream(DeviceId deviceId, VideoSourcePort source, StreamPipeline pipeline,
-                                  Instant startedAt) {
+    private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
+                                  StreamPipeline pipeline, Instant startedAt) {
     }
 }

@@ -57,7 +57,10 @@ export class FleetStore {
     void this.refresh();
     // Poll-while-visible now runs off the app's one shared timer (docs/CYCLES-PLAN.md §9, CU-b
     // item 3 — `PollScheduler`) rather than this store's own `setInterval`.
-    const unsubscribe = this.scheduler.schedule(POLL_INTERVAL_MS, () => void this.refresh({ quiet: true }));
+    // Returns the `refresh()` promise (not `void`-discarded) so `PollScheduler`'s in-flight guard
+    // can skip a tick while the previous poll is still pending, rather than piling another request
+    // on top of a slow/hung backend (docs/MVP2-PLAN.md §S, S-b).
+    const unsubscribe = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.refresh({ quiet: true }));
     inject(DestroyRef).onDestroy(unsubscribe);
   }
 

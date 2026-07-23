@@ -10,9 +10,13 @@ import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.net.URI;
 import java.util.Comparator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 
 /**
@@ -46,6 +51,10 @@ import java.util.Objects;
  * §C8 bullet 3) — the same precedent {@link AssetController} already sets for {@link
  * com.drones.vision.domain.port.out.TelemetryRepositoryPort}: no driving use-case exists for "read
  * a stream's recent detections", so this controller reads the driven port directly instead.
+ *
+ * <p>{@link #snapshot} (docs/MVP3-PLAN.md C-a) is the one binary (non-JSON) response in this
+ * controller — a JPEG thumbnail of a running stream's latest published frame, cheap enough for a
+ * manager dashboard to poll per-visible-tile.
  */
 @RestController
 public class StreamController {
@@ -137,6 +146,34 @@ public class StreamController {
                 .sorted(Comparator.comparing(DetectionResult::capturedAt).reversed())
                 .map(DetectionResultResponse::from)
                 .toList();
+    }
+
+    /**
+     * A JPEG snapshot of the latest published frame on a running stream (docs/MVP3-PLAN.md C-a) —
+     * post-overlay burn-in when it's on, since {@link StreamService#latestFrame} returns exactly
+     * the instance the pipeline last handed to {@link StreamPublisherPort#publish}. Downscaled to
+     * at most {@value SnapshotJpegEncoder#MAX_SNAPSHOT_WIDTH}px wide (aspect-preserving, see {@link
+     * SnapshotJpegEncoder}) so a manager dashboard polling many thumbnails at once (docs/MVP3-PLAN.md
+     * Command, ~1/5s per visible tile) stays cheap.
+     *
+     * <p>Never cached ({@code Cache-Control: no-store}) — every poll wants the actual latest frame,
+     * not a browser- or intermediary-cached one.
+     *
+     * @param streamId the stream to snapshot, as a canonical UUID string
+     * @return the JPEG bytes
+     * @throws NoSuchElementException if the stream is unknown, or is running but hasn't published a
+     *                                 frame yet (both → 404, same mapping as every other unknown-id
+     *                                 case in this codebase)
+     */
+    @GetMapping(value = "/api/streams/{streamId}/snapshot", produces = MediaType.IMAGE_JPEG_VALUE)
+    public ResponseEntity<byte[]> snapshot(@PathVariable String streamId) {
+        VideoFrame frame = streamService.latestFrame(StreamId.of(streamId))
+                .orElseThrow(() -> new NoSuchElementException("No frame available for stream: " + streamId));
+        byte[] jpeg = SnapshotJpegEncoder.encode(frame);
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_JPEG)
+                .cacheControl(CacheControl.noStore())
+                .body(jpeg);
     }
 
     private String viewUrl(StreamId streamId) {

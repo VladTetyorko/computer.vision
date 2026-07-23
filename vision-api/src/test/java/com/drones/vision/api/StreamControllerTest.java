@@ -10,7 +10,9 @@ import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,7 +22,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.URI;
+import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -28,6 +35,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,6 +46,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -420,5 +429,56 @@ class StreamControllerTest {
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    // ---- docs/MVP3-PLAN.md C-a: GET /api/streams/{streamId}/snapshot ----
+
+    private static byte[] tinyJpeg(int width, int height) throws IOException {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(image, "jpg", out);
+        return out.toByteArray();
+    }
+
+    @Test
+    void snapshotReturnsJpegBytesWithNoStoreCacheControl() throws Exception {
+        StreamId streamId = StreamId.random();
+        byte[] jpegBytes = tinyJpeg(2, 2); // already small: SnapshotJpegEncoder passes it through untouched
+        VideoFrame frame = new VideoFrame(streamId, 0, Instant.now(), 2, 2, PixelFormat.JPEG,
+                ByteBuffer.wrap(jpegBytes));
+        when(streamService.latestFrame(streamId)).thenReturn(Optional.of(frame));
+
+        mockMvc.perform(get("/api/streams/{streamId}/snapshot", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", MediaType.IMAGE_JPEG_VALUE))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(result -> assertArrayEquals(jpegBytes, result.getResponse().getContentAsByteArray()));
+    }
+
+    @Test
+    void snapshotReturns404WhenTheStreamHasNoFrameYet() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.latestFrame(streamId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/streams/{streamId}/snapshot", streamId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void snapshotReturns404ForAnUnknownStream() throws Exception {
+        // StreamService#latestFrame makes no distinction between "unknown" and "known but no frame
+        // yet" -- both are Optional.empty(), and both map to the same 404 here.
+        when(streamService.latestFrame(any())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/streams/{streamId}/snapshot", StreamId.random().value()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void snapshotReturns400ForAMalformedStreamId() throws Exception {
+        mockMvc.perform(get("/api/streams/{streamId}/snapshot", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 }

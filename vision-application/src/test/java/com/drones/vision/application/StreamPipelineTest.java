@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
@@ -235,6 +236,26 @@ class StreamPipelineTest {
         for (VideoFrame f : frames) {
             verify(streamPublisherPort).publish(streamId, f);
         }
+    }
+
+    @Test
+    void latestFrameIsEmptyBeforeAnyFrameHasBeenPublished() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertEquals(Optional.empty(), pipeline.latestFrame());
+    }
+
+    @Test
+    void latestFrameReflectsTheRawLastPublishedFrameWhenNoOverlayIsConfigured() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
+        pipeline.start();
+
+        assertEquals(Optional.of(f1), pipeline.latestFrame());
     }
 
     @Test
@@ -609,6 +630,24 @@ class StreamPipelineTest {
         assertEquals(f1, captor.getValue().frame());
         assertEquals(result.detections(), captor.getValue().detections());
         assertNull(captor.getValue().telemetry(), "no telemetry input reaches StreamPipeline yet (see class javadoc)");
+    }
+
+    @Test
+    void latestFrameReflectsTheRenderedFrameWhenOverlayBurnInProducesOne() {
+        // docs/MVP3-PLAN.md C-a: latestFrame() must expose the exact instance streamPublisherPort
+        // was handed, so a snapshot request sees the same post-overlay picture a viewer does.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99);
+        when(overlayPort.render(any())).thenReturn(rendered);
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2), overlayPort);
+        pipeline.start();
+
+        assertEquals(Optional.of(rendered), pipeline.latestFrame());
     }
 
     @Test

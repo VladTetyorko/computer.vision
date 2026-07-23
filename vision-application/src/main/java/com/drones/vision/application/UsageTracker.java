@@ -22,7 +22,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Drives {@link AssetUsage} lifecycle and telemetry sampling from {@link
@@ -62,6 +64,21 @@ import java.util.concurrent.Flow;
  * <p>Plain class with no framework dependency; constructor-injected ports and
  * collaborators only, consistent with the rest of this module.
  *
+ * <h2>Telemetry source supervision (docs/MVP2-PLAN.md &sect;S, S-a)</h2>
+ * Exactly like {@code DefaultStreamService} does for the video source, {@link #subscribeTelemetry}
+ * never subscribes a {@link TelemetrySubscriber} straight to a {@link TelemetrySourcePort#open}
+ * result — it wraps it in a {@link SupervisedPublisher} so a telemetry source error/completion is
+ * retried with the same capped exponential backoff instead of silently ending telemetry for the
+ * rest of the usage. Unlike the video path, this does <b>not</b> publish a {@code PIPELINE_ERROR}
+ * event on an outage — this class has no {@link com.drones.vision.domain.port.out.EventPublisherPort}
+ * (and no {@code StreamId} to publish one against; telemetry is tracked per-asset/device, not
+ * per-stream), and {@link TelemetrySubscriber#onError} was already, deliberately, a completely
+ * silent no-op before this task (see the Gotchas below) — reconnection is new, the pre-existing
+ * silence is not. {@link #unsubscribeTelemetry} calls {@link SupervisedPublisher#stop()}
+ * synchronously (cheap, in-memory) so an explicit stream stop cancels any pending reopen
+ * immediately, then releases the subscription/source off a background thread — see that method's
+ * own javadoc.
+ *
  * <h2>Threading</h2>
  * Per-asset state ({@link Tracking}) is reached through a {@link
  * ConcurrentHashMap} keyed by {@link AssetId}, and every read/mutate sequence
@@ -78,18 +95,41 @@ public final class UsageTracker {
     private final AssetUsageRepositoryPort usageRepository;
     private final TelemetryRepositoryPort telemetryRepository;
     private final List<TelemetrySourcePort> telemetrySources;
+    private final long sourceInitialBackoffNanos;
+    private final long sourceMaxBackoffNanos;
+
+    /** One dedicated daemon thread scheduling every telemetry subscription's reopen retries; see {@code DefaultStreamService}'s own field of the same shape for why this is shared rather than per-subscription. */
+    private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "telemetry-supervisor");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final ConcurrentHashMap<AssetId, Tracking> trackingByAsset = new ConcurrentHashMap<>();
 
     public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                          AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
                          List<TelemetrySourcePort> telemetrySources) {
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
+                SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS);
+    }
+
+    /**
+     * Test seam: same as the 5-argument constructor, with explicit (typically much smaller)
+     * telemetry-source reopen backoff bounds so supervision-related tests don't have to wait out a
+     * real 1s-30s backoff. Production always uses the 5-argument constructor's defaults.
+     */
+    UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
+                 AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
+                 List<TelemetrySourcePort> telemetrySources, long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
         this.telemetryRepository = Objects.requireNonNull(telemetryRepository, "telemetryRepository must not be null");
         Objects.requireNonNull(telemetrySources, "telemetrySources must not be null");
         this.telemetrySources = List.copyOf(telemetrySources);
+        this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
+        this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
     }
 
     /**
@@ -151,6 +191,33 @@ public final class UsageTracker {
         }
     }
 
+    /**
+     * The most recent telemetry sample ever received for {@code assetId} (docs/MVP3-PLAN.md C-a) —
+     * used to derive a fleet-summary attention row's battery percent and telemetry staleness.
+     *
+     * <p>Deliberately <b>not</b> scoped to the currently open usage the way {@link
+     * #latestPosition(AssetId)} is: that method answers "where is it right now", which is honestly
+     * unknowable once streaming stops, but staleness ("how long since we last heard from this
+     * asset") is most useful exactly once an asset has gone quiet — so this method keeps returning
+     * the last sample it ever saw for the asset rather than going empty the moment its usage closes.
+     * The underlying {@link Tracking} instance is never evicted from {@link #trackingByAsset} once
+     * created, so the sample survives across the asset's whole tracked lifetime, not just one usage.
+     *
+     * @param assetId the asset to inspect
+     * @return the freshest sample, or {@link Optional#empty()} if the asset has never reported
+     *         telemetry (including one that has never streamed at all)
+     */
+    public Optional<Telemetry> latestTelemetry(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Tracking tracking = trackingByAsset.get(assetId);
+        if (tracking == null) {
+            return Optional.empty();
+        }
+        synchronized (tracking) {
+            return Optional.ofNullable(tracking.lastSample);
+        }
+    }
+
     private void deviceStreamStarted(Asset asset, StreamId streamId) {
         Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
         boolean openedNow;
@@ -202,9 +269,14 @@ public final class UsageTracker {
             for (TelemetrySourcePort source : telemetrySources) {
                 if (source.supports(device)) {
                     TelemetrySubscriber subscriber = new TelemetrySubscriber(asset.id());
-                    source.open(device).subscribe(subscriber);
+                    // docs/MVP2-PLAN.md §S, S-a: supervised exactly like the video source (see this
+                    // class's own javadoc for why no PIPELINE_ERROR is published here).
+                    SupervisedPublisher<Telemetry> supervised = new SupervisedPublisher<>(() -> source.open(device),
+                            cause -> { }, retryScheduler, sourceInitialBackoffNanos, sourceMaxBackoffNanos);
+                    supervised.subscribe(subscriber);
                     synchronized (tracking) {
-                        tracking.telemetrySubscriptions.add(new TelemetrySubscription(source, deviceId, subscriber));
+                        tracking.telemetrySubscriptions.add(
+                                new TelemetrySubscription(source, deviceId, subscriber, supervised));
                     }
                     break; // first matching source wins, mirroring VideoSourceRegistry's selection rule
                 }
@@ -212,6 +284,16 @@ public final class UsageTracker {
         }
     }
 
+    /**
+     * Unsubscribes and releases every telemetry subscription opened for a now-closed usage.
+     * {@link SupervisedPublisher#stop()} runs synchronously here — cheap, in-memory, and it must
+     * happen before this method returns so a pending scheduled reopen can never race a legitimate
+     * close (docs/MVP2-PLAN.md §S, S-a, same reasoning as {@code DefaultStreamService#stop}). The
+     * actual {@link Flow.Subscription#cancel()}/{@link TelemetrySourcePort#close} calls run on a
+     * background thread instead, for the same reason {@code DefaultStreamService} defers its own
+     * source teardown: an adapter's {@code close()} is not guaranteed to be fast, and this method is
+     * itself called synchronously from {@code DefaultStreamService#stop}, which must return promptly.
+     */
     private void unsubscribeTelemetry(Tracking tracking) {
         List<TelemetrySubscription> subscriptions;
         synchronized (tracking) {
@@ -219,9 +301,17 @@ public final class UsageTracker {
             tracking.telemetrySubscriptions.clear();
         }
         for (TelemetrySubscription subscription : subscriptions) {
-            subscription.subscriber().cancel();
-            subscription.source().close(subscription.deviceId());
+            subscription.supervisedPublisher().stop();
         }
+        if (subscriptions.isEmpty()) {
+            return;
+        }
+        Thread.ofVirtual().name("telemetry-teardown").start(() -> {
+            for (TelemetrySubscription subscription : subscriptions) {
+                subscription.subscriber().cancel();
+                subscription.source().close(subscription.deviceId());
+            }
+        });
     }
 
     /**
@@ -253,6 +343,7 @@ public final class UsageTracker {
             updated = tracking.usage.withPositions(startPosition, lastPosition)
                     .withSampleCount(tracking.usage.sampleCount() + 1);
             tracking.usage = updated;
+            tracking.lastSample = sample; // docs/MVP3-PLAN.md C-a: outlives the usage, see latestTelemetry's javadoc
         }
         telemetryRepository.save(usageId, sample);
         usageRepository.save(updated);
@@ -269,11 +360,13 @@ public final class UsageTracker {
     private static final class Tracking {
         private int activeDevices;
         private AssetUsage usage;
+        /** docs/MVP3-PLAN.md C-a: the freshest sample ever seen, kept even once {@link #usage} closes — see {@link #latestTelemetry(AssetId)}. */
+        private Telemetry lastSample;
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
     }
 
     private record TelemetrySubscription(TelemetrySourcePort source, DeviceId deviceId,
-                                          TelemetrySubscriber subscriber) {
+                                          TelemetrySubscriber subscriber, SupervisedPublisher<Telemetry> supervisedPublisher) {
     }
 
     /**
@@ -282,6 +375,11 @@ public final class UsageTracker {
      * #applySample(AssetId, Telemetry)}. A source-side error simply stops
      * this subscription's flow of samples; it must never propagate into the
      * stream start/stop call that (indirectly) created it.
+     *
+     * <p>{@code onSubscribe} is called again, updating {@link #subscription}, every time {@link
+     * SupervisedPublisher} (docs/MVP2-PLAN.md §S, S-a) reopens the source after an outage — this
+     * class needs no reconnect logic of its own, it just keeps receiving the normal {@code
+     * onSubscribe}/{@code onNext} traffic the wrapper forwards.
      */
     private final class TelemetrySubscriber implements Flow.Subscriber<Telemetry> {
         private final AssetId assetId;
@@ -308,12 +406,17 @@ public final class UsageTracker {
 
         @Override
         public void onError(Throwable throwable) {
-            // Best-effort telemetry: a source failure must not affect stream/usage lifecycle.
+            // docs/MVP2-PLAN.md §S, S-a: unreachable in production -- subscribeTelemetry always
+            // wraps the source in a SupervisedPublisher, which intercepts onError/onComplete
+            // itself (to retry) and never forwards either one downstream. Left as a harmless no-op
+            // (not e.g. an AssertionError) since this class still implements the public
+            // Flow.Subscriber contract directly, and best-effort telemetry must never affect
+            // stream/usage lifecycle even if something one day subscribes this unsupervised.
         }
 
         @Override
         public void onComplete() {
-            // Source closed its publisher; nothing further to request.
+            // See onError above: unreachable in production, kept as a harmless no-op.
         }
 
         void cancel() {
