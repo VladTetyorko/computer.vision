@@ -33,7 +33,10 @@ RUN apt-get update \
 # everything else from PyPI) and steers pip to the CPU-only PyTorch wheels
 # so the image doesn't balloon with CUDA libraries this CPU-first service
 # never uses.
-RUN pip install --no-cache-dir \
+# --retries/--timeout: the wheel set is ~400MB (torch+opencv+openvino); on a
+# slow or flaky uplink pip's defaults (5 retries, 15s read timeout) abort the
+# whole layer for one stalled chunk, restarting the download from zero.
+RUN pip install --no-cache-dir --retries 15 --timeout 120 \
       --extra-index-url https://download.pytorch.org/whl/cpu \
       -e ".[cv]" openvino \
     && ./scripts/gen_proto.sh
