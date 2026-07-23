@@ -203,4 +203,203 @@ class SimulatedTelemetrySourceTest {
 
         source.close(device.id()); // must not throw
     }
+
+    // --- CT-a: configurable flight plans ---------------------------------------------
+
+    @Test
+    void routeOptionFliesAlongTheConfiguredRouteAtTheConfiguredSpeed() throws InterruptedException {
+        long periodMillis = 20L;
+        SimulatedTelemetrySource source = fastSource(periodMillis);
+        // A long, straight, north-heading leg so a modest speed only covers a small fraction of it.
+        Device device = telemetryDevice(Map.of("route", "10.0,20.0;10.01,20.0", "speedMps", "50"));
+
+        List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch atLeastFour = new CountDownLatch(4);
+        Flow.Publisher<Telemetry> publisher = source.open(device);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(Telemetry item) {
+                collected.add(item);
+                atLeastFour.countDown();
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        try {
+            assertTrue(atLeastFour.await(5, TimeUnit.SECONDS), "expected at least 4 telemetry samples within 5s");
+            List<Telemetry> snapshot = List.copyOf(collected);
+            assertTrue(snapshot.size() >= 4);
+
+            double expectedStepMeters = 50.0 * (periodMillis / 1000.0); // speedMps * tickSeconds
+            for (int i = 1; i < snapshot.size(); i++) {
+                double stepMeters = approxDistanceMeters(
+                        snapshot.get(i - 1).latitude(), snapshot.get(i - 1).longitude(),
+                        snapshot.get(i).latitude(), snapshot.get(i).longitude());
+                assertEquals(expectedStepMeters, stepMeters, 0.5,
+                        "each tick must advance by speedMps * tickSeconds along the route");
+            }
+            for (Telemetry sample : snapshot) {
+                assertEquals(0.0, sample.headingDegrees(), 1.0, "a due-north segment must report a ~0 degree heading");
+            }
+        } finally {
+            source.close(device.id());
+        }
+    }
+
+    @Test
+    void malformedRouteOptionFallsBackToTheCircularTrackWithoutThrowing() throws InterruptedException {
+        SimulatedTelemetrySource source = fastSource(20L);
+        Device device = telemetryDevice(Map.of("route", "not-a-route-at-all", "lat", "10.0", "lon", "20.0"));
+
+        assertCircularTrackAroundGivenCenter(source, device);
+    }
+
+    @Test
+    void routeOptionWithFewerThanTwoPointsFallsBackToTheCircularTrack() throws InterruptedException {
+        SimulatedTelemetrySource source = fastSource(20L);
+        Device device = telemetryDevice(Map.of("route", "10.0,20.0", "lat", "10.0", "lon", "20.0"));
+
+        assertCircularTrackAroundGivenCenter(source, device);
+    }
+
+    private void assertCircularTrackAroundGivenCenter(SimulatedTelemetrySource source, Device device)
+            throws InterruptedException {
+        List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch firstSample = new CountDownLatch(1);
+
+        Flow.Publisher<Telemetry> publisher = source.open(device);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(Telemetry item) {
+                collected.add(item);
+                firstSample.countDown();
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        try {
+            assertTrue(firstSample.await(5, TimeUnit.SECONDS));
+            Telemetry sample = collected.get(0);
+            double distanceFromCenter = approxDistanceMeters(sample.latitude(), sample.longitude(), 10.0, 20.0);
+            assertEquals(SimulatedTelemetrySource.TRACK_RADIUS_METERS, distanceFromCenter, 5.0);
+        } finally {
+            source.close(device.id());
+        }
+    }
+
+    @Test
+    void nonPositiveOrUnparseableSpeedMpsFallsBackToTheDefaultCruiseSpeed() throws InterruptedException {
+        long periodMillis = 20L;
+        SimulatedTelemetrySource source = fastSource(periodMillis);
+        Device device = telemetryDevice(Map.of("route", "10.0,20.0;10.01,20.0", "speedMps", "-5"));
+
+        List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch atLeastTwo = new CountDownLatch(2);
+        Flow.Publisher<Telemetry> publisher = source.open(device);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(Telemetry item) {
+                collected.add(item);
+                atLeastTwo.countDown();
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        try {
+            assertTrue(atLeastTwo.await(5, TimeUnit.SECONDS));
+            List<Telemetry> snapshot = List.copyOf(collected);
+            assertTrue(snapshot.size() >= 2);
+
+            double expectedStepMeters = RoutePlan.DEFAULT_SPEED_MPS * (periodMillis / 1000.0);
+            double stepMeters = approxDistanceMeters(
+                    snapshot.get(0).latitude(), snapshot.get(0).longitude(),
+                    snapshot.get(1).latitude(), snapshot.get(1).longitude());
+            assertEquals(expectedStepMeters, stepMeters, 0.5,
+                    "a non-positive speedMps must fall back to RoutePlan.DEFAULT_SPEED_MPS, not stall or throw");
+        } finally {
+            source.close(device.id());
+        }
+    }
+
+    @Test
+    void batteryDrainPerSecondOptionOverridesTheDefaultDrainRate() throws InterruptedException {
+        long periodMillis = 20L;
+        SimulatedTelemetrySource source = fastSource(periodMillis);
+        Device device = telemetryDevice(Map.of("batteryDrainPerSecond", "5.0"));
+
+        List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch atLeastThree = new CountDownLatch(3);
+        Flow.Publisher<Telemetry> publisher = source.open(device);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(Telemetry item) {
+                collected.add(item);
+                atLeastThree.countDown();
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+
+        try {
+            assertTrue(atLeastThree.await(5, TimeUnit.SECONDS));
+            List<Telemetry> snapshot = List.copyOf(collected);
+            assertTrue(snapshot.size() >= 3);
+
+            double expectedPerTickDrain = 5.0 * (periodMillis / 1000.0);
+            for (int i = 1; i < snapshot.size(); i++) {
+                double drop = snapshot.get(i - 1).batteryPercent() - snapshot.get(i).batteryPercent();
+                assertEquals(expectedPerTickDrain, drop, 0.01,
+                        "batteryDrainPerSecond must override the default 0.05%/s drain rate");
+            }
+        } finally {
+            source.close(device.id());
+        }
+    }
 }

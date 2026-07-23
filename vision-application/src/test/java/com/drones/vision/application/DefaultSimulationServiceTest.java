@@ -221,6 +221,67 @@ class DefaultSimulationServiceTest {
         assertEquals(Map.of("lon", "30.52"), telemetry.stream().options());
     }
 
+    // --- CT-a: telemetry flight plan ------------------------------------------------
+
+    @Test
+    void simulateWithATelemetryPlanSerializesTheRouteSpeedAndModeAndUsesTheFirstWaypointAsLatLon(
+            @TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        List<Waypoint> route = List.of(
+                new Waypoint(50.45, 30.52, null),
+                new Waypoint(50.46, 30.53, 120.0));
+        TelemetryPlan plan = new TelemetryPlan(15.0, RouteMode.BOUNCE, route);
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, plan);
+
+        service.simulate(spec, ownership, actor);
+
+        DeviceRegistration telemetry = capturedAssetSpec().devices().get(1);
+        assertEquals(Map.of(
+                "lat", "50.45",
+                "lon", "30.52",
+                "route", "50.45,30.52;50.46,30.53,120.0",
+                "speedMps", "15.0",
+                "routeMode", "bounce"
+        ), telemetry.stream().options());
+    }
+
+    @Test
+    void simulateWithATelemetryPlanOmitsSpeedAndModeOptionsWhenNeitherIsGiven(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        List<Waypoint> route = List.of(new Waypoint(1.0, 2.0, null), new Waypoint(3.0, 4.0, null));
+        TelemetryPlan plan = new TelemetryPlan(null, null, route);
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, plan);
+
+        service.simulate(spec, ownership, actor);
+
+        DeviceRegistration telemetry = capturedAssetSpec().devices().get(1);
+        assertEquals(Map.of("lat", "1.0", "lon", "2.0", "route", "1.0,2.0;3.0,4.0"),
+                telemetry.stream().options());
+    }
+
+    @Test
+    void simulateWithATelemetryPlanIgnoresBareLatitudeAndLongitude(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        List<Waypoint> route = List.of(new Waypoint(11.0, 22.0, null), new Waypoint(33.0, 44.0, null));
+        TelemetryPlan plan = new TelemetryPlan(null, null, route);
+        // Bare lat/lon (99.0/-99.0) are set too, but the plan must win entirely.
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), 99.0, -99.0, false,
+                SimulationTransport.DIRECT, plan);
+
+        service.simulate(spec, ownership, actor);
+
+        DeviceRegistration telemetry = capturedAssetSpec().devices().get(1);
+        Map<String, String> options = telemetry.stream().options();
+        assertEquals("11.0", options.get("lat"), "the plan's first waypoint must win over the bare latitude field");
+        assertEquals("22.0", options.get("lon"), "the plan's first waypoint must win over the bare longitude field");
+    }
+
     // --- autoStart ----------------------------------------------------------------
 
     @Test

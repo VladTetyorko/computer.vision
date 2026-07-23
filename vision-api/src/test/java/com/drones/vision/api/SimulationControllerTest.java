@@ -1,9 +1,11 @@
 package com.drones.vision.api;
 
+import com.drones.vision.application.RouteMode;
 import com.drones.vision.application.SimulatedAsset;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.SimulationSpec;
 import com.drones.vision.application.SimulationTransport;
+import com.drones.vision.application.TelemetryPlan;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
@@ -271,6 +273,123 @@ class SimulationControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.message").value(allOf(containsString("udp"), containsString("DIRECT"),
                         containsString("RTSP"), containsString("MJPEG"))));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    // ---- CT-a: telemetry flight plan ----
+
+    @Test
+    void simulateParsesATelemetryPlanWithARouteSpeedAndMode() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetry":{"speedMps":15.0,"routeMode":"bounce",
+                "route":[{"latitude":50.45,"longitude":30.52},{"latitude":50.46,"longitude":30.53,"altitudeMeters":120.0}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        TelemetryPlan plan = captor.getValue().plan();
+        assertEquals(15.0, plan.speedMps());
+        assertEquals(RouteMode.BOUNCE, plan.mode());
+        assertEquals(2, plan.route().size());
+        assertEquals(50.45, plan.route().get(0).latitude());
+        assertEquals(30.52, plan.route().get(0).longitude());
+        assertEquals(120.0, plan.route().get(1).altitudeMeters());
+    }
+
+    @Test
+    void simulateDefersRouteModeToTheAdaptersDefaultWhenAbsentFromTelemetry() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetry":{
+                "route":[{"latitude":1.0,"longitude":2.0},{"latitude":3.0,"longitude":4.0}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        TelemetryPlan plan = captor.getValue().plan();
+        assertEquals(null, plan.mode());
+        assertEquals(null, plan.speedMps());
+    }
+
+    @Test
+    void simulateDefaultsPlanToNullWhenTelemetryFieldIsAbsent() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"videoPath\":\"/data/clips/drone.mp4\"}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertEquals(null, captor.getValue().plan());
+    }
+
+    @Test
+    void simulateReturns400WhenTelemetryRouteHasFewerThanTwoWaypoints() throws Exception {
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetry":{"route":[{"latitude":1.0,"longitude":2.0}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    @Test
+    void simulateReturns400WhenATelemetryWaypointIsOutOfRange() throws Exception {
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetry":{
+                "route":[{"latitude":1.0,"longitude":2.0},{"latitude":999.0,"longitude":4.0}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    @Test
+    void simulateReturns400WhenTelemetrySpeedMpsIsNotPositive() throws Exception {
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetry":{"speedMps":0,
+                "route":[{"latitude":1.0,"longitude":2.0},{"latitude":3.0,"longitude":4.0}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    @Test
+    void simulateReturns400ForAnUnknownRouteModeAndNeverTouchesTheService() throws Exception {
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetry":{"routeMode":"zigzag",
+                "route":[{"latitude":1.0,"longitude":2.0},{"latitude":3.0,"longitude":4.0}]}}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message").value(allOf(containsString("zigzag"), containsString("LOOP"),
+                        containsString("BOUNCE"), containsString("ONCE"))));
 
         verifyNoInteractions(simulationService);
     }

@@ -119,7 +119,69 @@ The second protocol under the §0 doctrine, pulled forward from Phase 4 (ESP32-C
 
 ---
 
-## 7. Cycle order & status
+## 7. CT — configurable telemetry flight plans *(user-requested, pre-MVP)*
+
+Today `SimulatedTelemetrySource` only flies a fixed circle around `lat`/`lon`. The user must be able to define the flight: speed, start position, end position, checkpoints.
+
+### CT-a — backend: route engine + API
+
+- **adapter-simulation** — new telemetry-device options (strings, the Tier-3 escape hatch; the circular `lat`/`lon` behavior stays as the back-compat default when no `route` is given):
+  - `route` — `lat,lon[,altM];lat,lon[,altM];…`, ≥2 points: start → checkpoints → end.
+  - `speedMps` — cruise speed, default `12.0` (> 0; lenient parse per the module idiom).
+  - `routeMode` — `loop` (default; end→start closing leg) | `bounce` (retrace backwards) | `once` (hold at the end position, keep emitting).
+  - `batteryDrainPerSecond` — overrides the existing constant.
+  - Engine: piecewise-linear interpolation along the polyline at the existing 1 Hz tick using a local equirectangular approximation (KISS — segments are short); heading = current segment bearing; altitude interpolated when given. Extract a package-private pure `RoutePlan` (parse + `positionAt(distanceAlongRoute)`) so tests need no scheduler.
+  - Tests: parse matrix (bad points → fallback to circle, per the module's lenient-option convention), interpolation positions/bearing/altitude, all three modes, speed honored (distance covered per tick).
+- **vision-application** — `SimulationSpec` gains nullable `TelemetryPlan plan`; new record `TelemetryPlan(Double speedMps, RouteMode mode, List<Waypoint> route)` + `Waypoint(double latitude, double longitude, Double altitudeMeters)` (validated: route null-or-≥2, speed > 0), converted by `DefaultSimulationService` into the option strings above (plan wins over bare `lat`/`lon`).
+- **vision-api** — `StartSimulationRequest` gains optional `telemetry` object `{speedMps?, routeMode?, route:[{latitude, longitude, altitudeMeters?}, …]}` with `toPlan()` validation → 400 on bad input; tests.
+- **vision-app** — no new beans; extend a smoke test to pass a 3-point route and assert positions actually progress toward the checkpoints.
+
+**Done when:** `POST /api/simulations` with a route flies the drone along it on the C2/C6 maps at the requested speed. **Estimate: M.**
+
+### CT-b — UI: flight-plan editor in the Simulate wizard
+
+Wizard gains a **Flight plan** section (file modes only): speed input, route-mode select, and a checkpoint editor — an embedded mini-map (reuse `ui/leaflet-loader.ts`) where clicking appends waypoints (markers + connecting line, remove buttons in a list, drag to adjust if cheap), with a manual `lat,lon` text fallback. Sends the `telemetry` object; bare lat/lon home-position fields remain when no route is drawn. Specs for route-building/serialization logic. **Estimate: M — the map picker is the bulk.**
+
+---
+
+## 8. CW — warehouse device inventory flow *(user-requested)*
+
+The operator manages a fleet like a warehouse: add devices, name them, spread/assign them across assets, deactivate, archive (soft delete), restore. Domain + application services already support all lifecycle transitions (`LifecycleState`, `DeviceService`/`AssetService` update/setState/delete); this cycle exposes them over REST and builds the UI. **The API contract below is pinned — CW-a implements it server-side, CW-b codes against it verbatim.**
+
+### Pinned REST contract (all errors via the standard `ApiExceptionHandler` mapping)
+
+| Method | Path | Body | Success | Notes |
+|---|---|---|---|---|
+| PATCH | `/api/devices/{id}` | `{name?, protocol?, uri?, options?, capabilities?}` | 200 `DeviceResponse` | partial edit → `DeviceEdit`; stream fields only when any of protocol/uri/options present (then protocol+uri required together) |
+| POST | `/api/devices/{id}/state` | `{state:"ACTIVE"\|"DEACTIVATED"}` | 200 `DeviceResponse` | idempotent; `DEACTIVATED` on a DELETED device = restore; DELETED→ACTIVE → 409 |
+| DELETE | `/api/devices/{id}` | — | 200 `DeviceResponse` | soft delete (archive); idempotent |
+| GET | `/api/devices?includeDeleted=true` | — | 200 | default false (today's behavior) |
+| PATCH | `/api/assets/{id}` | `{displayName?, category?, attributes?}` | 200 `AssetDetailsResponse` | → `AssetEdit` |
+| POST | `/api/assets/{id}/state` | `{state:"ACTIVE"\|"DEACTIVATED"}` | 200 `AssetDetailsResponse` | same restore semantics |
+| DELETE | `/api/assets/{id}` | — | 200 `AssetDeletionResponse(assetId, displayName, devicesDeleted, usagesRetained, streamsStopped)` | soft; from `AssetDeletion` |
+| GET | `/api/assets?includeDeleted=true` | — | 200 | default false |
+| POST | `/api/assets/{id}/devices` | `{deviceId}` | 200 `AssetDetailsResponse` | assign an unowned device; owned by another asset → 409; unknown → 404 |
+| DELETE | `/api/assets/{id}/devices/{deviceId}` | — | 200 `AssetDetailsResponse` | unassign; removing the LAST device → 409 (assets need ≥1) |
+
+`DeviceResponse` gains a `state` field (`ACTIVE`/`DEACTIVATED`/`DELETED`) if not already exposed; `AssetSummaryResponse` likewise exposes lifecycle state as `lifecycle` alongside the derived streaming `status`.
+
+### CW-a — backend (vision-application + vision-api + vision-app; runs after CT-a frees the modules)
+
+- vision-application: `AssetService.assignDevice(AssetId, DeviceId, UserId)` / `unassignDevice(AssetId, DeviceId, UserId)` — validate ownership uniqueness (`AssetRepositoryPort.findByDeviceId`), the ≥1-device invariant, audit `UPDATED` with the change; everything else already exists.
+- vision-api: the endpoints above (`DeviceController`/`AssetController` additions + small request DTOs), MockMvc tests per house style incl. every 409 case.
+- vision-app: no new beans; wiring test untouched unless a gap appears.
+
+**Done when:** every row of the contract table passes MockMvc tests and the modules' scoped builds are green. **Estimate: M.**
+
+### CW-b — UI (vision-web; parallel-safe, codes to the pinned contract)
+
+Devices tab becomes the warehouse: table gains lifecycle chips (Active / Deactivated / Archived) and a per-row action menu — Rename/Edit, Deactivate|Activate, Archive, Restore, Assign to asset… (dialog listing assets), Unassign; "show archived" toggle (drives `includeDeleted`); asset cards with rename/category edit and Archive asset (with confirmation naming what's retained). All mutations through `FleetStore.run()`-style funneling; archived rows visually muted; actions disabled with a tooltip until the backend answers (a 404 on these endpoints before CW-a lands must degrade to one toast, not break the page). Pure logic (menu availability per state machine, request building) gets specs.
+
+**Done when:** full add → name → assign → deactivate → archive → restore journey works in the UI once CW-a is live; specs green regardless. **Estimate: M.**
+
+---
+
+## 9. Cycle order & status
 
 Execution follows the repo's delegation model: per-task scopes are disjoint; every task ends with its scoped build green and MODULE.md updated.
 
@@ -131,6 +193,10 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | C4 | **UI** | Simulation wizard | one task (vision-web) | ✅ done |
 | C5 | backend | mjpeg TX/RX pair | new module, then transport/wiring | ✅ done |
 | C6 | **UI** | `/map` overview tab | one task (vision-web) | ✅ done |
+| CT-a | backend | telemetry flight plans (route/speed/checkpoints) | §7, adapter-simulation → application/api/app | ✅ done |
+| CT-b | **UI** | flight-plan editor (map picker) in wizard | §7, vision-web | pending |
+| CW-a | backend | warehouse REST surface + assign/unassign | §8, after CT-a | pending |
+| CW-b | **UI** | device warehouse UI (lifecycle, assign) | §8, vision-web | pending |
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | pending |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | pending |
 | C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | pending |

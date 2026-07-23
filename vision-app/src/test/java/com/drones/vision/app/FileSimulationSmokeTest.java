@@ -32,7 +32,9 @@ import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -79,6 +81,23 @@ class FileSimulationSmokeTest {
     private static final long AWAIT_SECONDS = 60;
     private static final Duration TELEMETRY_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(200);
+
+    // --- docs/CYCLES-PLAN.md §7 (CT-a): telemetry flight plan ------------------------
+
+    private static final double EARTH_RADIUS_METERS = 6_371_000.0;
+    private static final double ROUTE_BASE_LATITUDE = 50.45;
+    private static final double ROUTE_BASE_LONGITUDE = 30.52;
+    private static final double ROUTE_LEG_METERS = 300.0; // waypoint spacing: wp0 -> wp1 -> wp2
+    private static final double ROUTE_SPEED_MPS = 100.0; // covers the ~600m route in exactly 6 real 1Hz ticks
+    // 8, not 6: a couple of ticks of margin past the route's exact completion tick, so the last
+    // observed sample is reliably holding at the checkpoint (routeMode=once) rather than landing
+    // exactly on the completion tick itself.
+    private static final int ROUTE_MIN_SAMPLE_COUNT = 8;
+    // Generous/CI-safe: this source ticks at the real 1Hz cadence in this module (see Gotchas),
+    // so this must comfortably outlast usage-open + several ticks of route progression.
+    private static final Duration ROUTE_TELEMETRY_TIMEOUT = Duration.ofSeconds(30);
+    private static final double ROUTE_DISTANCE_TREND_TOLERANCE_METERS = 5.0;
+    private static final double ROUTE_ARRIVAL_TOLERANCE_METERS = 50.0;
 
     @Autowired
     private WebApplicationContext webApplicationContext;
@@ -139,6 +158,88 @@ class FileSimulationSmokeTest {
         assertNotNull(closedUsage.endedAt(), "usage must be closed after stopping the simulated asset's stream");
     }
 
+    /**
+     * docs/CYCLES-PLAN.md §7 (CT-a): a 3-waypoint route with a high {@code speedMps} must fly the
+     * simulated drone's telemetry along it — successive samples' distance to the final checkpoint
+     * must trend toward zero (generous tolerance, since this runs at the real, unthrottled 1Hz
+     * cadence — see the class-level Gotcha), and {@code routeMode=once} means it holds there once
+     * arrived rather than looping back, keeping the "trending toward zero" assertion robust instead
+     * of flaky around whichever tick the poll happens to land on.
+     */
+    @Test
+    void postSimulationsWithARouteFliesTelemetryTowardTheFinalCheckpoint(@TempDir Path tempDir) throws Exception {
+        Path videoFile = createTestVideo(tempDir, WIDTH, HEIGHT, FRAME_COUNT, FPS);
+
+        double waypoint1Latitude = northOffsetLatitude(ROUTE_BASE_LATITUDE, ROUTE_LEG_METERS);
+        double waypoint2Latitude = northOffsetLatitude(ROUTE_BASE_LATITUDE, ROUTE_LEG_METERS * 2);
+
+        String requestBody = """
+                {"videoPath":%s,"telemetry":{"speedMps":%s,"routeMode":"once","route":[
+                    {"latitude":%s,"longitude":%s},
+                    {"latitude":%s,"longitude":%s},
+                    {"latitude":%s,"longitude":%s}
+                ]}}
+                """.formatted(jsonQuote(videoFile.toString()), jsonNumber(ROUTE_SPEED_MPS),
+                jsonNumber(ROUTE_BASE_LATITUDE), jsonNumber(ROUTE_BASE_LONGITUDE),
+                jsonNumber(waypoint1Latitude), jsonNumber(ROUTE_BASE_LONGITUDE),
+                jsonNumber(waypoint2Latitude), jsonNumber(ROUTE_BASE_LONGITUDE));
+
+        String responseJson = mockMvc.perform(post("/api/simulations")
+                        .contentType(MediaType.APPLICATION_JSON).content(requestBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.assetId").exists())
+                .andExpect(jsonPath("$.streamId").exists())
+                .andReturn().getResponse().getContentAsString();
+
+        AssetId assetId = AssetId.of(JsonPath.read(responseJson, "$.assetId"));
+
+        try {
+            AssetUsage openUsage = awaitOpenUsage(assetId);
+            assertNotNull(openUsage, "expected a usage to open once the simulated asset started streaming");
+
+            List<Telemetry> samples =
+                    awaitAtLeastNTelemetrySamples(openUsage.id(), ROUTE_MIN_SAMPLE_COUNT, ROUTE_TELEMETRY_TIMEOUT);
+            assertTrue(samples.size() >= ROUTE_MIN_SAMPLE_COUNT,
+                    "expected >= " + ROUTE_MIN_SAMPLE_COUNT + " telemetry samples flying the configured route "
+                            + "within " + ROUTE_TELEMETRY_TIMEOUT + ", got " + samples.size());
+
+            double[] distancesToCheckpoint2 = samples.stream()
+                    .mapToDouble(sample -> distanceMeters(
+                            sample.latitude(), sample.longitude(), waypoint2Latitude, ROUTE_BASE_LONGITUDE))
+                    .toArray();
+
+            for (int i = 1; i < distancesToCheckpoint2.length; i++) {
+                assertTrue(distancesToCheckpoint2[i] <= distancesToCheckpoint2[i - 1]
+                                + ROUTE_DISTANCE_TREND_TOLERANCE_METERS,
+                        "distance to the final checkpoint must trend toward zero across successive samples: "
+                                + Arrays.toString(distancesToCheckpoint2));
+            }
+            double lastDistance = distancesToCheckpoint2[distancesToCheckpoint2.length - 1];
+            assertTrue(lastDistance < ROUTE_ARRIVAL_TOLERANCE_METERS,
+                    "expected the last sample to have reached (and, routeMode=once, be holding at) the final "
+                            + "checkpoint within " + ROUTE_ARRIVAL_TOLERANCE_METERS + "m, was " + lastDistance + "m");
+        } finally {
+            mockMvc.perform(delete("/api/assets/{id}/stream", assetId.value()))
+                    .andExpect(status().isNoContent());
+        }
+    }
+
+    /** Equirectangular approximation, adequate at this route's scale — same technique adapter-simulation's own tests use. */
+    private static double distanceMeters(double lat1, double lon1, double lat2, double lon2) {
+        double meanLatitudeRadians = Math.toRadians((lat1 + lat2) / 2.0);
+        double northMeters = Math.toRadians(lat2 - lat1) * EARTH_RADIUS_METERS;
+        double eastMeters = Math.toRadians(lon2 - lon1) * EARTH_RADIUS_METERS * Math.cos(meanLatitudeRadians);
+        return Math.sqrt(northMeters * northMeters + eastMeters * eastMeters);
+    }
+
+    private static double northOffsetLatitude(double baseLatitude, double meters) {
+        return baseLatitude + Math.toDegrees(meters / EARTH_RADIUS_METERS);
+    }
+
+    private static String jsonNumber(double value) {
+        return String.format(Locale.ROOT, "%s", value);
+    }
+
     private AssetUsage awaitOpenUsage(AssetId assetId) throws InterruptedException {
         Instant deadline = Instant.now().plus(TELEMETRY_TIMEOUT);
         while (Instant.now().isBefore(deadline)) {
@@ -152,11 +253,16 @@ class FileSimulationSmokeTest {
     }
 
     private List<Telemetry> awaitAtLeastTwoTelemetrySamples(UsageId usageId) throws InterruptedException {
-        Instant deadline = Instant.now().plus(TELEMETRY_TIMEOUT);
+        return awaitAtLeastNTelemetrySamples(usageId, 2, TELEMETRY_TIMEOUT);
+    }
+
+    private List<Telemetry> awaitAtLeastNTelemetrySamples(UsageId usageId, int minCount, Duration timeout)
+            throws InterruptedException {
+        Instant deadline = Instant.now().plus(timeout);
         List<Telemetry> samples = List.of();
         while (Instant.now().isBefore(deadline)) {
-            samples = telemetryRepositoryPort.findByUsage(usageId, 100);
-            if (samples.size() >= 2) {
+            samples = telemetryRepositoryPort.findByUsage(usageId, 200);
+            if (samples.size() >= minCount) {
                 return samples;
             }
             Thread.sleep(POLL_INTERVAL.toMillis());

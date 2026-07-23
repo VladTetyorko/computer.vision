@@ -19,9 +19,13 @@ package com.drones.vision.application;
  *                     (in-process playback) or {@link SimulationTransport#RTSP} (pushed over the
  *                     wire via {@code FeedTransmitterPort} and ingested back, docs/CYCLES-PLAN.md
  *                     §3); must not be {@code null}
+ * @param plan         an optional configurable flight plan (docs/CYCLES-PLAN.md §7, CT-a) for the
+ *                     synthetic telemetry track — {@code null} keeps today's circular home-point
+ *                     track ({@link #latitude()}/{@link #longitude()}); when given, it wins over
+ *                     those bare fields
  */
 public record SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
-                              boolean autoStart, SimulationTransport transport) {
+                              boolean autoStart, SimulationTransport transport, TelemetryPlan plan) {
 
     public SimulationSpec {
         if (videoPath == null || videoPath.isBlank()) {
@@ -33,12 +37,29 @@ public record SimulationSpec(String displayName, String videoPath, Double latitu
     }
 
     /**
+     * Convenience constructor defaulting {@link #plan()} to {@code null} (no flight plan, the
+     * circular home-point track) — mirrors {@code Asset}/{@code Device}'s (vision-domain) N-1-arg
+     * convenience constructors that default a newly added field, rather than {@code AssetEdit}/
+     * {@code DeviceEdit}'s null-means-"leave unchanged" idiom, which only applies to
+     * partial-<em>edit</em> records (this is a creation command, so {@code null} can't mean
+     * "unchanged"). Keeps every pre-existing 6-arg call site source-compatible.
+     *
+     * @param displayName see the canonical constructor
+     * @param videoPath   see the canonical constructor
+     * @param latitude    see the canonical constructor
+     * @param longitude   see the canonical constructor
+     * @param autoStart   see the canonical constructor
+     * @param transport   see the canonical constructor
+     */
+    public SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
+                           boolean autoStart, SimulationTransport transport) {
+        this(displayName, videoPath, latitude, longitude, autoStart, transport, null);
+    }
+
+    /**
      * Convenience constructor defaulting {@link #transport()} to {@link SimulationTransport#DIRECT}
-     * — mirrors {@code Asset}/{@code Device}'s (vision-domain) N-1-arg convenience constructors
-     * that default a newly added field, rather than {@code AssetEdit}/{@code DeviceEdit}'s
-     * null-means-"leave unchanged" idiom, which only applies to partial-<em>edit</em> records
-     * (this is a creation command, so {@code null} can't mean "unchanged"). Keeps every
-     * pre-existing 5-arg call site source-compatible.
+     * and {@link #plan()} to {@code null}. Keeps every pre-existing 5-arg call site
+     * source-compatible.
      *
      * @param displayName see the canonical constructor
      * @param videoPath   see the canonical constructor
@@ -48,6 +69,6 @@ public record SimulationSpec(String displayName, String videoPath, Double latitu
      */
     public SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
                            boolean autoStart) {
-        this(displayName, videoPath, latitude, longitude, autoStart, SimulationTransport.DIRECT);
+        this(displayName, videoPath, latitude, longitude, autoStart, SimulationTransport.DIRECT, null);
     }
 }

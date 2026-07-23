@@ -272,17 +272,74 @@ public final class DefaultSimulationService implements SimulationService {
     /** Which {@link FeedTransmitterPort} started a tracked asset's feed, so {@link #stop} stops it via the same adapter. */
     private record TrackedFeed(FeedTransmitterPort transmitter, FeedId feedId) {}
 
+    /** {@code SimulatedTelemetrySource} (adapter-simulation) device option keys this method emits. */
+    private static final String TELEMETRY_OPTION_LAT = "lat";
+    private static final String TELEMETRY_OPTION_LON = "lon";
+    private static final String TELEMETRY_OPTION_ROUTE = "route";
+    private static final String TELEMETRY_OPTION_SPEED_MPS = "speedMps";
+    private static final String TELEMETRY_OPTION_ROUTE_MODE = "routeMode";
+
+    /**
+     * Builds the telemetry device's options: a {@link SimulationSpec#plan()} (docs/CYCLES-PLAN.md
+     * §7, CT-a) wins over the bare {@link SimulationSpec#latitude()}/{@link
+     * SimulationSpec#longitude()} home-point fields whenever it carries a route — in that case the
+     * route's first waypoint doubles as the {@code lat}/{@code lon} start position (so even a
+     * degenerate route string on the adapter side would fall back to a circle centered on the
+     * intended start, not the adapter's own unrelated default center), and the route itself,
+     * {@code speedMps}, and {@code routeMode} are serialized as {@code SimulatedTelemetrySource}
+     * option strings. Without a route-carrying plan, behavior is unchanged from before CT-a: bare
+     * {@code lat}/{@code lon} options are set only when the spec provides them.
+     */
     private static DeviceRegistration telemetryDevice(String displayName, SimulationSpec spec) {
         Map<String, String> options = new LinkedHashMap<>();
-        if (spec.latitude() != null) {
-            options.put("lat", String.valueOf(spec.latitude()));
-        }
-        if (spec.longitude() != null) {
-            options.put("lon", String.valueOf(spec.longitude()));
+        TelemetryPlan plan = spec.plan();
+        if (plan != null && plan.route() != null) {
+            Waypoint start = plan.route().get(0);
+            options.put(TELEMETRY_OPTION_LAT, formatDouble(start.latitude()));
+            options.put(TELEMETRY_OPTION_LON, formatDouble(start.longitude()));
+            options.put(TELEMETRY_OPTION_ROUTE, serializeRoute(plan.route()));
+            if (plan.speedMps() != null) {
+                options.put(TELEMETRY_OPTION_SPEED_MPS, formatDouble(plan.speedMps()));
+            }
+            if (plan.mode() != null) {
+                options.put(TELEMETRY_OPTION_ROUTE_MODE, plan.mode().name().toLowerCase(Locale.ROOT));
+            }
+        } else {
+            if (spec.latitude() != null) {
+                options.put(TELEMETRY_OPTION_LAT, formatDouble(spec.latitude()));
+            }
+            if (spec.longitude() != null) {
+                options.put(TELEMETRY_OPTION_LON, formatDouble(spec.longitude()));
+            }
         }
         URI telemetryUri = URI.create("sim://" + slug(displayName) + "-telemetry");
         return new DeviceRegistration(displayName + " · telemetry", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("sim", telemetryUri, options));
+    }
+
+    /** {@code lat,lon[,altM];lat,lon[,altM];…} — the format {@code RoutePlan} (adapter-simulation) parses. */
+    private static String serializeRoute(List<Waypoint> route) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < route.size(); i++) {
+            if (i > 0) {
+                builder.append(';');
+            }
+            Waypoint waypoint = route.get(i);
+            builder.append(formatDouble(waypoint.latitude())).append(',').append(formatDouble(waypoint.longitude()));
+            if (waypoint.altitudeMeters() != null) {
+                builder.append(',').append(formatDouble(waypoint.altitudeMeters()));
+            }
+        }
+        return builder.toString();
+    }
+
+    /**
+     * Explicit {@link Locale#ROOT} so a locale using {@code ,} as the decimal separator can never
+     * corrupt the {@code lat,lon[,altM];…} route format, whose own field separators are also
+     * {@code ,}/{@code ;}.
+     */
+    private static String formatDouble(double value) {
+        return String.format(Locale.ROOT, "%s", value);
     }
 
     /** A URI-safe stand-in for the display name; purely descriptive, never looked up. */

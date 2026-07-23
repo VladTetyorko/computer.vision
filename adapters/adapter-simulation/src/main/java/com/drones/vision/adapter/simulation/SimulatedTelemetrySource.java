@@ -21,26 +21,46 @@ import java.util.concurrent.Flow;
  * Synthetic {@link TelemetrySourcePort} implementation: generates a slow
  * circular GPS track with battery drain in-process, so usage history, start
  * position, and a telemetry trail are demoable with zero hardware (per the
- * asset model plan's demo goal).
+ * asset model plan's demo goal) — or, given a configurable flight plan
+ * (docs/CYCLES-PLAN.md §7, CT-a), flies a piecewise-linear route with
+ * checkpoints instead.
  *
  * <p>Supports devices that both expose {@link Capability#TELEMETRY} and use
  * {@code "sim"} as their {@link com.drones.vision.domain.model.StreamDescriptor#protocol()}
  * — i.e. the same simulated device a {@link SimulatedVideoSource} would also
  * serve. Recognized {@link com.drones.vision.domain.model.StreamDescriptor#options()}
- * keys (all optional):
+ * keys (all optional, all lenient — a blank/unparseable/malformed value silently falls
+ * back to its default rather than throwing, see {@code doubleOption}/{@link RoutePlan#parse}):
  * <ul>
- *   <li>{@code lat} — track center latitude, default {@value #DEFAULT_CENTER_LATITUDE}</li>
- *   <li>{@code lon} — track center longitude, default {@value #DEFAULT_CENTER_LONGITUDE}</li>
+ *   <li>{@code lat} — circular-track center latitude, default {@value #DEFAULT_CENTER_LATITUDE};
+ *       ignored once a valid {@code route} is given</li>
+ *   <li>{@code lon} — circular-track center longitude, default {@value #DEFAULT_CENTER_LONGITUDE};
+ *       ignored once a valid {@code route} is given</li>
+ *   <li>{@code route} — {@code lat,lon[,altM];lat,lon[,altM];…}, at least 2 points (start →
+ *       checkpoints → end); absent or malformed (fewer than 2 points, an unparseable number) means
+ *       "no route" — the circular track above is the back-compat default</li>
+ *   <li>{@code speedMps} — cruise speed along a route, default {@link RoutePlan#DEFAULT_SPEED_MPS};
+ *       only meaningful with {@code route}; must be positive, else the default applies</li>
+ *   <li>{@code routeMode} — {@code loop} (default)/{@code bounce}/{@code once}, case-insensitive;
+ *       only meaningful with {@code route}, see {@link RoutePlan.RouteMode}</li>
+ *   <li>{@code batteryDrainPerSecond} — overrides {@value #BATTERY_DRAIN_PERCENT_PER_SECOND}%/s,
+ *       whether flying the circular track or a route</li>
  * </ul>
  *
  * <p>Each {@link #open(Device)} call starts a dedicated, single-threaded
  * {@link ScheduledExecutorService} that, once per period (1 Hz by default —
  * see the package-private {@link #SimulatedTelemetrySource(long)} test seam
- * for a shorter interval), computes the next point on a ~{@value
- * #TRACK_RADIUS_METERS}m-radius circle around the center, a heading tangent
- * to that circle, and a battery level draining {@value
- * #BATTERY_DRAIN_PERCENT_PER_SECOND}%/s from a full charge, and submits a
- * {@link Telemetry} sample to a per-device {@link SubmissionPublisher}. {@link
+ * for a shorter interval), computes the next sample and submits a {@link
+ * Telemetry} to a per-device {@link SubmissionPublisher}. Without a valid
+ * {@code route} option, that sample is the next point on a ~{@value
+ * #TRACK_RADIUS_METERS}m-radius circle around the {@code lat}/{@code lon}
+ * center with a heading tangent to it (unchanged since before CT-a); with one,
+ * the runtime instead advances a cumulative {@code distanceMeters} by {@code
+ * speedMps * tickSeconds} every tick and asks the parsed {@link RoutePlan} for
+ * the position/heading/altitude there — all route-mode (loop/bounce/once)
+ * folding logic lives in {@link RoutePlan} itself, not here. Either way,
+ * battery drains {@code batteryDrainPerSecond}%/s (default {@value
+ * #BATTERY_DRAIN_PERCENT_PER_SECOND}) from a full charge. {@link
  * #close(DeviceId)} stops that executor and closes the publisher; both are
  * idempotent, matching {@link TelemetrySourcePort}'s contract.
  *
@@ -96,8 +116,14 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
         }
         double centerLatitude = doubleOption(device, "lat", DEFAULT_CENTER_LATITUDE);
         double centerLongitude = doubleOption(device, "lon", DEFAULT_CENTER_LONGITUDE);
+        double speedMps = positiveDoubleOption(device, "speedMps", RoutePlan.DEFAULT_SPEED_MPS);
+        double batteryDrainPercentPerSecond =
+                doubleOption(device, "batteryDrainPerSecond", BATTERY_DRAIN_PERCENT_PER_SECOND);
+        RoutePlan routePlan = RoutePlan.parse(
+                device.stream().options().get("route"), device.stream().options().get("routeMode"));
 
-        DeviceRuntime runtime = new DeviceRuntime(device.id(), centerLatitude, centerLongitude, periodMillis);
+        DeviceRuntime runtime = new DeviceRuntime(device.id(), centerLatitude, centerLongitude, periodMillis,
+                routePlan, speedMps, batteryDrainPercentPerSecond);
         DeviceRuntime previous = runtimes.put(device.id(), runtime);
         if (previous != null) {
             previous.close(); // defensive: a device id must not have two live runtimes
@@ -126,22 +152,38 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
         }
     }
 
+    /** Like {@link #doubleOption}, but a parsed value that isn't positive also falls back to the default. */
+    private static double positiveDoubleOption(Device device, String key, double defaultValue) {
+        double parsed = doubleOption(device, key, defaultValue);
+        return parsed > 0 ? parsed : defaultValue;
+    }
+
     /** Per-open runtime: a scheduled sample generator feeding a {@link SubmissionPublisher}. */
     private static final class DeviceRuntime {
         private final DeviceId deviceId;
         private final double centerLatitude;
         private final double centerLongitude;
         private final long periodMillis;
+        /** {@code null} means "no valid route" — fall back to the circular track, unchanged since before CT-a. */
+        private final RoutePlan routePlan;
+        private final double speedMps;
+        private final double batteryDrainPercentPerSecond;
         private final SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
         private final ScheduledExecutorService executor;
         private final AtomicLong tick = new AtomicLong();
         private final AtomicBoolean closed = new AtomicBoolean(false);
+        /** Cumulative distance flown along {@link #routePlan}; touched only by this runtime's single scheduler thread. */
+        private double distanceMeters;
 
-        DeviceRuntime(DeviceId deviceId, double centerLatitude, double centerLongitude, long periodMillis) {
+        DeviceRuntime(DeviceId deviceId, double centerLatitude, double centerLongitude, long periodMillis,
+                      RoutePlan routePlan, double speedMps, double batteryDrainPercentPerSecond) {
             this.deviceId = deviceId;
             this.centerLatitude = centerLatitude;
             this.centerLongitude = centerLongitude;
             this.periodMillis = periodMillis;
+            this.routePlan = routePlan;
+            this.speedMps = speedMps;
+            this.batteryDrainPercentPerSecond = batteryDrainPercentPerSecond;
             this.executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "sim-telemetry-" + deviceId.value());
                 thread.setDaemon(true);
@@ -159,28 +201,40 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
             }
             try {
                 long n = tick.getAndIncrement();
-                double angle = (n % TICKS_PER_LAP) / (double) TICKS_PER_LAP * 2 * Math.PI;
-
-                double northMeters = TRACK_RADIUS_METERS * Math.cos(angle);
-                double eastMeters = TRACK_RADIUS_METERS * Math.sin(angle);
-                double latitude = centerLatitude + Math.toDegrees(northMeters / EARTH_RADIUS_METERS);
-                double longitude = centerLongitude + Math.toDegrees(
-                        eastMeters / (EARTH_RADIUS_METERS * Math.cos(Math.toRadians(centerLatitude))));
-
-                // Heading tangent to the circle (bearing from north, clockwise), the direction
-                // of travel as angle increases along the (northMeters, eastMeters) parametrization.
-                double headingDegrees = (Math.toDegrees(Math.atan2(Math.cos(angle), -Math.sin(angle))) + 360.0) % 360.0;
-
                 double elapsedSeconds = (n * periodMillis) / 1000.0;
-                double batteryPercent = Math.max(0.0, 100.0 - BATTERY_DRAIN_PERCENT_PER_SECOND * elapsedSeconds);
-
-                Telemetry sample = new Telemetry(deviceId, Instant.now(), latitude, longitude, null, headingDegrees,
-                        batteryPercent, Map.of());
+                double batteryPercent = Math.max(0.0, 100.0 - batteryDrainPercentPerSecond * elapsedSeconds);
+                Telemetry sample = routePlan != null ? routeSample(batteryPercent) : circularSample(n, batteryPercent);
                 publisher.submit(sample);
             } catch (RuntimeException e) {
                 publisher.closeExceptionally(e);
                 close();
             }
+        }
+
+        /** The tick just advances distance by {@code speedMps * tickSeconds} and asks the plan for the rest. */
+        private Telemetry routeSample(double batteryPercent) {
+            distanceMeters += speedMps * (periodMillis / 1000.0);
+            RoutePlan.Position position = routePlan.positionAt(distanceMeters);
+            return new Telemetry(deviceId, Instant.now(), position.latitude(), position.longitude(),
+                    position.altitudeMeters(), position.headingDegrees(), batteryPercent, Map.of());
+        }
+
+        /** Unchanged since before CT-a: a point on a ~{@value #TRACK_RADIUS_METERS}m circle, tangent heading. */
+        private Telemetry circularSample(long n, double batteryPercent) {
+            double angle = (n % TICKS_PER_LAP) / (double) TICKS_PER_LAP * 2 * Math.PI;
+
+            double northMeters = TRACK_RADIUS_METERS * Math.cos(angle);
+            double eastMeters = TRACK_RADIUS_METERS * Math.sin(angle);
+            double latitude = centerLatitude + Math.toDegrees(northMeters / EARTH_RADIUS_METERS);
+            double longitude = centerLongitude + Math.toDegrees(
+                    eastMeters / (EARTH_RADIUS_METERS * Math.cos(Math.toRadians(centerLatitude))));
+
+            // Heading tangent to the circle (bearing from north, clockwise), the direction
+            // of travel as angle increases along the (northMeters, eastMeters) parametrization.
+            double headingDegrees = (Math.toDegrees(Math.atan2(Math.cos(angle), -Math.sin(angle))) + 360.0) % 360.0;
+
+            return new Telemetry(deviceId, Instant.now(), latitude, longitude, null, headingDegrees,
+                    batteryPercent, Map.of());
         }
 
         void close() {
