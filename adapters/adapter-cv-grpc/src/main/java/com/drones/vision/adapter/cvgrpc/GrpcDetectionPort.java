@@ -1,0 +1,323 @@
+package com.drones.vision.adapter.cvgrpc;
+
+import com.drones.vision.domain.model.BoundingBox;
+import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.ModelRef;
+import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.PixelFormat;
+import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.domain.port.out.DetectionPort;
+import com.drones.vision.proto.v1.DetectionResponse;
+import com.drones.vision.proto.v1.FrameRequest;
+import com.drones.vision.proto.v1.ImageEncoding;
+import com.drones.vision.proto.v1.InferenceGrpc;
+import com.google.protobuf.ByteString;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.stub.StreamObserver;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * {@link DetectionPort} over the generated {@code Inference/DetectStream} gRPC
+ * stub — the Java client half of the Java&harr;Python CV service contract
+ * (see {@code proto/vision/v1/cv.proto}).
+ *
+ * <h2>Per-stream bidi correlation</h2>
+ * {@code DetectStream} is a bidirectional streaming RPC; this class keeps
+ * exactly one call open per {@link StreamId}, lazily started on the first
+ * {@link #detect} for that stream and kept in a {@link ConcurrentHashMap}.
+ * Each frame is sent as one {@code FrameRequest} on that stream's request
+ * observer, keyed by {@code sequence}; the matching {@code DetectionResponse}
+ * (correlated back by the same {@code sequence}, not by re-parsing the
+ * wire-echoed {@code stream_id}) completes the {@link CompletableFuture}
+ * returned to the caller. gRPC stream observers are not thread-safe, so all
+ * writes to a stream's request observer (including the lazy open) are
+ * serialized through a per-stream monitor.
+ *
+ * <h2>Failure semantics</h2>
+ * <ul>
+ *   <li><b>Transport failure</b> ({@code onError} from the server, e.g. the
+ *   CV service restarting): every pending future for that stream fails
+ *   immediately with the transport exception, and the stream's entry is
+ *   dropped — the next {@link #detect} for that {@link StreamId} transparently
+ *   reopens a fresh call. This is what lets a caller's retry/backoff recover
+ *   after a service restart without ever seeing a stuck stream.</li>
+ *   <li><b>Hung service</b> (no failure, just silence): a bidi call has no
+ *   natural per-call deadline, so instead every pending future gets its own
+ *   {@value #RESPONSE_TIMEOUT_SECONDS}s timeout ({@link
+ *   CompletableFuture#orTimeout}); a service that stops responding degrades
+ *   each in-flight {@link #detect} call quickly instead of hanging it
+ *   indefinitely.</li>
+ *   <li><b>Unsupported {@link PixelFormat}</b>: fails fast with no gRPC call
+ *   at all — the frame's stream is never opened/touched.</li>
+ * </ul>
+ *
+ * <h2>Stream lifecycle</h2>
+ * There is no idle eviction. Callers that know a stream has ended should call
+ * {@link #streamEnded(StreamId)} to fail any still-pending futures for it and
+ * half-close its request observer; skipping it just leaves the call open
+ * until {@link #close()} (the next {@code detect()} for that id would simply
+ * keep reusing it). {@link #close()} shuts down every open stream and then
+ * the underlying channel, whether the channel was built by this instance or
+ * supplied by the caller.
+ *
+ * <h2>Threading</h2>
+ * Plain class, no Spring. {@link #detect} never blocks: building the request,
+ * looking up/opening the stream, and sending it are all non-blocking; the
+ * returned stage completes later, on a gRPC executor thread.
+ */
+public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
+
+    private static final System.Logger LOG = System.getLogger(GrpcDetectionPort.class.getName());
+
+    /** Per-pending-future response timeout — see class javadoc's "hung service" case. */
+    static final long RESPONSE_TIMEOUT_SECONDS = 2;
+
+    private static final long CHANNEL_SHUTDOWN_TIMEOUT_SECONDS = 5;
+
+    private final ManagedChannel channel;
+    private final InferenceGrpc.InferenceStub asyncStub;
+    private final ConcurrentHashMap<StreamId, StreamSession> sessions = new ConcurrentHashMap<>();
+    private final AtomicBoolean closed = new AtomicBoolean(false);
+
+    /**
+     * Convenience constructor: builds a plaintext {@link ManagedChannel} to
+     * {@code host:port}. The CV service is reached over a private/internal
+     * network (docker-compose) so plaintext is deliberate, not an oversight.
+     */
+    public GrpcDetectionPort(String host, int port) {
+        this(ManagedChannelBuilder.forAddress(host, port).usePlaintext().build());
+    }
+
+    /**
+     * Test/advanced seam: bring your own channel (e.g. an in-process channel
+     * in tests). {@link #close()} shuts this channel down regardless of who
+     * built it.
+     */
+    public GrpcDetectionPort(ManagedChannel channel) {
+        this.channel = Objects.requireNonNull(channel, "channel must not be null");
+        this.asyncStub = InferenceGrpc.newStub(channel);
+    }
+
+    @Override
+    public CompletionStage<DetectionResult> detect(VideoFrame frame, PipelineConfig config) {
+        Objects.requireNonNull(frame, "frame must not be null");
+        Objects.requireNonNull(config, "config must not be null");
+
+        if (closed.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("GrpcDetectionPort is closed"));
+        }
+
+        ImageEncoding encoding = toImageEncoding(frame.format());
+        if (encoding == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException(
+                    "Unsupported PixelFormat for gRPC inference: " + frame.format()));
+        }
+
+        StreamSession session = sessions.computeIfAbsent(frame.streamId(), StreamSession::new);
+        return session.send(frame, config, encoding);
+    }
+
+    /**
+     * Signals that {@code streamId} has ended: fails any still-pending
+     * futures for it with a {@link CancellationException}, half-closes its
+     * request observer (best-effort), and drops the stream entry so a future
+     * {@link #detect} for the same id starts a fresh call. Idempotent — a
+     * second call (or one for an id with no open stream) is a no-op.
+     */
+    public void streamEnded(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        StreamSession session = sessions.get(streamId);
+        if (session != null) {
+            session.endAndClose();
+        }
+    }
+
+    /**
+     * Idempotent. Ends every open stream (see {@link #streamEnded}) and then
+     * shuts down the channel, awaiting termination briefly before forcing it.
+     */
+    @Override
+    public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        List<StreamSession> openSessions = new ArrayList<>(sessions.values());
+        openSessions.forEach(StreamSession::endAndClose);
+
+        channel.shutdown();
+        try {
+            if (!channel.awaitTermination(CHANNEL_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                channel.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            channel.shutdownNow();
+        }
+    }
+
+    private static ImageEncoding toImageEncoding(PixelFormat format) {
+        return switch (format) {
+            case JPEG -> ImageEncoding.IMAGE_ENCODING_JPEG;
+            case BGR24 -> ImageEncoding.IMAGE_ENCODING_BGR24;
+            default -> null;
+        };
+    }
+
+    private static FrameRequest buildRequest(VideoFrame frame, PipelineConfig config, ImageEncoding encoding) {
+        return FrameRequest.newBuilder()
+                .setStreamId(frame.streamId().value().toString())
+                .setSequence(frame.sequence())
+                .setTimestampMillis(frame.capturedAt().toEpochMilli())
+                .setWidth(frame.width())
+                .setHeight(frame.height())
+                .setEncoding(encoding)
+                .setData(ByteString.copyFrom(frame.data()))
+                .setModelId(config.model().id())
+                .setModelVersion(config.model().version())
+                .setConfidenceThreshold((float) config.confidenceThreshold())
+                .build();
+    }
+
+    private static DetectionResult toDetectionResult(StreamId streamId, DetectionResponse response) {
+        ModelRef model = new ModelRef(response.getModelId(), response.getModelVersion());
+        List<Detection> detections = response.getDetectionsList().stream()
+                .map(wire -> toDetection(wire, model))
+                .toList();
+        return new DetectionResult(
+                streamId,
+                response.getSequence(),
+                Instant.ofEpochMilli(response.getTimestampMillis()),
+                detections,
+                Duration.ofMillis(response.getInferenceMillis()));
+    }
+
+    private static Detection toDetection(com.drones.vision.proto.v1.Detection wire, ModelRef model) {
+        var wireBox = wire.getBox();
+        BoundingBox box = new BoundingBox(wireBox.getX(), wireBox.getY(), wireBox.getWidth(), wireBox.getHeight());
+        return new Detection(wire.getLabel(), wire.getConfidence(), box, model);
+    }
+
+    /**
+     * One open {@code DetectStream} call for a single {@link StreamId}:
+     * owns the request observer, the write lock guarding it, and the
+     * sequence&rarr;future correlation map for responses still in flight.
+     */
+    private final class StreamSession {
+
+        private final StreamId streamId;
+        private final Object writeLock = new Object();
+        private final ConcurrentHashMap<Long, CompletableFuture<DetectionResult>> pending = new ConcurrentHashMap<>();
+
+        private volatile StreamObserver<FrameRequest> requestObserver;
+
+        StreamSession(StreamId streamId) {
+            this.streamId = streamId;
+        }
+
+        CompletionStage<DetectionResult> send(VideoFrame frame, PipelineConfig config, ImageEncoding encoding) {
+            long sequence = frame.sequence();
+            CompletableFuture<DetectionResult> future = new CompletableFuture<>();
+            pending.put(sequence, future);
+            future.orTimeout(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            future.whenComplete((result, error) -> pending.remove(sequence, future));
+
+            FrameRequest request = buildRequest(frame, config, encoding);
+            synchronized (writeLock) {
+                try {
+                    openIfNeeded().onNext(request);
+                } catch (RuntimeException e) {
+                    LOG.log(System.Logger.Level.WARNING,
+                            () -> "Failed to send frame " + sequence + " on detection stream " + streamId, e);
+                    failAllAndDrop(e);
+                }
+            }
+            return future;
+        }
+
+        /** Must be called while holding {@link #writeLock}. */
+        private StreamObserver<FrameRequest> openIfNeeded() {
+            StreamObserver<FrameRequest> observer = requestObserver;
+            if (observer == null) {
+                LOG.log(System.Logger.Level.INFO, () -> "Opening detection stream for " + streamId);
+                observer = asyncStub.detectStream(new ResponseHandler());
+                requestObserver = observer;
+            }
+            return observer;
+        }
+
+        private void onResponse(DetectionResponse response) {
+            CompletableFuture<DetectionResult> future = pending.remove(response.getSequence());
+            if (future == null) {
+                return; // already timed out, or an unrecognized/late sequence -- nothing to complete
+            }
+            try {
+                future.complete(toDetectionResult(streamId, response));
+            } catch (RuntimeException e) {
+                future.completeExceptionally(e);
+            }
+        }
+
+        private void onTransportError(Throwable t) {
+            LOG.log(System.Logger.Level.WARNING,
+                    () -> "Detection stream for " + streamId + " failed; will reopen on next detect()", t);
+            failAllAndDrop(t);
+        }
+
+        private void onServerCompleted() {
+            failAllAndDrop(new IllegalStateException("Detection stream for " + streamId + " completed unexpectedly"));
+        }
+
+        /** Fails every still-pending future and drops this session so the next {@code detect()} reopens. */
+        private void failAllAndDrop(Throwable cause) {
+            sessions.remove(streamId, this);
+            pending.values().forEach(future -> future.completeExceptionally(cause));
+        }
+
+        /** Fails pending futures, half-closes the request observer, and drops this session. Idempotent. */
+        void endAndClose() {
+            sessions.remove(streamId, this);
+            pending.values().forEach(future -> future.completeExceptionally(
+                    new CancellationException("Detection stream for " + streamId + " ended")));
+            StreamObserver<FrameRequest> observer = requestObserver;
+            if (observer != null) {
+                try {
+                    observer.onCompleted();
+                } catch (RuntimeException e) {
+                    LOG.log(System.Logger.Level.DEBUG,
+                            () -> "Ignoring error half-closing detection stream for " + streamId, e);
+                }
+            }
+        }
+
+        private final class ResponseHandler implements StreamObserver<DetectionResponse> {
+            @Override
+            public void onNext(DetectionResponse response) {
+                onResponse(response);
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                onTransportError(t);
+            }
+
+            @Override
+            public void onCompleted() {
+                onServerCompleted();
+            }
+        }
+    }
+}

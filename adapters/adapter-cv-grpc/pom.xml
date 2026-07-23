@@ -11,7 +11,7 @@
 
     <artifactId>adapter-cv-grpc</artifactId>
     <name>adapter-cv-grpc</name>
-    <description>Placeholder — gRPC client to the Python CV service, implemented in Phase 2.</description>
+    <description>gRPC client to the Python CV service — GrpcDetectionPort over the generated Inference/DetectStream stub.</description>
 
     <dependencies>
         <dependency>
@@ -21,6 +21,22 @@
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>vision-proto</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- In-process gRPC transport for tests only; version managed by the
+             io.grpc:grpc-bom imported via spring-boot-dependencies (not the
+             ${grpc.version}=1.64.0 pin used for the wire-facing artifacts
+             above via vision-proto) so it matches whatever grpc-core version
+             actually ends up mediated onto the classpath. -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-inprocess</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
