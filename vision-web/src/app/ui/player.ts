@@ -21,11 +21,14 @@ import {
 } from './detection-overlay-logic';
 import {
   COLD_START_RETRY_DELAY_MS,
+  INITIAL_PACING_STATE,
+  advancePacing,
+  cyclePacingDelayMs,
   initialTransportState,
   isStalled,
-  reconnectDelayMs,
-  reduceRecovery,
   reduceTransportRecovery,
+  shouldAttemptWhep,
+  type PacingState,
   type PlayerPhase,
   type Transport,
   type TransportRecoveryState,
@@ -208,6 +211,9 @@ interface DrawnBox {
               <span class="err-title">Playback failed</span>
               <span class="hint">{{ message() }}</span>
             }
+            @case ('stopped') {
+              <span class="muted">Stream stopped</span>
+            }
           }
         </div>
       }
@@ -333,6 +339,18 @@ export class Player {
   /** Wall tiles set this when scrolled out of view so off-screen video stops decoding. */
   readonly suspended = input(false);
 
+  /**
+   * The host page knows this stream was deliberately stopped (docs/MVP2-PLAN.md §S, S-b) — its own
+   * Stop action, or (a host reading it off `FleetStore`/an equivalent store) the streams list no
+   * longer naming this device. Renders a calm "Stream stopped" state and — the actual fix for the
+   * diagnosed freeze — makes the reattach effect below a no-op regardless of `src`/`whepUrl`, so a
+   * stray/late signal (the backend still tearing down, or briefly re-listing the stream) can never
+   * restart a reconnect attempt against a stream the user just asked to end. Absorbing per
+   * `player-recovery.ts#reduceRecovery`'s own doc comment: only a fresh `src`/`whepUrl` while this
+   * is `false` re-attaches.
+   */
+  readonly stopped = input(false);
+
   /** Compact tiles hide native controls and the caption. */
   readonly compact = input(false);
 
@@ -356,8 +374,18 @@ export class Player {
   protected readonly transport = computed<Transport>(() => this.transportState().transport);
   protected readonly message = signal<string | null>(null);
 
+  /**
+   * Cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) — `player-recovery.ts#PacingState`'s
+   * own doc comment has the full rules; this signal is the one piece of state that survives a
+   * WHEP→HLS fallback and every subsequent cycle restart, driving the *actual* delay/WHEP-retry
+   * decisions below. `transportState` above is untouched and still drives `phase`/the chip.
+   */
+  private readonly pacingState = signal<PacingState>(INITIAL_PACING_STATE);
+
   protected readonly reconnectHint = computed(() => {
-    const attempt = this.transportState().recovery.attempt;
+    // Reads the saga-wide pacing counter, not `transportState().recovery.attempt` (which resets on
+    // every WHEP→HLS fallback) — see `PacingState`'s doc comment for why the two differ on purpose.
+    const attempt = this.pacingState().cycleAttempt;
     return attempt <= 1
       ? 'The stream will resume automatically.'
       : `Retrying automatically (attempt ${attempt}).`;
@@ -420,8 +448,9 @@ export class Player {
       const src = this.src();
       const whepUrl = this.whepUrl();
       const suspended = this.suspended();
+      const stopped = this.stopped();
       // Read inputs before the async teardown so the effect tracks them.
-      void this.reattach(src, whepUrl, suspended);
+      void this.reattach(src, whepUrl, suspended, stopped);
     });
 
     effect(() => {
@@ -447,10 +476,7 @@ export class Player {
 
   /** Cancels any pending backoff wait and retries immediately — visible only while reconnecting. */
   protected retryNow(): void {
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     const generation = this.generation;
     if (this.transport() === 'webrtc' && this.currentWhepUrl !== null) {
       void this.beginWhepAttach(generation, this.currentWhepUrl, this.currentSrc);
@@ -459,11 +485,48 @@ export class Player {
     }
   }
 
-  private async reattach(src: string | null, whepUrl: string | null, suspended: boolean): Promise<void> {
+  /**
+   * Cancels whatever reconnect backoff is currently pending, if any — called at the top of every
+   * place that's about to set a new one (docs/MVP2-PLAN.md §S, S-b bug fix). Before this, each of
+   * `scheduleReconnect`/`handleWhepFailure`'s retry branch assigned `this.reconnectTimer` directly,
+   * silently **orphaning** whatever the field previously held: a second failure signal arriving
+   * before the first backoff wait elapsed (hls.js can emit more than one fatal `ERROR` for the same
+   * dead playlist as its own internal retry budget exhausts; the stall watchdog re-detects the same
+   * ongoing stall every `WATCHDOG_TICK_MS` once a long backoff wait is in progress; WHEP's ICE state
+   * can flip through `disconnected` then `failed` in quick succession) would leave the orphaned
+   * timer alive, still armed to fire `beginAttach`/`beginWhepAttach` **on its own, now-stale,
+   * shorter schedule** — a premature, redundant reattach that opens a fresh `Hls`/
+   * `RTCPeerConnection` and issues a fresh network request completely out of step with the capped
+   * backoff the state chip claims to be honoring. Under a persistently failing/flapping stream this
+   * compounds — each premature reattach can itself fail immediately, scheduling yet another
+   * un-cleared timer — which is the mechanism observed live behind the stop-freeze bug report (a
+   * tight, repeating WHEP-POST/GET-devices/GET-streams cycle in the network panel).
+   */
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private async reattach(
+    src: string | null,
+    whepUrl: string | null,
+    suspended: boolean,
+    stopped: boolean,
+  ): Promise<void> {
     const generation = ++this.generation;
     this.teardown();
     this.currentSrc = null;
     this.currentWhepUrl = null;
+
+    // Checked first, ahead of `src`/`whepUrl`: a deliberately stopped stream must never attach,
+    // even if the host is still feeding a (possibly stale/flapping) `src`/`whepUrl` — see the
+    // `stopped` input's own doc comment for why this is the actual freeze fix.
+    if (stopped) {
+      this.transportState.set(reduceTransportRecovery(this.transportState(), 'stopped'));
+      return;
+    }
 
     if ((!src && !whepUrl) || suspended) {
       this.transportState.set(reduceTransportRecovery(this.transportState(), 'reset'));
@@ -472,13 +535,43 @@ export class Player {
 
     this.currentSrc = src;
     this.currentWhepUrl = whepUrl;
-    const usesWhep = whepUrl !== null;
+    // A genuine fresh attach (a new `src`/`whepUrl`) starts a brand new reconnect saga (docs/MVP2-
+    // PLAN.md §S, S-c) — mirrors `transportState` being re-derived from scratch just below, rather
+    // than carrying over whatever pacing a *previous* src/whepUrl's saga had accumulated.
+    this.pacingState.set(INITIAL_PACING_STATE);
+    const usesWhep = whepUrl !== null && shouldAttemptWhep(this.pacingState(), true, Date.now());
     this.transportState.set(reduceTransportRecovery(initialTransportState(usesWhep), 'attachStarted'));
 
-    if (usesWhep) {
+    if (usesWhep && whepUrl) {
+      this.pacingState.update((s) => advancePacing(s, 'whepAttempted', Date.now()));
       await this.beginWhepAttach(generation, whepUrl, src);
     } else if (src) {
       await this.beginAttach(generation, src);
+    }
+  }
+
+  /**
+   * Starts the next reconnect cycle (docs/MVP2-PLAN.md §S, S-c): tries WHEP again if this saga's
+   * damping cooldown allows it (`shouldAttemptWhep`), otherwise goes straight to HLS — the fresh-
+   * `RecoveryState`/chip-phase reset here exactly mirrors `reattach()`'s own "fresh attach" branch
+   * above, just without resetting `pacingState` (a new *cycle*, not a new *saga*). Every scheduled
+   * retry (`scheduleColdStartRetry`'s escalating branch, `scheduleReconnect`) calls this instead of
+   * reattaching a fixed transport directly, so a saga that has fallen back to HLS gets a fair chance
+   * to re-try WHEP on a later cycle, not just once per component lifetime.
+   */
+  private beginNextCycle(generation: number): void {
+    if (generation !== this.generation || this.currentSrc === null) {
+      return;
+    }
+    const now = Date.now();
+    const tryWhep = this.currentWhepUrl !== null && shouldAttemptWhep(this.pacingState(), true, now);
+    this.transportState.set(reduceTransportRecovery(initialTransportState(tryWhep), 'attachStarted'));
+
+    if (tryWhep && this.currentWhepUrl !== null) {
+      this.pacingState.update((s) => advancePacing(s, 'whepAttempted', now));
+      void this.beginWhepAttach(generation, this.currentWhepUrl, this.currentSrc);
+    } else {
+      void this.beginAttach(generation, this.currentSrc);
     }
   }
 
@@ -526,6 +619,7 @@ export class Player {
       this.lastProgressAt = Date.now();
       const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
       this.transportState.set(reduceTransportRecovery(this.transportState(), 'firstSegment'));
+      this.pacingState.update((s) => advancePacing(s, 'playing', Date.now())); // docs/MVP2-PLAN.md §S, S-c
       if (wasReconnecting) {
         this.maybeSnapToLive('recovered'); // see docs/MVP2-PLAN.md §V, V-b — a fresh reattach earns a live-edge snap.
       }
@@ -562,21 +656,42 @@ export class Player {
     return code === 404 || code === 0;
   }
 
+  /**
+   * A never-yet-live stream's cold-start poll (docs/MVP2-PLAN.md §S, S-c rule 1): gentle and fixed
+   * while this saga has never failed anything (`cycleAttempt === 0` — "a never-yet-live stream
+   * politely waiting is allowed its gentle poll"), but the moment this saga has already failed a
+   * transport (a WHEP fallback, or an earlier HLS attempt this same saga), a further playlist miss
+   * is itself a cycle failure and folds under the same escalating pacing as any other reconnect
+   * ("a stream that HAS failed transports escalates") — closing the half of S-b's flagged gap where
+   * a stuck-`waiting` phase (which `isColdStartMiss` can keep true indefinitely, since the phase
+   * itself never leaves `connecting`/`waiting`) never got throttled at all.
+   */
   private scheduleColdStartRetry(generation: number): void {
-    this.coldStartTimer = setTimeout(() => {
-      if (generation === this.generation && this.currentSrc !== null) {
-        void this.beginAttach(generation, this.currentSrc);
-      }
-    }, COLD_START_RETRY_DELAY_MS);
+    const pacing = this.pacingState();
+    if (pacing.cycleAttempt === 0) {
+      this.coldStartTimer = setTimeout(() => {
+        if (generation === this.generation && this.currentSrc !== null) {
+          void this.beginAttach(generation, this.currentSrc);
+        }
+      }, COLD_START_RETRY_DELAY_MS);
+      return;
+    }
+    const next = advancePacing(pacing, 'cycleFailed', Date.now());
+    this.pacingState.set(next);
+    this.coldStartTimer = setTimeout(() => this.beginNextCycle(generation), cyclePacingDelayMs(next));
   }
 
+  /**
+   * Schedules the next reconnect cycle after a genuine failure (not a cold-start miss) — the delay
+   * and whether WHEP is retried both come from the shared, cross-cycle `pacingState` (docs/MVP2-
+   * PLAN.md §S, S-c), not `transportState().recovery.attempt`'s own cycle-local counter.
+   */
   private scheduleReconnect(generation: number): void {
-    const delay = reconnectDelayMs(this.transportState().recovery.attempt);
-    this.reconnectTimer = setTimeout(() => {
-      if (generation === this.generation && this.currentSrc !== null) {
-        void this.beginAttach(generation, this.currentSrc);
-      }
-    }, delay);
+    this.clearReconnectTimer(); // see its own doc comment — never leave a prior backoff orphaned
+    const next = advancePacing(this.pacingState(), 'cycleFailed', Date.now());
+    this.pacingState.set(next);
+    const delay = cyclePacingDelayMs(next);
+    this.reconnectTimer = setTimeout(() => this.beginNextCycle(generation), delay);
   }
 
   /** No fragment/segment progress for `STALL_WATCHDOG_MS` is treated as a silent stall — reconnect. */
@@ -589,12 +704,26 @@ export class Player {
       if (phase === 'idle' || phase === 'error') {
         return;
       }
+      this.tickPacingHealth();
       if (isStalled(this.lastProgressAt, Date.now())) {
         this.transportState.set(reduceTransportRecovery(this.transportState(), 'stalled'));
         this.message.set('No new video for a while — reconnecting.');
         this.scheduleReconnect(generation);
       }
     }, WATCHDOG_TICK_MS);
+  }
+
+  /**
+   * Dispatches a pacing `'healthTick'` (docs/MVP2-PLAN.md §S, S-c rule 3) whenever `phase ===
+   * 'playing'` — a no-op otherwise. Called from both the HLS/native watchdog (`startWatchdog`) and
+   * the WHEP one (`startWhepWatchdog`), which already tick every `WATCHDOG_TICK_MS` for their own
+   * stall check regardless of transport, so this reuses that existing cadence rather than starting
+   * a third timer.
+   */
+  private tickPacingHealth(): void {
+    if (this.transportState().recovery.phase === 'playing') {
+      this.pacingState.update((s) => advancePacing(s, 'healthTick', Date.now()));
+    }
   }
 
   private watchNativePlayback(generation: number, video: HTMLVideoElement): void {
@@ -608,6 +737,7 @@ export class Player {
         this.lastProgressAt = Date.now();
         const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
         this.transportState.set(reduceTransportRecovery(this.transportState(), 'firstSegment'));
+        this.pacingState.update((s) => advancePacing(s, 'playing', Date.now())); // docs/MVP2-PLAN.md §S, S-c
         if (wasReconnecting) {
           this.maybeSnapToLive('recovered'); // see docs/MVP2-PLAN.md §V, V-b — mirrors the hls.js FRAG_BUFFERED handler above.
         }
@@ -749,6 +879,7 @@ export class Player {
         this.behindLive.set(0); // WHEP is effectively live — see class doc.
         this.clearWhepNoTrackTimer();
         this.transportState.set(reduceTransportRecovery(this.transportState(), 'firstSegment'));
+        this.pacingState.update((s) => advancePacing(s, 'playing', Date.now())); // docs/MVP2-PLAN.md §S, S-c
         if (this.overlayTimer === null) {
           this.startOverlayLoop(); // ontrack can fire more than once on renegotiation
         }
@@ -839,6 +970,7 @@ export class Player {
       if (generation !== this.generation || this.transportState().transport !== 'webrtc') {
         return;
       }
+      this.tickPacingHealth();
       if (isStalled(this.lastFrameAt, Date.now())) {
         this.handleWhepFailure(generation, hlsFallbackSrc, 'stalled');
       }
@@ -847,8 +979,14 @@ export class Player {
 
   /**
    * Routes a WHEP failure through `reduceTransportRecovery`: falls back to HLS (via the existing
-   * `beginAttach` path) the first time this transport hasn't played yet, or retries WHEP itself
-   * with the same capped backoff once it has — see that function's own doc comment for the rule.
+   * `beginAttach` path, immediately, no extra delay — U3's permanent-per-cycle fallback, unchanged)
+   * the first time this transport hasn't played yet, or retries WHEP itself once it has — see that
+   * function's own doc comment for the rule. The pre-play fallback branch doesn't touch `pacingState`
+   * itself (the WHEP attempt that just failed was already recorded when it started — see
+   * `reattach`/`beginNextCycle`'s own `'whepAttempted'` dispatch — and falling through to try HLS is
+   * *within* the current cycle, not a new one); the played-before retry branch below does, since a
+   * previously-proven WHEP connection dying and needing reconnection is genuinely a new cycle
+   * (docs/MVP2-PLAN.md §S, S-c).
    */
   private handleWhepFailure(
     generation: number,
@@ -872,9 +1010,13 @@ export class Player {
     }
 
     const whepUrl = this.currentWhepUrl;
-    const delay = reconnectDelayMs(next.recovery.attempt);
+    const pacingNext = advancePacing(this.pacingState(), 'cycleFailed', Date.now());
+    this.pacingState.set(pacingNext);
+    const delay = cyclePacingDelayMs(pacingNext);
+    this.clearReconnectTimer(); // see its own doc comment — never leave a prior backoff orphaned
     this.reconnectTimer = setTimeout(() => {
       if (generation === this.generation && whepUrl !== null) {
+        this.pacingState.update((s) => advancePacing(s, 'whepAttempted', Date.now()));
         void this.beginWhepAttach(generation, whepUrl, hlsFallbackSrc);
       }
     }, delay);
@@ -1049,10 +1191,7 @@ export class Player {
       clearTimeout(this.coldStartTimer);
       this.coldStartTimer = null;
     }
-    if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     this.mediaAbort?.abort();
     this.mediaAbort = null;
     if (this.hls) {

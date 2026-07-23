@@ -15,8 +15,16 @@
  *
  * `error` is now reserved for a genuinely unrecoverable condition — this browser cannot play HLS
  * at all — not for a transient network hiccup.
+ *
+ * **`stopped`** (docs/MVP2-PLAN.md §S, S-b) — a *deliberately* stopped stream, distinct from both
+ * `idle` (nothing has ever been asked to play) and `reconnecting`/`error` (a still-wanted stream
+ * that is struggling or unplayable). Reached only via the new `'stopped'` event, which a host page
+ * dispatches once it knows — from its own explicit Stop action, or from the streams list no longer
+ * naming this device (see `ui/player.ts`'s `stopped` input doc) — that nothing should be attached
+ * any more. **Absorbing**: see `reduceRecovery`'s own doc comment for exactly which events can (and
+ * cannot) move a state back out of it.
  */
-export type PlayerPhase = 'idle' | 'connecting' | 'waiting' | 'playing' | 'reconnecting' | 'error';
+export type PlayerPhase = 'idle' | 'connecting' | 'waiting' | 'playing' | 'reconnecting' | 'error' | 'stopped';
 
 export interface RecoveryState {
   readonly phase: PlayerPhase;
@@ -40,7 +48,12 @@ export type RecoveryEvent =
   /** An hls.js/native fatal error that isn't the cold-start-404 pattern above. */
   | 'fatalError'
   /** This browser can play neither native HLS nor hls.js — nothing to retry. */
-  | 'unsupported';
+  | 'unsupported'
+  /**
+   * The stream was deliberately stopped (docs/MVP2-PLAN.md §S, S-b) — either this page's own Stop
+   * action, or the streams list no longer naming this device. Always wins, from any phase.
+   */
+  | 'stopped';
 
 /**
  * Advances the recovery state machine by one event.
@@ -50,15 +63,34 @@ export type RecoveryEvent =
  * it stays a gentle `waiting` (docs/CYCLES-PLAN.md §11 item 5: "no error flash on fresh streams").
  * Once the stream has played before, or is already mid-recovery, the *same* event means the
  * backend actually went away (e.g. a restart) — it becomes a real `reconnecting` attempt instead.
+ *
+ * **`stopped` is absorbing** (docs/MVP2-PLAN.md §S, S-b): once `phase === 'stopped'`, every event
+ * except `'attachStarted'`/`'reset'` (a *fresh* attach — a new `src`/`whepUrl` the caller actually
+ * wants attached again) is a no-op, returning the exact same `state`. This is the fix for the
+ * diagnosed stop-freeze mechanism: without it, a stray recovery signal arriving after a deliberate
+ * stop — a late hls.js fatal error from the just-torn-down attachment, a WHEP ICE state flip, or
+ * (observed live) the backend briefly re-listing the "stopped" stream while its own teardown is
+ * still in flight — would otherwise re-enter `reconnecting`/`playing` and the player would attach
+ * *again*, against a stream the user explicitly asked to end; repeated, this is exactly the tight
+ * reconnect cycle (fresh WHEP POST after fresh WHEP POST) that read as the whole app freezing.
+ * `'stopped'` itself always wins, overriding any in-progress state including a prior `'stopped'`.
  */
 export function reduceRecovery(state: RecoveryState, event: RecoveryEvent): RecoveryState {
+  if (event === 'stopped') {
+    return { phase: 'stopped', attempt: 0 };
+  }
+  if (state.phase === 'stopped' && event !== 'reset' && event !== 'attachStarted') {
+    return state; // absorbing — see this function's own doc comment above
+  }
   switch (event) {
     case 'reset':
       return INITIAL_RECOVERY_STATE;
     case 'unsupported':
       return { phase: 'error', attempt: state.attempt };
     case 'attachStarted':
-      return state.phase === 'idle' ? { phase: 'connecting', attempt: 0 } : state;
+      return state.phase === 'idle' || state.phase === 'stopped'
+        ? { phase: 'connecting', attempt: 0 }
+        : state;
     case 'firstSegment':
       return { phase: 'playing', attempt: 0 };
     case 'playlistNotReady':
@@ -136,6 +168,11 @@ export function initialTransportState(hasWhepUrl: boolean): TransportRecoverySta
  * "never played yet" apart from "played before, now reconnecting" (see its doc comment). `hls`,
  * whether active from the start or reached via fallback, behaves exactly as `reduceRecovery` always
  * has — this function changes nothing about HLS's own recovery once it's the active transport.
+ *
+ * `'stopped'` (docs/MVP2-PLAN.md §S, S-b) is not a "failure" this function's fallback rule cares
+ * about — it always routes straight to `reduceRecovery`, landing on the absorbing `stopped` phase
+ * regardless of `transport`/`neverPlayedYet`; `transport` itself is left as whatever it was (moot —
+ * the next real attach picks a fresh one via `initialTransportState`, it never reads this field).
  */
 export function reduceTransportRecovery(
   state: TransportRecoveryState,
@@ -148,4 +185,143 @@ export function reduceTransportRecovery(
     return { transport: 'hls', recovery: reduceRecovery(INITIAL_RECOVERY_STATE, 'attachStarted') };
   }
   return { transport: state.transport, recovery: reduceRecovery(state.recovery, event) };
+}
+
+// --- Cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) ------------------------------------
+//
+// `RecoveryState`/`reduceRecovery` and `TransportRecoveryState`/`reduceTransportRecovery` above are
+// UNCHANGED by this cycle — every existing caller/spec (including their own `attempt` field, reset
+// immediately by `firstSegment`) keeps working exactly as before; it still drives the visible
+// "Retrying automatically (attempt N)" hint, which is a *local*, per-phase-machine bookkeeping
+// detail, not a cross-cycle one.
+//
+// What follows is a further, independent pure state machine `ui/player.ts` layers on top, for the
+// one question `RecoveryState.attempt` was never designed to answer honestly: across a reconnect
+// saga that can span many WHEP→HLS *cycles* (a cycle: try WHEP if due, else go straight to HLS; a
+// WHEP pre-play failure still falls straight over to HLS within the *same* cycle, no extra delay —
+// U3's permanent-per-cycle fallback, untouched), how long has this saga actually been failing, and
+// has the stream proven itself recovered — or just blipped? S-b explicitly flagged this as an open
+// gap: "a rapid flapping connection defeats backoff via the legitimate firstSegment-resets-attempt
+// rule", and a zombie stream's WHEP-fail-then-HLS-fail cycling can pin every retry at the shortest
+// 1s delay forever, since each cycle's own `RecoveryState` legitimately looks freshly-connecting on
+// its own local terms — `reduceTransportRecovery`'s webrtc→hls fallback branch, in particular,
+// starts a brand new `RecoveryState` from scratch every time it fires.
+//
+// Three rules, each independently unit-tested below:
+//
+//  1. **Escalating pacing survives a cycle boundary.** `PacingState.cycleAttempt` is the single
+//     counter `ui/player.ts` uses to compute the delay before the *next* cycle
+//     (`cyclePacingDelayMs`, reusing `reconnectDelayMs`'s exact 1s→…→30s-capped schedule) — bumped
+//     once per *cycle* that ends without reaching a sustained recovery (`'cycleFailed'`), never
+//     reset by merely reaching `playing` (contrast `RecoveryState.attempt`, reset immediately). A
+//     cold-start playlist miss (404, never-yet-played) folds under this same pacing the moment this
+//     saga has already failed at least once (`cycleAttempt > 0`) — only a saga that has *never*
+//     failed anything yet keeps the fixed, gentle `COLD_START_RETRY_DELAY_MS` poll ("a never-yet-
+//     live stream politely waiting is allowed its gentle poll; a stream that HAS failed transports
+//     escalates").
+//  2. **WHEP is damped, not abandoned.** `shouldAttemptWhep` gates each cycle's choice to try WHEP
+//     at all behind `WHEP_RETRY_COOLDOWN_MS` (60s) since this saga's last attempt — see its own doc
+//     comment for the concrete request-rate math against a zombie endpoint. A sustained recovery
+//     (rule 3) re-arms it immediately (`lastWhepAttemptAtMs` cleared), so a connection that has
+//     genuinely proven itself healthy again doesn't have to wait out a stale cooldown before its
+//     next reconnect is allowed to try the better transport once more.
+//  3. **Only a sustained streak counts as recovered.** `'healthTick'` (dispatched roughly once a
+//     second by `ui/player.ts` while `phase === 'playing'`) only resets `cycleAttempt` once the
+//     *unbroken* streak since the last `'playing'` event has lasted `SUSTAINED_PLAYBACK_RESET_MS`
+//     (5s) — a connection that flaps (plays briefly, fails again before the window elapses) reports
+//     `'cycleFailed'` first, clearing the in-progress streak, so it never reaches the reset at all;
+//     the very next failure resumes escalating from wherever `cycleAttempt` already was.
+
+/**
+ * Cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) — see the block comment above for the
+ * three rules this backs.
+ */
+export interface PacingState {
+  /**
+   * Backoff level for the whole reconnect saga — survives every cycle boundary, including a
+   * WHEP→HLS fallback; only a sustained `'healthTick'` (rule 3) ever zeroes it.
+   */
+  readonly cycleAttempt: number;
+  /** `Date.now()` when the current unbroken `'playing'` streak began, `null` while not playing. */
+  readonly playingSinceMs: number | null;
+  /** `Date.now()` of the most recent WHEP attempt, `null` before this saga's first one. */
+  readonly lastWhepAttemptAtMs: number | null;
+}
+
+export const INITIAL_PACING_STATE: PacingState = {
+  cycleAttempt: 0,
+  playingSinceMs: null,
+  lastWhepAttemptAtMs: null,
+};
+
+/** How long an unbroken `playing` streak must last to count as a genuine recovery, not a blip. */
+export const SUSTAINED_PLAYBACK_RESET_MS = 5_000;
+
+/**
+ * Minimum time between WHEP attempts once this saga has made one — see `shouldAttemptWhep`'s own
+ * doc comment for the concrete request-rate this produces against a dead/zombie endpoint.
+ */
+export const WHEP_RETRY_COOLDOWN_MS = 60_000;
+
+export type PacingEvent =
+  /** A WHEP POST is actually going out this cycle — starts/refreshes the damping cooldown. */
+  | 'whepAttempted'
+  /** The current cycle ended without reaching a sustained recovery — bumps `cycleAttempt`. */
+  | 'cycleFailed'
+  /** This cycle (or a later moment) reached `playing` — starts tracking the streak, if not already. */
+  | 'playing'
+  /** A ~1s clock tick while `playing` — the only event that can reset `cycleAttempt`. */
+  | 'healthTick';
+
+/** Advances the pacing state by one event — see the block comment above this section for the rules. */
+export function advancePacing(state: PacingState, event: PacingEvent, nowMs: number): PacingState {
+  switch (event) {
+    case 'whepAttempted':
+      return { ...state, lastWhepAttemptAtMs: nowMs };
+    case 'cycleFailed':
+      return { ...state, cycleAttempt: state.cycleAttempt + 1, playingSinceMs: null };
+    case 'playing':
+      return state.playingSinceMs === null ? { ...state, playingSinceMs: nowMs } : state;
+    case 'healthTick': {
+      if (state.playingSinceMs === null || nowMs - state.playingSinceMs < SUSTAINED_PLAYBACK_RESET_MS) {
+        return state;
+      }
+      return state.cycleAttempt === 0 && state.lastWhepAttemptAtMs === null
+        ? state // already at rest — a genuine no-op, same reference (mirrors `reduceRecovery`'s own idiom)
+        : { cycleAttempt: 0, playingSinceMs: state.playingSinceMs, lastWhepAttemptAtMs: null };
+    }
+  }
+}
+
+/**
+ * The shared cross-cycle backoff delay for the *next* cycle (rule 1) — reuses `reconnectDelayMs`'s
+ * exact 1s→2s→…→30s-capped schedule, keyed off the saga-wide `cycleAttempt` rather than
+ * `RecoveryState.attempt`'s own cycle-local one.
+ */
+export function cyclePacingDelayMs(state: PacingState): number {
+  return reconnectDelayMs(state.cycleAttempt);
+}
+
+/**
+ * Whether the next cycle should even attempt WHEP (rule 2), given `hasWhepUrl` and the damping
+ * cooldown. Always true for this saga's first attempt (`lastWhepAttemptAtMs` starts `null`) — a
+ * fresh attach always tries the better transport first; damping only applies to *subsequent* cycles
+ * within the same still-failing saga.
+ *
+ * **The 60s figure, concretely, chosen over a fixed cycle-count**: a wall-clock cooldown bounds the
+ * *absolute* WHEP request rate directly ("a few requests per minute, not per second" — the task's
+ * own success criterion) regardless of how fast `cyclePacingDelayMs` happens to be cycling, which a
+ * cycle-count-based rule (e.g. "every 4th cycle") would not: cycle counting ties the WHEP-retry rate
+ * to the backoff schedule's own shape, so a future change to that schedule would silently change the
+ * WHEP-damping rate too. Concretely, against a zombie stream (WHEP fails pre-play every time, HLS's
+ * playlist never appears), `cycleAttempt`'s capped-exponential schedule reaches the 30s floor within
+ * about a minute of cumulative delay (1+2+4+8+16 = 31s by the 6th cycle) — so a 60s cooldown lands on
+ * roughly one WHEP retry every one-to-two reconnect cycles once backoff is fully escalated, i.e. on
+ * the order of one WHEP POST a minute, not one a second.
+ */
+export function shouldAttemptWhep(state: PacingState, hasWhepUrl: boolean, nowMs: number): boolean {
+  if (!hasWhepUrl) {
+    return false;
+  }
+  return state.lastWhepAttemptAtMs === null || nowMs - state.lastWhepAttemptAtMs >= WHEP_RETRY_COOLDOWN_MS;
 }
