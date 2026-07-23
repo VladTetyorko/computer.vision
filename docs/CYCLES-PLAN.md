@@ -130,7 +130,7 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | C3 | backend | `FeedTransmitterPort` + RTSP TX | domain+adapter, then application+api+app | ✅ done |
 | C4 | **UI** | Simulation wizard | one task (vision-web) | ✅ done |
 | C5 | backend | mjpeg TX/RX pair | new module, then transport/wiring | pending |
-| C6 | **UI** | `/map` overview tab | one task (vision-web) | pending |
+| C6 | **UI** | `/map` overview tab | one task (vision-web) | ✅ done |
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | pending |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | pending |
 | C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | pending |

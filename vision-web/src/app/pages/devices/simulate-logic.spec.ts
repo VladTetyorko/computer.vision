@@ -3,7 +3,6 @@ import type { AssetDetails, Device } from '../../core/api/models';
 import {
   buildSimulationRequest,
   buildSyntheticRegisterRequest,
-  findVideoDevice,
   isSimulatedAsset,
   mapSimulatedDevices,
   type FileSimulateForm,
@@ -136,21 +135,5 @@ describe('mapSimulatedDevices', () => {
 
   it('returns an empty map when simulated assets have no devices', () => {
     expect(mapSimulatedDevices([asset({ devices: [] })]).size).toBe(0);
-  });
-});
-
-describe('findVideoDevice', () => {
-  it('finds the first VIDEO-capable device', () => {
-    const telemetry = device({ id: 'dev-t', capabilities: ['TELEMETRY'] });
-    const video = device({ id: 'dev-v', capabilities: ['VIDEO'] });
-    expect(findVideoDevice([telemetry, video])).toBe(video);
-  });
-
-  it('returns undefined when no device is VIDEO-capable', () => {
-    expect(findVideoDevice([device({ capabilities: ['TELEMETRY'] })])).toBeUndefined();
-  });
-
-  it('returns undefined for an empty device list', () => {
-    expect(findVideoDevice([])).toBeUndefined();
   });
 });

@@ -1,0 +1,53 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Map</h1>
+      <p>Every asset with a known position, live — the tournament overview.</p>
+    </div>
+
+    @if (!isEmpty()) {
+      <div class="row summary muted">
+        <span class="chip ok">{{ mapStore.buckets().streaming.length }} streaming</span>
+        <span class="chip">{{ mapStore.buckets().offline.length }} offline</span>
+        @if (noPositionAssets().length > 0) {
+          <span class="chip warn">{{ noPositionAssets().length }} no position</span>
+        }
+      </div>
+    }
+  </div>
+
+  @if (isEmpty()) {
+    <div class="card empty">
+      <h3>No assets registered yet</h3>
+      <p>
+        Register a device or simulate one from the Devices tab and it appears here as soon as it
+        reports a position.
+      </p>
+      <a class="btn" routerLink="/devices">Go to Devices</a>
+    </div>
+  } @else {
+    <div class="map-layout">
+      <vision-fleet-map class="map-panel" (watch)="onWatch($event)" />
+
+      @if (noPositionAssets().length > 0) {
+        <aside class="rail card">
+          <h3>No position yet</h3>
+          <ul>
+            @for (asset of noPositionAssets(); track asset.assetId) {
+              <li class="rail-item">
+                <div class="rail-item-main">
+                  <span class="rail-name truncate">{{ asset.displayName }}</span>
+                  <span class="chip" [class.ok]="asset.status === 'STREAMING'">
+                    {{ asset.status === 'STREAMING' ? 'Streaming' : 'Offline' }}
+                  </span>
+                </div>
+                <div class="rail-item-meta muted">{{ asset.categoryName }}</div>
+                <button type="button" class="btn secondary small" (click)="onWatch(asset.assetId)">Watch</button>
+              </li>
+            }
+          </ul>
+        </aside>
+      }
+    </div>
+  }
+</div>

@@ -24,6 +24,7 @@ export class App {
    */
   protected readonly tabs: readonly Tab[] = [
     { path: '/wall', label: 'Wall' },
+    { path: '/map', label: 'Map' },
     { path: '/devices', label: 'Devices' },
     { path: '/settings', label: 'Settings' },
     { path: '/debug', label: 'Debug' },

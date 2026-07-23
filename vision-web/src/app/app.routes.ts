@@ -15,6 +15,15 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/wall/wall').then((m) => m.WallPage),
   },
   {
+    path: 'map',
+    title: 'Map · Vision',
+    // Its own lazy chunk like every route, but not worth an idle-preload slot: it isn't the
+    // first tab a user lands on and the Leaflet chunk it pulls in on visit is sizeable
+    // (docs/CYCLES-PLAN.md §6, same rationale as Debug's opt-out).
+    data: { preload: false },
+    loadComponent: () => import('./pages/map/map').then((m) => m.MapPage),
+  },
+  {
     path: 'devices',
     title: 'Devices · Vision',
     loadComponent: () => import('./pages/devices/devices').then((m) => m.DevicesPage),

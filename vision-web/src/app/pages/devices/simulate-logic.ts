@@ -1,7 +1,6 @@
 import type {
   AssetDetails,
   AssetSummary,
-  Device,
   RegisterDeviceRequest,
   StartSimulationRequest,
 } from '../../core/api/models';
@@ -9,10 +8,13 @@ import type {
 /**
  * Pure logic behind the Devices page's "Simulate a source" wizard (docs/CYCLES-PLAN.md §4):
  * request-building for the `direct`/`rtsp` modes, the `synthetic` mode's register-flow
- * shortcut, mapping devices to the simulated assets that own them (for the "Simulated" chip
- * and its stop action), and resolving which device a freshly-started simulation is watchable
- * through. Split out so it is unit-testable without HTTP or the router — mirrors
+ * shortcut, and mapping devices to the simulated assets that own them (for the "Simulated" chip
+ * and its stop action). Split out so it is unit-testable without HTTP or the router — mirrors
  * `core/telemetry-logic.ts` and `pages/debug/debug-*.ts`.
+ *
+ * The watch-target resolution (which device a freshly-started asset is watchable through) used
+ * to live here too but moved to `core/device-logic.ts#findVideoDevice` when docs/CYCLES-PLAN.md
+ * §6's `/map` tab needed the same resolution — see that file's doc comment for why.
  */
 
 /** The category `DefaultSimulationService` creates every simulated asset under. */
@@ -101,13 +103,4 @@ export function mapSimulatedDevices(
     }
   }
   return map;
-}
-
-/**
- * The device a freshly-started simulation is watchable through — the first VIDEO-capable
- * device on the asset (a simulated asset always has exactly one, but this makes no such
- * assumption).
- */
-export function findVideoDevice(devices: readonly Device[]): Device | undefined {
-  return devices.find((device) => device.capabilities.includes('VIDEO'));
 }

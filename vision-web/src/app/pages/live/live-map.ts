@@ -12,30 +12,25 @@ import {
 import type * as Leaflet from 'leaflet';
 import { TelemetryStore } from '../../core/telemetry-store';
 import type { GeoPosition, TelemetrySample } from '../../core/api/models';
-
-/** Injected once per document, only when a map is actually created — see class doc. */
-const LEAFLET_STYLESHEET_ID = 'vision-leaflet-css';
-const LEAFLET_STYLESHEET_HREF = '/leaflet/leaflet.css';
+import { darkTileLayer, droneDivIcon, ensureLeafletStylesheet, importLeaflet } from '../../ui/leaflet-loader';
 
 const DEFAULT_ZOOM = 17;
 
 /** Long enough to outlast the `.map-shell`/`.expanded` CSS transition (see live-map.css). */
 const EXPAND_TRANSITION_MS = 260;
 
-const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const OSM_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-
 /**
  * Live map inset for `/live/:deviceId` (docs/CYCLES-PLAN.md §2, UX-DESIGN §5.2): drone marker
  * rotated to heading, breadcrumb trail of the current usage, start-point flag, auto-follow
  * toggle, and an expand-to-full-pane control.
  *
- * **Leaflet loads only here.** The live route is already its own lazy chunk; `import('leaflet')`
- * inside `initMap()` — a *dynamic* import, not a static one — additionally keeps Leaflet out of
- * that chunk's own parse cost until a telemetry-capable device is actually being viewed.
- * Mirrors `ui/player.ts`'s `import('hls.js')` idiom: dynamic import inside an async method, a
- * `generation` counter to ignore a load superseded by teardown, cleanup on destroy.
+ * **Leaflet loads only here** (well, here and `pages/map/fleet-map.ts`, docs/CYCLES-PLAN.md §6 —
+ * the shared bootstrap lives in `ui/leaflet-loader.ts`). The live route is already its own lazy
+ * chunk; `initMap()`'s call to `importLeaflet()` — a *dynamic* `import('leaflet')` under the
+ * hood, not a static one — additionally keeps Leaflet out of that chunk's own parse cost until a
+ * telemetry-capable device is actually being viewed. Mirrors `ui/player.ts`'s `import('hls.js')`
+ * idiom: dynamic import inside an async method, a `generation` counter to ignore a load
+ * superseded by teardown, cleanup on destroy.
  *
  * **Zoneless gotcha (the risk CYCLES-PLAN.md §2 called out):** Leaflet is purely imperative and
  * is never bound in the template. `map`/`marker`/`trailLine`/`startFlag` are plain fields,
@@ -106,29 +101,17 @@ export class LiveMap {
 
   private async initMap(): Promise<void> {
     const generation = ++this.generation;
-    const imported = await import('leaflet');
+    const L = await importLeaflet();
     if (generation !== this.generation) {
       return; // destroyed before the chunk finished loading
     }
-
-    // Leaflet ships as UMD; depending on the bundler's CJS interop this dynamic import may
-    // resolve either the namespace itself or a `default` wrapping it.
-    const namespace = imported as unknown as { default?: typeof Leaflet } & typeof Leaflet;
-    const L = namespace.default ?? namespace;
     this.leaflet = L;
-    this.ensureStylesheet();
+    ensureLeafletStylesheet();
 
     const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
     this.map = map;
 
-    const tiles = L.tileLayer(OSM_TILE_URL, {
-      maxZoom: 19,
-      className: 'vision-tiles',
-      attribution: OSM_ATTRIBUTION,
-    });
-    tiles.on('tileerror', () => this.tilesOk.set(false));
-    tiles.on('load', () => this.tilesOk.set(true));
-    tiles.addTo(map);
+    darkTileLayer(L, (ok) => this.tilesOk.set(ok)).addTo(map);
 
     this.trailLine = L.polyline([], { color: '#4f8cff', weight: 3, opacity: 0.85 }).addTo(map);
     this.marker = L.marker([0, 0], {
@@ -192,12 +175,7 @@ export class LiveMap {
   }
 
   private droneIcon(headingDegrees: number): Leaflet.DivIcon {
-    return this.leaflet!.divIcon({
-      className: 'drone-marker',
-      html: `<div class="drone-arrow" style="transform: rotate(${headingDegrees}deg)"></div>`,
-      iconSize: [22, 22],
-      iconAnchor: [11, 11],
-    });
+    return droneDivIcon(this.leaflet!, headingDegrees);
   }
 
   private flagIcon(): Leaflet.DivIcon {
@@ -207,17 +185,6 @@ export class LiveMap {
       iconSize: [18, 18],
       iconAnchor: [2, 16],
     });
-  }
-
-  private ensureStylesheet(): void {
-    if (document.getElementById(LEAFLET_STYLESHEET_ID)) {
-      return;
-    }
-    const link = document.createElement('link');
-    link.id = LEAFLET_STYLESHEET_ID;
-    link.rel = 'stylesheet';
-    link.href = LEAFLET_STYLESHEET_HREF;
-    document.head.appendChild(link);
   }
 
   private teardown(): void {

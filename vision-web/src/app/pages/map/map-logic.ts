@@ -1,0 +1,201 @@
+import type { AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from '../../core/api/models';
+import { ageSeconds, deriveTrail } from '../../core/telemetry-logic';
+
+/**
+ * Pure derivations behind the `/map` fleet overview tab (docs/CYCLES-PLAN.md §6), split out so
+ * bucketing/trail-windowing/auto-fit/marker-building are unit-testable without HTTP, timers, or
+ * Leaflet — mirrors `core/telemetry-logic.ts`'s split of pure logic from the injectable
+ * (`map-store.ts`) that drives it.
+ */
+
+/** How many recent trail points a live fleet marker keeps (docs/CYCLES-PLAN.md §6: "short recent trail"). */
+export const TRAIL_WINDOW = 60;
+
+/** Which of the three ways an asset appears on the fleet map, derived from `AssetSummary` alone. */
+export type MarkerBucket = 'streaming' | 'offline' | 'noPosition';
+
+/**
+ * Buckets a single asset by how it should appear on the map.
+ *
+ * `AssetSummaryResponse#lastKnownPosition` is recomputed server-side on every request from the
+ * freshest usage row and updates on *every telemetry sample*, even while a usage is still open
+ * (`DefaultAssetService#toSummary`/`#lastKnownPosition`) — so it is already a live-enough
+ * position to bucket a `STREAMING` asset as plottable even before this page's own telemetry poll
+ * for that asset has landed.
+ *
+ * - `streaming`: a live marker; position/heading/battery are refined by telemetry as it arrives,
+ *   but `lastKnownPosition` is the immediate fallback so the marker is never a no-op until the
+ *   first poll.
+ * - `offline`: a dimmed static marker at `lastKnownPosition` — the crew's "where to retrieve it".
+ * - `noPosition`: no position has ever been recorded — including the brief window right after a
+ *   stream starts, before any positioned sample exists yet (see `DefaultStreamService#start`) —
+ *   never invisible, always accounted for in the "no position yet" rail instead.
+ */
+export function bucketForAsset(asset: Pick<AssetSummary, 'status' | 'lastKnownPosition'>): MarkerBucket {
+  if (!asset.lastKnownPosition) {
+    return 'noPosition';
+  }
+  return asset.status === 'STREAMING' ? 'streaming' : 'offline';
+}
+
+export interface AssetBuckets {
+  readonly streaming: readonly AssetSummary[];
+  readonly offline: readonly AssetSummary[];
+  readonly noPosition: readonly AssetSummary[];
+}
+
+/** Partitions `GET /api/assets`'s result into the three map buckets, preserving relative order. */
+export function bucketAssets(assets: readonly AssetSummary[]): AssetBuckets {
+  const streaming: AssetSummary[] = [];
+  const offline: AssetSummary[] = [];
+  const noPosition: AssetSummary[] = [];
+  for (const asset of assets) {
+    switch (bucketForAsset(asset)) {
+      case 'streaming':
+        streaming.push(asset);
+        break;
+      case 'offline':
+        offline.push(asset);
+        break;
+      case 'noPosition':
+        noPosition.push(asset);
+        break;
+    }
+  }
+  return { streaming, offline, noPosition };
+}
+
+/** Keeps only the most recent `max` trail points — a long-running flight shouldn't fill the map with old track. */
+export function windowTrail(trail: readonly GeoPosition[], max: number = TRAIL_WINDOW): readonly GeoPosition[] {
+  return trail.length <= max ? trail : trail.slice(trail.length - max);
+}
+
+/** One streaming asset's live telemetry, distilled for its marker — `map-store.ts`'s per-asset analog of `TelemetryStore`. */
+export interface AssetTelemetrySnapshot {
+  readonly latest: TelemetrySample | undefined;
+  readonly trail: readonly GeoPosition[];
+}
+
+/** Builds a snapshot from a raw `usageTelemetry` response — windows the trail, keeps the latest sample regardless of whether it carries a position (a sample with only battery/heading is still worth surfacing). */
+export function snapshotFromSamples(samples: readonly TelemetrySample[]): AssetTelemetrySnapshot {
+  return {
+    latest: samples.length > 0 ? samples[samples.length - 1] : undefined,
+    trail: windowTrail(deriveTrail(samples)),
+  };
+}
+
+/** One asset's fully-derived marker: where to plot it and what its popup shows. */
+export interface FleetMarker {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly category: string;
+  readonly categoryName: string;
+  readonly status: AssetStatus;
+  /** `true` for the `streaming` bucket — drives live vs. dimmed marker styling. */
+  readonly live: boolean;
+  readonly position: GeoPosition;
+  readonly headingDegrees?: number;
+  readonly batteryPercent?: number;
+  readonly trail: readonly GeoPosition[];
+  readonly sampleAgeSeconds?: number;
+}
+
+/**
+ * Combines a bucketed asset with its (possibly not-yet-arrived) live telemetry snapshot into a
+ * plottable marker, or `undefined` for the `noPosition` bucket.
+ *
+ * A `streaming` asset with no telemetry snapshot yet — or whose latest sample carries no lat/lon
+ * — falls back to the asset's own `lastKnownPosition` for *where* to plot it, but still surfaces
+ * whatever the latest sample does carry (heading, battery, age) independently, since those are
+ * reported on their own cadence, not gated on a fresh GPS fix.
+ */
+export function buildMarker(
+  asset: AssetSummary,
+  telemetry: AssetTelemetrySnapshot | undefined,
+  nowMs: number,
+): FleetMarker | undefined {
+  const bucket = bucketForAsset(asset);
+  if (bucket === 'noPosition') {
+    return undefined;
+  }
+
+  const base = {
+    assetId: asset.assetId,
+    displayName: asset.displayName,
+    category: asset.category,
+    categoryName: asset.categoryName,
+    status: asset.status,
+    live: bucket === 'streaming',
+  };
+
+  if (bucket === 'offline') {
+    return { ...base, position: asset.lastKnownPosition as GeoPosition, trail: [] };
+  }
+
+  const latest = telemetry?.latest;
+  const hasFix = latest?.latitude !== undefined && latest.longitude !== undefined;
+  const position: GeoPosition = hasFix
+    ? { latitude: latest!.latitude!, longitude: latest!.longitude!, altitudeMeters: latest!.altitudeMeters }
+    : (asset.lastKnownPosition as GeoPosition);
+
+  return {
+    ...base,
+    position,
+    headingDegrees: latest?.headingDegrees,
+    batteryPercent: latest?.batteryPercent,
+    trail: telemetry?.trail ?? [],
+    sampleAgeSeconds: ageSeconds(latest?.at, nowMs),
+  };
+}
+
+/** `buildMarker` over every asset, in order, skipping the `noPosition` ones. */
+export function buildMarkers(
+  assets: readonly AssetSummary[],
+  telemetryByAsset: ReadonlyMap<string, AssetTelemetrySnapshot>,
+  nowMs: number,
+): readonly FleetMarker[] {
+  const markers: FleetMarker[] = [];
+  for (const asset of assets) {
+    const marker = buildMarker(asset, telemetryByAsset.get(asset.assetId), nowMs);
+    if (marker) {
+      markers.push(marker);
+    }
+  }
+  return markers;
+}
+
+/**
+ * A stable fingerprint of which assets are plotted and where.
+ *
+ * `FleetMapStore.markers()` recomputes every second (it embeds `sampleAgeSeconds`, ticking on the
+ * same 1s clock as `TelemetryStore`'s own age readout), producing a new array reference each
+ * time even when no position actually moved. `FleetMap` compares this fingerprint rather than the
+ * marker array itself to decide whether an auto-fit refit is actually warranted, so a live "n
+ * seconds ago" label ticking over doesn't re-run `fitBounds()` every second for no visual reason.
+ */
+export function fingerprintMarkers(markers: readonly FleetMarker[]): string {
+  return markers
+    .map((marker) => `${marker.assetId}:${marker.position.latitude.toFixed(6)},${marker.position.longitude.toFixed(6)}`)
+    .join('|');
+}
+
+/** What can flip auto-fit on the fleet map: a manual pan/zoom disables it, the recenter control re-enables it. */
+export type AutoFitEvent = 'userInteraction' | 'recenterClicked';
+
+/**
+ * The auto-fit reducer (docs/CYCLES-PLAN.md §6): "auto-fit bounds on load and when the marker set
+ * changes, but any manual pan/zoom disables auto-fit until the user re-enables it via a recenter
+ * control." Idempotent either way — interacting while already off, or recentering while already
+ * on, is a no-op — so the map component can call this from every move/zoom event without first
+ * checking whether it actually changes anything.
+ */
+export function nextAutoFitEnabled(current: boolean, event: AutoFitEvent): boolean {
+  switch (event) {
+    case 'userInteraction':
+      return false;
+    case 'recenterClicked':
+      return true;
+    default:
+      return current;
+  }
+}

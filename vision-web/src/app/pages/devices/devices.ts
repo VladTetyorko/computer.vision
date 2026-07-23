@@ -6,11 +6,11 @@ import { FleetStore } from '../../core/fleet-store';
 import { SettingsStore } from '../../core/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
+import { findVideoDevice } from '../../core/device-logic';
 import { type Device, type DiscoveredDevice, type ScanResult } from '../../core/api/models';
 import {
   buildSimulationRequest,
   buildSyntheticRegisterRequest,
-  findVideoDevice,
   isSimulatedAsset,
   mapSimulatedDevices,
   type SimulateMode,
