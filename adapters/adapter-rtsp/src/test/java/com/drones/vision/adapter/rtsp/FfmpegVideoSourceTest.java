@@ -373,6 +373,73 @@ class FfmpegVideoSourceTest {
         return file;
     }
 
+    /**
+     * Regression test for the audio-interleave pacing stall: mp4 muxers write
+     * audio packets up to ~0.5s ahead of video, and pacing on {@code grab()}'s
+     * mixed audio+video timestamps slept until wall-clock caught up with the
+     * audio look-ahead — starving a real 30fps clip with an AAC track down to
+     * ~2 emitted fps. With {@code grabImage()} the pacing timeline is
+     * video-only, so a 3s file with audio must deliver most of its frames in
+     * roughly real time, not one every half second.
+     */
+    @Test
+    void fileWithAudioTrackIsPacedByVideoTimestampsNotStalledByAudioLookahead(@TempDir Path tempDir)
+            throws Exception {
+        int fps = 15;
+        int frameCount = 45; // 3s of media
+        Path videoFile = createTestVideoWithSilentAudio(tempDir, WIDTH, HEIGHT, frameCount, fps);
+
+        FfmpegVideoSource source = new FfmpegVideoSource();
+        StreamId streamId = StreamId.random();
+        int expectedWithinWindow = 30; // 2s of media; the stall bug delivered ~2fps -> ~11 frames in the window
+        CountDownLatch enoughFrames = new CountDownLatch(expectedWithinWindow);
+
+        Flow.Publisher<VideoFrame> publisher = source.openAny(streamId, videoFile.toUri(), Map.of());
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+            @Override public void onNext(VideoFrame item) {
+                enoughFrames.countDown();
+            }
+            @Override public void onError(Throwable throwable) {
+            }
+            @Override public void onComplete() {
+            }
+        });
+        try {
+            // Real-time budget for 2s of media + startup slack (native extraction
+            // is prepaid by earlier tests in the class). The pre-fix stall needed
+            // ~15s wall-clock for these 30 frames, far outside this window.
+            assertTrue(enoughFrames.await(6, TimeUnit.SECONDS),
+                    "expected " + expectedWithinWindow + " frames of an audio-carrying 15fps file within 6s "
+                            + "(audio-interleave pacing stall would deliver ~2fps)");
+        } finally {
+            source.close(streamId);
+        }
+    }
+
+    /** Same as {@link #createTestVideo} but muxes an interleaved silent mono AAC track alongside the video. */
+    private static Path createTestVideoWithSilentAudio(Path dir, int width, int height, int frameCount, double fps)
+            throws Exception {
+        Path file = dir.resolve("ffmpeg-source-test-av-" + frameCount + "-" + fps + ".mp4");
+        int sampleRate = 44100;
+        int samplesPerFrame = (int) Math.round(sampleRate / fps);
+        try (FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(file.toFile(), width, height, 1)) {
+            recorder.setFormat("mp4");
+            recorder.setFrameRate(fps);
+            recorder.setSampleRate(sampleRate);
+            recorder.start();
+            java.nio.ShortBuffer silence = java.nio.ShortBuffer.allocate(samplesPerFrame);
+            for (int i = 0; i < frameCount; i++) {
+                recorder.record(solidFrame(width, height, i));
+                silence.rewind();
+                recorder.recordSamples(sampleRate, 1, silence);
+            }
+        }
+        return file;
+    }
+
     /** A single-color synthetic BGR frame, shaded by frame index, for the test-only recorder. */
     private static Frame solidFrame(int width, int height, int frameIndex) {
         int channels = 3;

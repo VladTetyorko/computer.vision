@@ -261,7 +261,13 @@ public final class FfmpegVideoSource implements VideoSourcePort {
                 long pacingBaselineTimestampMicros = -1;
                 long pacingBaselineWallNanos = 0;
                 while (!stopRequested.get()) {
-                    Frame frame = grabber.grab();
+                    // grabImage(), not grab(): grab() also returns audio/data frames, and mp4
+                    // muxers interleave audio up to ~0.5s AHEAD of video -- pacing on those
+                    // look-ahead timestamps stalled the loop until wall-clock caught up with
+                    // the audio track, starving video down to ~2fps (observed with a real
+                    // 30fps clip carrying AAC). grabImage() skips non-video packets, so the
+                    // pacing timeline is the video track's own monotonic timestamps.
+                    Frame frame = grabber.grabImage();
                     if (frame == null) {
                         if (loop && !stopRequested.get()) {
                             grabber.restart(); // stop() + start(): reopens the file from the beginning

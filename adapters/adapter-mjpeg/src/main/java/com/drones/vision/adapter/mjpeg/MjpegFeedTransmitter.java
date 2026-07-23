@@ -315,7 +315,9 @@ public final class MjpegFeedTransmitter implements FeedTransmitterPort, Closeabl
                 long pacingBaselineTimestampMicros = -1;
                 long pacingBaselineWallNanos = 0;
                 while (!closed.get()) {
-                    Frame frame = grabber.grab();
+                    // grabImage(), not grab(): audio frames' look-ahead timestamps would
+                    // stall the pacing sleep (see adapter-rtsp FfmpegVideoSource's grab loop).
+                    Frame frame = grabber.grabImage();
                     if (frame == null) {
                         if (loop && !closed.get()) {
                             grabber.restart(); // stop() + start(): reopens the file from the beginning

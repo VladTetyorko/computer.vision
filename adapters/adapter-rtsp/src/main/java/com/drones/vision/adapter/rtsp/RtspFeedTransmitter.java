@@ -233,7 +233,9 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
                 long pacingBaselineTimestampMicros = -1;
                 long pacingBaselineWallNanos = 0;
                 while (!stopRequested.get()) {
-                    Frame frame = grabber.grab();
+                    // grabImage(), not grab(): audio frames' look-ahead timestamps would
+                    // stall the pacing sleep (see FfmpegVideoSource's grab loop comment).
+                    Frame frame = grabber.grabImage();
                     if (frame == null) {
                         if (loop && !stopRequested.get()) {
                             grabber.restart(); // stop() + start(): reopens the file from the beginning
