@@ -12,6 +12,7 @@ import com.drones.vision.proto.v1.InferenceGrpc;
 import io.grpc.BindableService;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
+import io.grpc.ServerBuilder;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
@@ -20,6 +21,8 @@ import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
@@ -37,6 +40,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -70,6 +74,13 @@ class GrpcDetectionPortTest {
         GrpcDetectionPort port = new GrpcDetectionPort(channel);
         ports.add(port);
         return port;
+    }
+
+    /** An ephemeral TCP port with nothing bound to it, for simulating a cv-service that is entirely down. */
+    private static int findFreeTcpPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 
     private static VideoFrame frame(StreamId streamId, long sequence, PixelFormat format) {
@@ -181,6 +192,110 @@ class GrpcDetectionPortTest {
         long elapsedSeconds = Duration.ofNanos(System.nanoTime() - startNanos).toSeconds();
         assertTrue(elapsedSeconds >= GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS,
                 "expected a timeout after ~" + GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + "s, took " + elapsedSeconds + "s");
+    }
+
+    @Test
+    void detectOnDeadTcpEndpointFailsPromptlyWithoutHangingForever() throws Exception {
+        // A real TCP port with NOTHING listening -- what a session opened while the cv-service is
+        // down entirely looks like over a real transport (an in-process channel with no registered
+        // server fails immediately and cleanly, which does not reproduce the interesting case: against
+        // a real dead endpoint, the first call was empirically observed to fail via this adapter's own
+        // RESPONSE_TIMEOUT_SECONDS timeout, with no transport onError ever delivered at all). Whichever
+        // way it fails, it must fail -- not hang past this bound.
+        int tcpPort = findFreeTcpPort();
+        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort);
+        ports.add(grpcPort);
+
+        CompletionStage<DetectionResult> stage =
+                grpcPort.detect(frame(StreamId.random(), 0, PixelFormat.BGR24), PipelineConfig.defaults());
+        assertThrows(ExecutionException.class,
+                () -> stage.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void detectAfterTimeoutTearsDownSessionSoNextDetectRecoversOnFreshCall() throws Exception {
+        // Real TCP transport (not in-process), server already listening -- deliberately does NOT
+        // reuse detectOnDeadTcpEndpointFailsPromptlyWithoutHangingForever's "nothing listening, then a
+        // server starts" shape for the recovery assertion below. That shape cannot be driven to a
+        // deterministic recovery in this repo's current dependency state: io.grpc:grpc-core resolves
+        // to 1.80.0 here (both via grpc-inprocess, and -- confirmed with
+        // `mvn dependency:tree -Dverbose` -- transitively via grpc-netty-shaded itself, overridden by
+        // spring-boot-dependencies' imported grpc-bom; the same override reaches vision-app's real
+        // compile classpath too, per `mvn -pl vision-app dependency:tree -Dincludes=io.grpc:grpc-core`),
+        // while grpc-netty-shaded's compiled bytecode (${grpc.version}=1.64.0) expects 1.64.0's API
+        // shape. A real *connect failure* hits a NoSuchMethodError deep in Netty's transport-shutdown
+        // notification (io.grpc.internal.ManagedClientTransport$Listener.transportShutdown) that gets
+        // silently swallowed, so the channel never learns the attempt failed and is permanently wedged
+        // in CONNECTING -- no session-level fix can make a channel recover from a real ECONNREFUSED
+        // here (verified empirically: even 10 retries a second apart, well past any reconnect backoff,
+        // never recovered). Fixing that is a pom.xml dependencyManagement change outside this module
+        // (grpc-core isn't pinned to ${grpc.version} at the root -- see also this module's Gotchas),
+        // out of this task's adapter-cv-grpc-only scope. A session that connects fine but never gets a
+        // response exercises the exact same StreamSession timeout/teardown code this bug is about,
+        // without ever touching that broken notification path, and is what this test does instead.
+        int tcpPort = findFreeTcpPort();
+        SilentThenEchoServicer servicer = new SilentThenEchoServicer();
+        Server server = ServerBuilder.forPort(tcpPort).addService(servicer).build().start();
+        servers.add(server);
+        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort);
+        ports.add(grpcPort);
+        StreamId streamId = StreamId.random();
+        PipelineConfig config = PipelineConfig.defaults();
+
+        CompletionStage<DetectionResult> first = grpcPort.detect(frame(streamId, 0, PixelFormat.BGR24), config);
+        assertThrows(ExecutionException.class,
+                () -> first.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+
+        // Emulates StreamPipeline's outage-recovery probes: a handful of attempts with short waits.
+        // Before the fix this keeps reusing the same dead session and every attempt fails; after the
+        // fix, the timeout above already tore the session down, so this opens a fresh call the
+        // (otherwise perfectly healthy) server does answer.
+        DetectionResult recovered = null;
+        Throwable lastFailure = null;
+        for (int attempt = 1; attempt <= 3 && recovered == null; attempt++) {
+            try {
+                recovered = grpcPort.detect(frame(streamId, attempt, PixelFormat.BGR24), config)
+                        .toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS);
+            } catch (ExecutionException e) {
+                lastFailure = e.getCause();
+            }
+        }
+
+        assertTrue(recovered != null,
+                "expected detect() to recover within a few probes once the dead session was torn down; last failure: "
+                        + lastFailure);
+        assertEquals(streamId, recovered.streamId());
+    }
+
+    @Test
+    void timeoutRacingTransportErrorTearsDownSessionOnceAndFailsPendingSiblingsFast() throws Exception {
+        RacingServicer servicer = new RacingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+        PipelineConfig config = PipelineConfig.defaults();
+
+        CompletionStage<DetectionResult> first = port.detect(frame(streamId, 0, PixelFormat.BGR24), config);
+        // Let frame 0 be well in flight (its own timeout and the server's racing transport error are
+        // both scheduled around RESPONSE_TIMEOUT_SECONDS from here) before frame 1 joins the same session.
+        Thread.sleep(500);
+        long secondSubmittedNanos = System.nanoTime();
+        CompletionStage<DetectionResult> second = port.detect(frame(streamId, 1, PixelFormat.BGR24), config);
+
+        assertThrows(ExecutionException.class,
+                () -> first.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS));
+        assertThrows(ExecutionException.class,
+                () -> second.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS));
+
+        long secondElapsedMillis = Duration.ofNanos(System.nanoTime() - secondSubmittedNanos).toMillis();
+        assertTrue(secondElapsedMillis < TimeUnit.SECONDS.toMillis(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS),
+                "sibling frame should fail once the session is torn down, not by waiting out its own "
+                        + GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + "s timeout; took " + secondElapsedMillis + "ms");
+
+        // Torn down exactly once despite the timeout/transport-error race (no exception escaped
+        // above): the next detect() opens a brand-new call and completes normally.
+        DetectionResult recovered = port.detect(frame(streamId, 2, PixelFormat.BGR24), config)
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertEquals(2L, recovered.frameSequence());
     }
 
     @Test
@@ -408,6 +523,103 @@ class GrpcDetectionPortTest {
                         responseObserver.onError(
                                 Status.UNAVAILABLE.withDescription("simulated CV service outage").asRuntimeException());
                         return;
+                    }
+                    responseObserver.onNext(DetectionResponse.newBuilder()
+                            .setStreamId(request.getStreamId())
+                            .setSequence(request.getSequence())
+                            .setTimestampMillis(request.getTimestampMillis())
+                            .setModelId(request.getModelId())
+                            .setModelVersion(request.getModelVersion())
+                            .build());
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // test double: nothing to clean up
+                }
+
+                @Override
+                public void onCompleted() {
+                    if (!firstCall) {
+                        responseObserver.onCompleted();
+                    }
+                }
+            };
+        }
+    }
+
+    /** First call: connects fine but never responds; every later call succeeds like a plain echo. */
+    private static final class SilentThenEchoServicer extends InferenceGrpc.InferenceImplBase {
+        private final AtomicInteger callIndex = new AtomicInteger();
+
+        @Override
+        public StreamObserver<FrameRequest> detectStream(StreamObserver<DetectionResponse> responseObserver) {
+            boolean firstCall = callIndex.getAndIncrement() == 0;
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(FrameRequest request) {
+                    if (firstCall) {
+                        return; // deliberately never responds
+                    }
+                    responseObserver.onNext(DetectionResponse.newBuilder()
+                            .setStreamId(request.getStreamId())
+                            .setSequence(request.getSequence())
+                            .setTimestampMillis(request.getTimestampMillis())
+                            .setModelId(request.getModelId())
+                            .setModelVersion(request.getModelVersion())
+                            .build());
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // test double: nothing to clean up
+                }
+
+                @Override
+                public void onCompleted() {
+                    if (!firstCall) {
+                        responseObserver.onCompleted();
+                    }
+                }
+            };
+        }
+    }
+
+    /**
+     * First call: never responds, and races the client's own {@code RESPONSE_TIMEOUT_SECONDS}
+     * timeout with a server-side transport error delivered at roughly the same instant (scheduled
+     * from the first frame it receives). Every later call succeeds like a plain echo.
+     */
+    private static final class RacingServicer extends InferenceGrpc.InferenceImplBase {
+        private final AtomicInteger callIndex = new AtomicInteger();
+
+        @Override
+        public StreamObserver<FrameRequest> detectStream(StreamObserver<DetectionResponse> responseObserver) {
+            boolean firstCall = callIndex.getAndIncrement() == 0;
+            AtomicBoolean racerScheduled = new AtomicBoolean(false);
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(FrameRequest request) {
+                    if (firstCall) {
+                        if (racerScheduled.compareAndSet(false, true)) {
+                            Thread racer = new Thread(() -> {
+                                try {
+                                    Thread.sleep(TimeUnit.SECONDS.toMillis(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS));
+                                } catch (InterruptedException e) {
+                                    Thread.currentThread().interrupt();
+                                    return;
+                                }
+                                try {
+                                    responseObserver.onError(Status.UNAVAILABLE
+                                            .withDescription("simulated racing outage").asRuntimeException());
+                                } catch (RuntimeException ignored) {
+                                    // the client may have already cancelled the call; nothing to do
+                                }
+                            });
+                            racer.setDaemon(true);
+                            racer.start();
+                        }
+                        return; // deliberately never responds on the first call
                     }
                     responseObserver.onNext(DetectionResponse.newBuilder()
                             .setStreamId(request.getStreamId())

@@ -16,6 +16,7 @@ import com.drones.vision.proto.v1.InferenceGrpc;
 import com.google.protobuf.ByteString;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.stub.ClientCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 
 import java.time.Duration;
@@ -28,6 +29,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -55,12 +57,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   dropped — the next {@link #detect} for that {@link StreamId} transparently
  *   reopens a fresh call. This is what lets a caller's retry/backoff recover
  *   after a service restart without ever seeing a stuck stream.</li>
- *   <li><b>Hung service</b> (no failure, just silence): a bidi call has no
- *   natural per-call deadline, so instead every pending future gets its own
- *   {@value #RESPONSE_TIMEOUT_SECONDS}s timeout ({@link
- *   CompletableFuture#orTimeout}); a service that stops responding degrades
- *   each in-flight {@link #detect} call quickly instead of hanging it
- *   indefinitely.</li>
+ *   <li><b>Hung or unreachable service</b> (no failure, just silence — this is
+ *   also what a session opened while the CV service is entirely down looks
+ *   like: the underlying call can sit half-open with no {@code onError} ever
+ *   delivered): a bidi call has no natural per-call deadline, so instead every
+ *   pending future gets its own {@value #RESPONSE_TIMEOUT_SECONDS}s timeout
+ *   ({@link CompletableFuture#orTimeout}). A timeout is treated exactly like a
+ *   transport failure — the call is cancelled, every other pending future for
+ *   that stream fails immediately, and the session is dropped — so the next
+ *   {@link #detect} always opens a fresh call instead of reusing a session
+ *   that may never recover on its own.</li>
  *   <li><b>Unsupported {@link PixelFormat}</b>: fails fast with no gRPC call
  *   at all — the frame's stream is never opened/touched.</li>
  * </ul>
@@ -222,6 +228,18 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
         private final Object writeLock = new Object();
         private final ConcurrentHashMap<Long, CompletableFuture<DetectionResult>> pending = new ConcurrentHashMap<>();
 
+        /**
+         * Guards session teardown so it runs exactly once, however it is
+         * triggered (transport {@code onError}/{@code onCompleted}, a pending
+         * future's own response timeout, or an explicit {@link #streamEnded}/
+         * {@link #close()}) — these race genuinely (e.g. a timeout firing on
+         * one gRPC executor thread just as {@code onError} lands on another),
+         * so whichever gets here first tears the session down and every
+         * other trigger becomes a no-op instead of double-failing futures or
+         * double-cancelling the call.
+         */
+        private final AtomicBoolean torndown = new AtomicBoolean(false);
+
         private volatile StreamObserver<FrameRequest> requestObserver;
 
         StreamSession(StreamId streamId) {
@@ -233,7 +251,12 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
             CompletableFuture<DetectionResult> future = new CompletableFuture<>();
             pending.put(sequence, future);
             future.orTimeout(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            future.whenComplete((result, error) -> pending.remove(sequence, future));
+            future.whenComplete((result, error) -> {
+                pending.remove(sequence, future);
+                if (error instanceof TimeoutException timeout) {
+                    onResponseTimeout(sequence, timeout);
+                }
+            });
 
             FrameRequest request = buildRequest(frame, config, encoding);
             synchronized (writeLock) {
@@ -281,14 +304,64 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
             failAllAndDrop(new IllegalStateException("Detection stream for " + streamId + " completed unexpectedly"));
         }
 
-        /** Fails every still-pending future and drops this session so the next {@code detect()} reopens. */
-        private void failAllAndDrop(Throwable cause) {
+        /**
+         * A pending future's own {@value #RESPONSE_TIMEOUT_SECONDS}s response
+         * timeout fired. A live, healthy session always gets either a
+         * response or a transport {@code onError} well within that window, so
+         * this means the session itself is presumed dead — most notably the
+         * case a session opened while the CV service was down entirely: the
+         * call can sit half-open with no {@code onError} ever delivered (no
+         * response, no transport signal at all), so without this the session
+         * would never be dropped and every future probe would keep reusing
+         * the same dead call. Treated exactly like a transport error: the
+         * call is cancelled and every other still-pending future for this
+         * stream fails immediately instead of waiting out its own timer.
+         */
+        private void onResponseTimeout(long sequence, TimeoutException cause) {
+            LOG.log(System.Logger.Level.WARNING,
+                    () -> "Detection stream for " + streamId + " timed out waiting for a response to frame "
+                            + sequence + "; treating session as dead and reopening on next detect()");
+            if (failAllAndDrop(cause)) {
+                cancelCall(cause);
+            }
+        }
+
+        /**
+         * Fails every still-pending future and drops this session so the next
+         * {@code detect()} reopens, exactly once (see {@link #torndown}).
+         *
+         * @return {@code true} if this call actually performed the teardown
+         * (i.e. it won the race); {@code false} if the session was already
+         * torn down by another trigger, in which case there is nothing left
+         * to do.
+         */
+        private boolean failAllAndDrop(Throwable cause) {
+            if (!torndown.compareAndSet(false, true)) {
+                return false;
+            }
             sessions.remove(streamId, this);
             pending.values().forEach(future -> future.completeExceptionally(cause));
+            return true;
+        }
+
+        /** Best-effort: cancels the underlying call so a dead/hung transport is discarded instead of lingering. */
+        private void cancelCall(Throwable cause) {
+            StreamObserver<FrameRequest> observer = requestObserver;
+            if (observer instanceof ClientCallStreamObserver<FrameRequest> clientCallObserver) {
+                try {
+                    clientCallObserver.cancel("Detection stream for " + streamId + " timed out", cause);
+                } catch (RuntimeException e) {
+                    LOG.log(System.Logger.Level.DEBUG,
+                            () -> "Ignoring error cancelling detection stream for " + streamId, e);
+                }
+            }
         }
 
         /** Fails pending futures, half-closes the request observer, and drops this session. Idempotent. */
         void endAndClose() {
+            if (!torndown.compareAndSet(false, true)) {
+                return;
+            }
             sessions.remove(streamId, this);
             pending.values().forEach(future -> future.completeExceptionally(
                     new CancellationException("Detection stream for " + streamId + " ended")));

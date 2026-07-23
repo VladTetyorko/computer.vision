@@ -126,6 +126,21 @@
             </dependency>
 
             <!-- External version pins -->
+            <!-- The whole io.grpc family MUST resolve to one version: Spring
+                 Boot's imported grpc-bom otherwise forces grpc-core to its own
+                 (newer) line against our grpc-netty-shaded ${grpc.version},
+                 and the mismatch throws NoSuchMethodError inside Netty's
+                 connect-failure path, permanently wedging every channel whose
+                 endpoint was ever unreachable (observed live; see
+                 adapter-cv-grpc/MODULE.md Gotchas). The bom import aligns
+                 grpc-core, grpc-inprocess, grpc-api, etc. in one place. -->
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>io.grpc</groupId>
                 <artifactId>grpc-netty-shaded</artifactId>

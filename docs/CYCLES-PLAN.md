@@ -224,9 +224,9 @@ Execution follows the repo's delegation model: per-task scopes are disjoint; eve
 | C7 | backend | real YOLO inference + gRPC DetectionPort + outage resilience | [MVP1-PLAN.md](MVP1-PLAN.md) §C7 | ✅ done |
 | C8 | UI-facing | overlay burn-in + detections endpoint + Live strip | [MVP1-PLAN.md](MVP1-PLAN.md) §C8 | ✅ done |
 | C9 | demo | compose + demo script + E2E | [MVP1-PLAN.md](MVP1-PLAN.md) §C9 | ✅ done |
-| CU-a | backend | fully synthetic simulation (no file) | §9 | pending |
+| CU-a | backend | fully synthetic simulation (no file) | §9 | ✅ done |
 | CU-b | **UI** | fast & simple + map upgrades | §9, after C8 | pending |
-| CD-a | backend | telemetry deviceId in API | §11 | pending |
+| CD-a | backend | telemetry deviceId in API | §11 | ✅ done |
 | CD-b | **UI** | asset-first Devices + detail page + self-recovering player | §11 | pending |
 
 C7–C9 execute **[MVP1-PLAN.md](MVP1-PLAN.md)** — the priority target ("the friends demo": simultaneous multi-protocol sources + map + live CV). Post-MVP candidates: WEB-PLAN W6 leftovers + W7 hardening (Playwright smoke in CI, keyboard, responsive); flight replay; MAVLink telemetry RX; geolocated detections on the map.
