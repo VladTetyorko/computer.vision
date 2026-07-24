@@ -213,6 +213,12 @@
   gap: 0.3rem;
 }
 
+/* Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — an explicit affordance line
+   instead of relying on `.readiness-tile:hover` alone to say "this tile does something". */
+.readiness-action {
+  font-size: 0.72rem;
+}
+
 /* ---- Events rail (bullet 5) --------------------------------------------------------------------- */
 
 .events-rail-embed {

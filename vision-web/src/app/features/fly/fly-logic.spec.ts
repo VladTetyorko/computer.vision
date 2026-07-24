@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, AssetUsage } from '../../core/api/models';
+import type { AssetSummary, AssetUsage, GeoPosition } from '../../core/api/models';
 import {
+  ALL_DRONES_OPTION_VALUE,
   cycleBoxesMode,
+  isAllDronesOption,
   isSwitcherOptionSelected,
   isWatchMode,
+  lastSeenLabel,
   latestFinishedUsage,
+  positionLabel,
   resolveActiveAssetId,
   sortAssetsForPicker,
+  streamStateLabel,
   trackingIdChanged,
 } from './fly-logic';
 
@@ -157,5 +162,54 @@ describe('trackingIdChanged (docs/REALTIME-PLAN.md Phase R-a item 2)', () => {
 
   it('is false when nothing was ever tracked and still is not', () => {
     expect(trackingIdChanged(undefined, undefined)).toBe(false);
+  });
+});
+
+describe('streamStateLabel (docs/UX-REWORK-PLAN.md §U-a2 — the picker card states its stream state as a word)', () => {
+  it('reads "Streaming" for a streaming asset', () => {
+    expect(streamStateLabel('STREAMING')).toBe('Streaming');
+  });
+
+  it('reads "Offline" for anything else', () => {
+    expect(streamStateLabel('OFFLINE')).toBe('Offline');
+  });
+});
+
+describe('lastSeenLabel', () => {
+  const nowMs = Date.parse('2026-07-24T12:00:00Z');
+
+  it('is undefined for an asset that has never been used', () => {
+    expect(lastSeenLabel(undefined, nowMs)).toBeUndefined();
+  });
+
+  it('renders elapsed time since lastUsedAt, reusing formatDuration\'s own wording', () => {
+    const fourMinutesAgo = '2026-07-24T11:55:53Z'; // 4m 07s before nowMs
+    expect(lastSeenLabel(fourMinutesAgo, nowMs)).toBe('4m 07s ago');
+  });
+
+  it('never goes negative for a clock-skewed future timestamp', () => {
+    const future = '2026-07-24T12:05:00Z';
+    expect(lastSeenLabel(future, nowMs)).toBe('0s ago');
+  });
+});
+
+describe('positionLabel', () => {
+  it('is undefined when the asset has never reported a fix', () => {
+    expect(positionLabel(undefined)).toBeUndefined();
+  });
+
+  it('formats lat/lon to 4 decimal places, altitude omitted', () => {
+    const position: GeoPosition = { latitude: 37.774929, longitude: -122.419416, altitudeMeters: 120 };
+    expect(positionLabel(position)).toBe('37.7749, -122.4194');
+  });
+});
+
+describe('isAllDronesOption (docs/UX-REWORK-PLAN.md §U-a bullet 4 — merges "All drones" into the switcher)', () => {
+  it('is true for the sentinel value', () => {
+    expect(isAllDronesOption(ALL_DRONES_OPTION_VALUE)).toBe(true);
+  });
+
+  it('is false for a real asset id', () => {
+    expect(isAllDronesOption('known-1')).toBe(false);
   });
 });

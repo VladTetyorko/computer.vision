@@ -67,9 +67,18 @@ describe('mapDeviceOwners', () => {
 
     const owners = mapDeviceOwners([a, b]);
 
-    expect(owners.get('dev-1')).toEqual({ assetId: 'a-1', assetName: 'Asset 1' });
-    expect(owners.get('dev-2')).toEqual({ assetId: 'a-1', assetName: 'Asset 1' });
-    expect(owners.get('dev-3')).toEqual({ assetId: 'a-2', assetName: 'Asset 2' });
+    expect(owners.get('dev-1')).toEqual({ assetId: 'a-1', assetName: 'Asset 1', deviceCount: 2 });
+    expect(owners.get('dev-2')).toEqual({ assetId: 'a-1', assetName: 'Asset 1', deviceCount: 2 });
+    expect(owners.get('dev-3')).toEqual({ assetId: 'a-2', assetName: 'Asset 2', deviceCount: 1 });
+  });
+
+  it("carries the owning asset's device count, for the unassign-would-empty-it poka-yoke check", () => {
+    const onlyDevice = assetDetails({
+      assetId: 'a-only',
+      displayName: 'Only',
+      devices: [device({ id: 'solo' })],
+    });
+    expect(mapDeviceOwners([onlyDevice]).get('solo')?.deviceCount).toBe(1);
   });
 
   it('returns an empty map for no assets', () => {
@@ -87,7 +96,7 @@ describe('buildWarehouseRows', () => {
       assetDetails({ assetId: 'a-1', displayName: 'Asset 1', devices: [device({ id: 'dev-1' })] }),
     ]);
     const rows = buildWarehouseRows([device({ id: 'dev-1' })], owners, new Set());
-    expect(rows[0].owner).toEqual({ assetId: 'a-1', assetName: 'Asset 1' });
+    expect(rows[0].owner).toEqual({ assetId: 'a-1', assetName: 'Asset 1', deviceCount: 1 });
   });
 
   it('leaves owner absent for an unowned device', () => {

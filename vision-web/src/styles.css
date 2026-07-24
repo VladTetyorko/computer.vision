@@ -310,6 +310,156 @@ input[type="checkbox"] {
     cursor: not-allowed;
 }
 
+/* ---- Kebab (⋯) menus ------------------------------------------------------ */
+/* A reusable per-row overflow menu (docs/UX-REWORK-PLAN.md U-a item 7 — this batch's Devices/
+   Asset-detail kebabs are the first consumers): a native `<details>`/`<summary>` disclosure, the
+   same idiom the header's own "More" overflow already established (`app.css`'s `.tab-more`/
+   `.tab-more-menu`), just a small per-row trigger instead of a nav tab — not a new dropdown
+   component. Expected shape:
+     <details class="kebab">
+       <summary class="kebab-trigger" aria-label="More actions for …">⋯</summary>
+       <div class="kebab-menu" (click)="closeIt()">
+         <button type="button">Details</button>
+         <div class="kebab-divider" role="separator"></div>
+         <div class="kebab-item">
+           <button type="button" class="danger-action" [disabled]="…">Archive</button>
+           <span class="kebab-reason">Stop the stream first</span> <!-- only while disabled -->
+         </div>
+       </div>
+     </details>
+   A plain, undecorated `<button>` is a normal row; `.kebab-item` only exists for a row that may
+   carry a `.kebab-reason`/`.disabled-reason` line under it; `.kebab-divider` is an explicit
+   element the menu itself renders above its destructive entry — poka-yoke rule 4's "physically
+   separated, behind a divider" — rather than something `.danger-action` infers from its position,
+   which would misfire wherever that same class is reused outside a menu (see `.danger-action`
+   below). */
+.kebab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.kebab-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    cursor: pointer;
+    list-style: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 1.15rem;
+    line-height: 1;
+}
+
+.kebab-trigger::-webkit-details-marker {
+    display: none;
+}
+
+.kebab-trigger:hover {
+    background: var(--panel-hover);
+    color: var(--text);
+}
+
+.kebab-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.3rem;
+    min-width: 11rem;
+    padding: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    z-index: 30;
+}
+
+.kebab-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.kebab-menu button:hover:not(:disabled) {
+    background: var(--panel-hover);
+}
+
+.kebab-menu button:disabled {
+    color: var(--text-faint);
+    cursor: not-allowed;
+}
+
+.kebab-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.kebab-divider {
+    height: 1px;
+    margin: 0.3rem 0.2rem;
+    background: var(--border);
+}
+
+/* Poka-yoke rule 1 (prevention over confirmation) — same pattern as `.disabled-reason` below,
+   scoped for a kebab row specifically since a menu item is narrower than a page-level control. */
+.kebab-reason {
+    display: block;
+    padding: 0 0.6rem 0.3rem;
+    font-size: 0.7rem;
+    color: var(--text-faint);
+}
+
+/* Poka-yoke (docs/UX-REWORK-PLAN.md U-a2 rule 4): "destructive actions look different and live
+   apart" — a plain modifier for the one destructive entry among routine ones, wherever it's used:
+   a `.kebab-menu` row (paired with that menu's own explicit `.kebab-divider` above it — see the
+   Kebab section above for why the separation itself is a rendered element, not CSS inferred from
+   sibling position) or a standalone `.btn.danger` outside any menu at all (e.g. Fly's own "Stop
+   stream"/"Confirm stop", which only need the red tint, not a divider they were never meant to
+   have). Only ever recolors text/icon — never assumes a menu context. */
+.danger-action,
+/* Repeated at higher specificity: `.kebab-menu button { color: var(--text) }` (0-1-1) and
+   `.btn.secondary` (0-2-0) both out-rank a lone class (0-1-0) and silently swallowed the red
+   tint on every Archive control in the app (U-a2 audit finding). */
+.kebab-menu button.danger-action,
+.btn.danger-action,
+button.danger-action {
+    color: var(--danger);
+}
+
+.danger-action svg,
+.danger-action .icon {
+    fill: currentColor;
+}
+
+.danger-action:hover:not(:disabled),
+.kebab-menu .danger-action:hover:not(:disabled) {
+    background: var(--danger-soft);
+}
+
+/* Poka-yoke (docs/UX-REWORK-PLAN.md U-a2 rule 1: prevention over confirmation) — the one-line
+   reason a disabled control can't be used right now ("Stop the stream first"), told inline rather
+   than only in a `title` tooltip. Plain class, no component: drop a `<p class="disabled-reason">`
+   (or a `<span>`) right after the control it explains. */
+.disabled-reason {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.72rem;
+    color: var(--text-faint);
+}
+
 /* ---- Chips & badges ----------------------------------------------------- */
 
 .chip {
@@ -431,4 +581,19 @@ tbody tr:last-child td {
         animation-duration: 0.01ms !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* Leaflet popups are injected at runtime outside any component's emulated-encapsulation scope,
+   and Leaflet's default white popup chrome made `.btn.secondary` (light text, transparent
+   background — designed for the app's dark canvas) nearly illegible inside marker popups
+   (U-a2 audit finding). Theme the popup box itself to match the app. */
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+    background: var(--panel-raised, #1c2027);
+    color: var(--text, #dfe6f0);
+    box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+}
+
+.leaflet-popup-close-button {
+    color: var(--text-faint, #8b93a1);
 }

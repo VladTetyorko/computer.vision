@@ -7,9 +7,11 @@ import type { FleetMarker } from '../../core/map/map-logic';
 /**
  * The docked live preview panel (docs/CYCLES-PLAN.md §9, CU-b item 5): clicking a streaming
  * asset's marker or rail row docks this beside the map instead of leaving the tab — inline
- * player + an OSD-style summary + an "Open full cockpit" link for the full `/live/:deviceId`
- * experience. Each host page (`MapPage`, and now `CommandPage`, docs/MVP3-PLAN.md §C-c) guarantees
- * at most one is ever rendered at a time (bandwidth); closing it emits `close` and the host un-docks.
+ * player + an OSD-style summary + a "Watch live" link (docs/UX-REWORK-PLAN.md U-a2 item 1 — was
+ * "Open full cockpit"; same verb as the dock itself, a fresh `/live/:deviceId` page instead of
+ * this inline panel is a presentation detail, not a new verb) for the full-page experience. Each
+ * host page (`MapPage`, and now `CommandPage`, docs/MVP3-PLAN.md §C-c) guarantees at most one is
+ * ever rendered at a time (bandwidth); closing it emits `close` and the host un-docks.
  *
  * Moved here from `pages/map/live-dock.ts` in docs/MVP3-PLAN.md §C-c alongside `shared/map/fleet-map.ts`
  * (see that file's own doc comment) — Command's own "hover/click preview, one at a time, LiveDock

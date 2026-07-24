@@ -86,7 +86,6 @@ export class LivePage {
   protected readonly hasTelemetry = computed(() =>
     (this.device()?.capabilities ?? []).includes('TELEMETRY'),
   );
-  protected readonly hasPtz = computed(() => (this.device()?.capabilities ?? []).includes('PTZ'));
 
   protected readonly optionPairs = computed(() =>
     Object.entries(this.device()?.options ?? {}).map(([key, value]) => ({ key, value })),

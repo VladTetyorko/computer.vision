@@ -93,3 +93,10 @@
   font-size: 0.72rem;
   white-space: nowrap;
 }
+
+/* Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — the row's own explicit affordance. */
+.event-affordance {
+  flex: none;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}

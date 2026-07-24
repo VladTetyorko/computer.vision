@@ -44,10 +44,13 @@ const SUMMARY_POLL_INTERVAL_MS = 5_000;
  *   `FleetMapStore` instance (own `providers`, like `MapPage`). Its own already-existing 5s
  *   `GET /api/assets` poll + per-*streaming*-asset 2s telemetry pollers are unchanged, pre-existing
  *   behavior from C6/CU-b, not new surface this cycle adds — see the Status/report note on why this
- *   doesn't count against this page's own "one summary poll" duty. **Watch** here still emits an
- *   assetId (unchanged component contract), but this page wires it straight to `watchAsset` —
- *   `/fly?asset=<id>&watch=1` (no device lookup needed, unlike `MapPage`'s `/live/:deviceId`) —
- *   **Preview** still docks `<vision-live-dock>` exactly like `MapPage` (`onPreview`).
+ *   doesn't count against this page's own "one summary poll" duty. Its `(watch)` output (unchanged
+ *   component contract) still emits an assetId, but this page wires it straight to `watchAsset` —
+ *   `/fly?asset=<id>&watch=1` (no device lookup needed, unlike `MapPage`'s `/live/:deviceId`) — its
+ *   `(preview)` output still docks `<vision-live-dock>` exactly like `MapPage` (`onPreview`). Both
+ *   read "Watch live" on screen (docs/UX-REWORK-PLAN.md U-a2 item 1 — the full-page-vs-inline
+ *   split is a presentation detail, not two verbs); `openAsset`/attention-row's own "Details"
+ *   button is the other half of the collapsed Watch/Preview/Open triple.
  * - **Warehouse readiness tiles** — plain buttons over `summary().categories` (never capped,
  *   server-side truth regardless of the `assets` list's own 500-row cap); click navigates to
  *   `/devices` (CD-b's own asset-first list has no category filter to deep-link into yet — per the

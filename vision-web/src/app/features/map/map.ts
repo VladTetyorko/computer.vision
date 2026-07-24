@@ -3,8 +3,6 @@ import { Router, RouterLink } from '@angular/router';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
-import { FlightPlanDialog } from '../../shared/map/flight-plan-dialog';
-import { buildTelemetryRequest, type FlightPlanForm } from '../../shared/map/flight-plan-logic';
 import { FleetMap } from '../../shared/map/fleet-map';
 import { LiveDock } from '../../shared/map/live-dock';
 import { FleetMapStore } from '../../core/map/map-store';
@@ -20,18 +18,27 @@ import type { AssetSummary } from '../../core/api/models';
  * 5s asset poll and every per-asset 2s telemetry poll start and stop with the route. Composes
  * `FleetMap` (the actual Leaflet rendering) plus a right-hand rail listing **every** registered
  * asset (docs/CYCLES-PLAN.md §11 — broadened from CU-b's "no position yet"-only rail so a referee
- * can account for the whole fleet from one list, not just the ones missing a position), with an
- * "Open" link to that asset's `/assets/:id` detail page alongside Watch/Preview.
+ * can account for the whole fleet from one list, not just the ones missing a position), with a
+ * "Details" link to that asset's `/assets/:id` detail page alongside "Watch live".
+ *
+ * **Verb dictionary (docs/UX-REWORK-PLAN.md U-a2 item 1):** the rail's old three-way Watch/
+ * Preview/Open button set is now exactly two labels everywhere on this page — "Watch live" (this
+ * page's own full-page `onWatch`, `FleetMap`'s inline-docking `onPreview`, and its popup's
+ * full-page button all read "Watch live"; which behavior a given "Watch live" button triggers is
+ * a presentation detail — inline dock vs. a fresh page — not a separate verb) and "Details"
+ * (`openAsset`, the asset's own `/assets/:id` page). See each method's own doc comment below for
+ * which of the two "Watch live" behaviors it is.
  *
  * **Docked live preview** (docs/CYCLES-PLAN.md §9, CU-b item 5): `dockedAssetId` tracks at most
  * one asset at a time (bandwidth) — set by `FleetMap`'s `(preview)` output (a streaming marker
- * click, or its popup's Preview button) or the rail's own Preview button, cleared by
- * `LiveDock`'s close button. Resolving *which device* to preview is `FleetMapStore`'s job
- * (`resolveWatchDevice`, the same lookup `onWatch` already used), same split as Watch.
+ * click, or its popup's own "Watch live" button) or the rail's own "Watch live" button (shown only
+ * while streaming), cleared by `LiveDock`'s close button. Resolving *which device* to preview is
+ * `FleetMapStore`'s job (`resolveWatchDevice`, the same lookup `onWatch` already used), same split
+ * as the full-page "Watch live".
  */
 @Component({
   selector: 'vision-map',
-  imports: [FleetMap, LiveDock, RouterLink, FlightPlanDialog],
+  imports: [FleetMap, LiveDock, RouterLink],
   templateUrl: './map.html',
   styleUrl: './map.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -64,7 +71,6 @@ export class MapPage {
   protected readonly dockedAssetId = signal<string | null>(null);
   protected readonly dockedDeviceId = signal<string | null>(null);
   protected readonly addingTestDrone = signal(false);
-  protected readonly flightPlanDialogOpen = signal(false);
 
   /** The docked asset's freshest marker, re-derived every tick — feeds `LiveDock`'s OSD summary. */
   protected readonly dockedMarker = computed(() => {
@@ -77,9 +83,10 @@ export class MapPage {
   }
 
   /**
-   * Shared by the rail's own Watch buttons and `FleetMap`'s popup Watch action (`(watch)`
-   * output) — resolving the device is `FleetMapStore`'s job, navigating is this page's, same
-   * split `features/devices/devices.ts` uses for its own Watch toast action.
+   * The full-page "Watch live" (docs/UX-REWORK-PLAN.md U-a2 item 1) — shared by the rail's own
+   * button and `FleetMap`'s popup `(watch)` output. Resolving the device is `FleetMapStore`'s job,
+   * navigating is this page's, same split `features/devices/devices.ts` uses for its own watch
+   * toast action.
    */
   protected async onWatch(assetId: string): Promise<void> {
     const device = await this.mapStore.resolveWatchDevice(assetId);
@@ -88,7 +95,11 @@ export class MapPage {
     }
   }
 
-  /** Docks `assetId`'s live preview beside the map — replaces whichever asset was docked before. */
+  /**
+   * The inline "Watch live" (docs/UX-REWORK-PLAN.md U-a2 item 1 — same label as `onWatch` above,
+   * a docked mini-player instead of a fresh page is a presentation detail, not a new verb): docks
+   * `assetId`'s live preview beside the map, replacing whichever asset was docked before.
+   */
   protected async onPreview(assetId: string): Promise<void> {
     const device = await this.mapStore.resolveWatchDevice(assetId);
     if (device) {
@@ -102,11 +113,12 @@ export class MapPage {
     this.dockedDeviceId.set(null);
   }
 
+  /** The rail's "Details" button (docs/UX-REWORK-PLAN.md U-a2 item 1 — was "Open"). */
   protected openAsset(assetId: string): Promise<boolean> {
     return this.router.navigate(['/assets', assetId]);
   }
 
-  /** `FleetMap`'s event-popup "Open asset" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
+  /** `FleetMap`'s event-popup "Details" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
   protected openEventAsset(assetId: string): Promise<boolean> {
     return this.openAsset(assetId);
   }
@@ -114,10 +126,11 @@ export class MapPage {
   /**
    * The Map tab's empty-state action (docs/CYCLES-PLAN.md §9, CU-b item 7): one click places a
    * moving synthetic drone with no video file (CU-a) — the fastest possible way to see the map
-   * actually plot something with no hardware and no file path to type in. Unchanged by CT-b
-   * (docs/CYCLES-PLAN.md §7) on purpose — this stays the true one-click path (a bare circular
-   * default track); `openFlightPlanDialog`/`onFlightPlanSaved` below are the *second*,
-   * flight-plan-aware door the same empty state now also offers.
+   * actually plot something with no hardware and no file path to type in. This is now the empty
+   * state's only action beyond "Go to Devices" (docs/UX-REWORK-PLAN.md U-a item 3 removed the
+   * second "Draw a flight plan…" door — a demo action judged not worth its own button on this
+   * referee-facing surface; `shared/map/flight-plan-dialog.ts` is untouched and still reused
+   * as-is by the Devices page's own Simulate step).
    */
   protected async addTestDrone(): Promise<void> {
     this.addingTestDrone.set(true);
@@ -127,39 +140,5 @@ export class MapPage {
     } finally {
       this.addingTestDrone.set(false);
     }
-  }
-
-  /**
-   * The flight-plan-aware door (docs/CYCLES-PLAN.md §7, CT-b): opens the exact same
-   * `<vision-flight-plan-dialog>` the Devices page's Simulate step uses (`shared/map/flight-plan-dialog.ts`
-   * — "no page imports another page's module", see that file's own doc comment) so a referee/crew
-   * member can place a test drone that actually flies a specific route, not just the default
-   * circle, without leaving the Map tab.
-   */
-  protected openFlightPlanDialog(): void {
-    this.flightPlanDialogOpen.set(true);
-  }
-
-  protected async onFlightPlanSaved(plan: FlightPlanForm): Promise<void> {
-    this.flightPlanDialogOpen.set(false);
-    this.addingTestDrone.set(true);
-    try {
-      await this.fleet.simulate(
-        buildTestDroneRequest({
-          name: '',
-          latitude: null,
-          longitude: null,
-          autoStart: true,
-          telemetry: buildTelemetryRequest(plan),
-        }),
-      );
-      await this.mapStore.refresh();
-    } finally {
-      this.addingTestDrone.set(false);
-    }
-  }
-
-  protected onFlightPlanCancelled(): void {
-    this.flightPlanDialogOpen.set(false);
   }
 }

@@ -1,4 +1,5 @@
-import type { AssetSummary, AssetUsage } from '../../core/api/models';
+import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition } from '../../core/api/models';
+import { formatDuration } from '../../core/stream-info-logic';
 import type { BoxesMode } from '../../shared/player/player';
 
 /**
@@ -111,4 +112,69 @@ export function isSwitcherOptionSelected(candidateAssetId: string, activeAssetId
  */
 export function trackingIdChanged(nextId: string | undefined, lastActedOnId: string | undefined): boolean {
   return nextId !== lastActedOnId;
+}
+
+// --- Picker asset card (docs/UX-REWORK-PLAN.md §U-a2 §3 — "the info-less asset card on Fly ...
+// becomes an asset card") ------------------------------------------------------------------------
+//
+// The picker card used to show only a `displayName` and, while streaming, a bare "Streaming" chip
+// — nothing else, silently whole-card-clickable (the plan's own screenshot evidence). These three
+// pure derivations back the rebuilt card's extra facts. **No new HTTP call backs any of them** —
+// every input is a field `AssetSummary` (the picker's existing `listAssets()` response) already
+// carries. Battery is deliberately **not** among them: `AssetSummary` has no such field, and the
+// per-asset battery reading this app does have (`TelemetryStore`) only exists for the one asset
+// currently tracked by the cockpit (component-provided, one instance per route) — showing it on
+// every picker card would mean one more `track()`-worth of polling per card, which is exactly the
+// new-request fan-out this task was told to avoid. Omitted rather than fabricated, same posture as
+// this app's other honest gaps (e.g. `fly-osd.ts`'s missing speed chip).
+
+/** The picker/asset card's stream-state word (U-a2 §1: "stream state with the word", never color-only). */
+export function streamStateLabel(status: AssetStatus): 'Streaming' | 'Offline' {
+  return status === 'STREAMING' ? 'Streaming' : 'Offline';
+}
+
+/**
+ * The card's "last seen" fact — elapsed time since `lastUsedAt`, reusing
+ * `core/stream-info-logic.ts#formatDuration` (this app's one duration renderer) rather than a
+ * second one, e.g. `"4m 07s ago"`. `undefined` when the asset has never been used — the card omits
+ * the fact entirely rather than showing a fabricated placeholder. `nowMs` is a parameter (not
+ * `Date.now()` read in here) purely so this stays deterministic under test; `FlyPage` supplies the
+ * real clock.
+ */
+export function lastSeenLabel(lastUsedAt: string | undefined, nowMs: number): string | undefined {
+  if (!lastUsedAt) {
+    return undefined;
+  }
+  const elapsedSeconds = Math.max(0, (nowMs - Date.parse(lastUsedAt)) / 1000);
+  return `${formatDuration(elapsedSeconds)} ago`;
+}
+
+/**
+ * The card's "position" fact — `lat, lon` to 4 decimal places (~11m precision, plenty for a
+ * glance), `undefined` when the asset has never reported a fix. Altitude is deliberately left out
+ * here — the card states *where*, not *how high*; altitude already has its own home in the cockpit
+ * OSD once actually flying (`fly-osd.ts`).
+ */
+export function positionLabel(position: GeoPosition | undefined): string | undefined {
+  if (!position) {
+    return undefined;
+  }
+  return `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`;
+}
+
+// --- Header switcher / "All drones" merge (docs/UX-REWORK-PLAN.md §U-a bullet 4 — "Merge 'All
+// drones' + drone <select> into one switcher control") -------------------------------------------
+
+/**
+ * Sentinel `<option>` value for "exit to the full picker", folded into the header's own drone
+ * switcher `<select>` as its last entry instead of a separate "All drones" button sitting next to
+ * it (the redundancy the plan names). No real asset id can ever equal this string — asset ids are
+ * `AssetId.random()`-shaped UUIDs, never this literal — so it can share the same `(change)` handler
+ * unambiguously with every genuine asset option.
+ */
+export const ALL_DRONES_OPTION_VALUE = '__all-drones__';
+
+/** Whether the switcher's `(change)` value is the "All drones" sentinel rather than a real asset id. */
+export function isAllDronesOption(value: string): boolean {
+  return value === ALL_DRONES_OPTION_VALUE;
 }

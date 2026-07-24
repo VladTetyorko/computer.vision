@@ -53,9 +53,9 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
         [boxesMode]="boxesMode()"
       />
       <footer>
-        <a class="name truncate" [routerLink]="['/live', stream().deviceId]">
+        <span class="name truncate" [title]="device()?.name ?? stream().deviceId">
           {{ device()?.name ?? stream().deviceId }}
-        </a>
+        </span>
         <div class="row chips">
           @if (telemetry.hasTelemetry()) {
             <span class="chip telemetry-chip" [class.stale]="telemetry.stale()">
@@ -67,6 +67,15 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
               }
             </span>
           }
+          <!-- Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
+               used to be the bare device name itself, silently clickable; it now states itself. -->
+          <a
+            class="btn secondary small watch-link"
+            [routerLink]="['/live', stream().deviceId]"
+            [title]="'Watch live: ' + (device()?.name ?? stream().deviceId)"
+          >
+            Watch live
+          </a>
           <button
             type="button"
             class="boxes-btn"
@@ -96,7 +105,8 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 0.5rem;
+      flex-wrap: wrap;
+      gap: 0.3rem 0.5rem;
       padding: 0.45rem 0.6rem;
     }
 
@@ -111,10 +121,6 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
       min-width: 0;
     }
 
-    .name:hover {
-      color: var(--accent);
-    }
-
     .telemetry-chip {
       font-size: 0.72rem;
       white-space: nowrap;
@@ -123,6 +129,13 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
     .telemetry-chip.stale {
       color: var(--danger);
       border-color: var(--danger);
+    }
+
+    /* Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
+       own default to fit alongside the telemetry chip and boxes toggle at wall-tile scale. */
+    .watch-link {
+      font-size: 0.72rem;
+      padding: 0.2rem 0.5rem;
     }
 
     .boxes-btn {

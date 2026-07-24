@@ -28,9 +28,6 @@
         <button type="button" class="btn" (click)="addTestDrone()" [disabled]="addingTestDrone()">
           {{ addingTestDrone() ? 'Placing…' : 'Add a test drone' }}
         </button>
-        <button type="button" class="btn secondary" (click)="openFlightPlanDialog()" [disabled]="addingTestDrone()">
-          Draw a flight plan…
-        </button>
       </div>
     </div>
   } @else {
@@ -70,13 +67,25 @@
                 </div>
                 <div class="rail-item-meta muted">{{ asset.categoryName }}</div>
                 <div class="row rail-actions">
-                  <button type="button" class="btn secondary small" (click)="onWatch(asset.assetId)">Watch</button>
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    (click)="onWatch(asset.assetId)"
+                    title="Watch live on its own page"
+                  >
+                    Watch live
+                  </button>
                   @if (asset.status === 'STREAMING') {
-                    <button type="button" class="btn secondary small" (click)="onPreview(asset.assetId)">
-                      Preview
+                    <button
+                      type="button"
+                      class="btn secondary small"
+                      (click)="onPreview(asset.assetId)"
+                      title="Watch live, inline beside the map"
+                    >
+                      Watch live
                     </button>
                   }
-                  <button type="button" class="btn secondary small" (click)="openAsset(asset.assetId)">Open</button>
+                  <button type="button" class="btn secondary small" (click)="openAsset(asset.assetId)">Details</button>
                 </div>
               </li>
             }
@@ -84,9 +93,5 @@
         </aside>
       }
     </div>
-  }
-
-  @if (flightPlanDialogOpen()) {
-    <vision-flight-plan-dialog (saved)="onFlightPlanSaved($event)" (cancelled)="onFlightPlanCancelled()" />
   }
 </div>

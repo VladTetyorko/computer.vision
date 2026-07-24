@@ -53,8 +53,8 @@
                 <p class="attention-why">{{ row.why }}</p>
               </div>
               <div class="row attention-actions">
-                <button type="button" class="btn secondary small" (click)="watchAsset(row.asset.assetId)">Watch</button>
-                <button type="button" class="btn secondary small" (click)="openAsset(row.asset.assetId)">Open</button>
+                <button type="button" class="btn secondary small" (click)="watchAsset(row.asset.assetId)">Watch live</button>
+                <button type="button" class="btn secondary small" (click)="openAsset(row.asset.assetId)">Details</button>
               </div>
             </li>
           }
@@ -133,6 +133,9 @@
                 <span class="chip">{{ tile.deleted }} archived</span>
               }
             </div>
+            <!-- Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — this tile is a plain
+                 navigation link in button's clothing; hover-only affordance isn't enough on its own. -->
+            <span class="readiness-action faint">View in Devices →</span>
           </button>
         }
       </div>

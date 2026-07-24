@@ -25,12 +25,16 @@ export class App {
    * operator's cockpit, `Command` the manager's dashboard, docs/MVP3-PLAN.md §C-c) plus the
    * warehouse (`Assets` — the tab label C-c renames; the route underneath is still `/devices`,
    * unchanged, so every existing `router.navigate(['/devices', ...])`/`routerLink="/devices"` call
-   * site across this app keeps working verbatim) and `Settings`. No capability lost: `/wall`,
-   * `/map`, `/debug`, and `/live/:deviceId` (never a tab to begin with) are all still fully
-   * reachable, just demoted out of the primary tab row into the "More" overflow (`moreLinks`
-   * below, rendered as a `<details>` dropdown in `app.html` — this app's existing disclosure idiom,
-   * see e.g. `shared/player/stream-info-panel.ts`'s "Technical details", reused here rather than inventing a
-   * new dropdown-menu component).
+   * site across this app keeps working verbatim) and `Settings`. No capability lost: `/wall` and
+   * `/map` (and `/live/:deviceId`, never a tab to begin with) are all still fully reachable, just
+   * demoted out of the primary tab row into the "More" overflow (`moreLinks` below, rendered as a
+   * `<details>` dropdown in `app.html` — this app's existing disclosure idiom, see e.g.
+   * `shared/player/stream-info-panel.ts`'s "Technical details", reused here rather than inventing a
+   * new dropdown-menu component). **`/debug` is deliberately not in `moreLinks`**
+   * (docs/UX-REWORK-PLAN.md U-a item 5): its route (`features/debug/debug.routes.ts`) is
+   * untouched and still fully reachable by direct URL, just no longer advertised in any nav
+   * surface — a raw API console isn't a link a pilot/manager should stumble into from "More".
+   * Nothing else about the More menu changes: `/wall` and `/map` stay exactly as they were.
    */
   protected readonly tabs: readonly Tab[] = [
     { path: '/fly', label: 'Fly' },
@@ -43,7 +47,6 @@ export class App {
   protected readonly moreLinks: readonly Tab[] = [
     { path: '/wall', label: 'Wall' },
     { path: '/map', label: 'Map' },
-    { path: '/debug', label: 'Debug' },
   ];
 
   protected readonly liveCount = computed(() => this.fleet.streams().length);

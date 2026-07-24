@@ -25,7 +25,8 @@ const PREROLL_MARGIN = '250px';
  * /api/streams/{id}/snapshot` into an `<img>`, cache-busted on every poll so the browser actually
  * re-requests it — server responses are `Cache-Control: no-store` already, but an unchanged `src`
  * string is a no-op for an `<img>` regardless of response headers), name, battery/age chips, and a
- * click-to-watch action.
+ * click-to-watch action — the whole tile is the button, with its own explicit "Watch live →"
+ * affordance line (docs/UX-REWORK-PLAN.md U-a2 §2.6 — a hover border alone isn't a label).
  *
  * **Visibility-gated, mirroring `features/wall/wall-tile.ts`'s own `IntersectionObserver`** — the
  * identical "off-screen things stop polling" idiom that page already established for its own
@@ -43,7 +44,12 @@ const PREROLL_MARGIN = '250px';
   selector: 'vision-live-strip-tile',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <button type="button" class="tile" (click)="watch.emit(asset().assetId)" [title]="'Watch ' + asset().displayName">
+    <button
+      type="button"
+      class="tile"
+      (click)="watch.emit(asset().assetId)"
+      [title]="'Watch live: ' + asset().displayName"
+    >
       <div class="thumb" [class.placeholder]="status() !== 'ok'">
         @if (snapshotSrc(); as src) {
           <img [src]="src" alt="" [class.hidden]="status() !== 'ok'" (load)="onLoad()" (error)="onError()" />
@@ -62,6 +68,9 @@ const PREROLL_MARGIN = '250px';
           }
           <span class="chip faint">{{ ageLabel() }}</span>
         </div>
+        <!-- Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — the whole tile is the
+             click target; a hover border alone doesn't say what clicking it does. -->
+        <span class="tile-action">Watch live →</span>
       </div>
     </button>
   `,
@@ -130,6 +139,12 @@ const PREROLL_MARGIN = '250px';
     .chips {
       gap: 0.3rem;
       flex-wrap: wrap;
+    }
+
+    .tile-action {
+      color: var(--accent);
+      font-size: 0.7rem;
+      font-weight: 500;
     }
   `,
 })

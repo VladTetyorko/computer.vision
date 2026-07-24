@@ -21,11 +21,17 @@ import { findVideoDevice } from '../../core/fleet/device-logic';
  * every import site this page already had keeps working verbatim.
  */
 export {
+  ASSET_ACTION_LABELS,
+  DEVICE_ACTION_LABELS,
   RESTORE_TARGET_STATE,
   availableAssetActions,
   availableDeviceActions,
   buildAssetEdit,
   buildDeviceRenameEdit,
+  operatorAssetActions,
+  reasonedAssetActions,
+  reasonedDeviceActions,
+  type ActionAvailability,
   type AssetEditForm,
   type AssetLifecycleAction,
   type DeviceLifecycleAction,
@@ -37,10 +43,16 @@ export {
  * `FleetStore`'s `run()` funnel, so a 404 today degrades to one toast, never a crash.
  */
 
-/** Enough about a device's owning asset to render an "owned by" column and an unassign action. */
+/**
+ * Enough about a device's owning asset to render an "owned by" column, an unassign action, and
+ * (docs/UX-REWORK-PLAN.md §U-a2 item 3a) whether unassigning it would leave that asset with none —
+ * `deviceCount` is what lets `reasonedDeviceActions`'s `ownerDeviceCount` parameter disable
+ * Unassign *before* the click instead of only after the backend's own 409.
+ */
 export interface DeviceOwner {
   readonly assetId: string;
   readonly assetName: string;
+  readonly deviceCount: number;
 }
 
 /**
@@ -55,7 +67,11 @@ export function mapDeviceOwners(assets: readonly AssetDetails[]): ReadonlyMap<st
   const owners = new Map<string, DeviceOwner>();
   for (const asset of assets) {
     for (const device of asset.devices) {
-      owners.set(device.id, { assetId: asset.assetId, assetName: asset.displayName });
+      owners.set(device.id, {
+        assetId: asset.assetId,
+        assetName: asset.displayName,
+        deviceCount: asset.devices.length,
+      });
     }
   }
   return owners;

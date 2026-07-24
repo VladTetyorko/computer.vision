@@ -46,6 +46,59 @@ No design system needed — pure removal of confirmed dead weight:
 Exit: Devices static buttons 34 → ≤20; Asset-detail 20 → ≤12; no screen shows a control that does
 nothing or duplicates a sibling.
 
+## U-a2 — Action clarity & poka-yoke (≈2–3 days, frontend; runs with/right after U-a)
+
+User feedback (2026-07-24): "Watch / Open / Archive on Assets, Start / Create asset / rename /
+deactivate / archive / assign on Devices, Watch / Preview / Open on Map, and the info-less asset
+card on Fly are not understandable." Root causes: bare-verb labels with no object or consequence,
+three near-synonyms for viewing, destructive and routine actions styled identically, and cards
+that are buttons without saying what pressing them does. Fix with **poka-yoke** (mistake-proofing)
+principles — prevent the wrong action, don't just warn after it.
+
+### 1. One verb dictionary, app-wide (the core fix)
+
+| Verb | Meaning (only this, everywhere) | Replaces |
+|---|---|---|
+| **Fly** | enter the pilot cockpit for this asset | picker card click, some "Watch" |
+| **Watch live** | see the live video (viewer, no controls) | "Watch", "Preview" |
+| **Details** | open the asset's detail page | "Open" |
+| **Start / Stop stream** | begin/end streaming (with object: "Stop stream") | "Start" |
+| **Archive** | hide from lists, stops streams; reversible | "Archive", "deactivate" (pick ONE lifecycle verb pair; today deactivate vs archive is an internal distinction no operator understands — surface it as Archive + Restore only, keep the finer states in Advanced) |
+
+Map's Watch/Preview/Open triple collapses to **Watch live** + **Details**. Every button label is
+verb + object ("Archive asset", "Assign to asset…"), never a bare verb.
+
+### 2. Poka-yoke rules (enforced by a checklist at review, applied everywhere)
+
+1. **Prevention over confirmation**: an action that can't apply now is disabled *with the reason
+   inline* ("Stop the stream first" under a disabled Archive), never enabled-then-error.
+2. **Consequence-stating confirmations** only for destructive/irreversible acts, and they say what
+   happens: "Archive *Falcon-2*? Its stream stops and it disappears from lists. Restore any time
+   from Warehouse → Advanced." Routine actions never confirm.
+3. **Undo over confirm** where reversible: Archive fires immediately with a 10s "Archived — Undo"
+   toast (poka-yoke's mistake-*recovery* arm; less friction than dialogs, safer than nothing).
+4. **Destructive actions look different and live apart**: red-tinted, physically separated (bottom
+   of kebab menu behind a divider), never adjacent to a primary button.
+5. **One primary action per card/row**: visible button = the single most likely action for that
+   user on that screen (Fly page → "Fly"; manager list → "Watch live"); everything else in a
+   labeled kebab menu whose entries carry verb+object and, for risky ones, a one-line consequence.
+6. **Cards state their action**: any clickable card gets an explicit affordance ("Enter cockpit →"),
+   not just hover styling.
+
+### 3. Asset-based surfaces (user thinks in drones, not devices)
+
+- Device-level actions (rename device, assign/unassign, raw register) stay ONLY in Warehouse →
+  Advanced; asset rows/cards never show device verbs. "Create asset from this device" is renamed to
+  its outcome: "Promote to asset…" with a one-line explainer in the dialog.
+- The Fly picker card (screenshot evidence: filename title + Streaming chip, nothing else) becomes
+  an asset card: given name (fallback: filename, but U-d's wizard makes names first-class), category
+  icon, **live attributes** (battery, position/last-seen, stream state with word), owner (post U-e),
+  and the explicit "Enter cockpit →" affordance. If it's streaming, a thumbnail.
+
+Exit: a first-time operator can say out loud what every visible button will do before pressing it
+(hallway test, 5 users × 3 screens); zero enabled-then-error paths; archive recoverable via Undo;
+Map/Assets/Devices share the §1 dictionary verbatim.
+
 ## U-b — Visual restyle: engineered, not generated (≈1 week, frontend only)
 
 Kill the named "AI-slop tells" and adopt the ops-room language (all researched, sourced in the
@@ -153,9 +206,9 @@ Exit: three seeded users (pilot / manager / manager-of-managers) log in and each
 ## Sequencing & dependencies
 
 ```
-UI-STRUCTURE-PLAN migration  →  U-a  →  U-b  →  U-c  →  U-d  →  U-e
-(folders first: everything          (each phase independently shippable and
- after lands in the new layout)      valuable; stop-points between all of them)
+UI-STRUCTURE-PLAN migration  →  U-a → U-a2  →  U-b  →  U-c  →  U-d  →  U-e
+(folders first: everything           (each phase independently shippable and
+ after lands in the new layout)       valuable; stop-points between all of them)
 ```
 
 - REALTIME-PLAN R-c/LiveStore must land before U-c (Command's live panels ride the SSE channel).

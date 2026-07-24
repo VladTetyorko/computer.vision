@@ -28,8 +28,8 @@ import {
 } from './simulate-logic';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import {
+  DEVICE_ACTION_LABELS,
   RESTORE_TARGET_STATE,
-  availableDeviceActions,
   buildAssetListRows,
   buildCreateAssetRequestForDevice,
   buildDeviceRenameEdit,
@@ -39,6 +39,9 @@ import {
   filterAssetListRowsByCategory,
   filterRowsByArchived,
   mapDeviceOwners,
+  operatorAssetActions,
+  reasonedDeviceActions,
+  type ActionAvailability,
   type AssetListRow,
   type CategoryOption,
   type DeviceLifecycleAction,
@@ -71,16 +74,8 @@ const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
 /** The Add-source flow's three top-level entry points (docs/CYCLES-PLAN.md §9, CU-b item 1). */
 type AddSourceMethod = 'register' | 'discover' | 'simulate';
 
-/** Button labels for the warehouse action menus (docs/CYCLES-PLAN.md §8). */
-const DEVICE_ACTION_LABELS: Record<DeviceLifecycleAction, string> = {
-  rename: 'Rename',
-  activate: 'Activate',
-  deactivate: 'Deactivate',
-  archive: 'Archive',
-  restore: 'Restore',
-  assign: 'Assign to asset…',
-  unassign: 'Unassign',
-};
+/** "Create asset from this device" renamed to its outcome (docs/UX-REWORK-PLAN.md §U-a2 §3). */
+const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
 
 @Component({
   selector: 'vision-devices',
@@ -132,6 +127,7 @@ export class DevicesPage {
 
   protected readonly registerableProtocols = REGISTERABLE_PROTOCOLS;
   protected readonly customProtocolOption = CUSTOM_PROTOCOL_OPTION;
+  protected readonly promoteToAssetLabel = PROMOTE_TO_ASSET_LABEL;
 
   protected readonly isCustomProtocol = computed(() => this.protocolSelect() === CUSTOM_PROTOCOL_OPTION);
 
@@ -262,11 +258,13 @@ export class DevicesPage {
     return plan ? buildTelemetryRequest(plan) : undefined;
   }
 
-  // --- Warehouse (docs/CYCLES-PLAN.md §8) -----------------------------------
+  // --- Warehouse (docs/CYCLES-PLAN.md §8; kebab menus + poka-yoke docs/UX-REWORK-PLAN.md §U-a item 7, §U-a2) -
   // Devices/assets lifecycle: rename, activate/deactivate, archive (soft delete)/restore, and
   // device↔asset assignment. Every mutation goes through `FleetStore`'s `run()`-wrapped thin
   // wrappers (mirroring how C4 added `simulate()`) so a 404 — CW-a, the backend half, is not
-  // live while this lands — degrades to exactly one toast, never a broken page.
+  // live while this lands — degrades to exactly one toast, never a broken page. Archive is the one
+  // exception (see `archiveDeviceNow`/`archiveAssetNow` below): it bypasses `FleetStore` on purpose
+  // so this page can attach an Undo action to its own toast instead of `FleetStore`'s plain one.
 
   protected readonly showArchived = signal(false);
   /** Populated only while `showArchived` is on — `includeDeleted=true` returns *every* device. */
@@ -283,8 +281,13 @@ export class DevicesPage {
   protected readonly deviceOwners = signal<ReadonlyMap<string, DeviceOwner>>(new Map());
   protected readonly busyAssetId = signal<string | null>(null);
 
-  /** One inline row/card open at a time per device — rename form, archive confirm, or assign picker. */
-  protected readonly rowAction = signal<{ deviceId: string; mode: 'rename' | 'archive' | 'assign' } | null>(
+  /**
+   * One inline row open at a time per device — a rename form or an assign picker; both need the
+   * user to actually type/pick something, unlike Archive (docs/UX-REWORK-PLAN.md §U-a2 item 3b —
+   * "Undo over confirm"), which now fires immediately from the kebab menu with no inline step at
+   * all — see `archiveDeviceNow` below.
+   */
+  protected readonly rowAction = signal<{ deviceId: string; mode: 'rename' | 'assign' } | null>(
     null,
   );
   protected readonly renameDraft = signal('');
@@ -292,9 +295,6 @@ export class DevicesPage {
 
   /** Advanced/raw-devices table — collapsed by default (docs/CYCLES-PLAN.md §11 item 1). */
   protected readonly advancedDevicesOpen = signal(false);
-
-  /** The list-level asset row's one destructive action — an inline confirm, mirroring the Advanced table's idiom. */
-  protected readonly archiveConfirmAssetId = signal<string | null>(null);
 
   private readonly warehouseDevices = computed<readonly Device[]>(() =>
     this.showArchived() ? this.allDevicesIncludingArchived() : this.fleet.devices(),
@@ -396,7 +396,7 @@ export class DevicesPage {
       const created = await this.api.createAsset(request);
       await this.fleet.deleteDevice(device.id); // archive the now-superseded standalone entry
       this.createAssetFor.set(null);
-      this.toasts.ok(`Created asset "${created.displayName}".`);
+      this.toasts.ok(`Promoted to asset "${created.displayName}".`);
       await this.router.navigate(['/assets', created.assetId]);
     } catch (error) {
       this.toasts.error(describeHttpError(error));
@@ -405,8 +405,21 @@ export class DevicesPage {
     }
   }
 
-  protected deviceActionsFor(row: WarehouseRow): readonly DeviceLifecycleAction[] {
-    return availableDeviceActions(row.lifecycle, !!row.owner);
+  /**
+   * The Advanced table's per-row kebab menu (docs/UX-REWORK-PLAN.md §U-a item 7): every device
+   * lifecycle action, reasoned (item 3a) — `row.owner?.deviceCount` is what lets Unassign disable
+   * itself *before* the click when this device is its asset's only one, instead of only after the
+   * backend's own 409 (see `reasonedDeviceActions`'s own doc comment for the verified backend rule).
+   */
+  protected deviceActionsFor(row: WarehouseRow): readonly ActionAvailability<DeviceLifecycleAction>[] {
+    return reasonedDeviceActions(row.lifecycle, !!row.owner, row.owner?.deviceCount);
+  }
+
+  /** The asset list's per-row kebab menu — just Archive/Restore, reasoned (item 2's simplification). */
+  protected assetActionsFor(
+    row: AssetListRow,
+  ): readonly ActionAvailability<'archive' | 'restore'>[] {
+    return operatorAssetActions(row.lifecycle);
   }
 
   protected lifecycleLabel(state: WarehouseRow['lifecycle']): string {
@@ -422,6 +435,10 @@ export class DevicesPage {
 
   protected deviceActionLabel(action: DeviceLifecycleAction): string {
     return DEVICE_ACTION_LABELS[action];
+  }
+
+  protected assetActionLabel(action: 'archive' | 'restore'): string {
+    return action === 'archive' ? 'Archive asset' : 'Restore asset';
   }
 
   protected trackAssetRow(_index: number, row: AssetListRow): string {
@@ -442,24 +459,60 @@ export class DevicesPage {
     return this.router.navigate(['/assets', row.asset.assetId]);
   }
 
-  protected requestArchiveAsset(row: AssetListRow): void {
-    this.archiveConfirmAssetId.set(row.asset.assetId);
-  }
-
-  protected cancelArchiveAsset(): void {
-    this.archiveConfirmAssetId.set(null);
-  }
-
-  protected async confirmArchiveAsset(assetId: string): Promise<void> {
+  /**
+   * Archive executes immediately, no confirm dialog (docs/UX-REWORK-PLAN.md §U-a2 item 3b —
+   * "Undo over confirm"): the previous inline confirm panel (`archiveConfirmAssetId`) is gone.
+   * Calls `VisionApi.deleteAsset` directly rather than `FleetStore.deleteAsset` — that method's own
+   * `run()`-wrapped success toast (still exactly what devices archived/usages retained/streams
+   * stopped) has no Undo action and can't gain one without touching `core/fleet/fleet-store.ts`
+   * (out of this task's scope this batch), so this page fires its own toast instead, mirroring
+   * `FleetStore#assignDevice`/`#unassignDevice`'s own precedent of a bespoke try/catch when the
+   * generic wrapper's toast isn't the one a caller needs.
+   */
+  protected async archiveAssetNow(row: AssetListRow): Promise<void> {
+    const assetId = row.asset.assetId;
     this.busyAssetId.set(assetId);
     try {
-      const result = await this.fleet.deleteAsset(assetId);
-      if (result) {
-        this.archiveConfirmAssetId.set(null);
-        await this.refreshWarehouse();
-      }
+      const result = await this.api.deleteAsset(assetId);
+      this.toasts.ok(
+        `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
+          `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
+        { label: 'Undo', onClick: () => void this.restoreAssetNow(assetId, result.displayName) },
+      );
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
     } finally {
       this.busyAssetId.set(null);
+    }
+  }
+
+  /**
+   * Both the Undo toast action above and the explicit "Restore asset" kebab entry (for an asset
+   * currently shown via "Show archived") call this same method — restoring is restoring either way.
+   * Only the asset's own lifecycle is reversed here, not the individual devices Archive cascaded
+   * onto (`AssetDeletionResponse#devicesDeleted`) — those stay archived until independently
+   * restored from the Advanced table; a documented, deliberate scope boundary (Undo's own primary
+   * use case is "wrong row, seconds ago", not reconstructing a fully-diverged device set).
+   */
+  protected async restoreAssetNow(assetId: string, displayName: string): Promise<void> {
+    this.busyAssetId.set(assetId);
+    try {
+      await this.api.setAssetState(assetId, RESTORE_TARGET_STATE);
+      this.toasts.ok(`Restored "${displayName}".`);
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyAssetId.set(null);
+    }
+  }
+
+  protected onAssetAction(row: AssetListRow, action: 'archive' | 'restore'): void {
+    if (action === 'archive') {
+      void this.archiveAssetNow(row);
+    } else {
+      void this.restoreAssetNow(row.asset.assetId, row.asset.displayName);
     }
   }
 
@@ -476,7 +529,7 @@ export class DevicesPage {
         void this.setDeviceLifecycle(row.device, 'DEACTIVATED');
         break;
       case 'archive':
-        this.rowAction.set({ deviceId: row.device.id, mode: 'archive' });
+        void this.archiveDeviceNow(row.device);
         break;
       case 'restore':
         void this.setDeviceLifecycle(row.device, RESTORE_TARGET_STATE);
@@ -493,8 +546,30 @@ export class DevicesPage {
     }
   }
 
+  /**
+   * Archive executes immediately, no confirm dialog (docs/UX-REWORK-PLAN.md §U-a2 item 3b) — see
+   * `archiveAssetNow`'s own doc comment for why this bypasses `FleetStore.deleteDevice` too. Undo
+   * reuses the existing explicit-Restore path (`setDeviceLifecycle`/`fleet.setDeviceState`) rather
+   * than a bespoke restore method — restoring is restoring, whichever button asked for it.
+   */
+  protected async archiveDeviceNow(device: Device): Promise<void> {
+    this.busyDeviceId.set(device.id);
+    try {
+      await this.api.deleteDevice(device.id);
+      this.toasts.ok(`Archived "${device.name}".`, {
+        label: 'Undo',
+        onClick: () => void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE),
+      });
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
   /** `null` when no inline row is open for this device — lets the template use one `@switch`. */
-  protected rowActionMode(deviceId: string): 'rename' | 'archive' | 'assign' | null {
+  protected rowActionMode(deviceId: string): 'rename' | 'assign' | null {
     const active = this.rowAction();
     return active && active.deviceId === deviceId ? active.mode : null;
   }
@@ -512,15 +587,6 @@ export class DevicesPage {
     await this.runDeviceAction(device.id, async () => {
       const updated = await this.fleet.updateDevice(device.id, edit);
       if (updated) {
-        this.rowAction.set(null);
-      }
-    });
-  }
-
-  protected async confirmArchiveDevice(device: Device): Promise<void> {
-    await this.runDeviceAction(device.id, async () => {
-      const archived = await this.fleet.deleteDevice(device.id);
-      if (archived) {
         this.rowAction.set(null);
       }
     });
@@ -643,7 +709,7 @@ export class DevicesPage {
         // extending `fleet.register()`'s own plain "Registered X." confirmation (out of this
         // cycle's scope — `FleetStore` is `core/fleet/**`, not `features/devices/**`).
         this.toasts.ok('Not yet part of any asset.', {
-          label: 'Create asset from this device',
+          label: PROMOTE_TO_ASSET_LABEL,
           onClick: () => this.openCreateAssetFor(device),
         });
       }

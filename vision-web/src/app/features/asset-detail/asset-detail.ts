@@ -13,12 +13,13 @@ import { findVideoDevice } from '../../core/fleet/device-logic';
 import { ageSeconds, isStale } from '../../core/telemetry/telemetry-logic';
 import { filterEvents, relativeTimeLabel } from '../../core/events/events-logic';
 import {
+  DEVICE_ACTION_LABELS,
   RESTORE_TARGET_STATE,
-  availableAssetActions,
-  availableDeviceActions,
   buildAssetEdit,
   buildDeviceRenameEdit,
-  type AssetLifecycleAction,
+  operatorAssetActions,
+  reasonedDeviceActions,
+  type ActionAvailability,
   type DeviceLifecycleAction,
 } from '../../core/fleet/warehouse-logic';
 import { formatDuration } from '../../core/stream-info-logic';
@@ -149,7 +150,16 @@ export class AssetDetailPage {
 
   protected readonly lifecycle = computed(() => this.asset()?.lifecycle ?? 'ACTIVE');
   protected readonly archived = computed(() => this.lifecycle() === 'DELETED');
-  protected readonly assetActions = computed(() => availableAssetActions(this.lifecycle()));
+
+  /**
+   * The header's one lifecycle button (docs/UX-REWORK-PLAN.md §U-a2 item 2 — operator-facing
+   * surfaces show only Archive/Restore; activate/deactivate no longer render anywhere on this
+   * page). Exactly one of the pair `operatorAssetActions` returns is ever `available` — see that
+   * function's own doc comment — so the header renders exactly that one, never a disabled sibling.
+   */
+  protected readonly assetLifecycleAction = computed(() =>
+    operatorAssetActions(this.lifecycle()).find((entry) => entry.available),
+  );
 
   protected readonly latencySeconds = signal<number | null>(null);
   /** The player's own live transport (docs/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
@@ -162,11 +172,12 @@ export class AssetDetailPage {
   protected readonly editingAsset = signal(false);
   protected readonly nameDraft = signal('');
   protected readonly categoryDraft = signal('');
-  protected readonly archiveConfirmOpen = signal(false);
 
   // --- Hardware section: per-device inline actions + attach-a-device ------------------------
+  // Archive (docs/UX-REWORK-PLAN.md §U-a2 item 3b — "Undo over confirm") fires immediately from
+  // the kebab menu, no inline confirm step; only rename still needs one (it needs typed input).
 
-  protected readonly rowAction = signal<{ deviceId: string; mode: 'rename' | 'archive' } | null>(null);
+  protected readonly rowAction = signal<{ deviceId: string; mode: 'rename' } | null>(null);
   protected readonly renameDraft = signal('');
   protected readonly busyDeviceId = signal<string | null>(null);
 
@@ -388,67 +399,87 @@ export class AssetDetailPage {
     }
   }
 
-  protected onAssetAction(action: AssetLifecycleAction): void {
-    switch (action) {
-      case 'rename':
-        this.openEditAsset();
-        break;
-      case 'activate':
-        void this.setAssetLifecycle('ACTIVE');
-        break;
-      case 'deactivate':
-        void this.setAssetLifecycle('DEACTIVATED');
-        break;
-      case 'archive':
-        this.archiveConfirmOpen.set(true);
-        break;
-      case 'restore':
-        void this.setAssetLifecycle(RESTORE_TARGET_STATE);
-        break;
+  protected renameAsset(): void {
+    this.openEditAsset();
+  }
+
+  protected assetActionLabel(action: 'archive' | 'restore'): string {
+    return action === 'archive' ? 'Archive asset' : 'Restore asset';
+  }
+
+  /**
+   * The header's one lifecycle action (docs/UX-REWORK-PLAN.md §U-a2 item 2's Archive/Restore pair).
+   * Archive executes immediately, no confirm dialog (item 3b — "Undo over confirm"; the previous
+   * `archiveConfirmOpen` card is gone). Bypasses `FleetStore.deleteAsset`/`setAssetState` for the
+   * same reason `features/devices/devices.ts#archiveAssetNow` does — see that method's own doc
+   * comment: `core/fleet/fleet-store.ts` isn't touched this batch, so this page attaches its own
+   * Undo action to its own toast instead of `FleetStore`'s plain one.
+   */
+  protected onAssetLifecycleAction(action: 'archive' | 'restore'): void {
+    if (action === 'archive') {
+      void this.archiveAssetNow();
+    } else {
+      void this.restoreAssetNow();
     }
   }
 
-  protected cancelArchive(): void {
-    this.archiveConfirmOpen.set(false);
-  }
-
-  protected async confirmArchiveAsset(): Promise<void> {
+  protected async archiveAssetNow(): Promise<void> {
     const asset = this.asset();
     if (!asset) {
       return;
     }
     this.busy.set(true);
     try {
-      const result = await this.fleet.deleteAsset(asset.assetId);
-      if (result) {
-        await this.router.navigate(['/devices']);
-      }
+      const result = await this.api.deleteAsset(asset.assetId);
+      this.toasts.ok(
+        `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
+          `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
+        { label: 'Undo', onClick: () => void this.restoreAssetNow() },
+      );
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
     } finally {
       this.busy.set(false);
     }
   }
 
-  private async setAssetLifecycle(state: SettableLifecycleState): Promise<void> {
+  /** Both the Undo toast action and the header's explicit "Restore asset" button call this. */
+  protected async restoreAssetNow(): Promise<void> {
     const asset = this.asset();
     if (!asset) {
       return;
     }
     this.busy.set(true);
     try {
-      const updated = await this.fleet.setAssetState(asset.assetId, state);
-      if (updated) {
-        await this.refresh();
-      }
+      await this.api.setAssetState(asset.assetId, RESTORE_TARGET_STATE);
+      this.toasts.ok(`Restored "${asset.displayName}".`);
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
     } finally {
       this.busy.set(false);
     }
   }
 
-  // --- Hardware section (docs/CYCLES-PLAN.md §11 item 2 — full warehouse actions) -------------
+  // --- Hardware section (docs/CYCLES-PLAN.md §11 item 2 — full warehouse actions; docs/UX-REWORK-PLAN.md
+  //     §U-a item 7 — collapsed into a per-row kebab; §U-a2 item 3a — reasoned/disabled-with-reason) -
 
-  /** Every device shown here already belongs to this asset — `owned` is always `true`. */
-  protected deviceActionsFor(device: Device): readonly DeviceLifecycleAction[] {
-    return availableDeviceActions(device.state, true).filter((action) => action !== 'assign');
+  /**
+   * Every device shown here already belongs to this asset — `owned` is always `true`, and `assign`
+   * never applies (filtered out below; only `unassign` is meaningful). `a.devices.length` is this
+   * asset's own current device count, so Unassign disables itself with a reason exactly when this
+   * device is the asset's only one (see `reasonedDeviceActions`'s own doc comment).
+   */
+  protected deviceActionsFor(device: Device): readonly ActionAvailability<DeviceLifecycleAction>[] {
+    const ownerDeviceCount = this.asset()?.devices.length;
+    return reasonedDeviceActions(device.state, true, ownerDeviceCount).filter(
+      (entry) => entry.action !== 'assign',
+    );
+  }
+
+  protected deviceActionLabel(action: DeviceLifecycleAction): string {
+    return DEVICE_ACTION_LABELS[action];
   }
 
   protected onDeviceAction(device: Device, action: DeviceLifecycleAction): void {
@@ -464,7 +495,7 @@ export class AssetDetailPage {
         void this.setDeviceLifecycle(device, 'DEACTIVATED');
         break;
       case 'archive':
-        this.rowAction.set({ deviceId: device.id, mode: 'archive' });
+        void this.archiveDeviceNow(device);
         break;
       case 'restore':
         void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE);
@@ -477,7 +508,28 @@ export class AssetDetailPage {
     }
   }
 
-  protected rowActionMode(deviceId: string): 'rename' | 'archive' | null {
+  /**
+   * Archive executes immediately, no confirm dialog (docs/UX-REWORK-PLAN.md §U-a2 item 3b) — same
+   * bypass-`FleetStore` reasoning as `archiveAssetNow` above. Undo reuses the existing explicit
+   * Restore path (`setDeviceLifecycle`) rather than a bespoke restore method.
+   */
+  protected async archiveDeviceNow(device: Device): Promise<void> {
+    this.busyDeviceId.set(device.id);
+    try {
+      await this.api.deleteDevice(device.id);
+      this.toasts.ok(`Archived "${device.name}".`, {
+        label: 'Undo',
+        onClick: () => void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE),
+      });
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
+  protected rowActionMode(deviceId: string): 'rename' | null {
     const active = this.rowAction();
     return active && active.deviceId === deviceId ? active.mode : null;
   }
@@ -495,15 +547,6 @@ export class AssetDetailPage {
     await this.runDeviceAction(device.id, async () => {
       const updated = await this.fleet.updateDevice(device.id, edit);
       if (updated) {
-        this.rowAction.set(null);
-      }
-    });
-  }
-
-  protected async confirmArchiveDevice(device: Device): Promise<void> {
-    await this.runDeviceAction(device.id, async () => {
-      const archived = await this.fleet.deleteDevice(device.id);
-      if (archived) {
         this.rowAction.set(null);
       }
     });

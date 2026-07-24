@@ -99,4 +99,18 @@ export class EventsRail {
   protected eventClickable(event: DetectionEvent): boolean {
     return resolveEventTarget(event, this.fleet.streams()) !== undefined;
   }
+
+  /**
+   * The row's own explicit affordance (docs/UX-REWORK-PLAN.md U-a2 §2.6 — a hover-only style isn't
+   * a label): which of the two-verb dictionary a click actually does, since `resolveEventTarget`
+   * resolves either an asset (→ "Details") or a live stream (→ "Watch live"); `null` when neither
+   * resolves, matching `eventClickable`'s own `false` — the row shows no promise it can't keep.
+   */
+  protected eventActionLabel(event: DetectionEvent): 'Watch live' | 'Details' | null {
+    const target = resolveEventTarget(event, this.fleet.streams());
+    if (!target) {
+      return null;
+    }
+    return target.kind === 'asset' ? 'Details' : 'Watch live';
+  }
 }

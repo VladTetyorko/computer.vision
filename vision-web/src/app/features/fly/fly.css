@@ -6,7 +6,14 @@
   gap: 0.85rem;
 }
 
+/* Asset card rebuild (docs/UX-REWORK-PLAN.md §U-a2 §3) — a flex column so the header row, category,
+   optional facts, and the trailing "Enter cockpit →" line all get consistent spacing regardless of
+   how many facts a given card actually has (an offline asset with no fix yet has fewer than one
+   that's flown and streamed before). */
 .picker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
   text-align: left;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -19,11 +26,60 @@
 
 .picker-card h3 {
   margin: 0;
+  min-width: 0;
 }
 
 .picker-card p {
-  margin: 0.3rem 0 0;
+  margin: 0;
   font-size: 0.8rem;
+}
+
+.picker-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+/* No facts at all (never used, no fix) — take up no space rather than leaving an empty gap. */
+.picker-card-facts:empty {
+  display: none;
+}
+
+.picker-card-facts .fact {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+
+.picker-card-facts dt {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.picker-card-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* Cards state their action (docs/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — `margin-top: auto` pins this
+   to the card's bottom edge regardless of how many facts render above it, so every card in a grid
+   row ends on the same line. */
+.picker-card-cta {
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
 }
 
 .skeleton-line,
@@ -34,7 +90,9 @@
 }
 
 .skeleton-card {
-  height: 6rem;
+  /* Taller than a bare-name card (docs/UX-REWORK-PLAN.md §U-a2 §3's rebuild) so the first-ever
+     load doesn't jump in height once the real facts/CTA line arrive. */
+  height: 8.5rem;
 }
 
 /* ---- Cockpit shell ----------------------------------------------------------------------- */
@@ -334,6 +392,25 @@
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+
+/* Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own inline
+   reason sits directly under it, not off in the video-stage notice, so the "why" is right where
+   the eye already is. */
+.start-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.start-hint {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.hint {
+  font-size: 0.72rem;
 }
 
 .btn.big {

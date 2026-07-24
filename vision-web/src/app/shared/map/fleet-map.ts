@@ -49,7 +49,7 @@ function escapeHtml(value: string): string {
 /**
  * The Leaflet fleet map (docs/CYCLES-PLAN.md §6's `/map` tab, now also docs/MVP3-PLAN.md §C-c's
  * Command dashboard): every asset `FleetMapStore.markers()` plots, a breadcrumb trail per
- * streaming asset, popups with a Watch action, and auto-fit-to-bounds that a manual pan/zoom
+ * streaming asset, popups with a "Watch live" action, and auto-fit-to-bounds that a manual pan/zoom
  * disables until "Recenter" is clicked.
  *
  * **Moved here from `pages/map/fleet-map.ts`** (docs/MVP3-PLAN.md §C-c) when Command needed to
@@ -76,14 +76,18 @@ function escapeHtml(value: string): string {
  * only disables auto-fit when that flag is *not* set, so it reliably fires only for actual
  * drag/scroll/zoom-button/keyboard interaction, never for our own recentering.
  *
- * **Watch/Preview actions:** popups are raw HTML (Leaflet popups aren't Angular templates), so
- * both buttons inside one are wired via a single delegated click listener on the map container
- * rather than one Angular event binding per popup — matches the imperative-Leaflet approach used
- * throughout this component. Resolving *which* device to navigate to is `FleetMapStore`'s job
- * (`resolveWatchDevice`); this component only emits the chosen `assetId` via `watch`/`preview` and
- * leaves both navigation and docking to `MapPage`. **Preview** (docs/CYCLES-PLAN.md §9, CU-b item
- * 5) additionally fires straight from a marker click for `live` markers (bypassing the popup) —
- * the popup's own Preview button exists for discoverability, not as the only way in.
+ * **"Watch live" actions (docs/UX-REWORK-PLAN.md U-a2 item 1):** popups are raw HTML (Leaflet
+ * popups aren't Angular templates), so both buttons inside one are wired via a single delegated
+ * click listener on the map container rather than one Angular event binding per popup — matches
+ * the imperative-Leaflet approach used throughout this component. Resolving *which* device to
+ * navigate to is `FleetMapStore`'s job (`resolveWatchDevice`); this component only emits the
+ * chosen `assetId` via `watch`/`preview` and leaves both navigation and docking to `MapPage`. Both
+ * buttons read "Watch live" — the docked-inline-preview vs. a fresh full page is a presentation
+ * detail, not a separate verb (see each output's own doc comment below for which is which); a
+ * `title` attribute on each still spells out the difference for a pointer-hovering user. The dock
+ * (`preview` output, docs/CYCLES-PLAN.md §9, CU-b item 5) additionally fires straight from a
+ * marker click for `live` markers (bypassing the popup) — the popup's own "Watch live" button
+ * exists for discoverability, not as the only way in.
  *
  * **Event markers** (docs/MVP2-PLAN.md §E, E-b bullet 3): a second, independent marker layer for
  * every position-carrying `DetectionEvent` (`EventsStore.events()`, injected directly rather than
@@ -91,12 +95,12 @@ function escapeHtml(value: string): string {
  * most recent `MAX_EVENT_MARKERS` (`selectEventMarkers`). These never participate in auto-fit
  * (`fitToMarkers` only ever looks at `store.markers()`, unchanged) — a stray old event elsewhere on
  * the map must never yank the fleet view away from where the assets actually are. A popup shows
- * label/confidence/first-and-last-seen and, per the plan's own honestly-scoped fallback, an **Open
- * asset** button when `assetId` resolved — R-b's replay route needs a `usageId` that
- * `AssetUsageResponse` does not expose (no way to resolve *which* usage was open at the event's
- * `firstSeen` from any current API — see the module's own MODULE.md Gotcha for the full trace),
- * so linking to a specific replay moment was rejected as unbuildable this cycle, not merely
- * skipped.
+ * label/confidence/first-and-last-seen and, per the plan's own honestly-scoped fallback, a
+ * **"Details"** button (docs/UX-REWORK-PLAN.md U-a2 item 1 — was "Open asset") when `assetId`
+ * resolved — R-b's replay route needs a `usageId` that `AssetUsageResponse` does not expose (no
+ * way to resolve *which* usage was open at the event's `firstSeen` from any current API — see the
+ * module's own MODULE.md Gotcha for the full trace), so linking to a specific replay moment was
+ * rejected as unbuildable this cycle, not merely skipped.
  */
 @Component({
   selector: 'vision-fleet-map',
@@ -112,17 +116,22 @@ export class FleetMap {
   /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
   protected readonly layers = MAP_LAYERS;
 
-  /** Emits the assetId behind a popup's Watch button; `MapPage` resolves the device and navigates. */
+  /**
+   * The full-page "Watch live" (docs/UX-REWORK-PLAN.md U-a2 item 1): emits the assetId behind a
+   * popup's own button; the host page resolves the device and navigates.
+   */
   readonly watch = output<string>();
 
   /**
-   * Emits the assetId behind a streaming marker click or its popup's Preview button
-   * (docs/CYCLES-PLAN.md §9, CU-b item 5); `MapPage` docks a live preview panel beside the map.
-   * Only ever emitted for `live` markers — an offline asset has nothing to preview.
+   * The inline "Watch live" (docs/UX-REWORK-PLAN.md U-a2 item 1 — same label as `watch` above, a
+   * docked mini-player instead of a fresh page is a presentation detail, not a new verb): emits
+   * the assetId behind a streaming marker click or its popup's own button (docs/CYCLES-PLAN.md §9,
+   * CU-b item 5); the host page docks a live preview panel beside the map. Only ever emitted for
+   * `live` markers — an offline asset has nothing to preview.
    */
   readonly preview = output<string>();
 
-  /** Emits the assetId behind an event popup's "Open asset" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
+  /** Emits the assetId behind an event popup's "Details" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
   readonly openEventAsset = output<string>();
 
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
@@ -257,7 +266,7 @@ export class FleetMap {
       const leafletMarker = L.marker(point, { icon: this.iconFor(L, marker), keyboard: false }).addTo(map);
       // Clicking a *streaming* marker directly docks the preview panel (docs/CYCLES-PLAN.md §9,
       // CU-b item 5) — in addition to (not instead of) the popup Leaflet opens on the same click,
-      // which still carries the Preview/Open-full-cockpit buttons for discoverability. `live` is
+      // which still carries its own two "Watch live" buttons for discoverability. `live` is
       // re-read from the store at click time rather than captured from this closure's `marker`,
       // since a marker can transition offline long after this listener was attached.
       leafletMarker.on('click', () => {
@@ -366,7 +375,7 @@ export class FleetMap {
     ];
     if (event.assetId) {
       rows.push(
-        `<button type="button" class="btn small event-asset-btn" data-asset-id="${escapeHtml(event.assetId)}">Open asset</button>`,
+        `<button type="button" class="btn small event-asset-btn" data-asset-id="${escapeHtml(event.assetId)}">Details</button>`,
       );
     } else {
       // Honest gap (docs/MVP2-PLAN.md §E, E-b bullet 3): no assetId resolved, and no current API
@@ -432,11 +441,11 @@ export class FleetMap {
     }
     if (marker.live) {
       rows.push(
-        `<button type="button" class="btn small secondary preview-btn" data-asset-id="${escapeHtml(marker.assetId)}">Preview</button>`,
+        `<button type="button" class="btn small secondary preview-btn" data-asset-id="${escapeHtml(marker.assetId)}" title="Watch live, inline beside the map">Watch live</button>`,
       );
     }
     rows.push(
-      `<button type="button" class="btn small watch-btn" data-asset-id="${escapeHtml(marker.assetId)}">Open full cockpit</button>`,
+      `<button type="button" class="btn small watch-btn" data-asset-id="${escapeHtml(marker.assetId)}" title="Watch live on its own page">Watch live</button>`,
     );
     return `<div class="fleet-popup">${rows.join('')}</div>`;
   }

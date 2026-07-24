@@ -52,47 +52,33 @@
         <a class="btn secondary" routerLink="/devices">All devices</a>
         @if (videoDevice(); as vd) {
           @if (live()) {
-            <button type="button" class="btn secondary" (click)="watch()">Open full cockpit</button>
-            <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop</button>
+            <button type="button" class="btn secondary" (click)="watch()" title="Watch this stream on its own page">Watch live</button>
+            <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop stream</button>
           } @else {
             <button type="button" class="btn" (click)="start()" [disabled]="busy()">
               {{ busy() ? 'Starting…' : 'Start stream' }}
             </button>
           }
         }
-        @for (action of assetActions(); track action) {
-          @if (action !== 'rename') {
-            <button
-              type="button"
-              class="btn secondary"
-              [class.danger]="action === 'archive'"
-              (click)="onAssetAction(action)"
-              [disabled]="busy()"
-            >
-              {{ action === 'activate' ? 'Activate' : action === 'deactivate' ? 'Deactivate' : action === 'restore' ? 'Restore' : 'Archive' }}
-            </button>
-          }
+        <!-- Lifecycle simplification (docs/UX-REWORK-PLAN.md §U-a2 item 2): operator-facing
+             surfaces show only Archive/Restore — activate/deactivate no longer render here at all.
+             Archive fires immediately (item 3b, "Undo over confirm") — no confirm dialog. -->
+        @if (!editingAsset() && !archived()) {
+          <button type="button" class="btn secondary" (click)="renameAsset()">Rename asset…</button>
         }
-        @if (!editingAsset() && assetActions().includes('rename')) {
-          <button type="button" class="btn secondary" (click)="onAssetAction('rename')">Rename</button>
+        @if (assetLifecycleAction(); as entry) {
+          <button
+            type="button"
+            class="btn secondary"
+            [class.danger-action]="entry.action === 'archive'"
+            (click)="onAssetLifecycleAction(entry.action)"
+            [disabled]="busy()"
+          >
+            {{ assetActionLabel(entry.action) }}
+          </button>
         }
       </div>
     </div>
-
-    @if (archiveConfirmOpen()) {
-      <section class="card inline-confirm-card">
-        <p>
-          Archive "{{ a.displayName }}"? Its device(s) archive with it; usage history is kept and
-          any running stream stops.
-        </p>
-        <div class="row">
-          <button type="button" class="btn danger small" (click)="confirmArchiveAsset()" [disabled]="busy()">
-            Confirm archive
-          </button>
-          <button type="button" class="btn secondary small" (click)="cancelArchive()">Cancel</button>
-        </div>
-      </section>
-    }
 
     <div class="detail-grid">
       <!-- ---- Live video ------------------------------------------------------------------ -->
@@ -367,17 +353,50 @@
                   }
                 </td>
                 <td class="actions">
-                  @for (action of deviceActionsFor(device); track action) {
-                    <button
-                      type="button"
-                      class="btn secondary small"
-                      [class.danger]="action === 'archive'"
-                      (click)="onDeviceAction(device, action)"
-                      [disabled]="busyDeviceId() === device.id"
-                    >
-                      {{ action }}
-                    </button>
-                  }
+                  <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): same actions as before,
+                       labeled verb+object, reasoned (§U-a2 item 3a) — Archive at the bottom, behind
+                       a divider, in danger-action. -->
+                  <details class="kebab" #hwKebab>
+                    <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + device.name">⋯</summary>
+                    <div class="kebab-menu" (click)="hwKebab.open = false">
+                      @for (entry of deviceActionsFor(device); track entry.action) {
+                        @if (entry.action !== 'archive') {
+                          <div class="kebab-item">
+                            <button
+                              type="button"
+                              [disabled]="!entry.available || busyDeviceId() === device.id"
+                              [title]="entry.reason ?? ''"
+                              (click)="onDeviceAction(device, entry.action)"
+                            >
+                              {{ deviceActionLabel(entry.action) }}
+                            </button>
+                            @if (!entry.available && entry.reason) {
+                              <span class="kebab-reason">{{ entry.reason }}</span>
+                            }
+                          </div>
+                        }
+                      }
+                      <div class="kebab-divider" role="separator"></div>
+                      @for (entry of deviceActionsFor(device); track entry.action) {
+                        @if (entry.action === 'archive') {
+                          <div class="kebab-item">
+                            <button
+                              type="button"
+                              class="danger-action"
+                              [disabled]="!entry.available || busyDeviceId() === device.id"
+                              [title]="entry.reason ?? ''"
+                              (click)="onDeviceAction(device, entry.action)"
+                            >
+                              {{ deviceActionLabel(entry.action) }}
+                            </button>
+                            @if (!entry.available && entry.reason) {
+                              <span class="kebab-reason">{{ entry.reason }}</span>
+                            }
+                          </div>
+                        }
+                      }
+                    </div>
+                  </details>
                 </td>
               </tr>
               @if (rowActionMode(device.id); as mode) {
@@ -388,13 +407,6 @@
                         <div class="inline-form">
                           <input [value]="renameDraft()" (input)="renameDraft.set($any($event.target).value)" placeholder="device name" aria-label="New device name" />
                           <button type="button" class="btn small" (click)="confirmRename(device)">Save</button>
-                          <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
-                        </div>
-                      }
-                      @case ('archive') {
-                        <div class="inline-confirm">
-                          <span>Archive "{{ device.name }}"? It stops streaming and is hidden from the default list.</span>
-                          <button type="button" class="btn danger small" (click)="confirmArchiveDevice(device)">Confirm archive</button>
                           <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
                         </div>
                       }

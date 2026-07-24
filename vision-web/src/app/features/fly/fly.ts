@@ -27,13 +27,18 @@ import { LiveMap } from '../../shared/map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { FlyOsd } from './fly-osd';
 import {
+  ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
   cycleBoxesMode,
+  isAllDronesOption,
   isSwitcherOptionSelected,
   isWatchMode,
+  lastSeenLabel,
   latestFinishedUsage,
+  positionLabel,
   resolveActiveAssetId,
   sortAssetsForPicker,
+  streamStateLabel,
   trackingIdChanged,
 } from './fly-logic';
 import type { AssetDetails, AssetSummary, DetectionEvent } from '../../core/api/models';
@@ -107,6 +112,9 @@ export class FlyPage {
   protected readonly pickerAssets = signal<readonly AssetSummary[] | undefined>(undefined);
   protected readonly pickerError = signal(false);
   protected readonly orderedPickerAssets = computed(() => sortAssetsForPicker(this.pickerAssets() ?? []));
+
+  /** The header switcher's own sentinel `<option>` value (docs/UX-REWORK-PLAN.md §U-a bullet 4). */
+  protected readonly ALL_DRONES_OPTION = ALL_DRONES_OPTION_VALUE;
 
   protected readonly activeAssetId = signal<string | undefined>(undefined);
   protected readonly asset = signal<AssetDetails | undefined>(undefined);
@@ -370,6 +378,33 @@ export class FlyPage {
    */
   protected switcherOptionSelected(candidateAssetId: string): boolean {
     return isSwitcherOptionSelected(candidateAssetId, this.activeAssetId());
+  }
+
+  /**
+   * The header switcher's single `(change)` handler (docs/UX-REWORK-PLAN.md §U-a bullet 4: fold
+   * the old standalone "All drones" button into this one control) — the sentinel option opens the
+   * full picker, any other value is a real asset id and switches straight to it, same as before.
+   */
+  protected onSwitcherChange(value: string): void {
+    if (isAllDronesOption(value)) {
+      this.openPicker();
+      return;
+    }
+    this.selectAsset(value);
+  }
+
+  // --- Picker card facts (docs/UX-REWORK-PLAN.md §U-a2 §3 — the asset card rebuild) -----------
+
+  protected assetStreamState(asset: AssetSummary): 'Streaming' | 'Offline' {
+    return streamStateLabel(asset.status);
+  }
+
+  protected assetLastSeen(asset: AssetSummary): string | undefined {
+    return lastSeenLabel(asset.lastUsedAt, Date.now());
+  }
+
+  protected assetPosition(asset: AssetSummary): string | undefined {
+    return positionLabel(asset.lastKnownPosition);
   }
 
   // --- Video device switching -----------------------------------------------------------------

@@ -33,12 +33,35 @@
         @for (a of orderedPickerAssets(); track a.assetId) {
           <button type="button" class="card picker-card" (click)="selectAsset(a.assetId)">
             <div class="row spread">
-              <h3>{{ a.displayName }}</h3>
-              @if (a.status === 'STREAMING') {
-                <span class="chip"><span class="dot live"></span>Streaming</span>
-              }
+              <h3 class="truncate">{{ a.displayName }}</h3>
+              <span class="chip" [class.ok]="a.status === 'STREAMING'">
+                <span class="dot" [class.live]="a.status === 'STREAMING'"></span>{{ assetStreamState(a) }}
+              </span>
             </div>
             <p class="muted">{{ a.categoryName }}</p>
+
+            <!-- Asset card rebuild (docs/UX-REWORK-PLAN.md §U-a2 §3 — screenshot evidence: "filename
+                 title + Streaming chip, nothing else"). Only facts already in the picker's own
+                 `listAssets()` response render here — no per-card HTTP call backs this; battery is
+                 deliberately absent (see `fly-logic.ts`'s own doc comment above `streamStateLabel`). -->
+            <dl class="picker-card-facts">
+              @if (assetLastSeen(a); as lastSeen) {
+                <div class="fact">
+                  <dt>Last seen</dt>
+                  <dd>{{ lastSeen }}</dd>
+                </div>
+              }
+              @if (assetPosition(a); as position) {
+                <div class="fact">
+                  <dt>Position</dt>
+                  <dd class="mono">{{ position }}</dd>
+                </div>
+              }
+            </dl>
+
+            <!-- Cards state their action (docs/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — the whole card
+                 stays clickable as an accelerator, but this line spells out what pressing it does. -->
+            <span class="picker-card-cta">Enter cockpit →</span>
           </button>
         }
       </div>
@@ -67,22 +90,21 @@
 
     <!-- ---- Header: exit, drone switcher, help ------------------------------------------- -->
     <div class="hud hud-header">
-      <a class="icon-btn" routerLink="/wall" title="Exit the cockpit">‹</a>
-      <button type="button" class="icon-btn" (click)="openPicker()" title="Choose a different drone from the full picker">
-        All drones
-      </button>
-      @if (orderedPickerAssets().length > 1) {
-        <label class="switcher-control" title="Switch drone">
-          <span class="switcher-label">Drone</span>
-          <select class="switcher" aria-label="Switch drone" (change)="selectAsset($any($event.target).value)">
-            @for (candidate of orderedPickerAssets(); track candidate.assetId) {
-              <option [value]="candidate.assetId" [selected]="switcherOptionSelected(candidate.assetId)">
-                {{ candidate.displayName }}
-              </option>
-            }
-          </select>
-        </label>
-      }
+      <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">‹</a>
+      <!-- U-a bullet 4: the old standalone "All drones" button and this switcher did the same job
+           two ways (a full-picker button vs. an inline pick) — folded into one control: pick any
+           listed drone directly, or the trailing "All drones…" entry to open the full picker. -->
+      <label class="switcher-control" title="Switch drone, or pick 'All drones…' for the full picker">
+        <span class="switcher-label">Drone</span>
+        <select class="switcher" aria-label="Switch drone" (change)="onSwitcherChange($any($event.target).value)">
+          @for (candidate of orderedPickerAssets(); track candidate.assetId) {
+            <option [value]="candidate.assetId" [selected]="switcherOptionSelected(candidate.assetId)">
+              {{ candidate.displayName }}
+            </option>
+          }
+          <option [value]="ALL_DRONES_OPTION">All drones…</option>
+        </select>
+      </label>
       <button type="button" class="icon-btn shortcuts-btn" (click)="shortcutsOpen.set(true)" title="Keyboard shortcuts (?)">
         ?
       </button>
@@ -166,11 +188,20 @@
           </a>
         }
         @if (live()) {
-          <button type="button" class="btn danger big" (click)="requestStop()" [disabled]="busy()">Stop</button>
-        } @else {
-          <button type="button" class="btn big" (click)="start()" [disabled]="busy() || !primaryDevice()">
-            {{ busy() ? 'Starting…' : 'Start stream' }}
+          <button type="button" class="btn danger big danger-action" (click)="requestStop()" [disabled]="busy()">
+            Stop stream
           </button>
+        } @else {
+          <!-- Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2): disabled with the reason inline,
+               never enabled-then-error — a drone with no camera device has nothing to stream. -->
+          <div class="start-control">
+            <button type="button" class="btn big" (click)="start()" [disabled]="busy() || !primaryDevice()">
+              {{ busy() ? 'Starting…' : 'Start stream' }}
+            </button>
+            @if (!primaryDevice()) {
+              <p class="muted hint start-hint">No camera device on this drone — nothing to stream.</p>
+            }
+          </div>
         }
       </div>
     }
@@ -178,9 +209,11 @@
     @if (stopConfirmOpen()) {
       <div class="hud hud-confirm">
         <div class="card inline-confirm-card">
-          <p>Stop this stream? It ends the stream for all viewers, not just you.</p>
+          <!-- Poka-yoke rule 2 (docs/UX-REWORK-PLAN.md §U-a2 §2): high-consequence, mid-flight —
+               keeps its confirm, but states the consequence, not just the question. -->
+          <p>Stop {{ a.displayName }}'s stream? It ends the stream for all viewers, not just you.</p>
           <div class="row">
-            <button type="button" class="btn danger small" (click)="confirmStop()" [disabled]="busy()">
+            <button type="button" class="btn danger small danger-action" (click)="confirmStop()" [disabled]="busy()">
               Confirm stop
             </button>
             <button type="button" class="btn secondary small" (click)="cancelStop()">Cancel</button>
@@ -216,7 +249,7 @@
             <dt>‹</dt>
             <dd>Exit to the Wall</dd>
             <dt>DRONE</dt>
-            <dd>Switch drone (or "All drones" for the full picker)</dd>
+            <dd>Switch drone, or pick "All drones…" for the full picker</dd>
             <dt>×</dt>
             <dd>Close this dialog</dd>
           </dl>

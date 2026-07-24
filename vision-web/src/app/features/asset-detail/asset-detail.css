@@ -26,17 +26,6 @@
     background: transparent;
 }
 
-.inline-confirm-card {
-    background: var(--danger-soft);
-    border-color: #6b2530;
-}
-
-.inline-confirm-card p {
-    margin: 0 0 0.6rem;
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-
 /* ---- Detail grid ---------------------------------------------------------------------------- */
 
 .detail-grid {
@@ -180,6 +169,13 @@ td.actions {
     padding-bottom: 0.75rem;
     border-bottom: 1px solid var(--border);
 }
+
+/* Per-row kebab (⋯) menu (docs/UX-REWORK-PLAN.md §U-a item 7): `.kebab`/`.kebab-trigger`/
+   `.kebab-menu`/`.kebab-item`/`.kebab-divider`/`.kebab-reason`/`.danger-action` are now a shared
+   global primitive in `src/styles.css` (see that stylesheet's own doc comment for the expected
+   `<details>`/`<summary>` shape). This page used to carry its own local copy of the same rules
+   (mirroring `features/devices/devices.css`'s own) before that global version existed; removed
+   once it did, rather than left as a shadowing duplicate. */
 
 /* ---- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) — mirrors features/wall/wall.css's own rail rows,
    minus the click affordance (this list is informational, not a navigation target). ------------ */

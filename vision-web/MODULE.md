@@ -928,3 +928,176 @@ import). Tests: `player-recovery.spec.ts` +9 (`extractWhepStatsSnapshot` jitter/
 `features/asset-detail/**` spec (`ng test --include` targeted, not full `test:ci`, per the
 coordinator's concurrent-agent instruction); `tsc --noEmit` clean on both `tsconfig.app.json`/
 `tsconfig.spec.json`.
+
+## U-a2 fly/wall — Fly + Wall's share of action clarity & poka-yoke (docs/UX-REWORK-PLAN.md §U-a, §U-a2)
+
+Scope: `features/fly/**` + `features/wall/**` only (no `core/`/`shared/` touched, concurrent agents
+owned devices/asset-detail and map/command/live/shared-ui/app-shell). **Picker card rebuild** (§U-a2
+§3 — screenshot evidence: "filename title + Streaming chip, nothing else"): `fly.html`'s picker card
+now shows display name, category, a stream-state chip carrying the word (`Streaming`/`Offline`, not
+color alone), "Last seen"/"Position" facts when `AssetSummary#lastUsedAt`/`lastKnownPosition` are
+present, and an explicit "Enter cockpit →" line (whole-card click stays as the accelerator) — three
+new pure functions in `fly-logic.ts` (`streamStateLabel`, `lastSeenLabel` reusing
+`core/stream-info-logic.ts#formatDuration`, `positionLabel`), no new HTTP call. **Battery omitted,
+deliberately**: `AssetSummary` carries no such field and `TelemetryStore` only ever tracks the one
+asset the cockpit currently has open — showing it on every card would mean one poller per card, the
+exact fan-out this task was told to avoid; documented in `fly-logic.ts`'s own doc comment rather than
+silently dropped. **§U-a bullet 4**: the standalone "All drones" header button and the DRONE
+`<select>` did the same job two ways — folded into one control, a trailing `All drones…` sentinel
+option in the same `<select>` (`ALL_DRONES_OPTION_VALUE`/`isAllDronesOption`, `onSwitcherChange`);
+`‹` (exit to Wall) stays separate and its title now says its object ("Exit to the Wall"). **Verb
+dictionary** (§U-a2 §1): Fly's Stop button reads "Stop stream" (was bare "Stop"); the wall tile's
+only navigating action — previously the bare device name, silently a link — now has an explicit
+"Watch live" button beside the telemetry chip, the name itself demoted to a non-interactive label.
+**Poka-yoke** (§U-a2 §2): Start stream shows an inline reason (`.start-hint`, "No camera device on
+this drone — nothing to stream") when disabled for lacking a video device, not just a disabled
+button; the Stop confirm now names the asset and states the consequence ("Stop *Falcon-2*'s stream?
+It ends the stream for all viewers, not just you."); Stop's two buttons (the primary and its confirm)
+both carry the new global `danger-action` class (styling owned by another agent). Fly already had
+one primary action per card/row — unchanged.
+
+**Tests**: `fly-logic.spec.ts` 24 → 33 (9 new: `streamStateLabel` 2, `lastSeenLabel` 3, `positionLabel`
+2, `isAllDronesOption` 2); `npx vitest run src/app/features/fly src/app/features/wall` — 33/33 pass.
+Wall got no new pure logic (label-only changes to `wall-tile.ts`'s template/styles), so no new spec
+file. `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json` for every
+`features/fly/**`/`features/wall/**` file (targeted, not a full build, per the coordinator's
+concurrent-agent instruction).
+
+**Deviation**: §U-a2 §3 also names a thumbnail ("if it's streaming, a thumbnail") and an owner field
+for the picker card; both stayed out — the task's own concrete field list for this cycle omitted
+them (owner is explicitly "post U-e" in the plan, and a thumbnail would need a per-card snapshot
+`<img>` fetch, the same new-request fan-out battery was cut for) — recorded here so a future cycle
+knows they were a deliberate cut, not an oversight.
+
+## U-a2 map/command/shell — Map + Command + Live + shell's share of action clarity & poka-yoke (docs/UX-REWORK-PLAN.md §U-a, §U-a2)
+
+Scope: `features/map/**`, `features/command/**`, `features/live/**`, `shared/ui/**`, `shared/map/**`
+(labels only), the app shell (`app.html`/`app.ts`/`app.routes.ts`), and the global `src/styles.css`
+— concurrent agents owned `features/fly`+`features/wall` and `features/devices`+`features/asset-detail`
+(+ `core/fleet/warehouse-logic.ts`), untouched here. **U-a deletions/demotions**: the dead PTZ
+placeholder card is gone from `live.html` (`hasPtz` in `live.ts` removed with it, now genuinely
+unused); the Map empty state's second "Draw a flight plan…" door is gone (`map.ts#openFlightPlanDialog`/
+`onFlightPlanSaved`/`onFlightPlanCancelled`/`flightPlanDialogOpen` removed with it) — "Add a test
+drone" is the empty state's only action again; `shared/map/flight-plan-dialog.ts`/`flight-plan-logic.ts`
+are untouched (still reused as-is by the Devices page's own Simulate step, confirmed by grep before
+touching anything). **Debug** is out of `app.ts#moreLinks` — its route is untouched and still
+reachable by direct URL, nothing else in the More menu (Wall, Map) changed.
+
+**Verb dictionary (§U-a2 item 1) — every "Watch"/"Preview"/"Open" instance in this scope, old →
+new**: map rail row — "Watch" → "Watch live" (`onWatch`, full-page `/live/:deviceId`), "Preview"
+→ "Watch live" (`onPreview`, docks `<vision-live-dock>` inline — shown only while streaming), "Open"
+→ "Details" (`openAsset`, `/assets/:id`); `shared/map/fleet-map.ts` marker popup — "Preview" →
+"Watch live" (inline dock) and "Open full cockpit" → "Watch live" (full page; both targets are "see
+the live video, no controls" per the dictionary, the full-page one via `/live/:deviceId` on Map or
+`/fly?asset=…&watch=1` on Command depending on host — never the Fly *piloting* verb, `watch=1`
+suppresses controls) — both buttons now read identically, a deliberate consequence of the plan's own
+"inline vs. page is a presentation detail, not a new verb" instruction; each keeps a distinguishing
+`title` tooltip (`"…inline beside the map"` / `"…on its own page"`) since two adjacent same-labeled
+buttons otherwise have no way to tell apart which is which before clicking. Event popup "Open asset"
+→ "Details" (same `/assets/:id` target). `command.html` attention row — "Watch" → "Watch live"
+(`watchAsset`, `/fly?asset=…&watch=1`), "Open" → "Details" (`openAsset`). `shared/map/live-dock.html`
+— "Open full cockpit" → "Watch live" (same full-page-vs-inline reasoning as the fleet-map popup).
+`shared/ui/events-rail.ts` gained a new `eventActionLabel(event)` (pure, reuses `resolveEventTarget`)
+so its own row shows "Watch live ›" or "Details ›" rather than a bare hover cue — see next paragraph.
+
+**Cards state their action (§U-a2 §2.6)**: `command.html`'s readiness tile (a `<button>` styled as a
+card, previously only a `title` tooltip) gained a visible "View in Devices →" line;
+`features/command/live-strip-tile.ts` (the whole tile is the click target) gained a visible
+"Watch live →" line; `shared/ui/events-rail.ts`'s event row (a full-width clickable row relying only
+on `:hover` before this) gained the `eventActionLabel` chevron described above, absent entirely for a
+row `eventClickable` already reports as unresolvable — never promises a click that goes nowhere.
+
+**Poka-yoke global styling (§5)** — `src/styles.css` gained three pieces other agents' kebabs already
+consume (confirmed by reading their in-flight diffs before finalizing the CSS, not guessed at):
+`.danger-action` (red-tinted text/icon only — no auto-inferred divider from sibling position, which
+would have broken Fly's own non-menu uses of this same class in a horizontal HUD row and a
+Cancel/Confirm dialog row; verified against `fly.html`'s actual two call sites before settling on
+this shape) plus a higher-specificity `.kebab-menu .danger-action:hover` pairing so the red hover
+tint wins over the menu's own generic grey row-hover; `.disabled-reason` (small muted text under a
+disabled control); and — not originally scoped to this task, added after `features/devices/devices.html`'s
+in-flight diff showed `.kebab`/`.kebab-trigger`/`.kebab-menu`/`.kebab-item`/`.kebab-divider`/
+`.kebab-reason` already in use with no CSS anywhere to back them — a full reusable kebab (⋯) menu
+primitive mirroring `app.css`'s own `.tab-more`/`.tab-more-menu` `<details>` idiom (see the stylesheet's
+own doc comment for the expected HTML shape). `.kebab-reason` gets the same visual treatment as
+`.disabled-reason` (the Devices agent named it separately; not renamed here, out of this scope's
+files).
+
+**Tests**: targeted `ng test --include` over `features/command/**`, `core/map/**`, `shared/map/**`
+— 98/98 passing (5 spec files: `command-logic`, `core/map/map-store`, `core/map/map-logic`,
+`shared/map/flight-plan-logic`, `shared/map/tile-cache-logic` — none of their own logic changed,
+confirms no regression). `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+No new spec file needed (every change here is template/global-CSS/doc-comment, no new pure logic —
+`events-rail.ts#eventActionLabel` is a thin two-branch wrapper over the already-tested
+`resolveEventTarget`, consistent with this app's own "no page-component spec" precedent elsewhere).
+
+## U-a2 devices/asset-detail — Devices + asset-detail's share of action clarity & poka-yoke (docs/UX-REWORK-PLAN.md §U-a item 7, §U-a2)
+
+Scope: `features/devices/**`, `features/asset-detail/**`, and `core/fleet/warehouse-logic.ts`'s
+action-matrix only (concurrent agents owned `features/fly`+`features/wall` and
+`features/map`+`features/command`+`features/live`+`shared/ui`+the app shell). **Item 7 — kebab
+collapse**: the Devices page's Advanced-table row actions and the asset detail page's Hardware
+section's device-row actions both collapsed from a flat button wall into one per-row `<details>`
+kebab (⋯) menu — a plain, feature-local `<details>`/`<summary>` popover (mirrors `app.css`'s own
+`.tab-more` idiom), not a new shared component; **mid-task, the concurrent map/command/shell agent
+found this page's own in-flight `.kebab*` markup with no CSS behind it yet and promoted the exact
+same shape into a shared `src/styles.css` primitive** — this page's own local CSS copy was removed
+once that landed, rather than kept as a shadowing duplicate (see `devices.css`/`asset-detail.css`'s
+own doc comments). Every menu entry now reads verb+object via two new label maps on the shared
+lifecycle module, `core/fleet/warehouse-logic.ts#DEVICE_ACTION_LABELS`/`ASSET_ACTION_LABELS`
+("Rename device…", "Assign to asset…", "Archive device" — ellipsis only for the two that open a
+form first) — a pure, additive extension of that module's existing API, nothing there was renamed
+or removed. "Create asset from this device" is now **"Promote to asset…"** (button, toast action,
+and dialog header alike), its dialog keeping the exact QF-2 explainer paragraph unchanged.
+
+**Item 2 — verb dictionary + lifecycle simplification**: the asset-first list's row actions are now
+exactly **Watch live** (the one visible primary button, poka-yoke rule 5) **/ Details / Archive
+asset**, the latter two moved into the kebab. Both operator-facing asset surfaces this scope owns —
+the list and the asset detail header — now show only **Archive + Restore** (`core/fleet/warehouse-logic.ts#operatorAssetActions`,
+new): activate/deactivate no longer render on either, since this codebase has no separate "Advanced"
+table for *assets* (only for devices) to retreat those two states into — a deliberate, documented
+loss of UI surface for them in this cycle (still reachable via the API/debug console), not a backend
+change. Device-level actions stay exactly where item 3 of the plan puts them: Warehouse → Advanced
+and the asset detail page's own Hardware section, never on an asset row/card.
+
+**Item 3a — poka-yoke prevention, reasoned**: `warehouse-logic.ts` gained `reasonedDeviceActions(state,
+owned, ownerDeviceCount?)` / `reasonedAssetActions(state)` / `operatorAssetActions(state)` — each
+action returned as `{action, available, reason?}`, letting a kebab render a disabled entry with its
+reason inline (`.kebab-reason`) instead of enabled-then-error. The reasons come from
+`availableDeviceActions`/`availableAssetActions`'s own existing state matrix — no second rule set
+invented — **plus one real backend precondition, verified by reading `DefaultAssetService`/
+`DefaultDeviceService` (vision-application) rather than assumed**: `setState` on either always stops
+a running stream itself as part of the very same transition, so Archive is **never** gated on
+streaming (the plan's own worked example, "Archive disabled with 'Stop the stream first' while
+streaming", does not hold in this domain and was deliberately not implemented). The one precondition
+that *is* real — `DefaultAssetService#unassignDevice` refuses (409) to unassign a device that is its
+owning asset's only one — now disables Unassign with a reason *before* the click:
+`devices-page-logic.ts#DeviceOwner` gained `deviceCount` (threaded through `mapDeviceOwners`), read
+by both pages' `deviceActionsFor`.
+
+**Item 3b — Undo over confirm**: Archive (both asset and device, in every surface this scope owns)
+now fires immediately with no confirm dialog — the asset list's inline confirm panel, the Advanced
+table's inline archive row, the asset header's confirm card, and the Hardware section's inline
+archive row are all gone. Each success toast carries an **Undo** action (`ToastService.ok`'s existing
+optional `ToastAction`, unmodified) that calls the same lifecycle-restore path the explicit "Restore"
+kebab entry uses. Archive bypasses `FleetStore.deleteAsset`/`deleteDevice` — calling `VisionApi`
+directly plus `fleet.refresh({quiet:true})` — because that store's own `run()`-wrapped toast has no
+Undo slot and adding one needs `core/fleet/fleet-store.ts`, out of this batch's scope; mirrors
+`FleetStore#assignDevice`/`#unassignDevice`'s own precedent of a bespoke try/catch when the generic
+wrapper's toast isn't the one a caller needs. **Two known, documented gaps, both scope-bounded, not
+bugs**: (1) the toast's own auto-dismiss is `ToastService`'s existing fixed 4s `'ok'` duration, not
+the 10s the plan names — changing that timing needs the same out-of-scope `core/toast.service.ts`;
+(2) an asset archive's Undo restores the asset's own lifecycle only, not the individual devices
+Archive cascaded onto (`AssetDeletionResponse#devicesDeleted`) — those stay archived until
+independently restored from the Advanced table, since Undo's own primary use case ("wrong row,
+seconds ago") doesn't need full cascade reconstruction. **Item 3c**: one primary action per row is
+already satisfied by the above (Watch live on the list; Start/Stop/Watch stay the Advanced table's
+and Hardware section's own visible actions, only the lifecycle wall moved into the kebab).
+
+**Tests**: `core/fleet/warehouse-logic.spec.ts` 17 → 33 (+16: the full reasons matrix for
+`reasonedDeviceActions`/`reasonedAssetActions`/`operatorAssetActions` across every lifecycle
+state × ownership × `ownerDeviceCount` combination, plus the two label maps' verb+object wording and
+a compile-time totality check); `features/devices/devices-page-logic.spec.ts` 34 → 35 (+1:
+`mapDeviceOwners`'s new `deviceCount`, three existing assertions updated for the same field).
+**Targeted `ng test --include` over the three touched spec files — 70/70 passing**; a full
+reactor-wide `ng test --watch=false` also run for cross-agent regression confidence — **661/661**
+passing. `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.

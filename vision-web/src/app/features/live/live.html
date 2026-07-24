@@ -13,7 +13,7 @@
       <div class="row">
         <a class="btn secondary" routerLink="/devices">All devices</a>
         @if (live()) {
-          <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop</button>
+          <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop stream</button>
         } @else {
           <button type="button" class="btn" (click)="start()" [disabled]="busy()">
             {{ busy() ? 'Starting…' : 'Start stream' }}
@@ -181,15 +181,6 @@
               @if (mapInsetVisible()) {
                 <vision-live-map />
               }
-            </section>
-          }
-
-          @if (hasPtz()) {
-            <section class="card">
-              <header><h2>PTZ</h2></header>
-              <p class="muted hint">
-                This device supports PTZ. Controls arrive with <code>adapter-onvif</code> in Phase 4.
-              </p>
             </section>
           }
         </aside>
