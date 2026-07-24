@@ -21,9 +21,17 @@ export class App {
 
   /**
    * Tabs appear as their backend lands — no "coming soon" pages.
-   * Events (Phase 2) and Studio (Phase 3) join here when they have something to show.
+   *
+   * `Fly` (docs/MVP3-PLAN.md §C-b) leads the list — it's the default route now (see
+   * `app.routes.ts`) and the operator's own single page. The full job-oriented nav this cycle's
+   * own "Information architecture change" describes (**Fly · Command · Assets · Settings**,
+   * replacing this whole array) is deliberately **not** done yet: `Command` doesn't exist until
+   * C-c ships, and swapping `Devices`→`Assets`/dropping `Map`/`Debug` from top-level nav ahead of
+   * that would strand their only entry point. This is the honest middle step — additive, no
+   * capability lost, every existing tab/route still reachable — not the finished IA.
    */
   protected readonly tabs: readonly Tab[] = [
+    { path: '/fly', label: 'Fly' },
     { path: '/wall', label: 'Wall' },
     { path: '/map', label: 'Map' },
     { path: '/devices', label: 'Devices' },

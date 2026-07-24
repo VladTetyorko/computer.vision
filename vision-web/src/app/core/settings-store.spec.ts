@@ -108,6 +108,27 @@ describe('SettingsStore', () => {
     expect(reloaded.eventNotifications()).toBe(false);
   });
 
+  it('defaults the fly asset to unset and persists a choice across reload', () => {
+    expect(store.flyAssetId()).toBeNull();
+
+    store.flyAssetId.set('asset-42');
+    TestBed.tick();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.flyAssetId()).toBe('asset-42');
+  });
+
+  it('ignores a non-string persisted flyAssetId rather than adopting it', () => {
+    localStorage.setItem('vision.settings.v1', JSON.stringify({ flyAssetId: 42 }));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.flyAssetId()).toBeNull();
+  });
+
   it('survives corrupt persisted settings', () => {
     localStorage.setItem('vision.settings.v1', '{not json');
     TestBed.resetTestingModule();

@@ -24,7 +24,7 @@ Top-level nav becomes job-oriented: **Fly** (operator cockpit) · **Command** (m
 | Cycle | Kind | Ships | Scope | Status |
 |---|---|---|---|---|
 | C-a | backend | stream snapshots (`GET /api/streams/{id}/snapshot.jpg`) + fleet summary (`GET /api/fleet/summary`) | vision-application, vision-api, vision-app | ✅ done |
-| C-b | **UI** | Fly: the operator cockpit page | vision-web | pending |
+| C-b | **UI** | Fly: the operator cockpit page | vision-web | ✅ done |
 | C-c | **UI** | Command: the manager dashboard | vision-web, after C-b | pending |
 
 ### C-a — backend: snapshots + fleet summary *(scope: vision-application, vision-api, vision-app wiring)*
@@ -76,6 +76,14 @@ Scope note: both endpoints are read-only additions; nothing about existing endpo
 - Keyboard: M map, B boxes, F fullscreen, Esc collapse — documented on-screen (? overlay).
 - Reuses: player (WHEP-first + recovery + stopped state), OSD/telemetry components, LiveMap, events store, replay route. Mostly composition, little new logic.
 - **Done when:** operator opens app → one click (or zero after first visit) → flying-aware; nothing on the page needs a second click to see safety-critical state. **Estimate: M/L.**
+
+**Done note (for C-c to build against):**
+
+- **Route**: `/fly` is now the default (`'' → redirectTo 'fly'`); every existing route (`/wall`, `/map`, `/live/:deviceId`, etc.) is untouched and still reachable, plus a new "Fly" nav tab (first in the list). `FlyPage` takes two **query-param** inputs, bound automatically with no route-table change (`withComponentInputBinding()` merges query params in by name, same mechanism path params use): `watch` (`?watch=1` exactly — hides Start/Stop/Replay) and `requestedAssetId` (aliased to `?asset=`, overrides — and becomes — the remembered `SettingsStore.flyAssetId`). **C-c's drill-down is exactly**: `router.navigate(['/fly'], {queryParams: {asset: assetId, watch: 1}})` — no other wiring needed on the Fly side.
+- **`SettingsStore.flyAssetId: WritableSignal<string | null>`** — the remembered/switcher-selected drone; `null` shows the picker. C-c doesn't need to touch this directly (the query-param route above handles it), but it's the field to read if a future page wants to know "what is the operator currently set to fly" without navigating there.
+- **Reused pieces available to Command too**: `core/device-logic.ts#videoDevices` (every `VIDEO`-capable device on an asset, not just the first), `core/telemetry-logic.ts#batterySeverity`/`telemetryAgeSeverity` (the `'ok'|'low'|'critical'|'unknown'` / `'fresh'|'amber'|'red'` tiers — Command's own attention-queue severity keying, per this plan's own C-c bullet, "battery < 20% / telemetry stale > 10s", can reuse `telemetryAgeSeverity`'s `TELEMETRY_AGE_RED_SECONDS`=10 constant directly rather than re-deriving it), `ui/detections-strip.ts` (moved to `ui/` specifically so a second page could import it without a cross-page import — Command doesn't currently need it, but it's no longer `pages/live/`-scoped if a future surface does).
+- **Map-tile cache is unconditionally live on every map already** (`ui/leaflet-loader.ts#mapLayerTileLayer`, the one function `LiveMap`/`FleetMap`/`ReplayMap`/`FlightPlanDialog` all build their tile layer through) — Command's own fleet map embed inherits it automatically, nothing to wire.
+- **No `sourceState`/reconnecting signal was invented anywhere in this cycle either** (matches C-a's own done note) — Fly's OSD reads staleness purely from telemetry age + the player's own transport/phase chip, never a fabricated "degraded" concept. Command's attention queue should key off the same honest signals C-a's fleet summary already exposes (`batteryPercent`, `telemetryAgeMs`, `openEventCount`), not assume this cycle added anything new server-visible.
 
 ### C-c — UI: Command (manager dashboard) *(scope: vision-web, after C-b)*
 

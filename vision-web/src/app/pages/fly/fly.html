@@ -1,0 +1,211 @@
+@if (showPicker()) {
+  <div class="page">
+    <div class="page-head">
+      <div>
+        <h1>Fly</h1>
+        <p>Pick a drone. Streaming ones show first — pick it again next time and you land straight in the cockpit.</p>
+      </div>
+    </div>
+
+    @if (pickerError()) {
+      <div class="card empty">
+        <h3>Could not reach the backend</h3>
+        <p>Streaming assets can't be listed right now.</p>
+        <button type="button" class="btn" (click)="retryPicker()">Retry</button>
+      </div>
+    } @else if (pickerAssets() === undefined) {
+      <div class="picker-grid">
+        @for (row of skeletonRows; track row) {
+          <div class="card skeleton-card"></div>
+        }
+      </div>
+    } @else if (orderedPickerAssets().length === 0) {
+      <div class="card empty">
+        <h3>No drones registered yet</h3>
+        <p>
+          Add a source from the Devices tab — the synthetic test drone flies a route with no
+          hardware at all.
+        </p>
+        <a class="btn" routerLink="/devices" [queryParams]="{ addSource: 1 }">Add source</a>
+      </div>
+    } @else {
+      <div class="picker-grid">
+        @for (a of orderedPickerAssets(); track a.assetId) {
+          <button type="button" class="card picker-card" (click)="selectAsset(a.assetId)">
+            <div class="row spread">
+              <h3>{{ a.displayName }}</h3>
+              @if (a.status === 'STREAMING') {
+                <span class="chip"><span class="dot live"></span>Streaming</span>
+              }
+            </div>
+            <p class="muted">{{ a.categoryName }}</p>
+          </button>
+        }
+      </div>
+    }
+  </div>
+} @else if (asset(); as a) {
+  <div class="cockpit" #stage>
+    <div class="stage-video">
+      <vision-player
+        [src]="stream()?.viewUrl ?? null"
+        [whepUrl]="stream()?.whepUrl ?? null"
+        [stopped]="stopped()"
+        [compact]="true"
+        [detections]="detections.results()"
+        [boxesMode]="boxesMode()"
+        (latencyChanged)="onLatency($event)"
+        (transportChanged)="onTransport($event)"
+      />
+
+      @if (!primaryDevice()) {
+        <div class="notice stage-notice">This drone has no camera device to watch.</div>
+      } @else if (live() && !stream()?.viewUrl) {
+        <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
+      }
+    </div>
+
+    <!-- ---- Header: exit, drone switcher, help ------------------------------------------- -->
+    <div class="hud hud-header">
+      <a class="icon-btn" routerLink="/wall" title="Exit the cockpit">‹</a>
+      <button type="button" class="icon-btn" (click)="openPicker()" title="Choose a different drone from the full picker">
+        All drones
+      </button>
+      @if (orderedPickerAssets().length > 1) {
+        <select
+          class="switcher"
+          aria-label="Switch drone"
+          [value]="activeAssetId()"
+          (change)="selectAsset($any($event.target).value)"
+        >
+          @for (candidate of orderedPickerAssets(); track candidate.assetId) {
+            <option [value]="candidate.assetId">{{ candidate.displayName }}</option>
+          }
+        </select>
+      }
+      <button type="button" class="icon-btn shortcuts-btn" (click)="shortcutsOpen.set(true)" title="Keyboard shortcuts (?)">
+        ?
+      </button>
+    </div>
+
+    <!-- ---- OSD chip bar ------------------------------------------------------------------ -->
+    <div class="hud hud-osd">
+      <vision-fly-osd [latencySeconds]="latencySeconds()" [transport]="transport()" />
+    </div>
+
+    <!-- ---- Events ticker ------------------------------------------------------------------ -->
+    @if (tickerEvents().length > 0) {
+      <div class="hud hud-ticker">
+        @for (event of tickerEvents(); track event.id) {
+          <div class="ticker-row" [class.open]="event.state === 'OPEN'">
+            <span class="dot" [class.live]="event.state === 'OPEN'"></span>
+            {{ tickerLabel(event) }}
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ---- Map inset (M) ------------------------------------------------------------------- -->
+    @if (mapVisible() && hasTelemetryDevice()) {
+      <div class="hud hud-map">
+        <vision-live-map />
+      </div>
+    }
+
+    <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
+    @if (secondaryDevices().length > 0) {
+      <div class="hud hud-secondary">
+        @for (device of secondaryDevices(); track device.id) {
+          <button
+            type="button"
+            class="secondary-tile"
+            (click)="setPrimaryDevice(device.id)"
+            [title]="'Switch to ' + device.name"
+          >
+            <vision-player
+              [src]="fleet.streamFor(device.id)?.viewUrl ?? null"
+              [whepUrl]="fleet.streamFor(device.id)?.whepUrl ?? null"
+              [compact]="true"
+            />
+            <span class="tile-label">{{ device.name }}</span>
+          </button>
+        }
+      </div>
+    }
+
+    <!-- ---- Detections strip (B cycles boxes overlay/burned/off) --------------------------- -->
+    @if (live()) {
+      <div class="hud hud-detections">
+        <button
+          type="button"
+          class="icon-btn"
+          (click)="detectionsStripOpen.set(!detectionsStripOpen())"
+        >
+          {{ detectionsStripOpen() ? 'Hide detections' : 'Detections' }}
+        </button>
+        @if (detectionsStripOpen()) {
+          <vision-detections-strip />
+        }
+      </div>
+    }
+
+    <!-- ---- Controls: Start/Stop, Replay ------------------------------------------------------ -->
+    @if (!watchMode()) {
+      <div class="hud hud-controls">
+        @if (latestFinishedUsageEntry(); as finished) {
+          <a class="btn secondary" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
+            Replay last flight
+          </a>
+        }
+        @if (live()) {
+          <button type="button" class="btn danger big" (click)="requestStop()" [disabled]="busy()">Stop</button>
+        } @else {
+          <button type="button" class="btn big" (click)="start()" [disabled]="busy() || !primaryDevice()">
+            {{ busy() ? 'Starting…' : 'Start stream' }}
+          </button>
+        }
+      </div>
+    }
+
+    @if (stopConfirmOpen()) {
+      <div class="hud hud-confirm">
+        <div class="card inline-confirm-card">
+          <p>Stop this stream? It ends the stream for all viewers, not just you.</p>
+          <div class="row">
+            <button type="button" class="btn danger small" (click)="confirmStop()" [disabled]="busy()">
+              Confirm stop
+            </button>
+            <button type="button" class="btn secondary small" (click)="cancelStop()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (shortcutsOpen()) {
+      <div class="hud hud-shortcuts">
+        <div class="card">
+          <header>
+            <h3>Keyboard shortcuts</h3>
+            <button type="button" class="icon-btn" (click)="shortcutsOpen.set(false)">×</button>
+          </header>
+          <dl>
+            <dt>M</dt>
+            <dd>Toggle the map inset</dd>
+            <dt>B</dt>
+            <dd>Cycle detection boxes — overlay / burned / off</dd>
+            <dt>F</dt>
+            <dd>Fullscreen</dd>
+            <dt>Esc</dt>
+            <dd>Collapse the topmost overlay</dd>
+            <dt>?</dt>
+            <dd>This help</dd>
+          </dl>
+        </div>
+      </div>
+    }
+  </div>
+} @else {
+  <div class="cockpit cockpit-loading">
+    <div class="card skeleton-card"></div>
+  </div>
+}

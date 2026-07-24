@@ -106,3 +106,48 @@ export function groupTelemetryByDevice(
 export function telemetryDevices(devices: readonly Device[]): readonly Device[] {
   return devices.filter((device) => device.capabilities.includes('TELEMETRY'));
 }
+
+// --- Severity tiers (docs/MVP3-PLAN.md §C-b) --------------------------------------------------
+// Two independent "how worried should the operator be" derivations, both pure so the Fly
+// cockpit's OSD chip bar can color-escalate without inventing new backend concepts. `batterySeverity`
+// started as a private computed inside `pages/live/telemetry-osd.ts`; lifted here (unchanged
+// thresholds/behavior) once the Fly cockpit's own OSD needed the identical classification —
+// the same "second consumer needs it, move it to core/" precedent as `findVideoDevice`/
+// `groupTelemetryByDevice` above. `telemetry-osd.ts` now imports it instead of computing its own.
+
+/** Battery-bar color thresholds, roughly matching common flight-controller OSDs. */
+export const BATTERY_LOW_PERCENT = 45;
+export const BATTERY_CRITICAL_PERCENT = 20;
+
+export type BatterySeverity = 'ok' | 'low' | 'critical' | 'unknown';
+
+/** `'unknown'` for a device that hasn't reported a battery reading yet — never a fabricated tier. */
+export function batterySeverity(percent: number | undefined): BatterySeverity {
+  if (percent === undefined) {
+    return 'unknown';
+  }
+  if (percent <= BATTERY_CRITICAL_PERCENT) {
+    return 'critical';
+  }
+  return percent <= BATTERY_LOW_PERCENT ? 'low' : 'ok';
+}
+
+/**
+ * A third tier past the existing binary `isStale`, for the Fly cockpit's OSD chip bar
+ * (docs/MVP3-PLAN.md §C-b: "telemetry age color escalation: fresh/amber >5s/red >10s"). `amber`
+ * reuses `STALE_AFTER_SECONDS` — the exact threshold every other "this reading is stale" indicator
+ * in this app already uses (`TelemetryStore.stale()`, `TelemetryOsd`'s `.stale`/`.stale-text`
+ * classes) — so the OSD's medium tier lines up with what "stale" already means everywhere else;
+ * `TELEMETRY_AGE_RED_SECONDS` is the one genuinely new, more urgent threshold this cycle adds.
+ */
+export const TELEMETRY_AGE_RED_SECONDS = 10;
+
+export type TelemetryAgeSeverity = 'fresh' | 'amber' | 'red';
+
+/** Only meaningful for a known sample age — callers with no sample yet render their own "—" state. */
+export function telemetryAgeSeverity(age: number): TelemetryAgeSeverity {
+  if (age > TELEMETRY_AGE_RED_SECONDS) {
+    return 'red';
+  }
+  return age > STALE_AFTER_SECONDS ? 'amber' : 'fresh';
+}

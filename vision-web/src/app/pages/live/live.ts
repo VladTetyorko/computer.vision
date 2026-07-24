@@ -17,7 +17,7 @@ import { TelemetryStore } from '../../core/telemetry-store';
 import { DetectionsStore } from '../../core/detections-store';
 import { TelemetryOsd } from './telemetry-osd';
 import { LiveMap } from '../../ui/live-map';
-import { DetectionsStrip } from './detections-strip';
+import { DetectionsStrip } from '../../ui/detections-strip';
 
 @Component({
   selector: 'vision-live',

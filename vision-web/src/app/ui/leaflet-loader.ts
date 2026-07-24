@@ -1,5 +1,7 @@
 import type * as Leaflet from 'leaflet';
 import type { MapLayerId } from '../core/settings-store';
+import { getCachedTile, putCachedTile } from './tile-cache-db';
+import { tileCacheKey } from './tile-cache-logic';
 
 /**
  * Leaflet bootstrap bits shared by every map in this app (`ui/live-map.ts`,
@@ -120,6 +122,15 @@ export function ensureLeafletStylesheet(): void {
  * does). Callers create a fresh instance per layer switch — swapping which `TileLayer` is
  * `addTo(map)` is how `LiveMap`/`FleetMap` change the active base layer, and Leaflet's own
  * attribution control follows whichever instance is currently added.
+ *
+ * **IndexedDB tile cache** (docs/MVP3-PLAN.md's Build rules): every tile this layer requests goes
+ * through `resolveTileSrc` below instead of a bare `img.src = url` — cache hit serves a stored
+ * blob, cache miss fetches, renders, and stores it for next time. Landing here (rather than in
+ * each host component) is what makes it shared infra: `LiveMap`, `FleetMap`, `ReplayMap`, and
+ * `FlightPlanDialog` all build their tile layer through this one function, so every map in the app
+ * — including the Fly cockpit's map inset, which reuses `LiveMap` unmodified — inherits the cache
+ * for free, exactly the plan's own "lands in C-b, so Fly/Command/replay/detail maps all inherit
+ * it" requirement.
  */
 export function mapLayerTileLayer(
   L: typeof Leaflet,
@@ -127,10 +138,99 @@ export function mapLayerTileLayer(
   onStatus: (ok: boolean) => void,
 ): Leaflet.TileLayer {
   const def = mapLayerDef(layerId);
-  const tiles = L.tileLayer(def.url, { maxZoom: def.maxZoom, attribution: def.attribution });
+  const CachedTileLayer = cachedTileLayerClass(L);
+  const tiles = new CachedTileLayer(def.url, {
+    maxZoom: def.maxZoom,
+    attribution: def.attribution,
+    cacheLayerId: layerId,
+  } as Leaflet.TileLayerOptions);
   tiles.on('tileerror', () => onStatus(false));
   tiles.on('load', () => onStatus(true));
   return tiles;
+}
+
+/** Built once per `L` module instance (every host shares the one dynamically-imported Leaflet). */
+let cachedTileLayerCtor: (new (url: string, options: Leaflet.TileLayerOptions) => Leaflet.TileLayer) | undefined;
+
+/**
+ * A `Leaflet.TileLayer` subclass whose only change is `createTile` — everything else (URL
+ * templating incl. `{s}`/`{r}` substitution, zoom/bounds handling, the `load`/`tileerror` events
+ * `mapLayerTileLayer` wires above) stays the stock `L.TileLayer` behavior, since only `createTile`
+ * is overridden. Built via `L.TileLayer.extend(...)` (Leaflet's own subclassing helper — this
+ * codebase has no other Leaflet subclass, but this is the documented way to override one method)
+ * rather than a TypeScript `class extends`, since `@types/leaflet` marks `createTile` `protected`;
+ * `.extend()` sidesteps that by construction (a plain object literal, not a subclass declaration).
+ */
+function cachedTileLayerClass(
+  L: typeof Leaflet,
+): new (url: string, options: Leaflet.TileLayerOptions) => Leaflet.TileLayer {
+  if (!cachedTileLayerCtor) {
+    cachedTileLayerCtor = (
+      L.TileLayer as unknown as {
+        extend(props: unknown): new (url: string, options: Leaflet.TileLayerOptions) => Leaflet.TileLayer;
+      }
+    ).extend({
+      createTile(this: Leaflet.TileLayer, coords: Leaflet.Coords, done: Leaflet.DoneCallback): HTMLElement {
+        const img = document.createElement('img');
+        const url: string = (this as unknown as { getTileUrl(c: Leaflet.Coords): string }).getTileUrl(coords);
+        const layerId = String((this.options as { cacheLayerId?: string }).cacheLayerId ?? '');
+        const key = tileCacheKey(layerId, coords.z, coords.x, coords.y);
+        void resolveTileSrc(key, url).then(({ src, isObjectUrl }) => {
+          img.onload = () => {
+            if (isObjectUrl) {
+              URL.revokeObjectURL(src);
+            }
+            done(undefined, img);
+          };
+          img.onerror = () => {
+            if (isObjectUrl) {
+              URL.revokeObjectURL(src);
+            }
+            done(new Error('Tile failed to load'), img);
+          };
+          img.src = src;
+        });
+        return img;
+      },
+    });
+  }
+  return cachedTileLayerCtor;
+}
+
+interface TileSrc {
+  readonly src: string;
+  /** Whether `src` is a `blob:` URL this caller must `URL.revokeObjectURL` once the image has loaded. */
+  readonly isObjectUrl: boolean;
+}
+
+/**
+ * Cache-first tile resolution: an IndexedDB hit serves a stored blob straight away; a miss fetches
+ * over the network, renders it, and stores it for next time (`putCachedTile` runs in the
+ * background — the tile is already on screen by the time the write settles). Any failure along
+ * that path (offline, a tile host that doesn't allow a CORS-readable `fetch`, IndexedDB unavailable)
+ * falls back to the plain `<img src>` request every map used before this cache existed — preserving
+ * the pre-existing offline-grid fallback (`onStatus(false)` still fires via the image's own error
+ * event) for a cache-miss-while-offline, per the plan's own requirement. Tiles are only ever
+ * fetched here in response to Leaflet's own `createTile` calls — panning/zooming the map the user
+ * is already looking at — never a deliberate bulk prefetch, respecting the tile-server usage
+ * policies the plan calls out.
+ */
+async function resolveTileSrc(key: string, url: string): Promise<TileSrc> {
+  const cached = await getCachedTile(key);
+  if (cached) {
+    return { src: URL.createObjectURL(cached), isObjectUrl: true };
+  }
+  try {
+    const response = await fetch(url, { mode: 'cors' });
+    if (!response.ok) {
+      throw new Error(`tile fetch failed: ${response.status}`);
+    }
+    const blob = await response.blob();
+    void putCachedTile(key, blob);
+    return { src: URL.createObjectURL(blob), isObjectUrl: true };
+  } catch {
+    return { src: url, isObjectUrl: false };
+  }
 }
 
 /**

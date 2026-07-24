@@ -76,6 +76,7 @@ interface PersistedSettings {
   draft: PipelineSettings | null;
   mapLayer: MapLayerId;
   eventNotifications: boolean;
+  flyAssetId: string | null;
 }
 
 const STORAGE_KEY = 'vision.settings.v1';
@@ -104,6 +105,18 @@ export class SettingsStore {
    * can never bypass the browser's own permission gate.
    */
   readonly eventNotifications = signal(false);
+
+  /**
+   * The operator's last-chosen drone for the Fly cockpit (docs/MVP3-PLAN.md §C-b) — `null` until a
+   * first pick is made. `null` is what tells `FlyPage` to show the asset picker instead of jumping
+   * straight into a cockpit; every later visit (and every use of the in-cockpit switcher, which
+   * writes here too) skips the picker. Not validated against the live fleet here — an id for an
+   * asset that was since archived/deleted is a normal, expected staleness this store has no way to
+   * detect on its own; `FlyPage` is the layer that checks the id still resolves and falls back to
+   * the picker if not (same "store persists, page validates" split `mapLayer`/`activeProfileId`
+   * already follow for their own stale-value cases).
+   */
+  readonly flyAssetId = signal<string | null>(null);
 
   readonly activeProfileId = signal(BUILT_IN_PROFILES[0].id);
   readonly customProfiles = signal<readonly PipelineProfile[]>([]);
@@ -207,6 +220,9 @@ export class SettingsStore {
       if (typeof parsed.eventNotifications === 'boolean') {
         this.eventNotifications.set(parsed.eventNotifications);
       }
+      if (typeof parsed.flyAssetId === 'string') {
+        this.flyAssetId.set(parsed.flyAssetId);
+      }
       if (Array.isArray(parsed.customProfiles)) {
         this.customProfiles.set(parsed.customProfiles);
       }
@@ -231,6 +247,7 @@ export class SettingsStore {
       draft: this.draftSignal(),
       mapLayer: this.mapLayer(),
       eventNotifications: this.eventNotifications(),
+      flyAssetId: this.flyAssetId(),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   }

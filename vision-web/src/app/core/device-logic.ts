@@ -20,3 +20,12 @@ import type { Device } from './api/models';
 export function findVideoDevice(devices: readonly Device[]): Device | undefined {
   return devices.find((device) => device.capabilities.includes('VIDEO'));
 }
+
+/**
+ * Every `VIDEO`-capable device on an asset (docs/MVP3-PLAN.md §C-b) — the Fly cockpit's secondary
+ * tile strip renders one small preview per entry beyond whichever is currently primary. Mirrors
+ * `core/telemetry-logic.ts#telemetryDevices`'s identical capability-filter shape for the other axis.
+ */
+export function videoDevices(devices: readonly Device[]): readonly Device[] {
+  return devices.filter((device) => device.capabilities.includes('VIDEO'));
+}

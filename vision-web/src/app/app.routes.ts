@@ -8,7 +8,17 @@ import { Routes } from '@angular/router';
  * every time (docs/UX-DESIGN.md §2 T1).
  */
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'wall' },
+  // docs/MVP3-PLAN.md §C-b: the operator cockpit is now the default landing page — an operator
+  // opens the app and is flying-aware in one click (or zero, once a drone is remembered). `/wall`
+  // keeps working unchanged for anyone who still wants the many-tiles overview.
+  { path: '', pathMatch: 'full', redirectTo: 'fly' },
+  {
+    path: 'fly',
+    title: 'Fly · Vision',
+    // `?asset=`/`?watch=1` bind to `FlyPage`'s own inputs by name — query params, so no route
+    // pattern change is needed for either (see `FlyPage`'s own doc comment).
+    loadComponent: () => import('./pages/fly/fly').then((m) => m.FlyPage),
+  },
   {
     path: 'wall',
     title: 'Wall · Vision',

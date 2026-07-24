@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ScrollingModule } from '@angular/cdk/scrolling';
 import { Router } from '@angular/router';
@@ -80,6 +80,15 @@ const DEVICE_ACTION_LABELS: Record<DeviceLifecycleAction, string> = {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DevicesPage {
+  /**
+   * `?addSource=` — opens the Add-source flow straight away (docs/MVP3-PLAN.md §C-b: the Fly
+   * cockpit's empty-state picker links here as `/devices?addSource=1` rather than a bare
+   * `/devices`, so "no drones yet" actually lands in the flow, not just the tab). Binds by name
+   * like every other query-param input in this app (`FlyPage.requestedAssetId`/`watch`) — no route
+   * change needed. Any non-empty value opens it; the value itself is never read.
+   */
+  readonly addSource = input<string | undefined>(undefined);
+
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly router = inject(Router);
@@ -489,6 +498,9 @@ export class DevicesPage {
 
   constructor() {
     void this.refreshWarehouse();
+    if (this.addSource()) {
+      this.addSourceOpen.set(true);
+    }
   }
 
   // --- Registration --------------------------------------------------------

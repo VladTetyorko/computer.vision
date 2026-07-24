@@ -1,9 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { TelemetryStore } from '../../core/telemetry-store';
-
-/** Battery thresholds for the bar's color, roughly matching common flight-controller OSDs. */
-const BATTERY_LOW_PERCENT = 45;
-const BATTERY_CRITICAL_PERCENT = 20;
+import { batterySeverity } from '../../core/telemetry-logic';
 
 /**
  * The live telemetry HUD strip for `/live/:deviceId` (docs/CYCLES-PLAN.md §2, UX-DESIGN §5.2).
@@ -236,16 +233,7 @@ export class TelemetryOsd {
     return percent === undefined ? '—' : `${percent.toFixed(0)}%`;
   });
 
-  protected readonly batteryClass = computed(() => {
-    const percent = this.batteryPercent();
-    if (percent === undefined) {
-      return 'unknown';
-    }
-    if (percent <= BATTERY_CRITICAL_PERCENT) {
-      return 'critical';
-    }
-    return percent <= BATTERY_LOW_PERCENT ? 'low' : 'ok';
-  });
+  protected readonly batteryClass = computed(() => batterySeverity(this.batteryPercent()));
 
   protected readonly ageLabel = computed(() => {
     const age = this.store.sampleAgeSeconds();

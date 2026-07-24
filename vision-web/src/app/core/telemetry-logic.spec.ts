@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { AssetDetails, AssetUsage, Device, TelemetrySample } from './api/models';
 import {
   ageSeconds,
+  batterySeverity,
   deriveTrail,
   findOwningAsset,
   groupTelemetryByDevice,
   isStale,
   selectOpenUsage,
   shouldPoll,
+  telemetryAgeSeverity,
   telemetryDevices,
 } from './telemetry-logic';
 
@@ -167,6 +169,43 @@ describe('ageSeconds / isStale', () => {
     expect(isStale(5)).toBe(false);
     expect(isStale(5.01)).toBe(true);
     expect(isStale(0)).toBe(false);
+  });
+});
+
+describe('batterySeverity', () => {
+  it('is unknown with no reading yet', () => {
+    expect(batterySeverity(undefined)).toBe('unknown');
+  });
+
+  it('is ok above the low threshold', () => {
+    expect(batterySeverity(46)).toBe('ok');
+  });
+
+  it('is low at and below the low threshold, above critical', () => {
+    expect(batterySeverity(45)).toBe('low');
+    expect(batterySeverity(21)).toBe('low');
+  });
+
+  it('is critical at and below the critical threshold', () => {
+    expect(batterySeverity(20)).toBe('critical');
+    expect(batterySeverity(0)).toBe('critical');
+  });
+});
+
+describe('telemetryAgeSeverity', () => {
+  it('is fresh at and below the amber threshold', () => {
+    expect(telemetryAgeSeverity(0)).toBe('fresh');
+    expect(telemetryAgeSeverity(5)).toBe('fresh');
+  });
+
+  it('is amber past the amber threshold, at and below the red one', () => {
+    expect(telemetryAgeSeverity(5.01)).toBe('amber');
+    expect(telemetryAgeSeverity(10)).toBe('amber');
+  });
+
+  it('is red past the red threshold', () => {
+    expect(telemetryAgeSeverity(10.01)).toBe('red');
+    expect(telemetryAgeSeverity(60)).toBe('red');
   });
 });
 
