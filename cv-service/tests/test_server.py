@@ -48,9 +48,13 @@ def _make_request(**overrides):
 
 
 def test_detect_stream_echoes_when_detector_unavailable(monkeypatch):
-    monkeypatch.setattr(server_module, "_build_default_detector", lambda: None)
+    # `InferenceServicer()` with no `detector=` now builds a registry (see
+    # `_build_default_registry`), not a lone detector directly -- patch that
+    # instead so this still exercises the "nothing could load at all" path.
+    monkeypatch.setattr(server_module, "_build_default_registry", lambda: None)
     servicer = InferenceServicer()
     assert servicer._detector is None
+    assert servicer._registry is None
 
     request = _make_request()
     (response,) = list(servicer.DetectStream(iter([request]), context=None))
@@ -182,3 +186,130 @@ def test_matching_model_id_does_not_warn(caplog):
         list(servicer.DetectStream(iter([request]), context=None))
 
     assert not any("model registry is Phase 3" in r.message for r in caplog.records)
+
+
+# --- registry-routed path (InferenceServicer(registry=...)) -----------------
+#
+# `InferenceServicer._detect_via_registry` lazily imports `cv_service.registry`
+# (mirroring `_build_default_detector`'s lazy import of `cv_service.inference`)
+# -- that import needs the `cv` extra (cv2/numpy, transitively via
+# `cv_service.inference`) even though `FakeRegistry`/`FakeDetector` below never
+# touch ultralytics/torch. Each test below skips cleanly rather than failing
+# if the `cv` extra isn't installed, same pattern as `test_real_model.py`.
+
+
+class FakeRegistry:
+    """Minimal stand-in for `cv_service.registry.ModelRegistry`: only the
+    `.resolve(model_id) -> list[(id, detector)]` surface `InferenceServicer`
+    actually calls."""
+
+    def __init__(self, resolved_by_model_id: dict[str, list] | None = None, *, default: list | None = None):
+        self._resolved_by_model_id = resolved_by_model_id or {}
+        self._default = default if default is not None else []
+
+    def resolve(self, model_id: str):
+        return self._resolved_by_model_id.get(model_id, self._default)
+
+
+def test_registry_path_routes_known_model_id_to_matching_detector():
+    pytest.importorskip("cv_service.registry")
+    from cv_service.inference import Detection
+
+    detector = FakeDetector(
+        model_name="orion12l.pt",
+        detections=[Detection(label="tank", confidence=0.8, x=0.1, y=0.1, width=0.2, height=0.2)],
+        inference_millis=42,
+    )
+    registry = FakeRegistry(resolved_by_model_id={"orion12l.pt": [("orion12l.pt", detector)]})
+    servicer = InferenceServicer(registry=registry)
+
+    request = _make_request(model_id="orion12l.pt")
+    (response,) = list(servicer.DetectStream(iter([request]), context=None))
+
+    assert response.inference_millis == 42
+    assert len(response.detections) == 1
+    assert response.detections[0].label == "tank"  # single member: no prefix
+    # the response envelope always echoes what the request asked for, same
+    # as the pre-registry behavior -- routing doesn't rewrite it.
+    assert response.model_id == "orion12l.pt"
+
+
+def test_registry_path_falls_back_to_default_for_unknown_model_id():
+    pytest.importorskip("cv_service.registry")
+    from cv_service.inference import Detection
+
+    default_detector = FakeDetector(
+        model_name="yolo11n.pt",
+        detections=[Detection(label="person", confidence=0.5, x=0.0, y=0.0, width=0.1, height=0.1)],
+        inference_millis=10,
+    )
+    # A real ModelRegistry.resolve() would fall back to the default for any
+    # unrecognized id -- FakeRegistry's `default=` simulates exactly that.
+    registry = FakeRegistry(default=[("yolo11n.pt", default_detector)])
+    servicer = InferenceServicer(registry=registry)
+
+    request = _make_request(model_id="totally-unknown-model")
+    (response,) = list(servicer.DetectStream(iter([request]), context=None))
+
+    assert response.inference_millis == 10
+    assert response.detections[0].label == "person"
+
+
+def test_registry_path_echoes_when_nothing_resolves():
+    pytest.importorskip("cv_service.registry")
+    registry = FakeRegistry()  # resolve() always returns [] (no default either)
+    servicer = InferenceServicer(registry=registry)
+
+    request = _make_request(model_id="anything")
+    (response,) = list(servicer.DetectStream(iter([request]), context=None))
+
+    assert list(response.detections) == []
+    assert response.inference_millis == 0
+
+
+def test_registry_path_composite_prefixes_labels_and_sums_millis():
+    pytest.importorskip("cv_service.registry")
+    from cv_service.inference import Detection
+
+    detector_general = FakeDetector(
+        model_name="yolo11n.pt",
+        detections=[Detection(label="person", confidence=0.9, x=0.0, y=0.0, width=0.1, height=0.1)],
+        inference_millis=15,
+    )
+    detector_military = FakeDetector(
+        model_name="orion12l.pt",
+        detections=[Detection(label="tank", confidence=0.7, x=0.2, y=0.2, width=0.2, height=0.2)],
+        inference_millis=45,
+    )
+    registry = FakeRegistry(
+        resolved_by_model_id={
+            "yolo11n.pt,orion12l.pt": [
+                ("yolo11n.pt", detector_general),
+                ("orion12l.pt", detector_military),
+            ]
+        }
+    )
+    servicer = InferenceServicer(registry=registry)
+
+    request = _make_request(model_id="yolo11n.pt,orion12l.pt")
+    (response,) = list(servicer.DetectStream(iter([request]), context=None))
+
+    assert response.inference_millis == 60  # sum of both members
+    labels = sorted(d.label for d in response.detections)
+    assert labels == ["orion12l:tank", "yolo11n:person"]
+
+
+def test_registry_path_per_frame_failure_still_echoes():
+    pytest.importorskip("cv_service.registry")
+
+    class BoomingRegistry:
+        def resolve(self, model_id):
+            raise RuntimeError("registry blew up")
+
+    servicer = InferenceServicer(registry=BoomingRegistry())
+    request = _make_request()
+
+    (response,) = list(servicer.DetectStream(iter([request]), context=None))
+
+    assert list(response.detections) == []
+    assert response.inference_millis == 0

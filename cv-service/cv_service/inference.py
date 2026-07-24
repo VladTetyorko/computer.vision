@@ -36,7 +36,7 @@ ENCODING_BGR24 = "IMAGE_ENCODING_BGR24"
 # Default Ultralytics model, overridable via the CV_MODEL env var. yolo11n is
 # the smallest/fastest Ultralytics YOLO11 checkpoint -- a reasonable CPU-first
 # default for a live demo.
-DEFAULT_MODEL = "yolo11n.pt"
+DEFAULT_MODEL = "yolo11n.pt" # orion12l
 
 # Ultralytics' own default confidence threshold. Used whenever a
 # FrameRequest doesn't specify (or specifies 0, i.e. proto3's float default

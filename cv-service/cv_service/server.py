@@ -24,6 +24,7 @@ committed.
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 import threading
@@ -37,6 +38,7 @@ from cv_service.concurrency import InferenceGate, LatestOnlyMailbox, process_gat
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance, see _build_default_detector
     from cv_service.inference import YoloDetector
+    from cv_service.registry import ModelRegistry
 
 # `protoc`'s Python codegen emits imports rooted at the proto package path
 # (e.g. `from vision.v1 import cv_pb2`), not at `cv_service.gen...`. So the
@@ -90,6 +92,60 @@ def _build_default_detector() -> Optional["YoloDetector"]:
             exc,
         )
         return None
+
+
+# Directory the registry scans for local `*.pt` weights / exported
+# `*_openvino_model` dirs: `cv_service/server.py`'s grandparent, i.e. the
+# `cv-service/` checkout directory itself -- the same place `YOLO("x.pt")`'s
+# own cwd-relative download/cache behavior already lands weights in when the
+# server/tests are run from there (see MODULE.md "CV_MODEL / weights
+# location"), and where the Dockerfile's `WORKDIR /app/cv-service` puts them
+# too. Resolved from `__file__` rather than `os.getcwd()` so discovery is
+# independent of the directory the process happens to be launched from.
+_MODEL_SEARCH_DIR = Path(__file__).resolve().parent.parent
+
+
+def _build_default_registry() -> Optional["ModelRegistry"]:
+    """Try to build the default `ModelRegistry`; `None` if unavailable.
+
+    Mirrors `_build_default_detector()`'s import/degrade contract exactly
+    (local import so the rest of the server stays importable without the
+    `cv` extra; any failure to load the *default* model degrades the whole
+    servicer to the Phase 0 echo behavior, same as before the registry
+    existed) -- the registry only changes what happens for *non-default*
+    `model_id`s, never the "no model at all" story.
+    """
+    try:
+        from cv_service.inference import DEFAULT_MODEL
+        from cv_service.registry import ModelRegistry, discover_roster
+    except ImportError as exc:
+        LOGGER.warning(
+            "cv-service YOLO backend unavailable (%s); DetectStream will "
+            "serve the Phase 0 echo behavior (empty detections) until the "
+            "'cv' optional dependency group is installed.",
+            exc,
+        )
+        return None
+
+    default_model = os.environ.get("CV_MODEL", DEFAULT_MODEL)
+    roster = discover_roster(_MODEL_SEARCH_DIR, default_model)
+    registry = ModelRegistry(roster=roster, default_id=default_model)
+
+    if registry.default_detector() is None:
+        LOGGER.warning(
+            "YOLO model could not be loaded (model_id=%r); DetectStream will "
+            "serve the Phase 0 echo behavior (empty detections) until this "
+            "is fixed.",
+            default_model,
+        )
+        return None
+
+    LOGGER.info(
+        "cv-service model registry roster: %s (default=%r)",
+        sorted(registry.roster),
+        default_model,
+    )
+    return registry
 
 
 class _StreamReader:
@@ -172,25 +228,42 @@ class _StreamReader:
 class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     """Real-YOLO-when-available, echo-otherwise implementation of ``Inference``.
 
-    A `YoloDetector` (see `cv_service/inference.py`) is built once at
-    construction time. If that fails for any reason -- `ultralytics` not
-    installed, weights unavailable offline, etc. -- `detector` is `None` and
-    every frame gets the original Phase 0 echo response instead: the service
-    must never crash-loop for lack of a model.
+    Two ways to give this servicer a model, mutually exclusive:
+
+    - **`detector=`** (explicit injection -- what every pre-registry test
+      still uses): exactly one `YoloDetector` handles every frame,
+      regardless of `model_id`; an unrecognized `model_id` just logs once
+      (`_warn_once_on_unknown_model`) and serves this same detector. No
+      registry, no composite mode -- this path is unchanged from before the
+      registry existed.
+    - **`registry=`** (default when `detector` is omitted -- see
+      `_build_default_registry()`): a `cv_service.registry.ModelRegistry`
+      routes each request's `model_id` (optionally a comma-separated
+      composite list, see `registry.detect_composite`) to the matching
+      locally-discovered model(s), falling back to the registry's own
+      default for an unknown/absent id. See `cv_service/registry.py` and
+      MODULE.md "Model registry" for the full design.
+
+    Either way, if no model could be loaded at all (neither `detector` nor a
+    usable `registry` default), every frame gets the original Phase 0 echo
+    response: the service must never crash-loop for lack of a model.
 
     Per-frame inference failures (bad frame bytes, a transient model error)
     are also caught and degrade to an echo response for that one frame,
     rather than tearing down the whole bidi stream.
 
-    **Concurrency (V-d):** when a detector is loaded, each `DetectStream`
-    call spawns a `_StreamReader` background thread so frame receipt and
-    inference overlap within that one stream (see its docstring), and every
-    `detect()` call is gated by `inference_gate` (default: the process-wide
-    `InferenceGate`, shared across every `InferenceServicer` instance/stream)
-    so the number of *concurrent* inferences across all streams stays
-    bounded regardless of how many streams are open. The echo-only path (no
-    detector) skips both -- there's nothing to overlap or bound without a
-    model in the loop, so it stays the plain synchronous loop it always was.
+    **Concurrency (V-d):** when a model is loaded (either path above), each
+    `DetectStream` call spawns a `_StreamReader` background thread so frame
+    receipt and inference overlap within that one stream (see its
+    docstring), and every `detect()` call is gated by `inference_gate`
+    (default: the process-wide `InferenceGate`, shared across every
+    `InferenceServicer` instance/stream) so the number of *concurrent*
+    inferences across all streams stays bounded regardless of how many
+    streams are open -- composite mode's member calls are gated the same
+    way, individually (see `registry.detect_composite`), not as one bigger
+    unit. The echo-only path (no model at all) skips both -- there's nothing
+    to overlap or bound without a model in the loop, so it stays the plain
+    synchronous loop it always was.
     """
 
     def __init__(
@@ -198,17 +271,25 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         detector: Optional["YoloDetector"] = None,
         *,
         inference_gate: Optional[InferenceGate] = None,
+        registry: Optional["ModelRegistry"] = None,
     ) -> None:
-        self._detector = detector if detector is not None else _build_default_detector()
-        self._warned_model_ids: set[str] = set()
         self._inference_gate = inference_gate if inference_gate is not None else process_gate()
+        self._warned_model_ids: set[str] = set()
+        if detector is not None:
+            # Explicit single-detector injection: registry routing is
+            # bypassed entirely, see class docstring.
+            self._detector = detector
+            self._registry = None
+        else:
+            self._detector = None
+            self._registry = registry if registry is not None else _build_default_registry()
 
     def DetectStream(
         self,
         request_iterator: Iterable["cv_pb2.FrameRequest"],
         context: grpc.ServicerContext,
     ) -> Iterator["cv_pb2.DetectionResponse"]:
-        if self._detector is None:
+        if self._detector is None and self._registry is None:
             for request in request_iterator:
                 yield self._echo(request)
             return
@@ -233,17 +314,21 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             reader.stop()
 
     def _handle_request(self, request: "cv_pb2.FrameRequest") -> "cv_pb2.DetectionResponse":
-        self._warn_once_on_unknown_model(request.model_id)
-
         try:
-            with self._inference_gate.acquire():
-                detections, inference_millis = self._detector.detect(
-                    width=request.width,
-                    height=request.height,
-                    encoding=cv_pb2.ImageEncoding.Name(request.encoding),
-                    data=request.data,
-                    confidence_threshold=request.confidence_threshold or None,
-                )
+            if self._registry is not None:
+                detections, inference_millis = self._detect_via_registry(request)
+                if detections is None:
+                    return self._echo(request)
+            else:
+                self._warn_once_on_unknown_model(request.model_id)
+                with self._inference_gate.acquire():
+                    detections, inference_millis = self._detector.detect(
+                        width=request.width,
+                        height=request.height,
+                        encoding=cv_pb2.ImageEncoding.Name(request.encoding),
+                        data=request.data,
+                        confidence_threshold=request.confidence_threshold or None,
+                    )
         except Exception:  # noqa: BLE001 - one bad frame must not kill the stream
             LOGGER.exception(
                 "inference failed for stream_id=%s sequence=%s; echoing "
@@ -275,9 +360,42 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             inference_millis=inference_millis,
         )
 
-    def _warn_once_on_unknown_model(self, requested_model_id: str) -> None:
-        """Log-and-serve-default for a requested `model_id` (registry is Phase 3).
+    def _detect_via_registry(
+        self, request: "cv_pb2.FrameRequest"
+    ) -> tuple[Optional[list], int]:
+        """Registry-routed counterpart of the explicit-`detector` branch above.
 
+        Resolves `request.model_id` (comma-separated for composite mode)
+        against `self._registry`'s roster and runs every resolved member via
+        `registry.detect_composite` (which does its own per-member
+        `inference_gate` acquisition -- see that function's docstring).
+        Returns ``(None, 0)`` when nothing resolved at all (registry present
+        but even its own default failed to load) so the caller echoes this
+        one frame, same as any other per-frame failure.
+        """
+        from cv_service.registry import detect_composite
+
+        resolved = self._registry.resolve(request.model_id)
+        if not resolved:
+            return None, 0
+        detections, inference_millis = detect_composite(
+            resolved,
+            gate=self._inference_gate,
+            width=request.width,
+            height=request.height,
+            encoding=cv_pb2.ImageEncoding.Name(request.encoding),
+            data=request.data,
+            confidence_threshold=request.confidence_threshold or None,
+        )
+        return detections, inference_millis
+
+    def _warn_once_on_unknown_model(self, requested_model_id: str) -> None:
+        """Log-and-serve-default for a requested `model_id`, explicit-`detector` path only.
+
+        The registry path (`self._registry is not None`) has its own
+        equivalent, deduplicated warning inside `ModelRegistry.resolve()` --
+        this method only runs for the legacy single-`detector` injection
+        branch (see class docstring), where there is no registry to ask.
         Warns at most once per distinct unknown `model_id` seen by this
         servicer instance, to avoid spamming logs once per frame.
         """
