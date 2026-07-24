@@ -23,10 +23,18 @@ import {
   type DeviceLifecycleAction,
 } from '../../core/fleet/warehouse-logic';
 import { formatDuration } from '../../core/stream-info-logic';
+import { registrationNumberOf, withRegistrationNumber, withoutRegistrationNumber } from '../../core/fleet/asset-attributes';
 import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
 import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
 import { LiveMap } from '../../shared/map/live-map';
-import { freshestSample, groupTelemetryByDevice, telemetryDevices } from './asset-detail-logic';
+import {
+  attributeRowsToRecord,
+  attributesToRows,
+  freshestSample,
+  groupTelemetryByDevice,
+  telemetryDevices,
+  type AttributeRow,
+} from './asset-detail-logic';
 import type {
   AssetDetails,
   AssetUsage,
@@ -167,6 +175,119 @@ export class AssetDetailPage {
   /** Per-tile "boxes: overlay/burned/off" toggle (docs/CYCLES-PLAN.md §11 item 6) — defaults to overlay. */
   protected readonly boxesMode = signal<BoxesMode>('overlay');
 
+  // --- Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3 — GET image URL as img src, graceful 404) -
+  // `hasImage` is optional on `AssetSummary`/`AssetDetails` (a backend predating the image endpoint
+  // pair simply omits it — see that field's own doc comment in `models.ts`); `imageLoadFailed`
+  // additionally covers the narrower case of a `hasImage: true` asset whose photo 404s anyway (the
+  // pinned contract's own `GET`'s documented failure mode — e.g. removed out from under a stale
+  // page), so the `<img>` degrades to "no photo" instead of a broken-image icon either way.
+
+  private readonly imageLoadFailed = signal(false);
+
+  protected readonly assetImageSrc = computed(() => {
+    const asset = this.asset();
+    if (!asset?.hasImage || this.imageLoadFailed()) {
+      return undefined;
+    }
+    return this.api.assetImageUrl(asset.assetId);
+  });
+
+  protected onImageError(): void {
+    this.imageLoadFailed.set(true);
+  }
+
+  // --- Registration/tail number (docs/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
+  // attributes-key convention (`core/fleet/asset-attributes.ts`), display + inline edit --------
+
+  protected readonly registrationNumber = computed(() => registrationNumberOf(this.asset()?.attributes ?? {}));
+  protected readonly editingRegistrationNumber = signal(false);
+  protected readonly registrationNumberDraft = signal('');
+
+  protected openEditRegistrationNumber(): void {
+    this.registrationNumberDraft.set(this.registrationNumber() ?? '');
+    this.editingRegistrationNumber.set(true);
+  }
+
+  protected cancelEditRegistrationNumber(): void {
+    this.editingRegistrationNumber.set(false);
+  }
+
+  /**
+   * `attributes` is a full replacement map, never a merge (`application.AssetEdit`'s own Javadoc) —
+   * both branches below start from the asset's *complete* current `attributes`, never just the one
+   * key, so no other attribute is silently dropped.
+   */
+  protected async confirmEditRegistrationNumber(): Promise<void> {
+    const asset = this.asset();
+    if (!asset) {
+      return;
+    }
+    const draft = this.registrationNumberDraft().trim();
+    const attributes =
+      draft.length > 0 ? withRegistrationNumber(asset.attributes, draft) : withoutRegistrationNumber(asset.attributes);
+    this.busy.set(true);
+    try {
+      const updated = await this.fleet.updateAsset(asset.assetId, { attributes });
+      if (updated) {
+        this.editingRegistrationNumber.set(false);
+      }
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  // --- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3 — advanced-mode key/value rows) ---
+  // Shows every attribute raw, including `registrationNumber` — this is the "advanced" escape
+  // hatch, it doesn't hide anything the simpler inline edit above already covers.
+
+  protected readonly attributesEditorOpen = signal(false);
+  protected readonly attributeRows = signal<readonly AttributeRow[]>([]);
+  protected readonly attributesSubmitting = signal(false);
+
+  protected openAttributesEditor(): void {
+    this.attributeRows.set(attributesToRows(this.asset()?.attributes ?? {}));
+    this.attributesEditorOpen.set(true);
+  }
+
+  protected cancelAttributesEditor(): void {
+    this.attributesEditorOpen.set(false);
+  }
+
+  protected addAttributeRow(): void {
+    this.attributeRows.update((rows) => [...rows, { key: '', value: '' }]);
+  }
+
+  protected removeAttributeRow(index: number): void {
+    this.attributeRows.update((rows) => rows.filter((_, i) => i !== index));
+  }
+
+  protected updateAttributeKey(index: number, key: string): void {
+    this.attributeRows.update((rows) => rows.map((row, i) => (i === index ? { ...row, key } : row)));
+  }
+
+  protected updateAttributeValue(index: number, value: string): void {
+    this.attributeRows.update((rows) => rows.map((row, i) => (i === index ? { ...row, value } : row)));
+  }
+
+  /** Submits every current row as the full replacement map — see `confirmEditRegistrationNumber`'s doc comment. */
+  protected async confirmAttributesEditor(): Promise<void> {
+    const asset = this.asset();
+    if (!asset) {
+      return;
+    }
+    this.attributesSubmitting.set(true);
+    try {
+      const updated = await this.fleet.updateAsset(asset.assetId, {
+        attributes: attributeRowsToRecord(this.attributeRows()),
+      });
+      if (updated) {
+        this.attributesEditorOpen.set(false);
+      }
+    } finally {
+      this.attributesSubmitting.set(false);
+    }
+  }
+
   // --- Asset header edit (rename/category) + lifecycle -------------------------------------
 
   protected readonly editingAsset = signal(false);
@@ -205,6 +326,7 @@ export class AssetDetailPage {
   constructor() {
     effect(() => {
       const id = this.assetId();
+      this.imageLoadFailed.set(false); // a fresh navigation deserves a fresh attempt at the photo
       void this.load(id);
     });
 

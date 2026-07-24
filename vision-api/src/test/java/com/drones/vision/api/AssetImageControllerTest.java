@@ -1,0 +1,154 @@
+package com.drones.vision.api;
+
+import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.AssetImage;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+class AssetImageControllerTest {
+
+    private AssetImageRepositoryPort assetImageRepositoryPort;
+    private MockMvc mockMvc;
+
+    private final AssetId assetId = AssetId.random();
+
+    @BeforeEach
+    void setUp() {
+        assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(new AssetImageController(assetImageRepositoryPort))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+    }
+
+    // ---- PUT /api/assets/{id}/image ----
+
+    @Test
+    void putStoresTheImageAndReturns204() throws Exception {
+        byte[] body = {1, 2, 3, 4, 5};
+
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value())
+                        .contentType("image/jpeg").content(body))
+                .andExpect(status().isNoContent());
+
+        ArgumentCaptor<AssetImage> captor = ArgumentCaptor.forClass(AssetImage.class);
+        verify(assetImageRepositoryPort).save(eq(assetId), captor.capture());
+        assertArrayEquals(body, captor.getValue().data());
+        assertEquals("image/jpeg", captor.getValue().contentType());
+    }
+
+    @Test
+    void putAcceptsPngContentType() throws Exception {
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value())
+                        .contentType("image/png").content(new byte[]{9, 9}))
+                .andExpect(status().isNoContent());
+
+        ArgumentCaptor<AssetImage> captor = ArgumentCaptor.forClass(AssetImage.class);
+        verify(assetImageRepositoryPort).save(eq(assetId), captor.capture());
+        assertEquals("image/png", captor.getValue().contentType());
+    }
+
+    @Test
+    void putReturns400ForAnUnsupportedContentType() throws Exception {
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value())
+                        .contentType("application/octet-stream").content(new byte[]{1}))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
+    @Test
+    void putReturns400ForAMissingContentType() throws Exception {
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value()).content(new byte[]{1}))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
+    @Test
+    void putReturns413ForAnOversizedBody() throws Exception {
+        byte[] tooBig = new byte[AssetImageController.MAX_IMAGE_BYTES + 1];
+
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value())
+                        .contentType("image/jpeg").content(tooBig))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.error").value("PAYLOAD_TOO_LARGE"));
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
+    @Test
+    void putReturns400ForAnEmptyBody() throws Exception {
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value())
+                        .contentType("image/jpeg").content(new byte[0]))
+                .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
+    // ---- GET /api/assets/{id}/image ----
+
+    @Test
+    void getReturnsTheStoredImageWithItsContentType() throws Exception {
+        byte[] data = {5, 4, 3, 2, 1};
+        when(assetImageRepositoryPort.findByAssetId(assetId))
+                .thenReturn(Optional.of(new AssetImage(data, "image/png")));
+
+        mockMvc.perform(get("/api/assets/{id}/image", assetId.value()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/png"))
+                .andExpect(result -> assertArrayEquals(data, result.getResponse().getContentAsByteArray()));
+    }
+
+    @Test
+    void getReturns404WhenNoImageIsStored() throws Exception {
+        when(assetImageRepositoryPort.findByAssetId(assetId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/assets/{id}/image", assetId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void getReturns400ForAMalformedUuid() throws Exception {
+        mockMvc.perform(get("/api/assets/{id}/image", "not-a-uuid"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ---- DELETE /api/assets/{id}/image ----
+
+    @Test
+    void deleteRemovesTheImageAndReturns204() throws Exception {
+        mockMvc.perform(delete("/api/assets/{id}/image", assetId.value()))
+                .andExpect(status().isNoContent());
+
+        verify(assetImageRepositoryPort, times(1)).deleteByAssetId(assetId);
+    }
+
+    @Test
+    void deleteReturns400ForAMalformedUuid() throws Exception {
+        mockMvc.perform(delete("/api/assets/{id}/image", "not-a-uuid"))
+                .andExpect(status().isBadRequest());
+    }
+}

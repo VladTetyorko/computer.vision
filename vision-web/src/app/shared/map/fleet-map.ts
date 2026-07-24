@@ -52,14 +52,15 @@ function escapeHtml(value: string): string {
  * streaming asset, popups with a "Watch live" action, and auto-fit-to-bounds that a manual pan/zoom
  * disables until "Recenter" is clicked.
  *
- * **Moved here from `pages/map/fleet-map.ts`** (docs/MVP3-PLAN.md §C-c) when Command needed to
- * embed this component too — the same "no page imports another page's module" precedent every
- * other shared piece in this app follows (see `core/fleet/device-logic.ts`'s doc comment). `MapPage`'s
- * own import path is the only thing that changed there; this component's behavior is otherwise
- * unchanged. `MapPage` resolves a clicked marker's `watch` output to `/live/:deviceId`;
- * `CommandPage` instead routes it straight to `/fly?asset=<id>&watch=1` (no device lookup needed —
- * see `CommandPage`'s own doc comment) — which host does the navigating is exactly the same split
- * described below, just resolved differently per page.
+ * **Moved here from `pages/map/fleet-map.ts`** (docs/MVP3-PLAN.md §C-c) when the (now-deleted)
+ * `MapPage` and the new Command dashboard both needed to embed this component — the same "no page
+ * imports another page's module" precedent every other shared piece in this app follows (see
+ * `core/fleet/device-logic.ts`'s doc comment). `MapPage` itself is gone now (`/map` redirects to
+ * `/command`, docs/UX-REWORK-PLAN.md §U-c — see `features/map/map.routes.ts`'s own doc comment),
+ * so `CommandPage` is this component's only host today: it routes a clicked marker's `watch` output
+ * straight to `/fly?asset=<id>&watch=1` (no device lookup needed — see `CommandPage`'s own doc
+ * comment) — which host does the navigating is exactly the same split described below, just there
+ * is now exactly one host to resolve it.
  *
  * **Leaflet loads only here and in `shared/map/live-map.ts`** — both dynamically `import`
  * (via `shared/map/leaflet-loader.ts#importLeaflet`) inside `initMap()`, called from `afterNextRender`,
@@ -81,7 +82,9 @@ function escapeHtml(value: string): string {
  * click listener on the map container rather than one Angular event binding per popup — matches
  * the imperative-Leaflet approach used throughout this component. Resolving *which* device to
  * navigate to is `FleetMapStore`'s job (`resolveWatchDevice`); this component only emits the
- * chosen `assetId` via `watch`/`preview` and leaves both navigation and docking to `MapPage`. Both
+ * chosen `assetId` via `watch`/`preview` and leaves both navigation and docking to the host page
+ * (`CommandPage` today — see its own doc comment for what each output now drives, since the old
+ * docked `LiveDock` panel `preview` used to open is gone). Both
  * buttons read "Watch live" — the docked-inline-preview vs. a fresh full page is a presentation
  * detail, not a separate verb (see each output's own doc comment below for which is which); a
  * `title` attribute on each still spells out the difference for a pointer-hovering user. The dock
@@ -91,7 +94,10 @@ function escapeHtml(value: string): string {
  *
  * **Event markers** (docs/MVP2-PLAN.md §E, E-b bullet 3): a second, independent marker layer for
  * every position-carrying `DetectionEvent` (`EventsStore.events()`, injected directly rather than
- * activated/released here — `MapPage` owns that lifecycle, see its own doc comment), capped to the
+ * activated/released here — nobody needs to: the app-shell header bell
+ * (`shared/ui/notification-bell.ts`) now keeps `EventsStore` activated for the entire session, so
+ * this component simply reads a feed that is always warm rather than owning any part of its
+ * activate/release lifecycle itself, same as before, just a different always-on reason), capped to the
  * most recent `MAX_EVENT_MARKERS` (`selectEventMarkers`). These never participate in auto-fit
  * (`fitToMarkers` only ever looks at `store.markers()`, unchanged) — a stray old event elsewhere on
  * the map must never yank the fleet view away from where the assets actually are. A popup shows
@@ -200,8 +206,14 @@ export class FleetMap {
     this.leaflet = L;
     ensureLeafletStylesheet();
 
-    const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
+    // `zoomControl: false` + re-added at `bottomright`: Leaflet's default zoom control lands at
+    // `topleft`, the same corner `.controls.layers` (the layer-switcher segmented control, see
+    // this component's own `fleet-map.css`) occupies — the two would render stacked on top of each
+    // other. `bottomright` is the one corner nothing else in this template claims (Recenter sits
+    // `topright`, the offline badge sits `bottomleft`).
+    const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2, zoomControl: false });
     this.map = map;
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     this.applyLayer(this.settings.mapLayer());
 

@@ -128,8 +128,15 @@ export class LiveMap {
     this.leaflet = L;
     ensureLeafletStylesheet();
 
-    const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2 });
+    // `zoomControl: false` + re-added at `bottomright`: Leaflet's default zoom control lands at
+    // `topleft`, the same corner `.controls.layers` (the layer-switcher segmented control, see
+    // this component's own `live-map.css`) occupies — the two would render stacked on top of each
+    // other (visually confirmed on `/fly`'s cockpit inset — see `shared/map/fleet-map.ts`'s
+    // identical fix and comment). `bottomright` is the one corner nothing else in this template
+    // claims (Follow/Expand sit `topright`, the offline badge sits `bottomleft`).
+    const map = L.map(this.mapHost().nativeElement, { center: [0, 0], zoom: 2, zoomControl: false });
     this.map = map;
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     this.applyLayer(this.settings.mapLayer());
 

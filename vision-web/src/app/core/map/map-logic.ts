@@ -11,8 +11,10 @@ import { ageSeconds, deriveTrail } from '../telemetry/telemetry-logic';
  * needed the identical fleet map embed (`shared/map/fleet-map.ts`, `core/map-store.ts`) a second page —
  * this codebase has no precedent for one page importing another page's module (see
  * `core/fleet/device-logic.ts`'s doc comment for the original precedent this follows, most recently
- * repeated by `shared/map/live-map.ts`/`shared/player/detections-strip.ts`'s own moves). `features/map/map.ts` now
- * imports this from here too; nothing about its behavior changed.
+ * repeated by `shared/map/live-map.ts`/`shared/player/detections-strip.ts`'s own moves). That original
+ * host, `MapPage`, is deleted now (`/map` redirects to `/command`, see `features/map/map.routes.ts`'s
+ * own doc comment) — `features/command/command.ts` (via `shared/map/fleet-map.ts`) is this module's
+ * sole importer today; nothing about its own behavior changed by either move.
  */
 
 /** How many recent trail points a live fleet marker keeps (docs/CYCLES-PLAN.md §6: "short recent trail"). */

@@ -11,7 +11,7 @@ import {
   type AssetTelemetrySnapshot,
 } from './map-logic';
 
-/** How often the fleet's asset list is re-read while the `/map` tab is visible — same cadence as `FleetStore`. */
+/** How often the fleet's asset list is re-read while the map is mounted (`/command` today) — same cadence as `FleetStore`. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
 /** How often each *streaming* asset's telemetry is re-read — matches `TelemetryStore`'s own cadence. */
@@ -31,7 +31,8 @@ interface AssetTracker {
 }
 
 /**
- * Polls the whole fleet for the `/map` tab (docs/CYCLES-PLAN.md §6): `GET /api/assets` every 5s
+ * Polls the whole fleet for the fleet map (originally the `/map` tab, docs/CYCLES-PLAN.md §6; now
+ * embedded in the Command dashboard, docs/MVP3-PLAN.md §C-c — see class doc below): `GET /api/assets` every 5s
  * drives `buckets`/`markers`; each asset currently bucketed `streaming` additionally gets its own
  * 2s telemetry poller — the fleet map's per-asset analog of `TelemetryStore`, reusing its pure
  * helper (`selectOpenUsage`, and `deriveTrail` via `map-logic.ts`) rather than the class itself:
@@ -51,12 +52,14 @@ interface AssetTracker {
  * next 5s tick — a referee's fleet is a handful of machines, not hundreds, but an idle map tab
  * still shouldn't accumulate pollers for drones nobody is flying anymore.
  *
- * **Page-provided, not `providedIn: 'root'`** — like `TelemetryStore`, each host page (`MapPage`,
- * and now `CommandPage`) lists this in its own `providers` so every poller (the 5s asset poll, the
- * 1s clock, and every per-asset 2s telemetry poll) starts and stops with that page's own route,
- * never running while neither tab is open. Two pages providing it means two independent instances
- * (and therefore two independent 5s asset polls) when both happen to be mounted — never actually
- * simultaneous in this single-route-at-a-time SPA, so this costs nothing in practice.
+ * **Page-provided, not `providedIn: 'root'`** — like `TelemetryStore`, the host page lists this in
+ * its own `providers` so every poller (the 5s asset poll, the 1s clock, and every per-asset 2s
+ * telemetry poll) starts and stops with that page's own route, never running while no page needing
+ * it is open. `CommandPage` is the only host today (`MapPage`, the original host, is deleted —
+ * `/map` now redirects there, see `features/map/map.routes.ts`'s own doc comment) — the two-hosts
+ * period this comment used to describe is over; a second host providing this again in the future
+ * would cost nothing new (two independent instances/polls, never simultaneous in this
+ * single-route-at-a-time SPA), it just isn't the current shape.
  *
  * **Errors silent-degrade**, same rationale as `TelemetryStore`: this is a background overview,
  * not a user-initiated action, so a failed poll just leaves signals at their last-known values
@@ -65,8 +68,9 @@ interface AssetTracker {
  * Moved here from `pages/map/map-store.ts` in docs/MVP3-PLAN.md §C-c when the Command dashboard
  * needed to embed `shared/map/fleet-map.ts` (which injects this store) as a second page — this codebase's
  * own "move a page-scoped thing to a shared home once a second page needs it" precedent (see
- * `core/map-logic.ts`'s doc comment). `features/map/map.ts` now imports this from here too; nothing
- * about its behavior changed.
+ * `core/map-logic.ts`'s doc comment). `features/command/command.ts` is that store's sole importer now
+ * (`features/map/` holds only a route redirect since `MapPage` was deleted — no `features/map/map.ts`
+ * component exists); nothing about this store's own behavior changed by the move.
  */
 @Injectable()
 export class FleetMapStore {

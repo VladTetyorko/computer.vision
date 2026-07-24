@@ -147,6 +147,49 @@ export interface ScanResult {
   readonly failedMethods: readonly string[];
 }
 
+// --- Device probe (docs/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) -----------
+// `POST /api/devices/probe`: the pinned "test-before-save" contract (UX-DESIGN §5.1) — connects to
+// a candidate device/URI without registering anything, decodes exactly one frame, and reports back
+// what it saw. This is what lets the wizard refuse to advance to Create on a connection that can't
+// actually produce video (`features/onboarding/onboarding-logic.ts#canAdvanceFromTest`). Coded
+// against the plan's pinned shape ahead of the backend half landing — see that plan section's own
+// "code defensively" note; a 422 with a specific message is the documented failure path
+// (`describeHttpError` already surfaces a backend-supplied `ErrorResponse.message` for any non-2xx
+// status, 422 included, with no dedicated case needed).
+
+/** Mirrors the probe endpoint's request body — the same shape a register/discover candidate already carries. */
+export interface ProbeDeviceRequest {
+  readonly protocol: string;
+  readonly uri: string;
+  readonly options?: Record<string, string>;
+}
+
+/**
+ * Mirrors the probe endpoint's 200 response — one decoded frame plus the facts the Test step shows
+ * (WxH, codec, fps, whether telemetry was detected alongside the video) and any non-fatal warnings.
+ * `codec`/`fps` are the two fields the pinned contract itself marks optional (not every source
+ * reports them); everything else is always present on a 200 — a probe that can't produce a frame at
+ * all is the documented 422 path instead (an `HttpErrorResponse`, not a `{ok: false}` body).
+ *
+ * **`warnings` is typed optional despite `dto.ProbeDeviceResponse`'s own Javadoc claiming "always
+ * present, possibly empty"** — verified live against the actual running backend (§U-d's backend
+ * half landed concurrently with this file): a probe against a `sim`/`sim://demo` device returned a
+ * 200 body with the key entirely absent, not `[]` (`{"ok":true,"widthPx":640,"heightPx":480,
+ * "codec":"mjpeg","telemetryDetected":true,"frameJpegBase64":"…"}` — no `warnings` key at all).
+ * Every reader here (`features/onboarding/onboarding.html`) defaults a missing value to `[]` rather
+ * than trusting the doc comment over the observed wire behavior.
+ */
+export interface ProbeDeviceResult {
+  readonly ok: boolean;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly codec?: string;
+  readonly fps?: number;
+  readonly telemetryDetected: boolean;
+  readonly frameJpegBase64: string;
+  readonly warnings?: readonly string[];
+}
+
 /** Mirrors `dto.ErrorResponse`, produced by `ApiExceptionHandler`. */
 export interface ApiErrorBody {
   readonly error: string;
@@ -219,6 +262,13 @@ export interface AssetUsage {
  * parallel with this UI, so a backend this app talks to before that ships simply omits it —
  * every reader here treats an absent `lifecycle` as `'ACTIVE'` (see
  * `features/devices/devices-page-logic.ts`), never as a crash.
+ *
+ * `hasImage` (docs/UX-REWORK-PLAN.md §U-d — the asset image endpoint pair) is optional for the
+ * identical reason: a backend that predates the `PUT/GET/DELETE /api/assets/{id}/image` endpoints
+ * simply omits the field. Every reader treats an absent value as "no photo" — see
+ * `features/asset-detail/asset-detail.ts`'s own image-loading guard, which is the one place this
+ * matters (the onboarding wizard's own Create step never reads it; it knows whether it just
+ * uploaded a photo).
  */
 export interface AssetSummary {
   readonly assetId: string;
@@ -231,6 +281,7 @@ export interface AssetSummary {
   readonly lastUsedAt?: string;
   readonly lastKnownPosition?: GeoPosition;
   readonly attributes: Record<string, string>;
+  readonly hasImage?: boolean;
 }
 
 /**

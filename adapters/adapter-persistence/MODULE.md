@@ -8,8 +8,10 @@ telemetry samples, detection results (docs/MVP2-PLAN.md P-b).
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration`, opt-in via `vision.persistence.enabled`)
-**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 42 tests (up from 39, docs/MVP2-PLAN.md R-a2 — `AssetUsageEntity`/`JpaAssetUsageRepository` gained `stream_id`)
-(`PostgresDockerIntegrationTest` + 6 `@Nested` classes + 4 top-level retention/restart-survival/schema
+**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 46 tests (up from 42, docs/UX-REWORK-PLAN.md
+§U-d item 3 — new `AssetImageEntity`/`JpaAssetImageRepository`, +4 tests; up from 39, docs/MVP2-PLAN.md R-a2 —
+`AssetUsageEntity`/`JpaAssetUsageRepository` gained `stream_id`)
+(`PostgresDockerIntegrationTest` + 7 `@Nested` classes + 4 top-level retention/restart-survival/schema
 tests), all Testcontainers-backed, docker-gated (skip cleanly without docker, see Tests below).
 
 All version pins (Hibernate, Postgres driver, Flyway, Testcontainers, Jackson 3) come from
@@ -29,12 +31,14 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `final class JpaAssetUsageRepository implements AssetUsageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/MVP2-PLAN.md P-b.
 - `final class JpaTelemetryRepository implements TelemetryRepositoryPort` — constructor `(EntityManagerFactory)` (production default retention cap, see Retention below) or `(EntityManagerFactory, int retentionLimitPerUsage)` (test/override seam). docs/MVP2-PLAN.md P-b.
 - `final class JpaDetectionRepository implements DetectionRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaTelemetryRepository`. docs/MVP2-PLAN.md P-b.
+- `final class JpaAssetImageRepository implements AssetImageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/UX-REWORK-PLAN.md §U-d item 3 — the asset image store (CONTRACT 2).
 - package-private `final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas).
 
 ### `com.drones.vision.adapter.persistence.entity`
-- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
+- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
 - `TelemetrySampleEntity`/`DetectionResultEntity` have a synthetic UUID `id` the adapter invents at save time (`UUID.randomUUID()` in each repository's `toEntity`) — `Telemetry`/`DetectionResult` themselves carry no identity of their own (append-only samples/results, not aggregates), so there is nothing domain-side to derive a primary key from; the id never surfaces back through the ports.
 - `AssetUsageEntity#streamId` (docs/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
+- `AssetImageEntity` (docs/UX-REWORK-PLAN.md §U-d item 3, `V5__asset_images.sql`) is keyed by `assetId` itself, **not** a synthetic id like `TelemetrySampleEntity`/`DetectionResultEntity` above — there is at most one image per asset and `save` is always an upsert, so the primary key doubles as the "one row per asset" constraint with no separate unique index needed. `data` is a plain `byte[]` field (Hibernate's default mapping to Postgres `bytea`, no `@Lob`/converter needed) — the first non-jsonb, non-text binary column in this module's schema.
 
 ## Schema (`src/main/resources/db/migration`)
 
@@ -42,6 +46,7 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `V2__seed_categories.sql` — the same default category set `InMemoryCategoryRepository` seeds in its constructor (`drone`, `ip-camera`, `usb-camera`, `robot`, `simulated`, then `fpv-drone`→`drone`, `esp32-cam`→`ip-camera` in a second batch so the self-referencing FK is satisfied), `ON CONFLICT (id) DO NOTHING` so re-running is a no-op. Keeps a persistence-enabled app's out-of-the-box category list identical to the in-memory fallback's.
 - `V3__history.sql` (docs/MVP2-PLAN.md P-b) — `asset_usages` (`id` UUID PK; `asset_id` UUID, indexed, no FK; `started_at`/`ended_at` timestamptz, the latter nullable; `start_latitude`/`start_longitude`/`start_altitude_meters` and the `last_*` triple — `GeoPosition` flattened to columns rather than jsonb, same "flatten a small value type" choice `AssetEntity` makes for `Ownership`; `sample_count` bigint), `telemetry_samples` (`id` UUID PK, synthetic; `usage_id` UUID + `at` timestamptz, **indexed together** as `(usage_id, at)`; `device_id` UUID; `latitude`/`longitude`/`altitude_meters`/`heading_degrees`/`battery_percent` all nullable doubles; `extra` jsonb), `detection_results` (`id` UUID PK, synthetic; `stream_id` UUID + `captured_at` timestamptz, **indexed together** as `(stream_id, captured_at)`; `frame_sequence` bigint; `detections` jsonb — the whole `List<Detection>`, see Conventions; `inference_latency_nanos` bigint). No FKs, same rationale as V1's tables (see Conventions).
 - `V4__usage_stream_id.sql` (docs/MVP2-PLAN.md R-a2) — `ALTER TABLE asset_usages ADD COLUMN stream_id UUID` (nullable, no FK, no backfill — a stream's id was never recorded anywhere before this migration, so pre-existing rows simply read back `null`, matching `AssetUsage#streamId`'s own honest "legacy usage" nullability). Purely additive on top of V1-V3; no other table changes.
+- `V5__asset_images.sql` (docs/UX-REWORK-PLAN.md §U-d item 3) — `asset_images` (`asset_id` UUID PK — no FK, same convention as every other table; `content_type` varchar; `data` bytea; `updated_at` timestamptz default `now()`). New table, no changes to any existing one.
 
 ## Bootstrap (no Spring, no connection pool)
 
@@ -106,6 +111,7 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   inclusive, mirroring `InMemoryDetectionRepository`'s actual behavior despite `DetectionQuery#to`'s
   javadoc calling it exclusive — see `JpaDetectionRepository`'s javadoc), label filter, newest-first
   ordering + limit.
+- `@Nested AssetImageRepositoryTests` (4, docs/UX-REWORK-PLAN.md §U-d item 3) — unknown asset id → empty `Optional` + `existsByAssetId` false, round trip of bytes + content type + `existsByAssetId` true, upsert-replaces (a second `save` for the same asset id fully replaces the first — different bytes, different content type), idempotent delete (also verifying `existsByAssetId` flips back to false, and a second delete call doesn't throw).
 - `telemetryRetentionPrunesOldestSamplesOnceCapExceeded`/`detectionRetentionPrunesOldestResultsOnceCapExceeded`
   — use each repository's small-cap constructor overload (cap 3) to insert 5 rows and assert exactly
   the 3 newest survive.
@@ -126,7 +132,7 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   schema every other test in this class already depends on (rather than only inferring the
   migration ran from a null-`streamId` round trip elsewhere).
 
-42 tests total, all green in this environment (`docker info` reachable).
+46 tests total, all green in this environment (`docker info` reachable).
 
 ## Gotchas
 
@@ -142,6 +148,8 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
 Fully implements docs/MVP2-PLAN.md **P-a** (`CategoryRepositoryPort`/`DeviceRepositoryPort`/`AssetRepositoryPort`) **and P-b** (`AssetUsageRepositoryPort`/`TelemetryRepositoryPort`/`DetectionRepositoryPort`): JPA implementations for all six, a Flyway-migrated schema (V1–V4), and every round-trip/upsert/idempotent-delete/lifecycle-state/ordering/limit/retention/restart-survival test described above passing. Wired into vision-app behind `vision.persistence.enabled` (default `false`) — see vision-app/MODULE.md's `PersistenceWiringConfiguration` entry for the toggle itself.
 
 docs/MVP2-PLAN.md **R-a2** ("usage→stream link, persistence half") is closed: `AssetUsageEntity`/`JpaAssetUsageRepository` gained a nullable `stream_id` column (`V4__usage_stream_id.sql`, additive over V1-V3 — no backfill possible or attempted, see the migration's own comment), mapped exactly like every other nullable field on the entity. This is what makes `vision-application`'s `DefaultReplayService` able to query `DetectionRepositoryPort` by a usage's real `streamId` instead of always returning empty detections — see vision-application/MODULE.md's `ReplayService`/Gotchas entries for the read side.
+
+docs/UX-REWORK-PLAN.md **§U-d item 3 done** (asset image, persistence half — CONTRACT 2's storage): a new sixth-plus-one repository port, `AssetImageEntity`/`JpaAssetImageRepository` (`V5__asset_images.sql`, purely additive — a new table, nothing else changed). Keyed by `assetId` itself rather than a synthetic id (see the entity's own note above), `data` a plain `byte[]`/`bytea` column (Hibernate's default mapping, no `@Lob`/converter/jsonb needed — the first genuinely binary, non-JSON column in this schema). `existsByAssetId` is a `count(a)` JPQL query, never fetching the `data` column, specifically so a fleet/asset list populating `hasImage` for many rows doesn't pay for loading image bytes it doesn't need. `./mvnw -B -pl adapters/adapter-persistence test`: **46/46 green** (was 42) — new `AssetImageRepositoryTests` (4, see Tests above). See vision-domain/vision-application/vision-api/vision-app's own MODULE.mds for the port/domain type, the probe endpoint, the REST controller, and the wiring (`PersistenceWiringConfiguration#assetImageRepositoryPort`, gated by `vision.persistence.enabled` exactly like the other six port beans).
 
 **Honest gaps / explicitly out of scope:**
 - **`AuditTrailPort` has no JPA implementation.** It was never in either P-a's or P-b's scope (docs/MVP2-PLAN.md doesn't mention it); `InMemoryAuditTrail` still backs it unconditionally in vision-app regardless of `vision.persistence.enabled` — the fleet-change audit trail does not survive a restart.

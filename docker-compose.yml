@@ -46,11 +46,31 @@ services:
 
   mediamtx:
     # Pinned, not :latest — mediamtx has shipped viewer-facing regressions in
-    # routine releases (e.g. #4022: WebRTC clients freeze on stream interruption,
-    # broken in v1.10.0, fixed later). 1.19.2 is the version V-a verified the
-    # MTX_HLS* defaults and WHEP behavior against. Bump deliberately, re-testing
-    # WHEP viewer reconnection on publish interruption when you do.
-    image: bluenviron/mediamtx:1.19.2
+    # routine releases, so every bump is deliberate and re-tested, never a
+    # rubber-stamp version-string edit.
+    #
+    # 1.19.3 fixes #5975, directly relevant to this stack's HLS+WHEP viewing
+    # path: with AllowOrigins left as a wildcard (this stack's default),
+    # mediamtx used to echo the request's own Origin back in
+    # Access-Control-Allow-Origin instead of "*" — the difference matters
+    # because browsers only forward credentials (cookies) on the echoed-origin
+    # form, so any third-party site could piggyback on a browser that had
+    # ever entered credentials for this mediamtx and read its HLS/WebRTC
+    # streams cross-origin. 1.19.3 now returns a literal "*", which is
+    # credential-less by browser rules.
+    #
+    # Bumped 1.19.2 -> 1.19.3 with a full WHEP re-test (docs/REALTIME-PLAN.md
+    # exit criteria: healthy-stream soak + feed-kill/ICE-restart/recovery) —
+    # see that test run's results for this bump. Re-run the same re-test on
+    # every future bump, same as this one.
+    #
+    # (Historical, no longer the pin's rationale: an earlier revision of this
+    # comment cited #4022 — WebRTC viewers freezing on stream interruption,
+    # introduced in v1.10.0 — as the reason to pin. That bug was fixed in
+    # v1.11.1, long before this pin was ever taken, so it was already dead
+    # history even at 1.19.2. Kept only so nobody goes hunting for a live
+    # #4022 regression that isn't there.)
+    image: bluenviron/mediamtx:1.19.3
     restart: unless-stopped
     ports:
       - "8554:8554" # RTSP

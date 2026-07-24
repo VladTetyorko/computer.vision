@@ -1,10 +1,11 @@
 <div class="page">
   <div class="page-head">
     <div>
-      <h1>Devices</h1>
+      <h1>Warehouse</h1>
       <p>
-        Everything Vision can pull frames from. "+ Add source" covers every way in — register by
-        hand, scan the network, or simulate one with no hardware at all.
+        Everything Vision already knows about — assets and the devices behind them. To bring in a
+        new source (register by hand, scan the network, or simulate one with no hardware at all),
+        use "+ Add source".
       </p>
     </div>
     <div class="row">
@@ -17,322 +18,12 @@
         />
         <span>Show archived</span>
       </label>
-      <button type="button" class="btn" (click)="toggleAddSource()">
-        {{ addSourceOpen() ? 'Close' : '+ Add source' }}
-      </button>
+      <button type="button" class="btn" (click)="goToAddSource()">+ Add source</button>
       <button type="button" class="btn secondary" (click)="refreshAll()" [disabled]="fleet.loading()">
         Refresh
       </button>
     </div>
   </div>
-
-  <!-- ---- Add source (docs/CYCLES-PLAN.md §9, CU-b item 1) ---------------- -->
-  @if (addSourceOpen()) {
-    <section class="card add-source" id="add-source-card" [class.highlighted]="highlighted()">
-      <header>
-        <div class="row">
-          @if (addSourceMethod()) {
-            <button type="button" class="btn secondary small back-btn" (click)="backToMethods()" aria-label="Back">
-              ‹
-            </button>
-          }
-          <h2>Add a source</h2>
-        </div>
-        <span class="muted">Every current way in, one door</span>
-      </header>
-
-      @if (!addSourceMethod()) {
-        <div class="method-grid">
-          <button type="button" class="method-tile" (click)="chooseMethod('register')">
-            <span class="method-glyph glyph-register" aria-hidden="true"></span>
-            <span class="method-title">Register manually</span>
-            <span class="method-sub">Type in a protocol and URI you already know.</span>
-          </button>
-          <button type="button" class="method-tile" (click)="chooseMethod('discover')">
-            <span class="method-glyph glyph-discover" aria-hidden="true"></span>
-            <span class="method-title">Discover on network</span>
-            <span class="method-sub">Scan for ONVIF, mDNS, and local V4L2 candidates.</span>
-          </button>
-          <button type="button" class="method-tile" (click)="chooseMethod('simulate')">
-            <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
-            <span class="method-title">Simulate</span>
-            <span class="method-sub">Zero hardware — a file, an RTSP rehearsal, or a moving test drone.</span>
-          </button>
-        </div>
-      }
-
-      @switch (addSourceMethod()) {
-        @case ('register') {
-          <form class="register-form" (ngSubmit)="submit()">
-            <div class="field">
-              <label class="label" for="f-name">Name</label>
-              <input id="f-name" name="name" [(ngModel)]="name" placeholder="front-gate" required />
-            </div>
-
-            <div class="field">
-              <label class="label" for="f-protocol">Protocol</label>
-              <select id="f-protocol" name="protocol" [(ngModel)]="protocolSelect" required>
-                <option value="" disabled>Choose a protocol…</option>
-                @for (option of registerableProtocols; track option.value) {
-                  <option [value]="option.value">{{ option.value }} — {{ option.hint }}</option>
-                }
-                <option [value]="customProtocolOption">Custom… — a protocol not listed above</option>
-              </select>
-            </div>
-
-            @if (isCustomProtocol()) {
-              <div class="field">
-                <label class="label" for="f-protocol-custom">Custom protocol</label>
-                <input
-                  id="f-protocol-custom"
-                  name="customProtocol"
-                  [(ngModel)]="customProtocol"
-                  placeholder="e.g. onvif"
-                  required
-                />
-              </div>
-            }
-
-            <div class="field wide">
-              <label class="label" for="f-uri">URI</label>
-              <input id="f-uri" name="uri" [(ngModel)]="uri" [placeholder]="uriPlaceholder()" required />
-            </div>
-
-            <button type="submit" class="btn" [disabled]="!canSubmit()">
-              {{ submitting() ? 'Registering…' : 'Register' }}
-            </button>
-          </form>
-
-          @if (settings.advancedMode()) {
-            <div class="advanced">
-              <div class="spread">
-                <h3>Stream options</h3>
-                <button type="button" class="btn secondary small" (click)="addOptionRow()">
-                  Add option
-                </button>
-              </div>
-              <p class="muted hint">
-                Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
-                e.g. <code>rtsp_transport = tcp</code>.
-              </p>
-              @for (row of options(); track $index) {
-                <div class="option-row">
-                  <input
-                    [value]="row.key"
-                    (input)="updateOptionKey($index, $any($event.target).value)"
-                    placeholder="key"
-                    [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
-                  />
-                  <input
-                    [value]="row.value"
-                    (input)="updateOptionValue($index, $any($event.target).value)"
-                    placeholder="value"
-                    [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
-                  />
-                  <button
-                    type="button"
-                    class="btn secondary small"
-                    (click)="removeOptionRow($index)"
-                    aria-label="Remove option"
-                  >
-                    ×
-                  </button>
-                </div>
-              }
-            </div>
-          } @else {
-            <p class="muted hint">
-              Advanced stream options are hidden. Turn on advanced mode in
-              <a href="/settings">Settings</a> to edit them.
-            </p>
-          }
-        }
-
-        @case ('discover') {
-          <div class="row scan-row">
-            <label class="row scan-timeout">
-              <span class="muted">Timeout</span>
-              <select [(ngModel)]="scanTimeout" name="scanTimeout" [disabled]="scanning()">
-                @for (timeout of scanTimeouts; track timeout) {
-                  <option [value]="timeout">{{ timeout / 1000 }}s</option>
-                }
-              </select>
-            </label>
-            <button type="button" class="btn" (click)="scan()" [disabled]="scanning()">
-              {{ scanning() ? 'Scanning…' : 'Scan' }}
-            </button>
-          </div>
-
-          <p class="muted hint">
-            Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
-            enumeration. Nothing is port-scanned.
-          </p>
-
-          @if (scanResult(); as result) {
-            @if (result.failedMethods.length > 0) {
-              <div class="failed">
-                Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
-                errored, not because the network is empty.
-              </div>
-            }
-
-            @if (result.devices.length === 0) {
-              <div class="empty"><p>Nothing responded.</p></div>
-            } @else {
-              <table>
-                <thead>
-                  <tr>
-                    <th>Method</th>
-                    <th>Name</th>
-                    <th>Address</th>
-                    <th>Suggested category</th>
-                    <th>Details</th>
-                    <th aria-label="Actions"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (candidate of result.devices; track candidate.method + candidate.address) {
-                    <tr>
-                      <td><span class="chip accent">{{ candidate.method }}</span></td>
-                      <td>{{ candidate.name }}</td>
-                      <td class="mono muted truncate" [title]="candidate.address">
-                        {{ candidate.address }}
-                      </td>
-                      <td>
-                        @if (candidate.suggestedCategory) {
-                          {{ candidate.suggestedCategory }}
-                        } @else {
-                          <span class="faint">unknown</span>
-                        }
-                      </td>
-                      <td class="details">
-                        @for (pair of detailPairs(candidate.details); track pair.key) {
-                          <span class="chip" [title]="pair.value">{{ pair.key }}</span>
-                        }
-                      </td>
-                      <td class="actions">
-                        <button type="button" class="btn secondary small" (click)="useCandidate(candidate)">
-                          Use
-                        </button>
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            }
-          } @else {
-            <div class="empty"><p class="faint">No scan run yet.</p></div>
-          }
-        }
-
-        @case ('simulate') {
-          <form class="simulate-form" (ngSubmit)="submitSimulate()">
-            <div class="field">
-              <label class="label" for="sim-name">Name</label>
-              <input
-                id="sim-name"
-                name="simName"
-                [(ngModel)]="simName"
-                placeholder="derived from the file name"
-              />
-            </div>
-
-            <div class="field wide">
-              <label class="label" for="sim-mode">Mode</label>
-              <select id="sim-mode" name="simMode" [(ngModel)]="simMode">
-                <option value="direct">Play a file directly</option>
-                <option value="rtsp">Transmit a file over RTSP</option>
-                <option value="testDrone">Test drone (moving, no file)</option>
-                <option value="synthetic">Synthetic pattern (still, no telemetry)</option>
-              </select>
-            </div>
-
-            @if (simNeedsVideoPath()) {
-              <div class="field wide">
-                <label class="label" for="sim-video-path">Server-side video path</label>
-                <input
-                  id="sim-video-path"
-                  name="simVideoPath"
-                  [(ngModel)]="simVideoPath"
-                  placeholder="/srv/videos/flight.mp4"
-                  required
-                />
-              </div>
-            }
-
-            @if (simNeedsHomePoint()) {
-              <div class="field wide flight-plan-field">
-                <span class="label">Flight plan</span>
-                @if (flightPlanSummary(); as summary) {
-                  <div class="row flight-plan-summary">
-                    <span class="chip accent">{{ summary }}</span>
-                    <button type="button" class="btn secondary small" (click)="openFlightPlanDialog()">
-                      Edit
-                    </button>
-                    <button type="button" class="btn secondary small" (click)="clearFlightPlan()">
-                      Clear
-                    </button>
-                  </div>
-                } @else {
-                  <div class="row flight-plan-summary">
-                    <button type="button" class="btn secondary small" (click)="openFlightPlanDialog()">
-                      Draw flight plan on map
-                    </button>
-                    <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
-                  </div>
-                }
-              </div>
-
-              <details class="field wide home-point-fallback">
-                <summary>Home point (used only without a flight plan)</summary>
-                <div class="row">
-                  <div class="field">
-                    <label class="label" for="sim-lat">Home latitude</label>
-                    <input
-                      id="sim-lat"
-                      name="simLatitude"
-                      type="number"
-                      step="any"
-                      [(ngModel)]="simLatitude"
-                      placeholder="optional"
-                    />
-                  </div>
-
-                  <div class="field">
-                    <label class="label" for="sim-lon">Home longitude</label>
-                    <input
-                      id="sim-lon"
-                      name="simLongitude"
-                      type="number"
-                      step="any"
-                      [(ngModel)]="simLongitude"
-                      placeholder="optional"
-                    />
-                  </div>
-                </div>
-              </details>
-
-              <label class="field checkbox-field">
-                <input type="checkbox" name="simAutoStart" [(ngModel)]="simAutoStart" />
-                <span>Start streaming immediately</span>
-              </label>
-            }
-
-            <button type="submit" class="btn" [disabled]="!simCanSubmit()">
-              {{ simSubmitting() ? 'Simulating…' : 'Simulate' }}
-            </button>
-          </form>
-
-          <p class="muted hint">
-            {{ simModeHint() }}
-            @if (simNeedsVideoPath()) {
-              The path must exist on the machine running the platform, not your browser.
-            }
-          </p>
-        }
-      }
-    </section>
-  }
 
   <!-- ---- Assets: the primary surface (docs/CYCLES-PLAN.md §11, CD-b item 1) ------------- -->
   <!-- One row per asset — exactly Watch · Open · Archive. CDK virtual scroll keeps rendering
@@ -363,8 +54,8 @@
           <h3>No assets yet</h3>
           <p>
             Register the built-in simulated source to see the whole pipeline work without any
-            hardware — then scan for the real thing, or place a moving test drone from "+ Add
-            source" → Simulate.
+            hardware — then use "+ Add source" above to bring in the real thing (register, scan, or
+            simulate a moving test drone) as a first-class asset.
           </p>
           <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
             Add the simulated source
@@ -451,7 +142,7 @@
     @if (warehouseRows().length === 0) {
       <div class="empty">
         <h3>No devices yet</h3>
-        <p>Use "+ Add source" above to register one — by hand, by scan, or with no hardware at all.</p>
+        <p>Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.</p>
       </div>
     } @else {
       <table>
@@ -649,8 +340,9 @@
   <!-- ---- Promote to asset (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix; renamed to
        its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3; switched to the deviceIds contract per
        docs/REALTIME-PLAN.md §4's backend follow-up batch — no more duplicate-device workaround). -->
-  <!-- Reached from a successful register's toast action, and from any Advanced row's kebab whose
-       owner is unassigned — one panel, one code path either way. -->
+  <!-- Reached from any Advanced row's kebab whose owner is unassigned — surgery for an already-
+       existing orphaned device (docs/UX-REWORK-PLAN.md §U-d); a brand-new source goes through the
+       onboarding wizard instead, which never produces an orphan in the first place. -->
   @if (createAssetFor(); as createDevice) {
     <section class="card create-asset-panel">
       <header>
@@ -693,15 +385,4 @@
       </div>
     </section>
   }
-
-  @if (flightPlanDialogOpen()) {
-    <vision-flight-plan-dialog
-      [homeLatitude]="simLatitude()"
-      [homeLongitude]="simLongitude()"
-      [initialPlan]="flightPlan() ?? null"
-      (saved)="onFlightPlanSaved($event)"
-      (cancelled)="onFlightPlanCancelled()"
-    />
-  }
-
 </div>

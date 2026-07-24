@@ -474,9 +474,20 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         };
     }
 
+    /**
+     * {@code hasImage} is always {@code false} on this live snapshot — deliberately, not an
+     * oversight (docs/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2): this class already sits at the
+     * five-constructor-parameter ceiling (see {@code .claude/skills/java-clean-code/SKILL.md} §3),
+     * and {@code AssetImageRepositoryPort} carries no per-asset lifecycle event of its own to
+     * announce a change through anyway (unlike {@code AuditTrailPort}/{@code EventPublisherPort},
+     * both already decorated for exactly this purpose in {@code vision-app}). A viewer relying on
+     * the SSE {@code fleet} topic for {@code hasImage} needs the plain {@code GET /api/assets}
+     * REST read instead, which computes it correctly (see {@code AssetController}).
+     */
     private LiveEnvelopeResponse freshFleetEnvelope() {
-        List<AssetSummaryResponse> snapshot =
-                assetService.getObject().assets().stream().map(AssetSummaryResponse::from).toList();
+        List<AssetSummaryResponse> snapshot = assetService.getObject().assets().stream()
+                .map(summary -> AssetSummaryResponse.from(summary, false))
+                .toList();
         return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.FLEET.wire(), snapshot);
     }
 

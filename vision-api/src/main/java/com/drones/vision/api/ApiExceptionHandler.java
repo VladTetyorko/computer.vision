@@ -1,6 +1,7 @@
 package com.drones.vision.api;
 
 import com.drones.vision.api.dto.ErrorResponse;
+import com.drones.vision.application.ProbeFailedException;
 import com.drones.vision.application.UnsupportedProtocolException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +38,13 @@ import java.util.NoSuchElementException;
  *       distinct from a normal non-2xx response actually received from
  *       upstream, which is passed through verbatim rather than mapped
  *       here.</li>
+ *   <li>{@link DeviceProbeController} throws {@link ProbeFailedException} when a probe's protocol
+ *       is recognized but the connection itself fails, times out, or ends without a frame —
+ *       mapped to {@code 422} (docs/UX-REWORK-PLAN.md §U-d item 3), distinct from {@link
+ *       UnsupportedProtocolException}'s {@code 400} (an unrecognized protocol is a malformed
+ *       request, not a probe failure).</li>
+ *   <li>{@link AssetImageController} throws {@link PayloadTooLargeException} when an uploaded
+ *       image body exceeds the configured maximum — mapped to {@code 413}.</li>
  * </ul>
  * {@code StreamService.stop} never throws — stopping an unknown/already
  * stopped stream is a documented no-op — so there is no 404 mapping for the
@@ -65,5 +73,19 @@ public class ApiExceptionHandler {
     @ExceptionHandler(HlsUpstreamUnavailableException.class)
     public ResponseEntity<ErrorResponse> handleBadGateway(HlsUpstreamUnavailableException ex) {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(new ErrorResponse("BAD_GATEWAY", ex.getMessage()));
+    }
+
+    @ExceptionHandler(ProbeFailedException.class)
+    public ResponseEntity<ErrorResponse> handleProbeFailed(ProbeFailedException ex) {
+        // UNPROCESSABLE_CONTENT, not the deprecated UNPROCESSABLE_ENTITY alias (Spring Framework 7) — same 422.
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
+                .body(new ErrorResponse("UNPROCESSABLE_ENTITY", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PayloadTooLargeException.class)
+    public ResponseEntity<ErrorResponse> handlePayloadTooLarge(PayloadTooLargeException ex) {
+        // CONTENT_TOO_LARGE, not the deprecated PAYLOAD_TOO_LARGE alias (Spring Framework 7) — same 413.
+        return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE)
+                .body(new ErrorResponse("PAYLOAD_TOO_LARGE", ex.getMessage()));
     }
 }

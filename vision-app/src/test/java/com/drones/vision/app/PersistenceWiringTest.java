@@ -1,11 +1,13 @@
 package com.drones.vision.app;
 
+import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
@@ -59,6 +61,9 @@ class PersistenceWiringTest {
     private DetectionRepositoryPort detectionRepositoryPort;
 
     @Autowired
+    private AssetImageRepositoryPort assetImageRepositoryPort;
+
+    @Autowired
     private ApplicationContext applicationContext;
 
     @Test
@@ -89,6 +94,11 @@ class PersistenceWiringTest {
     @Test
     void defaultConfigurationKeepsInMemoryDetectionRepository() {
         assertInstanceOf(InMemoryDetectionRepository.class, detectionRepositoryPort);
+    }
+
+    @Test
+    void defaultConfigurationKeepsInMemoryAssetImageRepository() {
+        assertInstanceOf(InMemoryAssetImageRepository.class, assetImageRepositoryPort);
     }
 
     @Test

@@ -29,19 +29,26 @@ import java.util.Map;
  * @param lastUsedAt         start time of the asset's most recent usage, or absent if never used
  * @param lastKnownPosition  last known position across usages, or absent if none is known
  * @param attributes         free-form key/value attributes
+ * @param hasImage           whether an image is stored for this asset (docs/UX-REWORK-PLAN.md
+ *                           §U-d item 3, CONTRACT 2) — never the image bytes themselves, only
+ *                           whether {@code GET /api/assets/{id}/image} would return one
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetSummaryResponse(String assetId, String displayName, String category, String categoryName,
                                     String owner, String status, String lifecycle, Instant lastUsedAt,
-                                    GeoPositionResponse lastKnownPosition, Map<String, String> attributes) {
+                                    GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
+                                    boolean hasImage) {
 
     /**
      * Maps an {@link AssetSummary} read model to its wire representation.
      *
-     * @param summary the summary to map
+     * @param summary  the summary to map
+     * @param hasImage whether an image is stored for this asset (a separate lookup — {@link
+     *                 AssetSummary} carries no notion of one; see {@code
+     *                 com.drones.vision.api.AssetController})
      * @return the response body element for {@code summary}
      */
-    public static AssetSummaryResponse from(AssetSummary summary) {
+    public static AssetSummaryResponse from(AssetSummary summary, boolean hasImage) {
         return new AssetSummaryResponse(
                 summary.asset().id().value().toString(),
                 summary.asset().displayName(),
@@ -52,6 +59,7 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
                 summary.asset().state().name(),
                 summary.lastUsedAt(),
                 GeoPositionResponse.from(summary.lastKnownPosition()),
-                summary.asset().attributes());
+                summary.asset().attributes(),
+                hasImage);
     }
 }

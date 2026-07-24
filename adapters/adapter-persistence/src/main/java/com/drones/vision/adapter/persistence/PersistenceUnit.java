@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.persistence;
 
 import com.drones.vision.adapter.persistence.entity.AssetEntity;
+import com.drones.vision.adapter.persistence.entity.AssetImageEntity;
 import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
@@ -62,6 +63,7 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(AssetUsageEntity.class);
         configuration.addAnnotatedClass(TelemetrySampleEntity.class);
         configuration.addAnnotatedClass(DetectionResultEntity.class);
+        configuration.addAnnotatedClass(AssetImageEntity.class);
         return configuration.buildSessionFactory();
     }
 }

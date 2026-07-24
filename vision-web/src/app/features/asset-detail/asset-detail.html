@@ -15,7 +15,11 @@
     </div>
   } @else if (asset(); as a) {
     <div class="page-head">
-      <div>
+      <div class="row header-identity">
+        @if (assetImageSrc(); as src) {
+          <img class="asset-photo" [src]="src" (error)="onImageError()" alt="" />
+        }
+        <div>
         @if (editingAsset()) {
           <div class="inline-form column edit-asset">
             <input
@@ -47,6 +51,7 @@
             }
           </p>
         }
+        </div>
       </div>
       <div class="row">
         <a class="btn secondary" routerLink="/devices">All devices</a>
@@ -280,6 +285,36 @@
           @if (a.lastUsedAt) {
             <div class="fact"><dt>Last used</dt><dd class="mono">{{ a.lastUsedAt }}</dd></div>
           }
+          <!-- Registration/tail number (docs/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
+               attributes-key convention, display + inline edit. -->
+          <div class="fact">
+            <dt>Registration</dt>
+            <dd>
+              @if (editingRegistrationNumber()) {
+                <span class="inline-form registration-edit">
+                  <input
+                    [value]="registrationNumberDraft()"
+                    (input)="registrationNumberDraft.set($any($event.target).value)"
+                    placeholder="N12345"
+                    aria-label="Registration / tail number"
+                  />
+                  <button type="button" class="btn small" (click)="confirmEditRegistrationNumber()" [disabled]="busy()">
+                    Save
+                  </button>
+                  <button type="button" class="btn secondary small" (click)="cancelEditRegistrationNumber()">
+                    Cancel
+                  </button>
+                </span>
+              } @else {
+                <span class="row registration-row">
+                  <span>{{ registrationNumber() ?? '—' }}</span>
+                  <button type="button" class="btn secondary small" (click)="openEditRegistrationNumber()">
+                    Edit
+                  </button>
+                </span>
+              }
+            </dd>
+          </div>
         </dl>
         @if (detailPairs(a.attributes).length > 0) {
           <dl class="facts">
@@ -289,6 +324,59 @@
           </dl>
         } @else {
           <p class="muted hint">No extra attributes recorded.</p>
+        }
+
+        <!-- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
+             key/value surgery, including the registrationNumber key the inline edit above already
+             covers more conveniently for the common case. -->
+        @if (settings.advancedMode()) {
+          <div class="attributes-editor">
+            @if (!attributesEditorOpen()) {
+              <button type="button" class="btn secondary small" (click)="openAttributesEditor()">
+                Edit attributes…
+              </button>
+            } @else {
+              <div class="spread">
+                <h3>Edit attributes</h3>
+                <button type="button" class="btn secondary small" (click)="addAttributeRow()">Add attribute</button>
+              </div>
+              @for (row of attributeRows(); track $index) {
+                <div class="option-row">
+                  <input
+                    [value]="row.key"
+                    (input)="updateAttributeKey($index, $any($event.target).value)"
+                    placeholder="key"
+                    [attr.aria-label]="'Attribute ' + ($index + 1) + ' key'"
+                  />
+                  <input
+                    [value]="row.value"
+                    (input)="updateAttributeValue($index, $any($event.target).value)"
+                    placeholder="value"
+                    [attr.aria-label]="'Attribute ' + ($index + 1) + ' value'"
+                  />
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    (click)="removeAttributeRow($index)"
+                    aria-label="Remove attribute"
+                  >
+                    ×
+                  </button>
+                </div>
+              }
+              <div class="row">
+                <button
+                  type="button"
+                  class="btn small"
+                  (click)="confirmAttributesEditor()"
+                  [disabled]="attributesSubmitting()"
+                >
+                  {{ attributesSubmitting() ? 'Saving…' : 'Save attributes' }}
+                </button>
+                <button type="button" class="btn secondary small" (click)="cancelAttributesEditor()">Cancel</button>
+              </div>
+            }
+          </div>
         }
       </section>
 

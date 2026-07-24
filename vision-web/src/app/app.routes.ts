@@ -4,6 +4,7 @@ import { COMMAND_ROUTES } from './features/command/command.routes';
 import { WALL_ROUTES } from './features/wall/wall.routes';
 import { MAP_ROUTES } from './features/map/map.routes';
 import { DEVICES_ROUTES } from './features/devices/devices.routes';
+import { ONBOARDING_ROUTES } from './features/onboarding/onboarding.routes';
 import { ASSET_DETAIL_ROUTES } from './features/asset-detail/asset-detail.routes';
 import { REPLAY_ROUTES } from './features/replay/replay.routes';
 import { LIVE_ROUTES } from './features/live/live.routes';
@@ -32,6 +33,7 @@ export const routes: Routes = [
   ...WALL_ROUTES,
   ...MAP_ROUTES,
   ...DEVICES_ROUTES,
+  ...ONBOARDING_ROUTES,
   ...ASSET_DETAIL_ROUTES,
   ...REPLAY_ROUTES,
   ...LIVE_ROUTES,

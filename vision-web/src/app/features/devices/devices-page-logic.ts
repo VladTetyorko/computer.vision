@@ -38,6 +38,14 @@ export {
 } from '../../core/fleet/warehouse-logic';
 
 /**
+ * The "existing categories + fallback list" category picker moved to `core/fleet/category-logic.ts`
+ * (docs/UX-REWORK-PLAN.md §U-d) once the onboarding wizard's Profile step needed the identical
+ * picker — same cross-feature-module rule as the re-export block above. Re-exported here so this
+ * page's own pre-existing import site keeps working verbatim.
+ */
+export { DEFAULT_CATEGORY_OPTIONS, deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
+
+/**
  * The pinned REST contract (docs/CYCLES-PLAN.md §8) is coded against verbatim even though CW-a
  * (the backend half) is not live while this lands: every mutation this logic feeds goes through
  * `FleetStore`'s `run()` funnel, so a 404 today degrades to one toast, never a crash.
@@ -196,50 +204,6 @@ export function filterAssetListRowsByCategory(
 ): readonly AssetListRow[] {
   const slug = category?.trim();
   return slug ? rows.filter((row) => row.asset.category === slug) : rows;
-}
-
-// --- Category picker (docs/UX-QUICKWINS-PLAN.md QF-2's "Create asset from this device") --------
-// This cycle's `vision-api.ts` change is scoped to `createAsset` only (see the plan) — no
-// `listCategories()`/`GET /api/categories` call site exists yet, even though that endpoint already
-// exists server-side (`CategoryController`). Rather than hand-roll a second, out-of-scope API
-// method, the picker derives its options from categories already present among the assets this
-// page has already loaded (real, in-use categories, no extra round trip) and only falls back to a
-// small hardcoded set — mirroring `InMemoryCategoryRepository`'s own dev/Phase-0 seed
-// (vision-app/devsupport) — for a brand-new install with no asset to derive from yet. A future
-// cycle wiring `VisionApi.listCategories()` should point this at the live list instead, keeping the
-// "derive from loaded assets" fast path.
-
-/** One category the "Create asset" picker can offer: enough to render and to send back as `category`. */
-export interface CategoryOption {
-  readonly slug: string;
-  readonly name: string;
-}
-
-/** Fallback options for an install with no asset yet to derive real categories from. */
-export const DEFAULT_CATEGORY_OPTIONS: readonly CategoryOption[] = [
-  { slug: 'drone', name: 'Drone' },
-  { slug: 'ip-camera', name: 'IP Camera' },
-  { slug: 'usb-camera', name: 'USB Camera' },
-  { slug: 'robot', name: 'Robot' },
-  { slug: 'simulated', name: 'Simulated' },
-];
-
-/**
- * The categories already in use among `assets`, deduped by slug and sorted by name — the "existing
- * categories" the create-asset picker offers. Falls back to {@link DEFAULT_CATEGORY_OPTIONS} only
- * when `assets` is empty (nothing yet to derive a real list from).
- */
-export function deriveCategoryOptions(assets: readonly AssetSummary[]): readonly CategoryOption[] {
-  const bySlug = new Map<string, CategoryOption>();
-  for (const asset of assets) {
-    if (!bySlug.has(asset.category)) {
-      bySlug.set(asset.category, { slug: asset.category, name: asset.categoryName });
-    }
-  }
-  if (bySlug.size === 0) {
-    return DEFAULT_CATEGORY_OPTIONS;
-  }
-  return [...bySlug.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**

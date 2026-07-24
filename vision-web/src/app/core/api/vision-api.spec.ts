@@ -262,4 +262,63 @@ describe('VisionApi', () => {
   it('escapes a stream id in the snapshot URL', () => {
     expect(api.snapshotUrl('s/1 x')).toBe('/api/streams/s%2F1%20x/snapshot');
   });
+
+  // --- Device probe (docs/UX-REWORK-PLAN.md §U-d) --------------------------------------------
+
+  it('probes a candidate connection', async () => {
+    const promise = api.probeDevice({ protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' });
+    const request = http.expectOne({ method: 'POST', url: '/api/devices/probe' });
+    expect(request.request.body).toEqual({ protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' });
+    request.flush({
+      ok: true,
+      widthPx: 1920,
+      heightPx: 1080,
+      telemetryDetected: false,
+      frameJpegBase64: 'ZmFrZQ==',
+      warnings: [],
+    });
+    await expect(promise).resolves.toMatchObject({ widthPx: 1920, heightPx: 1080 });
+  });
+
+  it('resolves a probe response with warnings entirely absent — the shape observed live against the running backend, not just the pinned contract', async () => {
+    const promise = api.probeDevice({ protocol: 'sim', uri: 'sim://demo' });
+    const request = http.expectOne({ method: 'POST', url: '/api/devices/probe' });
+    request.flush({
+      ok: true,
+      widthPx: 640,
+      heightPx: 480,
+      codec: 'mjpeg',
+      telemetryDetected: true,
+      frameJpegBase64: 'ZmFrZQ==',
+      // No `warnings` key at all — see models.ts#ProbeDeviceResult's own doc comment.
+    });
+    await expect(promise).resolves.not.toHaveProperty('warnings');
+    await expect(promise).resolves.toMatchObject({ ok: true, codec: 'mjpeg' });
+  });
+
+  // --- Asset image (docs/UX-REWORK-PLAN.md §U-d) --------------------------------------------
+
+  it('builds an asset image URL without issuing any request', () => {
+    expect(api.assetImageUrl('a-1')).toBe('/api/assets/a-1/image');
+    http.verify();
+  });
+
+  it('escapes the asset id in the image URL', () => {
+    expect(api.assetImageUrl('a/1 x')).toBe('/api/assets/a%2F1%20x/image');
+  });
+
+  it('uploads an asset image as a raw body', async () => {
+    const blob = new Blob(['fake-jpeg-bytes'], { type: 'image/jpeg' });
+    const promise = api.uploadAssetImage('a-1', blob);
+    const request = http.expectOne({ method: 'PUT', url: '/api/assets/a-1/image' });
+    expect(request.request.body).toBe(blob);
+    request.flush(null);
+    await promise;
+  });
+
+  it('deletes an asset image', async () => {
+    const promise = api.deleteAssetImage('a-1');
+    http.expectOne({ method: 'DELETE', url: '/api/assets/a-1/image' }).flush(null);
+    await promise;
+  });
 });

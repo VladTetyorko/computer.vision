@@ -17,6 +17,7 @@ import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import org.springframework.http.HttpStatus;
@@ -43,12 +44,15 @@ import java.util.Objects;
  * plus, in future, detections), see {@link UsageTimelineController} instead (docs/MVP2-PLAN.md
  * §R, R-a) — the two endpoints live on separate controllers, see that class's javadoc for why.
  *
- * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and two driven ports
+ * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and three driven ports
  * used read-only: {@link StreamPublisherPort} (resolving {@code viewUrl}/{@code whepUrl}, exactly
- * like {@link StreamController}) and {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
+ * like {@link StreamController}), {@link TelemetryRepositoryPort} (serving the telemetry endpoint — there
  * is no service method for "read a usage's telemetry trail" yet, so this controller reads the
  * driven port directly, the same precedent {@link StreamController} already sets for {@code
- * viewUrl}). Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this
+ * viewUrl}), and {@link AssetImageRepositoryPort} (populating {@code hasImage} on every summary/
+ * detail response — docs/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
+ * existsByAssetId} check; the image bytes themselves are served by {@link AssetImageController}).
+ * Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this
  * module depends only on {@code vision-domain} and {@code vision-application} — never on an
  * adapter.
  *
@@ -69,16 +73,20 @@ public class AssetController {
     private final CurrentUser currentUser;
     private final StreamPublisherPort streamPublisherPort;
     private final TelemetryRepositoryPort telemetryRepositoryPort;
+    private final AssetImageRepositoryPort assetImageRepositoryPort;
 
     public AssetController(AssetService assetService, CurrentUser currentUser,
                             StreamPublisherPort streamPublisherPort,
-                            TelemetryRepositoryPort telemetryRepositoryPort) {
+                            TelemetryRepositoryPort telemetryRepositoryPort,
+                            AssetImageRepositoryPort assetImageRepositoryPort) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.streamPublisherPort =
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
         this.telemetryRepositoryPort =
                 Objects.requireNonNull(telemetryRepositoryPort, "telemetryRepositoryPort must not be null");
+        this.assetImageRepositoryPort =
+                Objects.requireNonNull(assetImageRepositoryPort, "assetImageRepositoryPort must not be null");
     }
 
     /**
@@ -92,7 +100,7 @@ public class AssetController {
     @ResponseStatus(HttpStatus.CREATED)
     public AssetDetailsResponse create(@RequestBody CreateAssetRequest request) {
         Asset created = assetService.create(request.toSpec(), currentUser.ownership(), currentUser.userId());
-        return AssetDetailsResponse.from(assetService.details(created.id()));
+        return detailsResponse(created.id());
     }
 
     /**
@@ -111,7 +119,7 @@ public class AssetController {
         AssetId assetId = AssetId.of(id);
         assetService.update(assetId, (request == null ? UpdateAssetRequest.EMPTY : request).toEdit(),
                 currentUser.userId());
-        return AssetDetailsResponse.from(assetService.details(assetId));
+        return detailsResponse(assetId);
     }
 
     /**
@@ -131,7 +139,7 @@ public class AssetController {
     public AssetDetailsResponse setState(@PathVariable String id, @RequestBody SetLifecycleStateRequest request) {
         AssetId assetId = AssetId.of(id);
         assetService.setState(assetId, request.toLifecycleState(), currentUser.userId());
-        return AssetDetailsResponse.from(assetService.details(assetId));
+        return detailsResponse(assetId);
     }
 
     /**
@@ -159,7 +167,10 @@ public class AssetController {
      */
     @GetMapping("/api/assets")
     public List<AssetSummaryResponse> list(@RequestParam(defaultValue = "false") boolean includeDeleted) {
-        return assetService.assets(includeDeleted).stream().map(AssetSummaryResponse::from).toList();
+        return assetService.assets(includeDeleted).stream()
+                .map(summary -> AssetSummaryResponse.from(summary,
+                        assetImageRepositoryPort.existsByAssetId(summary.asset().id())))
+                .toList();
     }
 
     /**
@@ -170,7 +181,7 @@ public class AssetController {
      */
     @GetMapping("/api/assets/{id}")
     public AssetDetailsResponse details(@PathVariable String id) {
-        return AssetDetailsResponse.from(assetService.details(AssetId.of(id)));
+        return detailsResponse(AssetId.of(id));
     }
 
     /**
@@ -222,7 +233,7 @@ public class AssetController {
     public AssetDetailsResponse assignDevice(@PathVariable String id, @RequestBody AssignDeviceRequest request) {
         AssetId assetId = AssetId.of(id);
         assetService.assignDevice(assetId, request.toDeviceId(), currentUser.userId());
-        return AssetDetailsResponse.from(assetService.details(assetId));
+        return detailsResponse(assetId);
     }
 
     /**
@@ -237,7 +248,7 @@ public class AssetController {
     public AssetDetailsResponse unassignDevice(@PathVariable String id, @PathVariable String deviceId) {
         AssetId assetId = AssetId.of(id);
         assetService.unassignDevice(assetId, DeviceId.of(deviceId), currentUser.userId());
-        return AssetDetailsResponse.from(assetService.details(assetId));
+        return detailsResponse(assetId);
     }
 
     /**
@@ -262,6 +273,11 @@ public class AssetController {
         return telemetryRepositoryPort.findByUsage(UsageId.of(usageId), limit).stream()
                 .map(TelemetrySampleResponse::from)
                 .toList();
+    }
+
+    /** Fetches {@code id}'s detail view plus its {@code hasImage} flag in one call. */
+    private AssetDetailsResponse detailsResponse(AssetId id) {
+        return AssetDetailsResponse.from(assetService.details(id), assetImageRepositoryPort.existsByAssetId(id));
     }
 
     private String viewUrl(StreamId streamId) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TelemetrySample } from '../../core/api/models';
-import { freshestSample, groupTelemetryByDevice } from './asset-detail-logic';
+import { attributeRowsToRecord, attributesToRows, freshestSample, groupTelemetryByDevice } from './asset-detail-logic';
 
 function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
   return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
@@ -23,5 +23,50 @@ describe('freshestSample', () => {
 
   it('returns undefined for an empty map', () => {
     expect(freshestSample(new Map())).toBeUndefined();
+  });
+});
+
+describe('attributesToRows', () => {
+  it('maps each attribute to a row, in insertion order', () => {
+    expect(attributesToRows({ color: 'red', registrationNumber: 'N12345' })).toEqual([
+      { key: 'color', value: 'red' },
+      { key: 'registrationNumber', value: 'N12345' },
+    ]);
+  });
+
+  it('returns an empty array for no attributes', () => {
+    expect(attributesToRows({})).toEqual([]);
+  });
+});
+
+describe('attributeRowsToRecord', () => {
+  it('builds a record from key/value rows', () => {
+    expect(attributeRowsToRecord([{ key: 'color', value: 'red' }])).toEqual({ color: 'red' });
+  });
+
+  it('trims keys', () => {
+    expect(attributeRowsToRecord([{ key: '  color  ', value: 'red' }])).toEqual({ color: 'red' });
+  });
+
+  it('drops rows with a blank key', () => {
+    expect(attributeRowsToRecord([{ key: '   ', value: 'red' }])).toEqual({});
+  });
+
+  it('lets a later duplicate key win', () => {
+    expect(
+      attributeRowsToRecord([
+        { key: 'color', value: 'red' },
+        { key: 'color', value: 'blue' },
+      ]),
+    ).toEqual({ color: 'blue' });
+  });
+
+  it('returns an empty object for no rows', () => {
+    expect(attributeRowsToRecord([])).toEqual({});
+  });
+
+  it('round-trips with attributesToRows for a well-formed map', () => {
+    const attributes = { color: 'red', registrationNumber: 'N12345' };
+    expect(attributeRowsToRecord(attributesToRows(attributes))).toEqual(attributes);
   });
 });

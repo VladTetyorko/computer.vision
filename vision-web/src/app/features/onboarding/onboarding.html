@@ -1,0 +1,548 @@
+<div class="page onboarding-page">
+  <div class="page-head">
+    <div>
+      <h1>Add a source</h1>
+      <p>
+        Bring a real camera, drone, or a zero-hardware test source into Vision as a first-class
+        asset — with a name, a photo, and a proven-working connection, in one pass.
+      </p>
+    </div>
+    <a class="btn secondary" routerLink="/devices">Cancel</a>
+  </div>
+
+  <ol class="stepper" aria-label="Onboarding steps">
+    @for (item of steps; track item.step) {
+      <li
+        class="stepper-item"
+        [class.active]="store.step() === item.step"
+        [class.done]="stepIndex(item.step) < stepIndex(store.step())"
+      >
+        <span class="stepper-index">{{ $index + 1 }}</span>
+        <span class="stepper-label">{{ item.label }}</span>
+      </li>
+    }
+  </ol>
+
+  <section class="card wizard-card">
+    @switch (store.step()) {
+      <!-- ---- Step 1: Profile ------------------------------------------------------------- -->
+      @case ('profile') {
+        <h2>Profile</h2>
+        <p class="muted hint">What is it, and what does it look like?</p>
+
+        <div class="field">
+          <label class="label" for="p-name">Display name</label>
+          <input
+            id="p-name"
+            name="displayName"
+            [ngModel]="store.displayName()"
+            (ngModelChange)="store.displayName.set($event)"
+            placeholder="Falcon-2"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="p-reg">Registration / tail number (optional)</label>
+          <input
+            id="p-reg"
+            name="registrationNumber"
+            [ngModel]="store.registrationNumber()"
+            (ngModelChange)="store.registrationNumber.set($event)"
+            placeholder="N12345"
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="p-category">Category</label>
+          <select
+            id="p-category"
+            name="category"
+            [ngModel]="store.category()"
+            (ngModelChange)="store.chooseCategory($event)"
+          >
+            <option value="" disabled>Choose a category…</option>
+            @for (option of store.categoryOptions(); track option.slug) {
+              <option [value]="option.slug">{{ option.name }}</option>
+            }
+          </select>
+        </div>
+
+        <div class="field photo-field">
+          <span class="label">Photo (optional)</span>
+          <div class="row photo-row">
+            @if (store.photoPreviewUrl(); as preview) {
+              <img class="photo-preview" [src]="preview" alt="Selected photo preview" />
+            } @else {
+              <div class="photo-placeholder" aria-hidden="true"></div>
+            }
+            <div class="photo-actions">
+              <input
+                #photoInput
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                (change)="onPhotoSelected($event)"
+                class="visually-hidden"
+                aria-label="Choose a photo"
+              />
+              <button
+                type="button"
+                class="btn secondary small"
+                (click)="photoInput.click()"
+                [disabled]="store.photoProcessing()"
+              >
+                {{
+                  store.photoProcessing()
+                    ? 'Processing…'
+                    : store.photoPreviewUrl()
+                      ? 'Replace photo'
+                      : 'Choose photo'
+                }}
+              </button>
+              @if (store.photoPreviewUrl()) {
+                <button type="button" class="btn secondary small" (click)="store.removePhoto()">Remove</button>
+              }
+              @if (store.photoError(); as error) {
+                <p class="disabled-reason">{{ error }}</p>
+              }
+              <p class="muted hint">Downscaled to fit under 2MB automatically — any size photo works.</p>
+            </div>
+          </div>
+        </div>
+
+        @if (!store.canAdvanceProfile()) {
+          <p class="disabled-reason">Enter a display name and choose a category.</p>
+        }
+      }
+
+      <!-- ---- Step 2: Connect (the pre-existing 3-choice component, moved here verbatim) ---- -->
+      @case ('connect') {
+        <h2>Connect</h2>
+
+        @if (!store.connectMethod()) {
+          <p class="muted hint">Every current way in, one door.</p>
+          <div class="method-grid">
+            <button type="button" class="method-tile" (click)="store.chooseMethod('register')">
+              <span class="method-glyph glyph-register" aria-hidden="true"></span>
+              <span class="method-title">Register manually</span>
+              <span class="method-sub">Type in a protocol and URI you already know.</span>
+            </button>
+            <button type="button" class="method-tile" (click)="store.chooseMethod('discover')">
+              <span class="method-glyph glyph-discover" aria-hidden="true"></span>
+              <span class="method-title">Discover on network</span>
+              <span class="method-sub">Scan for ONVIF, mDNS, and local V4L2 candidates.</span>
+            </button>
+            <button type="button" class="method-tile" (click)="store.chooseMethod('simulate')">
+              <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
+              <span class="method-title">Simulate</span>
+              <span class="method-sub">Zero hardware — a file, an RTSP rehearsal, or a moving test drone.</span>
+            </button>
+          </div>
+        } @else {
+          <div class="row method-chosen-row">
+            <button
+              type="button"
+              class="btn secondary small back-btn"
+              (click)="store.connectMethod.set(null)"
+              aria-label="Back to connect methods"
+            >
+              ‹
+            </button>
+            <span class="muted">{{ connectMethodLabels[store.connectMethod()!] }}</span>
+          </div>
+
+          @switch (store.connectMethod()) {
+            @case ('register') {
+              <div class="register-form">
+                <div class="field">
+                  <label class="label" for="c-protocol">Protocol</label>
+                  <select
+                    id="c-protocol"
+                    name="protocol"
+                    [ngModel]="store.protocolSelect()"
+                    (ngModelChange)="store.protocolSelect.set($event)"
+                    required
+                  >
+                    <option value="" disabled>Choose a protocol…</option>
+                    @for (option of store.registerableProtocols; track option.value) {
+                      <option [value]="option.value">{{ option.value }} — {{ option.hint }}</option>
+                    }
+                    <option [value]="store.customProtocolOption">Custom… — a protocol not listed above</option>
+                  </select>
+                </div>
+
+                @if (store.isCustomProtocol()) {
+                  <div class="field">
+                    <label class="label" for="c-protocol-custom">Custom protocol</label>
+                    <input
+                      id="c-protocol-custom"
+                      name="customProtocol"
+                      [ngModel]="store.customProtocol()"
+                      (ngModelChange)="store.customProtocol.set($event)"
+                      placeholder="e.g. onvif"
+                      required
+                    />
+                  </div>
+                }
+
+                <div class="field wide">
+                  <label class="label" for="c-uri">URI</label>
+                  <input
+                    id="c-uri"
+                    name="uri"
+                    [ngModel]="store.uri()"
+                    (ngModelChange)="store.uri.set($event)"
+                    [placeholder]="store.uriPlaceholder()"
+                    required
+                  />
+                </div>
+              </div>
+
+              @if (settings.advancedMode()) {
+                <div class="advanced">
+                  <div class="spread">
+                    <h3>Stream options</h3>
+                    <button type="button" class="btn secondary small" (click)="store.addOptionRow()">
+                      Add option
+                    </button>
+                  </div>
+                  <p class="muted hint">
+                    Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
+                    e.g. <code>rtsp_transport = tcp</code>.
+                  </p>
+                  @for (row of store.options(); track $index) {
+                    <div class="option-row">
+                      <input
+                        [value]="row.key"
+                        (input)="store.updateOptionKey($index, $any($event.target).value)"
+                        placeholder="key"
+                        [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
+                      />
+                      <input
+                        [value]="row.value"
+                        (input)="store.updateOptionValue($index, $any($event.target).value)"
+                        placeholder="value"
+                        [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
+                      />
+                      <button
+                        type="button"
+                        class="btn secondary small"
+                        (click)="store.removeOptionRow($index)"
+                        aria-label="Remove option"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <p class="muted hint">
+                  Advanced stream options are hidden. Turn on advanced mode in
+                  <a href="/settings">Settings</a> to edit them.
+                </p>
+              }
+            }
+
+            @case ('discover') {
+              <div class="row scan-row">
+                <label class="row scan-timeout">
+                  <span class="muted">Timeout</span>
+                  <select
+                    [ngModel]="store.scanTimeout()"
+                    (ngModelChange)="store.scanTimeout.set($event)"
+                    name="scanTimeout"
+                    [disabled]="store.scanning()"
+                  >
+                    @for (timeout of store.scanTimeouts; track timeout) {
+                      <option [value]="timeout">{{ timeout / 1000 }}s</option>
+                    }
+                  </select>
+                </label>
+                <button type="button" class="btn" (click)="store.scan()" [disabled]="store.scanning()">
+                  {{ store.scanning() ? 'Scanning…' : 'Scan' }}
+                </button>
+              </div>
+
+              <p class="muted hint">
+                Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
+                enumeration. Nothing is port-scanned.
+              </p>
+
+              @if (store.scanResult(); as result) {
+                @if (result.failedMethods.length > 0) {
+                  <div class="failed">
+                    Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
+                    errored, not because the network is empty.
+                  </div>
+                }
+
+                @if (result.devices.length === 0) {
+                  <div class="empty"><p>Nothing responded.</p></div>
+                } @else {
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Method</th>
+                        <th>Name</th>
+                        <th>Address</th>
+                        <th>Suggested category</th>
+                        <th>Details</th>
+                        <th aria-label="Actions"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (candidate of result.devices; track candidate.method + candidate.address) {
+                        <tr>
+                          <td><span class="chip accent">{{ candidate.method }}</span></td>
+                          <td>{{ candidate.name }}</td>
+                          <td class="mono muted truncate" [title]="candidate.address">
+                            {{ candidate.address }}
+                          </td>
+                          <td>
+                            @if (candidate.suggestedCategory) {
+                              {{ candidate.suggestedCategory }}
+                            } @else {
+                              <span class="faint">unknown</span>
+                            }
+                          </td>
+                          <td class="details">
+                            @for (pair of detailPairs(candidate.details); track pair.key) {
+                              <span class="chip" [title]="pair.value">{{ pair.key }}</span>
+                            }
+                          </td>
+                          <td class="actions">
+                            <button type="button" class="btn secondary small" (click)="store.useCandidate(candidate)">
+                              Use
+                            </button>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                }
+              } @else {
+                <div class="empty"><p class="faint">No scan run yet.</p></div>
+              }
+            }
+
+            @case ('simulate') {
+              <div class="field wide">
+                <label class="label" for="sim-mode">Mode</label>
+                <select
+                  id="sim-mode"
+                  name="simMode"
+                  [ngModel]="store.simMode()"
+                  (ngModelChange)="store.simMode.set($event)"
+                >
+                  <option value="direct">Play a file directly</option>
+                  <option value="rtsp">Transmit a file over RTSP</option>
+                  <option value="testDrone">Test drone (moving, no file)</option>
+                  <option value="synthetic">Synthetic pattern (still, no telemetry)</option>
+                </select>
+              </div>
+
+              @if (store.simNeedsVideoPath()) {
+                <div class="field wide">
+                  <label class="label" for="sim-video-path">Server-side video path</label>
+                  <input
+                    id="sim-video-path"
+                    name="simVideoPath"
+                    [ngModel]="store.simVideoPath()"
+                    (ngModelChange)="store.simVideoPath.set($event)"
+                    placeholder="/srv/videos/flight.mp4"
+                    required
+                  />
+                </div>
+              }
+
+              @if (store.simNeedsHomePoint()) {
+                <div class="field wide flight-plan-field">
+                  <span class="label">Flight plan</span>
+                  @if (store.flightPlanSummary(); as summary) {
+                    <div class="row flight-plan-summary">
+                      <span class="chip accent">{{ summary }}</span>
+                      <button type="button" class="btn secondary small" (click)="store.openFlightPlanDialog()">
+                        Edit
+                      </button>
+                      <button type="button" class="btn secondary small" (click)="store.clearFlightPlan()">
+                        Clear
+                      </button>
+                    </div>
+                  } @else {
+                    <div class="row flight-plan-summary">
+                      <button type="button" class="btn secondary small" (click)="store.openFlightPlanDialog()">
+                        Draw flight plan on map
+                      </button>
+                      <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
+                    </div>
+                  }
+                </div>
+
+                <details class="field wide home-point-fallback">
+                  <summary>Home point (used only without a flight plan)</summary>
+                  <div class="row">
+                    <div class="field">
+                      <label class="label" for="sim-lat">Home latitude</label>
+                      <input
+                        id="sim-lat"
+                        name="simLatitude"
+                        type="number"
+                        step="any"
+                        [ngModel]="store.simLatitude()"
+                        (ngModelChange)="store.simLatitude.set($event)"
+                        placeholder="optional"
+                      />
+                    </div>
+
+                    <div class="field">
+                      <label class="label" for="sim-lon">Home longitude</label>
+                      <input
+                        id="sim-lon"
+                        name="simLongitude"
+                        type="number"
+                        step="any"
+                        [ngModel]="store.simLongitude()"
+                        (ngModelChange)="store.simLongitude.set($event)"
+                        placeholder="optional"
+                      />
+                    </div>
+                  </div>
+                </details>
+
+                <label class="field checkbox-field">
+                  <input
+                    type="checkbox"
+                    name="simAutoStart"
+                    [ngModel]="store.simAutoStart()"
+                    (ngModelChange)="store.simAutoStart.set($event)"
+                  />
+                  <span>Start streaming immediately</span>
+                </label>
+              }
+
+              <p class="muted hint">
+                {{ store.simModeHint() }}
+                @if (store.simNeedsVideoPath()) {
+                  The path must exist on the machine running the platform, not your browser.
+                }
+              </p>
+            }
+          }
+        }
+
+        @if (store.connectMethod() && !store.canAdvanceConnect()) {
+          <p class="disabled-reason">
+            @switch (store.connectMethod()) {
+              @case ('discover') {
+                Pick "Use" on a discovered candidate, or switch to Register manually.
+              }
+              @case ('register') {
+                Enter a protocol and a URI.
+              }
+              @case ('simulate') {
+                Enter the server-side video path.
+              }
+            }
+          </p>
+        }
+      }
+
+      <!-- ---- Step 3: Test (UX-DESIGN §5.1 "test-before-save"; skipped for Simulate) -------- -->
+      @case ('test') {
+        <h2>Test</h2>
+        <p class="muted hint">Before this becomes an asset, make sure it actually produces a frame.</p>
+
+        <div class="row">
+          <button type="button" class="btn" (click)="store.probe()" [disabled]="store.probing()">
+            {{ store.probing() ? 'Testing…' : store.lastProbeResult() || store.lastProbeError() ? 'Retry' : 'Run test' }}
+          </button>
+        </div>
+
+        @if (store.probing()) {
+          <div class="empty"><p class="faint">Connecting…</p></div>
+        } @else if (store.lastProbeError(); as error) {
+          <div class="failed">{{ error }}</div>
+        } @else if (store.lastProbeResult(); as result) {
+          <div class="test-result">
+            <img
+              class="test-frame"
+              [src]="'data:image/jpeg;base64,' + result.frameJpegBase64"
+              alt="Decoded test frame from the connection"
+            />
+            <dl class="facts">
+              <div class="fact">
+                <dt>Resolution</dt>
+                <dd class="mono">{{ result.widthPx }}×{{ result.heightPx }}</dd>
+              </div>
+              @if (result.codec) {
+                <div class="fact"><dt>Codec</dt><dd>{{ result.codec }}</dd></div>
+              }
+              @if (result.fps !== undefined) {
+                <div class="fact"><dt>FPS</dt><dd class="mono">{{ result.fps }}</dd></div>
+              }
+              <div class="fact">
+                <dt>Telemetry</dt>
+                <dd>{{ result.telemetryDetected ? 'Detected' : 'Not detected' }}</dd>
+              </div>
+            </dl>
+            @if (result.warnings && result.warnings.length > 0) {
+              <ul class="warnings">
+                @for (warning of result.warnings; track warning) {
+                  <li>{{ warning }}</li>
+                }
+              </ul>
+            }
+          </div>
+        } @else {
+          <div class="empty"><p class="faint">Not tested yet.</p></div>
+        }
+
+        @if (!store.canAdvanceTest()) {
+          <p class="disabled-reason">Run the test and get a successful frame before continuing.</p>
+        }
+      }
+
+      <!-- ---- Step 4: Create ----------------------------------------------------------------- -->
+      @case ('create') {
+        <h2>Create</h2>
+        <p class="muted hint">Everything looks right? This is the last step.</p>
+
+        <dl class="facts">
+          <div class="fact"><dt>Name</dt><dd>{{ store.displayName() }}</dd></div>
+          <div class="fact"><dt>Category</dt><dd>{{ categoryName() }}</dd></div>
+          @if (store.registrationNumber()) {
+            <div class="fact"><dt>Registration</dt><dd>{{ store.registrationNumber() }}</dd></div>
+          }
+          <div class="fact"><dt>Connection</dt><dd>{{ connectionSummary() }}</dd></div>
+        </dl>
+
+        @if (store.photoPreviewUrl(); as preview) {
+          <img class="photo-preview" [src]="preview" alt="Selected photo preview" />
+        }
+
+        <button type="button" class="btn" (click)="store.createAsset()" [disabled]="store.creating()">
+          {{ store.creating() ? 'Creating…' : 'Create asset' }}
+        </button>
+      }
+    }
+
+    <div class="row wizard-nav">
+      @if (store.step() !== 'profile') {
+        <button type="button" class="btn secondary" (click)="store.back()">Back</button>
+      }
+      @if (store.step() !== 'create') {
+        <button type="button" class="btn" [disabled]="!store.canAdvance()" (click)="store.next()">Next</button>
+      }
+    </div>
+  </section>
+
+  @if (store.flightPlanDialogOpen()) {
+    <vision-flight-plan-dialog
+      [homeLatitude]="store.simLatitude()"
+      [homeLongitude]="store.simLongitude()"
+      [initialPlan]="store.flightPlan() ?? null"
+      (saved)="store.onFlightPlanSaved($event)"
+      (cancelled)="store.onFlightPlanCancelled()"
+    />
+  }
+</div>

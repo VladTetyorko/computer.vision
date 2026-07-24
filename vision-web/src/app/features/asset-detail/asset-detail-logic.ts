@@ -35,3 +35,35 @@ export function freshestSample(
   }
   return freshest;
 }
+
+// --- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3 — advanced-mode key/value editor) ----
+
+/** One row of the advanced-mode attributes editor. */
+export interface AttributeRow {
+  readonly key: string;
+  readonly value: string;
+}
+
+/** `asset.attributes` → editable rows, in insertion order — the editor's own seed on open. */
+export function attributesToRows(attributes: Record<string, string>): readonly AttributeRow[] {
+  return Object.entries(attributes).map(([key, value]) => ({ key, value }));
+}
+
+/**
+ * Rows → `PATCH /api/assets/{id}`'s full replacement `attributes` map (docs/CYCLES-PLAN.md §8's
+ * pinned contract; `application.AssetEdit`'s own Javadoc: "replacement attributes, or null to keep
+ * the current map" — this is why the editor always submits every row, not just changed ones).
+ * Blank-key rows are dropped (an editor row added then left empty on "Save" shouldn't produce a
+ * `""` attribute key); keys are trimmed; a later duplicate key wins over an earlier one, matching
+ * how a plain object literal with repeated keys behaves.
+ */
+export function attributeRowsToRecord(rows: readonly AttributeRow[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (key.length > 0) {
+      result[key] = row.value;
+    }
+  }
+  return result;
+}

@@ -4,6 +4,8 @@ import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
+import com.drones.vision.api.AssetImageController;
+import com.drones.vision.api.DeviceProbeController;
 import com.drones.vision.api.EventController;
 import com.drones.vision.api.FleetController;
 import com.drones.vision.api.SimulationController;
@@ -12,10 +14,12 @@ import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.domain.model.FeedSpec;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
@@ -158,6 +162,22 @@ class AssetWiringTest {
     @Autowired
     private ApplicationRunner simulationResumeRunner;
 
+    /** docs/UX-REWORK-PLAN.md §U-d item 3: CONTRACT 1's test-before-save connection probe. */
+    @Autowired
+    private ProbeService probeService;
+
+    /** docs/UX-REWORK-PLAN.md §U-d item 3: {@code POST /api/devices/probe}. */
+    @Autowired
+    private DeviceProbeController deviceProbeController;
+
+    /** docs/UX-REWORK-PLAN.md §U-d item 3: CONTRACT 2's asset image store (in-memory by default). */
+    @Autowired
+    private AssetImageRepositoryPort assetImageRepositoryPort;
+
+    /** docs/UX-REWORK-PLAN.md §U-d item 3: {@code PUT}/{@code GET}/{@code DELETE /api/assets/{id}/image}. */
+    @Autowired
+    private AssetImageController assetImageController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -177,6 +197,10 @@ class AssetWiringTest {
         assertNotNull(fleetSummaryService, "FleetSummaryService bean must be registered (docs/MVP3-PLAN.md C-a)");
         assertNotNull(fleetController, "FleetController must resolve its constructor dependency (docs/MVP3-PLAN.md C-a)");
         assertNotNull(simulationResumeRunner, "simulated-feed resume-on-boot ApplicationRunner bean must be registered");
+        assertNotNull(probeService, "ProbeService bean must be registered (docs/UX-REWORK-PLAN.md §U-d item 3)");
+        assertNotNull(deviceProbeController, "DeviceProbeController must resolve its constructor dependency");
+        assertNotNull(assetImageRepositoryPort, "AssetImageRepositoryPort bean must be registered (docs/UX-REWORK-PLAN.md §U-d item 3)");
+        assertNotNull(assetImageController, "AssetImageController must resolve its constructor dependency");
     }
 
     @Test

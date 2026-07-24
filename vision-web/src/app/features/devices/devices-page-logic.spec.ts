@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetDetails, AssetSummary, Device } from '../../core/api/models';
 import {
-  DEFAULT_CATEGORY_OPTIONS,
   buildAssetListRows,
   buildAssetRows,
   buildCreateAssetRequestForDevice,
   buildWarehouseRows,
-  deriveCategoryOptions,
   filterAssetListRowsByArchived,
   filterAssetListRowsByCategory,
   filterAssetRowsByArchived,
@@ -18,7 +16,9 @@ import {
  * The lifecycle-action-menu/edit-builder tests (`availableDeviceActions`, `availableAssetActions`,
  * `buildDeviceRenameEdit`, `buildAssetEdit`, `RESTORE_TARGET_STATE`) moved to
  * `core/fleet/warehouse-logic.spec.ts` alongside the functions themselves (docs/CYCLES-PLAN.md §11,
- * CD-b) — this file keeps only the Devices-page-specific view-model builders.
+ * CD-b); the category-picker tests (`deriveCategoryOptions`, `DEFAULT_CATEGORY_OPTIONS`) moved to
+ * `core/fleet/category-logic.spec.ts` the same way (docs/UX-REWORK-PLAN.md §U-d) — this file keeps
+ * only the Devices-page-specific view-model builders.
  */
 
 function device(partial: Partial<Device> = {}): Device {
@@ -280,24 +280,6 @@ describe('filterAssetListRowsByCategory (docs/UX-QUICKWINS-PLAN.md QF-2 — /dev
 
   it('narrows to zero rows for a category with no current assets, rather than showing everything', () => {
     expect(filterAssetListRowsByCategory(rows, 'robot')).toEqual([]);
-  });
-});
-
-describe('deriveCategoryOptions (docs/UX-QUICKWINS-PLAN.md QF-2 — the create-asset category picker)', () => {
-  it('derives options from the categories already in use, deduped and sorted by name', () => {
-    const assets = [
-      assetSummary({ category: 'drone', categoryName: 'Drone' }),
-      assetSummary({ category: 'ip-camera', categoryName: 'IP Camera' }),
-      assetSummary({ category: 'drone', categoryName: 'Drone' }),
-    ];
-    expect(deriveCategoryOptions(assets)).toEqual([
-      { slug: 'drone', name: 'Drone' },
-      { slug: 'ip-camera', name: 'IP Camera' },
-    ]);
-  });
-
-  it('falls back to the default set when no asset exists yet', () => {
-    expect(deriveCategoryOptions([])).toEqual(DEFAULT_CATEGORY_OPTIONS);
   });
 });
 

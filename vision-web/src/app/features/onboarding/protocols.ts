@@ -1,7 +1,10 @@
 /**
  * Protocols this build of Vision can actually register a device against (docs/UX-QUICKWINS-PLAN.md
  * QF-2 — the Register-manually form's protocol field, previously free text, is now a `<select>` of
- * exactly this list). Each entry is a **consuming** (RX) protocol — one `VideoSourcePort`/
+ * exactly this list). Moved here from `features/devices/` when the onboarding wizard
+ * (docs/UX-REWORK-PLAN.md §U-d) absorbed the Register/Discover/Simulate connect methods wholesale —
+ * the Warehouse page never showed this select at all, it only ever rendered `Device.protocol`
+ * verbatim as a chip. Each entry is a **consuming** (RX) protocol — one `VideoSourcePort`/
  * `TelemetrySourcePort#supports()` implementation actually accepts it — verified against each
  * adapter's own source, not assumed:
  *

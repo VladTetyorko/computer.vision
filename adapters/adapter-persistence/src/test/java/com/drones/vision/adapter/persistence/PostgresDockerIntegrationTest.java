@@ -2,6 +2,7 @@ package com.drones.vision.adapter.persistence;
 
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.AssetImage;
 import com.drones.vision.domain.model.AssetUsage;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Capability;
@@ -22,6 +23,7 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
@@ -52,6 +54,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -583,6 +586,60 @@ class PostgresDockerIntegrationTest {
 
         private DetectionResult emptyDetectionResult(StreamId streamId, long frameSequence, Instant capturedAt) {
             return new DetectionResult(streamId, frameSequence, capturedAt, List.of(), Duration.ZERO);
+        }
+    }
+
+    /** docs/UX-REWORK-PLAN.md §U-d item 3: the asset image store. */
+    @Nested
+    class AssetImageRepositoryTests {
+
+        private final AssetImageRepositoryPort repository = new JpaAssetImageRepository(entityManagerFactory);
+
+        @Test
+        void unknownAssetIdReturnsEmptyOptionalAndDoesNotExist() {
+            AssetId unknown = AssetId.random();
+
+            assertTrue(repository.findByAssetId(unknown).isEmpty());
+            assertFalse(repository.existsByAssetId(unknown));
+        }
+
+        @Test
+        void savedImageRoundTripsBytesAndContentType() {
+            AssetId assetId = AssetId.random();
+            byte[] data = {1, 2, 3, 4, 5};
+
+            repository.save(assetId, new AssetImage(data, "image/jpeg"));
+
+            Optional<AssetImage> found = repository.findByAssetId(assetId);
+            assertTrue(found.isPresent());
+            assertArrayEquals(data, found.get().data());
+            assertEquals("image/jpeg", found.get().contentType());
+            assertTrue(repository.existsByAssetId(assetId));
+        }
+
+        @Test
+        void saveIsAnUpsert() {
+            AssetId assetId = AssetId.random();
+            repository.save(assetId, new AssetImage(new byte[]{1}, "image/jpeg"));
+            repository.save(assetId, new AssetImage(new byte[]{2, 2}, "image/png"));
+
+            Optional<AssetImage> found = repository.findByAssetId(assetId);
+            assertTrue(found.isPresent());
+            assertArrayEquals(new byte[]{2, 2}, found.get().data());
+            assertEquals("image/png", found.get().contentType());
+        }
+
+        @Test
+        void deleteByAssetIdIsIdempotentAndRemovesTheImage() {
+            AssetId assetId = AssetId.random();
+            repository.save(assetId, new AssetImage(new byte[]{9}, "image/png"));
+
+            repository.deleteByAssetId(assetId);
+            assertTrue(repository.findByAssetId(assetId).isEmpty());
+            assertFalse(repository.existsByAssetId(assetId));
+
+            // second call on an already-absent id must not throw
+            repository.deleteByAssetId(assetId);
         }
     }
 

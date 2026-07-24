@@ -1,24 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetDetails, Device } from '../../core/api/models';
-import {
-  buildSimulationRequest,
-  buildSyntheticRegisterRequest,
-  isSimulatedAsset,
-  mapSimulatedDevices,
-  type FileSimulateForm,
-} from './simulate-logic';
+import { isSimulatedAsset, mapSimulatedDevices } from './simulate-logic';
 
-function form(partial: Partial<FileSimulateForm> = {}): FileSimulateForm {
-  return {
-    name: '',
-    videoPath: '/videos/flight.mp4',
-    mode: 'direct',
-    latitude: null,
-    longitude: null,
-    autoStart: true,
-    ...partial,
-  };
-}
+/**
+ * `buildSimulationRequest`/`buildSyntheticRegisterRequest`'s own tests moved to
+ * `core/fleet/simulation-logic.spec.ts` alongside the functions themselves (docs/UX-REWORK-PLAN.md
+ * §U-d) — this file keeps only the Warehouse-page-specific display logic.
+ */
 
 function device(partial: Partial<Device>): Device {
   return {
@@ -48,83 +36,6 @@ function asset(partial: Partial<AssetDetails>): AssetDetails {
     ...partial,
   };
 }
-
-describe('buildSimulationRequest', () => {
-  it('trims the video path and maps mode straight to transport', () => {
-    expect(buildSimulationRequest(form({ videoPath: '  /videos/flight.mp4  ', mode: 'rtsp' }))).toEqual({
-      videoPath: '/videos/flight.mp4',
-      transport: 'rtsp',
-      autoStart: true,
-    });
-  });
-
-  it('omits a blank name rather than sending an empty displayName', () => {
-    const request = buildSimulationRequest(form({ name: '   ' }));
-    expect(request).not.toHaveProperty('displayName');
-  });
-
-  it('trims and includes a non-blank name', () => {
-    const request = buildSimulationRequest(form({ name: '  My Drone  ' }));
-    expect(request.displayName).toBe('My Drone');
-  });
-
-  it('omits latitude/longitude when absent rather than sending null', () => {
-    const request = buildSimulationRequest(form({ latitude: null, longitude: null }));
-    expect(request).not.toHaveProperty('latitude');
-    expect(request).not.toHaveProperty('longitude');
-  });
-
-  it('includes latitude/longitude when given, including falsy-but-valid 0', () => {
-    const request = buildSimulationRequest(form({ latitude: 0, longitude: -122.4 }));
-    expect(request.latitude).toBe(0);
-    expect(request.longitude).toBe(-122.4);
-  });
-
-  it('carries autoStart through as given', () => {
-    expect(buildSimulationRequest(form({ autoStart: false })).autoStart).toBe(false);
-  });
-
-  it('omits telemetry when the form carries no flight plan', () => {
-    expect(buildSimulationRequest(form())).not.toHaveProperty('telemetry');
-  });
-
-  it('includes telemetry verbatim when the form carries a flight plan (docs/CYCLES-PLAN.md §7, CT-b)', () => {
-    const telemetry: FileSimulateForm['telemetry'] = {
-      speedMps: 12,
-      routeMode: 'loop',
-      route: [
-        { latitude: 1, longitude: 2, altitudeMeters: 60 },
-        { latitude: 3, longitude: 4 },
-      ],
-    };
-    const request = buildSimulationRequest(form({ telemetry }));
-    expect(request.telemetry).toEqual(telemetry);
-    // latitude/longitude are still sent alongside a route — the backend ignores them in that case.
-    expect(buildSimulationRequest(form({ telemetry, latitude: 10, longitude: 20 })).latitude).toBe(10);
-  });
-});
-
-describe('buildSyntheticRegisterRequest', () => {
-  it('uses the trimmed name when one is given', () => {
-    expect(buildSyntheticRegisterRequest('  my-pattern  ')).toEqual({
-      name: 'my-pattern',
-      protocol: 'sim',
-      uri: 'sim://demo',
-    });
-  });
-
-  it('falls back to the quick-add default name when blank', () => {
-    expect(buildSyntheticRegisterRequest('   ')).toEqual({
-      name: 'sim-demo',
-      protocol: 'sim',
-      uri: 'sim://demo',
-    });
-  });
-
-  it('falls back to the default name for an empty string', () => {
-    expect(buildSyntheticRegisterRequest('').name).toBe('sim-demo');
-  });
-});
 
 describe('isSimulatedAsset', () => {
   it('is true for the simulated category', () => {

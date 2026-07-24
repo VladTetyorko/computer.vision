@@ -24,15 +24,21 @@ const EVENTS_LIMIT = 50;
  * genuinely-already-seen event re-fire a notification just because the user happened to change tabs
  * in between.
  *
- * **Cost, documented per the plan's own ask**: this is a `providedIn: 'root'` singleton, but it is
- * only ever *injected* from lazy route components (`WallPage`/`MapPage`/`AssetDetailPage`), never
- * from `app.ts` or any other eager path — so, like `FleetMapStore`'s own `leaflet-src` chunk
- * reasoning, it lands wherever the bundler puts code shared by those three lazy chunks, not the
- * initial bundle. It differs from `FleetStore` in one more way: `FleetStore` starts polling the
- * instant the app boots (constructed eagerly from `app.ts`) and never stops; this store polls
- * **only while `activeConsumers > 0`** (see `activate`/`release`) — "O(visible) discipline"
- * (docs/MVP2-PLAN.md §E, E-b bullet 5): no events poll runs at all while the user is on
- * Devices/Settings/Debug/Live/Replay, however long that lasts.
+ * **Cost, updated from the plan's original ask**: this is a `providedIn: 'root'` singleton. It used
+ * to be injected only from lazy route components (`WallPage`/`MapPage`/`AssetDetailPage`), never
+ * from `app.ts` or any other eager path, giving it "O(visible) discipline" (docs/MVP2-PLAN.md §E,
+ * E-b bullet 5): no events poll ran at all while the user was on Devices/Settings/Debug/Live/Replay,
+ * however long that lasted. **That is no longer this store's behavior.** The app-shell header bell
+ * (`shared/ui/notification-bell.ts`, docs/UX-REWORK-PLAN.md §U-c) is now a third, permanently-mounted
+ * consumer — alive for the whole session, never destroyed until the tab itself closes/reloads — so
+ * `activate()`/`release()` still exist and still gate the poll in principle, but in practice the
+ * refcount never returns to zero once the app has booted: this store is now effectively always-on,
+ * the same "starts at boot, never stops" posture `FleetStore` already had (see that component's own
+ * doc comment for the full rationale — a header bell that only showed unread events while the
+ * operator happened to be on Wall/Command/an asset page would defeat the point of a persistent
+ * notification affordance). `MapPage` itself no longer exists either (`/map` redirects to
+ * `/command`, docs/UX-REWORK-PLAN.md §U-c) — `WallPage`/`AssetDetailPage` remain the two page-scoped
+ * consumers alongside the always-on bell.
  *
  * **`ignoreHidden: true`, the one deliberate exception in this app** (see
  * `PollScheduler.ScheduleOptions#ignoreHidden`'s own doc comment): every other poller in this app
@@ -107,12 +113,13 @@ export class EventsStore {
   }
 
   /**
-   * Registers interest — call once from a page's constructor (`WallPage`/`MapPage`/
-   * `AssetDetailPage`). The first `activate()` since the last full `release()` triggers an
+   * Registers interest — call once from a consumer's constructor (`WallPage`/`AssetDetailPage`, and
+   * now the permanently-mounted app-shell `NotificationBell` — see class doc's "Cost" note for why
+   * that third, never-released consumer means the refcount effectively never returns to zero once
+   * the app has booted). The first `activate()` since the last full `release()` triggers an
    * immediate poll and starts the shared 5s cadence, **unless `LiveStore` is already `'open'`**, in
-   * which case there is nothing to poll for yet (live data is already flowing for free) — a
-   * second/third concurrent consumer (never actually simultaneous in this SPA today, but harmless if
-   * it ever were) just bumps the refcount.
+   * which case there is nothing to poll for yet (live data is already flowing for free) — any
+   * further concurrent consumer just bumps the refcount.
    */
   activate(): void {
     this.activeConsumers++;

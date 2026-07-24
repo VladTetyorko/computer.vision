@@ -1,11 +1,13 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.persistence.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
+import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
@@ -102,6 +104,16 @@ class PersistenceWiringConfigurationTest {
     }
 
     @Test
+    void enabledSelectsJpaAssetImageRepository() {
+        when(entityManagerFactoryProvider.getObject()).thenReturn(mock(EntityManagerFactory.class));
+        VisionPersistenceProperties enabled = new VisionPersistenceProperties(true,
+                VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
+
+        assertInstanceOf(JpaAssetImageRepository.class,
+                configuration.assetImageRepositoryPort(enabled, entityManagerFactoryProvider));
+    }
+
+    @Test
     void disabledSelectsInMemoryRepositoriesWithoutTouchingTheProvider() {
         VisionPersistenceProperties disabled = new VisionPersistenceProperties(false,
                 VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
@@ -118,5 +130,7 @@ class PersistenceWiringConfigurationTest {
                 configuration.telemetryRepositoryPort(disabled, entityManagerFactoryProvider));
         assertInstanceOf(InMemoryDetectionRepository.class,
                 configuration.detectionRepositoryPort(disabled, entityManagerFactoryProvider));
+        assertInstanceOf(InMemoryAssetImageRepository.class,
+                configuration.assetImageRepositoryPort(disabled, entityManagerFactoryProvider));
     }
 }

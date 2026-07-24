@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.persistence.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.JpaCategoryRepository;
@@ -7,12 +8,14 @@ import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.PersistenceUnit;
+import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
@@ -116,5 +119,15 @@ public class PersistenceWiringConfiguration {
             return new JpaDetectionRepository(entityManagerFactory.getObject());
         }
         return new InMemoryDetectionRepository();
+    }
+
+    /** docs/UX-REWORK-PLAN.md §U-d item 3 — the asset image store, same toggle idiom as the six above. */
+    @Bean
+    public AssetImageRepositoryPort assetImageRepositoryPort(VisionPersistenceProperties properties,
+                                                                ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaAssetImageRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryAssetImageRepository();
     }
 }

@@ -14,6 +14,8 @@ import type {
   DeviceEdit,
   FleetSummary,
   LiveSubscription,
+  ProbeDeviceRequest,
+  ProbeDeviceResult,
   RegisterDeviceRequest,
   ScanRequest,
   ScanResult,
@@ -114,6 +116,16 @@ export class VisionApi {
     return firstValueFrom(this.http.post<ScanResult>('/api/discovery/scan', request));
   }
 
+  // --- Device probe (docs/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) ---------
+  // "Test before save" (UX-DESIGN §5.1): connects to a candidate connection and decodes one frame
+  // without registering anything. A probe that can't produce a frame is a 422 with a specific
+  // message (`describeHttpError` already surfaces it) — the wizard never lets Register/Discover
+  // paths advance past a failed probe (`features/onboarding/onboarding-logic.ts#canAdvanceFromTest`).
+
+  probeDevice(request: ProbeDeviceRequest): Promise<ProbeDeviceResult> {
+    return firstValueFrom(this.http.post<ProbeDeviceResult>('/api/devices/probe', request));
+  }
+
   // --- Assets ----------------------------------------------------------------
   // Backs the live telemetry OSD/map (docs/CYCLES-PLAN.md §2): a device's asset — and
   // that asset's open usage — is looked up on demand, not polled by a fleet-wide store.
@@ -211,6 +223,36 @@ export class VisionApi {
       this.http.delete<AssetDetails>(
         `/api/assets/${encodeURIComponent(assetId)}/devices/${encodeURIComponent(deviceId)}`,
       ),
+    );
+  }
+
+  // --- Asset image (docs/UX-REWORK-PLAN.md §U-d) ----------------------------------------------
+  // A small binary sidecar on an asset, not a field in `AssetDetails`/`AssetSummary` itself — only
+  // `hasImage` lives on those DTOs (see that field's own doc comment in `models.ts`). Upload is
+  // always a client-downscaled JPEG (`features/onboarding/image-downscale.ts`), always ≤2MB per the
+  // pinned contract — this class does no downscaling itself, it only moves already-prepared bytes.
+
+  /**
+   * The path for an asset's photo (docs/UX-REWORK-PLAN.md §U-d) — not promise-returning, like
+   * `snapshotUrl` above: meant to be bound straight to an `<img src>`, which fetches it itself and
+   * degrades gracefully to its own `error` handler on a 404 (an asset with `hasImage` false/absent,
+   * or one whose photo was never uploaded on a pre-§U-d backend).
+   */
+  assetImageUrl(assetId: string): string {
+    return `/api/assets/${encodeURIComponent(assetId)}/image`;
+  }
+
+  /** Replaces the asset's photo — raw JPEG/PNG bytes, ≤2MB, `204` on success. */
+  uploadAssetImage(assetId: string, image: Blob): Promise<void> {
+    return firstValueFrom(
+      this.http.put<void>(`/api/assets/${encodeURIComponent(assetId)}/image`, image),
+    );
+  }
+
+  /** Removes the asset's photo — idempotent, `204` on success. */
+  deleteAssetImage(assetId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>(`/api/assets/${encodeURIComponent(assetId)}/image`),
     );
   }
 

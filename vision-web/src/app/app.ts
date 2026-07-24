@@ -32,11 +32,12 @@ export class App {
 
   /**
    * The plan's own end-state IA (docs/MVP3-PLAN.md "Information architecture change"): **Fly ·
-   * Command · Assets · Settings** — job-oriented, one tab per persona's own page (`Fly` the
+   * Command · Warehouse · Settings** — job-oriented, one tab per persona's own page (`Fly` the
    * operator's cockpit, `Command` the manager's dashboard, docs/MVP3-PLAN.md §C-c) plus the
-   * warehouse (`Assets` — the tab label C-c renames; the route underneath is still `/devices`,
-   * unchanged, so every existing `router.navigate(['/devices', ...])`/`routerLink="/devices"` call
-   * site across this app keeps working verbatim) and `Settings`. No capability lost: `/wall` and
+   * warehouse (labeled **Warehouse**, docs/UX-REWORK-PLAN.md §U-d renamed it from C-c's own
+   * "Assets" — the route underneath is still `/devices`, with `/warehouse` now an alias; every
+   * existing `router.navigate(['/devices', ...])`/`routerLink="/devices"` call site across this app
+   * keeps working verbatim) and `Settings`. No capability lost: `/wall` and
    * `/map` (and `/live/:deviceId`, never a tab to begin with) are all still fully reachable, just
    * demoted out of the primary tab row into the "More" overflow (`moreLinks` below, rendered as a
    * `<details>` dropdown in `app.html` — this app's existing disclosure idiom, see e.g.
@@ -55,7 +56,7 @@ export class App {
   protected readonly tabs: readonly Tab[] = [
     { path: '/fly', label: 'Fly' },
     { path: '/command', label: 'Command' },
-    { path: '/devices', label: 'Assets' },
+    { path: '/devices', label: 'Warehouse' },
     { path: '/settings', label: 'Settings' },
   ];
 

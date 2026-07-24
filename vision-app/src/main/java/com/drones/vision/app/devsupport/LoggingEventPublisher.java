@@ -18,7 +18,7 @@ public final class LoggingEventPublisher implements EventPublisherPort {
 
     @Override
     public void publish(Event event) {
-        log.info("event id={} streamId={} type={} message={} attributes={}",
+        log.debug("event id={} streamId={} type={} message={} attributes={}",
                 event.id(), event.streamId(), event.type(), event.message(), event.attributes());
-    }
+    }r
 }

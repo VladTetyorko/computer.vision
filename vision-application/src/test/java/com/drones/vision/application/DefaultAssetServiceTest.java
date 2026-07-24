@@ -347,6 +347,21 @@ class DefaultAssetServiceTest {
     }
 
     @Test
+    void updateAppliesAnAttributesOnlyEditIncludingRegistrationNumber() {
+        // Confirms attributes patch end-to-end (docs/UX-REWORK-PLAN.md §U-d item 3): the wizard's
+        // registrationNumber field is just an attributes key, no special-cased field needed.
+        Asset stored = asset(Set.of(DeviceId.random()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+
+        Asset updated = service.update(stored.id(),
+                new AssetEdit(null, null, Map.of("registrationNumber", "N12345")), actingUser);
+
+        assertEquals(Map.of("registrationNumber", "N12345"), updated.attributes());
+        assertEquals(stored.displayName(), updated.displayName());
+        assertEquals(stored.category(), updated.category());
+    }
+
+    @Test
     void updateRejectsAnUnknownCategoryAndLeavesTheAssetAlone() {
         Asset stored = asset(Set.of(DeviceId.random()));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));

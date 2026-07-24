@@ -27,6 +27,8 @@ import java.util.Map;
  * @param lastUsedAt         start time of the asset's most recent usage, or absent if never used
  * @param lastKnownPosition  last known position across usages, or absent if none is known
  * @param attributes         free-form key/value attributes
+ * @param hasImage           whether an image is stored for this asset (docs/UX-REWORK-PLAN.md
+ *                           §U-d item 3, CONTRACT 2)
  * @param devices            the asset's resolved devices
  * @param recentUsages       the asset's recent usage history, newest first
  */
@@ -34,16 +36,19 @@ import java.util.Map;
 public record AssetDetailsResponse(String assetId, String displayName, String category, String categoryName,
                                     String owner, String status, String lifecycle, Instant lastUsedAt,
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
-                                    List<DeviceResponse> devices, List<AssetUsageResponse> recentUsages) {
+                                    boolean hasImage, List<DeviceResponse> devices,
+                                    List<AssetUsageResponse> recentUsages) {
 
     /**
      * Maps an {@link AssetDetails} read model to its wire representation.
      *
-     * @param details the detail view to map
+     * @param details  the detail view to map
+     * @param hasImage whether an image is stored for this asset (a separate lookup — see {@link
+     *                 AssetSummaryResponse#from})
      * @return the response body for {@code details}
      */
-    public static AssetDetailsResponse from(AssetDetails details) {
-        AssetSummaryResponse summary = AssetSummaryResponse.from(details.summary());
+    public static AssetDetailsResponse from(AssetDetails details, boolean hasImage) {
+        AssetSummaryResponse summary = AssetSummaryResponse.from(details.summary(), hasImage);
         List<DeviceResponse> devices = details.devices().stream().map(DeviceResponse::from).toList();
         List<AssetUsageResponse> usages = details.recentUsages().stream().map(AssetUsageResponse::from).toList();
         return new AssetDetailsResponse(
@@ -57,6 +62,7 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
                 summary.lastUsedAt(),
                 summary.lastKnownPosition(),
                 summary.attributes(),
+                summary.hasImage(),
                 devices,
                 usages);
     }

@@ -26,6 +26,7 @@ import com.drones.vision.application.DefaultAssetService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
 import com.drones.vision.application.DefaultFleetSummaryService;
+import com.drones.vision.application.DefaultProbeService;
 import com.drones.vision.application.DefaultReplayService;
 import com.drones.vision.application.DefaultSimulationService;
 import com.drones.vision.application.DefaultStreamService;
@@ -33,6 +34,7 @@ import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.StreamService;
@@ -467,6 +469,20 @@ public class WiringConfiguration {
                                                      DetectionEventRepositoryPort detectionEventRepositoryPort) {
         return new DefaultFleetSummaryService(assetService, streamService, usageTracker,
                 detectionEventRepositoryPort);
+    }
+
+    /**
+     * Test-before-save connection probe (docs/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
+     * the read side behind {@code DeviceProbeController} (vision-api, component-scanned). Reuses
+     * {@link #videoSourceRegistry} (the exact same adapter-selection {@link StreamService} itself
+     * streams through) plus the {@code List<TelemetrySourcePort>} beans Spring already collects
+     * for {@link #usageTracker} — no new collaborator type, a one-line assembly mirroring {@link
+     * #replayService}'s shape.
+     */
+    @Bean
+    public ProbeService probeService(VideoSourceRegistry videoSourceRegistry,
+                                      List<TelemetrySourcePort> telemetrySources) {
+        return new DefaultProbeService(videoSourceRegistry, telemetrySources);
     }
 
     /**

@@ -24,6 +24,7 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +66,7 @@ class AssetControllerTest {
     private AssetService assetService;
     private StreamPublisherPort streamPublisherPort;
     private TelemetryRepositoryPort telemetryRepositoryPort;
+    private AssetImageRepositoryPort assetImageRepositoryPort;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -76,10 +78,11 @@ class AssetControllerTest {
         assetService = mock(AssetService.class);
         streamPublisherPort = mock(StreamPublisherPort.class);
         telemetryRepositoryPort = mock(TelemetryRepositoryPort.class);
+        assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetController(assetService, currentUser, streamPublisherPort,
-                        telemetryRepositoryPort))
+                        telemetryRepositoryPort, assetImageRepositoryPort))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -333,6 +336,23 @@ class AssetControllerTest {
     }
 
     @Test
+    void listIncludesHasImagePerAssetFromTheImageRepository() throws Exception {
+        Asset withImage = asset(videoDevice());
+        AssetSummary withImageSummary = new AssetSummary(withImage, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset withoutImage = asset(videoDevice());
+        AssetSummary withoutImageSummary = new AssetSummary(withoutImage, "Drone", AssetStatus.OFFLINE, null, null);
+
+        when(assetService.assets(false)).thenReturn(List.of(withImageSummary, withoutImageSummary));
+        when(assetImageRepositoryPort.existsByAssetId(withImage.id())).thenReturn(true);
+        when(assetImageRepositoryPort.existsByAssetId(withoutImage.id())).thenReturn(false);
+
+        mockMvc.perform(get("/api/assets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].hasImage").value(true))
+                .andExpect(jsonPath("$[1].hasImage").value(false));
+    }
+
+    @Test
     void listReturns200WithEmptyListWhenNoAssets() throws Exception {
         when(assetService.assets(false)).thenReturn(List.of());
 
@@ -374,6 +394,28 @@ class AssetControllerTest {
         ArgumentCaptor<AssetEdit> captor = ArgumentCaptor.forClass(AssetEdit.class);
         verify(assetService).update(eq(stored.id()), captor.capture(), any());
         assertEquals("renamed drone", captor.getValue().displayName());
+    }
+
+    @Test
+    void updateAppliesAnAttributesEditIncludingRegistrationNumber() throws Exception {
+        // docs/UX-REWORK-PLAN.md §U-d item 3: confirms attributes patch end-to-end through the
+        // HTTP layer — the frontend sends registrationNumber as a plain attributes key, no
+        // special-cased field needed anywhere in this path.
+        Device device = videoDevice();
+        Asset stored = asset(device);
+        stubExistingAsset(stored, device);
+
+        String body = """
+                {"attributes":{"registrationNumber":"N12345"}}
+                """;
+
+        mockMvc.perform(patch("/api/assets/{id}", stored.id().value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<AssetEdit> captor = ArgumentCaptor.forClass(AssetEdit.class);
+        verify(assetService).update(eq(stored.id()), captor.capture(), any());
+        assertEquals(Map.of("registrationNumber", "N12345"), captor.getValue().attributes());
     }
 
     @Test
@@ -638,6 +680,19 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$.recentUsages[1].startPosition.latitude").value(50.45))
                 .andExpect(jsonPath("$.recentUsages[1].lastPosition.latitude").value(50.46))
                 .andExpect(jsonPath("$.recentUsages[1].sampleCount").value(42));
+    }
+
+    @Test
+    void detailsIncludesHasImageFromTheImageRepository() throws Exception {
+        Device device = videoDevice();
+        Asset asset = asset(device);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        when(assetService.details(asset.id())).thenReturn(new AssetDetails(summary, List.of(device), List.of()));
+        when(assetImageRepositoryPort.existsByAssetId(asset.id())).thenReturn(true);
+
+        mockMvc.perform(get("/api/assets/{id}", asset.id().value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasImage").value(true));
     }
 
     @Test

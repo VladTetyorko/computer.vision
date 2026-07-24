@@ -18,12 +18,60 @@
 
 /* ---- Header ------------------------------------------------------------------------------- */
 
+.header-identity {
+    align-items: flex-start;
+}
+
+/* Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3) — shown only when `hasImage` and the fetch
+   hasn't 404'd (`AssetDetailPage#assetImageSrc`/`onImageError`). */
+.asset-photo {
+    width: 4.5rem;
+    height: 4.5rem;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--panel-raised);
+    flex: none;
+}
+
 .edit-asset input {
     max-width: 22rem;
 }
 
 .chip.faded {
     background: transparent;
+}
+
+/* ---- Registration/tail number inline edit (docs/UX-REWORK-PLAN.md §U-d item 3) --------------- */
+
+.registration-row {
+    gap: 0.5rem;
+}
+
+.registration-edit input {
+    max-width: 12rem;
+}
+
+/* ---- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3 — advanced mode) ------------------ */
+
+.attributes-editor {
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.attributes-editor h3 {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.72rem;
+}
+
+.attributes-editor .option-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
 }
 
 /* ---- Detail grid ---------------------------------------------------------------------------- */
