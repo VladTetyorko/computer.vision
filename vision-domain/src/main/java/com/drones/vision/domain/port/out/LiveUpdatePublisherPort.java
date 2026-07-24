@@ -1,6 +1,7 @@
 package com.drones.vision.domain.port.out;
 
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.Telemetry;
@@ -25,6 +26,10 @@ import com.drones.vision.domain.model.Telemetry;
  *       attributed to the stream's owning asset.</li>
  *   <li>{@link #publishEvent(Event)} — a domain {@link Event} was raised (device online/offline,
  *       stream started/stopped, pipeline errors, ...).</li>
+ *   <li>{@link #publishDetectionEvent(DetectionEvent)} — a debounced {@link DetectionEvent} opened,
+ *       advanced (a further qualifying observation while already open), or closed — the same
+ *       occurrence {@code DetectionEventRepositoryPort#save} already persists, announced at the
+ *       exact same seam rather than duplicated bookkeeping.</li>
  * </ul>
  *
  * <h2>Contract</h2>
@@ -72,4 +77,15 @@ public interface LiveUpdatePublisherPort {
      * @param event the event that was raised
      */
     void publishEvent(Event event);
+
+    /**
+     * Announces a debounced {@link DetectionEvent} occurrence — opened, advanced while already
+     * open, or closed. Carries the event itself (unlike {@link #publishFleetChanged()}'s no-payload
+     * shape) since a driving adapter has no cheaper way to re-derive "which event, in which state"
+     * than being told directly, exactly mirroring how {@link #publishTelemetryAppended}/{@link
+     * #publishDetections} already carry their own payload rather than a bare notification.
+     *
+     * @param event the event's current state
+     */
+    void publishDetectionEvent(DetectionEvent event);
 }

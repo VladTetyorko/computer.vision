@@ -26,6 +26,7 @@ import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.net.URI;
@@ -153,6 +154,10 @@ class AssetWiringTest {
     @Autowired
     private Ownership actingOwnership;
 
+    /** Simulated-feed resume-on-boot (vision-application/MODULE.md's own design sketch) — always registered, resolves to a no-op with default (persistence-disabled) properties. */
+    @Autowired
+    private ApplicationRunner simulationResumeRunner;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -171,6 +176,7 @@ class AssetWiringTest {
         assertNotNull(eventController, "EventController must resolve its constructor dependency (docs/MVP2-PLAN.md E-a)");
         assertNotNull(fleetSummaryService, "FleetSummaryService bean must be registered (docs/MVP3-PLAN.md C-a)");
         assertNotNull(fleetController, "FleetController must resolve its constructor dependency (docs/MVP3-PLAN.md C-a)");
+        assertNotNull(simulationResumeRunner, "simulated-feed resume-on-boot ApplicationRunner bean must be registered");
     }
 
     @Test

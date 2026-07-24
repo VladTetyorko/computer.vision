@@ -1,27 +1,39 @@
 package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
+import com.drones.vision.application.ActiveStream;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssetStatus;
 import com.drones.vision.application.AssetSummary;
+import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.StreamService;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.CategoryId;
 import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.DetectionEvent;
+import com.drones.vision.domain.model.DetectionEventId;
+import com.drones.vision.domain.model.DetectionEventState;
 import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -40,27 +52,34 @@ import static org.mockito.Mockito.when;
 
 /**
  * Pure unit tests for {@link LiveUpdateRegistry}'s coalescing and resume logic
- * (docs/REALTIME-PLAN.md §4) — a directly-executing {@link ScheduledExecutorService} test double
- * makes {@link LiveUpdateRegistry#publishFleetChanged()}/{@link LiveUpdateRegistry#publishEvent}
- * run synchronously, and {@link LiveUpdateRegistry#flushPending()} is called directly rather than
- * waiting on the real ~150ms timer, so nothing here sleeps or depends on real timing. No Spring
- * context, no {@code SseEmitter} delivery is exercised here — that's {@code LiveControllerTest}'s
- * job (vision-api's {@code com.drones.vision.api} package).
+ * (docs/REALTIME-PLAN.md §4, extended for the {@code devices}/{@code detection-events} topics) — a
+ * directly-executing {@link ScheduledExecutorService} test double makes {@link
+ * LiveUpdateRegistry#publishFleetChanged()}/{@link LiveUpdateRegistry#publishEvent}/{@link
+ * LiveUpdateRegistry#publishDetectionEvent} run synchronously, and {@link
+ * LiveUpdateRegistry#flushPending()} is called directly rather than waiting on the real ~150ms
+ * timer, so nothing here sleeps or depends on real timing. No Spring context, no {@code
+ * SseEmitter} delivery is exercised here — that's {@code LiveControllerTest}'s job (vision-api's
+ * {@code com.drones.vision.api} package).
  */
 class LiveUpdateRegistryTest {
 
     private final AssetService assetService = mock(AssetService.class);
+    private final DeviceService deviceService = mock(DeviceService.class);
+    private final StreamService streamService = mock(StreamService.class);
+    private final StreamPublisherPort streamPublisherPort = mock(StreamPublisherPort.class);
+    private final DetectionEventRepositoryPort detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
 
     private LiveUpdateRegistry registry() {
-        return new LiveUpdateRegistry(provider(assetService), new ImmediateScheduledExecutorService());
+        return new LiveUpdateRegistry(provider(assetService), provider(deviceService), provider(streamService),
+                streamPublisherPort, provider(detectionEventRepositoryPort), new ImmediateScheduledExecutorService());
     }
 
     /** {@link ObjectProvider#getObject()} is a {@code default} method (not abstract), so a plain lambda can't implement it directly -- a minimal override is enough for a test double. */
-    private static ObjectProvider<AssetService> provider(AssetService assetService) {
+    private static <T> ObjectProvider<T> provider(T value) {
         return new ObjectProvider<>() {
             @Override
-            public AssetService getObject() {
-                return assetService;
+            public T getObject() {
+                return value;
             }
         };
     }
@@ -81,6 +100,16 @@ class LiveUpdateRegistryTest {
         return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO);
     }
 
+    private static Device device(DeviceId deviceId) {
+        return new Device(deviceId, "cam-1", Set.of(), new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()),
+                LifecycleState.ACTIVE);
+    }
+
+    private static DetectionEvent detectionEvent(StreamId streamId, Instant firstSeen) {
+        return new DetectionEvent(DetectionEventId.random(), streamId, null, "person", 0.8, firstSeen, firstSeen,
+                DetectionEventState.OPEN, null);
+    }
+
     @Test
     void publishFleetChangedAppendsALiveSnapshotToTheFleetBuffer() {
         when(assetService.assets()).thenReturn(List.of());
@@ -91,6 +120,23 @@ class LiveUpdateRegistryTest {
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.FLEET).snapshot();
         assertEquals(1, buffered.size());
         assertEquals("fleet", buffered.get(0).type());
+    }
+
+    @Test
+    void publishFleetChangedAlsoRefreshesTheDevicesBufferInTheSameDispatch() {
+        when(assetService.assets()).thenReturn(List.of());
+        DeviceId deviceId = DeviceId.random();
+        when(deviceService.devices()).thenReturn(List.of(device(deviceId)));
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(java.util.Optional.of(URI.create("/hls/" + streamId.value())));
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishFleetChanged();
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.DEVICES).snapshot();
+        assertEquals(1, buffered.size(), "one devices snapshot per publishFleetChanged() dispatch, same as fleet");
+        assertEquals("devices", buffered.get(0).type());
     }
 
     @Test
@@ -109,6 +155,57 @@ class LiveUpdateRegistryTest {
         @SuppressWarnings("unchecked")
         List<Object> payload = (List<Object>) replayed.get(0).payload();
         assertEquals(1, payload.size());
+    }
+
+    @Test
+    void replayForDevicesComputesAFreshLiveSnapshotWhenNothingHasEverBeenPublished() {
+        DeviceId deviceId = DeviceId.random();
+        when(deviceService.devices()).thenReturn(List.of(device(deviceId)));
+        when(streamService.streams()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        List<LiveEnvelopeResponse> replayed = registry.replayFor(LiveTopic.DEVICES, null);
+
+        assertEquals(1, replayed.size(), "devices gets the same empty-buffer live-query fallback as fleet");
+        assertEquals("devices", replayed.get(0).type());
+    }
+
+    @Test
+    void replayForDetectionEventsSeedsFromTheRepositoryWhenBufferIsEmpty() {
+        StreamId streamId = StreamId.random();
+        DetectionEvent older = detectionEvent(streamId, Instant.now().minusSeconds(10));
+        DetectionEvent newer = detectionEvent(streamId, Instant.now());
+        // findRecent's own contract is newest-first -- the registry must reverse this before
+        // appending so the buffer's causal/seq ordering stays oldest-first like every other append.
+        when(detectionEventRepositoryPort.findRecent(null, LiveUpdateRegistry.DETECTION_EVENT_BUFFER_CAPACITY))
+                .thenReturn(List.of(newer, older));
+        LiveUpdateRegistry registry = registry();
+
+        List<LiveEnvelopeResponse> replayed = registry.replayFor(LiveTopic.DETECTION_EVENTS, null);
+
+        assertEquals(2, replayed.size());
+        assertTrue(replayed.get(0).seq() < replayed.get(1).seq(), "seeded oldest-first");
+        assertEquals("detection-events", replayed.get(0).type());
+    }
+
+    @Test
+    void replayForDetectionEventsReturnsEmptyWhenTheRepositoryHasNothingRecent() {
+        when(detectionEventRepositoryPort.findRecent(null, LiveUpdateRegistry.DETECTION_EVENT_BUFFER_CAPACITY))
+                .thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        assertEquals(List.of(), registry.replayFor(LiveTopic.DETECTION_EVENTS, null));
+    }
+
+    @Test
+    void publishDetectionEventAppendsImmediatelyWithoutWaitingForAFlush() {
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishDetectionEvent(detectionEvent(StreamId.random(), Instant.now()));
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.DETECTION_EVENTS).snapshot();
+        assertEquals(1, buffered.size());
+        assertEquals("detection-events", buffered.get(0).type());
     }
 
     @Test
@@ -222,9 +319,10 @@ class LiveUpdateRegistryTest {
     /**
      * Runs every submitted/scheduled task synchronously, on the calling thread, the moment it's
      * submitted — makes {@link LiveUpdateRegistry#publishFleetChanged()}/{@link
-     * LiveUpdateRegistry#publishEvent} deterministic in a pure unit test with no real waiting, and
-     * makes the constructor's own {@code scheduleAtFixedRate} calls (the periodic flush/heartbeat)
-     * a harmless no-op (this fake never actually re-invokes a periodic task on its own).
+     * LiveUpdateRegistry#publishEvent}/{@link LiveUpdateRegistry#publishDetectionEvent}
+     * deterministic in a pure unit test with no real waiting, and makes the constructor's own
+     * {@code scheduleAtFixedRate} calls (the periodic flush/heartbeat) a harmless no-op (this fake
+     * never actually re-invokes a periodic task on its own).
      */
     private static final class ImmediateScheduledExecutorService implements ScheduledExecutorService {
         @Override

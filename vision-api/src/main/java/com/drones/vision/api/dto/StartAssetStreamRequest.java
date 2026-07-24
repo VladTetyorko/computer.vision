@@ -19,12 +19,15 @@ import com.drones.vision.domain.model.PipelineConfig;
  * @param confidenceThreshold overrides {@link PipelineConfig#confidenceThreshold()} if present
  * @param inferenceFps        overrides {@link PipelineConfig#inferenceFps()} if present
  * @param overlayBurnIn       overrides {@link PipelineConfig#overlayBurnIn()} if present (docs/MVP2-PLAN.md §V, V-e)
+ * @param model               overrides {@link PipelineConfig#model()}'s {@code id} if present/non-blank — see
+ *                             {@link StartStreamRequest#model()}'s own javadoc for the full contract (raw,
+ *                             never split; version comes from the default)
  */
 public record StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
-                                       Boolean overlayBurnIn) {
+                                       Boolean overlayBurnIn, String model) {
 
     /** No body: no explicit device, use every default from {@link PipelineConfig#defaults()}. */
-    public static final StartAssetStreamRequest EMPTY = new StartAssetStreamRequest(null, null, null, null);
+    public static final StartAssetStreamRequest EMPTY = new StartAssetStreamRequest(null, null, null, null, null);
 
     /**
      * Parses {@link #deviceId()}, if present.
@@ -37,12 +40,12 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
     }
 
     /**
-     * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()} onto
-     * {@link PipelineConfig#defaults()}.
+     * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()}/{@link
+     * #model()} onto {@link PipelineConfig#defaults()}.
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
-        return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn).mergeOntoDefaults();
+        return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn, model).mergeOntoDefaults();
     }
 }

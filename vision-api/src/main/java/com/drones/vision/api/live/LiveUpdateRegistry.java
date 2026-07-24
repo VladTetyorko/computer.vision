@@ -1,7 +1,11 @@
 package com.drones.vision.api.live;
 
+import com.drones.vision.api.dto.ActiveStreamResponse;
 import com.drones.vision.api.dto.AssetSummaryResponse;
+import com.drones.vision.api.dto.DetectionEventResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
+import com.drones.vision.api.dto.DeviceResponse;
+import com.drones.vision.api.dto.DevicesSnapshotResponse;
 import com.drones.vision.api.dto.EventResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
@@ -9,11 +13,17 @@ import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
 import com.drones.vision.application.AssetService;
+import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.StreamService;
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,7 +31,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
@@ -41,26 +53,43 @@ import java.util.concurrent.atomic.AtomicLong;
  * SseEmitter}.
  *
  * <h2>Topics</h2>
- * {@link LiveTopic#FLEET}/{@link LiveTopic#EVENT} are implicit and on for every connection;
- * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in (requested via the {@code
- * topics} query parameter at connect time, or added/removed later via {@link
- * #updateTopics(String, UpdateLiveTopicsRequest)}).
+ * {@link LiveTopic#FLEET}/{@link LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
+ * LiveTopic#DETECTION_EVENTS} are implicit and on for every connection; {@code
+ * telemetry:<assetId>}/{@code detections:<assetId>} are opt-in (requested via the {@code topics}
+ * query parameter at connect time, or added/removed later via {@link #updateTopics(String,
+ * UpdateLiveTopicsRequest)}). {@code devices}/{@code detection-events} extend this channel beyond
+ * its original R-c scope: {@code devices} lets {@code FleetStore} (vision-web) drop its 5s {@code
+ * GET /api/devices}+{@code GET /api/streams} poll, and {@code detection-events} lets {@code
+ * EventsStore} drop its {@code GET /api/events} poll — see each topic's own javadoc ({@link
+ * LiveTopicKind#DEVICES}/{@link LiveTopicKind#DETECTION_EVENTS}) for why each is its own topic
+ * rather than folded into {@code fleet}/{@code event}.
  *
  * <h2>Snapshot-on-connect</h2>
  * Every topic is backed by a {@link LiveRingBuffer} (see that class for the FIFO-vs-latest-only
- * retention split). For {@link LiveTopic#FLEET} specifically, an empty buffer (nothing has ever
- * changed since this process started) is refreshed with one real, live {@link
- * AssetService#assets()} query before replay — every other topic's "snapshot" is honestly just
- * "whatever this process has buffered since it started" (documented limitation: a viewer
- * connecting for the first time to an asset's {@code telemetry}/{@code detections} topic sees
- * nothing until the next sample/result arrives, even if the asset has been streaming all along;
- * acceptable for a process-local, single-instance ring buffer per the plan's own scope).
+ * retention split). Three topics have a real live-query fallback when their buffer is still empty
+ * (nothing has ever changed since this process started) rather than reporting "nothing yet" just
+ * because the process just started:
+ * <ul>
+ *   <li>{@link LiveTopic#FLEET} — {@link AssetService#assets()}</li>
+ *   <li>{@link LiveTopic#DEVICES} — {@link DeviceService#devices()} + {@link StreamService#streams()}</li>
+ *   <li>{@link LiveTopic#DETECTION_EVENTS} — {@link DetectionEventRepositoryPort#findRecent}, the
+ *       exact same source {@code EventController} reads for {@code GET /api/events}</li>
+ * </ul>
+ * Every other topic's "snapshot" is honestly just "whatever this process has buffered since it
+ * started" (documented limitation: a viewer connecting for the first time to an asset's {@code
+ * telemetry}/{@code detections} topic sees nothing until the next sample/result arrives, even if
+ * the asset has been streaming all along; acceptable for a process-local, single-instance ring
+ * buffer per the plan's own scope) — {@link LiveTopic#EVENT} is the one always-on topic that stays
+ * in that "honestly limited" bucket, since {@code EventPublisherPort} has no read side to query.
  *
  * <h2>Resume</h2>
  * A reconnecting {@code EventSource} sends back {@code Last-Event-ID} (this class's own {@code
  * seq}, a single counter shared across every topic — see {@link LiveEnvelopeResponse}'s javadoc
  * for why). Per subscribed topic: if the topic's buffer can resume from that seq with no gap, only
  * the entries after it are replayed; otherwise the same snapshot path as a fresh connect runs.
+ * Adding two more topics changes nothing about this: every envelope on every topic still draws
+ * from the exact same {@link #sequencer}, so one {@code Last-Event-ID} still resumes every
+ * subscribed topic uniformly regardless of which combination a connection carries.
  *
  * <h2>Coalescing</h2>
  * {@link #publishTelemetryAppended}/{@link #publishDetections} never touch a connection directly —
@@ -70,9 +99,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * last flush into one {@code List<TelemetrySampleResponse>} envelope per asset; detections keep
  * only the latest result per asset (the pending map itself is a plain overwrite) — matching the
  * plan's "detections emit latest-frame-only" exactly. {@link #publishFleetChanged}/{@link
- * #publishEvent} are not coalesced (both are comparatively rare) but are still dispatched onto the
- * shared scheduler rather than run on the caller's thread, keeping every method here equally
- * fire-and-forget.
+ * #publishEvent}/{@link #publishDetectionEvent} are not coalesced (all three are comparatively
+ * rare) but are still dispatched onto the shared scheduler rather than run on the caller's thread,
+ * keeping every method here equally fire-and-forget.
  *
  * <p><b>Simplification, deliberate and documented</b>: coalescing runs once per topic, shared
  * across every connection subscribed to it, rather than genuinely independently per connection —
@@ -80,6 +109,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * one envelope per {@value #COALESCE_MILLIS}ms per topic), while keeping exactly one canonical,
  * resumable sequence per topic instead of a connection-specific one, which would have made {@code
  * Last-Event-ID} resume ambiguous across two connections subscribed to the same topic.
+ *
+ * <p><b>{@code devices} extends {@code publishFleetChanged}, rather than adding a new port
+ * method</b>: every asset/device/stream lifecycle seam that already calls {@link
+ * #publishFleetChanged()} (asset/device CRUD via {@code LiveUpdateAuditTrail}, stream start/stop
+ * via {@code LiveUpdateEventPublisher} — both {@code vision-app}) is exactly the set of seams the
+ * {@code devices} topic also needs to refresh on, so this class's own implementation of that one
+ * method now recomputes and broadcasts <em>both</em> the {@code fleet} and {@code devices}
+ * snapshots in the same dispatch, instead of {@code vision-app} needing a second call site (and
+ * {@code LiveUpdatePublisherPort} a second, near-duplicate method) for what is, at every call site
+ * that matters, the same fact: "fleet-level state changed, re-derive your own snapshot(s)".
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
@@ -97,7 +136,20 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
     /** Retained events on the shared {@code event} topic (FIFO — see {@link LiveRingBuffer}). */
     static final int EVENT_BUFFER_CAPACITY = 300;
 
+    /**
+     * Retained entries on the shared {@code detection-events} topic (FIFO — see {@link
+     * LiveRingBuffer}), and the {@code limit} used to seed it from {@link
+     * DetectionEventRepositoryPort#findRecent} when empty. Matches {@link #EVENT_BUFFER_CAPACITY}
+     * for the same reason: generous resume slack for a cross-stream, comparatively low-rate feed
+     * (debounced occurrences, not raw per-frame results).
+     */
+    static final int DETECTION_EVENT_BUFFER_CAPACITY = 300;
+
     private final ObjectProvider<AssetService> assetService;
+    private final ObjectProvider<DeviceService> deviceService;
+    private final ObjectProvider<StreamService> streamService;
+    private final StreamPublisherPort streamPublisherPort;
+    private final ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort;
     private final ScheduledExecutorService scheduler;
 
     private final AtomicLong sequencer = new AtomicLong(0L);
@@ -105,6 +157,8 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
 
     private final LiveRingBuffer fleetBuffer = new LiveRingBuffer(1, true);
     private final LiveRingBuffer eventBuffer = new LiveRingBuffer(EVENT_BUFFER_CAPACITY, false);
+    private final LiveRingBuffer devicesBuffer = new LiveRingBuffer(1, true);
+    private final LiveRingBuffer detectionEventsBuffer = new LiveRingBuffer(DETECTION_EVENT_BUFFER_CAPACITY, false);
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> telemetryBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
 
@@ -116,23 +170,48 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
      * {@code @Autowired} disambiguates this from the package-private test-seam constructor below
      * — Spring cannot pick one of two candidate constructors on its own.
      *
-     * <p>{@code assetService} is an {@link ObjectProvider}, not a plain {@link AssetService},
-     * deliberately: {@code DefaultAssetService} depends on {@code AuditTrailPort}, which — when
-     * {@code vision.live.enabled=true} — is wrapped in {@code LiveUpdateAuditTrail}, which depends
-     * on this exact port, which resolves to this class. A plain constructor-injected {@code
-     * AssetService} here would make that a genuine circular bean dependency at context-startup
-     * time; deferring the actual lookup to {@link #freshFleetEnvelope()} (only ever called well
-     * after the whole context has finished starting) breaks the cycle without changing anything
-     * about when a fleet snapshot is actually computed.
+     * <p>{@code assetService}/{@code deviceService}/{@code streamService}/{@code
+     * detectionEventRepositoryPort} are each an {@link ObjectProvider}, not the plain service/port
+     * type, deliberately: every one of them sits on the other side of a genuine circular bean
+     * dependency from this class. {@code DefaultAssetService}/{@code DefaultDeviceService} depend
+     * on {@code AuditTrailPort}, which (when {@code vision.live.enabled=true}) {@code vision-app}
+     * wraps in {@code LiveUpdateAuditTrail}, which depends on {@link LiveUpdatePublisherPort},
+     * which resolves to this class; {@code DefaultStreamService} depends on {@link
+     * LiveUpdatePublisherPort} directly; and the {@code detectionEventRepositoryPort} bean is
+     * itself wrapped in {@code LiveUpdateDetectionEventRepository}, which depends on this port too.
+     * A plain constructor-injected dependency on any of the four here would deadlock Spring's bean
+     * graph at startup; deferring the actual lookup to {@link #freshFleetEnvelope()}/{@link
+     * #freshDevicesEnvelope()}/{@link #seedDetectionEventsIfEmpty} (only ever called once the whole
+     * context has finished starting) breaks every one of these cycles. {@code streamPublisherPort}
+     * carries no such risk (neither {@code MediamtxStreamPublisher} nor {@code NoopStreamPublisher}
+     * depends on {@link LiveUpdatePublisherPort}), so it stays a plain constructor parameter. See
+     * vision-app/MODULE.md's own Gotcha for the full chain and the exact {@code
+     * UnsatisfiedDependencyException} this pattern resolves.
      */
     @Autowired
-    public LiveUpdateRegistry(ObjectProvider<AssetService> assetService) {
-        this(assetService, defaultScheduler());
+    public LiveUpdateRegistry(ObjectProvider<AssetService> assetService,
+                              ObjectProvider<DeviceService> deviceService,
+                              ObjectProvider<StreamService> streamService,
+                              StreamPublisherPort streamPublisherPort,
+                              ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort) {
+        this(assetService, deviceService, streamService, streamPublisherPort, detectionEventRepositoryPort,
+                defaultScheduler());
     }
 
     /** Test seam: an injectable scheduler so tests can trigger {@link #flushPending()}/{@link #heartbeatAll()} directly instead of waiting on real timer ticks. */
-    LiveUpdateRegistry(ObjectProvider<AssetService> assetService, ScheduledExecutorService scheduler) {
+    LiveUpdateRegistry(ObjectProvider<AssetService> assetService,
+                        ObjectProvider<DeviceService> deviceService,
+                        ObjectProvider<StreamService> streamService,
+                        StreamPublisherPort streamPublisherPort,
+                        ObjectProvider<DetectionEventRepositoryPort> detectionEventRepositoryPort,
+                        ScheduledExecutorService scheduler) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
+        this.deviceService = Objects.requireNonNull(deviceService, "deviceService must not be null");
+        this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
+        this.streamPublisherPort =
+                Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
+        this.detectionEventRepositoryPort =
+                Objects.requireNonNull(detectionEventRepositoryPort, "detectionEventRepositoryPort must not be null");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
         this.scheduler.scheduleAtFixedRate(this::flushPending, COALESCE_MILLIS, COALESCE_MILLIS, TimeUnit.MILLISECONDS);
         this.scheduler.scheduleAtFixedRate(this::heartbeatAll, HEARTBEAT_MILLIS, HEARTBEAT_MILLIS, TimeUnit.MILLISECONDS);
@@ -156,7 +235,8 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
      * @param topicsParam the raw {@code topics} query parameter value — comma-separated {@code
      *                     telemetry:<assetId>}/{@code detections:<assetId>} entries; {@code
      *                     null}/blank means none requested. {@link LiveTopic#FLEET}/{@link
-     *                     LiveTopic#EVENT} are added automatically regardless.
+     *                     LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
+     *                     LiveTopic#DETECTION_EVENTS} are added automatically regardless.
      * @param lastEventId  the {@code Last-Event-ID} header value, parsed to a {@code seq}, or
      *                     {@code null} if absent (a fresh connection, not a resume)
      * @return the emitter to return from the controller method
@@ -169,6 +249,8 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         LiveConnection connection = new LiveConnection(connectionId, emitter);
         connection.topics().add(LiveTopic.FLEET);
         connection.topics().add(LiveTopic.EVENT);
+        connection.topics().add(LiveTopic.DEVICES);
+        connection.topics().add(LiveTopic.DETECTION_EVENTS);
         connection.topics().addAll(requestedTopics);
         connections.put(connectionId, connection);
 
@@ -208,7 +290,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         for (String raw : request.remove()) {
             LiveTopic topic = LiveTopic.parse(raw);
             if (topic.kind() == LiveTopicKind.TELEMETRY || topic.kind() == LiveTopicKind.DETECTIONS) {
-                connection.topics().remove(topic); // FLEET/EVENT stay on regardless -- see class javadoc
+                connection.topics().remove(topic); // FLEET/EVENT/DEVICES/DETECTION_EVENTS stay on regardless -- see class javadoc
             }
         }
         try {
@@ -226,12 +308,23 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         return new LiveSubscriptionResponse(connectionId, wireTopics(connection.topics()));
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Recomputes and broadcasts <em>both</em> the {@code fleet} (asset-centric) and {@code
+     * devices} (device-list + active-stream-list) snapshots in one dispatch — see this class's own
+     * javadoc for why {@code devices} extends this method rather than needing a second port call.
+     */
     @Override
     public void publishFleetChanged() {
         scheduler.execute(() -> {
-            LiveEnvelopeResponse envelope = freshFleetEnvelope();
-            fleetBuffer.append(envelope);
-            broadcast(LiveTopic.FLEET, envelope);
+            LiveEnvelopeResponse fleetEnvelope = freshFleetEnvelope();
+            fleetBuffer.append(fleetEnvelope);
+            broadcast(LiveTopic.FLEET, fleetEnvelope);
+
+            LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
+            devicesBuffer.append(devicesEnvelope);
+            broadcast(LiveTopic.DEVICES, devicesEnvelope);
         });
     }
 
@@ -257,6 +350,16 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
                     LiveTopicKind.EVENT.wire(), EventResponse.from(event));
             eventBuffer.append(envelope);
             broadcast(LiveTopic.EVENT, envelope);
+        });
+    }
+
+    @Override
+    public void publishDetectionEvent(DetectionEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        scheduler.execute(() -> {
+            LiveEnvelopeResponse envelope = detectionEventEnvelope(event);
+            detectionEventsBuffer.append(envelope);
+            broadcast(LiveTopic.DETECTION_EVENTS, envelope);
         });
     }
 
@@ -334,8 +437,8 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
     /** Package-private (rather than {@code private}) purely so a pure unit test in this package can exercise the resume-vs-snapshot decision directly, without going through a real {@code SseEmitter}. */
     List<LiveEnvelopeResponse> replayFor(LiveTopic topic, Long lastEventId) {
         LiveRingBuffer buffer = bufferFor(topic);
-        if (topic.kind() == LiveTopicKind.FLEET && buffer.isEmpty()) {
-            buffer.append(freshFleetEnvelope());
+        if (buffer.isEmpty()) {
+            seedIfEmpty(topic, buffer);
         }
         if (lastEventId != null && buffer.canResumeFrom(lastEventId)) {
             return buffer.since(lastEventId);
@@ -343,11 +446,28 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         return buffer.snapshot();
     }
 
+    /**
+     * The one-per-kind live-query fallback for a topic whose buffer has never been appended to —
+     * see the class javadoc's "Snapshot-on-connect" section. {@link LiveTopicKind#EVENT}/{@link
+     * LiveTopicKind#TELEMETRY}/{@link LiveTopicKind#DETECTIONS} have no such fallback (nothing to
+     * seed an empty buffer with), so they simply fall through unchanged.
+     */
+    private void seedIfEmpty(LiveTopic topic, LiveRingBuffer buffer) {
+        switch (topic.kind()) {
+            case FLEET -> buffer.append(freshFleetEnvelope());
+            case DEVICES -> buffer.append(freshDevicesEnvelope());
+            case DETECTION_EVENTS -> seedDetectionEventsIfEmpty(buffer);
+            default -> { } // EVENT/TELEMETRY/DETECTIONS: honestly-limited, nothing to seed
+        }
+    }
+
     /** Package-private for the same reason as {@link #replayFor} — lets a pure unit test inspect a topic's buffered state directly. */
     LiveRingBuffer bufferFor(LiveTopic topic) {
         return switch (topic.kind()) {
             case FLEET -> fleetBuffer;
             case EVENT -> eventBuffer;
+            case DEVICES -> devicesBuffer;
+            case DETECTION_EVENTS -> detectionEventsBuffer;
             case TELEMETRY -> telemetryBuffers.computeIfAbsent(topic.assetId(),
                     id -> new LiveRingBuffer(TELEMETRY_BUFFER_CAPACITY, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
@@ -358,6 +478,54 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         List<AssetSummaryResponse> snapshot =
                 assetService.getObject().assets().stream().map(AssetSummaryResponse::from).toList();
         return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.FLEET.wire(), snapshot);
+    }
+
+    /**
+     * Builds a fresh {@code devices} snapshot from {@link DeviceService#devices()} (default,
+     * non-archived — matching {@code GET /api/devices}'s own default) + {@link
+     * StreamService#streams()}, mapping each active stream's viewer URLs through {@link
+     * #streamPublisherPort} exactly like {@code StreamController#list} already does.
+     */
+    private LiveEnvelopeResponse freshDevicesEnvelope() {
+        List<DeviceResponse> devices =
+                deviceService.getObject().devices().stream().map(DeviceResponse::from).toList();
+        List<ActiveStreamResponse> streams = streamService.getObject().streams().stream()
+                .map(stream -> new ActiveStreamResponse(stream.streamId().value().toString(),
+                        stream.deviceId().value().toString(), stream.startedAt(), viewUrl(stream.streamId()),
+                        whepUrl(stream.streamId())))
+                .toList();
+        DevicesSnapshotResponse snapshot = new DevicesSnapshotResponse(devices, streams);
+        return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.DEVICES.wire(), snapshot);
+    }
+
+    /**
+     * Seeds an empty {@code detection-events} buffer from {@link
+     * DetectionEventRepositoryPort#findRecent} — the exact same source {@code EventController}
+     * reads for {@code GET /api/events} — appended oldest-first (the port returns newest-first) so
+     * the buffer's own causal ordering/{@code seq} assignment stays consistent with every other
+     * append.
+     */
+    private void seedDetectionEventsIfEmpty(LiveRingBuffer buffer) {
+        List<DetectionEvent> newestFirst =
+                detectionEventRepositoryPort.getObject().findRecent(null, DETECTION_EVENT_BUFFER_CAPACITY);
+        List<DetectionEvent> oldestFirst = new ArrayList<>(newestFirst);
+        Collections.reverse(oldestFirst);
+        for (DetectionEvent event : oldestFirst) {
+            buffer.append(detectionEventEnvelope(event));
+        }
+    }
+
+    private LiveEnvelopeResponse detectionEventEnvelope(DetectionEvent event) {
+        return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.DETECTION_EVENTS.wire(),
+                DetectionEventResponse.from(event));
+    }
+
+    private String viewUrl(StreamId streamId) {
+        return streamPublisherPort.viewUrl(streamId).map(URI::toString).orElse(null);
+    }
+
+    private String whepUrl(StreamId streamId) {
+        return streamPublisherPort.whepUrl(streamId).map(URI::toString).orElse(null);
     }
 
     private static List<String> wireTopics(Set<LiveTopic> topics) {

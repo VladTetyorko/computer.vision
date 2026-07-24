@@ -1,6 +1,7 @@
 package com.drones.vision.app.devsupport;
 
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.Telemetry;
@@ -34,6 +35,11 @@ public final class NoopLiveUpdatePublisher implements LiveUpdatePublisherPort {
 
     @Override
     public void publishEvent(Event event) {
+        // no-op
+    }
+
+    @Override
+    public void publishDetectionEvent(DetectionEvent event) {
         // no-op
     }
 }

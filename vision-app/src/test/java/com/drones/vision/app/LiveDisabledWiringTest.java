@@ -3,9 +3,11 @@ package com.drones.vision.app;
 import com.drones.vision.api.LiveController;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.devsupport.InMemoryAuditTrail;
+import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
 import com.drones.vision.domain.port.out.AuditTrailPort;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import org.junit.jupiter.api.Test;
@@ -49,6 +51,9 @@ class LiveDisabledWiringTest {
     @Autowired
     private AuditTrailPort auditTrailPort;
 
+    @Autowired
+    private DetectionEventRepositoryPort detectionEventRepositoryPort;
+
     @Test
     void disabledConfigurationFallsBackToTheNoopLiveUpdatePublisher() {
         assertInstanceOf(NoopLiveUpdatePublisher.class, liveUpdatePublisherPort);
@@ -68,5 +73,10 @@ class LiveDisabledWiringTest {
     @Test
     void auditTrailIsNotWrappedWhenDisabled() {
         assertInstanceOf(InMemoryAuditTrail.class, auditTrailPort);
+    }
+
+    @Test
+    void detectionEventRepositoryIsNotWrappedWhenDisabled() {
+        assertInstanceOf(InMemoryDetectionEventRepository.class, detectionEventRepositoryPort);
     }
 }

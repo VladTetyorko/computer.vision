@@ -4,6 +4,7 @@ import com.drones.vision.application.AssetSpec;
 import com.drones.vision.application.DeviceRegistration;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.StreamDescriptor;
 
 import java.net.URI;
@@ -19,24 +20,49 @@ import java.util.Map;
  * Capability#VIDEO} only — mirroring {@link RegisterDeviceRequest}'s
  * Phase-1 capability default, see {@link DeviceSpec#capabilities()}) and
  * wraps them under the new asset in one call, per the asset-first
- * registration flow. At least one device is required — this is enforced by
- * {@link AssetSpec}'s own validation, not duplicated here.
+ * registration flow.
+ *
+ * <p>{@code deviceIds} is the complementary "promote to asset" flow: it assigns already-registered,
+ * currently unowned devices to the new asset in the same call, instead of registering new ones —
+ * validated exactly like {@code POST /api/assets/{id}/devices} ({@code AssetService#assignDevice}:
+ * must exist, must not be soft-deleted, must not already belong to another asset). {@code devices}
+ * and {@code deviceIds} may be combined freely; at least one device between the two is required —
+ * this is enforced by {@link AssetSpec}'s own validation, not duplicated here.
  *
  * @param displayName human-readable name (e.g. "my drone"); must not be blank
  * @param category    the asset's category slug; must be a known category (validated by the service)
  * @param attributes  free-form key/value attributes; may be {@code null} (treated as empty)
- * @param devices     the device(s) to register for this asset; must contain at least one entry
+ * @param devices     new device(s) to register for this asset; may be {@code null}/empty if {@code
+ *                    deviceIds} supplies at least one device instead
+ * @param deviceIds   existing device ids (canonical UUID strings) to assign to this asset; may be
+ *                    {@code null}/empty
  */
 public record CreateAssetRequest(String displayName, String category, Map<String, String> attributes,
-                                  List<DeviceSpec> devices) {
+                                  List<DeviceSpec> devices, List<String> deviceIds) {
+
+    /**
+     * Convenience constructor for the original, {@code deviceIds}-less shape — defaults it to
+     * empty, keeping every pre-existing caller (new devices only) working unchanged.
+     *
+     * @param displayName human-readable name (e.g. "my drone"); must not be blank
+     * @param category    the asset's category slug; must be a known category (validated by the service)
+     * @param attributes  free-form key/value attributes; may be {@code null} (treated as empty)
+     * @param devices     the device(s) to register for this asset; must contain at least one entry
+     */
+    public CreateAssetRequest(String displayName, String category, Map<String, String> attributes,
+                               List<DeviceSpec> devices) {
+        this(displayName, category, attributes, devices, List.of());
+    }
 
     /**
      * Validates and converts this request into an {@link AssetSpec}.
      *
      * @return the input for {@code AssetService#create}
      * @throws IllegalArgumentException if {@code displayName} is blank, {@code category} is not a
-     *                                   lower-case-kebab slug, {@code devices} is empty, or any device
-     *                                   entry fails its own validation (see {@link DeviceSpec#toRegistration()})
+     *                                   lower-case-kebab slug, both {@code devices} and {@code
+     *                                   deviceIds} are empty, any device entry fails its own
+     *                                   validation (see {@link DeviceSpec#toRegistration()}), or a
+     *                                   {@code deviceIds} entry is not a valid UUID
      */
     public AssetSpec toSpec() {
         CategoryId categoryId = new CategoryId(category);
@@ -44,7 +70,12 @@ public record CreateAssetRequest(String displayName, String category, Map<String
                 .stream()
                 .map(DeviceSpec::toRegistration)
                 .toList();
-        return new AssetSpec(displayName, categoryId, attributes == null ? Map.of() : attributes, registrations);
+        List<DeviceId> existingDeviceIds = (deviceIds == null ? List.<String>of() : deviceIds)
+                .stream()
+                .map(DeviceId::of)
+                .toList();
+        return new AssetSpec(displayName, categoryId, attributes == null ? Map.of() : attributes, registrations,
+                existingDeviceIds);
     }
 
     /**

@@ -6,13 +6,14 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * A subscribable {@code GET /api/live} topic (docs/REALTIME-PLAN.md §4, item 2) — {@code fleet}
- * and {@code event} are implicit and always-on (every connection gets both regardless of the
- * {@code topics} query parameter); {@code telemetry:<assetId>}/{@code detections:<assetId>} are
- * opt-in, named explicitly by the caller.
+ * A subscribable {@code GET /api/live} topic (docs/REALTIME-PLAN.md §4, item 2) — {@code fleet},
+ * {@code event}, {@code devices}, and {@code detection-events} are implicit and always-on (every
+ * connection gets all four regardless of the {@code topics} query parameter); {@code
+ * telemetry:<assetId>}/{@code detections:<assetId>} are opt-in, named explicitly by the caller.
  *
  * @param kind    which kind of topic
- * @param assetId the asset this topic is scoped to; {@code null} for {@link #FLEET}/{@link #EVENT}
+ * @param assetId the asset this topic is scoped to; {@code null} for {@link #FLEET}/{@link
+ *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}
  */
 record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
@@ -21,6 +22,12 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
     /** The always-on domain-event topic (device online/offline, stream started/stopped, ...). */
     static final LiveTopic EVENT = new LiveTopic(LiveTopicKind.EVENT, null);
+
+    /** The always-on device-list + active-stream-list topic (extends the R-c channel — see {@link LiveTopicKind#DEVICES}). */
+    static final LiveTopic DEVICES = new LiveTopic(LiveTopicKind.DEVICES, null);
+
+    /** The always-on debounced-detection-event topic (extends the R-c channel — see {@link LiveTopicKind#DETECTION_EVENTS}). */
+    static final LiveTopic DETECTION_EVENTS = new LiveTopic(LiveTopicKind.DETECTION_EVENTS, null);
 
     static LiveTopic telemetry(AssetId assetId) {
         return new LiveTopic(LiveTopicKind.TELEMETRY, assetId);
@@ -60,6 +67,8 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
         return switch (kind) {
             case FLEET -> FLEET;
             case EVENT -> EVENT;
+            case DEVICES -> DEVICES;
+            case DETECTION_EVENTS -> DETECTION_EVENTS;
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
         };

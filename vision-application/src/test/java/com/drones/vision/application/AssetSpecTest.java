@@ -2,6 +2,7 @@ package com.drones.vision.application;
 
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.StreamDescriptor;
 import org.junit.jupiter.api.Test;
 
@@ -52,5 +53,42 @@ class AssetSpecTest {
 
         assertEquals(1, spec.devices().size());
         assertEquals(Map.of("color", "red"), spec.attributes());
+    }
+
+    @Test
+    void fourArgConstructorDefaultsExistingDeviceIdsToEmpty() {
+        AssetSpec spec = new AssetSpec("drone", DRONE, Map.of(), List.of(device("cam")));
+
+        assertEquals(List.of(), spec.existingDeviceIds());
+    }
+
+    @Test
+    void existingDeviceIdsAloneSatisfiesTheAtLeastOneDeviceRule() {
+        AssetSpec spec = new AssetSpec("drone", DRONE, Map.of(), List.of(), List.of(DeviceId.random()));
+
+        assertEquals(1, spec.existingDeviceIds().size());
+        assertEquals(0, spec.devices().size());
+    }
+
+    @Test
+    void rejectsZeroDevicesAndZeroExistingDeviceIdsCombined() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new AssetSpec("drone", DRONE, Map.of(), List.of(), List.of()));
+    }
+
+    @Test
+    void rejectsNullExistingDeviceIds() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new AssetSpec("drone", DRONE, Map.of(), List.of(device("cam")), null));
+    }
+
+    @Test
+    void copiesExistingDeviceIdsDefensively() {
+        List<DeviceId> existingDeviceIds = new ArrayList<>(List.of(DeviceId.random()));
+        AssetSpec spec = new AssetSpec("drone", DRONE, Map.of(), List.of(), existingDeviceIds);
+
+        existingDeviceIds.add(DeviceId.random());
+
+        assertEquals(1, spec.existingDeviceIds().size());
     }
 }

@@ -56,6 +56,7 @@ import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -100,12 +101,16 @@ import java.util.List;
  * selects between the real {@code LiveUpdateRegistry} (vision-api) and {@code
  * NoopLiveUpdatePublisher} per {@link VisionLiveProperties#enabled()} (default {@code true}),
  * threaded unconditionally into {@link #usageTracker}/{@link #streamService}; {@link
- * #auditTrailPort}/{@link #eventPublisherPort} each gain one more decorator ({@code
- * LiveUpdateAuditTrail}/{@code LiveUpdateEventPublisher}) only when that property is {@code true}
- * — see this module's {@code MODULE.md} "Server-push data plane" section for the full reasoning.
+ * #auditTrailPort}/{@link #eventPublisherPort}/{@link #detectionEventRepositoryPort} each gain one
+ * more decorator ({@code LiveUpdateAuditTrail}/{@code LiveUpdateEventPublisher}/{@code
+ * LiveUpdateDetectionEventRepository}) only when that property is {@code true} — see this module's
+ * {@code MODULE.md} "Server-push data plane" section for the full reasoning, including the two
+ * topics ({@code devices}, {@code detection-events}) that extend the channel beyond its original
+ * R-c scope.
  */
 @Configuration
-@EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class, VisionLiveProperties.class})
+@EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class, VisionLiveProperties.class,
+        VisionSimulationProperties.class})
 public class WiringConfiguration {
 
     @Bean
@@ -351,10 +356,22 @@ public class WiringConfiguration {
      * Debounced detection events (docs/MVP2-PLAN.md §E, E-a). In-memory, unconditionally — like
      * {@link #auditTrailPort}, persistence was explicitly out of scope for this feature (deferred
      * to a future persistence cycle); see {@link InMemoryDetectionEventRepository}.
+     *
+     * <p>When {@link VisionLiveProperties#enabled()} is {@code true} (docs/REALTIME-PLAN.md §4,
+     * extended for the {@code detection-events} live topic), wrapped in {@link
+     * LiveUpdateDetectionEventRepository}, which announces every {@code save} (open/advance/close)
+     * as a live update — the same "decorate the port every write already goes through" seam {@link
+     * #auditTrailPort} uses, applied here since {@code DetectionEventEngine} (vision-application)
+     * already calls this port at exactly the moments a live viewer cares about.
      */
     @Bean
-    public DetectionEventRepositoryPort detectionEventRepositoryPort() {
-        return new InMemoryDetectionEventRepository();
+    public DetectionEventRepositoryPort detectionEventRepositoryPort(LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                                                       VisionLiveProperties liveProperties) {
+        DetectionEventRepositoryPort delegate = new InMemoryDetectionEventRepository();
+        if (liveProperties.enabled()) {
+            return new LiveUpdateDetectionEventRepository(delegate, liveUpdatePublisherPort);
+        }
+        return delegate;
     }
 
     /**
@@ -512,11 +529,42 @@ public class WiringConfiguration {
      * #assetService}, reusing every rule it already enforces rather than duplicating asset
      * creation here. {@link #feedTransmitterRegistry} backs {@code transport=rtsp}/{@code mjpeg}
      * simulations, selecting {@link #rtspFeedTransmitter}/{@link #mjpegFeedTransmitter} by protocol.
+     *
+     * <p>{@code properties.mediamtx().rtspBase()} is reused as-is (no new property — same
+     * "already exactly the mediamtx RTSP push target this app knows about" reasoning as {@link
+     * #rtspFeedTransmitter}) so {@link DefaultSimulationService#resumeAll()} (simulated-feed
+     * resume-on-boot) can recognize which persisted {@code rtsp} devices are this app's own TX-fed
+     * feeds — see {@link SimulationApplicationRunner} for what actually calls it.
      */
     @Bean
     public SimulationService simulationService(AssetService assetService,
                                                 CategoryRepositoryPort categoryRepositoryPort,
-                                                FeedTransmitterRegistry feedTransmitterRegistry) {
-        return new DefaultSimulationService(assetService, categoryRepositoryPort, feedTransmitterRegistry);
+                                                FeedTransmitterRegistry feedTransmitterRegistry,
+                                                VisionPublishProperties properties) {
+        return new DefaultSimulationService(assetService, categoryRepositoryPort, feedTransmitterRegistry,
+                properties.mediamtx().rtspBase());
+    }
+
+    /**
+     * Simulated-feed resume-on-boot (per the design sketch in vision-application/MODULE.md):
+     * restarts the TX feed for every persisted simulated asset whose {@code rtsp} video device is
+     * one of this app's own TX-fed feeds — see {@link SimulationResumeRunner}/{@code
+     * DefaultSimulationService#resumeAll()} for the mechanism itself. {@code enabled} is resolved
+     * once, here, from both gates: {@link VisionPersistenceProperties#enabled()} (the in-memory
+     * profile has nothing to resume after a restart either — its assets are gone too) <em>and</em>
+     * {@link VisionSimulationProperties#resumeOnBoot()} (an explicit opt-out, default {@code
+     * true}). Always registered as a bean (unlike {@code LiveController}'s conditionally-absent
+     * pattern) — a two-property AND condition has no single {@code @ConditionalOnProperty} to
+     * express it cleanly, and an always-present bean that resolves to a no-op when either gate is
+     * off is simpler and just as testable (see {@code PersistenceWiringConfigurationTest}'s own
+     * precedent for testing a property-gated {@code @Bean} method by calling it directly, without
+     * a live Spring context).
+     */
+    @Bean
+    public ApplicationRunner simulationResumeRunner(SimulationService simulationService,
+                                                     VisionPersistenceProperties persistenceProperties,
+                                                     VisionSimulationProperties simulationProperties) {
+        return new SimulationResumeRunner(simulationService,
+                persistenceProperties.enabled() && simulationProperties.resumeOnBoot());
     }
 }

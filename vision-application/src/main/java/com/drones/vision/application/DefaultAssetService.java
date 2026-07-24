@@ -85,6 +85,12 @@ public final class DefaultAssetService implements AssetService {
         for (DeviceRegistration registration : spec.devices()) {
             deviceIds.add(deviceService.register(registration, actor).id());
         }
+        // Existing, already-registered devices assigned in the same act (the "promote to asset"
+        // flow) -- same eligibility rules as #assignDevice, just folded into this asset's very
+        // first save instead of a separate per-device assign+audit cycle each.
+        for (DeviceId existingDeviceId : spec.existingDeviceIds()) {
+            deviceIds.add(requireAssignable(existingDeviceId).id());
+        }
 
         Asset saved = assetRepository.save(new Asset(AssetId.random(), spec.displayName(), spec.category(),
                 ownership, deviceIds, spec.attributes()));
@@ -262,16 +268,7 @@ public final class DefaultAssetService implements AssetService {
         Objects.requireNonNull(deviceId, "deviceId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Asset asset = require(id);
-        Device device = requireDevice(deviceId);
-
-        if (device.isDeleted()) {
-            throw new IllegalArgumentException(
-                    "Device " + device.name() + " is deleted; restore it before assigning it to an asset");
-        }
-        assetRepository.findByDeviceId(deviceId).ifPresent(owner -> {
-            throw new IllegalStateException(
-                    "Device " + device.name() + " already belongs to asset " + owner.displayName());
-        });
+        Device device = requireAssignable(deviceId);
 
         Set<DeviceId> devices = new LinkedHashSet<>(asset.devices());
         devices.add(deviceId);
@@ -309,6 +306,29 @@ public final class DefaultAssetService implements AssetService {
     private Device requireDevice(DeviceId id) {
         return deviceService.find(id)
                 .orElseThrow(() -> new NoSuchElementException("Unknown device: " + id.value()));
+    }
+
+    /**
+     * The eligibility rules shared by {@link #assignDevice} and {@link #create}'s {@code
+     * existingDeviceIds} path: the device must exist, must not be soft-deleted, and must not
+     * already belong to any asset (including — for {@code create}'s case — the one being created,
+     * which by construction cannot already own anything yet).
+     *
+     * @throws NoSuchElementException  if {@code deviceId} is unknown (→404)
+     * @throws IllegalArgumentException if the device is soft-deleted (→400)
+     * @throws IllegalStateException    if the device already belongs to another asset (→409)
+     */
+    private Device requireAssignable(DeviceId deviceId) {
+        Device device = requireDevice(deviceId);
+        if (device.isDeleted()) {
+            throw new IllegalArgumentException(
+                    "Device " + device.name() + " is deleted; restore it before assigning it to an asset");
+        }
+        assetRepository.findByDeviceId(deviceId).ifPresent(owner -> {
+            throw new IllegalStateException(
+                    "Device " + device.name() + " already belongs to asset " + owner.displayName());
+        });
+        return device;
     }
 
     private int countUsages(AssetId id) {

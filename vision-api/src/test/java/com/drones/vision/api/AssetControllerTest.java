@@ -227,6 +227,80 @@ class AssetControllerTest {
         verifyNoInteractions(assetService);
     }
 
+    // ---- POST /api/assets with deviceIds ("promote to asset") -----------------
+
+    @Test
+    void createAcceptsExistingDeviceIdsWithNoNewDevices() throws Exception {
+        Device existing = videoDevice();
+        Asset created = asset(existing);
+        when(assetService.create(any(), any(), any())).thenReturn(created);
+        stubExistingAsset(created, existing);
+
+        String body = """
+                {"displayName":"my drone","category":"drone","deviceIds":["%s"]}
+                """.formatted(existing.id().value());
+
+        mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<AssetSpec> captor = ArgumentCaptor.forClass(AssetSpec.class);
+        verify(assetService).create(captor.capture(), any(), any());
+        AssetSpec spec = captor.getValue();
+        assertEquals(0, spec.devices().size());
+        assertEquals(List.of(existing.id()), spec.existingDeviceIds());
+    }
+
+    @Test
+    void createCombinesNewDevicesAndExistingDeviceIdsInOneSpec() throws Exception {
+        Device existing = videoDevice();
+        Asset created = asset(existing);
+        when(assetService.create(any(), any(), any())).thenReturn(created);
+        stubExistingAsset(created, existing);
+
+        String body = """
+                {"displayName":"my drone","category":"drone",
+                 "devices":[{"name":"fpv-cam","protocol":"sim","uri":"sim://demo"}],
+                 "deviceIds":["%s"]}
+                """.formatted(existing.id().value());
+
+        mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<AssetSpec> captor = ArgumentCaptor.forClass(AssetSpec.class);
+        verify(assetService).create(captor.capture(), any(), any());
+        AssetSpec spec = captor.getValue();
+        assertEquals(1, spec.devices().size());
+        assertEquals(List.of(existing.id()), spec.existingDeviceIds());
+    }
+
+    @Test
+    void createReturns400ForAMalformedDeviceId() throws Exception {
+        String body = """
+                {"displayName":"my drone","category":"drone","deviceIds":["not-a-uuid"]}
+                """;
+
+        mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(assetService);
+    }
+
+    @Test
+    void createReturns409WhenAnExistingDeviceIdAlreadyBelongsToAnotherAsset() throws Exception {
+        DeviceId ownedElsewhere = DeviceId.random();
+        when(assetService.create(any(), any(), any()))
+                .thenThrow(new IllegalStateException("Device cam-2 already belongs to asset other-drone"));
+
+        String body = """
+                {"displayName":"my drone","category":"drone","deviceIds":["%s"]}
+                """.formatted(ownedElsewhere.value());
+
+        mockMvc.perform(post("/api/assets").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
+    }
+
     // ---- GET /api/assets ----
 
     @Test

@@ -30,11 +30,22 @@ public interface AssetService {
     /**
      * Creates an asset together with its device(s), owned by the acting user.
      *
+     * <p>{@link AssetSpec#devices()} registers brand-new devices; {@link
+     * AssetSpec#existingDeviceIds()} instead assigns already-registered, currently unowned devices
+     * to the new asset in the same act — validated exactly like {@link #assignDevice} (must exist,
+     * must not be soft-deleted, must not already belong to another asset). Both may be used
+     * together; at least one device between the two is required (enforced by {@link AssetSpec}
+     * itself).
+     *
      * @param spec      what to create
      * @param ownership who will own it
      * @param actor     the user performing the creation
      * @return the created asset
-     * @throws IllegalArgumentException if the category does not exist
+     * @throws IllegalArgumentException if the category does not exist, or an {@code
+     *                                   existingDeviceIds} entry is soft-deleted
+     * @throws java.util.NoSuchElementException if an {@code existingDeviceIds} entry is unknown
+     * @throws IllegalStateException            if an {@code existingDeviceIds} entry already
+     *                                           belongs to another asset
      */
     Asset create(AssetSpec spec, Ownership ownership, UserId actor);
 

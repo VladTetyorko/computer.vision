@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.FeedId;
 import com.drones.vision.domain.model.FeedSpec;
 import com.drones.vision.domain.model.Ownership;
@@ -18,11 +19,13 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -39,15 +42,37 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code #startStream} already enforces (category validation, audit, device registration) applies
  * here too instead of being duplicated.
  *
+ * <p>{@link #resumeAll} (the simulated-feed resume-on-boot mechanism) is the read side of the same
+ * bookkeeping: given a persisted, {@code ACTIVE}, {@code simulated}-category asset whose {@code
+ * rtsp} video device structurally looks like one of this app's own TX-fed feeds, it rebuilds the
+ * {@link FeedSpec} that would have produced it and restarts the transmit side — see that method's
+ * own javadoc for the full "frozen video after a restart" story this closes.
+ *
  * <h2>Threading</h2>
  * {@link #feedByAsset} is the only mutable state, a {@link ConcurrentHashMap} safe for concurrent
- * {@link #simulate}/{@link #stop} calls across different assets; all other shared state is reached
- * through the injected collaborators.
+ * {@link #simulate}/{@link #stop}/{@link #resumeAll} calls across different assets; all other
+ * shared state is reached through the injected collaborators.
  */
 public final class DefaultSimulationService implements SimulationService {
 
+    private static final System.Logger LOG = System.getLogger(DefaultSimulationService.class.getName());
+
     /** The category every simulated asset is created under; seeded by devsupport at startup. */
     static final CategoryId SIMULATED_CATEGORY = new CategoryId("simulated");
+
+    /** {@code AssetSpec#attributes()} key {@link #simulate} records the source video path under — read back by {@link #resumeAll}. */
+    private static final String SOURCE_ATTRIBUTE = "source";
+
+    /**
+     * The URL path prefix {@link com.drones.vision.domain.port.out.FeedTransmitterPort#start} uses
+     * for an RTSP feed's target (duplicated from {@code adapter-rtsp}'s {@code RtspFeedTransmitter}
+     * — a private constant there, and this class may not depend on that adapter module anyway).
+     * {@link #resumeAll} parses this same shape back out of a persisted device's URI to recover its
+     * {@link FeedId} — a deliberate, narrow coupling to one adapter's URL convention, not enforced
+     * by {@link com.drones.vision.domain.port.out.FeedTransmitterPort}'s own contract, which makes
+     * no promise about URL shape at all.
+     */
+    private static final String FEED_PATH_PREFIX = "feed-";
 
     /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the RTSP transport. */
     private static final String FEED_PROTOCOL_RTSP = "rtsp";
@@ -93,15 +118,24 @@ public final class DefaultSimulationService implements SimulationService {
     private final AssetService assetService;
     private final CategoryRepositoryPort categoryRepository;
     private final FeedTransmitterRegistry feedTransmitters;
+    private final URI mediamtxRtspBase;
 
     /** Tracks which transmitter/{@link FeedId} pair (if any) backs each wired-transport asset's feed. */
     private final Map<AssetId, TrackedFeed> feedByAsset = new ConcurrentHashMap<>();
 
+    /**
+     * @param mediamtxRtspBase this app's own configured mediamtx RTSP push target (the same {@code
+     *                         URI} {@code vision-app} already hands {@code RtspFeedTransmitter}) —
+     *                         used only by {@link #resumeAll} to recognize which persisted {@code
+     *                         rtsp} devices are this app's own TX-fed simulation feeds, structurally
+     *                         (host:port match), rather than a real external camera
+     */
     public DefaultSimulationService(AssetService assetService, CategoryRepositoryPort categoryRepository,
-                                     FeedTransmitterRegistry feedTransmitters) {
+                                     FeedTransmitterRegistry feedTransmitters, URI mediamtxRtspBase) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.categoryRepository = Objects.requireNonNull(categoryRepository, "categoryRepository must not be null");
         this.feedTransmitters = Objects.requireNonNull(feedTransmitters, "feedTransmitters must not be null");
+        this.mediamtxRtspBase = Objects.requireNonNull(mediamtxRtspBase, "mediamtxRtspBase must not be null");
     }
 
     @Override
@@ -201,6 +235,114 @@ public final class DefaultSimulationService implements SimulationService {
         if (feedId != null) {
             transmitter.stop(feedId);
         }
+    }
+
+    // --- Simulated-feed resume-on-boot ----------------------------------------
+
+    @Override
+    public List<AssetId> resumeAll() {
+        List<AssetId> resumed = new ArrayList<>();
+        int candidateCount = 0;
+        for (AssetSummary summary : assetService.assets()) {
+            Asset asset = summary.asset();
+            if (!SIMULATED_CATEGORY.equals(asset.category()) || !asset.isActive()) {
+                continue; // not our concern, or deliberately out of service -- never spring back on its own
+            }
+            if (feedByAsset.containsKey(asset.id())) {
+                continue; // already resumed earlier in this same process run, or currently simulated -- idempotent
+            }
+            Optional<Device> ownFeedDevice = findOwnRtspFeedDevice(asset.id());
+            if (ownFeedDevice.isEmpty()) {
+                continue; // e.g. transport=DIRECT/MJPEG, or a real (not ours) rtsp camera -- nothing to resume, not an error
+            }
+            candidateCount++;
+            resumeOne(asset, ownFeedDevice.get()).ifPresent(resumed::add);
+        }
+        LOG.log(System.Logger.Level.INFO,
+                "Resumed " + resumed.size() + " of " + candidateCount + " simulated RTSP feed(s) found on boot");
+        return resumed;
+    }
+
+    /** Attempts to resume one candidate; every failure is logged and skipped, never thrown. */
+    private Optional<AssetId> resumeOne(Asset asset, Device device) {
+        Optional<FeedId> feedId = parseFeedId(device.stream().uri());
+        if (feedId.isEmpty()) {
+            LOG.log(System.Logger.Level.WARNING, () -> "Skipping " + describe(asset)
+                    + ": could not parse a feed id from its video device uri " + device.stream().uri());
+            return Optional.empty();
+        }
+        String source = asset.attributes().get(SOURCE_ATTRIBUTE);
+        if (source == null || source.isBlank()) {
+            LOG.log(System.Logger.Level.WARNING, () -> "Skipping " + describe(asset)
+                    + ": no recorded source video path (attributes.source) to rebuild its feed from");
+            return Optional.empty();
+        }
+        Path videoPath;
+        try {
+            videoPath = validateVideoPath(source);
+        } catch (IllegalArgumentException e) {
+            LOG.log(System.Logger.Level.WARNING, "Skipping " + describe(asset) + ": " + e.getMessage());
+            return Optional.empty();
+        }
+        FeedSpec feedSpec = new FeedSpec(FEED_PROTOCOL_RTSP, videoPath.toUri(), Map.of("loop", "true"));
+        FeedTransmitterPort transmitter;
+        try {
+            transmitter = feedTransmitters.transmitterFor(feedSpec);
+        } catch (IllegalArgumentException e) {
+            LOG.log(System.Logger.Level.WARNING,
+                    "Skipping " + describe(asset) + ": no transmitter supports its feed: " + e.getMessage());
+            return Optional.empty();
+        }
+        transmitter.start(feedId.get(), feedSpec);
+        feedByAsset.put(asset.id(), new TrackedFeed(transmitter, feedId.get()));
+        LOG.log(System.Logger.Level.INFO,
+                () -> "Resumed simulated feed for " + describe(asset) + " (feed " + feedId.get().value() + ")");
+        return Optional.of(asset.id());
+    }
+
+    /**
+     * The asset's own currently-active, {@code VIDEO}-capable device whose {@code rtsp} URI's
+     * host:port matches {@link #mediamtxRtspBase} — this app's own TX-fed simulation feed, not a
+     * real external camera (structurally indistinguishable from one in what's actually persisted;
+     * see {@link #resumeAll}'s own javadoc). At most one is expected in practice (every {@code
+     * simulate()}-created asset has exactly one video device); the first match wins if somehow more
+     * than one qualifies.
+     */
+    private Optional<Device> findOwnRtspFeedDevice(AssetId assetId) {
+        return assetService.details(assetId).devices().stream()
+                .filter(Device::isActive)
+                .filter(device -> device.capabilities().contains(Capability.VIDEO))
+                .filter(device -> isOwnRtspFeedUri(device.stream()))
+                .findFirst();
+    }
+
+    private boolean isOwnRtspFeedUri(StreamDescriptor stream) {
+        if (!FEED_PROTOCOL_RTSP.equals(stream.protocol())) {
+            return false; // "file"/"sim"/"mjpeg" video devices are never a resumable rtsp TX feed
+        }
+        URI uri = stream.uri();
+        return Objects.equals(uri.getHost(), mediamtxRtspBase.getHost()) && uri.getPort() == mediamtxRtspBase.getPort();
+    }
+
+    /** Reverses {@code RtspFeedTransmitter#targetUri} -- see {@link #FEED_PATH_PREFIX}'s own javadoc for the coupling this implies. */
+    private static Optional<FeedId> parseFeedId(URI uri) {
+        String path = uri.getPath();
+        if (path == null) {
+            return Optional.empty();
+        }
+        String segment = path.startsWith("/") ? path.substring(1) : path;
+        if (!segment.startsWith(FEED_PATH_PREFIX)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(FeedId.of(segment.substring(FEED_PATH_PREFIX.length())));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    private static String describe(Asset asset) {
+        return "asset " + asset.displayName() + " (" + asset.id().value() + ")";
     }
 
     /**

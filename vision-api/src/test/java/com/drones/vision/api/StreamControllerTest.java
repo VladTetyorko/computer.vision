@@ -226,6 +226,71 @@ class StreamControllerTest {
     }
 
     @Test
+    void startMergesModelOverrideOntoDefaults() throws Exception {
+        // The frontend's detection-model picker sends a model id here -- possibly a
+        // comma-composite ("yolo11n.pt,orion12l.pt") cv-service's own registry parses
+        // server-side; this DTO/PipelineConfig must carry it through verbatim, unsplit.
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"model":"yolo11n.pt,orion12l.pt"}
+                """;
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        PipelineConfig defaults = PipelineConfig.defaults();
+        PipelineConfig config = captor.getValue();
+        assertEquals("yolo11n.pt,orion12l.pt", config.model().id());
+        assertEquals(defaults.model().version(), config.model().version());
+        assertEquals(defaults.confidenceThreshold(), config.confidenceThreshold());
+        assertEquals(defaults.inferenceFps(), config.inferenceFps());
+    }
+
+    @Test
+    void startWithoutModelKeepsTheDefaultModel() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"confidenceThreshold":0.6}
+                """;
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        assertEquals(PipelineConfig.defaults().model(), captor.getValue().model());
+    }
+
+    @Test
+    void startTreatsABlankModelAsAbsent() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"model":"   "}
+                """;
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        assertEquals(PipelineConfig.defaults().model(), captor.getValue().model());
+    }
+
+    @Test
     void startReturns404WhenDeviceIsUnknown() throws Exception {
         when(streamService.start(any(), any()))
                 .thenThrow(new NoSuchElementException("Unknown device: " + deviceId.value()));

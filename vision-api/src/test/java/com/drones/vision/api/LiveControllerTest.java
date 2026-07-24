@@ -4,6 +4,8 @@ import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssetStatus;
 import com.drones.vision.application.AssetSummary;
+import com.drones.vision.application.DeviceService;
+import com.drones.vision.application.StreamService;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.CategoryId;
@@ -14,6 +16,8 @@ import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -59,19 +63,29 @@ class LiveControllerTest {
     void setUp() {
         assetService = mock(AssetService.class);
         when(assetService.assets()).thenReturn(List.of());
-        registry = new LiveUpdateRegistry(new ObjectProvider<>() {
-            @Override
-            public AssetService getObject() {
-                return assetService;
-            }
-        });
+        DeviceService deviceService = mock(DeviceService.class);
+        StreamService streamService = mock(StreamService.class);
+        StreamPublisherPort streamPublisherPort = mock(StreamPublisherPort.class);
+        DetectionEventRepositoryPort detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
+        registry = new LiveUpdateRegistry(
+                provider(assetService), provider(deviceService), provider(streamService), streamPublisherPort,
+                provider(detectionEventRepositoryPort));
         mockMvc = MockMvcBuilders.standaloneSetup(new LiveController(registry))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
 
+    private static <T> ObjectProvider<T> provider(T value) {
+        return new ObjectProvider<>() {
+            @Override
+            public T getObject() {
+                return value;
+            }
+        };
+    }
+
     @Test
-    void connectingReceivesTheConnectionHandshakeThenTheFleetSnapshot() throws Exception {
+    void connectingReceivesTheConnectionHandshakeThenTheFleetAndDevicesSnapshots() throws Exception {
         AssetId assetId = AssetId.random();
         when(assetService.assets()).thenReturn(List.of(summary(assetId)));
 
@@ -82,12 +96,19 @@ class LiveControllerTest {
         String body = result.getResponse().getContentAsString();
         assertTrue(body.contains("event:connection"), "the first thing sent must be the connection handshake event");
         List<String> dataLines = dataLines(body);
-        assertEquals(2, dataLines.size(), "connection handshake + one fleet snapshot envelope");
+        // Connection handshake + one fleet snapshot + one devices snapshot -- detection-events and
+        // event have nothing to seed from in this test (no detection events/domain events raised),
+        // so they contribute zero envelopes on this fresh connect. Fleet/devices are looked up by
+        // their own "type" field, not a fixed index -- the topic loop iterates a plain (unordered)
+        // Set, so which of the two is written first is not something a caller may rely on.
+        assertEquals(3, dataLines.size(), "connection handshake + fleet snapshot + devices snapshot");
         JsonNode connected = json(dataLines.get(0));
         assertTrue(connected.has("connectionId"));
-        JsonNode fleetEnvelope = json(dataLines.get(1));
-        assertEquals("fleet", fleetEnvelope.get("type").asString());
+        JsonNode fleetEnvelope = envelopeOfType(dataLines, "fleet");
         assertEquals(assetId.value().toString(), fleetEnvelope.get("payload").get(0).get("assetId").asString());
+        JsonNode devicesEnvelope = envelopeOfType(dataLines, "devices");
+        assertTrue(devicesEnvelope.get("payload").has("devices"));
+        assertTrue(devicesEnvelope.get("payload").has("streams"));
     }
 
     @Test
@@ -97,11 +118,13 @@ class LiveControllerTest {
                 .andReturn();
         int initialDataLines = dataLines(result.getResponse().getContentAsString()).size();
 
-        registry.publishFleetChanged(); // fires on the registry's own background dispatcher
+        registry.publishFleetChanged(); // fires on the registry's own background dispatcher -- refreshes fleet AND devices
 
-        List<String> dataLines = awaitAtLeast(result, initialDataLines + 1);
-        JsonNode delta = json(dataLines.get(dataLines.size() - 1));
-        assertEquals("fleet", delta.get("type").asString());
+        List<String> dataLines = awaitAtLeast(result, initialDataLines + 2);
+        JsonNode fleetDelta = json(dataLines.get(dataLines.size() - 2));
+        assertEquals("fleet", fleetDelta.get("type").asString());
+        JsonNode devicesDelta = json(dataLines.get(dataLines.size() - 1));
+        assertEquals("devices", devicesDelta.get("type").asString());
     }
 
     @Test
@@ -180,6 +203,15 @@ class LiveControllerTest {
                 .filter(line -> line.startsWith("data:"))
                 .map(line -> line.substring("data:".length()))
                 .toList();
+    }
+
+    /** Finds the one data line whose {@code type} field matches -- fails the test if none/more than one does. */
+    private static JsonNode envelopeOfType(List<String> dataLines, String type) {
+        List<JsonNode> matches = dataLines.stream().map(LiveControllerTest::json)
+                .filter(node -> node.has("type") && type.equals(node.get("type").asString()))
+                .toList();
+        assertEquals(1, matches.size(), "expected exactly one \"" + type + "\" envelope among " + dataLines);
+        return matches.get(0);
     }
 
     private static JsonNode json(String data) {

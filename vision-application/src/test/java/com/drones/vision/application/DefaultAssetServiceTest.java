@@ -134,6 +134,71 @@ class DefaultAssetServiceTest {
         assertEquals(Set.of(cam.id(), telemetry.id()), created.devices());
     }
 
+    // --- Creating with existingDeviceIds ("promote to asset") ------------------
+
+    @Test
+    void createAssignsExistingUnownedDevicesInsteadOfRegisteringNewOnes() {
+        Device existing = device("already-registered");
+        when(deviceService.find(existing.id())).thenReturn(Optional.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(existing.id()));
+
+        Asset created = service.create(spec, ownership, actingUser);
+
+        assertEquals(Set.of(existing.id()), created.devices());
+        verify(deviceService, never()).register(any(), any());
+    }
+
+    @Test
+    void createCombinesNewlyRegisteredAndExistingDevices() {
+        Device newCam = device("brand-new");
+        when(deviceService.register(any(), eq(actingUser))).thenReturn(newCam);
+        Device existing = device("already-registered");
+        when(deviceService.find(existing.id())).thenReturn(Optional.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(registration("brand-new")),
+                List.of(existing.id()));
+
+        Asset created = service.create(spec, ownership, actingUser);
+
+        assertEquals(Set.of(newCam.id(), existing.id()), created.devices());
+    }
+
+    @Test
+    void createThrowsForAnUnknownExistingDeviceId() {
+        DeviceId unknown = DeviceId.random();
+        when(deviceService.find(unknown)).thenReturn(Optional.empty());
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(unknown));
+
+        assertThrows(NoSuchElementException.class, () -> service.create(spec, ownership, actingUser));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void createRejectsADeletedExistingDeviceId() {
+        Device deleted = device("gone").withState(LifecycleState.DELETED);
+        when(deviceService.find(deleted.id())).thenReturn(Optional.of(deleted));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(deleted.id()));
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(spec, ownership, actingUser));
+        verify(assetRepository, never()).save(any());
+    }
+
+    @Test
+    void createRefusesAnExistingDeviceIdAlreadyOwnedByAnotherAsset() {
+        Device owned = device("owned-elsewhere");
+        Asset other = asset(Set.of(DeviceId.random()));
+        when(deviceService.find(owned.id())).thenReturn(Optional.of(owned));
+        when(assetRepository.findByDeviceId(owned.id())).thenReturn(Optional.of(other));
+        AssetSpec spec = new AssetSpec("my drone", DRONE, Map.of(), List.of(), List.of(owned.id()));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> service.create(spec, ownership, actingUser));
+
+        assertTrue(thrown.getMessage().contains(other.displayName()));
+        verify(assetRepository, never()).save(any());
+    }
+
     // --- Reading -------------------------------------------------------------
 
     @Test

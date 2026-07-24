@@ -4,11 +4,13 @@ import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceCategory;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.FeedId;
 import com.drones.vision.domain.model.FeedSpec;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamDescriptor;
@@ -47,6 +49,7 @@ import static org.mockito.Mockito.when;
 class DefaultSimulationServiceTest {
 
     private static final CategoryId SIMULATED = new CategoryId("simulated");
+    private static final URI MEDIAMTX_RTSP_BASE = URI.create("rtsp://localhost:8554");
 
     private AssetService assetService;
     private CategoryRepositoryPort categoryRepository;
@@ -63,7 +66,7 @@ class DefaultSimulationServiceTest {
         feedTransmitter = mock(FeedTransmitterPort.class);
         mjpegTransmitter = mock(FeedTransmitterPort.class);
         service = new DefaultSimulationService(assetService, categoryRepository,
-                new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter)));
+                new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter)), MEDIAMTX_RTSP_BASE);
         actor = UserId.random();
         ownership = new Ownership(actor, GroupId.random());
 
@@ -654,6 +657,172 @@ class DefaultSimulationServiceTest {
         service.stop(created.id());
 
         verify(feedTransmitter, times(1)).stop(any());
+    }
+
+    // --- resumeAll() -------------------------------------------------------------
+
+    @Test
+    void resumeAllRestartsTheFeedForAPersistedOwnRtspAsset(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        FeedId feedId = FeedId.random();
+        Device videoDevice = rtspVideoDevice(feedUri(feedId));
+        Asset asset = simulatedAsset(videoDevice, Map.of("source", file.toString()));
+        stubFleetOf(asset, videoDevice);
+        when(feedTransmitter.supports(any())).thenReturn(true);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(asset.id()), resumed);
+        ArgumentCaptor<FeedSpec> specCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(feedTransmitter).start(eq(feedId), specCaptor.capture());
+        assertEquals("rtsp", specCaptor.getValue().protocol());
+        assertEquals(file.toUri(), specCaptor.getValue().source());
+    }
+
+    @Test
+    void resumeAllSkipsANonSimulatedAsset(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Asset asset = new Asset(AssetId.random(), "real drone", new CategoryId("drone"), ownership,
+                Set.of(videoDevice.id()), Map.of("source", file.toString()));
+        when(assetService.assets()).thenReturn(List.of(summaryOf(asset)));
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verify(assetService, never()).details(any());
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsADeactivatedAsset(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Asset asset = new Asset(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()),
+                Map.of("source", file.toString()), LifecycleState.DEACTIVATED);
+        when(assetService.assets()).thenReturn(List.of(summaryOf(asset)));
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsAnAssetWithNoRtspVideoDevice() {
+        Device fileVideoDevice = new Device(DeviceId.random(), "drone · video", Set.of(Capability.VIDEO),
+                new StreamDescriptor("file", URI.create("file:///tmp/clip.mp4"), Map.of("loop", "true")));
+        Asset asset = simulatedAsset(fileVideoDevice, Map.of("source", "/tmp/clip.mp4"));
+        stubFleetOf(asset, fileVideoDevice);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsAnRtspDeviceThatIsNotOurOwnMediamtxBase() {
+        Device foreignDevice = rtspVideoDevice(URI.create("rtsp://some-real-camera.example:554/live"));
+        Asset asset = simulatedAsset(foreignDevice, Map.of("source", "/tmp/clip.mp4"));
+        stubFleetOf(asset, foreignDevice);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsWhenTheSourceAttributeIsMissing() {
+        Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Asset asset = simulatedAsset(videoDevice, Map.of());
+        stubFleetOf(asset, videoDevice);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsWhenTheSourceFileNoLongerExists() {
+        Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Asset asset = simulatedAsset(videoDevice, Map.of("source", "/no/such/file-any-more.mp4"));
+        stubFleetOf(asset, videoDevice);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsWhenTheUriHasNoParseableFeedId() {
+        Device videoDevice = rtspVideoDevice(URI.create(MEDIAMTX_RTSP_BASE + "/not-a-feed-path"));
+        Asset asset = simulatedAsset(videoDevice, Map.of("source", "/tmp/clip.mp4"));
+        stubFleetOf(asset, videoDevice);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verifyNoInteractions(feedTransmitter);
+    }
+
+    @Test
+    void resumeAllSkipsWhenNoTransmitterSupportsTheRebuiltFeed(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Asset asset = simulatedAsset(videoDevice, Map.of("source", file.toString()));
+        stubFleetOf(asset, videoDevice);
+        when(feedTransmitter.supports(any())).thenReturn(false);
+        when(mjpegTransmitter.supports(any())).thenReturn(false);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(), resumed);
+        verify(feedTransmitter, never()).start(any(), any());
+    }
+
+    @Test
+    void resumeAllIsIdempotentAndNeverRestartsAnAlreadyTrackedAssetTwice(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        FeedId feedId = FeedId.random();
+        Device videoDevice = rtspVideoDevice(feedUri(feedId));
+        Asset asset = simulatedAsset(videoDevice, Map.of("source", file.toString()));
+        stubFleetOf(asset, videoDevice);
+        when(feedTransmitter.supports(any())).thenReturn(true);
+
+        List<AssetId> first = service.resumeAll();
+        List<AssetId> second = service.resumeAll();
+
+        assertEquals(List.of(asset.id()), first);
+        assertEquals(List.of(), second, "already tracked -- the second call must not restart it again");
+        verify(feedTransmitter, times(1)).start(eq(feedId), any());
+    }
+
+    private Device rtspVideoDevice(URI uri) {
+        return new Device(DeviceId.random(), "drone · video", Set.of(Capability.VIDEO),
+                new StreamDescriptor("rtsp", uri, Map.of()));
+    }
+
+    private URI feedUri(FeedId feedId) {
+        return URI.create(MEDIAMTX_RTSP_BASE + "/feed-" + feedId.value());
+    }
+
+    private Asset simulatedAsset(Device videoDevice, Map<String, String> attributes) {
+        return new Asset(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()), attributes);
+    }
+
+    private AssetSummary summaryOf(Asset asset) {
+        return new AssetSummary(asset, "Simulated", AssetStatus.OFFLINE, null, null);
+    }
+
+    /** Stubs {@link #assetService} so {@code resumeAll} sees exactly one asset, with one device. */
+    private void stubFleetOf(Asset asset, Device device) {
+        AssetSummary summary = summaryOf(asset);
+        when(assetService.assets()).thenReturn(List.of(summary));
+        when(assetService.details(asset.id())).thenReturn(new AssetDetails(summary, List.of(device), List.of()));
     }
 
     // --- Helpers -------------------------------------------------------------
