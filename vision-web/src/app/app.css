@@ -3,6 +3,14 @@
     min-height: 100%;
 }
 
+/* Identity/nav only — no action buttons ever render here (verified against `app.html`, docs/
+   UX-REWORK-PLAN.md §U-b item 4); actions belong to the selected entity's own panel. Flat and
+   fully opaque on purpose (item 4's "tighten … flat, bordered bottom, no shadow"): the previous
+   `color-mix(… 88% …)` translucency + `backdrop-filter: blur(8px)` was a soft frosted-glass
+   affordance, the same family of cue as a drop-shadow, and this app's own hairline-seam gotcha
+   (see `features/fly/fly.css`'s `.cockpit` box-shadow doc comment) was partly a consequence of
+   this header not being fully opaque; an opaque header cannot show that seam at all, though the
+   `fly.css` defensive fix is left in place as harmless belt-and-suspenders. */
 .app-header {
     position: sticky;
     top: 0;
@@ -12,8 +20,7 @@
     gap: 1.25rem;
     height: var(--header-height);
     padding: 0 1.25rem;
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: blur(8px);
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
 }
 
@@ -49,13 +56,22 @@
     height: 100%;
 }
 
+/* Chrome/label typographic scale (docs/UX-REWORK-PLAN.md §U-b item 3): this app already had one
+   good instance of it (`.label` in `src/styles.css` — uppercase, 600 tracking, muted) and `th`
+   mirrors it independently; this systematizes the same treatment onto the header's own nav, the
+   one piece of top-level chrome that didn't have it. Two deliberate registers, not one: *display*
+   text (`h1`–`h3`, `.brand`) stays mixed-case, 600 weight, tight `-0.01em` tracking; *structural/
+   label* text (`.label`, `th`, and now `.tab`) goes uppercase, loosened tracking, because it's
+   naming a slot/category rather than being read as prose. */
 .tab {
     display: flex;
     align-items: center;
     padding: 0 0.85rem;
     color: var(--text-muted);
-    font-size: 0.88rem;
-    font-weight: 500;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     border-bottom: 2px solid transparent;
     transition: color 0.15s ease, border-color 0.15s ease;
 }

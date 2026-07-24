@@ -15,9 +15,16 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
+import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { TelemetryOsd } from './telemetry-osd';
 import { LiveMap } from '../../shared/map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
+
+/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
+ * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
+ * for why this isn't routed through `SettingsStore`. */
+const RAIL_OPEN_KEY = 'vision.live.railOpen';
+const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
 
 @Component({
   selector: 'vision-live',
@@ -49,8 +56,8 @@ export class LivePage {
    * in a form field) alongside its own button, since it is the one panel worth a fast toggle
    * mid-flight.
    */
-  protected readonly railOpen = signal(true);
-  protected readonly mapInsetVisible = signal(true);
+  protected readonly railOpen = signal(readPersistedFlag(RAIL_OPEN_KEY, true));
+  protected readonly mapInsetVisible = signal(readPersistedFlag(MAP_INSET_VISIBLE_KEY, true));
 
   /** The player's own measured seconds-behind-live, piped into `StreamInfoPanel` — see its doc comment. */
   protected readonly latencySeconds = signal<number | null>(null);
@@ -92,6 +99,12 @@ export class LivePage {
   );
 
   constructor() {
+    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
+    // actually changes; the initial `signal()` value above already restored whatever was last
+    // saved (or the existing default, on a first visit).
+    effect(() => writePersistedFlag(RAIL_OPEN_KEY, this.railOpen()));
+    effect(() => writePersistedFlag(MAP_INSET_VISIBLE_KEY, this.mapInsetVisible()));
+
     // Latches once `live()` is ever observed true — see `stopped`'s own doc comment above.
     effect(() => {
       if (this.live()) {

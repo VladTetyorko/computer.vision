@@ -182,6 +182,8 @@
 .readiness-total {
   color: var(--text-muted);
   font-size: 0.85rem;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Mark spec: thin bar, 2px gap between segments, rounded data-ends — a magnitude comparison across

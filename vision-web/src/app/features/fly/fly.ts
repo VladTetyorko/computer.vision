@@ -19,6 +19,7 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
+import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
@@ -45,6 +46,12 @@ import type { AssetDetails, AssetSummary, DetectionEvent } from '../../core/api/
 
 /** Asset characteristics/usages + the picker's own asset list are re-read at this cadence. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
+
+/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
+ * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
+ * for why this isn't routed through `SettingsStore`. */
+const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
+const DETECTIONS_STRIP_OPEN_KEY = 'vision.fly.detectionsStripOpen';
 
 /**
  * Console prefix for this page's diagnostic logging (the "Fly shows only the asset name and an
@@ -176,8 +183,8 @@ export class FlyPage {
   protected readonly transport = signal<Transport>('hls');
   protected readonly boxesMode = signal<BoxesMode>('overlay');
 
-  protected readonly mapVisible = signal(true);
-  protected readonly detectionsStripOpen = signal(false);
+  protected readonly mapVisible = signal(readPersistedFlag(MAP_VISIBLE_KEY, true));
+  protected readonly detectionsStripOpen = signal(readPersistedFlag(DETECTIONS_STRIP_OPEN_KEY, false));
   protected readonly shortcutsOpen = signal(false);
   protected readonly stopConfirmOpen = signal(false);
   protected readonly busy = signal(false);
@@ -200,6 +207,13 @@ export class FlyPage {
 
   constructor() {
     void this.initPicker();
+
+    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
+    // actually changes (the `M` shortcut, the detections-strip button, or `collapseOverlays`'s
+    // `Esc` handling all just flip the same signals); the initial `signal()` value above already
+    // restored whatever was last saved.
+    effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
+    effect(() => writePersistedFlag(DETECTIONS_STRIP_OPEN_KEY, this.detectionsStripOpen()));
 
     // Latches once `live()` is ever observed true for the current primary device — see `stopped`'s
     // own doc comment above.

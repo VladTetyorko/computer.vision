@@ -121,16 +121,11 @@ dd {
     margin: 0.6rem 0 0.5rem;
 }
 
-/* Detection boxes toggle (docs/CYCLES-PLAN.md §11 item 6) */
-.boxes-toggle {
-    gap: 0.3rem;
-}
-
-.boxes-toggle .btn.active {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: #a9c8ff;
-}
+/* The "boxes: Overlay/Burned/Off" toggle group used to carry its own local `.boxes-toggle`
+   active-state CSS here (mirrored verbatim in `asset-detail.css`); both were removed in favor of
+   the shared global `.segmented` (docs/UX-REWORK-PLAN.md §U-b item 5, `src/styles.css`) once the
+   template's wrapper class changed from `boxes-toggle` to `segmented` — same promotion-to-global
+   precedent as the kebab menu (see vision-web/MODULE.md's U-a2 map/command/shell entry). */
 
 input[type="range"] {
     margin-bottom: 0.75rem;

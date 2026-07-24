@@ -86,7 +86,7 @@
         <header>
           <h2>Video</h2>
           @if (live()) {
-            <div class="row boxes-toggle" role="group" aria-label="Detection boxes">
+            <div class="row segmented" role="group" aria-label="Detection boxes">
               <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'overlay'" (click)="setBoxesMode('overlay')">Overlay</button>
               <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'burned'" (click)="setBoxesMode('burned')">Burned</button>
               <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'off'" (click)="setBoxesMode('off')">Off</button>

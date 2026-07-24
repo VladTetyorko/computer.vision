@@ -4,12 +4,55 @@
  * Dark-first on purpose: camera monitoring happens in dark rooms and outdoors
  * (docs/UX-DESIGN.md §7.7). The palette continues the Phase-1 console's language
  * so the visual identity carries over rather than restarting.
+ *
+ * docs/UX-REWORK-PLAN.md §U-b ("engineered, not generated") pass: flat/bordered panels replace
+ * rounded-card-with-shadow (§1), the accent/status palette was audited for a single saturated hue
+ * (§2), telemetry numerals switched to B612 Mono (§3), and a `.segmented` control primitive was
+ * added (§6) — see the doc comments at each token/rule below for the specific before→after and why.
  */
+
+/* B612 Mono (docs/UX-REWORK-PLAN.md §U-b item 3) — designed by Airbus for cockpit/instrument
+   displays, the deliberate "this is a piece of avionics, not a SaaS dashboard" typographic signal
+   for telemetry numerals (OSD, latency badge, stat tiles). Installed via `npm install
+   @fontsource/b612-mono` (pinned in `package.json`, the version this pair was copied from is
+   named below) but served from `public/fonts/` rather than importing the package's own CSS —
+   mirrors this codebase's existing `public/leaflet/leaflet.css` convention (see vision-web/MODULE.md
+   Gotchas: "kept in sync by hand", not a build step) and gives precise control over the "woff2
+   latin subset only" budget this task set: exactly the 2 files actually used (400/700 upright,
+   latin `unicode-range` copied verbatim from the package's own `400.css`/`700.css`), no woff
+   fallback, no italic. Re-copy from `node_modules/@fontsource/b612-mono@<version>/files/` if this
+   dependency is ever bumped. */
+@font-face {
+    font-family: "B612 Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/b612-mono-latin-400-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+        U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: "B612 Mono";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/fonts/b612-mono-latin-700-normal.woff2") format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+        U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
     color-scheme: dark;
 
-    /* Surfaces, back to front */
+    /* Surfaces, back to front — a 3-step elevation staircase (docs/UX-REWORK-PLAN.md §U-b item 1):
+       L0 `--bg` is the page canvas; L1 `--panel` is a bordered panel/card sitting on it; L2
+       `--panel-raised` is a surface nested *inside* an L1 panel (a form control, a popover/menu, a
+       skeleton block) — each step is background-lightness only, no elevation ever comes from a
+       shadow (see `.card`/the Panels note below). `--panel-hover` is deliberately *not* a fourth
+       elevation step: audited every call site (vision-web/MODULE.md's own U-b entry has the count)
+       and every single one pairs it with a `:hover` selector — it is the interaction-feedback tint
+       a panel/row tints to on hover, at any elevation, not a place a page ever sits at rest. */
     --bg: #0b0e13;
     --panel: #141922;
     --panel-raised: #1a212c;
@@ -17,12 +60,32 @@
     --border: #232b36;
     --border-strong: #323d4c;
 
-    /* Text */
+    /* Text — three-tier hierarchy: full-contrast body text, a muted secondary tier, and a faint
+       tertiary tier for captions/timestamps/disabled reasons. `--text-faint` was bumped from
+       `#5f6b7c` (docs/UX-REWORK-PLAN.md §U-b item 7, contrast audit): its WCAG contrast ratio — an
+       accessible proxy for the APCA check this item asked for — measured ~3.3:1 against `--panel`
+       and ~3.6:1 against `--bg`, below the ~4.5:1 a small caption should clear; `#788496` measures
+       ~4.3:1 / ~4.7:1 against the same two surfaces while staying visibly the dimmest tier below
+       `--text-muted` (~6:1 against both, unchanged, already solid). */
     --text: #e7ecf3;
     --text-muted: #8d99ab;
-    --text-faint: #5f6b7c;
+    --text-faint: #788496;
 
-    /* Intent */
+    /* Intent — audited for exactly one saturated accent (docs/UX-REWORK-PLAN.md §U-b item 2):
+       `--accent` is the only hue used for primary action/selection/focus anywhere in this app (no
+       stray second blue/violet found in a full sweep of every component stylesheet); `--ok`/
+       `--warn`/`--danger` sit at mutually-distinct hues (green/amber/red) and away from the
+       accent's blue. `--live` was moved off `--danger`'s exact hue: both used to read as "the same
+       red" (`#ff4d6a` vs `#ff5d5d`, ~10° apart) even though they mean different things — `--live`
+       is a *temporal* "this is happening right now" state (a streaming tally dot, a still-open
+       detection event), `--danger` means "something failed". Convention keeps both in the warm/red
+       family on purpose (a green/amber "live" light would be a stranger convention than a red one
+       for a camera system), so the fix is a bigger hue separation within that family — `--live` now
+       sits at a rose/magenta ~340°, `--danger` stays at coral-red 0° — rather than a hue swap out
+       of the red family entirely. Neither is ever the *only* carrier of its meaning: every
+       live/open-vs-closed dot this app renders is already paired with a text label (QF-3's
+       legibility pass — "Streaming" chip, `OPEN`/`CLOSED` state chip), so this is a visual
+       distinctness pass, not the accessibility fix itself. */
     --accent: #4f8cff;
     --accent-soft: #16264a;
     --accent-text: #04101f;
@@ -32,18 +95,27 @@
     --warn-soft: #33260c;
     --danger: #ff5d5d;
     --danger-soft: #331419;
-    --live: #ff4d6a;
+    --live: #ff3d78;
 
-    /* Geometry */
-    --radius: 10px;
-    --radius-sm: 6px;
+    /* Geometry — `--radius` dropped from 10px (docs/UX-REWORK-PLAN.md §U-b item 1: "10px reads
+       generic-SaaS"); `--radius-sm` scaled down with it, same ~0.6 ratio as before. Pills
+       (`--radius-pill`, status chips/badges) are a deliberately different geometry, not part of
+       this audit — a pill shape isn't the "rounded card" tell the plan flags. */
+    --radius: 5px;
+    --radius-sm: 3px;
     --radius-pill: 999px;
 
-    /* Type */
+    /* Type — `--mono` now leads with B612 Mono (see the `@font-face` pair above), the existing
+       stack demoted to its fallback. Every existing `.mono`-classed/`var(--mono)` consumer (ids,
+       timestamps, the OSD, the player's latency badge, Fly's cockpit HUD) picks this up with no
+       template changes. */
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, monospace;
+    --mono: "B612 Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, monospace;
 
-    /* Depth */
+    /* Depth — `--shadow` is reserved for true overlays only (menus, dialogs, toasts): kebab/tab-more
+       menus, `flight-plan-dialog`, the toast host, the map inset's fullscreen `.expanded` state, and
+       Fly's `hud-confirm`/`hud-shortcuts` modals (docs/UX-REWORK-PLAN.md §U-b item 1). `.card` and
+       every panel/tile stylesheet in this app were audited and carry no box-shadow. */
     --shadow: 0 6px 24px rgb(0 0 0 / 45%);
     --header-height: 52px;
 }
@@ -67,6 +139,11 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* Two deliberate typographic registers (docs/UX-REWORK-PLAN.md §U-b item 3), not one scale reused
+   everywhere: *display* text (these headers, `.brand` in `app.css`) is mixed-case, 600 weight,
+   tightened `-0.01em` tracking, read as prose/a title. *Structural/label* text (`.label` below,
+   `th`, and now `app.css`'s own `.tab`) is uppercase, loosened `+0.04–0.05em` tracking, read as
+   naming a slot/category rather than being read as prose. */
 h1,
 h2,
 h3 {
@@ -164,6 +241,10 @@ a {
 .mono {
     font-family: var(--mono);
     font-size: 0.8rem;
+    /* docs/UX-REWORK-PLAN.md §U-b item 3 — every digit takes the same width, so a value that ticks
+       (a duration, a sample age, a device id) doesn't shift its neighbors as it changes. Inert on
+       non-digit characters, so this is safe on every existing `.mono` consumer, numeric or not. */
+    font-variant-numeric: tabular-nums;
 }
 
 .truncate {
@@ -308,6 +389,53 @@ input[type="checkbox"] {
 .btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+/* ---- Segmented controls --------------------------------------------------- */
+/* Mutually-exclusive mode buttons (docs/UX-REWORK-PLAN.md U-b item 5 — the Live/asset-detail
+   "boxes: Overlay/Burned/Off" toggle, the fleet/live map's layer picker) rendered as one joined
+   strip with a strong active state, not parallel separate buttons floating next to each other.
+   Add this class alongside a group's own layout/`role="group"` wrapper; children stay plain
+   `.btn.secondary.small` buttons carrying `[class.active]="…"` exactly as before — this only
+   touches the seam between them and the active member's color, no new component. Border-overlap
+   (`margin-left: -1px`) rather than `overflow: hidden` on the container, deliberately: the map
+   layer group's own container still needs to `flex-wrap` at narrow widths, which a clipped
+   container would break. */
+.segmented {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0;
+}
+
+.segmented > .btn {
+    border-radius: 0;
+    margin-left: -1px;
+}
+
+.segmented > .btn:first-child {
+    margin-left: 0;
+    border-top-left-radius: var(--radius-sm);
+    border-bottom-left-radius: var(--radius-sm);
+}
+
+.segmented > .btn:last-child {
+    border-top-right-radius: var(--radius-sm);
+    border-bottom-right-radius: var(--radius-sm);
+}
+
+/* Whichever segment is active/focused/hovered paints its own full border on top of its neighbors'
+   overlapping edge, rather than a later sibling's plain border winning the shared 1px seam. */
+.segmented > .btn.active,
+.segmented > .btn:hover,
+.segmented > .btn:focus-visible {
+    position: relative;
+    z-index: 1;
+}
+
+.segmented > .btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
 }
 
 /* ---- Kebab (⋯) menus ------------------------------------------------------ */
@@ -474,6 +602,11 @@ button.danger-action {
     font-size: 0.72rem;
     letter-spacing: 0.02em;
     white-space: nowrap;
+    /* A chip is this app's own "stat tile" in miniature almost everywhere it carries a count (the
+       header's live count, Command's attention-queue count, Map's streaming/offline/no-position
+       counts) — tabular-nums keeps those steady as they change; inert on the many chips that carry
+       only a word (`Streaming`, a category name). */
+    font-variant-numeric: tabular-nums;
 }
 
 .chip.accent {

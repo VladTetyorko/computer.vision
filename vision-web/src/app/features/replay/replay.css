@@ -146,6 +146,10 @@
 .fact dd {
     margin: 0.1rem 0 0;
     font-size: 0.85rem;
+    /* docs/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts (altitude, heading,
+       battery) with text facts (transport, detections); tabular-nums only (not the mono font) since
+       it's inert on the text ones but keeps the numeric ones from jittering as they tick. */
+    font-variant-numeric: tabular-nums;
 }
 
 /* ---- Telemetry panels (mirrors asset-detail.css) ----------------------------------------------- */

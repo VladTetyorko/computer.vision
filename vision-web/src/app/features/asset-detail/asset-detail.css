@@ -49,17 +49,10 @@
     }
 }
 
-/* ---- Boxes toggle (mirrors features/live/live.css) -------------------------------------------- */
-
-.boxes-toggle {
-    gap: 0.3rem;
-}
-
-.boxes-toggle .btn.active {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: #a9c8ff;
-}
+/* The "boxes: Overlay/Burned/Off" toggle group used to carry its own local `.boxes-toggle`
+   active-state CSS here (mirrored verbatim in `features/live/live.css`); both were removed in favor
+   of the shared global `.segmented` (docs/UX-REWORK-PLAN.md §U-b item 5, `src/styles.css`) once the
+   template's wrapper class changed from `boxes-toggle` to `segmented`. */
 
 /* ---- Facts grid (mirrors shared/player/stream-info-panel.ts's own — CSS encapsulation means this needs
    its own copy; used here for Characteristics and per-device telemetry panels) --------------- */
@@ -81,6 +74,10 @@
 .fact dd {
     margin: 0.1rem 0 0;
     font-size: 0.85rem;
+    /* docs/UX-REWORK-PLAN.md §U-b item 3 — mirrors `shared/player/stream-info-panel.ts`'s own
+       identical rule: tabular-nums only (not the mono font), since this grid mixes numeric
+       telemetry readouts with text facts (category, transport) the mono font shouldn't touch. */
+    font-variant-numeric: tabular-nums;
 }
 
 .stale-text {

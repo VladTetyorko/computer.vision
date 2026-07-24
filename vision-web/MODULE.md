@@ -1101,3 +1101,136 @@ a compile-time totality check); `features/devices/devices-page-logic.spec.ts` 34
 **Targeted `ng test --include` over the three touched spec files — 70/70 passing**; a full
 reactor-wide `ng test --watch=false` also run for cross-agent regression confidence — **661/661**
 passing. `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+## U-b — Visual restyle: engineered, not generated (docs/UX-REWORK-PLAN.md §U-b)
+
+Scope: the full `vision-web/` CSS surface (global tokens, component stylesheets, a handful of
+template class/structure hooks) — no other agent held any part of this module concurrently. No
+behavior change beyond the one item the plan itself asked for (§7, panel-state memory). Read via
+the `frontend-design` skill first; then applied the plan's own 7 items literally rather than a
+free restyle, since the plan had already done the design research.
+
+**1. Panels** (`src/styles.css` `:root`): `--radius` 10px → **5px**, `--radius-sm` 6px → **3px**
+(same ~0.6 ratio preserved; `--radius-pill` untouched — a pill is a different geometry, not the
+"rounded card" tell). The 3-step elevation model (`--bg` L0 → `--panel` L1 → `--panel-raised` L2)
+was already consistent across every consumer (audited every `var(--panel*)` call site) — rather
+than rename tokens (would touch ~20 files for no visual change), it's now spelled out as an
+explicit doc comment on the token block itself, and `--panel-hover` is documented as *not* a fourth
+elevation step: every one of its call sites pairs it with `:hover`, confirmed by grep, so it's the
+interaction-tint a panel/row goes to on hover, at any elevation, never a resting state. Shadow
+audit: `.card` and every panel/tile stylesheet already carried no `box-shadow` (a prior cycle's own
+discipline); the 3 non-`.card` `box-shadow` uses that did exist were reviewed individually and kept
+— `features/fly/fly.css`'s `.cockpit` hairline-seam fix (flat, zero-blur, not an elevation cue),
+`shared/map/fleet-map.css`'s event-marker glow ring (an icon treatment, not a panel), and (after
+converting a fourth one, see below) nothing else. Two changes: `features/devices/devices.css`'s
+`#add-source-card.highlighted` "just added" ring was the one real violation (a `.card` gaining a
+`box-shadow` on a non-overlay state) — converted to `outline`/`outline-offset: -1px` transitioning
+`outline-color`, same visual ring, no layout effect, not a shadow. `features/fly/fly.css`'s
+`.hud-confirm .card`/`.hud-shortcuts .card` (a full-screen-scrim confirm dialog and the keyboard-
+shortcuts help panel) were missing a shadow despite being genuine floating overlays — given one
+(`box-shadow: var(--shadow)`), completing the "shadows only on true overlays" rule in both
+directions rather than only the removal direction.
+
+**2. Palette**: swept every component stylesheet for a second saturated hue — none found (`--accent`
+#4f8cff is the only one; `--ok`/`--warn`/`--danger` are mutually distinct and away from the
+accent's blue; no gradients anywhere, confirmed by `grep -rn gradient`). The one real finding:
+`--live` (`#ff4d6a`) and `--danger` (`#ff5d5d`) were ~10° apart in hue — visually "the same red"
+despite meaning different things (`--live` = a temporal "happening right now" state: the streaming
+tally dot, a still-open detection event; `--danger` = something failed). Moved `--live` to
+**`#ff3d78`** (~340° rose/magenta) rather than off the red family entirely — a green/amber "live"
+light would be the stranger convention for a camera system, so the fix is separation *within* the
+warm family, documented at the token itself. No hardcoded companion of the old `--live` hex existed
+anywhere (verified — everything referenced `var(--live)` directly) except one: `features/fly/fly.css`'s
+`.ticker-row.open` used a translucent `rgb(255 77 106 / 45%)` border (a var() can't carry alpha as a
+separate channel), updated in lockstep to `rgb(255 61 120 / 45%)` with a comment tying it back to
+the token.
+
+**3. Typography**: `npm install @fontsource/b612-mono` (pinned `5.2.7`), but the two needed woff2
+files (400/700, upright, latin-only) are copied into `public/fonts/` and served via a hand-written
+`@font-face` pair in `src/styles.css` rather than importing the package's own CSS — mirrors this
+module's existing `public/leaflet/leaflet.css` convention (Gotchas: "kept in sync by hand", not a
+build step) and gives exact control over "woff2 latin subset only": no woff fallback, no italic,
+`unicode-range` copied verbatim from the package's own `400.css`/`700.css`. `--mono` now leads with
+`"B612 Mono"`, existing stack demoted to fallback — every existing `.mono`/`var(--mono)` consumer
+(ids, timestamps, the OSD's "Position" line, the player's latency badge, Fly's cockpit HUD) picked
+this up with zero template changes. `font-variant-numeric: tabular-nums` (inert on non-digit
+characters, confirmed safe to apply broadly) was added to: the global `.mono` and `.chip` classes;
+`features/live/telemetry-osd.ts`'s `.value` (also switched to the mono font — every OSD numeric
+readout, not just Position); `features/fly/fly-osd.ts`'s `.v`/`.chip.dim` (already mono, just
+missing the numeric-width guarantee); `shared/player/player.ts`'s latency badge (already mono);
+`features/command/command.css`'s `.readiness-total` stat-tile number (switched to mono too); the
+three duplicated `.fact dd` facts-grid rules (`shared/player/stream-info-panel.ts`,
+`features/asset-detail/asset-detail.css`, `features/replay/replay.css`) got tabular-nums **only**,
+deliberately not the mono font — that grid mixes numeric readouts with text facts (category,
+transport) the mono font shouldn't touch; and `features/wall/wall-tile.ts`'s `.telemetry-chip`.
+Chrome/label scale systematized (`src/styles.css`'s own new doc comment above `h1`–`h3`): two
+registers, not one — *display* text (headers, `.brand`) stays mixed-case/600-weight/`-0.01em`
+tracking; *structural/label* text (`.label`, `th`, and now `app.css`'s `.tab`) goes uppercase/loosened
+`+0.04–0.05em` tracking. The header's nav tabs moved from the display register (0.88rem/500) into
+the label register (0.78rem uppercase/600/`+0.04em`) — the one piece of top-level chrome that didn't
+already have it.
+
+**4. Header**: confirmed zero action buttons in `app.html` (brand link, nav tabs, the `More`
+overflow, two status chips — nothing else) — no removal needed. "Tighten … flat, bordered bottom,
+no shadow" was mostly already true; the one real change was `.app-header`'s background:
+`color-mix(in srgb, var(--bg) 88%, transparent)` + `backdrop-filter: blur(8px)` (a frosted-glass
+affordance, the same soft-depth family as a shadow) → a flat, fully opaque `var(--bg)`. Documented
+bonus: this also structurally closes the hairline hand the header's own translucency played in the
+`.cockpit` seam gotcha (Gotchas, "a hairline seam between the sticky app header … and this
+full-bleed view") — the `fly.css` defensive `box-shadow: 0 -2px 0 #000` fix is left in place as
+harmless belt-and-suspenders, not removed.
+
+**5. Segmented controls** (new `.segmented` in `src/styles.css`, joined `.btn`s via
+`margin-left: -1px` + per-first/last-child radius rather than `overflow: hidden`, since the map
+layer group must still `flex-wrap` at narrow widths): applied to the "boxes: Overlay/Burned/Off"
+group on `features/live/live.html` and `features/asset-detail/asset-detail.html` (template class
+`row boxes-toggle` → `row segmented`; both files' own local `.boxes-toggle`/`.btn.active` CSS —
+duplicated verbatim between the two — removed in favor of the shared global rule, same
+promotion-to-global precedent as the kebab menu) and to the map layer picker in
+`shared/map/fleet-map.html`/`shared/map/live-map.html` (`class="controls layers segmented"`; each
+file's own `.controls.layers` rule gained an explicit `gap: 0` since a component-scoped rule
+outranks the global one on specificity). **Deliberately not converted**: `features/wall/wall-tile.ts`'s
+boxes toggle is a single cycling icon button, not three parallel buttons — its own doc comment
+already explains why ("there is no room for a labeled toggle group at wall-tile scale" on a
+30-tile wall); forcing a 3-button segmented control back in would reintroduce the exact space
+problem that choice was made to avoid, so it stays as-is.
+
+**6. Panel state memory** (new `core/panel-state.ts`: `readPersistedFlag`/`writePersistedFlag`, two
+tiny pure functions over `localStorage`, not a service/store class — see its own doc comment for
+why this isn't folded into `core/settings/settings-store.ts`). Wired into exactly the four named,
+already-existing toggles: `features/live/live.ts`'s `railOpen`/`mapInsetVisible` and
+`features/fly/fly.ts`'s `mapVisible`/`detectionsStripOpen` — each gained a persisted-key constant, an
+initial `signal(readPersistedFlag(KEY, <existing default>))`, and one `effect(() => writePersistedFlag(KEY, …))`
+in the constructor; every existing toggle method (`toggleRail`, `M`/`Esc` handlers, the detections-
+strip button) needed no change at all. `SettingsStore.wallDensity`/`mapLayer` already persisted
+before this task (confirmed by reading the store) and were left untouched, per the task's own "skip
+any that already persist" instruction; `features/devices/devices.ts`'s `advancedDevicesOpen` was
+**not** touched either — real, but not one of the four toggles this item named, so out of scope
+for this pass. 3 new spec cases (`core/panel-state.spec.ts`).
+
+**7. Contrast**: `--text-faint` bumped `#5f6b7c` → **`#788496`** — WCAG contrast ratio (used as an
+accessible proxy for the APCA check this item asked for, since this codebase has no APCA
+calculator) measured ~3.3:1 against `--panel` / ~3.6:1 against `--bg` before the change, both below
+the ~4.5:1 a small caption should clear; the new value measures ~4.3:1 / ~4.7:1 against the same
+two surfaces while staying visibly the dimmest tier below `--text-muted` (~6:1 against both,
+unchanged — already solid, not touched).
+
+**Verify**: `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`; `npm run
+test:ci` **664/664** (661 baseline + 3 new `core/panel-state.spec.ts` cases, nothing else changed
+count-wise — every other edit this cycle was CSS/template/token, no new pure logic besides
+`panel-state.ts`); `ng build --configuration production` succeeds, initial bundle **309.26 kB raw /
+85.88 kB transfer** (baseline immediately before this task: 308.06 kB / 85.64 kB — **+1.20 kB raw /
++0.24 kB transfer**, almost entirely `styles.css` itself, 7.00 kB → 8.26 kB raw; the two B612 Mono
+woff2 files, 19.05 kB + 18.98 kB, are `public/` static assets fetched on demand via `@font-face`,
+like Leaflet's tiles — they do **not** count against the JS/CSS bundle budget at all, confirmed by
+listing `dist/fonts/`). The initial-bundle warning (budget 300 kB) pre-dates this task (baseline was
+already 8.06 kB over); this task's own contribution to that overage is +1.20 kB.
+
+**One build hazard worth remembering for any future inline-`styles` edit**: a CSS `/* comment */`
+written *inside* a component's inline `styles: \`…\`` template literal must never contain a literal
+backtick — even inside a comment, it terminates the outer JS template literal early and produces
+`FatalDiagnosticError: Failed to resolve @Component.styles to a string`, a confusing error that
+doesn't name the offending file. Hit once this cycle (a `` `.mono` `` reference inside
+`features/live/telemetry-osd.ts`'s inline styles, fixed by quoting it `".mono"` instead) — plain
+external `.css` files and this module's global `src/styles.css` have no such restriction, since
+they're never parsed as TypeScript.

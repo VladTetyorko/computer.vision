@@ -87,7 +87,12 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
     }
 
     .value {
+      /* docs/UX-REWORK-PLAN.md §U-b item 3 — every numeric readout on this HUD (altitude, heading,
+         battery, sample age), not just the "Position" line, which already carried its own explicit
+         ".mono" class in the template alongside this one. */
+      font-family: var(--mono);
       font-weight: 600;
+      font-variant-numeric: tabular-nums;
     }
 
     .stale-text {

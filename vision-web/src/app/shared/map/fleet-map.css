@@ -34,6 +34,12 @@
   right: auto;
   flex-wrap: wrap;
   max-width: calc(100% - 1rem);
+  /* Joined into one segmented control (docs/UX-REWORK-PLAN.md §U-b item 5, `.segmented` in
+     `src/styles.css`) rather than parallel pill buttons with a gap between them — `.segmented`
+     itself already sets `gap: 0`, but this component-scoped rule outranks it (an emulated-view-
+     encapsulation attribute bumps this selector's specificity above the global one), so it's
+     restated here explicitly rather than relying on cascade order across two files. */
+  gap: 0;
 }
 
 .controls .btn.active {

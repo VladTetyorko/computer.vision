@@ -293,7 +293,10 @@
 }
 
 .ticker-row.open {
-  border-color: rgb(255 77 106 / 45%);
+  /* Hardcoded, not `var(--live)`, because this is a translucent border and the token is a plain
+     hex string — mirrors `--live: #ff3d78` (docs/UX-REWORK-PLAN.md §U-b item 2); update in lockstep
+     if that token's value ever changes again. */
+  border-color: rgb(255 61 120 / 45%);
 }
 
 /* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3, extended to this page's own inline ticker
@@ -433,6 +436,9 @@
 .hud-shortcuts .card {
   max-width: 24rem;
   width: 90%;
+  /* The one place `.card` gets a shadow (docs/UX-REWORK-PLAN.md §U-b item 1): these two render
+     over a full-screen scrim, a genuine floating overlay, not a page panel. */
+  box-shadow: var(--shadow);
 }
 
 .inline-confirm-card {

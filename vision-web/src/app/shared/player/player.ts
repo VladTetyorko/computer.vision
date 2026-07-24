@@ -396,6 +396,7 @@ interface DrawnBox {
       backdrop-filter: blur(4px);
       font-size: 0.72rem;
       font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
       color: #dfe6f0;
     }
 

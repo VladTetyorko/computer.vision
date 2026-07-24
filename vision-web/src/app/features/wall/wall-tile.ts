@@ -124,6 +124,8 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
     .telemetry-chip {
       font-size: 0.72rem;
       white-space: nowrap;
+      /* docs/UX-REWORK-PLAN.md §U-b item 3 — battery/altitude readouts. */
+      font-variant-numeric: tabular-nums;
     }
 
     .telemetry-chip.stale {

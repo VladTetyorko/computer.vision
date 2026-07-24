@@ -43,6 +43,10 @@
   right: auto;
   flex-wrap: wrap;
   max-width: calc(100% - 1rem);
+  /* Joined into one segmented control (docs/UX-REWORK-PLAN.md §U-b item 5, `.segmented` in
+     `src/styles.css`) — see `shared/map/fleet-map.css`'s identical rule for why `gap: 0` is
+     restated here rather than left to the global rule's own cascade order. */
+  gap: 0;
 }
 
 .controls .btn.active {

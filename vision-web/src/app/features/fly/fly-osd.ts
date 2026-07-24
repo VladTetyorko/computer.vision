@@ -87,11 +87,13 @@ import type { Transport } from '../../shared/player/player';
     .v {
       font-family: var(--mono);
       font-weight: 600;
+      font-variant-numeric: tabular-nums;
     }
 
     .chip.dim {
       font-family: var(--mono);
       color: rgb(231 236 243 / 78%);
+      font-variant-numeric: tabular-nums;
     }
 
     .batt-low .v,

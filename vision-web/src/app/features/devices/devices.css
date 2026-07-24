@@ -50,11 +50,16 @@ td.actions {
 /* One progressive card replaces the old stacked Register/Discover/Simulate cards. */
 
 #add-source-card {
-    transition: box-shadow 0.25s ease;
+    /* An outline, not a box-shadow (docs/UX-REWORK-PLAN.md §U-b item 1 — shadows are reserved for
+       true overlays; this is a flat attention ring on a page card, not elevation). `outline` never
+       affects layout, so no offset/inset compensation is needed either. */
+    outline: 2px solid transparent;
+    outline-offset: -1px;
+    transition: outline-color 0.25s ease;
 }
 
 #add-source-card.highlighted {
-    box-shadow: 0 0 0 2px var(--accent);
+    outline-color: var(--accent);
 }
 
 .add-source .back-btn {

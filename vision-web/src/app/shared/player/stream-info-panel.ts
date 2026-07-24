@@ -118,6 +118,10 @@ const CLOCK_TICK_MS = 1_000;
     .fact dd {
       margin: 0.1rem 0 0;
       font-size: 0.85rem;
+      /* docs/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts ("Streaming for",
+         "Latency") with text facts ("Transport", the "Detections" chip); tabular-nums only (not
+         the mono font), inert on the text ones but keeps the numeric ones from jittering. */
+      font-variant-numeric: tabular-nums;
     }
 
     .tech-details {
