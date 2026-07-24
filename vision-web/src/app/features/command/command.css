@@ -58,6 +58,15 @@
   font-size: 0.9rem;
 }
 
+/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's border-left color used to be
+   the only carrier of critical-vs-warning severity. `.severity-chip` restates it as a word, so the
+   row reads correctly even color-blind or at a glance across a long queue. */
+.severity-chip {
+  flex: none;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
 .attention-age {
   margin-left: auto;
   font-size: 0.72rem;

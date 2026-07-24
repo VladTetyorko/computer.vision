@@ -57,8 +57,9 @@ const CLOCK_TICK_MS = 1_000;
           <div class="fact">
             <dt>Detections</dt>
             <dd>
-              <span class="dot" [class.ok]="detectionsOn()"></span>
-              {{ detectionsOn() ? 'on' : 'off' }}
+              <span class="chip" [class.ok]="detectionsOn()">
+                <span class="dot" [class.ok]="detectionsOn()"></span>{{ detectionsLabel() }}
+              </span>
               @if (lastDetectionAgeLabel(); as age) {
                 <span class="muted"> · last seen {{ age }}</span>
               }
@@ -175,6 +176,15 @@ export class StreamInfoPanel {
   protected readonly transportFact = computed(() => transportLabel(this.transport()));
 
   protected readonly detectionsOn = computed(() => this.detections.status() === 'on');
+
+  /**
+   * Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the dot alone used to be the only
+   * carrier of on/off — a word now always renders beside it, in the same chip idiom
+   * `shared/ui/events-rail.ts`'s OPEN/CLOSED chip uses, self-describing even read out of context.
+   */
+  protected readonly detectionsLabel = computed(() =>
+    this.detectionsOn() ? 'Detections on' : 'Detections off',
+  );
 
   protected readonly lastDetectionAgeLabel = computed(() => {
     const latest = this.detections.results()[0];

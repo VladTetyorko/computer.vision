@@ -44,6 +44,9 @@
               <div class="attention-info">
                 <div class="attention-main">
                   <span class="name truncate">{{ row.asset.displayName }}</span>
+                  <span class="chip severity-chip" [class.danger]="row.severity === 'critical'" [class.warn]="row.severity === 'warning'">
+                    {{ row.severity === 'critical' ? 'CRITICAL' : 'WARNING' }}
+                  </span>
                   <span class="chip">{{ row.asset.categoryName }}</span>
                   <span class="attention-age faint">{{ ageLabel(row.asset) }}</span>
                 </div>
@@ -106,7 +109,7 @@
       </header>
       <div class="readiness-grid">
         @for (tile of readinessTiles(); track tile.categoryId) {
-          <button type="button" class="readiness-tile" (click)="openDevices()" [title]="'Open ' + tile.categoryName + ' in Devices'">
+          <button type="button" class="readiness-tile" (click)="openDevices(tile.categoryId)" [title]="'Open ' + tile.categoryName + ' in Devices'">
             <div class="readiness-head">
               <span class="readiness-name">{{ tile.categoryName }}</span>
               <span class="readiness-total">{{ tile.total }}</span>

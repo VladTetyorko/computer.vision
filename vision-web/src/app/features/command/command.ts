@@ -142,8 +142,14 @@ export class CommandPage {
     void this.router.navigate(['/assets', assetId]);
   }
 
-  protected openDevices(): void {
-    void this.router.navigate(['/devices']);
+  /**
+   * A readiness tile's drill-down (docs/UX-QUICKWINS-PLAN.md QF-3): navigates to that tile's own
+   * category, matching its visual promise, rather than the same plain `/devices` every tile used to
+   * open regardless of which one was clicked. `categoryId` absent falls back to plain `/devices`
+   * (unfiltered) — the same behavior every caller had before this fix.
+   */
+  protected openDevices(categoryId?: string): void {
+    void this.router.navigate(['/devices'], categoryId ? { queryParams: { category: categoryId } } : {});
   }
 
   protected ageLabel(asset: AssetAttention): string {

@@ -202,9 +202,16 @@ td.actions {
 
 .register-form {
     display: grid;
-    grid-template-columns: 1.2fr 1fr 0.8fr 2fr auto;
+    /* auto-fit rather than a fixed column count (docs/UX-QUICKWINS-PLAN.md QF-2): the protocol
+       field's Custom… option conditionally adds a fifth field, so the track count must flex with
+       however many fields are actually rendered rather than assuming a fixed 4- or 5-up layout. */
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
     gap: 0.6rem;
     align-items: end;
+}
+
+.register-form .field.wide {
+    grid-column: span 2;
 }
 
 .field.wide {
@@ -379,4 +386,23 @@ tr.archived,
 .advanced-devices {
     padding-top: 0.5rem;
     border-top: 1px solid var(--border);
+}
+
+/* ---- Category filter banner (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — /devices?category=) ------ */
+
+.category-filter-banner {
+    margin-bottom: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* ---- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) - */
+
+.create-asset-panel .hint {
+    margin-bottom: 0.85rem;
+}
+
+.create-asset-panel .field {
+    margin-bottom: 0.75rem;
+    max-width: 24rem;
 }

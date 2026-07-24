@@ -63,6 +63,14 @@
   border-color: var(--live);
 }
 
+/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's dot alone used to be the only
+   carrier of OPEN vs. CLOSED — color-blind/low-contrast-unsafe. The dot stays (fast at-a-glance
+   scan), but `event.state` itself (the API's own term, DetectionEventState) now always renders next
+   to it, in the same `chip`/`dot` idiom `command.html`'s readiness tiles already use. */
+.event-state {
+  flex: none;
+}
+
 .event-main {
   flex: 1;
   min-width: 0;

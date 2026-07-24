@@ -45,6 +45,17 @@
   min-height: 20rem;
   overflow: hidden;
   background: #000;
+  /* Cosmetic fix (docs/UX-QUICKWINS-PLAN.md QF-1): a hairline seam between the sticky app header
+     (app.css's `.app-header`) and this full-bleed view showed a ghosted sliver of the header's own
+     text at 1440x900/1920x1080 — `100vh - var(--header-height)` and the header's own real box each
+     round to the nearest device pixel slightly differently at those sizes, leaving a sub-pixel gap
+     the header's translucent/blurred background doesn't fully cover. A flat, unblurred shadow
+     offset 2px above this box papers over any such remainder with the cockpit's own black — it
+     paints *behind* the header (whose `z-index: 20` already beats this plain `position: relative`
+     box's `z-index: auto`), so it's invisible whenever there's no gap to hide, and it changes no
+     layout/height, so it can't introduce a matching gap at the opposite edge the way nudging this
+     box's own height/margin would. */
+  box-shadow: 0 -2px 0 #000;
 }
 
 .cockpit-loading {
@@ -133,16 +144,58 @@
   background: rgb(20 25 34 / 78%);
 }
 
-.switcher {
+/* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): a labeled cockpit control, not a bare native
+   `<select>` — the "DRONE" label is always visible (fleet/military ethos: words, not just a control
+   floating unexplained in the header), styled as the same frosted-pill chrome every other HUD
+   control here already uses (`.icon-btn`'s own background/border/blur), just wrapping a `<label>`
+   so the label text and the control share one clickable/hoverable surface and one native
+   association, instead of a second free-floating `<span>`. */
+.switcher-control {
   margin-left: auto;
-  max-width: 14rem;
+  max-width: 16rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   background: rgb(6 9 14 / 62%);
   backdrop-filter: blur(6px);
   border: 1px solid rgb(255 255 255 / 9%);
-  color: #e7ecf3;
   border-radius: var(--radius-pill);
-  padding: 0.3rem 0.6rem;
+  padding: 0.3rem 0.65rem 0.3rem 0.75rem;
+  cursor: pointer;
+}
+
+.switcher-label {
+  flex: none;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(231 236 243 / 60%);
+}
+
+.switcher {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: #e7ecf3;
+  padding: 0;
   font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.switcher:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The dropdown's own popup is native chrome no amount of CSS reaches reliably — `--panel-raised`
+   dark option rows are the one part of it every mainstream engine does still honor, so the list
+   itself stays legible on dark rather than falling back to the OS's default (often light) popup. */
+.switcher option {
+  background: var(--panel-raised);
+  color: var(--text);
 }
 
 .shortcuts-btn {
@@ -185,6 +238,14 @@
   border-color: rgb(255 77 106 / 45%);
 }
 
+/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3, extended to this page's own inline ticker
+   copy per the coordinator) — mirrors `shared/ui/events-rail.css`'s `.event-state`/
+   `features/command/command.css`'s `.severity-chip`: the global `.chip`/`.dot` classes already do
+   the coloring, this just keeps the chip from stretching inside the ticker row's flex layout. */
+.event-state-chip {
+  flex: none;
+}
+
 @keyframes ticker-fade {
   from {
     opacity: 1;
@@ -194,8 +255,18 @@
   }
 }
 
+/* BROKEN #1 (docs/UX-QUICKWINS-PLAN.md QF-1): this inset used to share `.hud-header`'s own
+   `top: 0.75rem`, so `shared/map/live-map.css`'s own follow/expand/layer controls (`z-index: 1000`,
+   "above Leaflet's own panes") sat at the same on-screen coordinates as the header's rightmost
+   controls (the switcher, the `?` button) — same physical corner, and Leaflet's own z-index simply
+   won, so `elementFromPoint` there resolved to a map button, not the switcher. Geometric fix, not a
+   z-index chase: start this inset *below* the header row entirely (matching `.hud-osd`'s own
+   below-header offset), so the two can never occupy the same point at any viewport width — the
+   header's own height doesn't depend on viewport width in the first place, only on its (short,
+   non-wrapping) content, which holds at every width this app targets (≥1280px, docs/UX-QUICKWINS-PLAN.md's
+   own floor). */
 .hud-map {
-  top: 0.75rem;
+  top: 3.6rem;
   right: 0.75rem;
   width: min(22rem, 32vw);
 }
@@ -306,6 +377,14 @@
   font-size: 0.85rem;
 }
 
+/* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): the second `<dl>` — mouse-only, icon-only
+   cockpit controls — gets its own small heading rather than blending into the keyboard list above. */
+.shortcuts-subhead {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .hud-shortcuts dt {
   font-family: var(--mono);
   color: var(--text);
@@ -326,7 +405,7 @@
     max-width: 14rem;
   }
 
-  .switcher {
-    max-width: 8rem;
+  .switcher-control {
+    max-width: 9rem;
   }
 }

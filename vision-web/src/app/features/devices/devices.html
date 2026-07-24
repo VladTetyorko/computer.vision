@@ -71,18 +71,31 @@
 
             <div class="field">
               <label class="label" for="f-protocol">Protocol</label>
-              <input id="f-protocol" name="protocol" [(ngModel)]="protocol" placeholder="rtsp" required />
+              <select id="f-protocol" name="protocol" [(ngModel)]="protocolSelect" required>
+                <option value="" disabled>Choose a protocol…</option>
+                @for (option of registerableProtocols; track option.value) {
+                  <option [value]="option.value">{{ option.value }} — {{ option.hint }}</option>
+                }
+                <option [value]="customProtocolOption">Custom… — a protocol not listed above</option>
+              </select>
             </div>
+
+            @if (isCustomProtocol()) {
+              <div class="field">
+                <label class="label" for="f-protocol-custom">Custom protocol</label>
+                <input
+                  id="f-protocol-custom"
+                  name="customProtocol"
+                  [(ngModel)]="customProtocol"
+                  placeholder="e.g. onvif"
+                  required
+                />
+              </div>
+            }
 
             <div class="field wide">
               <label class="label" for="f-uri">URI</label>
-              <input
-                id="f-uri"
-                name="uri"
-                [(ngModel)]="uri"
-                placeholder="rtsp://user:pass@192.168.1.50:554/stream"
-                required
-              />
+              <input id="f-uri" name="uri" [(ngModel)]="uri" [placeholder]="uriPlaceholder()" required />
             </div>
 
             <button type="submit" class="btn" [disabled]="!canSubmit()">
@@ -332,17 +345,31 @@
       <span class="muted">{{ assetListRows().length }} asset(s)</span>
     </header>
 
+    @if (categoryFilterName(); as filterName) {
+      <div class="row category-filter-banner">
+        <span class="chip accent">Filtered by category: {{ filterName }}</span>
+        <button type="button" class="btn secondary small" (click)="clearCategoryFilter()">
+          Clear filter — show every category
+        </button>
+      </div>
+    }
+
     @if (assetListRows().length === 0) {
       <div class="empty">
-        <h3>No assets yet</h3>
-        <p>
-          Register the built-in simulated source to see the whole pipeline work without any
-          hardware — then scan for the real thing, or place a moving test drone from "+ Add
-          source" → Simulate.
-        </p>
-        <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
-          Add the simulated source
-        </button>
+        @if (categoryFilterName(); as filterName) {
+          <h3>No assets in "{{ filterName }}"</h3>
+          <p>Nothing is currently registered under this category.</p>
+        } @else {
+          <h3>No assets yet</h3>
+          <p>
+            Register the built-in simulated source to see the whole pipeline work without any
+            hardware — then scan for the real thing, or place a moving test drone from "+ Add
+            source" → Simulate.
+          </p>
+          <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
+            Add the simulated source
+          </button>
+        }
       </div>
     } @else {
       <div class="asset-list-head">
@@ -428,13 +455,7 @@
     @if (warehouseRows().length === 0) {
       <div class="empty">
         <h3>No devices yet</h3>
-        <p>
-          Register the built-in simulated source to see the whole pipeline work without any
-          hardware — then scan for the real thing.
-        </p>
-        <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
-          Add the simulated source
-        </button>
+        <p>Use "+ Add source" above to register one — by hand, by scan, or with no hardware at all.</p>
       </div>
     } @else {
       <table>
@@ -519,6 +540,11 @@
                     [disabled]="busySimulatedAssetId() === simInfo.assetId"
                   >
                     {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
+                  </button>
+                }
+                @if (!row.archived && !row.owner) {
+                  <button type="button" class="btn secondary small" (click)="openCreateAssetFor(row.device)">
+                    Create asset from this device
                   </button>
                 }
                 @for (action of deviceActionsFor(row); track action) {
@@ -610,6 +636,53 @@
     </div>
     }
   </section>
+
+  <!-- ---- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) -->
+  <!-- Reached from a successful register's toast action, and from any Advanced row whose owner is
+       unassigned — one panel, one code path either way. -->
+  @if (createAssetFor(); as createDevice) {
+    <section class="card create-asset-panel">
+      <header>
+        <h2>Create asset from "{{ createDevice.name }}"</h2>
+      </header>
+      <p class="muted hint">
+        Registers a new device with this one's exact connection details ({{ createDevice.protocol }},
+        <span class="mono">{{ createDevice.uri }}</span>) under a new asset, then archives this
+        standalone entry — its history is kept, and it will no longer show as unassigned.
+      </p>
+
+      <div class="field">
+        <label class="label" for="create-asset-name">Asset name</label>
+        <input
+          id="create-asset-name"
+          name="createAssetName"
+          [(ngModel)]="createAssetName"
+          placeholder="front-gate"
+        />
+      </div>
+
+      <div class="field">
+        <label class="label" for="create-asset-category">Category</label>
+        <select id="create-asset-category" name="createAssetCategory" [(ngModel)]="createAssetCategory">
+          @for (option of categoryOptions(); track option.slug) {
+            <option [value]="option.slug">{{ option.name }}</option>
+          }
+        </select>
+      </div>
+
+      <div class="row">
+        <button
+          type="button"
+          class="btn"
+          (click)="confirmCreateAsset()"
+          [disabled]="!canSubmitCreateAsset()"
+        >
+          {{ createAssetSubmitting() ? 'Creating…' : 'Create asset' }}
+        </button>
+        <button type="button" class="btn secondary" (click)="cancelCreateAsset()">Cancel</button>
+      </div>
+    </section>
+  }
 
   @if (flightPlanDialogOpen()) {
     <vision-flight-plan-dialog

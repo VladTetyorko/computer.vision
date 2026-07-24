@@ -109,6 +109,17 @@ export class AssetDetailPage {
   private readonly hasBeenLive = signal(false);
   protected readonly stopped = computed(() => this.explicitlyStopped() || (this.hasBeenLive() && !this.live()));
 
+  /**
+   * The idle video panel's state line (docs/UX-QUICKWINS-PLAN.md QF-4 item 3) — the same two honest
+   * words `<vision-player>` itself shows for these exact phases (`player.ts`'s own template: `'Not
+   * streaming'` / `'Stream stopped'`), read off this page's own `stopped()`/`live()` rather than the
+   * player's internal phase, since the player isn't mounted at all while `!live()` (see the video
+   * card's template — no new state, just projecting what's already computed here into words).
+   */
+  protected readonly videoStateLine = computed(() =>
+    this.stopped() ? 'Stream stopped' : 'Not streaming',
+  );
+
   // --- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
   // Per the plan's own scoping: the per-stream feed while this asset is actively streaming (a
   // dedicated small poll below, mirroring `DetectionsStore`'s own per-stream cadence), else recent

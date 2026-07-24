@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssetUsage } from '../../core/api/models';
 import {
   cycleBoxesMode,
+  isSwitcherOptionSelected,
   isWatchMode,
   latestFinishedUsage,
   resolveActiveAssetId,
@@ -109,6 +110,31 @@ describe('cycleBoxesMode', () => {
     expect(cycleBoxesMode('overlay')).toBe('burned');
     expect(cycleBoxesMode('burned')).toBe('off');
     expect(cycleBoxesMode('off')).toBe('overlay');
+  });
+});
+
+describe('isSwitcherOptionSelected (BROKEN #2 — switcher selection race, docs/UX-QUICKWINS-PLAN.md QF-1)', () => {
+  it('selects the option matching the active asset', () => {
+    expect(isSwitcherOptionSelected('drone-a', 'drone-a')).toBe(true);
+  });
+
+  it('does not select an option that is not the active asset', () => {
+    expect(isSwitcherOptionSelected('drone-b', 'drone-a')).toBe(false);
+  });
+
+  it('selects nothing while no asset is active yet', () => {
+    expect(isSwitcherOptionSelected('drone-a', undefined)).toBe(false);
+  });
+
+  it('picks exactly the active asset regardless of where it falls in option order — the whole point of the fix', () => {
+    // `drone-a` is neither first nor alphabetically first: the bug this replaces (`[value]` on the
+    // `<select>` racing its own `<option>` children) always defaulted to the first-listed option
+    // instead, so this must hold for every position, not just "happens to be first".
+    const optionIds = ['zulu-drone', 'alpha-drone', 'mike-drone'];
+    expect(optionIds.map((id) => isSwitcherOptionSelected(id, 'alpha-drone'))).toEqual([false, true, false]);
+
+    const reordered = ['alpha-drone', 'zulu-drone', 'mike-drone'];
+    expect(reordered.map((id) => isSwitcherOptionSelected(id, 'alpha-drone'))).toEqual([true, false, false]);
   });
 });
 

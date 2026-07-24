@@ -30,6 +30,7 @@ import {
   attachKey,
   cyclePacingDelayMs,
   didWhepStatsAdvance,
+  estimateWhepLatencySeconds,
   extractWhepStatsSnapshot,
   initialTransportState,
   isStalled,
@@ -43,6 +44,7 @@ import {
   type RecoveryEvent,
   type Transport,
   type TransportRecoveryState,
+  type WhepCandidatePairStatLike,
   type WhepIceEvent,
   type WhepIceState,
   type WhepInboundRtpStatLike,
@@ -55,9 +57,8 @@ import {
   isPatchFallbackStatus,
 } from './webrtc-ice-restart';
 import {
-  behindLiveChipLabel,
-  shouldShowBehindLive,
   shouldSnapToLive,
+  transportLatencyLabel,
   type SnapToLiveReason,
 } from './live-edge-logic';
 
@@ -173,13 +174,16 @@ interface DrawnBox {
  *    touches the initial bundle of a user who only visits Devices. WHEP needs no such import —
  *    `RTCPeerConnection`/`fetch` are browser built-ins — and this component itself only ever
  *    reaches a lazy route chunk (never `providedIn: 'root'`), so the WHEP code adds nothing eager.
- *  - The distance behind the live edge is measured and displayed continuously. HLS costs
- *    seconds of latency; a user told "≈6 s behind live" understands the trade, while a
- *    user shown a spinner concludes the app is broken. WHEP is effectively live — `behindLive` is
- *    pinned to `0` the moment a track arrives (a real, meaningful number, not `null`: the
- *    detection-overlay sync matcher (`detection-overlay-logic.ts#selectDetectionResult`) needs an
- *    actual latency estimate to pick the right batch, and `0` is what "near-zero" means here) —
- *    though the visible badge reads "live · WebRTC" rather than a suspiciously precise "0.0s".
+ *  - The distance behind the live edge is measured and displayed continuously, in a small,
+ *    always-on chrome badge (docs/UX-QUICKWINS-PLAN.md QF-4): `"HLS ~6s"` / `"WebRTC 0.4s"` / `"—"`
+ *    while unmeasured — a user told "≈6 s behind live" understands the trade, while a user shown a
+ *    spinner concludes the app is broken. WHEP's own badge figure is a `getStats()`-derived estimate
+ *    (half the measured round-trip time plus jitter, `player-recovery.ts#estimateWhepLatencySeconds`
+ *    — see `refreshWhepStatsProgress`), kept deliberately separate from `behindLive`, which stays
+ *    pinned to `0` the moment a track arrives (a real, meaningful number, not `null`, for a
+ *    different consumer: the detection-overlay sync matcher,
+ *    `detection-overlay-logic.ts#selectDetectionResult`, needs an actual latency estimate to pick
+ *    the right batch, and `0` is what "near-zero" means there).
  *  - The player never gives up. `shared/player/player-recovery.ts`'s pure state machine drives every
  *    transition; a fatal hls.js error or a silent stall (the watchdog: no fragment progress for
  *    `STALL_WATCHDOG_MS`) destroys and reattaches with capped exponential backoff, indefinitely,
@@ -231,9 +235,10 @@ interface DrawnBox {
  * across every tile and every reconnect, for server-side viewer correlation, and one fewer ECDSA
  * keygen per attach.
  *
- * The visible state chip's transport suffix (`'live · WebRTC'` / `'…s behind · HLS'`) always names
- * whichever transport is actually attached, and `transportChanged` emits it too, for a host that
- * wants to echo it (e.g. `shared/player/stream-info-panel.ts`'s "Transport" fact).
+ * The visible latency badge (`'WebRTC 0.4s'` / `'HLS ~6s'` / `'—'` while unmeasured — see
+ * `live-edge-logic.ts#transportLatencyLabel`) always names whichever transport is actually
+ * attached, and `transportChanged` emits it too, for a host that wants to echo it (e.g.
+ * `shared/player/stream-info-panel.ts`'s "Transport" fact).
  *
  * **Detection overlay** (docs/CYCLES-PLAN.md §11 item 6): an optional `detections`/`boxesMode`
  * input pair draws a canvas overlay of the freshest detection batch matched against this player's
@@ -280,7 +285,7 @@ interface DrawnBox {
             }
             @case ('reconnecting') {
               <span class="spinner" aria-hidden="true"></span>
-              <span>Reconnecting…</span>
+              <span>Feed unreachable</span>
               <span class="hint">{{ reconnectHint() }}</span>
               <button type="button" class="btn secondary small" (click)="retryNow()">
                 Retry now
@@ -297,9 +302,9 @@ interface DrawnBox {
         </div>
       }
 
-      @if (phase() === 'playing') {
+      @if (phase() !== 'idle' && phase() !== 'stopped') {
         <div class="badge" [title]="latencyTitle()">
-          <span class="dot live"></span>{{ latencyLabel() }}
+          <span class="dot" [class.live]="phase() === 'playing'"></span>{{ latencyLabel() }}
         </div>
       }
     </div>
@@ -377,8 +382,10 @@ interface DrawnBox {
     }
 
     .badge {
+      /* Bottom-anchored: hosts (the Fly cockpit) overlay their own chrome along the frame's top
+         edge, and a top-left badge bleeds through transparent gaps in that chrome. */
       position: absolute;
-      top: 0.5rem;
+      bottom: 0.5rem;
       left: 0.5rem;
       display: flex;
       align-items: center;
@@ -514,35 +521,49 @@ export class Player {
     return next;
   }
 
+  /**
+   * The "reconnecting" state line's cause + action (docs/UX-QUICKWINS-PLAN.md QF-4 item 2 —
+   * "Feed unreachable — retrying in Ns (attempt k)") — projects the existing recovery/pacing state
+   * into words rather than inventing a new one: `cyclePacingDelayMs` (`player-recovery.ts`) is the
+   * *exact* delay `scheduleReconnect`/`scheduleColdStartRetry`/`handleWhepFailure` already computed
+   * and used to arm the pending retry timer (each dispatches `'cycleFailed'` — updating
+   * `pacingState` — *before* scheduling it), so this reads the real countdown, not a guess. Reads
+   * the saga-wide pacing counter, not `transportState().recovery.attempt` (which resets on every
+   * WHEP→HLS fallback) — see `PacingState`'s doc comment for why the two differ on purpose.
+   */
   protected readonly reconnectHint = computed(() => {
-    // Reads the saga-wide pacing counter, not `transportState().recovery.attempt` (which resets on
-    // every WHEP→HLS fallback) — see `PacingState`'s doc comment for why the two differ on purpose.
-    const attempt = this.pacingState().cycleAttempt;
-    return attempt <= 1
-      ? 'The stream will resume automatically.'
-      : `Retrying automatically (attempt ${attempt}).`;
+    const pacing = this.pacingState();
+    const delaySeconds = Math.max(1, Math.round(cyclePacingDelayMs(pacing) / 1000));
+    return `Retrying in ${delaySeconds}s (attempt ${pacing.cycleAttempt}).`;
   });
 
-  /** Seconds behind the live edge, or `null` while unknown. Pinned to `0` for a live WHEP track. */
+  /**
+   * Seconds behind the live edge, or `null` while unknown. Pinned to `0` for a live WHEP track —
+   * this is the number the detection-overlay sync matcher needs (see class doc), *not* the latency
+   * badge's own WebRTC figure below; kept separate on purpose so that invariant never has to share a
+   * signal with a display-only estimate.
+   */
   private readonly behindLive = signal<number | null>(null);
 
   /**
-   * Whether the chip's quantified "…s behind" tail is currently showing (docs/MVP2-PLAN.md §V,
-   * V-b) — `shared/player/live-edge-logic.ts#shouldShowBehindLive`'s own hysteresis state, updated once per
-   * latency sample (`startLatencySampling`) rather than recomputed from nothing on every read, so
-   * "currently showing" has a well-defined previous value for that hysteresis to compare against.
+   * The latency badge's WebRTC figure (docs/UX-QUICKWINS-PLAN.md QF-4) — `null` until the first
+   * `getStats()` tick that reports a round-trip time (`estimateWhepLatencySeconds`,
+   * `player-recovery.ts`), refreshed on the same `WATCHDOG_TICK_MS` cadence as the stall watchdog's
+   * own poll (`refreshWhepStatsProgress`). Purely a display concern — never read by the overlay sync
+   * matcher or the snap-to-live logic, both of which keep using `behindLive` above exactly as before.
    */
-  private readonly showBehindLive = signal(false);
+  private readonly whepLatencySeconds = signal<number | null>(null);
 
+  /** The player chrome's latency badge text — see `live-edge-logic.ts#transportLatencyLabel`'s own doc comment for the exact wording rules per transport. */
   protected readonly latencyLabel = computed(() =>
-    behindLiveChipLabel(this.transport(), this.behindLive(), this.showBehindLive()),
+    transportLatencyLabel(this.transport(), this.behindLive(), this.whepLatencySeconds()),
   );
 
   protected readonly latencyTitle = computed(() =>
     this.transport() === 'webrtc'
-      ? 'WebRTC (WHEP) is sub-second, effectively live glass-to-glass.'
-      : 'Distance behind the live edge, measured continuously. HLS inherently buffers ' +
-        'several segments; WebRTC (WHEP), when reachable, cuts this to well under a second.',
+      ? "Estimated one-way delay from the WebRTC (WHEP) connection's own measured round-trip " +
+        'time and jitter buffer (getStats()) — not a fixed number.'
+      : 'Distance behind the live edge, measured continuously from the HLS buffer position.',
   );
 
   protected readonly hoveredDetection = signal<Detection | null>(null);
@@ -1047,16 +1068,14 @@ export class Player {
   }
 
   /**
-   * Samples `behindLive` once a second and derives the two live-edge behaviors that ride on that
-   * same cadence (docs/MVP2-PLAN.md §V, V-b) — no new timer for either:
-   *
-   *  - the chip's hysteresis (`showBehindLive`, `shared/player/live-edge-logic.ts#shouldShowBehindLive`);
-   *  - a tab-visibility restore, detected by diffing `document.hidden` against what it was on the
-   *    *previous* tick (there is no dedicated `visibilitychange` listener — this app already has
-   *    the precedent of checking `document.hidden` from an existing per-second heartbeat rather
-   *    than a separate event, see `core/poll-scheduler.ts`; unlike that poller, this timer
-   *    deliberately keeps running while hidden, per this file's own pre-existing "a backgrounded
-   *    tab's video should keep buffering" doc note above `startWatchdog`/`teardownMedia`).
+   * Samples `behindLive` once a second and derives the live-edge behavior that rides on that same
+   * cadence (docs/MVP2-PLAN.md §V, V-b) — a tab-visibility restore, detected by diffing
+   * `document.hidden` against what it was on the *previous* tick (there is no dedicated
+   * `visibilitychange` listener — this app already has the precedent of checking `document.hidden`
+   * from an existing per-second heartbeat rather than a separate event, see `core/poll-scheduler.ts`;
+   * unlike that poller, this timer deliberately keeps running while hidden, per this file's own
+   * pre-existing "a backgrounded tab's video should keep buffering" doc note above
+   * `startWatchdog`/`teardownMedia`).
    */
   private startLatencySampling(video: HTMLVideoElement): void {
     this.wasDocumentHidden = isDocumentHidden();
@@ -1067,7 +1086,6 @@ export class Player {
 
       const measured = this.measureBehindLive(video);
       this.behindLive.set(measured);
-      this.showBehindLive.set(shouldShowBehindLive(measured, this.showBehindLive()));
 
       if (becameVisible) {
         this.maybeSnapToLive('visibilityRestored', measured);
@@ -1585,6 +1603,11 @@ export class Player {
    * every tick — this runs on the same `WATCHDOG_TICK_MS` (2s) cadence as every healthy stream, so
    * per-tick logging here would be exactly the console spam this file's own `LOG_PREFIX` doc
    * comment says to avoid.
+   *
+   * **Also refreshes `whepLatencySeconds`** (docs/UX-QUICKWINS-PLAN.md QF-4's latency badge) from
+   * the exact same report — `extractWhepStatsSnapshot` now also reads jitter/round-trip time
+   * alongside the decode counters, so this is one `getStats()` call serving both concerns, not a
+   * second poller.
    */
   private async refreshWhepStatsProgress(generation: number): Promise<void> {
     const pc = this.peerConnection;
@@ -1600,8 +1623,8 @@ export class Player {
     if (generation !== this.generation) {
       return;
     }
-    const stats: WhepInboundRtpStatLike[] = [];
-    report.forEach((value) => stats.push(value as WhepInboundRtpStatLike));
+    const stats: (WhepInboundRtpStatLike | WhepCandidatePairStatLike)[] = [];
+    report.forEach((value) => stats.push(value as WhepInboundRtpStatLike | WhepCandidatePairStatLike));
     const current = extractWhepStatsSnapshot(stats);
     const advanced = didWhepStatsAdvance(this.whepStatsSnapshot, current);
     if (advanced !== this.whepStatsAdvancing) {
@@ -1614,6 +1637,7 @@ export class Player {
     if (current) {
       this.whepStatsSnapshot = current;
     }
+    this.whepLatencySeconds.set(estimateWhepLatencySeconds(current));
     if (advanced) {
       this.lastFrameAt = Date.now();
     }
@@ -1879,7 +1903,7 @@ export class Player {
     video.removeAttribute('src');
     video.load();
     this.behindLive.set(null);
-    this.showBehindLive.set(false); // hysteresis resets with every fresh attach, not carried over.
+    this.whepLatencySeconds.set(null); // the badge resets with every fresh attach, not carried over.
   }
 
   /** Full stop — component destroy, or the `src`/`whepUrl`/`suspended` inputs actually changed. */

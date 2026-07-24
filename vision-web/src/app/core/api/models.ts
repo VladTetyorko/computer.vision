@@ -235,6 +235,37 @@ export interface AssetDetails extends AssetSummary {
 }
 
 /**
+ * Mirrors `dto.CreateAssetRequest.DeviceSpec` (docs/UX-QUICKWINS-PLAN.md QF-2 — the "Create asset
+ * from this device" quick action) — one device to register **alongside** the new asset. This is
+ * always a **new** device registration (`name`/`protocol`/`uri`), never a reference to an existing
+ * `Device` by id: `CreateAssetRequest`/`AssetSpec` carry no such field (verified by reading
+ * `AssetController#create`/`CreateAssetRequest.java`/`AssetSpec.java` — `AssetService#create` calls
+ * `deviceService.register(...)` for every entry, unconditionally). `options`/`capabilities` are
+ * optional, `@JsonInclude(NON_NULL)`-style like every other request DTO here — omit rather than
+ * send `undefined`/empty.
+ */
+export interface CreateAssetDeviceSpec {
+  readonly name: string;
+  readonly protocol: string;
+  readonly uri: string;
+  readonly options?: Record<string, string>;
+  readonly capabilities?: readonly Capability[];
+}
+
+/**
+ * Mirrors `dto.CreateAssetRequest`, the body of `POST /api/assets` (docs/UX-QUICKWINS-PLAN.md QF-2).
+ * `attributes` omitted rather than sent as `{}`/`null`; `devices` must contain at least one entry
+ * (`AssetSpec`'s own validation, not re-checked here) — the response is a full `AssetDetails`
+ * (`AssetDetailsResponse`, 201).
+ */
+export interface CreateAssetRequest {
+  readonly displayName: string;
+  readonly category: string;
+  readonly attributes?: Record<string, string>;
+  readonly devices: readonly CreateAssetDeviceSpec[];
+}
+
+/**
  * Mirrors `PATCH /api/assets/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every field
  * optional — send only what actually changed. Built by
  * `features/devices/devices-page-logic.ts#buildAssetEdit`.

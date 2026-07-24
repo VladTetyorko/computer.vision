@@ -31,16 +31,26 @@ import {
   RESTORE_TARGET_STATE,
   availableDeviceActions,
   buildAssetListRows,
+  buildCreateAssetRequestForDevice,
   buildDeviceRenameEdit,
   buildWarehouseRows,
+  deriveCategoryOptions,
   filterAssetListRowsByArchived,
+  filterAssetListRowsByCategory,
   filterRowsByArchived,
   mapDeviceOwners,
   type AssetListRow,
+  type CategoryOption,
   type DeviceLifecycleAction,
   type DeviceOwner,
   type WarehouseRow,
 } from './devices-page-logic';
+import {
+  CUSTOM_PROTOCOL_OPTION,
+  REGISTERABLE_PROTOCOLS,
+  placeholderForProtocol,
+  protocolSelectionFor,
+} from './protocols';
 
 interface OptionRow {
   key: string;
@@ -89,6 +99,13 @@ export class DevicesPage {
    */
   readonly addSource = input<string | undefined>(undefined);
 
+  /**
+   * `?category=<slug>` — pre-filters the asset-first list to one category (docs/UX-QUICKWINS-PLAN.md
+   * QF-2/QF-3): the drill-down target for the Command dashboard's readiness tiles. Binds by name,
+   * same query-param-to-input mechanism as `addSource` above — no route change needed.
+   */
+  readonly category = input<string | undefined>(undefined);
+
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly router = inject(Router);
@@ -99,14 +116,32 @@ export class DevicesPage {
   protected readonly scanTimeouts = SCAN_TIMEOUTS;
 
   // --- Register form -------------------------------------------------------
+  // The protocol field is a `<select>` of exactly what this build can consume
+  // (docs/UX-QUICKWINS-PLAN.md QF-2 — `./protocols.ts`, verified against each adapter's own
+  // `supports()`), plus a `Custom…` escape hatch that reveals the old free-text input for a future
+  // adapter not in that list yet.
 
   protected readonly name = signal('');
-  protected readonly protocol = signal('');
+  protected readonly protocolSelect = signal('');
+  protected readonly customProtocol = signal('');
   protected readonly uri = signal('');
   protected readonly options = signal<readonly OptionRow[]>([]);
   protected readonly submitting = signal(false);
   /** Briefly outlines the form after a discovery candidate fills it in. */
   protected readonly highlighted = signal(false);
+
+  protected readonly registerableProtocols = REGISTERABLE_PROTOCOLS;
+  protected readonly customProtocolOption = CUSTOM_PROTOCOL_OPTION;
+
+  protected readonly isCustomProtocol = computed(() => this.protocolSelect() === CUSTOM_PROTOCOL_OPTION);
+
+  /** The protocol string actually sent — the select's value, or the free-text field under `Custom…`. */
+  protected readonly protocol = computed(() =>
+    this.isCustomProtocol() ? this.customProtocol() : this.protocolSelect(),
+  );
+
+  /** The URI field's placeholder, updated per selected protocol (docs/UX-QUICKWINS-PLAN.md QF-2). */
+  protected readonly uriPlaceholder = computed(() => placeholderForProtocol(this.protocol()));
 
   protected readonly canSubmit = computed(
     () =>
@@ -279,15 +314,96 @@ export class DevicesPage {
    * list is not O(visible) (`refreshWarehouseAssets` below resolves every asset's devices, not
    * just the ones currently scrolled into view), a known, documented ceiling tied to the backend's
    * in-memory repositories rather than something this cycle solves (see MODULE.md Status).
+   *
+   * `?category=` (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's readiness-tile
+   * drill-down) narrows this further, after the archived filter.
    */
   protected readonly assetListRows = computed<readonly AssetListRow[]>(() =>
-    filterAssetListRowsByArchived(buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()), this.showArchived()),
+    filterAssetListRowsByCategory(
+      filterAssetListRowsByArchived(buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()), this.showArchived()),
+      this.category(),
+    ),
   );
+
+  /**
+   * The active `?category=` filter's human-readable name, for the "Filtered by …" banner —
+   * resolved from whichever loaded asset actually carries this slug (falls back to the bare slug
+   * itself so a category with zero current assets still names what was asked for, rather than
+   * showing nothing).
+   */
+  protected readonly categoryFilterName = computed(() => {
+    const slug = this.category()?.trim();
+    if (!slug) {
+      return undefined;
+    }
+    return this.assets().find((asset) => asset.category === slug)?.categoryName ?? slug;
+  });
+
+  protected clearCategoryFilter(): Promise<boolean> {
+    return this.router.navigate(['/devices']);
+  }
 
   /** Non-archived assets are always valid assign targets — a device's ownership is the only rule. */
   protected readonly assignableAssets = computed(() =>
     this.assets().filter((asset) => (asset.lifecycle ?? 'ACTIVE') !== 'DELETED'),
   );
+
+  // --- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) --
+  // Reached from a successful register's toast action and from any Advanced-table row whose
+  // `owner` is unassigned — one inline panel, one code path, regardless of entry point.
+
+  protected readonly createAssetFor = signal<Device | null>(null);
+  protected readonly createAssetName = signal('');
+  protected readonly createAssetCategory = signal('');
+  protected readonly createAssetSubmitting = signal(false);
+
+  /** The category picker's options — real, in-use categories when any asset has been loaded, else a small default set. */
+  protected readonly categoryOptions = computed<readonly CategoryOption[]>(() => deriveCategoryOptions(this.assets()));
+
+  protected readonly canSubmitCreateAsset = computed(
+    () => !this.createAssetSubmitting() && this.createAssetCategory().trim().length > 0,
+  );
+
+  protected openCreateAssetFor(device: Device): void {
+    this.createAssetFor.set(device);
+    this.createAssetName.set(device.name);
+    this.createAssetCategory.set(this.categoryOptions()[0]?.slug ?? '');
+  }
+
+  protected cancelCreateAsset(): void {
+    this.createAssetFor.set(null);
+  }
+
+  /**
+   * Registers a new device wrapping `device`'s own connection details under a brand-new asset,
+   * then archives `device` itself — `POST /api/assets` cannot reference an existing device by id
+   * (see `buildCreateAssetRequestForDevice`'s own doc comment), so this is the quick fix's honest
+   * resolution: no duplicate left behind in the Advanced table, and the new asset owns a device
+   * with identical settings. Navigates to the new asset's detail page on success.
+   */
+  protected async confirmCreateAsset(): Promise<void> {
+    const device = this.createAssetFor();
+    if (!device || !this.canSubmitCreateAsset()) {
+      return;
+    }
+    this.createAssetSubmitting.set(true);
+    try {
+      const request = buildCreateAssetRequestForDevice(
+        device,
+        this.createAssetName(),
+        this.createAssetCategory().trim(),
+      );
+      const created = await this.api.createAsset(request);
+      await this.fleet.deleteDevice(device.id); // archive the now-superseded standalone entry
+      this.createAssetFor.set(null);
+      this.toasts.ok(`Created asset "${created.displayName}".`);
+      await this.router.navigate(['/assets', created.assetId]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.createAssetSubmitting.set(false);
+    }
+  }
 
   protected deviceActionsFor(row: WarehouseRow): readonly DeviceLifecycleAction[] {
     return availableDeviceActions(row.lifecycle, !!row.owner);
@@ -520,6 +636,16 @@ export class DevicesPage {
       if (device) {
         this.resetForm();
         this.closeAddSource();
+        await this.refreshWarehouse();
+        // Orphaned-device dead end, quick version (docs/UX-QUICKWINS-PLAN.md QF-2): a freshly
+        // registered device has no owning asset yet — offer the fix right away, not just from the
+        // Advanced table's own "unassigned" row action below. A second, distinct toast rather than
+        // extending `fleet.register()`'s own plain "Registered X." confirmation (out of this
+        // cycle's scope — `FleetStore` is `core/fleet/**`, not `features/devices/**`).
+        this.toasts.ok('Not yet part of any asset.', {
+          label: 'Create asset from this device',
+          onClick: () => this.openCreateAssetFor(device),
+        });
       }
     } finally {
       this.submitting.set(false);
@@ -566,7 +692,8 @@ export class DevicesPage {
 
   private resetForm(): void {
     this.name.set('');
-    this.protocol.set('');
+    this.protocolSelect.set('');
+    this.customProtocol.set('');
     this.uri.set('');
     this.options.set([]);
   }
@@ -596,8 +723,10 @@ export class DevicesPage {
 
   /** Fills the register form from a discovery candidate and switches to it; the user still confirms. */
   protected useCandidate(candidate: DiscoveredDevice): void {
+    const selection = protocolSelectionFor(candidate.protocol);
     this.name.set(candidate.name);
-    this.protocol.set(candidate.protocol ?? '');
+    this.protocolSelect.set(selection.select);
+    this.customProtocol.set(selection.custom);
     this.uri.set(candidate.uri ?? candidate.address);
     this.options.set([]);
 

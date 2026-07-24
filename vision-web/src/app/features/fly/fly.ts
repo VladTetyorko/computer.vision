@@ -29,6 +29,7 @@ import { FlyOsd } from './fly-osd';
 import {
   TICKER_MAX_EVENTS,
   cycleBoxesMode,
+  isSwitcherOptionSelected,
   isWatchMode,
   latestFinishedUsage,
   resolveActiveAssetId,
@@ -360,6 +361,15 @@ export class FlyPage {
   /** Returns to the full picker without forgetting the remembered choice (re-picking re-sets it anyway). */
   protected openPicker(): void {
     this.activeAssetId.set(undefined);
+  }
+
+  /**
+   * `fly.html`'s header switcher binds this per-`<option>` (`[selected]`) rather than `[value]` on
+   * the `<select>` itself — see `fly-logic.ts#isSwitcherOptionSelected`'s doc comment for the
+   * `<select>`/`@for` ordering race this sidesteps (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2).
+   */
+  protected switcherOptionSelected(candidateAssetId: string): boolean {
+    return isSwitcherOptionSelected(candidateAssetId, this.activeAssetId());
   }
 
   // --- Video device switching -----------------------------------------------------------------

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetDetails, AssetSummary, Device } from '../../core/api/models';
 import {
+  DEFAULT_CATEGORY_OPTIONS,
   buildAssetListRows,
   buildAssetRows,
+  buildCreateAssetRequestForDevice,
   buildWarehouseRows,
+  deriveCategoryOptions,
   filterAssetListRowsByArchived,
+  filterAssetListRowsByCategory,
   filterAssetRowsByArchived,
   filterRowsByArchived,
   mapDeviceOwners,
@@ -235,5 +239,99 @@ describe('filterAssetListRowsByArchived', () => {
       'active',
       'archived',
     ]);
+  });
+});
+
+describe('filterAssetListRowsByCategory (docs/UX-QUICKWINS-PLAN.md QF-2 — /devices?category= support)', () => {
+  const rows = buildAssetListRows(
+    [
+      assetDetails({ assetId: 'drone-1', category: 'drone' }),
+      assetDetails({ assetId: 'cam-1', category: 'ip-camera' }),
+    ],
+    new Set(),
+  );
+
+  it('leaves every row when category is undefined', () => {
+    expect(filterAssetListRowsByCategory(rows, undefined).map((r) => r.asset.assetId)).toEqual([
+      'drone-1',
+      'cam-1',
+    ]);
+  });
+
+  it('leaves every row when category is blank', () => {
+    expect(filterAssetListRowsByCategory(rows, '   ').map((r) => r.asset.assetId)).toEqual([
+      'drone-1',
+      'cam-1',
+    ]);
+  });
+
+  it('narrows to rows matching the given category slug', () => {
+    expect(filterAssetListRowsByCategory(rows, 'drone').map((r) => r.asset.assetId)).toEqual(['drone-1']);
+  });
+
+  it('narrows to zero rows for a category with no current assets, rather than showing everything', () => {
+    expect(filterAssetListRowsByCategory(rows, 'robot')).toEqual([]);
+  });
+});
+
+describe('deriveCategoryOptions (docs/UX-QUICKWINS-PLAN.md QF-2 — the create-asset category picker)', () => {
+  it('derives options from the categories already in use, deduped and sorted by name', () => {
+    const assets = [
+      assetSummary({ category: 'drone', categoryName: 'Drone' }),
+      assetSummary({ category: 'ip-camera', categoryName: 'IP Camera' }),
+      assetSummary({ category: 'drone', categoryName: 'Drone' }),
+    ];
+    expect(deriveCategoryOptions(assets)).toEqual([
+      { slug: 'drone', name: 'Drone' },
+      { slug: 'ip-camera', name: 'IP Camera' },
+    ]);
+  });
+
+  it('falls back to the default set when no asset exists yet', () => {
+    expect(deriveCategoryOptions([])).toEqual(DEFAULT_CATEGORY_OPTIONS);
+  });
+});
+
+describe('buildCreateAssetRequestForDevice (docs/UX-QUICKWINS-PLAN.md QF-2 — the orphaned-device quick fix)', () => {
+  it('wraps the device\'s own connection details as the new asset\'s one device', () => {
+    const request = buildCreateAssetRequestForDevice(
+      device({ id: 'dev-1', name: 'front-gate', protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' }),
+      'Front gate camera',
+      'ip-camera',
+    );
+    expect(request).toEqual({
+      displayName: 'Front gate camera',
+      category: 'ip-camera',
+      devices: [
+        {
+          name: 'front-gate',
+          protocol: 'rtsp',
+          uri: 'rtsp://192.168.1.50:554/stream',
+          capabilities: ['VIDEO'],
+        },
+      ],
+    });
+  });
+
+  it('falls back to the device name when displayName is blank', () => {
+    const request = buildCreateAssetRequestForDevice(device({ name: 'front-gate' }), '   ', 'ip-camera');
+    expect(request.displayName).toBe('front-gate');
+  });
+
+  it('trims a non-blank displayName', () => {
+    const request = buildCreateAssetRequestForDevice(device(), '  My Drone  ', 'drone');
+    expect(request.displayName).toBe('My Drone');
+  });
+
+  it('includes options only when the device carries any', () => {
+    const withOptions = buildCreateAssetRequestForDevice(
+      device({ options: { rtsp_transport: 'tcp' } }),
+      'name',
+      'drone',
+    );
+    expect(withOptions.devices[0].options).toEqual({ rtsp_transport: 'tcp' });
+
+    const withoutOptions = buildCreateAssetRequestForDevice(device({ options: {} }), 'name', 'drone');
+    expect(withoutOptions.devices[0]).not.toHaveProperty('options');
   });
 });

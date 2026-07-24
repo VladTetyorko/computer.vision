@@ -41,7 +41,9 @@
             [disabled]="!eventClickable(event)"
             (click)="open.emit(event)"
           >
-            <span class="dot" [class.live]="event.state === 'OPEN'"></span>
+            <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
+              <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
+            </span>
             <span class="event-main">
               <span class="event-label">{{ event.label }}</span>
               <span class="event-meta muted">

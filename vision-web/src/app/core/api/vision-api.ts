@@ -7,6 +7,7 @@ import type {
   AssetDetails,
   AssetEdit,
   AssetSummary,
+  CreateAssetRequest,
   DetectionEvent,
   DetectionResult,
   Device,
@@ -129,6 +130,16 @@ export class VisionApi {
 
   getAsset(assetId: string): Promise<AssetDetails> {
     return firstValueFrom(this.http.get<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}`));
+  }
+
+  /**
+   * Creates a new asset together with its device(s) in one call (docs/UX-QUICKWINS-PLAN.md QF-2 —
+   * the Devices page's "Create asset from this device" quick action, the first UI call site for an
+   * endpoint that already existed server-side). Returns the full detail view (201), same shape as
+   * {@link getAsset}.
+   */
+  createAsset(request: CreateAssetRequest): Promise<AssetDetails> {
+    return firstValueFrom(this.http.post<AssetDetails>('/api/assets', request));
   }
 
   usageTelemetry(usageId: string, limit = 200): Promise<TelemetrySample[]> {

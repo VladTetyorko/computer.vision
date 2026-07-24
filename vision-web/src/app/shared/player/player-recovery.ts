@@ -354,10 +354,18 @@ export function shouldAttemptWhep(state: PacingState, hasWhepUrl: boolean, nowMs
 // without a real `RTCPeerConnection`/`getStats()` — mirrors this file's own existing split of pure
 // state-machine logic from the component that drives it.
 
-/** The two monotonic WHEP inbound-video counters this cycle's stall check watches. */
+/**
+ * The two monotonic WHEP inbound-video counters this cycle's stall check watches, plus the two
+ * connection-quality figures the latency badge (docs/UX-QUICKWINS-PLAN.md QF-4) reads from the
+ * *same* `getStats()` pass — extending this extraction rather than adding a second poller/call.
+ */
 export interface WhepStatsSnapshot {
   readonly framesDecoded: number;
   readonly bytesReceived: number;
+  /** `RTCInboundRtpStreamStats.jitter` (seconds), from the same inbound video entry, when reported. */
+  readonly jitterSeconds?: number;
+  /** `RTCIceCandidatePairStats.currentRoundTripTime` (seconds) of the active pair, when reported. */
+  readonly roundTripTimeSeconds?: number;
 }
 
 /**
@@ -370,23 +378,76 @@ export interface WhepInboundRtpStatLike {
   readonly kind?: string;
   readonly framesDecoded?: number;
   readonly bytesReceived?: number;
+  readonly jitter?: number;
 }
 
 /**
- * Finds the inbound video RTP stat among a `getStats()` report's entries and reads its two decode
- * counters. `null` when no such entry exists (e.g. the very first tick right after
- * `setRemoteDescription`, before the receiver has produced its first stats sample) — the caller
- * treats that the same as "no progress observed this tick", not a stall by itself.
+ * The active ICE candidate-pair entry in the same `getStats()` report — the source of round-trip
+ * time for the latency badge (docs/UX-QUICKWINS-PLAN.md QF-4): STUN connectivity checks measure RTT
+ * regardless of media direction, so this is available even for this player's `recvonly`-only
+ * transceiver, unlike a sender-side `remote-inbound-rtp` report (mediamtx's WHEP output has no
+ * reason to produce one of those for a receive-only viewer).
+ */
+export interface WhepCandidatePairStatLike {
+  readonly type?: string;
+  readonly state?: string;
+  readonly nominated?: boolean;
+  readonly currentRoundTripTime?: number;
+}
+
+/**
+ * Finds the inbound video RTP stat among a `getStats()` report's entries and reads its decode
+ * counters plus jitter, and separately reads round-trip time off whichever candidate-pair entry is
+ * actually carrying the connection (`state === 'succeeded'`, `nominated`) — one pass over the same
+ * report the R-a stall watchdog already fetches every `WATCHDOG_TICK_MS`, not a second call.
+ *
+ * `null` when no inbound video RTP entry exists yet (e.g. the very first tick right after
+ * `setRemoteDescription`, before the receiver has produced its first stats sample) — the stall
+ * watchdog treats that the same as "no progress observed this tick"; `estimateWhepLatencySeconds`
+ * below treats a missing `roundTripTimeSeconds` the same way, as "not yet known", never a guess.
  */
 export function extractWhepStatsSnapshot(
-  stats: Iterable<WhepInboundRtpStatLike>,
+  stats: Iterable<WhepInboundRtpStatLike | WhepCandidatePairStatLike>,
 ): WhepStatsSnapshot | null {
+  let inbound: { framesDecoded: number; bytesReceived: number; jitterSeconds?: number } | null =
+    null;
+  let roundTripTimeSeconds: number | undefined;
   for (const stat of stats) {
-    if (stat.type === 'inbound-rtp' && stat.kind === 'video') {
-      return { framesDecoded: stat.framesDecoded ?? 0, bytesReceived: stat.bytesReceived ?? 0 };
+    if (stat.type === 'inbound-rtp' && (stat as WhepInboundRtpStatLike).kind === 'video') {
+      const s = stat as WhepInboundRtpStatLike;
+      inbound = {
+        framesDecoded: s.framesDecoded ?? 0,
+        bytesReceived: s.bytesReceived ?? 0,
+        jitterSeconds: s.jitter,
+      };
+    } else if (stat.type === 'candidate-pair') {
+      const pair = stat as WhepCandidatePairStatLike;
+      if (pair.state === 'succeeded' && pair.nominated) {
+        roundTripTimeSeconds = pair.currentRoundTripTime;
+      }
     }
   }
-  return null;
+  return inbound ? { ...inbound, roundTripTimeSeconds } : null;
+}
+
+/**
+ * A player-chrome latency estimate for a WHEP transport (docs/UX-QUICKWINS-PLAN.md QF-4's latency
+ * badge) — WHEP has no live-edge distance to measure the way HLS does (`shared/player/player.ts`'s
+ * own `behindLive` stays pinned to `0` for the overlay-sync matcher; see that class's own doc
+ * comment), so this is the honest number to show instead: half the measured round-trip time (the
+ * one-way network transit this side of the connection experiences) plus the jitter-buffer delay the
+ * browser is absorbing to smooth packet arrival — both already sitting in the same `getStats()`
+ * snapshot the stall watchdog polls every `WATCHDOG_TICK_MS`, via `extractWhepStatsSnapshot` above.
+ *
+ * `null` — rendered as `'—'` by the badge, never a guessed number — until this attach's first
+ * candidate-pair report actually carries a round-trip time; jitter alone, without an RTT, isn't a
+ * latency estimate worth showing.
+ */
+export function estimateWhepLatencySeconds(snapshot: WhepStatsSnapshot | null): number | null {
+  if (!snapshot || snapshot.roundTripTimeSeconds === undefined) {
+    return null;
+  }
+  return snapshot.roundTripTimeSeconds / 2 + (snapshot.jitterSeconds ?? 0);
 }
 
 /**

@@ -398,6 +398,10 @@ Bundle sizes (`ng build --configuration production`, after C6): initial total **
 
 **Test count: 172 → 189** (17 new: 8 `core/poll-scheduler.spec.ts` + 2 new `core/settings/settings-store.spec.ts` map-layer-persistence cases + 7 new `core/fleet/simulation-logic.spec.ts#buildTestDroneRequest` cases. No page-component-level tests existed for `devices.ts`/`live.ts`/`map.ts`/`fleet-map.ts`/`live-map.ts` before this cycle, so the Add-source flow, video-first layout, docked preview, and layer switcher have no dedicated component specs either; they're exercised by the full production build (twice, from clean) plus manual verification against this doc's description of their behavior. The pure logic each leans on — `buildTestDroneRequest`, `PollScheduler`'s cadence/pause/unsubscribe semantics, `SettingsStore.mapLayer` persistence — is unit-tested).
 
+**QF-3** (docs/UX-QUICKWINS-PLAN.md, one of four parallel quick-fix agents — scope `features/command/**` + `shared/ui/**` + the global `src/styles.css`): readiness tiles now navigate to `/devices?category=<tile's own categoryId>` (`command.ts#openDevices(categoryId?)`, falling back to plain `/devices` when absent — the contract QF-2's Devices-page filter codes against); global `input`/`select`/`textarea` restyled off `--panel-raised` (was the same shade as `--bg` — a control indistinguishable from the page behind it) with a visible `--border-strong` edge, an accent focus ring, and an explicit `option` background/color; a status-legibility pass added a word next to every color/dot-only status this scope owns — `shared/ui/events-rail.ts`'s row dot now always shows the event's own `state` (`OPEN`/`CLOSED`, `DetectionEventState`) beside it, and `command.html`'s attention-queue rows (previously severity-by-border-color only) gained a `CRITICAL`/`WARNING` chip. `command-logic.spec.ts` (33/33) and `tsc --noEmit` both green; no new component spec needed (template/global-CSS-only changes, consistent with this page's own standing "no page-component spec" precedent). Violations found outside this scope, left for their owning agents (see this cycle's own report): `app.html`'s fleet-reachable header dot (color-only, no word at all), `shared/player/stream-info-panel.ts`'s detections-on dot, and the `OPEN`/`CLOSED` event dots duplicated in `features/asset-detail/asset-detail.html` and `features/fly/fly.html`.
+
+**QF-2** (docs/UX-QUICKWINS-PLAN.md, one of four parallel quick-fix agents — scope `features/devices/**` + `core/api/vision-api.ts`'s `createAsset` only): Register-manually's protocol field is now a `<select>` of exactly what this build's adapters consume — new `features/devices/protocols.ts#REGISTERABLE_PROTOCOLS` (`rtsp`/`file`/`mjpeg`/`v4l2`/`sim`/`mavlink`, each with a one-line hint + a realistic URI placeholder, verified against each adapter's own RX-side `supports()`, TX-only `FeedTransmitter` halves excluded), plus a `Custom…` sentinel revealing the old free-text input for a future adapter (`protocolSelectionFor` also re-derives select/custom state from a discovery candidate's protocol). The duplicated "Add the simulated source" empty-state button (Assets vs. Advanced) now renders once — Advanced's empty state just points back at "+ Add source". Orphaned-device dead end: a "Create asset from this device" action (toast action after a successful register, and a row action on any Advanced row with `owner` unassigned) opens an inline panel — name + a category `<select>` (`devices-page-logic.ts#deriveCategoryOptions`, derived from categories already in use among loaded assets, falling back to a small hardcoded set mirroring `InMemoryCategoryRepository`'s dev seed only when none exist yet; **not** wired to `GET /api/categories` — out of this cycle's one-method `vision-api.ts` scope) — that calls the new `VisionApi.createAsset` (`POST /api/assets`, mirrors `AssetController#create`/`CreateAssetRequest` exactly; new `CreateAssetRequest`/`CreateAssetDeviceSpec` in `models.ts`). **Documented, deliberate side effect**: `CreateAssetRequest` has no "existing device id" field (`AssetSpec` always registers a *new* `DeviceRegistration`, verified by reading `AssetController.java`/`CreateAssetRequest.java`/`AssetSpec.java`), so `buildCreateAssetRequestForDevice` wraps the orphan's own protocol/uri/capabilities as a new device, and `devices.ts#confirmCreateAsset` archives the original standalone entry right after — no duplicate left behind, told to the user up front in the panel's own copy. `/devices?category=<slug>` pre-filters the asset-first list (`filterAssetListRowsByCategory`, the contract QF-3's readiness tiles drill into), with a "Filtered by category: …" banner + clear-filter action. **22 new spec cases** (12 `protocols.spec.ts` + 10 `devices-page-logic.spec.ts`), devices+protocols suite **62/62 passing**; `tsc --noEmit` clean for every file this scope touched (`shared/player/**` showed transient errors from QF-4's concurrent in-flight edit at verification time — confirmed unrelated by re-diffing against this scope's own files only).
+
 ---
 
 ## U2 / CD-b — asset-first Devices + asset detail page + self-recovering player + vector detection overlay (docs/CYCLES-PLAN.md §11)
@@ -874,3 +878,53 @@ Frontend half of the server-push data plane — `vision-web/` scope only, per th
 - **`Last-Event-ID` resume in practice** — `EventSource`'s automatic resume-header behavior is a browser built-in this store deliberately writes zero code for (see point 2 above); confirmed correct by reading the spec and `vision-api`'s own `LiveControllerTest` (which does exercise it against a real `MockMvc` `SseEmitter`), but never observed end-to-end from this browser against that server.
 - **The exit criteria's own numbers** (docs/REALTIME-PLAN.md §4: "`/fly` steady state = 1 SSE connection + WHEP media, zero recurring GETs in a 60s window... command dashboard with N=10 assets stays under 5 req/min total") — unverifiable without a live backend + a real fleet; and, per the Gotchas entry above, **still not fully achievable even once one exists** — `FleetStore`'s 5s device/stream poll and `EventsStore`'s 5s events poll are both real, unconverted, ongoing request costs this cycle does not touch, so "zero recurring GETs" specifically is not yet true even in principle, only "recurring GETs for telemetry/detections specifically are gone".
 - **Coalescing timing in practice** (`LiveUpdateRegistry`'s own 150ms `COALESCE_MILLIS`) — this store just renders whatever arrives, whenever it arrives; the 100–200ms batching the plan describes is entirely a server-side concern this frontend cycle has no way to observe without a live connection.
+
+## QF-1 — Fly cockpit usability fixes (docs/UX-QUICKWINS-PLAN.md QF-1)
+
+Scope: `features/fly/**` only. Fixed the switcher being unreachable behind the map inset (`fly.css`'s
+`.hud-map` now starts below the header row, `top: 3.6rem`, not `top: 0.75rem` — a geometric
+no-overlap fix, not a z-index chase against Leaflet's own `z-index: 1000` controls) and the switcher
+showing the wrong drone on load (native `<select>`'s `[value]` binding raced its own `@for`-built
+`<option>` children — see `fly-logic.ts#isSwitcherOptionSelected`'s doc comment; fixed by binding
+`[selected]` per-`<option>` instead, unit-tested in `fly-logic.spec.ts`). Restyled the switcher as a
+labeled "DRONE" cockpit control (`.switcher-control`/`.switcher-label` in `fly.css`, same frosted-pill
+chrome as `.icon-btn`). Papered over a hairline header/cockpit seam at 1440x900/1920x1080 with a
+layout-neutral `box-shadow` on `.cockpit` (see its own comment). Every icon-only control now has a
+`title` and a line in the `?` shortcuts dialog's new "Cockpit controls" list. Also replicated QF-3's
+events-rail status-legibility treatment (state word beside the dot, not color-only) onto this page's
+own inline ticker row — `.event-state-chip` in `fly.css`, mirrored from `shared/ui/events-rail.css`/
+`features/command/command.css`, not imported. `npx vitest run src/app/features/fly` — 24/24 pass;
+`npx tsc --noEmit` clean for every `features/fly/**` file (pre-existing, concurrent-edit errors
+elsewhere in `features/devices/protocols.ts` are another agent's in-progress work, unrelated).
+
+## QF-4 — Player + asset detail (docs/UX-QUICKWINS-PLAN.md QF-4)
+
+Scope: `shared/player/**` and `features/asset-detail/**` only. **Latency badge**: `player.ts`'s
+chrome badge now reads `"WebRTC 0.4s"` / `"HLS ~6s"` / `"—"` while unmeasured, always visible outside
+`idle`/`stopped` (was: `"live · WebRTC"` with no number at all, `"live · HLS[· Ns behind]"` gated by a
+now-removed show/hide hysteresis) — `live-edge-logic.ts#transportLatencyLabel` replaces
+`behindLiveChipLabel`/`shouldShowBehindLive`. HLS's number is `measureBehindLive`'s existing
+continuous live-edge measurement (unchanged); WHEP's is new — `player-recovery.ts#extractWhepStatsSnapshot`
+(the same `getStats()` pass R-a's stall watchdog already polls every 2s, extended rather than a
+second poller) now also reads jitter off the inbound video RTP entry and round-trip time off the
+active (`succeeded`+`nominated`) candidate-pair entry; `estimateWhepLatencySeconds` = `rtt/2 + jitter`,
+surfaced via a new display-only `Player#whepLatencySeconds` signal kept deliberately separate from
+`behindLive` (still pinned to `0` for the detection-overlay sync matcher — untouched). **Empty/error
+states**: the `reconnecting` phase now reads "Feed unreachable" + "Retrying in Ns (attempt k)." —
+`reconnectHint` derives the real countdown from `cyclePacingDelayMs(pacingState)`, the same delay
+already armed for the pending retry timer; no new state, just wording projected off the existing
+`RecoveryState`/`PacingState`. `idle`/`connecting`/`waiting`/`stopped`/`error` text unchanged (already
+honest). **Asset-detail idle layout**: the Video card no longer mounts `<vision-player>` at all while
+`!live()` — a compact `.empty` placeholder (existing global class) shows the same `'Not
+streaming'`/`'Stream stopped'` words plus a Start button, expanding back to the full player the
+instant `live()` flips true; no more ~630px reserved black box while idle. **Coordinator-flagged
+QF-3 follow-ups in owned files**: `stream-info-panel.ts`'s Detections fact now wraps the dot in a
+`.chip` with a self-describing word (`"Detections on"`/`"Detections off"`, was bare `"on"`/`"off"`);
+`asset-detail.html`'s event-row dot gained the same `.chip.event-state` + `{{ event.state }}`
+treatment `events-rail.css` established (mirrored locally in `asset-detail.css`, no cross-feature
+import). Tests: `player-recovery.spec.ts` +9 (`extractWhepStatsSnapshot` jitter/RTT extraction,
+`estimateWhepLatencySeconds`), `live-edge-logic.spec.ts`'s hysteresis tests replaced with
+`transportLatencyLabel` coverage — 153/153 pass across every `shared/player/**` +
+`features/asset-detail/**` spec (`ng test --include` targeted, not full `test:ci`, per the
+coordinator's concurrent-agent instruction); `tsc --noEmit` clean on both `tsconfig.app.json`/
+`tsconfig.spec.json`.

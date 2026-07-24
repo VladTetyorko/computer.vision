@@ -10,6 +10,7 @@ import {
   attachKey,
   cyclePacingDelayMs,
   didWhepStatsAdvance,
+  estimateWhepLatencySeconds,
   extractWhepStatsSnapshot,
   initialTransportState,
   isStalled,
@@ -22,6 +23,7 @@ import {
   type PacingState,
   type RecoveryState,
   type TransportRecoveryState,
+  type WhepCandidatePairStatLike,
   type WhepIceState,
   type WhepInboundRtpStatLike,
 } from './player-recovery';
@@ -653,6 +655,98 @@ describe('extractWhepStatsSnapshot', () => {
   it('is null when no inbound video RTP entry exists yet', () => {
     expect(extractWhepStatsSnapshot([{ type: 'candidate-pair' }])).toBeNull();
     expect(extractWhepStatsSnapshot([])).toBeNull();
+  });
+
+  // --- Latency badge extension (docs/UX-QUICKWINS-PLAN.md QF-4) — same report, same pass -------
+
+  it('also reads jitter off the inbound video entry, when reported', () => {
+    expect(
+      extractWhepStatsSnapshot([{ ...inboundVideo, jitter: 0.012 }]),
+    ).toEqual({ framesDecoded: 42, bytesReceived: 12_345, jitterSeconds: 0.012 });
+  });
+
+  it('also reads round-trip time off the active (succeeded, nominated) candidate-pair entry', () => {
+    const pair: WhepCandidatePairStatLike = {
+      type: 'candidate-pair',
+      state: 'succeeded',
+      nominated: true,
+      currentRoundTripTime: 0.04,
+    };
+    expect(extractWhepStatsSnapshot([inboundVideo, pair])).toEqual({
+      framesDecoded: 42,
+      bytesReceived: 12_345,
+      roundTripTimeSeconds: 0.04,
+    });
+  });
+
+  it('ignores a candidate-pair entry that is not the active (succeeded + nominated) one', () => {
+    const notNominated: WhepCandidatePairStatLike = {
+      type: 'candidate-pair',
+      state: 'succeeded',
+      nominated: false,
+      currentRoundTripTime: 0.9,
+    };
+    const notSucceeded: WhepCandidatePairStatLike = {
+      type: 'candidate-pair',
+      state: 'waiting',
+      nominated: true,
+      currentRoundTripTime: 0.9,
+    };
+    expect(extractWhepStatsSnapshot([inboundVideo, notNominated])?.roundTripTimeSeconds).toBeUndefined();
+    expect(extractWhepStatsSnapshot([inboundVideo, notSucceeded])?.roundTripTimeSeconds).toBeUndefined();
+  });
+
+  it('order in the report does not matter — the candidate-pair can arrive before or after inbound-rtp', () => {
+    const pair: WhepCandidatePairStatLike = {
+      type: 'candidate-pair',
+      state: 'succeeded',
+      nominated: true,
+      currentRoundTripTime: 0.06,
+    };
+    expect(extractWhepStatsSnapshot([pair, inboundVideo])).toEqual({
+      framesDecoded: 42,
+      bytesReceived: 12_345,
+      roundTripTimeSeconds: 0.06,
+    });
+  });
+});
+
+describe('estimateWhepLatencySeconds', () => {
+  it('is null with no snapshot at all', () => {
+    expect(estimateWhepLatencySeconds(null)).toBeNull();
+  });
+
+  it('is null when the snapshot has no round-trip time yet, even with jitter known', () => {
+    expect(
+      estimateWhepLatencySeconds({ framesDecoded: 10, bytesReceived: 1_000, jitterSeconds: 0.02 }),
+    ).toBeNull();
+  });
+
+  it('is half the round-trip time when jitter is unknown (treated as zero)', () => {
+    expect(
+      estimateWhepLatencySeconds({
+        framesDecoded: 10,
+        bytesReceived: 1_000,
+        roundTripTimeSeconds: 0.08,
+      }),
+    ).toBeCloseTo(0.04);
+  });
+
+  it('adds jitter on top of half the round-trip time when both are known', () => {
+    expect(
+      estimateWhepLatencySeconds({
+        framesDecoded: 10,
+        bytesReceived: 1_000,
+        roundTripTimeSeconds: 0.08,
+        jitterSeconds: 0.01,
+      }),
+    ).toBeCloseTo(0.05);
+  });
+
+  it('a zero round-trip time (loopback) still counts as known, not unmeasured', () => {
+    expect(
+      estimateWhepLatencySeconds({ framesDecoded: 10, bytesReceived: 1_000, roundTripTimeSeconds: 0 }),
+    ).toBe(0);
   });
 });
 

@@ -207,6 +207,15 @@ td.actions {
     border-color: var(--live);
 }
 
+/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's dot alone used to be the only
+   carrier of OPEN vs. CLOSED. The dot stays (fast at-a-glance scan), but `event.state` itself (the
+   API's own term) now always renders next to it, in the same chip/dot idiom
+   `shared/ui/events-rail.css#.event-state` already uses — replicated locally rather than imported,
+   since this page never imports another feature's styles. */
+.event-state {
+    flex: none;
+}
+
 .event-main {
     flex: 1;
     min-width: 0;

@@ -1,16 +1,16 @@
 import type { Transport } from './player-recovery';
 
 /**
- * Pure logic behind `shared/player/player.ts`'s live-edge behavior (docs/MVP2-PLAN.md §V, V-b): when a
- * stale HLS buffer is worth an active catch-up seek, and when the state chip's "how far behind"
- * readout is worth showing at all. Split out so both decisions are unit-testable without hls.js,
- * timers, or a `<video>` element — mirrors `shared/player/player-recovery.ts`/`shared/player/detection-overlay-logic.ts`.
+ * Pure logic behind `shared/player/player.ts`'s live-edge behavior (docs/MVP2-PLAN.md §V, V-b; the
+ * badge text itself extended by docs/UX-QUICKWINS-PLAN.md QF-4): when a stale HLS buffer is worth
+ * an active catch-up seek, and how the player chrome's latency badge should read given whichever
+ * transport is live. Split out so both decisions are unit-testable without hls.js, timers, or a
+ * `<video>` element — mirrors `shared/player/player-recovery.ts`/`shared/player/detection-overlay-logic.ts`.
  *
  * Both functions here are deliberately transport/reducer-*aware*, not transport/reducer
  * *replacements* — `shared/player/player.ts` still drives every phase transition through
  * `player-recovery.ts#reduceTransportRecovery`; this module only answers "given where that
- * machine already says we are, should we also do X" for the two live-edge-specific actions V-b
- * adds on top of it.
+ * machine already says we are, and what's been measured, what should the chrome show".
  */
 
 // --- Snap-to-live --------------------------------------------------------------------------
@@ -60,60 +60,38 @@ export function shouldSnapToLive(
   return behindLiveSeconds !== null && behindLiveSeconds > thresholdSeconds;
 }
 
-// --- Behind-live chip (honest, not decorative — with hysteresis) ---------------------------
-
-/** Above this many seconds behind, the chip starts quantifying it — see `shouldShowBehindLive`. */
-export const BEHIND_LIVE_SHOW_THRESHOLD_SECONDS = 4;
-
-/**
- * Once shown, the readout stays up until behind-ness drops below this *lower* threshold — the
- * hysteresis band between this and `BEHIND_LIVE_SHOW_THRESHOLD_SECONDS` is what stops the chip
- * flickering "live · HLS" / "live · HLS · 4.0s behind" back and forth while the real latency
- * hovers within a second of a single cutoff (ordinary jitter in `measureBehindLive`'s own
- * per-second sample, not a real change in how far behind the stream is).
- */
-export const BEHIND_LIVE_HIDE_THRESHOLD_SECONDS = 2;
+// --- Latency badge (honest, always-on — docs/UX-QUICKWINS-PLAN.md QF-4) --------------------
+//
+// Superseded the earlier hysteresis-gated "live · HLS[· Ns behind]" chip (docs/MVP2-PLAN.md §V,
+// V-b): the fleet/military honesty ethos this quick-win batch is built around (UX-DESIGN §T1) asks
+// for the measured number *always* visible, updating as it changes, not hidden behind a dead-band
+// until it crosses a few-second threshold. There is nothing left to debounce once the badge always
+// shows a number — the old flicker concern only existed because the chip toggled between a
+// qualitative "live" form and a quantified one at a single noisy cutoff; a badge that is *always*
+// quantified has no such toggle to flicker.
 
 /**
- * Whether the chip should currently be showing the quantified "…s behind" readout.
- *
- * A plain `> threshold` check with only one threshold would flicker every time `behindLiveSeconds`
- * ticks across that single line; this takes the *current* display state as an input and applies
- * whichever of the two thresholds is relevant to the direction being asked about (rising past the
- * show line, or falling past the lower hide line) — the standard two-threshold hysteresis shape,
- * same idea as a thermostat's deadband. `null` (not yet measured) never shows — there is nothing
- * honest to quantify yet, so the chip falls back to the plain "live" form.
+ * The player chrome's latency badge text, e.g. `'WebRTC 0.4s'`, `'HLS ~6s'`, or `'WebRTC —'`/
+ * `'HLS —'` while unmeasured (docs/UX-QUICKWINS-PLAN.md QF-4) — `transport` always leads, exactly
+ * as the plan's own example format shows. WebRTC shows one decimal (`estimateWhepLatencySeconds`,
+ * `player-recovery.ts`, is a real getStats()-derived estimate, precise enough to be worth a
+ * decimal); HLS rounds to a whole second with a leading `~` (`measureBehindLive`'s own live-edge
+ * distance is a continuously-drifting measurement, not a fixed round-trip figure, so a decimal
+ * would read as more precise than it is). Kept as its own pure function (rather than a template
+ * ternary) purely so the exact wording has a unit test, same convention as every other formatter in
+ * this app (`core/stream-info-logic.ts#formatLatency`/`formatDuration`, etc).
  */
-export function shouldShowBehindLive(
-  behindLiveSeconds: number | null,
-  currentlyShowing: boolean,
-  showThresholdSeconds = BEHIND_LIVE_SHOW_THRESHOLD_SECONDS,
-  hideThresholdSeconds = BEHIND_LIVE_HIDE_THRESHOLD_SECONDS,
-): boolean {
-  if (behindLiveSeconds === null) {
-    return false;
-  }
-  return currentlyShowing
-    ? behindLiveSeconds > hideThresholdSeconds
-    : behindLiveSeconds > showThresholdSeconds;
-}
-
-/**
- * The state chip's label, e.g. `'live · WebRTC'`, `'live · HLS'`, or `'live · HLS · 4.2s behind'`
- * — `transport` always leads (docs/MVP2-PLAN.md §V, V-b's own example format), the quantified tail
- * only appears while `shouldShowBehindLive` says it should. Kept as its own pure function (rather
- * than a template ternary) purely so the exact wording has a unit test, same convention as every
- * other formatter in this app (`core/stream-info-logic.ts#formatLatency`/`formatDuration`, etc).
- */
-export function behindLiveChipLabel(
+export function transportLatencyLabel(
   transport: Transport,
-  behindLiveSeconds: number | null,
-  showBehindLive: boolean,
+  hlsBehindLiveSeconds: number | null,
+  webrtcLatencySeconds: number | null,
 ): string {
   if (transport === 'webrtc') {
-    return 'live · WebRTC';
+    return webrtcLatencySeconds === null
+      ? 'WebRTC —'
+      : `WebRTC ${webrtcLatencySeconds.toFixed(1)}s`;
   }
-  return showBehindLive && behindLiveSeconds !== null
-    ? `live · HLS · ${behindLiveSeconds.toFixed(1)}s behind`
-    : 'live · HLS';
+  return hlsBehindLiveSeconds === null
+    ? 'HLS —'
+    : `HLS ~${Math.max(0, Math.round(hlsBehindLiveSeconds))}s`;
 }

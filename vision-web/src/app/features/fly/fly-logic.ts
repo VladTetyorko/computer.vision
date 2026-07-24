@@ -73,6 +73,32 @@ export function cycleBoxesMode(current: BoxesMode): BoxesMode {
 export const TICKER_MAX_EVENTS = 4;
 
 /**
+ * Whether `candidateAssetId` is the header switcher `<option>` that should carry the native
+ * `selected` property (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2 — "switcher shows wrong selected
+ * drone when the active asset isn't first in option order"). Extracted so the fix is unit-testable
+ * without a real `<select>`/`<option>` DOM.
+ *
+ * **Root cause this replaces**: `fly.html` used to bind `[value]="activeAssetId()"` on the
+ * `<select>` itself, with every `<option>` built by the same `@for` that is the select's own
+ * content. Angular applies an element's own property bindings before it patches that element's
+ * child content, so on first paint the `<select>`'s `value` property was written before any
+ * `<option>` existed to match it. Per the HTML spec, setting a `<select>`'s `value` to a string
+ * with no matching `<option>` selects nothing, and the browser then falls back to whichever
+ * `<option>` is first in *document* order — not the active asset. Because Angular only re-writes a
+ * property binding when the bound expression's value actually changes, and `activeAssetId()`
+ * hadn't changed since that failed first write, nothing ever corrected it afterwards: the switcher
+ * stuck on the first-listed drone (per `sortAssetsForPicker`'s streaming-then-alphabetical order)
+ * whenever the active asset wasn't that one.
+ *
+ * Binding `[selected]` per `<option>` (via this function) instead sidesteps the ordering race
+ * entirely: each option applies its own `selected` property the moment *that node* is created or
+ * re-checked, never depending on a sibling — least of all the `<select>` itself — existing first.
+ */
+export function isSwitcherOptionSelected(candidateAssetId: string, activeAssetId: string | undefined): boolean {
+  return candidateAssetId === activeAssetId;
+}
+
+/**
  * Whether a tracking effect (docs/REALTIME-PLAN.md Phase R-a item 2) should re-enter its store's
  * `track()`/`reset()` this run: only when the derived id primitive actually changed from the id it
  * last acted on. `FlyPage`'s own `asset()`/`stream()` signals are fresh objects on every ~5s poll

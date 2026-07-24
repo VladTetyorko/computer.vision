@@ -108,15 +108,29 @@
           }
         </header>
         @if (videoDevice()) {
-          <vision-player
-            [src]="stream()?.viewUrl ?? null"
-            [whepUrl]="stream()?.whepUrl ?? null"
-            [stopped]="stopped()"
-            [detections]="detections.results()"
-            [boxesMode]="boxesMode()"
-            (latencyChanged)="onLatency($event)"
-            (transportChanged)="onTransport($event)"
-          />
+          @if (live()) {
+            <vision-player
+              [src]="stream()?.viewUrl ?? null"
+              [whepUrl]="stream()?.whepUrl ?? null"
+              [stopped]="stopped()"
+              [detections]="detections.results()"
+              [boxesMode]="boxesMode()"
+              (latencyChanged)="onLatency($event)"
+              (transportChanged)="onTransport($event)"
+            />
+          } @else {
+            <!-- Collapsed idle placeholder (docs/UX-QUICKWINS-PLAN.md QF-4 item 3) — no
+                 <vision-player> mounted at all while nothing is streaming, so this card doesn't
+                 reserve the ~630px a 16:9 frame would; it expands back to the full player the
+                 instant `live()` flips true (a fresh Start, here or on another tab watching the
+                 same asset). -->
+            <div class="empty">
+              <p>{{ videoStateLine() }}</p>
+              <button type="button" class="btn" (click)="start()" [disabled]="busy()">
+                {{ busy() ? 'Starting…' : 'Start stream' }}
+              </button>
+            </div>
+          }
         } @else {
           <div class="empty">
             <p class="faint">This asset has no video-capable device.</p>
@@ -207,7 +221,9 @@
           <ul class="event-list">
             @for (event of displayedEvents(); track event.id) {
               <li class="event-row" [class.open]="event.state === 'OPEN'">
-                <span class="dot" [class.live]="event.state === 'OPEN'"></span>
+                <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
+                  <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
+                </span>
                 <span class="event-main">
                   <span class="event-label">{{ event.label }}</span>
                   <span class="event-meta muted">{{ (event.peakConfidence * 100).toFixed(0) }}% confidence</span>

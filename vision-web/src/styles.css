@@ -195,20 +195,54 @@ input,
 select,
 textarea {
     width: 100%;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    /* `--panel-raised`, not `--bg` — a control the same shade as the page behind it reads as no
+       control at all (docs/UX-QUICKWINS-PLAN.md QF-3's "nearly invisible" finding: fly switcher,
+       scan-timeout select, device-assign picker) — this is what gives every native form control a
+       visible surface distinct from the page, consistent with `.btn.secondary`'s own border/surface
+       treatment below. */
+    background: var(--panel-raised);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     padding: 0.45rem 0.55rem;
-    transition: border-color 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 input:hover,
 select:hover,
 textarea:hover {
-    border-color: var(--border-strong);
+    border-color: var(--accent);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 input::placeholder {
+    color: var(--text-faint);
+}
+
+/* Dropdown popup contents: `color-scheme: dark` on `:root` gets the popup chrome itself dark in
+   most engines, but an explicit `option` background/color keeps every option row legible
+   regardless of engine/OS quirks — this was the actual "invisible options" report (a light native
+   dropdown popup over this app's dark select, or unreadable-on-hover option text). */
+option {
+    background: var(--panel-raised);
+    color: var(--text);
+}
+
+option:disabled {
     color: var(--text-faint);
 }
 

@@ -1,4 +1,10 @@
-import type { AssetDetails, AssetSummary, Device, LifecycleState } from '../../core/api/models';
+import type {
+  AssetDetails,
+  AssetSummary,
+  CreateAssetRequest,
+  Device,
+  LifecycleState,
+} from '../../core/api/models';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 
 /**
@@ -159,4 +165,98 @@ export function filterAssetListRowsByArchived(
   showArchived: boolean,
 ): readonly AssetListRow[] {
   return showArchived ? rows : rows.filter((row) => !row.archived);
+}
+
+/**
+ * `/devices?category=<slug>` pre-filter (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3) — the drill-down
+ * target for the Command dashboard's readiness tiles ("this category's assets", not the whole
+ * fleet). Blank/absent leaves every row; an unknown slug legitimately narrows to zero rows rather
+ * than falling back to "show everything", since a tile linking here already knows the category
+ * exists.
+ */
+export function filterAssetListRowsByCategory(
+  rows: readonly AssetListRow[],
+  category: string | undefined,
+): readonly AssetListRow[] {
+  const slug = category?.trim();
+  return slug ? rows.filter((row) => row.asset.category === slug) : rows;
+}
+
+// --- Category picker (docs/UX-QUICKWINS-PLAN.md QF-2's "Create asset from this device") --------
+// This cycle's `vision-api.ts` change is scoped to `createAsset` only (see the plan) — no
+// `listCategories()`/`GET /api/categories` call site exists yet, even though that endpoint already
+// exists server-side (`CategoryController`). Rather than hand-roll a second, out-of-scope API
+// method, the picker derives its options from categories already present among the assets this
+// page has already loaded (real, in-use categories, no extra round trip) and only falls back to a
+// small hardcoded set — mirroring `InMemoryCategoryRepository`'s own dev/Phase-0 seed
+// (vision-app/devsupport) — for a brand-new install with no asset to derive from yet. A future
+// cycle wiring `VisionApi.listCategories()` should point this at the live list instead, keeping the
+// "derive from loaded assets" fast path.
+
+/** One category the "Create asset" picker can offer: enough to render and to send back as `category`. */
+export interface CategoryOption {
+  readonly slug: string;
+  readonly name: string;
+}
+
+/** Fallback options for an install with no asset yet to derive real categories from. */
+export const DEFAULT_CATEGORY_OPTIONS: readonly CategoryOption[] = [
+  { slug: 'drone', name: 'Drone' },
+  { slug: 'ip-camera', name: 'IP Camera' },
+  { slug: 'usb-camera', name: 'USB Camera' },
+  { slug: 'robot', name: 'Robot' },
+  { slug: 'simulated', name: 'Simulated' },
+];
+
+/**
+ * The categories already in use among `assets`, deduped by slug and sorted by name — the "existing
+ * categories" the create-asset picker offers. Falls back to {@link DEFAULT_CATEGORY_OPTIONS} only
+ * when `assets` is empty (nothing yet to derive a real list from).
+ */
+export function deriveCategoryOptions(assets: readonly AssetSummary[]): readonly CategoryOption[] {
+  const bySlug = new Map<string, CategoryOption>();
+  for (const asset of assets) {
+    if (!bySlug.has(asset.category)) {
+      bySlug.set(asset.category, { slug: asset.category, name: asset.categoryName });
+    }
+  }
+  if (bySlug.size === 0) {
+    return DEFAULT_CATEGORY_OPTIONS;
+  }
+  return [...bySlug.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Builds the `POST /api/assets` body for "Create asset from this device" (docs/UX-QUICKWINS-PLAN.md
+ * QF-2's orphaned-device quick fix): wraps `device`'s own connection details (name/protocol/uri/
+ * options/capabilities) as the new asset's one device.
+ *
+ * **This registers a brand-new `Device`, not a reference to `device` itself** — `CreateAssetRequest`
+ * carries no "existing device id" field (verified against `AssetController#create`/
+ * `CreateAssetRequest.java`/`AssetSpec.java`: every entry in `devices` always goes through
+ * `deviceService.register(...)`, unconditionally). The caller is expected to archive the original
+ * `device` (e.g. `FleetStore#deleteDevice`) once this succeeds, so the orphan doesn't linger
+ * side-by-side with its own now-owned duplicate — `devices.ts#confirmCreateAsset` does exactly
+ * that, and the confirm panel's own copy tells the user this up front.
+ */
+export function buildCreateAssetRequestForDevice(
+  device: Device,
+  displayName: string,
+  category: string,
+): CreateAssetRequest {
+  const trimmedName = displayName.trim();
+  const hasOptions = Object.keys(device.options).length > 0;
+  return {
+    displayName: trimmedName.length > 0 ? trimmedName : device.name,
+    category,
+    devices: [
+      {
+        name: device.name,
+        protocol: device.protocol,
+        uri: device.uri,
+        ...(hasOptions ? { options: device.options } : {}),
+        capabilities: device.capabilities,
+      },
+    ],
+  };
 }
