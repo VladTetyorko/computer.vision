@@ -13,6 +13,7 @@ import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 
@@ -95,6 +96,7 @@ public final class UsageTracker {
     private final AssetUsageRepositoryPort usageRepository;
     private final TelemetryRepositoryPort telemetryRepository;
     private final List<TelemetrySourcePort> telemetrySources;
+    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
     private final long sourceInitialBackoffNanos;
     private final long sourceMaxBackoffNanos;
 
@@ -110,24 +112,41 @@ public final class UsageTracker {
     public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                          AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
                          List<TelemetrySourcePort> telemetrySources) {
-        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS);
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources, null);
     }
 
     /**
-     * Test seam: same as the 5-argument constructor, with explicit (typically much smaller)
+     * Same as the 5-argument constructor, plus a {@link LiveUpdatePublisherPort} collaborator
+     * (docs/REALTIME-PLAN.md §4): every telemetry sample folded via {@link #applySample} is
+     * announced through it.
+     *
+     * @param liveUpdatePublisherPort nullable, following the same convention as {@code
+     *                                 DefaultStreamService}'s own collaborator of the same type:
+     *                                 {@code null} means no live-update announcements.
+     */
+    public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
+                         AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
+                         List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
+                liveUpdatePublisherPort, SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS);
+    }
+
+    /**
+     * Test seam: same as the 6-argument constructor, with explicit (typically much smaller)
      * telemetry-source reopen backoff bounds so supervision-related tests don't have to wait out a
-     * real 1s-30s backoff. Production always uses the 5-argument constructor's defaults.
+     * real 1s-30s backoff. Production always uses the 6-argument constructor's defaults.
      */
     UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                  AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                 List<TelemetrySourcePort> telemetrySources, long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
+                 List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                 long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
         this.telemetryRepository = Objects.requireNonNull(telemetryRepository, "telemetryRepository must not be null");
         Objects.requireNonNull(telemetrySources, "telemetrySources must not be null");
         this.telemetrySources = List.copyOf(telemetrySources);
+        this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
         this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
     }
@@ -347,6 +366,9 @@ public final class UsageTracker {
         }
         telemetryRepository.save(usageId, sample);
         usageRepository.save(updated);
+        if (liveUpdatePublisherPort != null) { // docs/REALTIME-PLAN.md §4
+            liveUpdatePublisherPort.publishTelemetryAppended(assetId, sample);
+        }
     }
 
     private static GeoPosition toPosition(Telemetry sample) {

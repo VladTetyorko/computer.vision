@@ -1,6 +1,7 @@
 package com.drones.vision.application;
 
 import com.drones.vision.domain.model.AnnotatedFrame;
+import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
@@ -12,6 +13,7 @@ import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 
@@ -181,6 +183,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final EventPublisherPort eventPublisher;
     private final OverlayPort overlayPort;
     private final DetectionEventEngine eventEngine;
+    private final AssetId assetId;
+    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
     private final LongSupplier nanoTimeSource;
     private final DetectionExtrapolator extrapolator = new DetectionExtrapolator();
 
@@ -265,7 +269,31 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                            EventPublisherPort eventPublisher, OverlayPort overlayPort,
                            DetectionEventEngine eventEngine) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, System::nanoTime);
+                eventPublisher, overlayPort, eventEngine, null, null);
+    }
+
+    /**
+     * Same as the 10-argument constructor, plus the collaborators needed to announce completed
+     * detection results as live updates (docs/REALTIME-PLAN.md §4).
+     *
+     * @param assetId                 nullable — the owning asset of the device streaming, resolved
+     *                                 once by {@link DefaultStreamService} at stream start;
+     *                                 {@code null} when the device belongs to no asset, in which
+     *                                 case nothing is ever announced (mirrors {@code
+     *                                 UsageTracker}'s own "untracked device" convention)
+     * @param liveUpdatePublisherPort nullable — {@code null} (every other constructor's default)
+     *                                 means no live-update announcements for this pipeline, the
+     *                                 same nullable-collaborator convention as {@code
+     *                                 overlayPort}/{@code eventEngine}
+     */
+    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                           EventPublisherPort eventPublisher, OverlayPort overlayPort,
+                           DetectionEventEngine eventEngine, AssetId assetId,
+                           LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, System::nanoTime);
     }
 
     /**
@@ -278,7 +306,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                    EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
-                   LongSupplier nanoTimeSource) {
+                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort, LongSupplier nanoTimeSource) {
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -290,6 +318,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.overlayPort = overlayPort; // nullable: no-op overlay rendering when absent
         this.eventEngine = eventEngine; // nullable: no detection-event tracking when absent
+        this.assetId = assetId; // nullable: no owning asset, or live updates not wired
+        this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
         this.sampleEveryNthFrame = everyNth(ASSUMED_SOURCE_FPS);
     }
@@ -585,6 +615,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         extrapolator.accept(result);
         if (eventEngine != null) {
             eventEngine.accept(result);
+        }
+        if (liveUpdatePublisherPort != null && assetId != null) {
+            liveUpdatePublisherPort.publishDetections(assetId, result);
         }
         if (!result.detections().isEmpty()) {
             detectionRepositoryPort.save(result);

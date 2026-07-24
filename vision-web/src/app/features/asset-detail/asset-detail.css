@@ -1,0 +1,231 @@
+/* ---- Loading skeleton (skeletons over spinners, per U1 convention) ------------------------ */
+
+.skeleton-line,
+.skeleton-card {
+    background: var(--panel-raised);
+    border-radius: var(--radius-sm);
+    animation: pulse 1.6s ease-in-out infinite;
+}
+
+.skeleton-line.title {
+    height: 1.6rem;
+    width: 14rem;
+}
+
+.skeleton-card {
+    height: 12rem;
+}
+
+/* ---- Header ------------------------------------------------------------------------------- */
+
+.edit-asset input {
+    max-width: 22rem;
+}
+
+.chip.faded {
+    background: transparent;
+}
+
+.inline-confirm-card {
+    background: var(--danger-soft);
+    border-color: #6b2530;
+}
+
+.inline-confirm-card p {
+    margin: 0 0 0.6rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+/* ---- Detail grid ---------------------------------------------------------------------------- */
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+}
+
+.detail-grid .card {
+    margin-bottom: 0;
+}
+
+.span-2 {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ---- Boxes toggle (mirrors features/live/live.css) -------------------------------------------- */
+
+.boxes-toggle {
+    gap: 0.3rem;
+}
+
+.boxes-toggle .btn.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: #a9c8ff;
+}
+
+/* ---- Facts grid (mirrors shared/player/stream-info-panel.ts's own — CSS encapsulation means this needs
+   its own copy; used here for Characteristics and per-device telemetry panels) --------------- */
+
+.facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    margin: 0 0 0.5rem;
+}
+
+.fact dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.fact dd {
+    margin: 0.1rem 0 0;
+    font-size: 0.85rem;
+}
+
+.stale-text {
+    color: var(--danger);
+}
+
+/* ---- Telemetry panels (docs/CYCLES-PLAN.md §11 item 3 — one per source device) ------------- */
+
+.telemetry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.75rem;
+}
+
+.telemetry-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: 0.7rem 0.85rem;
+}
+
+.telemetry-panel.stale {
+    border-color: var(--danger);
+}
+
+.panel-name {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+
+.hint {
+    font-size: 0.8rem;
+}
+
+/* ---- Hardware section (mirrors features/devices/devices.css's inline row idiom) --------------- */
+
+td.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: flex-end;
+}
+
+.name {
+    font-weight: 500;
+}
+
+.source {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    max-width: 22rem;
+}
+
+.inline-row td {
+    background: var(--panel-raised);
+}
+
+.inline-form,
+.inline-confirm {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.inline-form input,
+.inline-form select {
+    width: auto;
+    min-width: 12rem;
+    flex: 1 1 12rem;
+}
+
+.inline-form.column {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.inline-confirm span {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.assign-form {
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ---- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) — mirrors features/wall/wall.css's own rail rows,
+   minus the click affordance (this list is informational, not a navigation target). ------------ */
+
+.event-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.event-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.45rem 0.6rem;
+}
+
+.event-row.open {
+    border-color: var(--live);
+}
+
+.event-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.event-label {
+    font-weight: 600;
+    text-transform: capitalize;
+    font-size: 0.85rem;
+}
+
+.event-meta {
+    font-size: 0.72rem;
+}
+
+.event-time {
+    font-size: 0.72rem;
+    white-space: nowrap;
+}

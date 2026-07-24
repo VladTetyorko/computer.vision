@@ -1,0 +1,299 @@
+import { describe, expect, it } from 'vitest';
+import type { ActiveStream, DetectionEvent, Device } from '../api/models';
+import {
+  MAX_EVENT_MARKERS,
+  advanceCursor,
+  capitalizeLabel,
+  describeEventSource,
+  distinctLabels,
+  eventNotificationText,
+  filterEvents,
+  formatConfidence,
+  mergeEvents,
+  relativeTimeLabel,
+  resolveEventTarget,
+  selectEventMarkers,
+  shouldNotify,
+} from './events-logic';
+
+function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
+  return {
+    id: 'e-1',
+    streamId: 's-1',
+    label: 'person',
+    peakConfidence: 0.8,
+    firstSeen: '2026-07-23T10:00:00.000Z',
+    lastSeen: '2026-07-23T10:00:05.000Z',
+    state: 'OPEN',
+    ...partial,
+  };
+}
+
+function device(partial: Partial<Device> = {}): Device {
+  return {
+    id: 'dev-1',
+    name: 'Front camera',
+    capabilities: ['VIDEO'],
+    protocol: 'sim',
+    uri: 'sim://demo',
+    options: {},
+    state: 'ACTIVE',
+    ...partial,
+  };
+}
+
+function stream(partial: Partial<ActiveStream> = {}): ActiveStream {
+  return { streamId: 's-1', deviceId: 'dev-1', startedAt: '2026-07-23T09:00:00Z', ...partial };
+}
+
+describe('mergeEvents', () => {
+  it('adds a genuinely new event', () => {
+    const merged = mergeEvents([], [event({ id: 'e-1' })]);
+    expect(merged.map((e) => e.id)).toEqual(['e-1']);
+  });
+
+  it('upserts an existing id — incoming always wins, never duplicated', () => {
+    const stale = event({ id: 'e-1', peakConfidence: 0.5, lastSeen: '2026-07-23T10:00:05.000Z' });
+    const fresh = event({ id: 'e-1', peakConfidence: 0.9, lastSeen: '2026-07-23T10:00:10.000Z' });
+    const merged = mergeEvents([stale], [fresh]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toEqual(fresh);
+  });
+
+  it('re-sorts the merged set newest-first by lastSeen regardless of input order', () => {
+    const older = event({ id: 'older', lastSeen: '2026-07-23T10:00:00.000Z' });
+    const newer = event({ id: 'newer', lastSeen: '2026-07-23T10:05:00.000Z' });
+    const merged = mergeEvents([older], [newer]);
+    expect(merged.map((e) => e.id)).toEqual(['newer', 'older']);
+  });
+
+  it('trims to maxRetained, dropping the oldest first', () => {
+    const events = [
+      event({ id: 'a', lastSeen: '2026-07-23T10:03:00.000Z' }),
+      event({ id: 'b', lastSeen: '2026-07-23T10:02:00.000Z' }),
+      event({ id: 'c', lastSeen: '2026-07-23T10:01:00.000Z' }),
+    ];
+    expect(mergeEvents([], events, 2).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('a reopened/updated OPEN event keeps its single slot, not a second row', () => {
+    const first = event({ id: 'e-1', state: 'OPEN', lastSeen: '2026-07-23T10:00:00.000Z' });
+    const closed = event({ id: 'e-1', state: 'CLOSED', lastSeen: '2026-07-23T10:00:30.000Z' });
+    const merged = mergeEvents(mergeEvents([], [first]), [closed]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].state).toBe('CLOSED');
+  });
+});
+
+describe('advanceCursor', () => {
+  it('stays undefined when nothing has ever arrived', () => {
+    expect(advanceCursor(undefined, [])).toBeUndefined();
+  });
+
+  it('adopts the newest batch\'s lastSeen on the first poll (incoming is newest-first)', () => {
+    const incoming = [
+      event({ lastSeen: '2026-07-23T10:05:00.000Z' }),
+      event({ lastSeen: '2026-07-23T10:00:00.000Z' }),
+    ];
+    expect(advanceCursor(undefined, incoming)).toBe(Date.parse('2026-07-23T10:05:00.000Z'));
+  });
+
+  it('never regresses when an empty poll comes back', () => {
+    expect(advanceCursor(1_000, [])).toBe(1_000);
+  });
+
+  it('never regresses even if a later poll\'s newest is somehow not fresher', () => {
+    const stale = [event({ lastSeen: '2026-07-23T09:00:00.000Z' })];
+    expect(advanceCursor(Date.parse('2026-07-23T10:00:00.000Z'), stale)).toBe(
+      Date.parse('2026-07-23T10:00:00.000Z'),
+    );
+  });
+
+  it('advances forward when a fresher batch arrives', () => {
+    const fresh = [event({ lastSeen: '2026-07-23T11:00:00.000Z' })];
+    expect(advanceCursor(Date.parse('2026-07-23T10:00:00.000Z'), fresh)).toBe(
+      Date.parse('2026-07-23T11:00:00.000Z'),
+    );
+  });
+});
+
+describe('filterEvents', () => {
+  const events = [
+    event({ id: 'e-1', label: 'person', assetId: 'a-1' }),
+    event({ id: 'e-2', label: 'car', assetId: 'a-1' }),
+    event({ id: 'e-3', label: 'person', assetId: 'a-2' }),
+    event({ id: 'e-4', label: 'person' }), // no assetId
+  ];
+
+  it('matches everything when no filter fields are given', () => {
+    expect(filterEvents(events, {})).toHaveLength(4);
+  });
+
+  it('filters by label alone', () => {
+    expect(filterEvents(events, { label: 'car' }).map((e) => e.id)).toEqual(['e-2']);
+  });
+
+  it('filters by asset alone', () => {
+    expect(filterEvents(events, { assetId: 'a-1' }).map((e) => e.id)).toEqual(['e-1', 'e-2']);
+  });
+
+  it('combines both filters', () => {
+    expect(filterEvents(events, { label: 'person', assetId: 'a-2' }).map((e) => e.id)).toEqual(['e-3']);
+  });
+
+  it('an assetId filter never matches an event with no assetId', () => {
+    expect(filterEvents(events, { assetId: 'a-1' })).not.toContainEqual(events[3]);
+  });
+});
+
+describe('distinctLabels', () => {
+  it('deduplicates and sorts alphabetically', () => {
+    const events = [event({ label: 'person' }), event({ label: 'car' }), event({ label: 'person' })];
+    expect(distinctLabels(events)).toEqual(['car', 'person']);
+  });
+
+  it('is empty for no events', () => {
+    expect(distinctLabels([])).toEqual([]);
+  });
+});
+
+describe('capitalizeLabel', () => {
+  it('capitalizes the first letter only', () => {
+    expect(capitalizeLabel('person')).toBe('Person');
+  });
+
+  it('handles an empty string without throwing', () => {
+    expect(capitalizeLabel('')).toBe('');
+  });
+});
+
+describe('formatConfidence', () => {
+  it('renders a whole-percent string', () => {
+    expect(formatConfidence(0.873)).toBe('87%');
+  });
+
+  it('rounds rather than truncates', () => {
+    expect(formatConfidence(0.876)).toBe('88%');
+  });
+});
+
+describe('relativeTimeLabel', () => {
+  it('renders seconds elapsed', () => {
+    const now = Date.parse('2026-07-23T10:00:12.000Z');
+    expect(relativeTimeLabel('2026-07-23T10:00:00.000Z', now)).toBe('12s ago');
+  });
+
+  it('never goes negative for a clock-skewed future timestamp', () => {
+    const now = Date.parse('2026-07-23T10:00:00.000Z');
+    expect(relativeTimeLabel('2026-07-23T10:00:05.000Z', now)).toBe('0s ago');
+  });
+});
+
+describe('describeEventSource', () => {
+  it('resolves the streaming device\'s own name', () => {
+    const e = event({ streamId: 's-1' });
+    expect(describeEventSource(e, [device({ id: 'dev-1', name: 'Front camera' })], [stream()])).toBe(
+      'Front camera',
+    );
+  });
+
+  it('falls back to a short assetId fragment when the device cannot be resolved', () => {
+    const e = event({ streamId: 'unknown-stream', assetId: 'asset-1234-5678' });
+    expect(describeEventSource(e, [], [])).toBe('asset-12');
+  });
+
+  it('falls back to a short streamId fragment when neither device nor asset resolve', () => {
+    const e = event({ streamId: 'stream-1234-5678', assetId: undefined });
+    expect(describeEventSource(e, [], [])).toBe('stream-1');
+  });
+});
+
+describe('resolveEventTarget', () => {
+  it('prefers the asset detail target when assetId resolved', () => {
+    const e = event({ assetId: 'a-1', streamId: 's-1' });
+    expect(resolveEventTarget(e, [stream()])).toEqual({ kind: 'asset', id: 'a-1' });
+  });
+
+  it('falls back to the live cockpit when no assetId but the stream is still active', () => {
+    const e = event({ assetId: undefined, streamId: 's-1' });
+    expect(resolveEventTarget(e, [stream({ streamId: 's-1', deviceId: 'dev-9' })])).toEqual({
+      kind: 'live',
+      id: 'dev-9',
+    });
+  });
+
+  it('resolves to undefined when neither an asset nor a live stream can be found', () => {
+    const e = event({ assetId: undefined, streamId: 'gone' });
+    expect(resolveEventTarget(e, [])).toBeUndefined();
+  });
+});
+
+describe('selectEventMarkers', () => {
+  it('keeps only events carrying a position', () => {
+    const withPos = event({ id: 'has-pos', position: { latitude: 1, longitude: 2 } });
+    const withoutPos = event({ id: 'no-pos' });
+    expect(selectEventMarkers([withPos, withoutPos]).map((e) => e.id)).toEqual(['has-pos']);
+  });
+
+  it('caps to the max most recent (assumes newest-first input)', () => {
+    const events = Array.from({ length: MAX_EVENT_MARKERS + 5 }, (_, i) =>
+      event({ id: `e-${i}`, position: { latitude: i, longitude: i } }),
+    );
+    expect(selectEventMarkers(events)).toHaveLength(MAX_EVENT_MARKERS);
+    expect(selectEventMarkers(events)[0].id).toBe('e-0');
+  });
+
+  it('respects a custom max', () => {
+    const events = [
+      event({ id: 'a', position: { latitude: 1, longitude: 1 } }),
+      event({ id: 'b', position: { latitude: 2, longitude: 2 } }),
+    ];
+    expect(selectEventMarkers(events, 1).map((e) => e.id)).toEqual(['a']);
+  });
+
+  it('is empty when nothing carries a position', () => {
+    expect(selectEventMarkers([event()])).toEqual([]);
+  });
+});
+
+describe('shouldNotify', () => {
+  const base = {
+    event: event({ state: 'OPEN' }),
+    alreadySeen: false,
+    notificationsEnabled: true,
+    permission: 'granted' as NotificationPermission,
+    documentHidden: true,
+  };
+
+  it('fires for a genuinely new, OPEN event with everything else granted', () => {
+    expect(shouldNotify(base)).toBe(true);
+  });
+
+  it('refuses an already-seen event — dedupe by id', () => {
+    expect(shouldNotify({ ...base, alreadySeen: true })).toBe(false);
+  });
+
+  it('refuses a CLOSED event even if brand new', () => {
+    expect(shouldNotify({ ...base, event: event({ state: 'CLOSED' }) })).toBe(false);
+  });
+
+  it('refuses when the user has not opted in', () => {
+    expect(shouldNotify({ ...base, notificationsEnabled: false })).toBe(false);
+  });
+
+  it('refuses when the browser permission is not granted', () => {
+    expect(shouldNotify({ ...base, permission: 'default' })).toBe(false);
+    expect(shouldNotify({ ...base, permission: 'denied' })).toBe(false);
+  });
+
+  it('refuses while the document is visible — the rail already shows it', () => {
+    expect(shouldNotify({ ...base, documentHidden: false })).toBe(false);
+  });
+});
+
+describe('eventNotificationText', () => {
+  it('renders a capitalized label title and a confidence body', () => {
+    const text = eventNotificationText(event({ label: 'person', peakConfidence: 0.87 }));
+    expect(text).toEqual({ title: 'Person detected', body: '87% confidence' });
+  });
+});

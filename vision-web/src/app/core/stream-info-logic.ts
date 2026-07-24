@@ -1,11 +1,11 @@
 import type { Device } from './api/models';
 
 /**
- * Pure derivations behind `ui/stream-info-panel.ts` (docs/MVP2-PLAN.md §U-info, folded into
+ * Pure derivations behind `shared/player/stream-info-panel.ts` (docs/MVP2-PLAN.md §U-info, folded into
  * docs/CYCLES-PLAN.md §11/CD-b): turning plumbing (`protocol`/`uri`/`options`, a raw `startedAt`
  * timestamp) into what a field user actually reads at a glance — a human source description and a
  * live session duration — rather than leading with identifiers. Split out so it is unit-testable
- * without HTTP, timers, or a component — mirrors `core/telemetry-logic.ts`.
+ * without HTTP, timers, or a component — mirrors `core/telemetry/telemetry-logic.ts`.
  */
 
 export interface SourceDescription {
@@ -91,7 +91,7 @@ export function formatDuration(totalSeconds: number): string {
 }
 
 /**
- * The info panel's latency line — reuses `ui/player.ts`'s own measured `behindLive` (surfaced via
+ * The info panel's latency line — reuses `shared/player/player.ts`'s own measured `behindLive` (surfaced via
  * its `latencyChanged` output) rather than re-measuring, so the number never disagrees with the
  * badge already drawn on the video (docs/MVP2-PLAN.md §U-info: "viewer latency estimate from the
  * player").
@@ -102,7 +102,7 @@ export function formatLatency(behindLiveSeconds: number | null): string {
 
 /**
  * The info panel's "Transport" fact (docs/MVP2-PLAN.md §L / §U3) — names whichever transport
- * `ui/player.ts` actually attached (`transportChanged`), replacing the old hardcoded "HLS" now
+ * `shared/player/player.ts` actually attached (`transportChanged`), replacing the old hardcoded "HLS" now
  * that WHEP-first playback exists. Kept a one-line pure function, mirroring `formatLatency`,
  * rather than a template ternary — this app's own convention for anything worth a unit test.
  */

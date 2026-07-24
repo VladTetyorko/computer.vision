@@ -17,6 +17,7 @@ import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,6 +72,11 @@ class UsageTrackerTest {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources);
     }
 
+    private UsageTracker tracker(List<TelemetrySourcePort> sources, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+                liveUpdatePublisherPort);
+    }
+
     /**
      * docs/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
      * backoff instead of production's real 1s-30s one, via the package-private test-seam
@@ -78,7 +84,7 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
+                null, TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
     }
 
     @Test
@@ -195,6 +201,26 @@ class UsageTrackerTest {
         // awaited rather than checked synchronously right after onStreamStopped returns.
         assertTrue(source.closeLatch.await(1, TimeUnit.SECONDS), "telemetry must be unsubscribed/closed on usage close");
         assertTrue(source.closedDevices.contains(telemetryDevice.id()));
+    }
+
+    @Test
+    void announcesEveryAppendedSampleAsALiveUpdateWhenConfigured() {
+        // docs/REALTIME-PLAN.md §4: applySample is the single write path for a telemetry sample --
+        // the live-update announcement rides along with the persist/summary-fold, attributed to the
+        // owning asset (not the device the sample physically came from).
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        UsageTracker tracker = tracker(List.of(source), liveUpdatePublisherPort);
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        verify(liveUpdatePublisherPort).publishTelemetryAppended(asset.id(), sample);
     }
 
     @Test

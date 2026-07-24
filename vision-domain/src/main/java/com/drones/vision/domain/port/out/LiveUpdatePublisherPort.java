@@ -1,0 +1,75 @@
+package com.drones.vision.domain.port.out;
+
+import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.Telemetry;
+
+/**
+ * Driven port: announce a live update so a driving adapter can push it to connected viewers
+ * (docs/REALTIME-PLAN.md §4 — the server-push data plane replacing steady-state polling).
+ *
+ * <p>This is the application layer's <em>only</em> notion of "someone might be watching right
+ * now" — it knows nothing about SSE, connections, topics, or resume/replay; those are entirely a
+ * driving adapter's concern (today, {@code vision-api}'s {@code /api/live} registry). Callers
+ * simply announce facts as they already happen at their natural seam:
+ * <ul>
+ *   <li>{@link #publishFleetChanged()} — an asset, device, or stream's lifecycle state changed
+ *       (created/updated/deleted/started/stopped). No payload: the adapter decides what a fresh
+ *       fleet snapshot looks like and fetches it itself (through the same driving services a
+ *       REST client already uses), so this port never has to shadow that read model.</li>
+ *   <li>{@link #publishTelemetryAppended(AssetId, Telemetry)} — one telemetry sample was just
+ *       appended to an asset's open usage.</li>
+ *   <li>{@link #publishDetections(AssetId, DetectionResult)} — one stream's inference completed
+ *       (including an empty result — "nothing detected now" is itself useful live information),
+ *       attributed to the stream's owning asset.</li>
+ *   <li>{@link #publishEvent(Event)} — a domain {@link Event} was raised (device online/offline,
+ *       stream started/stopped, pipeline errors, ...).</li>
+ * </ul>
+ *
+ * <h2>Contract</h2>
+ * Every method must return quickly and must not throw for an ordinary delivery failure (ADR
+ * mirrors {@link EventPublisherPort}'s own contract) — a disconnected viewer, a full connection
+ * registry, or the feature being disabled entirely (a no-op implementation) must never surface as
+ * an exception on the caller's own hot path.
+ *
+ * <h2>Threading</h2>
+ * Called from the hot stream-pipeline path ({@code StreamPipeline}, once per completed inference)
+ * and from telemetry sampling ({@code UsageTracker}, once per appended sample), so implementations
+ * must be cheap and effectively fire-and-forget: hand off to a background dispatcher for any real
+ * I/O (serializing a payload, writing to a connection) rather than doing it on the calling thread.
+ * Safe for concurrent use from many streams/assets at once.
+ */
+public interface LiveUpdatePublisherPort {
+
+    /**
+     * Announces that fleet-level state changed — an asset, device, or stream's lifecycle
+     * (created, edited, soft-deleted/restored, started, stopped). Carries no payload; a driving
+     * adapter that wants to push a fresh snapshot re-derives it from the same driving services a
+     * REST client would call.
+     */
+    void publishFleetChanged();
+
+    /**
+     * Announces that one telemetry sample was appended to an asset's currently open usage.
+     *
+     * @param assetId the asset the sample belongs to
+     * @param sample  the newly appended sample
+     */
+    void publishTelemetryAppended(AssetId assetId, Telemetry sample);
+
+    /**
+     * Announces that one stream's inference completed, attributed to the stream's owning asset.
+     *
+     * @param assetId the asset that owns the stream this result belongs to
+     * @param result  the completed detection result, including an empty one
+     */
+    void publishDetections(AssetId assetId, DetectionResult result);
+
+    /**
+     * Announces a domain {@link Event}.
+     *
+     * @param event the event that was raised
+     */
+    void publishEvent(Event event);
+}

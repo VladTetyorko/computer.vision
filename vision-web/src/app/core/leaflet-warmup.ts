@@ -13,7 +13,7 @@ const IDLE_TIMEOUT_MS = 4_000;
  * fetch+parse cost on click. `App` calls `schedule()` once, from `afterNextRender`.
  *
  * A plain **dynamic** `import('leaflet')` — exactly what every host component's own `initMap()`
- * already does via `ui/leaflet-loader.ts#importLeaflet` — so this changes only *when* the chunk is
+ * already does via `shared/map/leaflet-loader.ts#importLeaflet` — so this changes only *when* the chunk is
  * fetched, never *whether*: it stays out of the initial bundle either way, and a browser that
  * never visits `/map` or a telemetry-capable device still only pays for it once idle time exists.
  *

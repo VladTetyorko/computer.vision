@@ -1,5 +1,6 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
@@ -12,6 +13,7 @@ import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
@@ -68,6 +70,7 @@ public final class DefaultStreamService implements StreamService {
     private final UsageTracker usageTracker;
     private final OverlayPort overlayPort;
     private final DetectionEventRepositoryPort detectionEventRepositoryPort;
+    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
     private final long sourceInitialBackoffNanos;
     private final long sourceMaxBackoffNanos;
 
@@ -143,14 +146,35 @@ public final class DefaultStreamService implements StreamService {
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker,
                                  OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort,
+                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, null);
+    }
+
+    /**
+     * Same as the 9-argument constructor, plus a {@link LiveUpdatePublisherPort} collaborator
+     * (docs/REALTIME-PLAN.md §4): threaded into every {@link StreamPipeline} this service starts,
+     * alongside the owning asset id resolved once at {@link #start} via {@code usageTracker}, so
+     * completed detection results are announced as live updates.
+     *
+     * @param liveUpdatePublisherPort nullable, following the same convention as {@code
+     *                                 overlayPort}/{@code detectionEventRepositoryPort}: {@code
+     *                                 null} means no live-update announcements from any stream this
+     *                                 service starts.
+     */
+    public DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
+                                 DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
+                                 DetectionRepositoryPort detectionRepositoryPort,
+                                 EventPublisherPort eventPublisher, UsageTracker usageTracker,
+                                 OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                                 LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
                 SupervisedPublisher.INITIAL_BACKOFF_NANOS, SupervisedPublisher.MAX_BACKOFF_NANOS);
     }
 
     /**
-     * Test seam: same as the 9-argument constructor, with explicit (typically much smaller) source
-     * reopen backoff bounds so supervision-related tests don't have to wait out a real 1s-30s
-     * backoff. Production always uses the 9-argument constructor's defaults
+     * Test seam: same as the 10-argument constructor, with explicit (typically much smaller)
+     * source reopen backoff bounds so supervision-related tests don't have to wait out a real
+     * 1s-30s backoff. Production always uses the 10-argument constructor's defaults
      * ({@link SupervisedPublisher#INITIAL_BACKOFF_NANOS}/{@link SupervisedPublisher#MAX_BACKOFF_NANOS}).
      */
     DefaultStreamService(DeviceRepositoryPort deviceRepository, VideoSourceRegistry videoSourceRegistry,
@@ -158,6 +182,7 @@ public final class DefaultStreamService implements StreamService {
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
                           OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
+                          LiveUpdatePublisherPort liveUpdatePublisherPort,
                           long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
@@ -169,6 +194,7 @@ public final class DefaultStreamService implements StreamService {
         this.usageTracker = usageTracker; // nullable: no-op usage tracking when absent
         this.overlayPort = overlayPort; // nullable: no overlay rendering when absent
         this.detectionEventRepositoryPort = detectionEventRepositoryPort; // nullable: no event tracking when absent
+        this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
         this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
         this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
     }
@@ -203,8 +229,15 @@ public final class DefaultStreamService implements StreamService {
             DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
                     : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
                             detectionEventRepositoryPort);
+            // docs/REALTIME-PLAN.md §4: resolved once, here, rather than re-resolved per completed
+            // detection result -- a device's owning asset does not change while its stream runs.
+            // Skipped entirely (not just discarded) when there's no LiveUpdatePublisherPort to hand
+            // the result to, so a lookup nobody will ever read is never even attempted.
+            AssetId ownerAssetId = (usageTracker == null || liveUpdatePublisherPort == null) ? null
+                    : usageTracker.resolveAsset(deviceId).orElse(null);
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, supervisedSource, detectionPort,
-                    streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine);
+                    streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
+                    ownerAssetId, liveUpdatePublisherPort);
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pipeline, Instant.now()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,

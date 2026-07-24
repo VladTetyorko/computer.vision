@@ -21,8 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
  *
  * <p>{@code vision.publish.enabled=false} for the same determinism reasons as {@link
  * DiscoveryWiringTest}/{@link AssetWiringTest} — this test doesn't care about stream egress.
+ * {@code vision.live.enabled=false} (docs/REALTIME-PLAN.md §4) isolates this test from the
+ * server-push feature's own {@code EventPublisherPort} decorator ({@link LiveUpdateEventPublisher}
+ * — see {@link LiveWiringTest}/{@link LiveDisabledWiringTest} for that feature's own coverage), so
+ * this class's assertions stay about CV wiring specifically, not about which other decorators
+ * happen to also be layered on by default.
  */
-@SpringBootTest(properties = "vision.publish.enabled=false")
+@SpringBootTest(properties = {"vision.publish.enabled=false", "vision.live.enabled=false"})
 class CvWiringTest {
 
     @Autowired

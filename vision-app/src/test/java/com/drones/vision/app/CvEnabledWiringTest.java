@@ -21,12 +21,17 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
  * cleanly into a host/port for {@link VisionCvProperties#host()}/{@link
  * VisionCvProperties#port()}; the full round trip against a real (in-test) gRPC server is
  * covered by {@link CvDetectionE2ETest}. {@code vision.publish.enabled=false} for the same
- * determinism reasons as {@link AssetWiringTest}.
+ * determinism reasons as {@link AssetWiringTest}. {@code vision.live.enabled=false}
+ * (docs/REALTIME-PLAN.md §4) isolates this test from the server-push feature's own {@code
+ * EventPublisherPort} decorator ({@link LiveUpdateEventPublisher}, which would otherwise wrap
+ * {@link DetectionSessionCleanupEventPublisher} one layer further out by default) — see {@link
+ * LiveWiringTest}/{@link LiveDisabledWiringTest} for that feature's own coverage.
  */
 @SpringBootTest(properties = {
         "vision.publish.enabled=false",
         "vision.cv.enabled=true",
-        "vision.cv.endpoint=localhost:59321"
+        "vision.cv.endpoint=localhost:59321",
+        "vision.live.enabled=false"
 })
 class CvEnabledWiringTest {
 

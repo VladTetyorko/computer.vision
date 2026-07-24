@@ -12,6 +12,7 @@ import type {
   Device,
   DeviceEdit,
   FleetSummary,
+  LiveSubscription,
   RegisterDeviceRequest,
   ScanRequest,
   ScanResult,
@@ -21,6 +22,7 @@ import type {
   StartStreamRequest,
   StartStreamResult,
   TelemetrySample,
+  UpdateLiveTopicsRequest,
   UsageTimeline,
 } from './models';
 
@@ -140,7 +142,7 @@ export class VisionApi {
   /**
    * The flight-replay window for one usage (docs/MVP2-PLAN.md §R, R-a/R-b — `UsageTimelineController`,
    * windowed + downsampled, unlike `usageTelemetry` above). `fromMs`/`toMs`/`maxPoints` are each
-   * only added to the query string when given — omitting all three (`pages/replay/replay.ts`'s
+   * only added to the query string when given — omitting all three (`features/replay/replay.ts`'s
    * only call site) lets the server default the window to the usage's own bounds and thin to its
    * own `DEFAULT_MAX_POINTS`; the replay cockpit instead always asks for `maxPoints: 2000` (the
    * server's clamp ceiling) once, up front, then scrubs entirely against the in-memory result —
@@ -218,7 +220,7 @@ export class VisionApi {
 
   // --- Detection events (docs/MVP2-PLAN.md §E, E-a/E-b) ----------------------------------------
   // `EventController`'s polling contract: newest-first by `lastSeen`, `sinceMs` a nullable cursor
-  // (see `core/events-store.ts` for how the poll loop advances it).
+  // (see `core/events/events-store.ts` for how the poll loop advances it).
 
   /**
    * Recent detection events across every stream, newest-first by `lastSeen`. `sinceMs` is only
@@ -267,7 +269,7 @@ export class VisionApi {
   /**
    * The path for a running stream's latest-frame JPEG thumbnail (docs/MVP3-PLAN.md C-a/C-c) — not
    * promise-returning like every other method here: this is meant to be bound straight to an
-   * `<img src>` (`pages/command/live-strip-tile.ts`), which fetches it itself via the browser's own
+   * `<img src>` (`features/command/live-strip-tile.ts`), which fetches it itself via the browser's own
    * image loading, cache-busted with a query param on each poll — there is nothing this class could
    * usefully `await` on the caller's behalf. Still lives here rather than being inlined at the call
    * site, so `VisionApi` stays "the only place the frontend knows REST URLs" (this file's own top
@@ -275,5 +277,21 @@ export class VisionApi {
    */
   snapshotUrl(streamId: string): string {
     return `/api/streams/${encodeURIComponent(streamId)}/snapshot`;
+  }
+
+  // --- Live updates (docs/REALTIME-PLAN.md §4, Phase R-c) ------------------------------------
+  // `GET /api/live` itself is not here — `core/live/live-store.ts` opens it as a raw `EventSource`
+  // (not `HttpClient`, which cannot stream SSE), so this class's own "the only place the frontend
+  // knows REST URLs" rule bends for exactly that one endpoint (see that file's own doc comment).
+  // This PATCH is a plain request/response, so it follows the usual path.
+
+  /** Adds/removes topics on an already-open live connection; returns the full topic set afterward. */
+  updateLiveTopics(connectionId: string, request: UpdateLiveTopicsRequest): Promise<LiveSubscription> {
+    return firstValueFrom(
+      this.http.patch<LiveSubscription>(
+        `/api/live/${encodeURIComponent(connectionId)}/topics`,
+        request,
+      ),
+    );
   }
 }

@@ -70,7 +70,7 @@
 }
 
 /* "More" overflow (docs/MVP3-PLAN.md §C-c's IA change) — a native <details> disclosure, this app's
-   existing pattern for a collapsed set of secondary links (see e.g. ui/stream-info-panel.ts's
+   existing pattern for a collapsed set of secondary links (see e.g. shared/player/stream-info-panel.ts's
    "Technical details"), not a new dropdown-menu component. Only the header-context chrome below is
    new; <details>/<summary> themselves are unstyled everywhere else in this app on purpose. */
 .tab-more {

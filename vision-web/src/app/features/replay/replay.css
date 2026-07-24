@@ -1,0 +1,184 @@
+/* ---- Loading skeleton (skeletons over spinners, per U1 convention — mirrors asset-detail.css) */
+
+.skeleton-line,
+.skeleton-card {
+    background: var(--panel-raised);
+    border-radius: var(--radius-sm);
+    animation: pulse 1.6s ease-in-out infinite;
+}
+
+.skeleton-line.title {
+    height: 1.6rem;
+    width: 14rem;
+}
+
+.skeleton-card {
+    height: 12rem;
+}
+
+/* ---- Header --------------------------------------------------------------------------------- */
+
+.back-link {
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.3rem;
+}
+
+.back-link:hover {
+    color: var(--accent);
+}
+
+/* ---- Detail grid (mirrors asset-detail.css) -------------------------------------------------- */
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+}
+
+.detail-grid .card {
+    margin-bottom: 0;
+}
+
+.span-2 {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+    .detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ---- Playback transport ----------------------------------------------------------------------- */
+
+.transport {
+    margin-bottom: 0.85rem;
+}
+
+.speeds {
+    gap: 0.3rem;
+}
+
+.speeds .btn.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: #a9c8ff;
+}
+
+/* ---- Scrub bar + detection density strip ------------------------------------------------------ */
+
+.scrub-track {
+    position: relative;
+    padding-top: 1rem;
+}
+
+.density-strip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 14px;
+}
+
+.density-marker {
+    position: absolute;
+    top: 0;
+    width: 10px;
+    height: 14px;
+    transform: translateX(-50%);
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+
+.density-marker::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 4px;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--warn);
+    opacity: calc(0.45 + 0.45 * var(--density, 1));
+    transform: translateX(-50%);
+    transition: opacity 0.1s ease, height 0.1s ease;
+}
+
+.density-marker:hover::after,
+.density-marker:focus-visible::after {
+    opacity: 1;
+    height: 130%;
+}
+
+.density-marker:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+.scrub-input {
+    width: 100%;
+    margin: 0;
+    accent-color: var(--accent);
+}
+
+/* ---- Facts grid (mirrors asset-detail.css / shared/player/stream-info-panel.ts's own) -------------------- */
+
+.facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    margin: 0;
+}
+
+.fact dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.fact dd {
+    margin: 0.1rem 0 0;
+    font-size: 0.85rem;
+}
+
+/* ---- Telemetry panels (mirrors asset-detail.css) ----------------------------------------------- */
+
+.telemetry-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 0.75rem;
+}
+
+.telemetry-panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: 0.7rem 0.85rem;
+}
+
+.panel-name {
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+}
+
+.sample-time {
+    margin: 0 0 0.5rem;
+    font-size: 0.72rem;
+}
+
+.hint {
+    font-size: 0.8rem;
+}
+
+/* ---- Detections chips ---------------------------------------------------------------------- */
+
+.chips-wrap {
+    flex-wrap: wrap;
+}

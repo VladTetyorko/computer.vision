@@ -13,11 +13,13 @@ import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.SimulatedVideoSource;
 import com.drones.vision.adapter.v4l2.V4l2VideoSource;
 import com.drones.vision.api.HlsProxyController;
+import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.app.devsupport.InMemoryAuditTrail;
 import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
+import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
 import com.drones.vision.app.devsupport.NoopStreamPublisher;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.DefaultAssetService;
@@ -47,11 +49,13 @@ import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -80,9 +84,9 @@ import java.util.List;
  * on {@link VisionPublishProperties}. CV inference ({@link DetectionPort})
  * is real as of docs/MVP1-PLAN.md §C7: {@link #detectionPort(VisionCvProperties)}
  * selects between {@code GrpcDetectionPort} (adapter-cv-grpc) and the no-op
- * fallback based on {@link VisionCvProperties}; see {@link
- * #eventPublisherPort(DetectionPort, VisionCvProperties)} for how the gRPC
- * session's per-stream lifecycle is cleaned up.
+ * fallback based on {@link VisionCvProperties}; see {@link #eventPublisherPort}
+ * for how the gRPC session's per-stream lifecycle is cleaned up, and how that
+ * same bean is further wrapped for the server-push data plane below.
  *
  * <p>Fleet persistence (docs/MVP2-PLAN.md P-a: {@code CategoryRepositoryPort}/{@code
  * DeviceRepositoryPort}/{@code AssetRepositoryPort}) and history persistence (docs/MVP2-PLAN.md
@@ -90,12 +94,18 @@ import java.util.List;
  * DetectionRepositoryPort}) are both wired in the sibling {@link PersistenceWiringConfiguration}
  * instead of here — same split-out-by-concern precedent as {@link DiscoveryWiringConfiguration} —
  * selecting between {@code adapter-persistence}'s JPA implementations and the devsupport
- * in-memory fallbacks per {@link VisionPersistenceProperties#enabled()}. {@code AuditTrailPort}
- * ({@link #auditTrailPort} below) stays unconditionally in-memory — it was never in either
- * cycle's scope.
+ * in-memory fallbacks per {@link VisionPersistenceProperties#enabled()}.
+ *
+ * <p>The server-push data plane (docs/REALTIME-PLAN.md §4): {@link #liveUpdatePublisherPort}
+ * selects between the real {@code LiveUpdateRegistry} (vision-api) and {@code
+ * NoopLiveUpdatePublisher} per {@link VisionLiveProperties#enabled()} (default {@code true}),
+ * threaded unconditionally into {@link #usageTracker}/{@link #streamService}; {@link
+ * #auditTrailPort}/{@link #eventPublisherPort} each gain one more decorator ({@code
+ * LiveUpdateAuditTrail}/{@code LiveUpdateEventPublisher}) only when that property is {@code true}
+ * — see this module's {@code MODULE.md} "Server-push data plane" section for the full reasoning.
  */
 @Configuration
-@EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class})
+@EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class, VisionLiveProperties.class})
 public class WiringConfiguration {
 
     @Bean
@@ -161,14 +171,48 @@ public class WiringConfiguration {
      * GrpcDetectionPort#streamEnded} after delegating the event unchanged. With CV disabled, the
      * decorator is never constructed and this is exactly {@link #eventPublisherPort}'s pre-C7
      * behavior.
+     *
+     * <p>When {@link VisionLiveProperties#enabled()} is {@code true} (docs/REALTIME-PLAN.md §4),
+     * the result (whichever of the above it is) is further wrapped in {@link
+     * LiveUpdateEventPublisher}, which announces every event as a live update and, for
+     * device/stream lifecycle event types, a "fleet changed" one too — see that class's own
+     * javadoc. Composition order: CV cleanup (if any) still runs as part of the innermost
+     * delegate's own {@code publish}, and the live-update wrapper sees every event exactly once,
+     * regardless of whether CV cleanup is also wired.
      */
     @Bean
-    public EventPublisherPort eventPublisherPort(DetectionPort detectionPort, VisionCvProperties cvProperties) {
+    public EventPublisherPort eventPublisherPort(DetectionPort detectionPort, VisionCvProperties cvProperties,
+                                                  LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                                  VisionLiveProperties liveProperties) {
         EventPublisherPort delegate = new LoggingEventPublisher();
         if (cvProperties.enabled() && detectionPort instanceof GrpcDetectionPort grpcDetectionPort) {
-            return new DetectionSessionCleanupEventPublisher(delegate, grpcDetectionPort);
+            delegate = new DetectionSessionCleanupEventPublisher(delegate, grpcDetectionPort);
+        }
+        if (liveProperties.enabled()) {
+            delegate = new LiveUpdateEventPublisher(delegate, liveUpdatePublisherPort);
         }
         return delegate;
+    }
+
+    /**
+     * Selects the {@link LiveUpdatePublisherPort} implementation per {@link
+     * VisionLiveProperties#enabled()} (docs/REALTIME-PLAN.md §4, item 4): {@code true} (the
+     * default) wires the real {@code LiveUpdateRegistry} (vision-api, component-scanned — same
+     * bean that backs {@code GET /api/live}, obtained via {@link ObjectProvider} for the same
+     * reason {@link PersistenceWiringConfiguration}'s six repository-port beans do: the registry's
+     * own {@code @ConditionalOnProperty} means it may not exist as a bean at all on the {@code
+     * false} branch, and {@code getObject()} is only ever called on the branch where {@link
+     * VisionLiveProperties#enabled()} guarantees it does); {@code false} wires {@link
+     * NoopLiveUpdatePublisher}, and {@code /api/live} 404s (its controller is gated by the exact
+     * same property key, independently, directly via {@code @ConditionalOnProperty}).
+     */
+    @Bean
+    public LiveUpdatePublisherPort liveUpdatePublisherPort(VisionLiveProperties properties,
+                                                            ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
     }
 
     /**
@@ -284,10 +328,23 @@ public class WiringConfiguration {
      * Append-only record of who changed the fleet. In-memory, unconditionally — {@code
      * AuditTrailPort} was out of scope for both docs/MVP2-PLAN.md P-a and P-b (see this class's
      * javadoc); see {@link InMemoryAuditTrail}.
+     *
+     * <p>When {@link VisionLiveProperties#enabled()} is {@code true} (docs/REALTIME-PLAN.md §4),
+     * wrapped in {@link LiveUpdateAuditTrail}, which announces a "fleet changed" live update for
+     * every recorded entry — every asset/device create/update/state-change/assign/unassign audits
+     * exactly one entry regardless of whether it also raises a domain event, making this the
+     * uniform seam for that half of "assets/devices/streams lifecycle" (see that class's own
+     * javadoc for why {@code STREAM_STARTED}/{@code STREAM_STOPPED} instead flow through {@link
+     * #eventPublisherPort}).
      */
     @Bean
-    public AuditTrailPort auditTrailPort() {
-        return new InMemoryAuditTrail();
+    public AuditTrailPort auditTrailPort(LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                          VisionLiveProperties liveProperties) {
+        AuditTrailPort delegate = new InMemoryAuditTrail();
+        if (liveProperties.enabled()) {
+            return new LiveUpdateAuditTrail(delegate, liveUpdatePublisherPort);
+        }
+        return delegate;
     }
 
     /**
@@ -306,17 +363,31 @@ public class WiringConfiguration {
      * notifications — see {@link #streamService} below, which is
      * constructed with this collaborator via {@code DefaultStreamService}'s
      * 7-argument constructor.
+     *
+     * <p>{@code liveUpdatePublisherPort} (docs/REALTIME-PLAN.md §4) is threaded through
+     * unconditionally — it is always a real bean (either the SSE registry or {@link
+     * com.drones.vision.app.devsupport.NoopLiveUpdatePublisher}, see {@link
+     * #liveUpdatePublisherPort}), so every appended telemetry sample is announced regardless of
+     * {@link VisionLiveProperties#enabled()}; the no-op branch makes that announcement free.
      */
     @Bean
     public UsageTracker usageTracker(AssetRepositoryPort assetRepositoryPort,
                                       DeviceRepositoryPort deviceRepositoryPort,
                                       AssetUsageRepositoryPort assetUsageRepositoryPort,
                                       TelemetryRepositoryPort telemetryRepositoryPort,
-                                      List<TelemetrySourcePort> telemetrySources) {
+                                      List<TelemetrySourcePort> telemetrySources,
+                                      LiveUpdatePublisherPort liveUpdatePublisherPort) {
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources);
+                telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort);
     }
 
+    /**
+     * {@code liveUpdatePublisherPort} (docs/REALTIME-PLAN.md §4) is threaded through
+     * unconditionally, same reasoning as {@link #usageTracker} above — every stream pipeline this
+     * service starts announces its completed detection results (attributed to the owning asset,
+     * resolved once at start via {@code usageTracker}) regardless of {@link
+     * VisionLiveProperties#enabled()}.
+     */
     @Bean
     public StreamService streamService(DeviceRepositoryPort deviceRepositoryPort,
                                         VideoSourceRegistry videoSourceRegistry,
@@ -326,10 +397,11 @@ public class WiringConfiguration {
                                         EventPublisherPort eventPublisherPort,
                                         UsageTracker usageTracker,
                                         OverlayPort overlayPort,
-                                        DetectionEventRepositoryPort detectionEventRepositoryPort) {
+                                        DetectionEventRepositoryPort detectionEventRepositoryPort,
+                                        LiveUpdatePublisherPort liveUpdatePublisherPort) {
         return new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort,
-                detectionEventRepositoryPort);
+                detectionEventRepositoryPort, liveUpdatePublisherPort);
     }
 
     /**

@@ -1,0 +1,213 @@
+.archived-toggle {
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.archived-toggle input {
+  width: auto;
+}
+
+/* ---- Attention queue (bullet 1) ------------------------------------------------------------- */
+
+.attention-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.attention-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.attention-row.critical {
+  border-left-color: var(--danger);
+}
+
+.attention-row.warning {
+  border-left-color: var(--warn);
+}
+
+.attention-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.attention-main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.attention-main .name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.attention-age {
+  margin-left: auto;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.attention-why {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.attention-actions {
+  flex: none;
+}
+
+/* ---- Live strip (bullet 2) ------------------------------------------------------------------- */
+
+.strip-viewport {
+  height: 176px;
+  width: 100%;
+}
+
+.strip-viewport vision-live-strip-tile {
+  display: inline-block;
+  margin-right: 0.75rem;
+}
+
+/* ---- Fleet map embed (bullet 3) — mirrors features/map/map.css's own layout ---------------------- */
+
+.map-section {
+  margin-bottom: 1.5rem;
+}
+
+.section-head {
+  margin-bottom: 0.75rem;
+}
+
+.map-layout {
+  display: flex;
+  align-items: stretch;
+  gap: 1rem;
+  height: 50vh;
+  min-height: 380px;
+}
+
+.map-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.dock-panel {
+  width: 300px;
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .map-layout {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .map-panel {
+    height: 50vh;
+    min-height: 320px;
+  }
+
+  .dock-panel {
+    width: 100%;
+    height: 50vh;
+    min-height: 280px;
+  }
+}
+
+/* ---- Warehouse readiness tiles (bullet 4) ------------------------------------------------------ */
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.readiness-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-align: left;
+  cursor: pointer;
+  padding: 0.75rem 0.85rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.readiness-tile:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+}
+
+.readiness-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.readiness-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.readiness-total {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Mark spec: thin bar, 2px gap between segments, rounded data-ends — a magnitude comparison across
+   lifecycle states, not a full chart, so no axis/legend beyond the chips already naming each color. */
+.readiness-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+}
+
+.seg {
+  border-radius: 3px;
+}
+
+.seg.active {
+  background: var(--ok);
+}
+
+.seg.deactivated {
+  background: var(--warn);
+}
+
+.seg.deleted {
+  background: var(--text-faint);
+}
+
+.readiness-chips {
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+/* ---- Events rail (bullet 5) --------------------------------------------------------------------- */
+
+.events-rail-embed {
+  width: 100%;
+  max-height: 26rem;
+  overflow-y: auto;
+}

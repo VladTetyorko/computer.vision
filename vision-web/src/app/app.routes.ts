@@ -1,4 +1,14 @@
 import { Routes } from '@angular/router';
+import { FLY_ROUTES } from './features/fly/fly.routes';
+import { COMMAND_ROUTES } from './features/command/command.routes';
+import { WALL_ROUTES } from './features/wall/wall.routes';
+import { MAP_ROUTES } from './features/map/map.routes';
+import { DEVICES_ROUTES } from './features/devices/devices.routes';
+import { ASSET_DETAIL_ROUTES } from './features/asset-detail/asset-detail.routes';
+import { REPLAY_ROUTES } from './features/replay/replay.routes';
+import { LIVE_ROUTES } from './features/live/live.routes';
+import { SETTINGS_ROUTES } from './features/settings/settings.routes';
+import { DEBUG_ROUTES } from './features/debug/debug.routes';
 
 /**
  * One lazy chunk per page.
@@ -6,84 +16,31 @@ import { Routes } from '@angular/router';
  * Client-side routing (rather than separate documents) is what lets a live player and its
  * HLS buffer survive a tab switch — a full reload would cost another ~6 s of buffering
  * every time (docs/UX-DESIGN.md §2 T1).
+ *
+ * Per-feature route arrays (vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3, B8): every routed
+ * feature under `features/` owns its own `<name>.routes.ts` (one line to import it here); this
+ * file only composes them plus the two shell-level entries that don't belong to any one feature —
+ * the `/` redirect and the `**` not-found catch-all.
  */
 export const routes: Routes = [
   // docs/MVP3-PLAN.md §C-b: the operator cockpit is now the default landing page — an operator
   // opens the app and is flying-aware in one click (or zero, once a drone is remembered). `/wall`
   // keeps working unchanged for anyone who still wants the many-tiles overview.
   { path: '', pathMatch: 'full', redirectTo: 'fly' },
-  {
-    path: 'fly',
-    title: 'Fly · Vision',
-    // `?asset=`/`?watch=1` bind to `FlyPage`'s own inputs by name — query params, so no route
-    // pattern change is needed for either (see `FlyPage`'s own doc comment).
-    loadComponent: () => import('./pages/fly/fly').then((m) => m.FlyPage),
-  },
-  {
-    path: 'command',
-    title: 'Command · Vision',
-    // The manager dashboard (docs/MVP3-PLAN.md §C-c) — a real top-level tab, so it's idle-preloaded
-    // like every other one (no `data: { preload: false }`).
-    loadComponent: () => import('./pages/command/command').then((m) => m.CommandPage),
-  },
-  {
-    path: 'wall',
-    title: 'Wall · Vision',
-    loadComponent: () => import('./pages/wall/wall').then((m) => m.WallPage),
-  },
-  {
-    path: 'map',
-    title: 'Map · Vision',
-    // Every tab chunk is now idle-preloaded (docs/CYCLES-PLAN.md §9, CU-b item 2) — "fast" means
-    // every tab click lands on a warm chunk, not just the ones visited first. The Leaflet chunk
-    // this route pulls in on visit gets its own separate idle warmup, see `core/leaflet-warmup.ts`.
-    loadComponent: () => import('./pages/map/map').then((m) => m.MapPage),
-  },
-  {
-    path: 'devices',
-    title: 'Devices · Vision',
-    loadComponent: () => import('./pages/devices/devices').then((m) => m.DevicesPage),
-  },
-  {
-    path: 'assets/:assetId',
-    title: 'Asset · Vision',
-    // The Devices page's asset-first list "Open" target (docs/CYCLES-PLAN.md §11, CD-b item 2).
-    // Param named `:assetId` (not `:id`) so it matches `AssetDetailPage.assetId`'s own input name
-    // exactly — `withComponentInputBinding()` binds a route param to a component input only when
-    // the names match (docs/MVP2-PLAN.md §V, V-b — fixed a long-flagged Gotcha; see that entry in
-    // vision-web/MODULE.md for how this was silently broken before and what fixing it restores).
-    loadComponent: () => import('./pages/asset-detail/asset-detail').then((m) => m.AssetDetailPage),
-  },
-  {
-    path: 'assets/:assetId/replay/:usageId',
-    title: 'Replay · Vision',
-    // The asset detail page's usage history "Replay" target for a finished usage
-    // (docs/MVP2-PLAN.md §R, R-b) — its own lazy chunk, not a nav tab. Param names match
-    // `ReplayPage`'s input names exactly (`assetId`/`usageId`) so `withComponentInputBinding()`
-    // binds them — see that component's own doc comment.
-    loadComponent: () => import('./pages/replay/replay').then((m) => m.ReplayPage),
-  },
-  {
-    path: 'live/:deviceId',
-    title: 'Live · Vision',
-    loadComponent: () => import('./pages/live/live').then((m) => m.LivePage),
-  },
-  {
-    path: 'settings',
-    title: 'Settings · Vision',
-    loadComponent: () => import('./pages/settings/settings').then((m) => m.SettingsPage),
-  },
-  {
-    path: 'debug',
-    title: 'Debug · Vision',
-    // Idle-preloaded too as of docs/CYCLES-PLAN.md §9, CU-b item 2 — weighed against its own
-    // small chunk size (~14 kB raw) and decided the same "every tab lands warm" way as `/map`.
-    loadComponent: () => import('./pages/debug/debug').then((m) => m.DebugPage),
-  },
+  ...FLY_ROUTES,
+  ...COMMAND_ROUTES,
+  ...WALL_ROUTES,
+  ...MAP_ROUTES,
+  ...DEVICES_ROUTES,
+  ...ASSET_DETAIL_ROUTES,
+  ...REPLAY_ROUTES,
+  ...LIVE_ROUTES,
+  ...SETTINGS_ROUTES,
+  ...DEBUG_ROUTES,
   {
     path: '**',
     title: 'Not found · Vision',
     data: { preload: false },
-    loadComponent: () => import('./pages/not-found/not-found').then((m) => m.NotFoundPage),
+    loadComponent: () => import('./features/not-found/not-found').then((m) => m.NotFoundPage),
   },
 ];

@@ -1,6 +1,8 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Capability;
+import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
@@ -15,6 +17,7 @@ import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +50,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -201,7 +206,7 @@ class DefaultStreamServiceTest {
         // immediately -- a tiny backoff window (20ms) plus a generous wait afterwards proves no
         // further open() call ever arrives, without waiting out the real 1s-30s production backoff.
         StreamService fastRetryService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
-                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
+                detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null,
                 TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
         ErroringThenSilentPublisher publisher = new ErroringThenSilentPublisher();
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
@@ -325,6 +330,43 @@ class DefaultStreamServiceTest {
         service.stop(streamId);
 
         assertEquals(Optional.empty(), service.latestFrame(streamId));
+    }
+
+    @Test
+    void resolvesTheOwningAssetOnceAtStartAndThreadsItWithLiveUpdatePublisherIntoThePipeline() {
+        // docs/REALTIME-PLAN.md §4: DefaultStreamService is where assetId gets resolved (via
+        // usageTracker.resolveAsset), once, and handed to StreamPipeline alongside
+        // liveUpdatePublisherPort -- StreamPipelineTest itself proves the emission logic once both
+        // are present, this proves the wiring seam that gets them there.
+        UsageTracker usageTracker = mock(UsageTracker.class);
+        AssetId assetId = AssetId.random();
+        when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
+        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        StreamService withLiveUpdates = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null, null,
+                liveUpdatePublisherPort);
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+
+        withLiveUpdates.start(device.id(), PipelineConfig.defaults());
+
+        verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+    }
+
+    @Test
+    void neverResolvesOrAnnouncesLiveUpdatesWhenNoLiveUpdatePublisherIsConfigured() {
+        // Documents/protects the nullable-collaborator contract: usageTracker.resolveAsset must
+        // never even be called when there's no LiveUpdatePublisherPort to hand the result to.
+        UsageTracker usageTracker = mock(UsageTracker.class);
+        StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
+
+        withTracker.start(device.id(), PipelineConfig.defaults());
+
+        verify(usageTracker, never()).resolveAsset(any());
     }
 
     /** A {@link Flow.Publisher} that delivers exactly one frame on its first {@code request()} call. */

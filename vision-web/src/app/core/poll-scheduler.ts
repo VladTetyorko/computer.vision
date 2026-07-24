@@ -4,7 +4,7 @@ import { Injectable } from '@angular/core';
  * Background polling pauses while the tab is hidden rather than stopping forever — the idiom
  * every poller in this app (`FleetStore`, `TelemetryStore`, `FleetMapStore`, `DetectionsStore`)
  * followed before `PollScheduler` consolidated them. Kept here as the scheduler's single source
- * of truth; `core/telemetry-logic.ts#shouldPoll` re-exports this so existing imports of the
+ * of truth; `core/telemetry/telemetry-logic.ts#shouldPoll` re-exports this so existing imports of the
  * telemetry-flavored name keep working.
  */
 export function shouldPoll(documentHidden: boolean): boolean {
@@ -34,7 +34,7 @@ export interface ScheduleOptions {
    * task (see the class doc's "pause, never drop" contract). Defaults to `false` — every existing
    * caller is unaffected.
    *
-   * **The one documented user** is `core/events-store.ts`'s global detection-events poll
+   * **The one documented user** is `core/events/events-store.ts`'s global detection-events poll
    * (docs/MVP2-PLAN.md §E, E-b): its whole reason to exist is noticing a newly-opened event *while
    * the tab is in the background*, so it can fire a browser `Notification` — a task that pauses
    * the instant the tab backgrounds could never detect anything to notify about, since by

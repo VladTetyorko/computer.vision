@@ -1,6 +1,7 @@
 package com.drones.vision.application;
 
 import com.drones.vision.domain.model.AnnotatedFrame;
+import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Detection;
@@ -19,6 +20,7 @@ import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -131,9 +133,15 @@ class StreamPipelineTest {
                 detectionRepositoryPort, eventPublisher, null, eventEngine);
     }
 
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
+                                     LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort);
+    }
+
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, clock);
+                detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
     }
 
     /**
@@ -149,7 +157,7 @@ class StreamPipelineTest {
      */
     private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, clock);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         return pipeline;
     }
@@ -426,6 +434,53 @@ class StreamPipelineTest {
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
 
         assertDoesNotThrow(() -> pipeline(publisher, config(30, 2)).start());
+    }
+
+    @Test
+    void announcesEveryCompletedResultAsALiveUpdateWhenConfiguredWithAnOwningAsset() {
+        // docs/REALTIME-PLAN.md §4: empty results matter here too -- "nothing detected now" is
+        // itself useful live information, mirroring the eventEngine precedent above exactly.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        DetectionResult nonEmpty = nonEmptyResult(0);
+        DetectionResult empty = emptyResult(1);
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(nonEmpty))
+                .thenReturn(CompletableFuture.completedFuture(empty));
+        AssetId assetId = AssetId.random();
+        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+
+        pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort).start();
+
+        verify(liveUpdatePublisherPort).publishDetections(assetId, nonEmpty);
+        verify(liveUpdatePublisherPort).publishDetections(assetId, empty);
+    }
+
+    @Test
+    void neverAnnouncesLiveUpdatesWhenTheDeviceHasNoOwningAsset() {
+        // A configured port but no resolved assetId (the device isn't wrapped by any asset yet)
+        // must never announce -- mirrors UsageTracker's own "untracked device" convention.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+
+        pipeline(publisher, config(30, 2), null, liveUpdatePublisherPort).start();
+
+        verifyNoInteractions(liveUpdatePublisherPort);
+    }
+
+    @Test
+    void neverTouchesLiveUpdatePublisherWhenNoneIsConfigured() {
+        // Documents/protects the nullable-collaborator contract, same as neverTouchesTheEventEngine...
+        // above: every constructor that doesn't mention liveUpdatePublisherPort must default it to
+        // null without ever NPE-ing on a completed result.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+
+        assertDoesNotThrow(() -> pipeline(publisher, config(30, 2), AssetId.random(), null).start());
     }
 
     @Test

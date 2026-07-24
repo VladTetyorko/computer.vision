@@ -57,7 +57,7 @@ export interface Device {
  * Mirrors `PATCH /api/devices/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every
  * field optional, `@JsonInclude(NON_NULL)`-style — send only what actually changed. The backend
  * requires `protocol`+`uri` together whenever either (or `options`) is present; the request
- * builder in `pages/devices/warehouse-logic.ts` only ever populates `name` today (the UI's
+ * builder in `features/devices/devices-page-logic.ts` only ever populates `name` today (the UI's
  * "Rename" action), but the type mirrors the full pinned shape for API-layer completeness.
  */
 export interface DeviceEdit {
@@ -176,7 +176,7 @@ export interface Category {
  * `deviceId` (docs/CYCLES-PLAN.md §11, CD-a) is never absent — every `Telemetry` sample carries
  * the telemetry device it came from, which is what makes multi-telemetry grouping possible (an
  * asset's usage can mix samples from more than one TELEMETRY-capable device; see
- * `pages/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`).
+ * `features/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`).
  */
 export interface TelemetrySample {
   readonly deviceId: string;
@@ -210,7 +210,7 @@ export interface AssetUsage {
  * `status`). It is typed optional rather than required: CW-a lands this field server-side in
  * parallel with this UI, so a backend this app talks to before that ships simply omits it —
  * every reader here treats an absent `lifecycle` as `'ACTIVE'` (see
- * `pages/devices/warehouse-logic.ts`), never as a crash.
+ * `features/devices/devices-page-logic.ts`), never as a crash.
  */
 export interface AssetSummary {
   readonly assetId: string;
@@ -237,7 +237,7 @@ export interface AssetDetails extends AssetSummary {
 /**
  * Mirrors `PATCH /api/assets/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every field
  * optional — send only what actually changed. Built by
- * `pages/devices/warehouse-logic.ts#buildAssetEdit`.
+ * `features/devices/devices-page-logic.ts#buildAssetEdit`.
  */
 export interface AssetEdit {
   readonly displayName?: string;
@@ -284,7 +284,7 @@ export interface WaypointRequest {
 /**
  * Mirrors `dto.StartSimulationRequest.TelemetryRequest` (docs/CYCLES-PLAN.md §7, CT-a's pinned
  * contract) — a configurable flight plan replacing the bare circular home-point track. `route`
- * must carry at least 2 waypoints (`ui/flight-plan-logic.ts#canSavePlan`/`buildTelemetryRequest`
+ * must carry at least 2 waypoints (`shared/map/flight-plan-logic.ts#canSavePlan`/`buildTelemetryRequest`
  * enforce this client-side before a request is ever built); `speedMps`/`routeMode` omitted defer
  * to the adapter's own defaults (`12.0`/`"loop"`).
  */
@@ -301,7 +301,7 @@ export interface TelemetryPlanRequest {
  *
  * `videoPath` is optional (docs/CYCLES-PLAN.md §9, CU-a): omitting it entirely registers a fully
  * synthetic VIDEO+TELEMETRY device instead of a `file`-backed one — a moving test drone with no
- * video file at all (`pages/devices/simulate-logic.ts#buildTestDroneRequest`). A `null`/absent
+ * video file at all (`core/fleet/simulation-logic.ts#buildTestDroneRequest`). A `null`/absent
  * `videoPath` requires `transport` to stay `"direct"` (the default) — the backend 400s otherwise,
  * since `"rtsp"`/`"mjpeg"` have no in-process renderer output to push over the wire.
  *
@@ -312,7 +312,7 @@ export interface TelemetryPlanRequest {
  * `telemetry` (docs/CYCLES-PLAN.md §7, CT-a/CT-b) is an optional flight plan replacing the bare
  * `latitude`/`longitude` circular home-point track; when present, `latitude`/`longitude` are
  * still accepted but ignored server-side (`StartSimulationRequest`'s own Javadoc) —
- * `ui/flight-plan-dialog.ts` is the UI that builds this field.
+ * `shared/map/flight-plan-dialog.ts` is the UI that builds this field.
  */
 export interface StartSimulationRequest {
   readonly displayName?: string;
@@ -357,7 +357,7 @@ export interface Detection {
 /**
  * Mirrors `dto.DetectionResultResponse`, the body element of `GET
  * /api/streams/{streamId}/detections` (docs/MVP1-PLAN.md §C8 bullet 3) — one completed inference
- * result. Backs the Live page's detections strip (`core/detections-store.ts`).
+ * result. Backs the Live page's detections strip (`core/detections/detections-store.ts`).
  */
 export interface DetectionResult {
   readonly streamId: string;
@@ -377,7 +377,7 @@ export interface DetectionResult {
  * thinning that always keeps the first/last sample — `ReplayService`, vision-application).
  * `detections` is ascending by `capturedAt`; real for usages opened after R-a2's
  * `AssetUsage.streamId` link, honestly `[]` for a legacy or streamless usage — see
- * `pages/replay/replay.ts`'s empty-state handling.
+ * `features/replay/replay.ts`'s empty-state handling.
  */
 export interface UsageTimeline {
   readonly usage: AssetUsage;
@@ -414,13 +414,13 @@ export interface CategoryCounts {
  * absent whenever `streaming` is `false`; `batteryPercent`/`telemetryAgeMs` absent when the asset
  * has never reported telemetry at all — deliberately still reported once the asset stops streaming
  * (the Java doc comment's own "staleness is exactly how long since we last heard from this asset"),
- * which is exactly the signal `pages/command/command-logic.ts`'s attention rules read.
+ * which is exactly the signal `features/command/command-logic.ts`'s attention rules read.
  *
  * Unlike `AssetSummary#lifecycle`, this field is **required**, not optional — this is a brand-new
  * endpoint with no pre-CW-a backend to stay compatible with, and the Java DTO never omits it.
  *
  * **No `sourceState` field** — the backend deliberately doesn't invent a "reconnecting"/"degraded"
- * read (see the DTO's own doc comment); `pages/command/command-logic.ts`'s attention rules key off
+ * read (see the DTO's own doc comment); `features/command/command-logic.ts`'s attention rules key off
  * `batteryPercent`/`telemetryAgeMs`/`openEventCount` only, never a fabricated fourth signal.
  */
 export interface AssetAttention {
@@ -470,11 +470,15 @@ export type DetectionEventState = 'OPEN' | 'CLOSED';
  * backend's own documented behavior) — a marker plotted from it is "where it started", not "where
  * it is now".
  *
- * **No pipeline-error events here.** `EventPublisherPort`'s generic `Event`s (`PIPELINE_ERROR`
- * etc., the docs/MVP2-PLAN.md §U-info ask) are not exposed by this API — E-a's own MODULE.md
- * documents that port as fire-and-forget/write-only with no read side at all. `core/events-store.ts`
- * and every page reading it are detection events only, labeled as such; the player state chip
- * (docs/CYCLES-PLAN.md §11 item 5 / docs/MVP2-PLAN.md §V, V-b) stays the connectivity surface.
+ * **No pipeline-error events here, still.** `EventPublisherPort`'s generic `Event`s
+ * (`PIPELINE_ERROR` etc., the docs/MVP2-PLAN.md §U-info ask) are still not exposed by *this* API —
+ * `core/events/events-store.ts` and every page reading it are detection events only, labeled as such; the
+ * player state chip (docs/CYCLES-PLAN.md §11 item 5 / docs/MVP2-PLAN.md §V, V-b) stays the
+ * connectivity surface. docs/REALTIME-PLAN.md §4 (Phase R-c) **does** now expose the generic
+ * `Event` for the first time, but only over the new `GET /api/live` SSE `event` topic, as the
+ * unrelated {@link LiveEvent} shape below — not this one, and not as a `DetectionEvent`. The two
+ * are genuinely different domain concepts (see `LiveEvent`'s own doc comment) — `core/live/live-store.ts`
+ * exposes `LiveEvent`s on its own `liveEvents` signal, unconsumed by `EventsStore` this cycle.
  */
 export interface DetectionEvent {
   readonly id: string;
@@ -486,4 +490,76 @@ export interface DetectionEvent {
   readonly lastSeen: string;
   readonly state: DetectionEventState;
   readonly position?: GeoPosition;
+}
+
+// --- Live updates (docs/REALTIME-PLAN.md §4, Phase R-c — GET /api/live SSE) -------------------
+// The first wire shapes in this app that do not arrive through `VisionApi`/`HttpClient` at all:
+// `LiveConnected`/`LiveEnvelope` are read straight off a raw `EventSource` by `core/live/live-store.ts`,
+// never `JSON`-decoded by Angular's `HttpClient` pipeline — still mirrored here 1:1 with their Java
+// DTOs per this file's own top doc comment, since they are still exactly as much "the wire contract"
+// as anything fetched the usual way. `UpdateLiveTopicsRequest`/`LiveSubscription` *do* go through
+// `VisionApi.updateLiveTopics` (a plain `PATCH`), so those two follow the normal path.
+
+/**
+ * Mirrors `dto.LiveConnectedResponse` — the payload of the `connection`-named SSE event sent once,
+ * first, on every new `GET /api/live` connection (docs/REALTIME-PLAN.md §4, item 2). Not wrapped in
+ * a {@link LiveEnvelope} (no `seq`, never replayed on resume) — handshake metadata only.
+ */
+export interface LiveConnected {
+  readonly connectionId: string;
+  readonly topics: readonly string[];
+}
+
+/**
+ * Mirrors `dto.EventResponse` — the payload of a {@link LiveEnvelope} whose `type` is `'event'`.
+ *
+ * **Not the same thing as {@link DetectionEvent}, despite the similar name.** This mirrors the
+ * domain's generic `Event`/`EventType` (`DEVICE_ONLINE`/`DEVICE_OFFLINE`/`STREAM_STARTED`/
+ * `STREAM_STOPPED`/`PIPELINE_ERROR`/`DETECTION`/`TRAINING`) — a different, older domain concept
+ * than the debounced, tracked-over-time `DetectionEvent` (`OPEN`/`CLOSED`, `peakConfidence`,
+ * `label`) that `/api/events` and `core/events/events-store.ts` serve. There is still no SSE topic (or any
+ * REST endpoint) carrying `DetectionEvent`s — see that interface's own doc comment. `type` is the
+ * domain `EventType` enum's `name()` (e.g. `"STREAM_STARTED"`), not one of this file's own
+ * `AssetStatus`/`LifecycleState`-style unions — left as a plain `string` rather than an enumerated
+ * union that would need to track the Java enum by hand for a signal nothing in this app renders yet.
+ */
+export interface LiveEvent {
+  readonly id: string;
+  readonly streamId?: string;
+  readonly at: string;
+  readonly type: string;
+  readonly message: string;
+  readonly attributes: Record<string, string>;
+}
+
+/**
+ * Mirrors `dto.LiveEnvelopeResponse` — the shape of every regular (default-named) `GET /api/live`
+ * SSE `data:` line; the event's own `id:` field carries `seq` as a string (which is what makes
+ * `EventSource`'s automatic `Last-Event-ID` resume work with no client code at all). A discriminated
+ * union on `type` so a `switch` narrows `payload` to the right shape per branch — the four `type`
+ * values and their payloads are fixed 1:1 with `LiveTopicKind`'s wire values and
+ * `LiveUpdateRegistry`'s own javadoc (vision-api).
+ */
+export type LiveEnvelope =
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'telemetry'; readonly payload: readonly TelemetrySample[] }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'detections'; readonly payload: DetectionResult }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'event'; readonly payload: LiveEvent };
+
+/**
+ * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
+ * (docs/REALTIME-PLAN.md §4, item 2). Both fields optional here too, same `@JsonInclude`-adjacent
+ * convention as every other request DTO in this file — `core/live/live-store.ts` always sends both as
+ * plain arrays (possibly empty), never omits either, since the backend already defaults an absent
+ * field to `[]` and an empty array is simpler to always construct than conditionally omitting one.
+ */
+export interface UpdateLiveTopicsRequest {
+  readonly add: readonly string[];
+  readonly remove: readonly string[];
+}
+
+/** Mirrors `dto.LiveSubscriptionResponse` — the response body of the `PATCH` above. */
+export interface LiveSubscription {
+  readonly connectionId: string;
+  readonly topics: readonly string[];
 }
