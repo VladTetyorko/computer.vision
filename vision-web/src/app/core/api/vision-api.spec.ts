@@ -235,4 +235,31 @@ describe('VisionApi', () => {
     request.flush([]);
     await expect(promise).resolves.toEqual([]);
   });
+
+  // --- Fleet summary + stream snapshots (docs/MVP3-PLAN.md C-a/C-c) --------------------------
+
+  it('fetches the fleet summary without includeArchived by default', async () => {
+    const promise = api.fleetSummary();
+    const request = http.expectOne((r) => r.url === '/api/fleet/summary');
+    expect(request.request.params.has('includeArchived')).toBe(false);
+    request.flush({ categories: [], assets: [], totalAssets: 0 });
+    await expect(promise).resolves.toEqual({ categories: [], assets: [], totalAssets: 0 });
+  });
+
+  it('fetches the fleet summary with includeArchived=true when asked', async () => {
+    const promise = api.fleetSummary(true);
+    const request = http.expectOne((r) => r.url === '/api/fleet/summary');
+    expect(request.request.params.get('includeArchived')).toBe('true');
+    request.flush({ categories: [], assets: [], totalAssets: 0 });
+    await promise;
+  });
+
+  it('builds a stream snapshot URL without issuing any request', () => {
+    expect(api.snapshotUrl('s-1')).toBe('/api/streams/s-1/snapshot');
+    http.verify(); // nothing was ever requested
+  });
+
+  it('escapes a stream id in the snapshot URL', () => {
+    expect(api.snapshotUrl('s/1 x')).toBe('/api/streams/s%2F1%20x/snapshot');
+  });
 });

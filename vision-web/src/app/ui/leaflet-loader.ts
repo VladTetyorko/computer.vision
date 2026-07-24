@@ -5,7 +5,7 @@ import { tileCacheKey } from './tile-cache-logic';
 
 /**
  * Leaflet bootstrap bits shared by every map in this app (`ui/live-map.ts`,
- * docs/CYCLES-PLAN.md §2; `pages/map/fleet-map.ts`, docs/CYCLES-PLAN.md §6): the dynamic import,
+ * docs/CYCLES-PLAN.md §2; `ui/fleet-map.ts`, docs/CYCLES-PLAN.md §6): the dynamic import,
  * the runtime stylesheet injection, and the switchable base-layer tile factory
  * (docs/CYCLES-PLAN.md §9, CU-b item 6 — `MAP_LAYERS`/`mapLayerTileLayer`). Pulled out of
  * `live-map.ts` when the `/map` tab needed the identical setup — intra-app DRY (unlike the

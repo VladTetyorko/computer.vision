@@ -15,7 +15,8 @@
     gap: 0.85rem;
 }
 
-/* ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1) ------------------------------------ */
+/* ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1) — sizing/positioning only; the rail's own
+   internal look lives in ui/events-rail.css now (docs/MVP3-PLAN.md §C-c) ---------------------- */
 
 .events-rail {
     width: 300px;
@@ -24,81 +25,6 @@
     overflow-y: auto;
     position: sticky;
     top: 1rem;
-}
-
-.events-rail header {
-    align-items: baseline;
-}
-
-.rail-filters {
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-}
-
-.rail-filters select {
-    width: auto;
-    flex: 1 1 8rem;
-    font-size: 0.78rem;
-}
-
-.event-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-}
-
-.event-row {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    text-align: left;
-    background: var(--panel-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.45rem 0.6rem;
-    cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.event-row:hover:not(:disabled) {
-    border-color: var(--border-strong);
-    background: var(--panel-hover);
-}
-
-.event-row:disabled {
-    cursor: default;
-    opacity: 0.7;
-}
-
-.event-row.open {
-    border-color: var(--live);
-}
-
-.event-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-}
-
-.event-label {
-    font-weight: 600;
-    text-transform: capitalize;
-    font-size: 0.85rem;
-}
-
-.event-meta {
-    font-size: 0.72rem;
-}
-
-.event-time {
-    font-size: 0.72rem;
-    white-space: nowrap;
 }
 
 @media (max-width: 1000px) {

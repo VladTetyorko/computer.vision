@@ -1,11 +1,18 @@
-import type { AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from '../../core/api/models';
-import { ageSeconds, deriveTrail } from '../../core/telemetry-logic';
+import type { AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from './api/models';
+import { ageSeconds, deriveTrail } from './telemetry-logic';
 
 /**
- * Pure derivations behind the `/map` fleet overview tab (docs/CYCLES-PLAN.md §6), split out so
+ * Pure derivations behind the fleet map (docs/CYCLES-PLAN.md §6's `/map` tab), split out so
  * bucketing/trail-windowing/auto-fit/marker-building are unit-testable without HTTP, timers, or
  * Leaflet — mirrors `core/telemetry-logic.ts`'s split of pure logic from the injectable
- * (`map-store.ts`) that drives it.
+ * (`core/map-store.ts`) that drives it.
+ *
+ * Moved here from `pages/map/map-logic.ts` in docs/MVP3-PLAN.md §C-c when the Command dashboard
+ * needed the identical fleet map embed (`ui/fleet-map.ts`, `core/map-store.ts`) a second page —
+ * this codebase has no precedent for one page importing another page's module (see
+ * `core/device-logic.ts`'s doc comment for the original precedent this follows, most recently
+ * repeated by `ui/live-map.ts`/`ui/detections-strip.ts`'s own moves). `pages/map/map.ts` now
+ * imports this from here too; nothing about its behavior changed.
  */
 
 /** How many recent trail points a live fleet marker keeps (docs/CYCLES-PLAN.md §6: "short recent trail"). */

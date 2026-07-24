@@ -1,9 +1,9 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
-import { VisionApi } from '../../core/api/vision-api';
-import { findVideoDevice } from '../../core/device-logic';
-import { PollScheduler } from '../../core/poll-scheduler';
-import { selectOpenUsage } from '../../core/telemetry-logic';
-import type { AssetSummary, Device } from '../../core/api/models';
+import { VisionApi } from './api/vision-api';
+import { findVideoDevice } from './device-logic';
+import { PollScheduler } from './poll-scheduler';
+import { selectOpenUsage } from './telemetry-logic';
+import type { AssetSummary, Device } from './api/models';
 import {
   bucketAssets,
   buildMarkers,
@@ -48,13 +48,22 @@ interface AssetTracker {
  * next 5s tick — a referee's fleet is a handful of machines, not hundreds, but an idle map tab
  * still shouldn't accumulate pollers for drones nobody is flying anymore.
  *
- * **Page-provided, not `providedIn: 'root'`** — like `TelemetryStore`, `MapPage` lists this in
- * its own `providers` so every poller (the 5s asset poll, the 1s clock, and every per-asset 2s
- * telemetry poll) starts and stops with the route, never running while the tab isn't open.
+ * **Page-provided, not `providedIn: 'root'`** — like `TelemetryStore`, each host page (`MapPage`,
+ * and now `CommandPage`) lists this in its own `providers` so every poller (the 5s asset poll, the
+ * 1s clock, and every per-asset 2s telemetry poll) starts and stops with that page's own route,
+ * never running while neither tab is open. Two pages providing it means two independent instances
+ * (and therefore two independent 5s asset polls) when both happen to be mounted — never actually
+ * simultaneous in this single-route-at-a-time SPA, so this costs nothing in practice.
  *
  * **Errors silent-degrade**, same rationale as `TelemetryStore`: this is a background overview,
  * not a user-initiated action, so a failed poll just leaves signals at their last-known values
  * rather than raising a toast.
+ *
+ * Moved here from `pages/map/map-store.ts` in docs/MVP3-PLAN.md §C-c when the Command dashboard
+ * needed to embed `ui/fleet-map.ts` (which injects this store) as a second page — this codebase's
+ * own "move a page-scoped thing to a shared home once a second page needs it" precedent (see
+ * `core/map-logic.ts`'s doc comment). `pages/map/map.ts` now imports this from here too; nothing
+ * about its behavior changed.
  */
 @Injectable()
 export class FleetMapStore {

@@ -53,7 +53,7 @@ export interface PipelineSettings {
 
 /**
  * The four base map layers (docs/CYCLES-PLAN.md §9, CU-b item 6) — shared by the fleet map
- * (`pages/map/fleet-map.ts`) and the live cockpit's map inset (`ui/live-map.ts`) via this
+ * (`ui/fleet-map.ts`) and the live cockpit's map inset (`ui/live-map.ts`) via this
  * one persisted choice, rather than each map remembering its own. Definitions (tile URL,
  * attribution, max zoom) live in `ui/leaflet-loader.ts#MAP_LAYERS`, keyed by this id — this file
  * only owns *which one is selected*, not the tile-provider details.

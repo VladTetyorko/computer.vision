@@ -119,7 +119,7 @@ interface DrawnBox {
  * Self-recovering video player, WebRTC(WHEP)-first with an automatic HLS fallback
  * (docs/MVP2-PLAN.md §L / §U3), with an honest status line (docs/CYCLES-PLAN.md §11, CD-b item 5)
  * — shared as-is by `wall-tile.ts`, `live.html`, `pages/asset-detail/asset-detail.html`, and
- * `pages/map/live-dock.ts`, so every one of those surfaces gets everything below for free.
+ * `ui/live-dock.ts`, so every one of those surfaces gets everything below for free.
  *
  * Three deliberate choices, all from docs/UX-DESIGN.md §2 T1 plus CD-b's own resilience ask:
  *

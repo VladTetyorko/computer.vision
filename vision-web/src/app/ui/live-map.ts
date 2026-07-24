@@ -30,7 +30,7 @@ const EXPAND_TRANSITION_MS = 260;
  * codebase has no precedent for one page importing another page's module (see
  * `core/device-logic.ts`'s doc comment for the original precedent that established this).
  *
- * **Leaflet loads only here** (well, here and `pages/map/fleet-map.ts`, docs/CYCLES-PLAN.md §6 —
+ * **Leaflet loads only here** (well, here and `ui/fleet-map.ts`, docs/CYCLES-PLAN.md §6 —
  * the shared bootstrap lives in `ui/leaflet-loader.ts`). Each host route is already its own lazy
  * chunk; `initMap()`'s call to `importLeaflet()` — a *dynamic* `import('leaflet')` under the
  * hood, not a static one — additionally keeps Leaflet out of that chunk's own parse cost until a

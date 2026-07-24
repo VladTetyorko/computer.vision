@@ -25,7 +25,7 @@ Top-level nav becomes job-oriented: **Fly** (operator cockpit) · **Command** (m
 |---|---|---|---|---|
 | C-a | backend | stream snapshots (`GET /api/streams/{id}/snapshot.jpg`) + fleet summary (`GET /api/fleet/summary`) | vision-application, vision-api, vision-app | ✅ done |
 | C-b | **UI** | Fly: the operator cockpit page | vision-web | ✅ done |
-| C-c | **UI** | Command: the manager dashboard | vision-web, after C-b | pending |
+| C-c | **UI** | Command: the manager dashboard | vision-web, after C-b | ✅ done |
 
 ### C-a — backend: snapshots + fleet summary *(scope: vision-application, vision-api, vision-app wiring)*
 
@@ -91,6 +91,18 @@ Scope note: both endpoints are read-only additions; nothing about existing endpo
 - Fly gains `?watch=1` (watch mode: no Start/Stop, viewing only) as the drill-down target.
 - Scales: CDK virtual scroll everywhere list-like; a single summary poll + per-visible-thumbnail snapshot polls; no live player except a hover/click preview (one at a time, LiveDock precedent).
 - **Done when:** with 100 simulated assets (script or synthetic), Command stays smooth, issues one summary poll per cycle, and the attention queue surfaces a low-battery drone within one poll. **Estimate: L.**
+
+**Done note:**
+
+- **Route**: `/command`, idle-preloaded like every real tab, a real top-level nav entry (see the IA note below). No inputs — unlike `/fly`, nothing else deep-links into Command yet.
+- **Attention queue severity, exactly as spec'd**: `battery < 20%` (warning) escalating to `< 10%` (critical); `telemetryAgeMs > 10s` **while streaming only** (critical — a landed asset with old telemetry isn't urgent, an airborne one is); `openEventCount > 0` (warning). No `source reconnecting` reason — per both C-a's and C-b's own done notes, no honest "reconnecting" signal exists anywhere server-side to key off; the queue's three rules are exactly the three C-a's `AssetAttentionResponse` actually supports. Ordering: highest-severity triggered reason first, then more-simultaneous-reasons-first, then alphabetical — see `vision-web/src/app/pages/command/command-logic.ts` for the exact rule and `vision-web/MODULE.md`'s own C-c Status entry for the full boundary-tested writeup.
+- **Live strip**: `GET /api/streams/{id}/snapshot` into an `<img>`, cache-busted per poll (the server's `Cache-Control: no-store` alone doesn't make an unchanged `<img src>` re-fetch), gated on `IntersectionObserver` visibility *and* CDK horizontal virtual scroll — snapshot request count is bounded by strip viewport width, never by fleet or streaming-count size. A 404 (no frame published yet) shows a plain "No preview" placeholder, never an error toast.
+- **Fleet map embed**: `<vision-fleet-map>` reused completely unmodified (its own event markers/layer switcher/auto-fit all included for free) — but relocated, along with `LiveDock`/`FleetMapStore`/its pure logic, from `pages/map/` to shared `core`/`ui` homes so Command could embed it without breaking this codebase's own "no cross-page import" precedent; `MapPage` itself is behaviorally unchanged (its own full spec suite passes unmodified at the new location). Command's own "Watch" wiring differs from `MapPage`'s: the map's `watch` output is just an assetId, and Command routes it straight to `/fly?asset=<id>&watch=1` (C-b's own pinned one-liner) rather than resolving a device id for `/live/:deviceId` — no `resolveWatchDevice` call needed for Watch, only for the (unchanged) docked Preview.
+- **Warehouse readiness tiles**: per-category counts read from `summary.categories` (never capped server-side, unlike `summary.assets`' 500-row cap) — accurate at any fleet size. Click navigates to plain `/devices`, no query param: the Devices page has no category filter to deep-link into today, per this cycle's own explicit "don't build new filtering into Devices" instruction.
+- **Events rail**: `pages/wall/wall.ts`'s own rail extracted to `ui/events-rail.ts` (byte-for-byte the same feature) so Command could reuse it too — `WallPage` itself is unchanged in behavior.
+- **Nav IA landed as the plan's own end state**: `app.ts`'s tabs are now **Fly · Command · Assets · Settings** (`Assets` a label-only rename — the route stays `/devices`); `Wall`/`Map`/`Debug` moved into a header "More" `<details>` overflow, not removed — every route stays fully reachable, `routerLinkActive` still highlights the overflow trigger when one of its own links is active.
+- **Scale**: verified at N=100 both by code reasoning (grep-verified: `VisionApi.fleetSummary()` has exactly one call site in `pages/command/**`) and by dedicated `command-logic.spec.ts` cases building 100 synthetic assets. Full accounting — including the one documented, pre-existing exception (the embedded fleet map's own already-established `core/map-store.ts` polling, unchanged since C6/CU-b, not new O(fleet) surface this cycle adds) — is in `vision-web/MODULE.md`'s C-c Status entry.
+- **No `sourceState`/reconnecting signal was invented here either** (matches C-a's and C-b's own done notes) — the queue's `telemetry-stale` reason reads staleness purely from `telemetryAgeMs`, the same honest signal Fly's own OSD already uses.
 
 ## Deferred (MVP4 candidates)
 

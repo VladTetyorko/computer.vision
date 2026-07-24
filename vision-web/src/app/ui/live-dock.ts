@@ -1,15 +1,19 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Player } from '../../ui/player';
-import { FleetStore } from '../../core/fleet-store';
-import type { FleetMarker } from './map-logic';
+import { Player } from './player';
+import { FleetStore } from '../core/fleet-store';
+import type { FleetMarker } from '../core/map-logic';
 
 /**
  * The docked live preview panel (docs/CYCLES-PLAN.md §9, CU-b item 5): clicking a streaming
  * asset's marker or rail row docks this beside the map instead of leaving the tab — inline
  * player + an OSD-style summary + an "Open full cockpit" link for the full `/live/:deviceId`
- * experience. `MapPage` guarantees at most one is ever rendered at a time (bandwidth); closing it
- * emits `close` and `MapPage` un-docks.
+ * experience. Each host page (`MapPage`, and now `CommandPage`, docs/MVP3-PLAN.md §C-c) guarantees
+ * at most one is ever rendered at a time (bandwidth); closing it emits `close` and the host un-docks.
+ *
+ * Moved here from `pages/map/live-dock.ts` in docs/MVP3-PLAN.md §C-c alongside `ui/fleet-map.ts`
+ * (see that file's own doc comment) — Command's own "hover/click preview, one at a time, LiveDock
+ * precedent" bullet reuses this unmodified.
  *
  * Reuses the shared `<vision-player>` (the same component `WallTile`/`LivePage` use — "Player
  * component reused cleanly across wall-tile/live/map-panel" per the cycle's done-when list) for

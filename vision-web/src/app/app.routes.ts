@@ -20,6 +20,13 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/fly/fly').then((m) => m.FlyPage),
   },
   {
+    path: 'command',
+    title: 'Command · Vision',
+    // The manager dashboard (docs/MVP3-PLAN.md §C-c) — a real top-level tab, so it's idle-preloaded
+    // like every other one (no `data: { preload: false }`).
+    loadComponent: () => import('./pages/command/command').then((m) => m.CommandPage),
+  },
+  {
     path: 'wall',
     title: 'Wall · Vision',
     loadComponent: () => import('./pages/wall/wall').then((m) => m.WallPage),

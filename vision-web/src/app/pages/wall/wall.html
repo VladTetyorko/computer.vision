@@ -44,63 +44,9 @@
       }
     </div>
 
-    <!-- ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1) --------------------------------- -->
-    <aside class="events-rail card">
-      <header>
-        <h3>Events</h3>
-        <span class="muted">{{ events.events().length }}</span>
-      </header>
-
-      @if (availableLabels().length > 0 || availableAssets().length > 0) {
-        <div class="row rail-filters">
-          <select aria-label="Filter by label" [value]="labelFilter()" (change)="setLabelFilter($any($event.target).value)">
-            <option value="">All labels</option>
-            @for (label of availableLabels(); track label) {
-              <option [value]="label">{{ label }}</option>
-            }
-          </select>
-          @if (availableAssets().length > 0) {
-            <select aria-label="Filter by asset" [value]="assetFilter()" (change)="setAssetFilter($any($event.target).value)">
-              <option value="">All assets</option>
-              @for (asset of availableAssets(); track asset.id) {
-                <option [value]="asset.id">{{ asset.name }}</option>
-              }
-            </select>
-          }
-        </div>
-      }
-
-      @if (events.events().length === 0) {
-        <p class="muted hint">
-          No detection events yet — one opens once a configured label (person/car by default) is
-          seen for a few consecutive frames.
-        </p>
-      } @else if (railEvents().length === 0) {
-        <p class="muted hint">No events match this filter.</p>
-      } @else {
-        <ul class="event-list">
-          @for (event of railEvents(); track event.id) {
-            <li>
-              <button
-                type="button"
-                class="event-row"
-                [class.open]="event.state === 'OPEN'"
-                [disabled]="!eventClickable(event)"
-                (click)="openEvent(event)"
-              >
-                <span class="dot" [class.live]="event.state === 'OPEN'"></span>
-                <span class="event-main">
-                  <span class="event-label">{{ event.label }}</span>
-                  <span class="event-meta muted">
-                    {{ sourceLabel(event) }} · {{ (event.peakConfidence * 100).toFixed(0) }}%
-                  </span>
-                </span>
-                <span class="event-time faint">{{ relativeTime(event) }}</span>
-              </button>
-            </li>
-          }
-        </ul>
-      }
-    </aside>
+    <!-- ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1; docs/MVP3-PLAN.md §C-c: extracted
+         to ui/events-rail.ts so the Command dashboard could reuse it — see that component's own
+         doc comment) ------------------------------------------------------------------------ -->
+    <vision-events-rail class="events-rail" (open)="openEvent($event)" />
   </div>
 </div>

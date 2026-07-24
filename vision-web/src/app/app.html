@@ -8,6 +8,14 @@
     @for (tab of tabs; track tab.path) {
       <a class="tab" [routerLink]="tab.path" routerLinkActive="active">{{ tab.label }}</a>
     }
+    <details class="tab-more" routerLinkActive="active" #more>
+      <summary class="tab">More</summary>
+      <div class="tab-more-menu" (click)="more.open = false">
+        @for (link of moreLinks; track link.path) {
+          <a [routerLink]="link.path" routerLinkActive="active">{{ link.label }}</a>
+        }
+      </div>
+    </details>
   </nav>
 
   <div class="status" [title]="offline() ? 'Backend unreachable' : 'Backend reachable'">

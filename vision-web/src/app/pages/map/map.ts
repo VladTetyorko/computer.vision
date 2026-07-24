@@ -5,10 +5,10 @@ import { EventsStore } from '../../core/events-store';
 import { buildTestDroneRequest } from '../devices/simulate-logic';
 import { FlightPlanDialog } from '../../ui/flight-plan-dialog';
 import { buildTelemetryRequest, type FlightPlanForm } from '../../ui/flight-plan-logic';
-import { FleetMap } from './fleet-map';
-import { LiveDock } from './live-dock';
-import { FleetMapStore } from './map-store';
-import { bucketForAsset, type MarkerBucket } from './map-logic';
+import { FleetMap } from '../../ui/fleet-map';
+import { LiveDock } from '../../ui/live-dock';
+import { FleetMapStore } from '../../core/map-store';
+import { bucketForAsset, type MarkerBucket } from '../../core/map-logic';
 import type { AssetSummary } from '../../core/api/models';
 
 /**

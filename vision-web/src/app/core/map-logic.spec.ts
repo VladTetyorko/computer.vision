@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, GeoPosition, TelemetrySample } from '../../core/api/models';
+import type { AssetSummary, GeoPosition, TelemetrySample } from './api/models';
 import {
   bucketAssets,
   bucketForAsset,

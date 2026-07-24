@@ -387,6 +387,73 @@ export interface UsageTimeline {
   readonly detections: readonly DetectionResult[];
 }
 
+/**
+ * Mirrors `dto.CategoryCountsResponse`, one row of `FleetSummary#categories` (docs/MVP3-PLAN.md
+ * C-a) — per-category asset counts, lifecycle crossed with currently-streaming. Every field is
+ * always present (no `NON_NULL`-style optionality — nothing here is nullable server-side).
+ */
+export interface CategoryCounts {
+  readonly categoryId: string;
+  readonly categoryName: string;
+  readonly total: number;
+  readonly active: number;
+  readonly deactivated: number;
+  /** Only non-zero when the request asked for `includeArchived=true`. */
+  readonly deleted: number;
+  readonly streaming: number;
+}
+
+/**
+ * Mirrors `dto.AssetAttentionResponse`, one row of `FleetSummary#assets` (docs/MVP3-PLAN.md C-a) —
+ * one asset's attention-relevant facts, everything the Command dashboard's attention queue and
+ * live strip need without a second poll per asset (docs/MVP3-PLAN.md §C-c).
+ *
+ * `streamId`/`batteryPercent`/`telemetryAgeMs` are absent (never `null`) exactly when the backend
+ * DTO's own doc comment says so — check for key presence (`!== undefined`), never `!== null`, this
+ * app's own `@JsonInclude(NON_NULL)` convention (see this file's own top doc comment): `streamId`
+ * absent whenever `streaming` is `false`; `batteryPercent`/`telemetryAgeMs` absent when the asset
+ * has never reported telemetry at all — deliberately still reported once the asset stops streaming
+ * (the Java doc comment's own "staleness is exactly how long since we last heard from this asset"),
+ * which is exactly the signal `pages/command/command-logic.ts`'s attention rules read.
+ *
+ * Unlike `AssetSummary#lifecycle`, this field is **required**, not optional — this is a brand-new
+ * endpoint with no pre-CW-a backend to stay compatible with, and the Java DTO never omits it.
+ *
+ * **No `sourceState` field** — the backend deliberately doesn't invent a "reconnecting"/"degraded"
+ * read (see the DTO's own doc comment); `pages/command/command-logic.ts`'s attention rules key off
+ * `batteryPercent`/`telemetryAgeMs`/`openEventCount` only, never a fabricated fourth signal.
+ */
+export interface AssetAttention {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly categoryId: string;
+  readonly categoryName: string;
+  readonly lifecycle: LifecycleState;
+  readonly streaming: boolean;
+  readonly streamId?: string;
+  readonly batteryPercent?: number;
+  readonly telemetryAgeMs?: number;
+  readonly openEventCount: number;
+}
+
+/**
+ * Mirrors `dto.FleetSummaryResponse`, the body of `GET /api/fleet/summary` (docs/MVP3-PLAN.md C-a)
+ * — the Command dashboard's one aggregated poll (docs/MVP3-PLAN.md §C-c), driving the attention
+ * queue, the live strip's membership, and the warehouse readiness tiles all from one response.
+ * Every field is always present.
+ *
+ * `assets` is capped server-side at 500 (`DefaultFleetSummaryService.MAX_ASSETS_IN_SUMMARY`) and
+ * sorted by `displayName`; compare `assets.length` to `totalAssets` to detect truncation.
+ * `categories` is **never** capped — always the true per-category picture regardless of `assets`'
+ * own cap, which is what lets the readiness tiles and the empty state's own "N assets, M streaming"
+ * count stay accurate even past that cap.
+ */
+export interface FleetSummary {
+  readonly categories: readonly CategoryCounts[];
+  readonly assets: readonly AssetAttention[];
+  readonly totalAssets: number;
+}
+
 /** Mirrors `domain.model.DetectionEventState` as surfaced by `dto.DetectionEventResponse#state`. */
 export type DetectionEventState = 'OPEN' | 'CLOSED';
 

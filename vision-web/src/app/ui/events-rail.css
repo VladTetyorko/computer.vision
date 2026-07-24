@@ -1,0 +1,87 @@
+/* Sizing/positioning (width, max-height, sticky, overflow) is each host page's own concern,
+   applied directly to this component's tag (`wall.css`'s `.events-rail`, `command.css`'s own
+   class) — mirrors `ui/fleet-map.ts`'s `:host{height:100%}` + the host's own `.map-panel` sizing
+   class working together. This component only owns what's visually *inside* the card. */
+:host {
+  display: block;
+}
+
+:host .card {
+  margin-bottom: 0;
+}
+
+.rail-filters {
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.rail-filters select {
+  width: auto;
+  flex: 1 1 8rem;
+  font-size: 0.78rem;
+}
+
+.hint {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.event-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.6rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.event-row:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+}
+
+.event-row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.event-row.open {
+  border-color: var(--live);
+}
+
+.event-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.event-label {
+  font-weight: 600;
+  text-transform: capitalize;
+  font-size: 0.85rem;
+}
+
+.event-meta {
+  font-size: 0.72rem;
+}
+
+.event-time {
+  font-size: 0.72rem;
+  white-space: nowrap;
+}

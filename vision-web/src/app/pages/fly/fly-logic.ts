@@ -5,7 +5,7 @@ import type { BoxesMode } from '../../ui/player';
  * Pure, Angular-free logic behind `FlyPage` (docs/MVP3-PLAN.md §C-b) — split out so picker
  * ordering, remembered/requested-asset resolution, the "Replay last flight" link, watch-mode
  * parsing, and the keyboard boxes-cycle are unit-testable without HTTP, the router, or `document`,
- * mirroring every other page's own `*-logic.ts` split (`pages/map/map-logic.ts`,
+ * mirroring every other page's own `*-logic.ts` split (`core/map-logic.ts`,
  * `pages/replay/replay-logic.ts`, etc.).
  */
 

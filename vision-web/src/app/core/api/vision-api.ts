@@ -11,6 +11,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  FleetSummary,
   RegisterDeviceRequest,
   ScanRequest,
   ScanResult,
@@ -242,5 +243,37 @@ export class VisionApi {
         params: { limit },
       }),
     );
+  }
+
+  // --- Fleet summary + stream snapshots (docs/MVP3-PLAN.md C-a/C-c) --------------------------
+  // The Command dashboard's one aggregated poll: per-category counts + a capped per-asset
+  // attention list, server-joined so the browser never assembles this from several endpoints.
+
+  /**
+   * `includeArchived` (deliberately **not** `includeDeleted` like every other list endpoint here —
+   * see vision-api/MODULE.md's Conventions for why the fleet-summary endpoint alone uses this
+   * name) defaults to `false` and is only added to the query string when `true`, mirroring
+   * `listDevices`/`listAssets`'s own `includeDeleted` convention.
+   */
+  fleetSummary(includeArchived = false): Promise<FleetSummary> {
+    return firstValueFrom(
+      this.http.get<FleetSummary>(
+        '/api/fleet/summary',
+        includeArchived ? { params: { includeArchived: true } } : {},
+      ),
+    );
+  }
+
+  /**
+   * The path for a running stream's latest-frame JPEG thumbnail (docs/MVP3-PLAN.md C-a/C-c) — not
+   * promise-returning like every other method here: this is meant to be bound straight to an
+   * `<img src>` (`pages/command/live-strip-tile.ts`), which fetches it itself via the browser's own
+   * image loading, cache-busted with a query param on each poll — there is nothing this class could
+   * usefully `await` on the caller's behalf. Still lives here rather than being inlined at the call
+   * site, so `VisionApi` stays "the only place the frontend knows REST URLs" (this file's own top
+   * doc comment) even for a path that's never actually passed through `HttpClient`.
+   */
+  snapshotUrl(streamId: string): string {
+    return `/api/streams/${encodeURIComponent(streamId)}/snapshot`;
   }
 }

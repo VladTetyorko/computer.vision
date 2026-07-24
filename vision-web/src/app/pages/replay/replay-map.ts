@@ -26,7 +26,7 @@ const DEFAULT_ZOOM = 17;
  *
  * Reuses the shared Leaflet bootstrap (`ui/leaflet-loader.ts`: dynamic `import('leaflet')`, the
  * runtime stylesheet injection, the four-layer `MAP_LAYERS` switcher, the rotated `droneDivIcon`)
- * exactly like `ui/live-map.ts`/`pages/map/fleet-map.ts`/`ui/flight-plan-dialog.ts` — a fourth home
+ * exactly like `ui/live-map.ts`/`ui/fleet-map.ts`/`ui/flight-plan-dialog.ts` — a fourth home
  * for the same shared module, per its own "intra-app DRY" doc comment. Lives in `pages/replay/`
  * rather than `ui/` since only this page uses it, mirroring `ui/live-map.ts`'s own original home
  * (`pages/live/live-map.ts`) before a second page needed it — see that module's doc comment for

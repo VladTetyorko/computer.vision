@@ -1,8 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { FleetMapStore } from './map-store';
-import { VisionApi } from '../../core/api/vision-api';
-import type { AssetDetails, AssetSummary, Device, TelemetrySample } from '../../core/api/models';
+import { VisionApi } from './api/vision-api';
+import type { AssetDetails, AssetSummary, Device, TelemetrySample } from './api/models';
 
 /** Lets the fire-and-forget promise chains inside `refresh()`/tracker startup settle before asserting. */
 function flush(): Promise<void> {

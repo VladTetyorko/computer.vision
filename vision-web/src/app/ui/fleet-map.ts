@@ -12,13 +12,13 @@ import {
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
-import { SettingsStore, type MapLayerId } from '../../core/settings-store';
-import { EventsStore } from '../../core/events-store';
-import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../core/events-logic';
-import type { DetectionEvent } from '../../core/api/models';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../../ui/leaflet-loader';
-import { FleetMapStore } from './map-store';
-import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from './map-logic';
+import { SettingsStore, type MapLayerId } from '../core/settings-store';
+import { EventsStore } from '../core/events-store';
+import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../core/events-logic';
+import type { DetectionEvent } from '../core/api/models';
+import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from './leaflet-loader';
+import { FleetMapStore } from '../core/map-store';
+import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../core/map-logic';
 
 /** Padding so the outermost markers aren't flush against the map's edge after a fit. */
 const FIT_PADDING: Leaflet.PointTuple = [48, 48];
@@ -47,9 +47,19 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * The Leaflet map for the `/map` fleet overview tab (docs/CYCLES-PLAN.md §6): every asset
- * `FleetMapStore.markers()` plots, a breadcrumb trail per streaming asset, popups with a Watch
- * action, and auto-fit-to-bounds that a manual pan/zoom disables until "Recenter" is clicked.
+ * The Leaflet fleet map (docs/CYCLES-PLAN.md §6's `/map` tab, now also docs/MVP3-PLAN.md §C-c's
+ * Command dashboard): every asset `FleetMapStore.markers()` plots, a breadcrumb trail per
+ * streaming asset, popups with a Watch action, and auto-fit-to-bounds that a manual pan/zoom
+ * disables until "Recenter" is clicked.
+ *
+ * **Moved here from `pages/map/fleet-map.ts`** (docs/MVP3-PLAN.md §C-c) when Command needed to
+ * embed this component too — the same "no page imports another page's module" precedent every
+ * other shared piece in this app follows (see `core/device-logic.ts`'s doc comment). `MapPage`'s
+ * own import path is the only thing that changed there; this component's behavior is otherwise
+ * unchanged. `MapPage` resolves a clicked marker's `watch` output to `/live/:deviceId`;
+ * `CommandPage` instead routes it straight to `/fly?asset=<id>&watch=1` (no device lookup needed —
+ * see `CommandPage`'s own doc comment) — which host does the navigating is exactly the same split
+ * described below, just resolved differently per page.
  *
  * **Leaflet loads only here and in `ui/live-map.ts`** — both dynamically `import`
  * (via `ui/leaflet-loader.ts#importLeaflet`) inside `initMap()`, called from `afterNextRender`,
