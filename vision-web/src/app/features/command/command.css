@@ -1,3 +1,39 @@
+/* ---- Shell — full-bleed below the header (docs/UX-REWORK-PLAN.md §U-c bullet 1/5) -------------
+   Mirrors `features/fly/fly.css`'s `.cockpit` — the other page in this app that opts out of the
+   shared `.page` (centered, max-width, padded) wrapper in favor of genuinely filling the viewport
+   below the sticky header. No `box-shadow`/seam fix is needed here the way Fly's needed one: this
+   page's own topbar is opaque and in normal flow (not translucent chrome over a full-bleed video),
+   so there is no hairline-seam class of bug to guard against. */
+.command-shell {
+  height: calc(100vh - var(--header-height));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.command-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.topbar-left {
+  gap: 0.6rem;
+}
+
+.brand-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
 .archived-toggle {
   gap: 0.4rem;
   font-size: 0.82rem;
@@ -7,224 +43,220 @@
   width: auto;
 }
 
-/* ---- Attention queue (bullet 1) ------------------------------------------------------------- */
+.topbar-notice {
+  flex: none;
+  padding: 0.4rem 1rem;
+  background: var(--warn-soft);
+  border-bottom: 1px solid #5a4413;
+  color: #ffd479;
+  font-size: 0.78rem;
+}
 
-.attention-list {
+/* ---- Body — the collapsible-rail × collapsible-panel grid (command-logic.ts#commandGridColumns
+   computes the actual `grid-template-columns` value; this stylesheet only styles the tracks'
+   contents). Real grid-track siblings, not floated overlays — see that function's own doc comment
+   for why this is the deliberate "geometric separation over z-index" choice for this task. */
+.command-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-items: stretch;
+}
+
+/* ---- Entity rail (docs/UX-REWORK-PLAN.md §U-c bullet 1) — the slim, always-attention-sorted list,
+   reusing the pre-§U-c attention queue's data/severity rules, just as a full asset list rather than
+   a filtered "needs attention" queue. -------------------------------------------------------------- */
+.command-rail {
+  min-width: 0;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 0.75rem 0.6rem;
+}
+
+.rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+  padding: 0 0.15rem;
+}
+
+.hint {
+  font-size: 0.8rem;
+  margin: 0;
+  padding: 0 0.15rem;
+}
+
+.rail-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 
-.attention-row {
+.rail-row {
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.6rem 0.85rem;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--border-strong);
+  gap: 0.45rem;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-left: 3px solid transparent;
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.attention-row.critical {
+.rail-row:hover {
+  background: var(--panel-hover);
+}
+
+.rail-row.critical {
   border-left-color: var(--danger);
 }
 
-.attention-row.warning {
+.rail-row.warning {
   border-left-color: var(--warn);
 }
 
-.attention-info {
-  min-width: 0;
+/* Declared after .critical/.warning so "which row did I click" always wins the shared
+   border-left channel; severity stays visible via the row's chip. The raised background
+   and outline carry selection even while the border shows severity on flagged rows. */
+.rail-row.selected {
+  background: var(--panel-raised);
+  border-left-color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.rail-name {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.attention-main {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
   min-width: 0;
+  font-size: 0.84rem;
 }
 
-.attention-main .name {
-  font-weight: 600;
-  font-size: 0.9rem;
+.rail-category {
+  flex: none;
+  max-width: 6rem;
+  font-size: 0.7rem;
 }
 
-/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's border-left color used to be
-   the only carrier of critical-vs-warning severity. `.severity-chip` restates it as a word, so the
-   row reads correctly even color-blind or at a glance across a long queue. */
 .severity-chip {
   flex: none;
   font-weight: 700;
   letter-spacing: 0.03em;
 }
 
-.attention-age {
-  margin-left: auto;
-  font-size: 0.72rem;
-  white-space: nowrap;
-}
-
-.attention-why {
-  margin: 0;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
-
-.attention-actions {
-  flex: none;
-}
-
-/* ---- Live strip (bullet 2) ------------------------------------------------------------------- */
-
-.strip-viewport {
-  height: 176px;
-  width: 100%;
-}
-
-.strip-viewport vision-live-strip-tile {
-  display: inline-block;
-  margin-right: 0.75rem;
-}
-
-/* ---- Fleet map embed (bullet 3) — mirrors features/map/map.css's own layout ---------------------- */
-
-.map-section {
-  margin-bottom: 1.5rem;
-}
-
-.section-head {
-  margin-bottom: 0.75rem;
-}
-
-.map-layout {
-  display: flex;
-  align-items: stretch;
-  gap: 1rem;
-  height: 50vh;
-  min-height: 380px;
-}
-
-.map-panel {
-  flex: 1;
-  min-width: 0;
-}
-
-.dock-panel {
-  width: 300px;
-  flex: none;
-}
-
-@media (max-width: 900px) {
-  .map-layout {
-    flex-direction: column;
-    height: auto;
-  }
-
-  .map-panel {
-    height: 50vh;
-    min-height: 320px;
-  }
-
-  .dock-panel {
-    width: 100%;
-    height: 50vh;
-    min-height: 280px;
-  }
-}
-
-/* ---- Warehouse readiness tiles (bullet 4) ------------------------------------------------------ */
-
-.readiness-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: 0.75rem;
-}
-
-.readiness-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  text-align: left;
+/* ---- Toggle tabs — the slim, always-present drawer handle (mirrors `features/live/live.css`'s
+   own `.rail-toggle` idiom exactly, one copy per side): a real grid track of its own, never
+   absolutely positioned over the map, so there is nothing here for Leaflet's own `z-index: 1000`
+   corner controls to fight with. ------------------------------------------------------------- */
+.side-toggle {
+  align-self: stretch;
+  width: 1.1rem;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-faint);
   cursor: pointer;
-  padding: 0.75rem 0.85rem;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
-.readiness-tile:hover {
-  border-color: var(--border-strong);
+.side-toggle:hover {
+  color: var(--text);
   background: var(--panel-hover);
 }
 
-.readiness-head {
+.rail-toggle {
+  border-left: none;
+}
+
+.panel-toggle {
+  border-right: none;
+}
+
+/* ---- Map stage — the full-bleed canvas itself ------------------------------------------------ */
+.command-stage {
+  position: relative;
+  min-width: 0;
+  background: #0b0f14;
+}
+
+.command-map {
+  position: absolute;
+  inset: 0;
+  /* Trap Leaflet's internal z-indexes (panes go up to 400+) inside this element's own
+     stacking context — without this they bubble to the document root and paint over the
+     header's bell dropdown, whose whole stacking layer is the header's z-index:20. */
+  isolation: isolate;
+  z-index: 0;
+}
+
+.stage-empty {
+  position: absolute;
+  inset: 0;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem;
   gap: 0.5rem;
-}
-
-.readiness-name {
-  font-weight: 600;
-  font-size: 0.88rem;
-}
-
-.readiness-total {
   color: var(--text-muted);
+}
+
+.stage-empty h3 {
+  color: var(--text);
+}
+
+.stage-empty p {
+  margin: 0;
+  max-width: 40ch;
   font-size: 0.85rem;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
 }
 
-/* Mark spec: thin bar, 2px gap between segments, rounded data-ends — a magnitude comparison across
-   lifecycle states, not a full chart, so no axis/legend beyond the chips already naming each color. */
-.readiness-bar {
-  display: flex;
-  gap: 2px;
-  height: 6px;
+.empty-actions {
+  margin-top: 0.5rem;
 }
 
-.seg {
-  border-radius: 3px;
+/* ---- Detail panel (docs/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------- */
+.command-panel {
+  display: block;
+  min-width: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
 }
 
-.seg.active {
-  background: var(--ok);
-}
+/* ---- Narrow viewports: stack instead of collapsing to unreadably thin grid tracks -------------- */
+@media (max-width: 900px) {
+  .command-body {
+    grid-template-columns: 1fr !important;
+    grid-auto-rows: auto;
+    overflow-y: auto;
+  }
 
-.seg.deactivated {
-  background: var(--warn);
-}
+  .command-rail,
+  .command-panel {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 40vh;
+  }
 
-.seg.deleted {
-  background: var(--text-faint);
-}
+  .side-toggle {
+    display: none;
+  }
 
-.readiness-chips {
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-/* Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — an explicit affordance line
-   instead of relying on `.readiness-tile:hover` alone to say "this tile does something". */
-.readiness-action {
-  font-size: 0.72rem;
-}
-
-/* ---- Events rail (bullet 5) --------------------------------------------------------------------- */
-
-.events-rail-embed {
-  width: 100%;
-  max-height: 26rem;
-  overflow-y: auto;
+  .command-stage {
+    min-height: 40vh;
+  }
 }

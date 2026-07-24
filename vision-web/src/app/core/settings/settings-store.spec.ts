@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { BUILT_IN_PROFILES, SettingsStore } from './settings-store';
+import { BUILT_IN_PROFILES, DEFAULT_DETECTION_MODEL, SettingsStore } from './settings-store';
 
 describe('SettingsStore', () => {
   let store: SettingsStore;
@@ -13,7 +13,11 @@ describe('SettingsStore', () => {
 
   it('starts on the profile that mirrors the backend defaults', () => {
     expect(store.activeProfile().id).toBe('balanced');
-    expect(store.effective()).toEqual({ confidenceThreshold: 0.4, inferenceFps: 5 });
+    expect(store.effective()).toEqual({
+      confidenceThreshold: 0.4,
+      inferenceFps: 5,
+      model: DEFAULT_DETECTION_MODEL,
+    });
     expect(store.isCustom()).toBe(false);
   });
 
@@ -28,7 +32,11 @@ describe('SettingsStore', () => {
     store.adjust({ confidenceThreshold: 0.8 });
 
     expect(store.isCustom()).toBe(true);
-    expect(store.effective()).toEqual({ confidenceThreshold: 0.8, inferenceFps: 3 });
+    expect(store.effective()).toEqual({
+      confidenceThreshold: 0.8,
+      inferenceFps: 3,
+      model: DEFAULT_DETECTION_MODEL,
+    });
     // The preset it is based on is still identifiable, which is what the badge shows.
     expect(store.activeProfile().id).toBe('low-latency');
 
@@ -54,7 +62,11 @@ describe('SettingsStore', () => {
     expect(saved[0].builtIn).toBe(false);
     expect(store.activeProfileId()).toBe(saved[0].id);
     expect(store.isCustom()).toBe(false);
-    expect(store.effective()).toEqual({ confidenceThreshold: 0.25, inferenceFps: 12 });
+    expect(store.effective()).toEqual({
+      confidenceThreshold: 0.25,
+      inferenceFps: 12,
+      model: DEFAULT_DETECTION_MODEL,
+    });
   });
 
   it('falls back to a built-in when a deleted profile was active', () => {
@@ -127,6 +139,103 @@ describe('SettingsStore', () => {
     const reloaded = TestBed.inject(SettingsStore);
 
     expect(reloaded.flyAssetId()).toBeNull();
+  });
+
+  // ---- Detection model (docs/CV-MODELS-PLAN.md item 4) ------------------------------------
+
+  it('defaults every built-in profile to the general model', () => {
+    for (const profile of BUILT_IN_PROFILES) {
+      expect(profile.model).toBe(DEFAULT_DETECTION_MODEL);
+    }
+  });
+
+  it('adjusting the model turns the active profile into a revertible custom draft', () => {
+    store.selectProfile('low-latency');
+    store.adjust({ model: 'orion12l.pt' });
+
+    expect(store.isCustom()).toBe(true);
+    expect(store.effective()).toEqual({
+      confidenceThreshold: 0.5,
+      inferenceFps: 3,
+      model: 'orion12l.pt',
+    });
+    // Confidence/fps stay exactly what the base preset had — only model moved.
+    expect(store.activeProfile().id).toBe('low-latency');
+
+    store.revertDraft();
+    expect(store.isCustom()).toBe(false);
+    expect(store.effective().model).toBe(DEFAULT_DETECTION_MODEL);
+  });
+
+  it('saves a draft model choice as a reusable profile, including the composite id', () => {
+    store.adjust({ model: 'yolo11n.pt,orion12l.pt' });
+    store.saveDraftAs('Both models');
+
+    const saved = store.customProfiles();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].model).toBe('yolo11n.pt,orion12l.pt');
+    expect(store.isCustom()).toBe(false);
+    expect(store.effective().model).toBe('yolo11n.pt,orion12l.pt');
+  });
+
+  it('persists a custom profile model choice across reload (round-trip)', () => {
+    store.adjust({ model: 'orion12l.pt' });
+    store.saveDraftAs('Military watch');
+    TestBed.tick();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    const saved = reloaded.customProfiles();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].model).toBe('orion12l.pt');
+    expect(reloaded.activeProfile().model).toBe('orion12l.pt');
+    expect(reloaded.effective().model).toBe('orion12l.pt');
+  });
+
+  it('ignores a corrupt persisted draft model rather than adopting it', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({ draft: { confidenceThreshold: 0.6, inferenceFps: 8, model: 'not-a-model' } }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.effective().model).toBe(DEFAULT_DETECTION_MODEL);
+    // The rest of the corrupt-field draft still restores — one bad field doesn't sink it.
+    expect(reloaded.effective().confidenceThreshold).toBe(0.6);
+  });
+
+  it('migrates a custom profile saved before the model picker existed (no model field at all)', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({
+        activeProfileId: 'custom-old-preset',
+        customProfiles: [
+          {
+            id: 'custom-old-preset',
+            name: 'Old preset',
+            description: 'Based on Balanced.',
+            builtIn: false,
+            confidenceThreshold: 0.6,
+            inferenceFps: 8,
+            // no `model` field — this is what every profile saved before this task looked like.
+          },
+        ],
+      }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.customProfiles()).toHaveLength(1);
+    expect(reloaded.customProfiles()[0].model).toBe(DEFAULT_DETECTION_MODEL);
+    expect(reloaded.activeProfile().id).toBe('custom-old-preset');
+    expect(reloaded.effective().model).toBe(DEFAULT_DETECTION_MODEL);
+    // Its own pre-existing fields are untouched by the migration.
+    expect(reloaded.effective().confidenceThreshold).toBe(0.6);
+    expect(reloaded.effective().inferenceFps).toBe(8);
   });
 
   it('survives corrupt persisted settings', () => {

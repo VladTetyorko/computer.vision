@@ -1,34 +1,37 @@
-import type { AssetAttention, CategoryCounts } from '../../core/api/models';
+import type { AssetAttention } from '../../core/api/models';
 import { formatDuration } from '../../core/stream-info-logic';
 import { TELEMETRY_AGE_RED_SECONDS } from '../../core/telemetry/telemetry-logic';
 
 /**
- * Pure, Angular-free logic behind `CommandPage` (docs/MVP3-PLAN.md §C-c) — the manager dashboard's
- * attention-queue severity rules, queue ordering, live-strip membership, readiness-tile ordering,
- * and the strip tile's own visibility gate, split out so every rule is unit-testable without HTTP,
- * the router, or a component, mirroring every other page's own `*-logic.ts` split
- * (`features/fly/fly-logic.ts`, `core/map/map-logic.ts`, etc.).
+ * Pure, Angular-free logic behind `CommandPage` (docs/UX-REWORK-PLAN.md §U-c — the map-first
+ * manager dashboard, superseding docs/MVP3-PLAN.md §C-c's stacked-cards layout) — the entity
+ * rail's attention-sort order and severity rules, and the collapsible-rail/collapsible-panel grid
+ * layout arithmetic, split out so every rule is unit-testable without HTTP, the router, or a
+ * component, mirroring every other page's own `*-logic.ts` split.
  *
- * Every function here operates on an already-fetched `FleetSummary` (one `GET /api/fleet/summary`
- * response) — nothing below issues a request or knows `VisionApi` exists, which is what makes the
- * "one summary poll drives the queue, the strip's membership, and the readiness tiles" scale claim
- * (docs/MVP3-PLAN.md §C-c bullet 6) true by construction: there is no code path here that could
- * fan out a second request per asset even by accident.
+ * **What moved out of this file in the §U-c rework, and why**: `buildAttentionQueue`/`AttentionRow`
+ * (the old, separate "attention queue" card) is replaced by `buildEntityRows` below — the rail is
+ * now the *one* asset list (attention-sorted, but showing every asset, not only flagged ones), so
+ * there is no longer a second, narrower "queue" projection to maintain alongside it.
+ * `sortReadinessTiles`/`totalStreaming` (the warehouse-readiness tiles) and `streamingAssets`/
+ * `shouldPollSnapshot` (the live-strip snapshot tiles) are deleted outright, not moved — both
+ * sections they backed are gone from Command per the plan's own user-amendments blockquote
+ * ("Warehouse-readiness section: removed"; "live strip: removed"), and neither rule had any other
+ * consumer (grep-verified before deleting).
  */
 
-// --- Attention queue (docs/MVP3-PLAN.md §C-c bullet 1) -----------------------------------------
+// --- Attention rules (unchanged from the pre-§U-c queue — still exactly what colors a rail row) --
 
-/** Battery below this percent is worth a queue row at all. */
+/** Battery below this percent is worth flagging at all. */
 export const BATTERY_ATTENTION_PERCENT = 20;
 
-/** Battery below this percent escalates the same reason to the queue's most severe tier. */
+/** Battery below this percent escalates the same reason to the most severe tier. */
 export const BATTERY_CRITICAL_PERCENT = 10;
 
 /**
- * Telemetry older than this, on a *currently streaming* asset, is itself a queue reason. Reuses
- * `core/telemetry/telemetry-logic.ts#TELEMETRY_AGE_RED_SECONDS` directly rather than re-deriving the same
- * threshold under a new name (docs/MVP3-PLAN.md's own C-b done note: Command's severity keying
- * "can reuse `telemetryAgeSeverity`'s `TELEMETRY_AGE_RED_SECONDS`=10 constant directly").
+ * Telemetry older than this, on a *currently streaming* asset, is itself an attention reason.
+ * Reuses `core/telemetry/telemetry-logic.ts#TELEMETRY_AGE_RED_SECONDS` directly rather than
+ * re-deriving the same threshold under a new name.
  */
 export const TELEMETRY_STALE_MS = TELEMETRY_AGE_RED_SECONDS * 1000;
 
@@ -38,21 +41,19 @@ export type AttentionSeverity = 'critical' | 'warning';
 export interface AttentionReason {
   readonly kind: AttentionReasonKind;
   readonly severity: AttentionSeverity;
-  /** A complete sentence — `AttentionRow#why` joins one or more of these with a space. */
+  /** A complete sentence — the panel's "why" line joins one or more of these with a space. */
   readonly text: string;
 }
 
 /**
- * How urgently each reason kind reads, highest first — a row's overall rank is the max of its own
- * triggered reasons' ranks (see `buildAttentionQueue`), so an asset with *any* rank-4/3 reason
+ * How urgently each reason kind reads, highest first — an asset's overall rank is the max of its
+ * own triggered reasons' ranks (see `buildEntityRows`), so an asset with *any* rank-4/3 reason
  * always outranks one with only rank-2/1 reasons, regardless of how many of the latter it has.
  *
  * Battery-critical and telemetry-stale share the top two ranks deliberately, both above battery-low
  * and open-events: a dead battery mid-flight and a lost telemetry link mid-flight are the same kind
- * of "this drone may not come back" risk (the plan's own persona text ranks "telemetry/link age,
- * staleness = danger" right behind the video feed itself in priority — not a lesser concern than
- * battery). Battery-low is a step down — worth watching, not yet urgent. Open detection events rank
- * lowest — informational (something was seen), not a safety condition.
+ * of "this drone may not come back" risk. Battery-low is a step down — worth watching, not yet
+ * urgent. Open detection events rank lowest — informational, not a safety condition.
  */
 const REASON_RANK: Readonly<Record<AttentionReasonKind, number>> = {
   'battery-critical': 4,
@@ -65,9 +66,9 @@ const REASON_RANK: Readonly<Record<AttentionReasonKind, number>> = {
 export type BatteryAttentionSeverity = 'critical' | 'warning' | 'ok' | 'unknown';
 
 /**
- * The single battery-severity rule the whole Command page uses — the attention queue's own reason
- * (`battery-critical`/`battery-low`) and the live strip tile's chip color both derive from this one
- * function, so "when is a battery reading worth calling out" is answered in exactly one place.
+ * The single battery-severity rule the whole Command page uses — a rail row's chip color and the
+ * detail panel's own battery fact both derive from this one function, so "when is a battery
+ * reading worth calling out" is answered in exactly one place.
  */
 export function batteryAttentionSeverity(percent: number | undefined): BatteryAttentionSeverity {
   if (percent === undefined) {
@@ -91,9 +92,9 @@ function batteryReason(percent: number | undefined): AttentionReason | undefined
 }
 
 /**
- * Telemetry stale *while streaming* only (docs/MVP3-PLAN.md §C-c: "telemetryAgeMs > 10s while
- * streaming") — an asset that isn't currently flying reporting old telemetry is expected (it landed
- * a while ago), not itself an urgent, right-now attention item the way a live drone going quiet is.
+ * Telemetry stale *while streaming* only — an asset that isn't currently flying reporting old
+ * telemetry is expected (it landed a while ago), not itself an urgent, right-now attention item the
+ * way a live drone going quiet is.
  */
 function telemetryReason(asset: AssetAttention): AttentionReason | undefined {
   if (!asset.streaming || asset.telemetryAgeMs === undefined || asset.telemetryAgeMs <= TELEMETRY_STALE_MS) {
@@ -119,9 +120,8 @@ function openEventsReason(openEventCount: number): AttentionReason | undefined {
 }
 
 /**
- * Every reason `asset` triggers, most severe first (docs/MVP3-PLAN.md §C-c's three rules: battery <
- * 20%/red < 10%, telemetryAgeMs > 10s while streaming, openEventCount > 0). An asset with none of
- * these returns an empty array — "all quiet" for that asset, not rendered in the queue at all.
+ * Every reason `asset` triggers, most severe first. An asset with none of these returns an empty
+ * array — "all quiet" for that asset (still shown in the rail, just at the bottom, unflagged).
  */
 export function attentionReasons(asset: AssetAttention): readonly AttentionReason[] {
   const reasons = [batteryReason(asset.batteryPercent), telemetryReason(asset), openEventsReason(asset.openEventCount)].filter(
@@ -130,46 +130,45 @@ export function attentionReasons(asset: AssetAttention): readonly AttentionReaso
   return [...reasons].sort((a, b) => REASON_RANK[b.kind] - REASON_RANK[a.kind]);
 }
 
-export interface AttentionRow {
-  readonly asset: AssetAttention;
-  /** Most severe first — same order `attentionReasons` already returns. */
-  readonly reasons: readonly AttentionReason[];
-  /** The most severe triggered reason's own severity — drives the row's color. */
-  readonly severity: AttentionSeverity;
-  readonly why: string;
+/** The rail/panel's own "age" column — the freshest telemetry sample's age, or `'—'` when none exists yet. */
+export function attentionAgeLabel(asset: AssetAttention): string {
+  return asset.telemetryAgeMs === undefined ? '—' : `${formatDuration(asset.telemetryAgeMs / 1000)} ago`;
 }
 
-function buildRow(asset: AssetAttention): AttentionRow | undefined {
-  const reasons = attentionReasons(asset);
-  if (reasons.length === 0) {
-    return undefined;
-  }
-  return {
-    asset,
-    reasons,
-    severity: reasons[0].severity,
-    why: reasons.map((reason) => reason.text).join(' '),
-  };
+// --- Entity rail (docs/UX-REWORK-PLAN.md §U-c bullet 1) -----------------------------------------
+
+export interface EntityRow {
+  readonly asset: AssetAttention;
+  /** Most severe first — same order `attentionReasons` already returns; empty when quiet. */
+  readonly reasons: readonly AttentionReason[];
+  /** The most severe triggered reason's own severity, or `'ok'` for a quiet asset. */
+  readonly severity: AttentionSeverity | 'ok';
+}
+
+function rowRank(row: EntityRow): number {
+  return row.reasons[0] ? REASON_RANK[row.reasons[0].kind] : 0;
 }
 
 /**
- * The attention queue: every asset with ≥1 triggered reason, most severe first (docs/MVP3-PLAN.md
- * §C-c bullet 1). Ordering, fully spec'd:
+ * The left entity rail's own rows: **every** asset (not just flagged ones — the rail replaces both
+ * the old separate "attention queue" card and the old map rail's "every asset" list), sorted
+ * attention-first:
  *
- * 1. Higher `REASON_RANK` (the most severe of an asset's own triggered reasons) first.
- * 2. Within a rank tie, more simultaneous reasons first — two things wrong at once reads as more
- *    urgent than one, regardless of which two.
- * 3. Within that tie too, alphabetical by display name (case-insensitive) — deterministic, and
- *    never leans on comparing e.g. a battery percentage against an event count across rows
- *    triggered by unrelated reasons, which would be a meaningless comparison.
+ * 1. Higher reason rank first (a quiet asset's rank is 0 — always last).
+ * 2. Within a rank tie, more simultaneous reasons first.
+ * 3. Alphabetical by display name (case-insensitive) as the final, deterministic tie-break —
+ *    this is also what orders the quiet assets among themselves, once every flagged one sorts
+ *    ahead of them.
  */
-export function buildAttentionQueue(assets: readonly AssetAttention[]): readonly AttentionRow[] {
-  const rows = assets.map(buildRow).filter((row): row is AttentionRow => row !== undefined);
+export function buildEntityRows(assets: readonly AssetAttention[]): readonly EntityRow[] {
+  const rows: EntityRow[] = assets.map((asset) => {
+    const reasons = attentionReasons(asset);
+    return { asset, reasons, severity: reasons[0]?.severity ?? 'ok' };
+  });
   return [...rows].sort((a, b) => {
-    const rankA = REASON_RANK[a.reasons[0].kind];
-    const rankB = REASON_RANK[b.reasons[0].kind];
-    if (rankA !== rankB) {
-      return rankB - rankA;
+    const rankDiff = rowRank(b) - rowRank(a);
+    if (rankDiff !== 0) {
+      return rankDiff;
     }
     if (a.reasons.length !== b.reasons.length) {
       return b.reasons.length - a.reasons.length;
@@ -178,52 +177,39 @@ export function buildAttentionQueue(assets: readonly AssetAttention[]): readonly
   });
 }
 
-/** The queue row's own "age" column — the freshest telemetry sample's age, or `'—'` when none exists yet. */
-export function attentionAgeLabel(asset: AssetAttention): string {
-  return asset.telemetryAgeMs === undefined ? '—' : `${formatDuration(asset.telemetryAgeMs / 1000)} ago`;
-}
+// --- Layout grid (docs/UX-REWORK-PLAN.md §U-c bullet 5 — geometric separation, not z-index) -----
 
-/** The empty state's own count: "All quiet — N assets, M streaming" (docs/MVP3-PLAN.md §C-c bullet 1). */
-export function totalStreaming(categories: readonly CategoryCounts[]): number {
-  return categories.reduce((sum, category) => sum + category.streaming, 0);
-}
+/** `'hidden'`: nothing selected, no reopen chip. `'collapsed'`: selected, but shrunk to a chip. */
+export type DetailPanelState = 'hidden' | 'open' | 'collapsed';
 
-// --- Live strip (docs/MVP3-PLAN.md §C-c bullet 2) -----------------------------------------------
+export const COMMAND_RAIL_WIDTH = '300px';
+export const COMMAND_PANEL_WIDTH = '380px';
 
 /**
- * Every currently-streaming asset, alphabetical by name — the live strip's own membership. Only
- * ever derived from the one already-fetched summary (never a second request), which is what makes
- * "the strip's membership" one of the three things a single summary poll drives.
+ * The full-bleed map stage's own `grid-template-columns`, as plain CSS text — computed here rather
+ * than assembled from several `[class.x]` toggles in the template, so the collapsible-rail ×
+ * collapsible-panel arithmetic (6 combinations: 2 rail states × 3 panel states) is unit-tested
+ * directly instead of eyeballed across CSS class combinations. Each side's own "reopen" toggle
+ * button is always its own grid track (`auto`) once that side is in play — mirrors
+ * `features/live/live.ts`'s `.rail-toggle` idiom (a toggle tab that's always present once its side
+ * exists, only the content column collapses) — which is also why a `'hidden'` panel contributes
+ * *no* extra track at all: there is nothing to reopen until an asset is actually selected.
+ *
+ * This is deliberately a **flex-docked** layout (rail/map/panel are side-by-side grid tracks, never
+ * `position: absolute` overlays on top of the map), not because the plan's own "chrome floating
+ * over" language forbids overlays, but because `shared/map/fleet-map.ts`'s own zoom/layer controls
+ * are fixed at `top:0.5rem` in its *own* corners (its own CSS, out of this task's reach — the plan
+ * explicitly rules out reworking `fleet-map`/`live-map` themselves) — an absolutely-positioned rail
+ * sharing that same corner would occlude them, reproducing exactly the "switcher unreachable under
+ * the map inset" incident (docs/UX-QUICKWINS-PLAN.md QF-1, `features/fly/fly.css`'s own `.hud-map`
+ * doc comment) this task was told to learn from. Docking the panels as real layout siblings instead
+ * means the map's own corner controls and this app's own chrome never share a pixel — geometric
+ * separation by construction, zero z-index coordination needed with a component this task cannot
+ * modify.
  */
-export function streamingAssets(assets: readonly AssetAttention[]): readonly AssetAttention[] {
-  return assets
-    .filter((asset) => asset.streaming && asset.streamId !== undefined)
-    .slice()
-    .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
-}
-
-/**
- * Whether a strip tile should keep polling its own snapshot — visible tiles only (docs/MVP3-PLAN.md
- * §C-c bullets 2/6: "refreshed … per VISIBLE tile only", "no O(fleet) request patterns"). A pure
- * wrapper around the same boolean an `IntersectionObserver` callback drives in
- * `features/command/live-strip-tile.ts` (mirroring `features/wall/wall-tile.ts`'s identical visibility
- * gate for its own telemetry/detections polls) — kept here so the *rule* itself, not just the DOM
- * wiring around it, is unit-tested. `hasStreamId` covers the honest gap where a tile is still
- * mounted (its asset was streaming as of the last summary poll) but the stream has since stopped —
- * there is nothing to snapshot until the next summary poll either drops the tile or hands it a
- * fresh `streamId`.
- */
-export function shouldPollSnapshot(visible: boolean, hasStreamId: boolean): boolean {
-  return visible && hasStreamId;
-}
-
-// --- Warehouse readiness tiles (docs/MVP3-PLAN.md §C-c bullet 4) --------------------------------
-
-/**
- * `FleetSummary#categories` in display order — alphabetical by category name. The server already
- * sorts by slug (`FleetSummaryResponse`'s own doc comment); this is purely a friendlier *display*
- * order, not a behavior change (a category's slug and name agree in every seed category today).
- */
-export function sortReadinessTiles(categories: readonly CategoryCounts[]): readonly CategoryCounts[] {
-  return [...categories].sort((a, b) => a.categoryName.localeCompare(b.categoryName, undefined, { sensitivity: 'base' }));
+export function commandGridColumns(railOpen: boolean, panel: DetailPanelState): string {
+  const rail = railOpen ? `${COMMAND_RAIL_WIDTH} auto` : 'auto';
+  const stage = 'minmax(0, 1fr)';
+  const panelTrack = panel === 'hidden' ? '' : panel === 'open' ? ` auto ${COMMAND_PANEL_WIDTH}` : ' auto';
+  return `${rail} ${stage}${panelTrack}`;
 }

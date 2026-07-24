@@ -18,14 +18,17 @@
     </details>
   </nav>
 
-  <div class="status" [title]="offline() ? 'Backend unreachable' : 'Backend reachable'">
-    @if (liveCount() > 0) {
-      <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
-    }
-    <span class="chip"
-      ><span class="dot" [class.ok]="fleet.reachable() === true" [class.danger]="offline()"></span
-      >{{ offline() ? 'OFFLINE' : 'ONLINE' }}</span
-    >
+  <div class="status">
+    <vision-notification-bell />
+    <span class="row" [title]="offline() ? 'Backend unreachable' : 'Backend reachable'">
+      @if (liveCount() > 0) {
+        <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
+      }
+      <span class="chip"
+        ><span class="dot" [class.ok]="fleet.reachable() === true" [class.danger]="offline()"></span
+        >{{ offline() ? 'OFFLINE' : 'ONLINE' }}</span
+      >
+    </span>
   </div>
 </header>
 

@@ -375,11 +375,11 @@ export class DevicesPage {
   }
 
   /**
-   * Registers a new device wrapping `device`'s own connection details under a brand-new asset,
-   * then archives `device` itself — `POST /api/assets` cannot reference an existing device by id
-   * (see `buildCreateAssetRequestForDevice`'s own doc comment), so this is the quick fix's honest
-   * resolution: no duplicate left behind in the Advanced table, and the new asset owns a device
-   * with identical settings. Navigates to the new asset's detail page on success.
+   * Assigns `device` — the existing, already-registered device, by id — to a brand-new asset via
+   * `POST /api/assets`'s `deviceIds` field (docs/REALTIME-PLAN.md §4's backend follow-up batch —
+   * see `buildCreateAssetRequestForDevice`'s own doc comment). No new `Device` row, no archive
+   * step: `device` keeps its own id/history/connection details, just under a new owner. Navigates
+   * to the new asset's detail page on success.
    */
   protected async confirmCreateAsset(): Promise<void> {
     const device = this.createAssetFor();
@@ -394,7 +394,6 @@ export class DevicesPage {
         this.createAssetCategory().trim(),
       );
       const created = await this.api.createAsset(request);
-      await this.fleet.deleteDevice(device.id); // archive the now-superseded standalone entry
       this.createAssetFor.set(null);
       this.toasts.ok(`Promoted to asset "${created.displayName}".`);
       await this.router.navigate(['/assets', created.assetId]);
@@ -477,7 +476,10 @@ export class DevicesPage {
       this.toasts.ok(
         `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
           `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
-        { label: 'Undo', onClick: () => void this.restoreAssetNow(assetId, result.displayName) },
+        {
+          label: 'Undo',
+          onClick: () => void this.undoArchiveAsset(assetId, result.displayName, result.devicesDeleted),
+        },
       );
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
     } catch (error) {
@@ -488,12 +490,12 @@ export class DevicesPage {
   }
 
   /**
-   * Both the Undo toast action above and the explicit "Restore asset" kebab entry (for an asset
-   * currently shown via "Show archived") call this same method — restoring is restoring either way.
-   * Only the asset's own lifecycle is reversed here, not the individual devices Archive cascaded
-   * onto (`AssetDeletionResponse#devicesDeleted`) — those stay archived until independently
-   * restored from the Advanced table; a documented, deliberate scope boundary (Undo's own primary
-   * use case is "wrong row, seconds ago", not reconstructing a fully-diverged device set).
+   * The explicit "Restore asset" kebab entry (for an asset currently shown via "Show archived")
+   * calls this — the asset's own lifecycle only. Unlike the Undo toast action (`undoArchiveAsset`
+   * below), this path has no trustworthy "how many devices *this* archive cascaded onto" figure to
+   * act on (the asset may have been archived in an earlier session, or had devices independently
+   * archived/restored meanwhile), so it stays exactly what it always was — devices stay archived
+   * until independently restored from the Advanced table.
    */
   protected async restoreAssetNow(assetId: string, displayName: string): Promise<void> {
     this.busyAssetId.set(assetId);
@@ -505,6 +507,61 @@ export class DevicesPage {
       this.toasts.error(describeHttpError(error));
     } finally {
       this.busyAssetId.set(null);
+    }
+  }
+
+  /**
+   * The Undo action fired from `archiveAssetNow`'s own toast — closes the gap that method used to
+   * document as a deliberate limitation ("Undo restores the asset's own lifecycle only, not the
+   * devices Archive cascaded onto"): restores the asset first (sequence matters — a device
+   * assign/list call against a still-archived asset could 404 otherwise), then, since
+   * `devicesArchived` (`AssetDeletionResponse#devicesDeleted`, captured at the moment of *this*
+   * archive, not guessed) says how many devices to expect, fetches the asset's current device list
+   * and restores every one Archive's own cascade left `DELETED`. Tolerates a partial device-restore
+   * failure — the asset itself is not rolled back — with a toast naming exactly what happened, so a
+   * still-archived device is never silently left behind with no explanation.
+   */
+  protected async undoArchiveAsset(assetId: string, displayName: string, devicesArchived: number): Promise<void> {
+    this.busyAssetId.set(assetId);
+    try {
+      await this.api.setAssetState(assetId, RESTORE_TARGET_STATE);
+    } catch (error) {
+      this.busyAssetId.set(null);
+      this.toasts.error(describeHttpError(error));
+      return;
+    }
+
+    let devicesRestored = 0;
+    let devicesFailed = 0;
+    if (devicesArchived > 0) {
+      try {
+        const asset = await this.api.getAsset(assetId);
+        const archivedDevices = asset.devices.filter((device) => device.state === 'DELETED');
+        const outcomes = await Promise.allSettled(
+          archivedDevices.map((device) => this.api.setDeviceState(device.id, RESTORE_TARGET_STATE)),
+        );
+        devicesRestored = outcomes.filter((outcome) => outcome.status === 'fulfilled').length;
+        devicesFailed = outcomes.length - devicesRestored;
+      } catch {
+        // Couldn't even fetch the asset's own device list — the asset itself is still restored;
+        // its devices stay archived, still restorable from the Advanced table.
+        devicesFailed = devicesArchived;
+      }
+    }
+
+    await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
+    this.busyAssetId.set(null);
+
+    if (devicesFailed > 0) {
+      const succeeded = devicesRestored > 0 ? ` (${devicesRestored} succeeded)` : '';
+      this.toasts.error(
+        `Restored "${displayName}", but ${devicesFailed} of its ${devicesArchived} device(s) failed to ` +
+          `restore${succeeded} — retry from the Advanced table.`,
+      );
+    } else if (devicesRestored > 0) {
+      this.toasts.ok(`Restored "${displayName}" and ${devicesRestored} device(s).`);
+    } else {
+      this.toasts.ok(`Restored "${displayName}".`);
     }
   }
 

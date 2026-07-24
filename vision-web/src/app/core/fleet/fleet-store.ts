@@ -1,9 +1,11 @@
-import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
+import { LiveStore } from '../live/live-store';
+import { isLiveAvailable } from '../live/live-fallback-logic';
 import type {
   ActiveStream,
   AssetDeletionResponse,
@@ -12,6 +14,7 @@ import type {
   AssetSummary,
   Device,
   DeviceEdit,
+  DevicesSnapshot,
   RegisterDeviceRequest,
   SettableLifecycleState,
   SimulationResponse,
@@ -37,13 +40,29 @@ const LOG_PREFIX = '[fleet]';
  *
  * Every page reads the same two signals, so the Wall, the Devices tab and a Live view
  * cannot disagree — and there is exactly one poller in the app rather than one per page
- * (docs/WEB-PLAN.md, W6). Polling pauses while the tab is hidden.
+ * (docs/WEB-PLAN.md, W6).
+ *
+ * **Projection of `LiveStore`'s `devices` topic** (docs/REALTIME-PLAN.md §4's backend follow-up
+ * batch — the same poll-vs-live pattern `TelemetryStore`/`DetectionsStore` established in R-c,
+ * simplified since this topic is app-wide and always-on, not per-asset/opt-in): while `LiveStore`
+ * is `'open'`, `devices`/`streams` are set atomically from each `DevicesSnapshotResponse` envelope
+ * (both fields from the *same* snapshot — never independently stale relative to each other) and
+ * the 5s poll below is paused entirely; while not `'open'`, the 5s `GET /api/devices`+`GET
+ * /api/streams` poll is the (documented) fallback, exactly as it always was. No ref-counted
+ * subscribe/unsubscribe is needed here (unlike `trackTelemetry`/`trackDetections`) — `devices` is
+ * always-on, arriving on every connection regardless of the `topics` query parameter, so this store
+ * only ever routes by `LiveStore.connectionState()`, never calls `track*`/`untrack*`.
+ *
+ * The constructor's own one-time `refresh()` call stays unconditional (mirrors `TelemetryStore`'s
+ * "always one backfill fetch" precedent) — it paints something immediately without waiting on the
+ * SSE handshake, and a live snapshot simply overwrites it moments later once `LiveStore` connects.
  */
 @Injectable({ providedIn: 'root' })
 export class FleetStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly scheduler = inject(PollScheduler);
+  private readonly live = inject(LiveStore);
 
   private readonly devicesSignal = signal<readonly Device[]>([]);
   private readonly streamsSignal = signal<readonly ActiveStream[]>([]);
@@ -62,15 +81,82 @@ export class FleetStore {
     () => new Set(this.streamsSignal().map((stream) => stream.deviceId)),
   );
 
+  /** `null` until the poll is actually paused/resumed for the first time — see `applyTransport`. */
+  private stopPollingFn: (() => void) | null = null;
+
   constructor() {
-    void this.refresh();
+    void this.refresh(); // one-time initial fetch, regardless of live — see class doc.
     // Poll-while-visible now runs off the app's one shared timer (docs/CYCLES-PLAN.md §9, CU-b
-    // item 3 — `PollScheduler`) rather than this store's own `setInterval`.
-    // Returns the `refresh()` promise (not `void`-discarded) so `PollScheduler`'s in-flight guard
-    // can skip a tick while the previous poll is still pending, rather than piling another request
-    // on top of a slow/hung backend (docs/MVP2-PLAN.md §S, S-b).
-    const unsubscribe = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.refresh({ quiet: true }));
-    inject(DestroyRef).onDestroy(unsubscribe);
+    // item 3 — `PollScheduler`) rather than this store's own `setInterval`. Started unconditionally
+    // here so today's (pre-live, or live-unavailable) behavior is unchanged byte-for-byte; the
+    // effect below only ever pauses it (once live opens) or resumes it (once live drops), never
+    // double-registers it — see `applyTransport`'s own `stopPollingFn !== null` guard.
+    this.stopPollingFn = this.schedulePoll();
+
+    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops (docs/REALTIME-PLAN.md
+    // §4's backend follow-up batch) — mirrors `TelemetryStore`/`DetectionsStore`'s identical
+    // reconnect-driven effect, simplified: no per-session `tracking` guard is needed since this
+    // store has no track()/reset() session at all, just "poll, unless live is open".
+    effect(() => {
+      this.applyTransport(isLiveAvailable(this.live.connectionState()));
+    });
+
+    // Applies each `devices` snapshot atomically the moment one arrives — independent of whether
+    // the poll is currently running, so a snapshot that lands before the connectionState effect
+    // above has paused polling (or one that arrives while genuinely subscribed) is never dropped.
+    effect(() => {
+      const snapshot = this.live.devices();
+      if (snapshot !== undefined) {
+        this.applyDevicesSnapshot(snapshot);
+      }
+    });
+
+    inject(DestroyRef).onDestroy(() => this.stopPolling());
+  }
+
+  /**
+   * Switches whether the local 5s poll is running — **not** whether `LiveStore` itself has a
+   * connection (that's `LiveStore`'s own concern; there is nothing to subscribe/unsubscribe here,
+   * `devices` being always-on). `liveAvailable` pauses the poll; its absence resumes it, refetching
+   * immediately first (mirrors `TelemetryStore.applyTransport`'s reconnect-driven branch) since
+   * `devices`/`streams` may be stale from however long the live connection was up. A no-op when the
+   * poll is already in the requested state (`stopPollingFn`'s own nullness tracks that).
+   */
+  private applyTransport(liveAvailable: boolean): void {
+    if (liveAvailable) {
+      this.stopPolling();
+      return;
+    }
+    if (this.stopPollingFn !== null) {
+      return; // already polling
+    }
+    void this.refresh({ quiet: true });
+    this.stopPollingFn = this.schedulePoll();
+  }
+
+  /**
+   * Applies one `devices` envelope: both lists set together (the envelope's own atomicity
+   * guarantee — see class doc), and `reachable` set `true` — a live snapshot arriving is itself
+   * proof the backend is reachable, exactly as a successful `refresh()` would conclude.
+   */
+  private applyDevicesSnapshot(snapshot: DevicesSnapshot): void {
+    this.devicesSignal.set(snapshot.devices);
+    this.streamsSignal.set(snapshot.streams);
+    this.reachableSignal.set(true);
+  }
+
+  /**
+   * Returns the `refresh()` promise (not `void`-discarded) so `PollScheduler`'s in-flight guard can
+   * skip a tick while the previous poll is still pending, rather than piling another request on top
+   * of a slow/hung backend (docs/MVP2-PLAN.md §S, S-b).
+   */
+  private schedulePoll(): () => void {
+    return this.scheduler.schedule(POLL_INTERVAL_MS, () => this.refresh({ quiet: true }));
+  }
+
+  private stopPolling(): void {
+    this.stopPollingFn?.();
+    this.stopPollingFn = null;
   }
 
   /** The stream currently running for a device, if any. */

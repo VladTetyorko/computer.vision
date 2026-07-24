@@ -1,8 +1,24 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { BUILT_IN_PROFILES, SettingsStore } from '../../core/settings/settings-store';
+import {
+  BUILT_IN_PROFILES,
+  DETECTION_MODEL_OPTIONS,
+  SettingsStore,
+  type DetectionModelId,
+} from '../../core/settings/settings-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { ToastService } from '../../core/toast.service';
 
+/**
+ * docs/CV-MODELS-PLAN.md item 4 — the model picker persists a choice (`SettingsStore`, same
+ * profile/draft/custom semantics as confidence/fps) that now reaches a running stream end to end:
+ * `StartStreamRequest` (`core/api/models.ts`) declares the `model` field mirroring vision-api's own
+ * DTO (`StartStreamRequest.java`/`StartAssetStreamRequest.java`, whose `mergeOntoDefaults()` builds
+ * a `ModelRef` from it — landed concurrently with this UI, same field name, same "raw
+ * possibly-composite string, verbatim" contract), and `fleet.start()` posts `settings.effective()`
+ * straight through with no destructuring in between, so the value was already riding in the JSON
+ * body even before the DTO declared it. No further frontend wiring needed for this to take effect
+ * on the next stream start.
+ */
 @Component({
   selector: 'vision-settings',
   templateUrl: './settings.html',
@@ -15,6 +31,8 @@ export class SettingsPage {
   private readonly toasts = inject(ToastService);
 
   protected readonly newProfileName = signal('');
+
+  protected readonly modelOptions = DETECTION_MODEL_OPTIONS;
 
   /**
    * The browser's own grant, read once per render rather than tracked as a signal — this app has
@@ -41,8 +59,16 @@ export class SettingsPage {
     if (current.inferenceFps !== this.defaults.inferenceFps) {
       changes.push(`inference ${this.defaults.inferenceFps} → ${current.inferenceFps} fps`);
     }
+    if (current.model !== this.defaults.model) {
+      changes.push(`model ${this.modelLabel(this.defaults.model)} → ${this.modelLabel(current.model)}`);
+    }
     return changes;
   });
+
+  /** Also used by the template to show a profile's model in its compact values line. */
+  protected modelLabel(id: DetectionModelId): string {
+    return this.modelOptions.find((option) => option.id === id)?.label ?? id;
+  }
 
   protected readonly customProfiles = computed(() => this.settings.customProfiles());
 
@@ -56,6 +82,10 @@ export class SettingsPage {
 
   protected onFps(value: string): void {
     this.settings.adjust({ inferenceFps: Number(value) });
+  }
+
+  protected onModel(model: DetectionModelId): void {
+    this.settings.adjust({ model });
   }
 
   protected saveAs(): void {

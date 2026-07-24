@@ -1,0 +1,104 @@
+<div class="panel">
+  <header class="panel-head">
+    <div class="panel-title">
+      <span class="name truncate">{{ asset().displayName }}</span>
+      <span class="chip">{{ asset().categoryName }}</span>
+    </div>
+    <button type="button" class="btn secondary small" (click)="closePanel.emit()" aria-label="Close panel">×</button>
+  </header>
+
+  <div class="segmented tabs" role="tablist">
+    <button type="button" class="btn secondary small" role="tab" [class.active]="activeTab() === 'status'" (click)="selectTab('status')">
+      Status
+    </button>
+    <button type="button" class="btn secondary small" role="tab" [class.active]="activeTab() === 'telemetry'" (click)="selectTab('telemetry')">
+      Telemetry
+    </button>
+    <button type="button" class="btn secondary small" role="tab" [class.active]="activeTab() === 'video'" (click)="selectTab('video')">
+      Video
+    </button>
+  </div>
+
+  <div class="panel-body">
+    @switch (activeTab()) {
+      @case ('status') {
+        <dl class="facts">
+          <div class="fact">
+            <dt>Stream</dt>
+            <dd>
+              <span class="chip" [class.ok]="asset().streaming">
+                @if (asset().streaming) {
+                  <span class="dot live"></span>
+                }
+                {{ asset().streaming ? 'Streaming' : 'Offline' }}
+              </span>
+            </dd>
+          </div>
+          <div class="fact"><dt>Lifecycle</dt><dd>{{ asset().lifecycle }}</dd></div>
+          <div class="fact"><dt>Open events</dt><dd class="mono">{{ asset().openEventCount }}</dd></div>
+          <div class="fact"><dt>Telemetry age</dt><dd class="mono">{{ ageLabel() }}</dd></div>
+        </dl>
+
+        @if (reasons().length > 0) {
+          <div class="why-block">
+            @for (reason of reasons(); track reason.kind) {
+              <div class="row why-row">
+                <span class="chip severity-chip" [class.danger]="reason.severity === 'critical'" [class.warn]="reason.severity === 'warning'">
+                  {{ reason.severity === 'critical' ? 'CRITICAL' : 'WARNING' }}
+                </span>
+                <span class="why-text">{{ reason.text }}</span>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="muted hint">All quiet — nothing needs attention on this asset right now.</p>
+        }
+      }
+      @case ('telemetry') {
+        @if (marker(); as m) {
+          <dl class="facts">
+            <div class="fact">
+              <dt>Position</dt>
+              <dd class="mono">{{ m.position.latitude.toFixed(5) }}, {{ m.position.longitude.toFixed(5) }}</dd>
+            </div>
+            <div class="fact">
+              <dt>Altitude</dt>
+              <dd class="mono">{{ m.position.altitudeMeters !== undefined ? m.position.altitudeMeters.toFixed(0) + ' m' : '—' }}</dd>
+            </div>
+            <div class="fact">
+              <dt>Heading</dt>
+              <dd class="mono">{{ m.headingDegrees !== undefined ? m.headingDegrees.toFixed(0) + '°' : '—' }}</dd>
+            </div>
+            <div class="fact">
+              <dt>Battery</dt>
+              <dd class="mono" [class.stale-text]="batterySeverity() === 'critical'">
+                {{ m.batteryPercent !== undefined ? m.batteryPercent.toFixed(0) + '%' : '—' }}
+              </dd>
+            </div>
+            <div class="fact">
+              <dt>Sample age</dt>
+              <dd class="mono">{{ m.sampleAgeSeconds !== undefined ? m.sampleAgeSeconds.toFixed(0) + 's ago' : '—' }}</dd>
+            </div>
+          </dl>
+        } @else {
+          <p class="muted hint">No position or telemetry recorded yet for this asset.</p>
+        }
+      }
+      @case ('video') {
+        @if (videoDeviceId()) {
+          <vision-player [src]="stream()?.viewUrl ?? null" [whepUrl]="stream()?.whepUrl ?? null" [compact]="true" />
+          @if (!stream()) {
+            <p class="muted hint">Not streaming right now — start it from Details.</p>
+          }
+        } @else {
+          <p class="muted hint">This asset has no camera device.</p>
+        }
+      }
+    }
+  </div>
+
+  <div class="row panel-actions">
+    <button type="button" class="btn secondary small" (click)="watchLive.emit()">Watch live</button>
+    <button type="button" class="btn secondary small" (click)="openDetails.emit()">Details</button>
+  </div>
+</div>

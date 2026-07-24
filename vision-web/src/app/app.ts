@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, afterNextRender, computed, inject }
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
+import { NotificationBell } from './shared/ui/notification-bell';
 import { ToastHost } from './shared/ui/toast-host';
 
 interface Tab {
@@ -9,9 +10,19 @@ interface Tab {
   readonly label: string;
 }
 
+/**
+ * `<vision-notification-bell>` (`app.html`, next to the existing live-count/online status chips) is
+ * a deliberate, named exception to docs/UX-REWORK-PLAN.md §U-b item 4's "zero action buttons in
+ * persistent chrome" — the plan's own §U-c user-amendments blockquote carves this one out
+ * explicitly ("Events become notifications (header bell + transient toasts …)"). It reads as one
+ * more status affordance alongside the two chips already there (information access, not a mutation
+ * trigger), not the return of a header action button. See that component's own doc comment for the
+ * `EventsStore` cost-model change it introduces (the events poll is now effectively always-on, not
+ * just while Wall/Command/an asset page is mounted).
+ */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, ToastHost],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, NotificationBell, ToastHost],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -34,7 +45,12 @@ export class App {
    * (docs/UX-REWORK-PLAN.md U-a item 5): its route (`features/debug/debug.routes.ts`) is
    * untouched and still fully reachable by direct URL, just no longer advertised in any nav
    * surface — a raw API console isn't a link a pilot/manager should stumble into from "More".
-   * Nothing else about the More menu changes: `/wall` and `/map` stay exactly as they were.
+   *
+   * **`Map` is gone from `moreLinks` (docs/UX-REWORK-PLAN.md §U-c)**: `/map` now redirects into
+   * `/command` (`features/map/map.routes.ts`) — Command absorbed the fleet map, the asset rail, and
+   * the docked live preview, so a separate "Map" link would just be a second door to the same
+   * screen. `Wall` stays (the plan's own user-amendments blockquote: "the Wall stays as its own
+   * route and covers 'all video at once', so Command does NOT absorb Wall").
    */
   protected readonly tabs: readonly Tab[] = [
     { path: '/fly', label: 'Fly' },
@@ -44,10 +60,7 @@ export class App {
   ];
 
   /** The plan's "still reachable, not removed" routes — folded into the header's "More" overflow. */
-  protected readonly moreLinks: readonly Tab[] = [
-    { path: '/wall', label: 'Wall' },
-    { path: '/map', label: 'Map' },
-  ];
+  protected readonly moreLinks: readonly Tab[] = [{ path: '/wall', label: 'Wall' }];
 
   protected readonly liveCount = computed(() => this.fleet.streams().length);
   protected readonly offline = computed(() => this.fleet.reachable() === false);

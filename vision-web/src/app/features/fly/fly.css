@@ -330,6 +330,10 @@
   top: 3.6rem;
   right: 0.75rem;
   width: min(22rem, 32vw);
+  /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
+     (400+) from escaping to the root and painting over header overlays (bell dropdown). */
+  isolation: isolate;
+  z-index: 0;
 }
 
 .hud-secondary {

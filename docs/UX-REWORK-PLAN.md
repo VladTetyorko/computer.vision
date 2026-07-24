@@ -124,6 +124,14 @@ design report):
 Exit: side-by-side screenshot review; no gradient/shadow-card/violet leftovers; telemetry numbers
 don't jitter; header has no buttons.
 
+> **User amendments (2026-07-24), authoritative over the section below where they differ:**
+> map is the first-priority canvas; clicking drones on the map keeps its current behavior;
+> **Warehouse-readiness section: removed** (drill-down lives in Warehouse itself);
+> **Events become notifications** (header bell + transient toasts via the existing toast system),
+> not a docked module; **live strip: removed** — the Wall stays as its own route and covers
+> "all video at once", so Command does NOT absorb Wall. `/map` folds into Command (redirect).
+> Styles/colors get a verification pass after the rebuild.
+
 ## U-c — Screen consolidation: map-first manager, cockpit pilot (≈1–2 weeks, frontend)
 
 Today three screens overlap on "see the whole fleet" (Wall=video grid, Map=geo, Command=attention)

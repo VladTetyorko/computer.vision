@@ -1,117 +1,158 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
-import { ScrollingModule } from '@angular/cdk/scrolling';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
+import { Router, RouterLink } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { EventsStore } from '../../core/events/events-store';
+import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { FleetMapStore } from '../../core/map/map-store';
-import { resolveEventTarget } from '../../core/events/events-logic';
+import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { FleetMap } from '../../shared/map/fleet-map';
-import { LiveDock } from '../../shared/map/live-dock';
-import { EventsRail } from '../../shared/ui/events-rail';
-import { LiveStripTile } from './live-strip-tile';
-import { attentionAgeLabel, buildAttentionQueue, sortReadinessTiles, streamingAssets, totalStreaming } from './command-logic';
-import type { AssetAttention, DetectionEvent, FleetSummary } from '../../core/api/models';
+import { AssetPanel } from './asset-panel';
+import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
+import type { AssetAttention, FleetSummary } from '../../core/api/models';
 
-/** The one poll driving the attention queue, the strip's membership, and the readiness tiles alike. */
+/** The one poll driving the entity rail and the selected asset's Status/Telemetry facts alike. */
 const SUMMARY_POLL_INTERVAL_MS = 5_000;
 
+const RAIL_OPEN_KEY = 'vision.command.railOpen';
+const PANEL_OPEN_KEY = 'vision.command.panelOpen';
+
 /**
- * `/command` — the manager dashboard (docs/MVP3-PLAN.md §C-c), the second of the plan's two
- * job-oriented pages: *does attention triage, not watching* — "an operator opens the app and is
- * flying-aware in one click; a manager opens the app and knows within five seconds which of 100
- * assets needs attention."
+ * `/command` — the manager dashboard (docs/UX-REWORK-PLAN.md §U-c, superseding docs/MVP3-PLAN.md
+ * §C-c's stacked-cards layout with the plan's own map-first, three-panel model: FlytBase Fleet View
+ * 2.0's "full-bleed map as canvas, slim entity rail docked left, detail panel docked right").
  *
- * **One aggregated poll drives everything** (bullet 6): `GET /api/fleet/summary` every 5s
- * (`refreshSummary`, via the shared `PollScheduler`) populates one `summary` signal; the attention
- * queue, the live strip's membership, and the warehouse readiness tiles are all pure `computed()`s
- * over that one signal (`command-logic.ts`) — there is no code path anywhere on this page that
- * issues a second request per asset. The only *other* requests this page makes are: one snapshot
- * poll per **visible** live-strip tile (`live-strip-tile.ts`, gated by `IntersectionObserver` +
- * CDK virtual scroll — see that component's own doc comment), and whatever `shared/map/fleet-map.ts`'s own
- * already-established polling does for its embedded map (see below) — never anything proportional
- * to total fleet size from this page's own code.
+ * **Layout**: `<vision-fleet-map>` fills the entire stage between two independently collapsible
+ * docked panels (`command-logic.ts#commandGridColumns` computes the grid — see its own doc comment
+ * for why these are real grid-track siblings, not `position: absolute` overlays, and how that
+ * avoids the map's own zoom/layer controls entirely by construction rather than z-index
+ * coordination). Both panels persist their collapsed state per user (`core/panel-state.ts`,
+ * docs/UX-REWORK-PLAN.md §U-b item 7's "explicit collapse, reopen via toggle chip" — mirrors
+ * `features/live/live.ts`'s `railOpen`/`features/fly/fly.ts`'s `mapVisible` exactly).
  *
- * **Composition, not new UI** — every section reuses an existing piece, each justified below (the
- * plan's own binding "reuse-first" rule):
- * - **Attention queue** — new markup (a list has to render *somewhere*), but zero new polling: pure
- *   `computed()`s over `summary()` via `command-logic.ts#buildAttentionQueue`.
- * - **Live strip** — `LiveStripTile` is genuinely new (no existing component polls a snapshot
- *   `<img>`), but it's a thin composition of an `<img>` + the same `IntersectionObserver`/
- *   `PollScheduler` idioms `features/wall/wall-tile.ts` already established, not a new pattern.
- * - **Fleet map** — `<vision-fleet-map>` (`shared/map/fleet-map.ts`) reused **unmodified**, own
- *   `FleetMapStore` instance (own `providers`, like `MapPage`). Its own already-existing 5s
- *   `GET /api/assets` poll + per-*streaming*-asset 2s telemetry pollers are unchanged, pre-existing
- *   behavior from C6/CU-b, not new surface this cycle adds — see the Status/report note on why this
- *   doesn't count against this page's own "one summary poll" duty. Its `(watch)` output (unchanged
- *   component contract) still emits an assetId, but this page wires it straight to `watchAsset` —
- *   `/fly?asset=<id>&watch=1` (no device lookup needed, unlike `MapPage`'s `/live/:deviceId`) — its
- *   `(preview)` output still docks `<vision-live-dock>` exactly like `MapPage` (`onPreview`). Both
- *   read "Watch live" on screen (docs/UX-REWORK-PLAN.md U-a2 item 1 — the full-page-vs-inline
- *   split is a presentation detail, not two verbs); `openAsset`/attention-row's own "Details"
- *   button is the other half of the collapsed Watch/Preview/Open triple.
- * - **Warehouse readiness tiles** — plain buttons over `summary().categories` (never capped,
- *   server-side truth regardless of the `assets` list's own 500-row cap); click navigates to
- *   `/devices` (CD-b's own asset-first list has no category filter to deep-link into yet — per the
- *   plan's own instruction, this does **not** add one; a future cycle that adds Devices filtering
- *   is where this tile's click would gain a query param).
- * - **Events rail** — `<vision-events-rail>` (`shared/ui/events-rail.ts`, extracted from `features/wall/`
- *   this same cycle so Command could reuse it too — see that component's own doc comment) reused
- *   unmodified; this page owns `EventsStore.activate()`/`release()` exactly like `WallPage`/
- *   `MapPage`/`AssetDetailPage` already do (one more of the handful of pages keeping that shared
- *   poll alive while mounted) and resolves a clicked row's navigation target itself
- *   (`openEventFromRail`), identical to `WallPage`'s own `openEvent`.
+ * **Selecting an asset** (a rail row, or `<vision-fleet-map>`'s own `(preview)` output — a direct
+ * marker click, unchanged component behavior per the plan's own "keep the existing marker/popup
+ * behavior" instruction) opens the right `<vision-asset-panel>`. Everything that panel shows is
+ * data this page already has from its own existing pollers — **zero new recurring requests**:
+ * - Status/the "why" reasons: the one `GET /api/fleet/summary` poll (`summary`, unchanged from the
+ *   pre-§U-c page — still the single aggregated poll behind the whole page).
+ * - Telemetry facts (position/altitude/heading/battery/age): the embedded `<vision-fleet-map>`'s own
+ *   `FleetMapStore` (`mapStore.markers()`) — the exact reuse `shared/map/live-dock.ts` already
+ *   established ("passing marker in avoids a second, redundant telemetry poller").
+ * - Video: one **one-shot** `FleetMapStore.resolveWatchDevice(assetId)` call per selection change
+ *   (unchanged from the old docked-preview's own `onPreview`, just retargeted — see below) plus the
+ *   always-on root `FleetStore.streamFor(deviceId)`.
  *
- * **CDK virtual scroll** (bullet 3/scale duty) on the live strip — this app's second use of
- * `@angular/cdk/scrolling` beyond `features/devices/devices.ts`'s asset list (U2's own precedent,
- * horizontal here rather than vertical: `orientation="horizontal"`, still a fixed `itemSize`).
- * Rendering cost for the strip stays bounded to roughly "however many tiles fit the viewport plus a
- * small buffer" regardless of how many assets in the fleet happen to be streaming at once.
+ * **Removed this cycle** (docs/UX-REWORK-PLAN.md §U-c's own user-amendments blockquote):
+ * the Warehouse-readiness tiles (drill-down lives in Warehouse itself now) and the live strip
+ * (`LiveStripTile`, deleted — its one consumer was this page). The events rail is gone from this
+ * page too — events are notifications now (the app shell's header bell, `shared/ui/notification-bell.ts`),
+ * not a docked module; `EventsStore` stays the data source, just activated by the shell instead of
+ * by this page (see that component's own doc comment for the resulting always-on cost, superseding
+ * this store's old "O(visible) discipline" note).
+ *
+ * **`<vision-live-dock>` is no longer used here** — the old "docked preview beside the map" role is
+ * now the asset panel's own Video tab (a superset: facts + actions, not just a bare player). Its
+ * `(preview)` handler is retargeted from "resolve a device and dock `LiveDock`" to "select this
+ * asset", which is the *only* change to how `<vision-fleet-map>` is composed here — the component
+ * itself, its inputs, and its `(watch)`/`(preview)`/`(openEventAsset)` outputs are all unchanged.
  */
 @Component({
   selector: 'vision-command',
-  imports: [ScrollingModule, FleetMap, LiveDock, EventsRail, LiveStripTile],
+  imports: [FleetMap, AssetPanel, RouterLink],
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // Own instance per route activation, identical convention to `MapPage`'s own `FleetMapStore`.
+  // Own instance per route activation, identical convention to the pre-§U-c page's own `FleetMapStore`.
   providers: [FleetMapStore],
 })
 export class CommandPage {
   private readonly router = inject(Router);
   private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
-  protected readonly events = inject(EventsStore);
   protected readonly mapStore = inject(FleetMapStore);
+
+  /**
+   * `?asset=<id>` deep link (docs/UX-REWORK-PLAN.md §U-c's "preserve ?asset deep links if map
+   * supported any" — `/map` never actually had one, grep-verified before writing this; added here
+   * anyway for consistency with `features/fly/fly.ts`'s identical `requestedAssetId` precedent, and
+   * because `/map` now redirects here, this *is* where such a link would need to land). Query
+   * params bind to inputs by name/alias automatically (`withComponentInputBinding()`,
+   * `app.config.ts`) — no route-table change needed.
+   */
+  readonly requestedAssetId = input<string | undefined>(undefined, { alias: 'asset' });
 
   protected readonly summary = signal<FleetSummary | undefined>(undefined);
   /** Only ever set when the *very first* load fails — a background poll failure silently degrades. */
   protected readonly summaryError = signal(false);
   protected readonly includeArchived = signal(false);
 
-  protected readonly attentionRows = computed(() => buildAttentionQueue(this.summary()?.assets ?? []));
-  protected readonly stripAssets = computed(() => streamingAssets(this.summary()?.assets ?? []));
-  protected readonly readinessTiles = computed(() => sortReadinessTiles(this.summary()?.categories ?? []));
-  protected readonly totalAssetsCount = computed(() => this.summary()?.totalAssets ?? 0);
-  protected readonly totalStreamingCount = computed(() => totalStreaming(this.summary()?.categories ?? []));
+  protected readonly entityRows = computed(() => buildEntityRows(this.summary()?.assets ?? []));
 
-  // --- Docked live preview (bullet 3, LiveDock precedent) — at most one at a time, identical
-  // shape to `MapPage`'s own `dockedAssetId`/`dockedDeviceId`/`dockedMarker`.
-  protected readonly dockedAssetId = signal<string | null>(null);
-  protected readonly dockedDeviceId = signal<string | null>(null);
-  protected readonly dockedMarker = computed(() => {
-    const assetId = this.dockedAssetId();
+  // --- Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7 / §U-c bullet 5) -------------------
+  protected readonly railOpen = signal(readPersistedFlag(RAIL_OPEN_KEY, true));
+  private readonly panelOpenPreference = signal(readPersistedFlag(PANEL_OPEN_KEY, true));
+
+  // --- Selection (docs/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------------
+  protected readonly selectedAssetId = signal<string | null>(null);
+  protected readonly selectedVideoDeviceId = signal<string | undefined>(undefined);
+
+  protected readonly selectedAsset = computed<AssetAttention | undefined>(() =>
+    this.summary()?.assets.find((asset) => asset.assetId === this.selectedAssetId()),
+  );
+
+  protected readonly selectedMarker = computed(() => {
+    const assetId = this.selectedAssetId();
     return assetId ? this.mapStore.markers().find((marker) => marker.assetId === assetId) : undefined;
   });
 
+  protected readonly selectedStream = computed(() => {
+    const deviceId = this.selectedVideoDeviceId();
+    return deviceId ? this.fleet.streamFor(deviceId) : undefined;
+  });
+
+  /**
+   * `'hidden'` whenever there is no *resolvable* selection — tied to `selectedAsset()`, not the
+   * raw id, so a selection that stops existing in the current summary (archived, or the
+   * "include archived" toggle flipped off underneath it) self-heals the layout back to no panel
+   * rather than reserving a grid track for content that no longer renders. Otherwise the manager's
+   * own open/collapsed preference.
+   */
+  protected readonly panelState = computed<DetailPanelState>(() =>
+    this.selectedAsset() === undefined ? 'hidden' : this.panelOpenPreference() ? 'open' : 'collapsed',
+  );
+
+  protected readonly gridColumns = computed(() => commandGridColumns(this.railOpen(), this.panelState()));
+
+  protected readonly mapIsEmpty = computed(() => this.mapStore.assets().length === 0);
+  protected readonly addingTestDrone = signal(false);
+
+  private appliedDeepLink = false;
+
   constructor() {
-    this.events.activate();
     void this.refreshSummary();
     const stopPoll = inject(PollScheduler).schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
-    inject(DestroyRef).onDestroy(() => {
-      this.events.release();
-      stopPoll();
+    inject(DestroyRef).onDestroy(stopPoll);
+
+    effect(() => writePersistedFlag(RAIL_OPEN_KEY, this.railOpen()));
+    effect(() => writePersistedFlag(PANEL_OPEN_KEY, this.panelOpenPreference()));
+
+    // One-shot `?asset=` resolution, mirroring `fly.ts#initPicker`'s own "runs once, never inside
+    // the periodic poll" rule — a later query-param change while already on `/command` should not
+    // silently override a manager's own subsequent click elsewhere in the rail/map.
+    effect(() => {
+      if (this.appliedDeepLink) {
+        return;
+      }
+      const requested = this.requestedAssetId();
+      const assets = this.summary()?.assets;
+      if (!requested || !assets) {
+        return;
+      }
+      this.appliedDeepLink = true;
+      if (assets.some((asset) => asset.assetId === requested)) {
+        void this.selectAsset(requested);
+      }
     });
   }
 
@@ -134,58 +175,80 @@ export class CommandPage {
     void this.refreshSummary(); // don't make the toggle wait up to 5s for the next scheduled poll
   }
 
-  // --- Navigation (the drill-down target every surface on this page shares) -------------------
+  protected toggleRail(): void {
+    this.railOpen.update((open) => !open);
+  }
 
-  /** `router.navigate(['/fly'], {queryParams: {asset, watch: 1}})` — C-a/C-b's own pinned contract. */
+  protected togglePanelCollapse(): void {
+    this.panelOpenPreference.update((open) => !open);
+  }
+
+  // --- Selection (rail row click, or the map's own direct-marker-click `(preview)`) --------------
+
+  /**
+   * Selects `assetId` for the right-hand panel and resolves its video device (one-shot, mirrors
+   * the pre-§U-c docked-preview's own `onPreview` — see class doc). A fresh selection always shows
+   * the panel, even if the operator had previously collapsed it — collapsing is "get this out of my
+   * way for now", not "never show me a panel again".
+   */
+  protected async selectAsset(assetId: string): Promise<void> {
+    this.selectedAssetId.set(assetId);
+    this.selectedVideoDeviceId.set(undefined);
+    this.panelOpenPreference.set(true);
+    const device = await this.mapStore.resolveWatchDevice(assetId);
+    // Guard against a stale response landing after the operator already selected someone else.
+    if (this.selectedAssetId() === assetId) {
+      this.selectedVideoDeviceId.set(device?.id);
+    }
+  }
+
+  protected closePanel(): void {
+    this.selectedAssetId.set(null);
+    this.selectedVideoDeviceId.set(undefined);
+  }
+
+  // --- Navigation (the verb dictionary's two terms — docs/UX-REWORK-PLAN.md §U-a2 item 1) --------
+
+  /** `router.navigate(['/fly'], {queryParams: {asset, watch: 1}})` — the pinned Watch-live contract. */
   protected watchAsset(assetId: string): void {
     void this.router.navigate(['/fly'], { queryParams: { asset: assetId, watch: 1 } });
+  }
+
+  protected watchSelected(): void {
+    const assetId = this.selectedAssetId();
+    if (assetId) {
+      this.watchAsset(assetId);
+    }
   }
 
   protected openAsset(assetId: string): void {
     void this.router.navigate(['/assets', assetId]);
   }
 
+  protected openSelectedDetails(): void {
+    const assetId = this.selectedAssetId();
+    if (assetId) {
+      this.openAsset(assetId);
+    }
+  }
+
+  /** `<vision-fleet-map>`'s event-popup "Details" button — unchanged target, just this page's own wiring. */
+  protected openEventAsset(assetId: string): void {
+    this.openAsset(assetId);
+  }
+
   /**
-   * A readiness tile's drill-down (docs/UX-QUICKWINS-PLAN.md QF-3): navigates to that tile's own
-   * category, matching its visual promise, rather than the same plain `/devices` every tile used to
-   * open regardless of which one was clicked. `categoryId` absent falls back to plain `/devices`
-   * (unfiltered) — the same behavior every caller had before this fix.
+   * The map's own empty-state action, ported from the now-deleted `MapPage` (docs/UX-REWORK-PLAN.md
+   * §U-c: "their components fold in") — one click places a moving synthetic drone with no video
+   * file, the fastest way to see the map plot something with no hardware/file path needed.
    */
-  protected openDevices(categoryId?: string): void {
-    void this.router.navigate(['/devices'], categoryId ? { queryParams: { category: categoryId } } : {});
-  }
-
-  protected ageLabel(asset: AssetAttention): string {
-    return attentionAgeLabel(asset);
-  }
-
-  // --- Fleet map wiring (mirrors `MapPage`'s own split — see class doc) -----------------------
-
-  protected async onPreview(assetId: string): Promise<void> {
-    const device = await this.mapStore.resolveWatchDevice(assetId);
-    if (device) {
-      this.dockedAssetId.set(assetId);
-      this.dockedDeviceId.set(device.id);
+  protected async addTestDrone(): Promise<void> {
+    this.addingTestDrone.set(true);
+    try {
+      await this.fleet.simulate(buildTestDroneRequest({ name: '', latitude: null, longitude: null, autoStart: true }));
+      await this.mapStore.refresh();
+    } finally {
+      this.addingTestDrone.set(false);
     }
-  }
-
-  protected closeDock(): void {
-    this.dockedAssetId.set(null);
-    this.dockedDeviceId.set(null);
-  }
-
-  // --- Events rail wiring (identical to `WallPage`'s own `openEvent`) --------------------------
-
-  protected openEventFromRail(event: DetectionEvent): void {
-    const target = resolveEventTarget(event, this.fleet.streams());
-    if (!target) {
-      return;
-    }
-    void this.router.navigate(target.kind === 'asset' ? ['/assets', target.id] : ['/live', target.id]);
-  }
-
-  /** `cdkVirtualFor`'s own `trackBy` shape (the `@for` blocks above track by a plain expression instead). */
-  protected trackAsset(_: number, asset: AssetAttention): string {
-    return asset.assetId;
   }
 }

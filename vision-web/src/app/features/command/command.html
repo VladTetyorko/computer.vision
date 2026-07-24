@@ -1,8 +1,10 @@
-<div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Command</h1>
-      <p>Fleet triage for a manager overseeing 3–100 pilots — what needs attention now, who's flying, and the state of the warehouse.</p>
+<div class="command-shell">
+  <div class="command-topbar">
+    <div class="row topbar-left">
+      <span class="brand-label">Command</span>
+      @if (summary(); as s) {
+        <span class="chip">{{ s.totalAssets }} assets</span>
+      }
     </div>
     <label class="row archived-toggle">
       <input
@@ -14,136 +16,110 @@
     </label>
   </div>
 
-  @if (summary() === undefined) {
-    @if (summaryError()) {
-      <div class="card empty">
-        <h3>Could not reach the fleet summary</h3>
-        <p>Check that the backend is running — this page keeps retrying automatically every 5 seconds.</p>
-      </div>
-    } @else {
-      <div class="card empty">
-        <h3>Loading the fleet…</h3>
-      </div>
-    }
-  } @else {
-    <!-- ---- Attention queue (bullet 1) — the page's reason to exist ---------------------------- -->
-    <section class="card">
-      <header>
-        <h2>Attention queue</h2>
-        @if (attentionRows().length > 0) {
-          <span class="chip danger">{{ attentionRows().length }}</span>
-        }
-      </header>
-
-      @if (attentionRows().length === 0) {
-        <p class="muted hint">All quiet — {{ totalAssetsCount() }} assets, {{ totalStreamingCount() }} streaming.</p>
-      } @else {
-        <ul class="attention-list">
-          @for (row of attentionRows(); track row.asset.assetId) {
-            <li class="attention-row" [class.critical]="row.severity === 'critical'" [class.warning]="row.severity === 'warning'">
-              <div class="attention-info">
-                <div class="attention-main">
-                  <span class="name truncate">{{ row.asset.displayName }}</span>
-                  <span class="chip severity-chip" [class.danger]="row.severity === 'critical'" [class.warn]="row.severity === 'warning'">
-                    {{ row.severity === 'critical' ? 'CRITICAL' : 'WARNING' }}
-                  </span>
-                  <span class="chip">{{ row.asset.categoryName }}</span>
-                  <span class="attention-age faint">{{ ageLabel(row.asset) }}</span>
-                </div>
-                <p class="attention-why">{{ row.why }}</p>
-              </div>
-              <div class="row attention-actions">
-                <button type="button" class="btn secondary small" (click)="watchAsset(row.asset.assetId)">Watch live</button>
-                <button type="button" class="btn secondary small" (click)="openAsset(row.asset.assetId)">Details</button>
-              </div>
-            </li>
-          }
-        </ul>
-      }
-    </section>
-
-    <!-- ---- Live strip (bullet 2) — snapshot thumbnails, O(visible) polling -------------------- -->
-    <section class="card">
-      <header>
-        <h2>Live strip</h2>
-        <span class="muted">{{ stripAssets().length }} streaming</span>
-      </header>
-
-      @if (stripAssets().length === 0) {
-        <p class="muted hint">Nothing is streaming right now.</p>
-      } @else {
-        <cdk-virtual-scroll-viewport orientation="horizontal" itemSize="180" class="strip-viewport">
-          <vision-live-strip-tile
-            *cdkVirtualFor="let asset of stripAssets(); trackBy: trackAsset"
-            [asset]="asset"
-            (watch)="watchAsset($event)"
-          />
-        </cdk-virtual-scroll-viewport>
-      }
-    </section>
-
-    <!-- ---- Fleet map embed (bullet 3) — vision-fleet-map reused as-is ------------------------- -->
-    <section class="map-section">
-      <div class="section-head">
-        <h2>Fleet map</h2>
-      </div>
-      <div class="map-layout">
-        <vision-fleet-map
-          class="map-panel"
-          (watch)="watchAsset($event)"
-          (preview)="onPreview($event)"
-          (openEventAsset)="openAsset($event)"
-        />
-        @if (dockedAssetId(); as assetId) {
-          @if (dockedDeviceId(); as deviceId) {
-            <vision-live-dock class="dock-panel" [deviceId]="deviceId" [marker]="dockedMarker()" (close)="closeDock()" />
-          }
-        }
-      </div>
-    </section>
-
-    <!-- ---- Warehouse readiness tiles (bullet 4) ------------------------------------------------ -->
-    <section class="card">
-      <header>
-        <h2>Warehouse readiness</h2>
-      </header>
-      <div class="readiness-grid">
-        @for (tile of readinessTiles(); track tile.categoryId) {
-          <button type="button" class="readiness-tile" (click)="openDevices(tile.categoryId)" [title]="'Open ' + tile.categoryName + ' in Devices'">
-            <div class="readiness-head">
-              <span class="readiness-name">{{ tile.categoryName }}</span>
-              <span class="readiness-total">{{ tile.total }}</span>
-            </div>
-            <div class="readiness-bar" role="img" [attr.aria-label]="tile.active + ' active, ' + tile.deactivated + ' deactivated' + (includeArchived() ? ', ' + tile.deleted + ' archived' : '')">
-              <span class="seg active" [style.flex-grow]="tile.active || 0.0001"></span>
-              @if (tile.deactivated > 0) {
-                <span class="seg deactivated" [style.flex-grow]="tile.deactivated"></span>
-              }
-              @if (includeArchived() && tile.deleted > 0) {
-                <span class="seg deleted" [style.flex-grow]="tile.deleted"></span>
-              }
-            </div>
-            <div class="row readiness-chips">
-              <span class="chip ok"><span class="dot live"></span>{{ tile.streaming }} streaming</span>
-              <span class="chip">{{ tile.active }} active</span>
-              @if (tile.deactivated > 0) {
-                <span class="chip warn">{{ tile.deactivated }} deactivated</span>
-              }
-              @if (includeArchived() && tile.deleted > 0) {
-                <span class="chip">{{ tile.deleted }} archived</span>
-              }
-            </div>
-            <!-- Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — this tile is a plain
-                 navigation link in button's clothing; hover-only affordance isn't enough on its own. -->
-            <span class="readiness-action faint">View in Devices →</span>
-          </button>
-        }
-      </div>
-    </section>
-
-    <!-- ---- Events rail (bullet 5) — vision-events-rail reused as-is --------------------------- -->
-    <section>
-      <vision-events-rail class="events-rail-embed" (open)="openEventFromRail($event)" />
-    </section>
+  @if (summaryError() && summary() === undefined) {
+    <div class="topbar-notice">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</div>
   }
+
+  <div class="command-body" [style.grid-template-columns]="gridColumns()">
+    @if (railOpen()) {
+      <aside class="command-rail">
+        <header class="rail-head">
+          <h2>Assets</h2>
+          <span class="muted">{{ entityRows().length }}</span>
+        </header>
+
+        @if (summary() === undefined) {
+          <p class="muted hint">Loading…</p>
+        } @else if (entityRows().length === 0) {
+          <p class="muted hint">No assets registered yet.</p>
+        } @else {
+          <ul class="rail-list">
+            @for (row of entityRows(); track row.asset.assetId) {
+              <li>
+                <button
+                  type="button"
+                  class="rail-row"
+                  [class.selected]="row.asset.assetId === selectedAssetId()"
+                  [class.critical]="row.severity === 'critical'"
+                  [class.warning]="row.severity === 'warning'"
+                  (click)="selectAsset(row.asset.assetId)"
+                >
+                  <span class="dot" [class.live]="row.asset.streaming"></span>
+                  <span class="rail-name truncate">{{ row.asset.displayName }}</span>
+                  <span class="rail-category faint truncate">{{ row.asset.categoryName }}</span>
+                  @if (row.severity !== 'ok') {
+                    <span class="chip severity-chip" [class.danger]="row.severity === 'critical'" [class.warn]="row.severity === 'warning'">
+                      {{ row.severity === 'critical' ? 'CRIT' : 'WARN' }}
+                    </span>
+                  }
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </aside>
+    }
+
+    <button
+      type="button"
+      class="side-toggle rail-toggle"
+      (click)="toggleRail()"
+      [attr.aria-expanded]="railOpen()"
+      [title]="railOpen() ? 'Hide asset list' : 'Show asset list'"
+    >
+      {{ railOpen() ? '‹' : '›' }}
+    </button>
+
+    <div class="command-stage">
+      @if (mapIsEmpty()) {
+        <div class="stage-empty">
+          <h3>No assets registered yet</h3>
+          <p>
+            Register a device or simulate one from the Assets tab and it appears here as soon as it
+            reports a position — or place a moving test drone right now, no hardware or file needed.
+          </p>
+          <div class="row empty-actions">
+            <a class="btn secondary" routerLink="/devices">Go to Devices</a>
+            <button type="button" class="btn" (click)="addTestDrone()" [disabled]="addingTestDrone()">
+              {{ addingTestDrone() ? 'Placing…' : 'Add a test drone' }}
+            </button>
+          </div>
+        </div>
+      } @else {
+        <vision-fleet-map
+          class="command-map"
+          (watch)="watchAsset($event)"
+          (preview)="selectAsset($event)"
+          (openEventAsset)="openEventAsset($event)"
+        />
+      }
+    </div>
+
+    @if (panelState() !== 'hidden') {
+      <button
+        type="button"
+        class="side-toggle panel-toggle"
+        (click)="togglePanelCollapse()"
+        [attr.aria-expanded]="panelState() === 'open'"
+        [title]="panelState() === 'open' ? 'Collapse panel' : 'Show panel'"
+      >
+        {{ panelState() === 'open' ? '›' : '‹' }}
+      </button>
+
+      @if (panelState() === 'open') {
+        @if (selectedAsset(); as asset) {
+          <vision-asset-panel
+            class="command-panel"
+            [asset]="asset"
+            [marker]="selectedMarker()"
+            [videoDeviceId]="selectedVideoDeviceId()"
+            [stream]="selectedStream()"
+            (watchLive)="watchSelected()"
+            (openDetails)="openSelectedDetails()"
+            (closePanel)="closePanel()"
+          />
+        }
+      }
+    }
+  </div>
 </div>

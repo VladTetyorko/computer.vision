@@ -279,12 +279,19 @@ export class VisionApi {
 
   /**
    * The path for a running stream's latest-frame JPEG thumbnail (docs/MVP3-PLAN.md C-a/C-c) — not
-   * promise-returning like every other method here: this is meant to be bound straight to an
-   * `<img src>` (`features/command/live-strip-tile.ts`), which fetches it itself via the browser's own
-   * image loading, cache-busted with a query param on each poll — there is nothing this class could
-   * usefully `await` on the caller's behalf. Still lives here rather than being inlined at the call
-   * site, so `VisionApi` stays "the only place the frontend knows REST URLs" (this file's own top
-   * doc comment) even for a path that's never actually passed through `HttpClient`.
+   * promise-returning like every other method here: meant to be bound straight to an `<img src>`,
+   * which fetches it itself via the browser's own image loading, cache-busted with a query param on
+   * each poll — there is nothing this class could usefully `await` on the caller's behalf.
+   *
+   * **Currently unused** (docs/UX-REWORK-PLAN.md §U-c): its one consumer,
+   * `features/command/live-strip-tile.ts` (the Command dashboard's live-strip snapshot tiles), was
+   * deleted when that section was removed from Command per the plan's own user-amendments
+   * blockquote ("live strip: removed"). Left in place rather than deleted — a small, self-contained,
+   * still-correct method, and out of `vision-web/MODULE.md`'s own "core/api/** mirrors the wire
+   * contract 1:1" scope to prune opportunistically; a future cycle that finds no plausible use for
+   * it is free to remove it then. Still lives here (not inlined at a call site, if one reappears) so
+   * `VisionApi` stays "the only place the frontend knows REST URLs" (this file's own top doc
+   * comment) even for a path that's never actually passed through `HttpClient`.
    */
   snapshotUrl(streamId: string): string {
     return `/api/streams/${encodeURIComponent(streamId)}/snapshot`;

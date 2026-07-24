@@ -15,7 +15,50 @@ export interface PipelineProfile {
   readonly builtIn: boolean;
   readonly confidenceThreshold: number;
   readonly inferenceFps: number;
+  readonly model: DetectionModelId;
 }
+
+/**
+ * cv-service's local model registry (docs/CV-MODELS-PLAN.md item 4). An id here is exactly the
+ * checkpoint filename the registry loads by — not an id scheme of our own — so it is also exactly
+ * what `core/api/models.ts#StartStreamRequest.model` forwards to vision-api's own DTO
+ * (`StartStreamRequest.java`/`StartAssetStreamRequest.java`), which builds a `ModelRef` from it.
+ * `'yolo11n.pt,orion12l.pt'` is the composite id: the registry runs *both* checkpoints on the same
+ * frame and returns both classsets (`orion12l:`-prefixed labels), not a third model of its own —
+ * comma-joined is the exact wire format the registry parses, so this string is never split/rejoined
+ * on this side.
+ */
+export type DetectionModelId = 'yolo11n.pt' | 'orion12l.pt' | 'yolo11n.pt,orion12l.pt';
+
+/** One choice in the Detection model picker (`features/settings`, `features/live`'s rail). */
+export interface DetectionModelOption {
+  readonly id: DetectionModelId;
+  readonly label: string;
+  /** One line: what it detects, plus — honestly — what it costs. Shown under the picker. */
+  readonly hint: string;
+}
+
+/** `yolo11n.pt` ("General") is what cv-service already serves when `model_id` is absent/unknown
+ * (docs/CV-MODELS-PLAN.md item 1) — the one existing saved profiles/drafts migrate to. */
+export const DEFAULT_DETECTION_MODEL: DetectionModelId = 'yolo11n.pt';
+
+export const DETECTION_MODEL_OPTIONS: readonly DetectionModelOption[] = [
+  {
+    id: 'yolo11n.pt',
+    label: 'General',
+    hint: 'Everyday objects — people, vehicles, animals. The default, and the fastest of the three.',
+  },
+  {
+    id: 'orion12l.pt',
+    label: 'Military',
+    hint: 'Military vehicles and hardware, in place of everyday objects.',
+  },
+  {
+    id: 'yolo11n.pt,orion12l.pt',
+    label: 'Both',
+    hint: 'Runs both models on every frame — boxes update ~3×/s, far slower than either model alone (measured: ~346ms/frame vs. ~58ms for General alone).',
+  },
+];
 
 /** `balanced` mirrors `PipelineConfig.defaults()` exactly, so "no override" and it agree. */
 export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
@@ -26,6 +69,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     builtIn: true,
     confidenceThreshold: 0.4,
     inferenceFps: 5,
+    model: DEFAULT_DETECTION_MODEL,
   },
   {
     id: 'low-latency',
@@ -34,6 +78,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     builtIn: true,
     confidenceThreshold: 0.5,
     inferenceFps: 3,
+    model: DEFAULT_DETECTION_MODEL,
   },
   {
     id: 'high-quality',
@@ -42,6 +87,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     builtIn: true,
     confidenceThreshold: 0.3,
     inferenceFps: 10,
+    model: DEFAULT_DETECTION_MODEL,
   },
 ];
 
@@ -49,6 +95,7 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
 export interface PipelineSettings {
   readonly confidenceThreshold: number;
   readonly inferenceFps: number;
+  readonly model: DetectionModelId;
 }
 
 /**
@@ -146,6 +193,7 @@ export class SettingsStore {
       this.draftSignal() ?? {
         confidenceThreshold: this.activeProfile().confidenceThreshold,
         inferenceFps: this.activeProfile().inferenceFps,
+        model: this.activeProfile().model,
       },
   );
 
@@ -181,6 +229,7 @@ export class SettingsStore {
       builtIn: false,
       confidenceThreshold: current.confidenceThreshold,
       inferenceFps: current.inferenceFps,
+      model: current.model,
     };
     this.saveCustomProfile(profile);
     this.draftSignal.set(null);
@@ -224,13 +273,16 @@ export class SettingsStore {
         this.flyAssetId.set(parsed.flyAssetId);
       }
       if (Array.isArray(parsed.customProfiles)) {
-        this.customProfiles.set(parsed.customProfiles);
+        // Migration-safe: a profile saved before the model picker existed has no `model` field at
+        // all (not just an invalid one) — both fall back to `DEFAULT_DETECTION_MODEL` the same way
+        // a corrupt value on any other field here does, rather than rejecting the whole profile.
+        this.customProfiles.set(parsed.customProfiles.map(withValidModel));
       }
       if (typeof parsed.activeProfileId === 'string') {
         this.activeProfileId.set(parsed.activeProfileId);
       }
       if (parsed.draft) {
-        this.draftSignal.set(parsed.draft);
+        this.draftSignal.set(withValidModel(parsed.draft));
       }
     } catch {
       // Corrupt or stale settings must never keep the app from starting.
@@ -257,4 +309,24 @@ const MAP_LAYER_IDS: readonly MapLayerId[] = ['standard', 'night', 'relief', 'sa
 
 function isMapLayerId(value: unknown): value is MapLayerId {
   return typeof value === 'string' && (MAP_LAYER_IDS as readonly string[]).includes(value);
+}
+
+const DETECTION_MODEL_IDS: readonly DetectionModelId[] = DETECTION_MODEL_OPTIONS.map(
+  (option) => option.id,
+);
+
+function isDetectionModelId(value: unknown): value is DetectionModelId {
+  return typeof value === 'string' && (DETECTION_MODEL_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * Backfills a missing/corrupt `model` field to `DEFAULT_DETECTION_MODEL` — the one place both
+ * `customProfiles` and `draft` go through on restore, so a profile saved before this field existed
+ * (or a tampered/stale value) reads exactly as if it had always been the backend default, never as
+ * a reason to drop the rest of the profile.
+ */
+function withValidModel<T extends { model?: unknown }>(value: T): T & { model: DetectionModelId } {
+  return isDetectionModelId(value.model)
+    ? (value as T & { model: DetectionModelId })
+    : { ...value, model: DEFAULT_DETECTION_MODEL };
 }

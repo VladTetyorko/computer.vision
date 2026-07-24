@@ -1,0 +1,81 @@
+/* Mirrors `app.css`'s own `.tab-more`/`.tab-more-menu` disclosure idiom (a native `<details>`, no new
+   dropdown-menu component) and `src/styles.css`'s `.kebab`/`.kebab-menu` positioning — this is the
+   third consumer of that exact "trigger + absolute popover, box-shadow since it's a true overlay"
+   shape in this app, not a new pattern. */
+:host {
+  display: block;
+}
+
+.bell {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.bell-trigger {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.bell-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.bell-trigger:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.bell-trigger svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bell-badge {
+  position: absolute;
+  top: 0.05rem;
+  right: 0.05rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--live);
+  color: #1a0410;
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Applied directly to `<vision-events-rail>`'s own host tag (its `:host{display:block}` already
+   makes that meaningful) — mirrors `features/wall/wall.css`'s `.events-rail`/the pre-§U-c
+   `command.css`'s `.events-rail-embed`: "sizing/positioning stays each host's own concern",
+   `events-rail.ts`'s own doc comment. This host is a popover instead of an inline page section, so
+   it adds `position: absolute` + the true-overlay `box-shadow` those two hosts never needed. */
+.bell-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.4rem;
+  width: 22rem;
+  max-width: calc(100vw - 2rem);
+  max-height: 26rem;
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}

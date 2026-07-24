@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetAttention, CategoryCounts } from '../../core/api/models';
+import type { AssetAttention } from '../../core/api/models';
 import {
   attentionAgeLabel,
   attentionReasons,
   batteryAttentionSeverity,
-  buildAttentionQueue,
-  shouldPollSnapshot,
-  sortReadinessTiles,
-  streamingAssets,
-  totalStreaming,
+  buildEntityRows,
+  commandGridColumns,
 } from './command-logic';
 
 function asset(partial: Partial<AssetAttention> = {}): AssetAttention {
@@ -20,19 +17,6 @@ function asset(partial: Partial<AssetAttention> = {}): AssetAttention {
     lifecycle: 'ACTIVE',
     streaming: false,
     openEventCount: 0,
-    ...partial,
-  };
-}
-
-function category(partial: Partial<CategoryCounts> = {}): CategoryCounts {
-  return {
-    categoryId: 'drone',
-    categoryName: 'Drone',
-    total: 0,
-    active: 0,
-    deactivated: 0,
-    deleted: 0,
-    streaming: 0,
     ...partial,
   };
 }
@@ -111,16 +95,31 @@ describe('attentionReasons', () => {
   });
 });
 
-describe('buildAttentionQueue', () => {
-  it('omits assets with nothing triggered', () => {
-    expect(buildAttentionQueue([asset({ batteryPercent: 90 })])).toEqual([]);
+describe('attentionAgeLabel', () => {
+  it('renders a dash with no telemetry reading yet', () => {
+    expect(attentionAgeLabel(asset({ telemetryAgeMs: undefined }))).toBe('—');
+  });
+
+  it('renders a formatted duration otherwise', () => {
+    expect(attentionAgeLabel(asset({ telemetryAgeMs: 12_000 }))).toBe('12s ago');
+  });
+});
+
+describe('buildEntityRows', () => {
+  it('includes every asset, not only flagged ones (the rail is a slim always-available list)', () => {
+    const quiet = asset({ assetId: 'q', displayName: 'Quiet', batteryPercent: 90 });
+    const flagged = asset({ assetId: 'f', displayName: 'Flagged', batteryPercent: 5 });
+    const rows = buildEntityRows([quiet, flagged]);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.asset.assetId === 'q')!.severity).toBe('ok');
+    expect(rows.find((r) => r.asset.assetId === 'f')!.severity).toBe('critical');
   });
 
   it('ranks a critical-tier asset above a warning-only one regardless of reason count', () => {
     const warningTwice = asset({ assetId: 'w', displayName: 'Warned', batteryPercent: 15, openEventCount: 2 });
     const criticalOnce = asset({ assetId: 'c', displayName: 'Zulu-critical', batteryPercent: 5 });
-    const queue = buildAttentionQueue([warningTwice, criticalOnce]);
-    expect(queue.map((row) => row.asset.assetId)).toEqual(['c', 'w']);
+    const rows = buildEntityRows([warningTwice, criticalOnce]);
+    expect(rows.map((row) => row.asset.assetId)).toEqual(['c', 'w']);
   });
 
   it('within the same top rank, ranks more simultaneous reasons first', () => {
@@ -132,26 +131,29 @@ describe('buildAttentionQueue', () => {
       streaming: true,
       telemetryAgeMs: 99_000,
     });
-    const queue = buildAttentionQueue([oneReason, twoReasons]);
-    expect(queue.map((row) => row.asset.assetId)).toEqual(['two', 'one']);
+    const rows = buildEntityRows([oneReason, twoReasons]);
+    expect(rows.map((row) => row.asset.assetId)).toEqual(['two', 'one']);
+  });
+
+  it('sorts every flagged asset ahead of every quiet one, quiet ones alphabetical among themselves', () => {
+    const quietB = asset({ assetId: 'qb', displayName: 'Bravo-quiet', batteryPercent: 90 });
+    const quietA = asset({ assetId: 'qa', displayName: 'Alpha-quiet', batteryPercent: 90 });
+    const flagged = asset({ assetId: 'fl', displayName: 'Zulu-flagged', batteryPercent: 5 });
+    const rows = buildEntityRows([quietB, quietA, flagged]);
+    expect(rows.map((row) => row.asset.assetId)).toEqual(['fl', 'qa', 'qb']);
   });
 
   it('falls back to alphabetical, case-insensitive, once rank and reason count both tie', () => {
     const bravo = asset({ assetId: 'b', displayName: 'bravo', batteryPercent: 15 });
     const alpha = asset({ assetId: 'a', displayName: 'Alpha', batteryPercent: 15 });
-    const queue = buildAttentionQueue([bravo, alpha]);
-    expect(queue.map((row) => row.asset.assetId)).toEqual(['a', 'b']);
-  });
-
-  it('joins multiple reasons into one why sentence', () => {
-    const row = buildAttentionQueue([asset({ batteryPercent: 5, openEventCount: 1 })])[0];
-    expect(row.why).toBe('Battery critical at 5%. 1 open detection event.');
+    const rows = buildEntityRows([bravo, alpha]);
+    expect(rows.map((row) => row.asset.assetId)).toEqual(['a', 'b']);
   });
 
   it('does not mutate the input array', () => {
     const list = [asset({ assetId: 'z', displayName: 'Z', batteryPercent: 5 }), asset({ assetId: 'a', displayName: 'A', batteryPercent: 5 })];
     const original = [...list];
-    buildAttentionQueue(list);
+    buildEntityRows(list);
     expect(list).toEqual(original);
   });
 
@@ -167,102 +169,35 @@ describe('buildAttentionQueue', () => {
         }),
       );
     }
-    const queue = buildAttentionQueue(assets);
-    expect(queue).toHaveLength(10);
-    expect(queue.every((row) => row.severity === 'critical')).toBe(true);
+    const rows = buildEntityRows(assets);
+    expect(rows).toHaveLength(100);
+    expect(rows.slice(0, 10).every((row) => row.severity === 'critical')).toBe(true);
+    expect(rows.slice(10).every((row) => row.severity === 'ok')).toBe(true);
   });
 });
 
-describe('attentionAgeLabel', () => {
-  it('renders a dash with no telemetry reading yet', () => {
-    expect(attentionAgeLabel(asset({ telemetryAgeMs: undefined }))).toBe('—');
+describe('commandGridColumns', () => {
+  it('rail open, no selection', () => {
+    expect(commandGridColumns(true, 'hidden')).toBe('300px auto minmax(0, 1fr)');
   });
 
-  it('renders a formatted duration otherwise', () => {
-    expect(attentionAgeLabel(asset({ telemetryAgeMs: 12_000 }))).toBe('12s ago');
-  });
-});
-
-describe('totalStreaming', () => {
-  it('sums the streaming count across every category', () => {
-    expect(totalStreaming([category({ streaming: 2 }), category({ categoryId: 'camera', streaming: 3 })])).toBe(5);
+  it('rail closed, no selection', () => {
+    expect(commandGridColumns(false, 'hidden')).toBe('auto minmax(0, 1fr)');
   });
 
-  it('is zero for no categories', () => {
-    expect(totalStreaming([])).toBe(0);
-  });
-});
-
-describe('streamingAssets', () => {
-  it('keeps only streaming assets carrying a streamId', () => {
-    const streaming = asset({ assetId: 's', streaming: true, streamId: 'stream-1' });
-    const notStreaming = asset({ assetId: 'n', streaming: false });
-    const inconsistent = asset({ assetId: 'i', streaming: true, streamId: undefined });
-    expect(streamingAssets([streaming, notStreaming, inconsistent]).map((a) => a.assetId)).toEqual(['s']);
+  it('rail open, panel open', () => {
+    expect(commandGridColumns(true, 'open')).toBe('300px auto minmax(0, 1fr) auto 380px');
   });
 
-  it('sorts alphabetically, case-insensitively', () => {
-    const bravo = asset({ assetId: 'b', displayName: 'bravo', streaming: true, streamId: 's-b' });
-    const alpha = asset({ assetId: 'a', displayName: 'Alpha', streaming: true, streamId: 's-a' });
-    expect(streamingAssets([bravo, alpha]).map((a) => a.assetId)).toEqual(['a', 'b']);
+  it('rail open, panel collapsed to its reopen chip', () => {
+    expect(commandGridColumns(true, 'collapsed')).toBe('300px auto minmax(0, 1fr) auto');
   });
 
-  it('does not mutate the input array', () => {
-    const list = [
-      asset({ assetId: 'b', displayName: 'B', streaming: true, streamId: 's-b' }),
-      asset({ assetId: 'a', displayName: 'A', streaming: true, streamId: 's-a' }),
-    ];
-    const original = [...list];
-    streamingAssets(list);
-    expect(list).toEqual(original);
+  it('rail closed, panel open', () => {
+    expect(commandGridColumns(false, 'open')).toBe('auto minmax(0, 1fr) auto 380px');
   });
 
-  it('holds at scale (N=100): membership stays a pure filter over the one already-fetched list', () => {
-    const assets: AssetAttention[] = [];
-    for (let i = 0; i < 100; i++) {
-      const streaming = i % 4 === 0;
-      assets.push(
-        asset({
-          assetId: `a-${i}`,
-          displayName: `Asset ${String(i).padStart(3, '0')}`,
-          streaming,
-          streamId: streaming ? `stream-${i}` : undefined,
-        }),
-      );
-    }
-    expect(streamingAssets(assets)).toHaveLength(25);
-  });
-});
-
-describe('shouldPollSnapshot', () => {
-  it('polls only when visible and a streamId exists', () => {
-    expect(shouldPollSnapshot(true, true)).toBe(true);
-  });
-
-  it('does not poll an off-screen tile even with a streamId', () => {
-    expect(shouldPollSnapshot(false, true)).toBe(false);
-  });
-
-  it('does not poll a visible tile whose asset has stopped streaming since the last summary poll', () => {
-    expect(shouldPollSnapshot(true, false)).toBe(false);
-  });
-
-  it('does not poll when neither condition holds', () => {
-    expect(shouldPollSnapshot(false, false)).toBe(false);
-  });
-});
-
-describe('sortReadinessTiles', () => {
-  it('sorts categories alphabetically by name, case-insensitively', () => {
-    const zebra = category({ categoryId: 'zebra', categoryName: 'Zebra-cam' });
-    const drone = category({ categoryId: 'drone', categoryName: 'drone' });
-    expect(sortReadinessTiles([zebra, drone]).map((c) => c.categoryId)).toEqual(['drone', 'zebra']);
-  });
-
-  it('does not mutate the input array', () => {
-    const list = [category({ categoryId: 'z', categoryName: 'Z' }), category({ categoryId: 'a', categoryName: 'A' })];
-    const original = [...list];
-    sortReadinessTiles(list);
-    expect(list).toEqual(original);
+  it('rail closed, panel collapsed', () => {
+    expect(commandGridColumns(false, 'collapsed')).toBe('auto minmax(0, 1fr) auto');
   });
 });

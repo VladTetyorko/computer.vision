@@ -1,0 +1,107 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  overflow-y: auto;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.tabs {
+  align-self: flex-start;
+}
+
+.panel-body {
+  flex: 1;
+}
+
+/* The same `dl.facts`/`.fact` telemetry-facts idiom already duplicated independently by
+   `features/asset-detail/asset-detail.css`, `shared/player/stream-info-panel.ts`, and
+   `features/replay/replay.css` (docs/UX-REWORK-PLAN.md §U-b's own audit found three copies) — a
+   fourth here is consistent with that established precedent, not a new pattern. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.fact dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.fact dd {
+  margin: 0.1rem 0 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stale-text {
+  color: var(--danger);
+}
+
+.hint {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.why-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.why-row {
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.severity-chip {
+  flex: none;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.why-text {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.panel-actions {
+  flex: none;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.panel-actions .btn {
+  flex: 1;
+  justify-content: center;
+}

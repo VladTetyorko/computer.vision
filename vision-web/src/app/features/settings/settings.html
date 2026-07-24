@@ -92,13 +92,32 @@
           <span class="profile-name">{{ profile.name }}</span>
           <span class="profile-desc muted">{{ profile.description }}</span>
           <span class="profile-values mono faint">
-            conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps
+            conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps · {{ modelLabel(profile.model) }}
           </span>
         </button>
       }
     </div>
 
     <div class="knobs">
+      <span class="label">Detection model</span>
+      <div class="profiles">
+        @for (option of modelOptions; track option.id) {
+          <button
+            type="button"
+            class="profile"
+            [class.selected]="settings.effective().model === option.id"
+            (click)="onModel(option.id)"
+          >
+            <span class="profile-name">{{ option.label }}</span>
+            <span class="profile-desc muted">{{ option.hint }}</span>
+          </button>
+        }
+      </div>
+      <p class="muted hint">
+        Applied the next time a stream starts — a stream already running keeps the model it
+        started with.
+      </p>
+
       <label class="label" for="s-confidence">
         Confidence threshold — {{ settings.effective().confidenceThreshold.toFixed(2) }}
       </label>
@@ -163,7 +182,7 @@
           <div class="custom-row">
             <span>{{ profile.name }}</span>
             <span class="mono faint">
-              conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps
+              conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps · {{ modelLabel(profile.model) }}
             </span>
             <button
               type="button"

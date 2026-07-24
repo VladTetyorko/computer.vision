@@ -243,17 +243,19 @@ export function deriveCategoryOptions(assets: readonly AssetSummary[]): readonly
 }
 
 /**
- * Builds the `POST /api/assets` body for "Create asset from this device" (docs/UX-QUICKWINS-PLAN.md
- * QF-2's orphaned-device quick fix): wraps `device`'s own connection details (name/protocol/uri/
- * options/capabilities) as the new asset's one device.
+ * Builds the `POST /api/assets` body for "Promote to asset…" (docs/UX-QUICKWINS-PLAN.md QF-2's
+ * orphaned-device quick fix, renamed to its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3): assigns
+ * `device` — the existing, already-registered device, by id — to the new asset via `deviceIds`.
  *
- * **This registers a brand-new `Device`, not a reference to `device` itself** — `CreateAssetRequest`
- * carries no "existing device id" field (verified against `AssetController#create`/
- * `CreateAssetRequest.java`/`AssetSpec.java`: every entry in `devices` always goes through
- * `deviceService.register(...)`, unconditionally). The caller is expected to archive the original
- * `device` (e.g. `FleetStore#deleteDevice`) once this succeeds, so the orphan doesn't linger
- * side-by-side with its own now-owned duplicate — `devices.ts#confirmCreateAsset` does exactly
- * that, and the confirm panel's own copy tells the user this up front.
+ * **No new `Device` row, no archive step** (docs/REALTIME-PLAN.md §4's backend follow-up batch,
+ * `CreateAssetRequest#deviceIds`): this used to be impossible — `CreateAssetRequest` had no
+ * "existing device id" field, so `devices.ts#confirmCreateAsset` registered a brand-new device
+ * wrapping `device`'s own connection details, then archived `device` itself, so the orphan didn't
+ * linger side-by-side with its own now-owned duplicate. `deviceIds` closes that gap directly:
+ * `device.id` is assigned to the new asset in the same call the asset is created with, keeping its
+ * own id/history/connection details exactly as they were — see `CreateAssetRequest`'s own doc
+ * comment in `models.ts` for the validation this goes through (must exist, not soft-deleted, not
+ * already owned).
  */
 export function buildCreateAssetRequestForDevice(
   device: Device,
@@ -261,18 +263,9 @@ export function buildCreateAssetRequestForDevice(
   category: string,
 ): CreateAssetRequest {
   const trimmedName = displayName.trim();
-  const hasOptions = Object.keys(device.options).length > 0;
   return {
     displayName: trimmedName.length > 0 ? trimmedName : device.name,
     category,
-    devices: [
-      {
-        name: device.name,
-        protocol: device.protocol,
-        uri: device.uri,
-        ...(hasOptions ? { options: device.options } : {}),
-        capabilities: device.capabilities,
-      },
-    ],
+    deviceIds: [device.id],
   };
 }

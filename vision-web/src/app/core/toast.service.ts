@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-export type ToastKind = 'ok' | 'error' | 'info';
+export type ToastKind = 'ok' | 'error' | 'info' | 'notification';
 
 /** An optional follow-up the user can take straight from the toast (docs/CYCLES-PLAN.md §4's "Watch"). */
 export interface ToastAction {
@@ -15,11 +15,17 @@ export interface Toast {
   readonly action?: ToastAction;
 }
 
-/** Errors linger long enough to read; confirmations get out of the way. */
+/**
+ * Errors linger long enough to read; confirmations get out of the way. `notification` (docs/UX-REWORK-PLAN.md
+ * §U-c: "new events arrive as transient toasts") sits between `ok`/`info` — a background event the
+ * operator didn't ask for, worth slightly longer than a confirmation they *did* trigger, but this
+ * app has no reason to make it linger as long as an `error`.
+ */
 const DISMISS_AFTER_MS: Record<ToastKind, number> = {
   ok: 4_000,
   info: 5_000,
   error: 9_000,
+  notification: 6_000,
 };
 
 @Injectable({ providedIn: 'root' })
@@ -40,6 +46,19 @@ export class ToastService {
 
   error(text: string): void {
     this.push('error', text);
+  }
+
+  /**
+   * A background event surfaced without the user asking for it — today, only the notification
+   * bell's own newly-arrived detection events (`shared/ui/notification-bell.ts`). Takes an
+   * `action` (mirrors `ok`'s own — docs/CYCLES-PLAN.md §4's "Watch" precedent) since the whole
+   * point of one is a one-click way to look at whatever just happened, per the verb dictionary
+   * ("Watch live"/"Details"). Visually its own kind (`shared/ui/toast-host.ts`'s `.toast.notification`)
+   * rather than reusing `info`'s bare styling — distinct enough to read as "something happened
+   * elsewhere", not a confirmation of something the operator just clicked.
+   */
+  notify(text: string, action?: ToastAction): void {
+    this.push('notification', text, action);
   }
 
   dismiss(id: number): void {

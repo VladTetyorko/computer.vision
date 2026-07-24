@@ -647,7 +647,8 @@
   </section>
 
   <!-- ---- Promote to asset (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix; renamed to
-       its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3 — same flow, same QF-2 explainer below). -->
+       its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3; switched to the deviceIds contract per
+       docs/REALTIME-PLAN.md §4's backend follow-up batch — no more duplicate-device workaround). -->
   <!-- Reached from a successful register's toast action, and from any Advanced row's kebab whose
        owner is unassigned — one panel, one code path either way. -->
   @if (createAssetFor(); as createDevice) {
@@ -656,9 +657,8 @@
         <h2>Promote "{{ createDevice.name }}" to asset</h2>
       </header>
       <p class="muted hint">
-        Registers a new device with this one's exact connection details ({{ createDevice.protocol }},
-        <span class="mono">{{ createDevice.uri }}</span>) under a new asset, then archives this
-        standalone entry — its history is kept, and it will no longer show as unassigned.
+        Assigns this device ({{ createDevice.protocol }}, <span class="mono">{{ createDevice.uri }}</span>)
+        to a new asset — its own id, history, and connection details are kept exactly as they are.
       </p>
 
       <div class="field">

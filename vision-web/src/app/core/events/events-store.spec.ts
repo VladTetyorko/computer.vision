@@ -1,9 +1,11 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventsStore } from './events-store';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
 import { SettingsStore } from '../settings/settings-store';
+import { LiveStore, type LiveConnectionState } from '../live/live-store';
 import type { DetectionEvent } from '../api/models';
 
 /** Lets the fire-and-forget promise chain inside `pollOnce()` settle before asserting. */
@@ -28,10 +30,32 @@ function stubSettings(eventNotifications = false) {
   return { eventNotifications: () => eventNotifications };
 }
 
+/**
+ * A minimal `LiveStore` test double (docs/REALTIME-PLAN.md §4's backend follow-up batch), mirroring
+ * `telemetry-store.spec.ts#stubLiveStore` — real Angular `signal`s so `EventsStore`'s own
+ * `computed`/`effect` react to it exactly as they would to the real class, without a real
+ * `EventSource` (jsdom has none). Defaults to `'closed'` — the same state the *real* `LiveStore`
+ * reports under jsdom — so every pre-existing test above, which never provides this stub at all,
+ * keeps exercising the poll-only path unmodified.
+ */
+function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+  const stateSignal = signal<LiveConnectionState>(initialState);
+  const detectionEventsSignal = signal<readonly DetectionEvent[]>([]);
+  return {
+    connectionState: stateSignal.asReadonly(),
+    detectionEvents: detectionEventsSignal.asReadonly(),
+    setState: (state: LiveConnectionState) => stateSignal.set(state),
+    /** Appends, oldest-first — mirrors the real `LiveStore.detectionEvents`'s own accumulation contract. */
+    pushDetectionEvents: (events: readonly DetectionEvent[]) =>
+      detectionEventsSignal.update((existing) => [...existing, ...events]),
+  };
+}
+
 function create(options: {
   events?: ReturnType<typeof vi.fn>;
   scheduler?: unknown;
   eventNotifications?: boolean;
+  live?: ReturnType<typeof stubLiveStore>;
 } = {}): { store: EventsStore; api: { events: ReturnType<typeof vi.fn> } } {
   const api = { events: options.events ?? vi.fn().mockResolvedValue([]) };
   const providers: unknown[] = [
@@ -40,6 +64,9 @@ function create(options: {
   ];
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });
+  }
+  if (options.live) {
+    providers.push({ provide: LiveStore, useValue: options.live });
   }
   TestBed.configureTestingModule({ providers });
   return { store: TestBed.inject(EventsStore), api };
@@ -66,6 +93,7 @@ function installNotificationStub(permission: NotificationPermission): ReturnType
 function createWithCapturedPoll(options: {
   events?: ReturnType<typeof vi.fn>;
   eventNotifications?: boolean;
+  live?: ReturnType<typeof stubLiveStore>;
 } = {}): { store: EventsStore; api: { events: ReturnType<typeof vi.fn> }; poll: () => void } {
   let captured: (() => void) | undefined;
   const schedule = vi.fn((_periodMs: number, callback: () => void) => {
@@ -268,6 +296,92 @@ describe('EventsStore', () => {
     await flush();
 
     expect(NotificationCtor).not.toHaveBeenCalled();
+    store.release();
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  // --- LiveStore projection (docs/REALTIME-PLAN.md §4's backend follow-up batch) ---------------
+
+  it('does not poll at all when activated while LiveStore is already open', () => {
+    const events = vi.fn().mockResolvedValue([]);
+    const live = stubLiveStore('open');
+    const { store } = create({ events, live });
+
+    store.activate();
+
+    expect(events).not.toHaveBeenCalled();
+    store.release();
+  });
+
+  it('folds a detection-events arrival into events(), live, with no poll involved', () => {
+    const events = vi.fn().mockResolvedValue([]);
+    const live = stubLiveStore('open');
+    const { store } = create({ events, live });
+
+    store.activate();
+    live.pushDetectionEvents([event({ id: 'e-live', peakConfidence: 0.6 })]);
+    TestBed.tick(); // flushes the live-arrival effect
+
+    expect(store.events().map((e) => e.id)).toEqual(['e-live']);
+    expect(events).not.toHaveBeenCalled();
+    store.release();
+  });
+
+  it('switches from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+    const events = vi.fn().mockResolvedValue([]);
+    const stop = vi.fn();
+    const schedule = vi.fn().mockReturnValue(stop);
+    const live = stubLiveStore('closed');
+    const { store } = create({ events, live, scheduler: { schedule } });
+
+    store.activate();
+    await flush();
+    expect(stop).not.toHaveBeenCalled();
+
+    live.setState('open');
+    TestBed.tick(); // flushes the transport-switch effect
+
+    expect(stop).toHaveBeenCalledOnce(); // the poll is stopped, not left running alongside live
+    store.release();
+  });
+
+  it('falls back to polling again, fetching fresh data immediately, when LiveStore drops mid-session', async () => {
+    const events = vi.fn().mockResolvedValue([event({ id: 'e-fallback' })]);
+    const live = stubLiveStore('open');
+    const { store } = create({ events, live });
+
+    store.activate();
+    expect(events).not.toHaveBeenCalled(); // live from the start — no poll yet
+
+    live.setState('closed');
+    TestBed.tick(); // flushes the transport-switch effect
+    await flush();
+
+    expect(events).toHaveBeenCalledOnce(); // immediate re-fetch on falling back to polling
+    expect(store.events().map((e) => e.id)).toEqual(['e-fallback']);
+    store.release();
+  });
+
+  it('upserts a same-id OPEN→CLOSED pair from a single live batch in chronological order, notifying only for the OPEN', () => {
+    const NotificationCtor = installNotificationStub('granted');
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+
+    const events = vi.fn().mockResolvedValue([]);
+    const live = stubLiveStore('open');
+    const { store } = create({ events, live, eventNotifications: true });
+
+    store.activate();
+    // A burst containing the OPEN, then (later) the CLOSED state of the *same* id — mirrors a
+    // connect-time snapshot replay or several arrivals coalesced into one effect run.
+    live.pushDetectionEvents([
+      event({ id: 'e-lifecycle', state: 'OPEN', lastSeen: '2026-07-23T10:00:00.000Z' }),
+      event({ id: 'e-lifecycle', state: 'CLOSED', lastSeen: '2026-07-23T10:00:05.000Z' }),
+    ]);
+    TestBed.tick();
+
+    expect(store.events()).toHaveLength(1);
+    expect(store.events()[0].state).toBe('CLOSED'); // the later state wins, not the earlier OPEN
+    expect(NotificationCtor).toHaveBeenCalledTimes(1); // fired once, for the genuine OPEN
     store.release();
     Object.defineProperty(document, 'hidden', { value: false, configurable: true });
   });

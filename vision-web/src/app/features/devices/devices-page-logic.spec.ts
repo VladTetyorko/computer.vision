@@ -301,8 +301,8 @@ describe('deriveCategoryOptions (docs/UX-QUICKWINS-PLAN.md QF-2 — the create-a
   });
 });
 
-describe('buildCreateAssetRequestForDevice (docs/UX-QUICKWINS-PLAN.md QF-2 — the orphaned-device quick fix)', () => {
-  it('wraps the device\'s own connection details as the new asset\'s one device', () => {
+describe('buildCreateAssetRequestForDevice (docs/UX-QUICKWINS-PLAN.md QF-2 — "Promote to asset…", now via deviceIds per docs/REALTIME-PLAN.md §4)', () => {
+  it("assigns the existing device by id — no devices array, no duplicate registration", () => {
     const request = buildCreateAssetRequestForDevice(
       device({ id: 'dev-1', name: 'front-gate', protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' }),
       'Front gate camera',
@@ -311,14 +311,7 @@ describe('buildCreateAssetRequestForDevice (docs/UX-QUICKWINS-PLAN.md QF-2 — t
     expect(request).toEqual({
       displayName: 'Front gate camera',
       category: 'ip-camera',
-      devices: [
-        {
-          name: 'front-gate',
-          protocol: 'rtsp',
-          uri: 'rtsp://192.168.1.50:554/stream',
-          capabilities: ['VIDEO'],
-        },
-      ],
+      deviceIds: ['dev-1'],
     });
   });
 
@@ -332,15 +325,13 @@ describe('buildCreateAssetRequestForDevice (docs/UX-QUICKWINS-PLAN.md QF-2 — t
     expect(request.displayName).toBe('My Drone');
   });
 
-  it('includes options only when the device carries any', () => {
-    const withOptions = buildCreateAssetRequestForDevice(
-      device({ options: { rtsp_transport: 'tcp' } }),
+  it("carries the device's own id regardless of its other fields (options/capabilities stay untouched, on the device itself)", () => {
+    const request = buildCreateAssetRequestForDevice(
+      device({ id: 'dev-2', options: { rtsp_transport: 'tcp' }, capabilities: ['VIDEO', 'TELEMETRY'] }),
       'name',
       'drone',
     );
-    expect(withOptions.devices[0].options).toEqual({ rtsp_transport: 'tcp' });
-
-    const withoutOptions = buildCreateAssetRequestForDevice(device({ options: {} }), 'name', 'drone');
-    expect(withoutOptions.devices[0]).not.toHaveProperty('options');
+    expect(request.deviceIds).toEqual(['dev-2']);
+    expect(request).not.toHaveProperty('devices');
   });
 });

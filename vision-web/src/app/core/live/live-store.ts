@@ -1,6 +1,15 @@
 import { DestroyRef, Injectable, type Signal, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
-import type { AssetSummary, DetectionResult, LiveConnected, LiveEnvelope, LiveEvent, TelemetrySample } from '../api/models';
+import type {
+  AssetSummary,
+  DetectionEvent,
+  DetectionResult,
+  DevicesSnapshot,
+  LiveConnected,
+  LiveEnvelope,
+  LiveEvent,
+  TelemetrySample,
+} from '../api/models';
 import {
   type LiveConnectionState,
   SSE_RETRY_INTERVAL_MS,
@@ -21,39 +30,47 @@ const LOG_PREFIX = '[live]';
 const MAX_LIVE_EVENTS = 200;
 
 /**
+ * How many `detection-events` arrivals `detectionEvents` retains — matches `LiveUpdateRegistry`'s
+ * own `DETECTION_EVENT_BUFFER_CAPACITY` (vision-api), so a fresh connection's full snapshot burst
+ * always fits without this store trimming anything the server itself still considers current.
+ */
+const MAX_LIVE_DETECTION_EVENTS = 300;
+
+/**
  * Owns the app's **one** `GET /api/live` connection (docs/REALTIME-PLAN.md §4, Phase R-c) — the
  * server-push replacement for steady-state polling. `TelemetryStore`/`DetectionsStore` project this
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
  *
- * <h2>Not every existing poller has a matching topic — read before wiring a new consumer</h2>
- * The backend's four topics (`fleet`, `event`, `telemetry:<assetId>`, `detections:<assetId>`) map
- * cleanly onto exactly two of this app's four pre-existing pollers:
+ * <h2>Six topics now, four projected stores — read before wiring a new consumer</h2>
+ * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
+ * `detections:<assetId>`) and grew two more, always-on like `fleet`/`event`
+ * (docs/REALTIME-PLAN.md §4's backend follow-up batch): `devices` and `detection-events`. All four
+ * of the plan's originally-named stores now have a matching topic:
  * - `telemetry:<assetId>` ↔ `TelemetryStore` (same domain — {@link TelemetrySample}s for one asset).
  * - `detections:<assetId>` ↔ `DetectionsStore` (same domain — the latest {@link DetectionResult}),
  *   **but keyed differently**: `DetectionsStore.track(streamId, assetId?)` still takes a
  *   `streamId` (the poll fallback's own key), with `assetId` now optional and required only to use
  *   live at all — mirrors `TelemetryStore.track(deviceId, assetId?)`'s own R-a-established split.
+ * - `devices` ↔ `core/fleet/fleet-store.ts#FleetStore` — a **new**, separate topic from `fleet`, not an
+ *   extension of it: `fleet`'s payload is `List<AssetSummaryResponse>` (→ {@link AssetSummary}, this
+ *   file's own `fleet` signal below), asset-centric and unrelated to `FleetStore`'s own domain
+ *   (`Device`/`ActiveStream` from `GET /api/devices`+`GET /api/streams`). `devices` was added
+ *   specifically to give `FleetStore` something to project — see its own doc comment for the
+ *   poll-vs-live toggle (no per-asset subscription needed; this topic is always-on, like `fleet`).
+ * - `detection-events` ↔ `core/events/events-store.ts#EventsStore` — also a **new**, separate topic from
+ *   `event`: `event`'s payload is `EventResponse` (→ {@link LiveEvent}), the domain's generic `Event`
+ *   (`STREAM_STARTED`/`DEVICE_ONLINE`/`PIPELINE_ERROR`/...), genuinely different from the debounced,
+ *   `OPEN`/`CLOSED`, `peakConfidence`-carrying `DetectionEvent` `GET /api/events` serves — see
+ *   {@link LiveEvent}'s own doc comment for the full distinction. `detection-events` carries
+ *   `DetectionEvent`s (FIFO, snapshot-on-connect oldest-first, same underlying source `GET
+ *   /api/events` reads) for `EventsStore` to project, exactly like `event`/`LiveEvent` remains
+ *   unconsumed (no store's domain matches it — `liveEvents` below is exposed anyway, arriving for
+ *   free, for a future consumer that doesn't exist yet).
  *
- * The other two do **not** match any existing store's domain, verified by reading both the actual
- * DTOs and this app's own models before assuming otherwise:
- * - `fleet`'s payload is `List<AssetSummaryResponse>` (→ {@link AssetSummary}, this file's own
- *   `fleet` signal) — **not** `core/fleet/fleet-store.ts#FleetStore`'s domain at all, which is
- *   `Device`/`ActiveStream` from `GET /api/devices`+`GET /api/streams`, a different pair of REST
- *   resources entirely. `FleetStore` is therefore **not** converted into a projection of this store
- *   this cycle — there is nothing here for it to project. (`AssetSummary` polling is today done ad
- *   hoc by several pages — `fly.ts`'s own picker refresh, `core/map/map-store.ts`, `asset-detail.ts` —
- *   with no single existing store class; a future cycle could point one of those at this store's
- *   `fleet` signal, but none is rewired this cycle, to keep this task's scope to the four named
- *   stores rather than an open-ended page audit.)
- * - `event`'s payload is `EventResponse` (→ {@link LiveEvent}) — the domain's generic `Event`
- *   (`STREAM_STARTED`/`DEVICE_ONLINE`/`PIPELINE_ERROR`/...), **not** `DetectionEvent` (the
- *   debounced, `OPEN`/`CLOSED`, `peakConfidence`-carrying kind `GET /api/events` and
- *   `core/events/events-store.ts#EventsStore` serve) — see {@link LiveEvent}'s own doc comment for the
- *   full distinction. There is no SSE topic (or REST endpoint) for `DetectionEvent`s at all today,
- *   so `EventsStore` is **not** converted either — it keeps polling `GET /api/events` unchanged.
- *   `liveEvents` below is exposed anyway (it arrives on every connection for free, being always-on)
- *   for a future consumer, but nothing in this app reads it yet.
+ * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
+ * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
+ * a future cycle could point one of those at this store's `fleet` signal, but none is rewired here.
  *
  * <h2>Connection lifecycle</h2>
  * `EventSource` is a browser built-in with its own native reconnect for a transient network drop
@@ -120,6 +137,25 @@ export class LiveStore {
   private readonly liveEventsSignal = signal<readonly LiveEvent[]>([]);
   /** Generic domain events (always-on) — **not** `DetectionEvent`s; see class doc. */
   readonly liveEvents = this.liveEventsSignal.asReadonly();
+
+  private readonly devicesSignal = signal<DevicesSnapshot | undefined>(undefined);
+  /** The latest `devices` snapshot (always-on) — `core/fleet/fleet-store.ts#FleetStore`'s own projection source. */
+  readonly devices = this.devicesSignal.asReadonly();
+
+  /**
+   * Every `detection-events` arrival this connection has seen, **chronological (oldest-first,
+   * true FIFO append)** — deliberately not newest-first like `liveEvents` above, because the same
+   * `DetectionEvent` id can arrive more than once as its `OPEN`→`CLOSED` lifecycle advances,
+   * and `core/events/events-store.ts#EventsStore`'s own `mergeEvents` upserts by id, letting a
+   * *later* array entry win over an *earlier* one for the same id (its own doc comment: "incoming
+   * always wins"). Appending in true arrival order — and trimming overflow from the *front* — is
+   * what keeps that "later wins" guarantee correct regardless of how many times this array has
+   * been reprocessed; reversing the order here would silently let a stale `OPEN` snapshot entry
+   * clobber a genuinely newer `CLOSED` one.
+   */
+  private readonly detectionEventsSignal = signal<readonly DetectionEvent[]>([]);
+  /** `core/events/events-store.ts#EventsStore`'s own projection source — see this field's own doc comment above. */
+  readonly detectionEvents = this.detectionEventsSignal.asReadonly();
 
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
@@ -293,6 +329,16 @@ export class LiveStore {
         return;
       case 'event':
         this.liveEventsSignal.update((events) => [envelope.payload, ...events].slice(0, MAX_LIVE_EVENTS));
+        return;
+      case 'devices':
+        this.devicesSignal.set(envelope.payload);
+        return;
+      case 'detection-events':
+        // Chronological append, trimmed from the front on overflow — see `detectionEventsSignal`'s
+        // own doc comment for why this must stay oldest-first, unlike `liveEvents` above.
+        this.detectionEventsSignal.update((events) =>
+          [...events, envelope.payload].slice(-MAX_LIVE_DETECTION_EVENTS),
+        );
         return;
     }
   }

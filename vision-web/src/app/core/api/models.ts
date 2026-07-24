@@ -97,10 +97,18 @@ export interface ActiveStream {
   readonly whepUrl?: string;
 }
 
-/** Mirrors `dto.StartStreamRequest` — both fields fall back to `PipelineConfig.defaults()`. */
+/**
+ * Mirrors `dto.StartStreamRequest` — every field falls back to `PipelineConfig.defaults()`.
+ * `model` (docs/CV-MODELS-PLAN.md item 4 — the detection-model picker,
+ * `core/settings/settings-store.ts#DetectionModelId`) is the raw model id string verbatim, never
+ * split here — it may be a comma-composite (`"yolo11n.pt,orion12l.pt"`) that only `cv-service`'s own
+ * registry parses; the resulting `ModelRef`'s version always stays the backend default (there is no
+ * per-stream version override, only a model-id one).
+ */
 export interface StartStreamRequest {
   readonly confidenceThreshold?: number;
   readonly inferenceFps?: number;
+  readonly model?: string;
 }
 
 /** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as `ActiveStream#whepUrl`. */
@@ -253,16 +261,25 @@ export interface CreateAssetDeviceSpec {
 }
 
 /**
- * Mirrors `dto.CreateAssetRequest`, the body of `POST /api/assets` (docs/UX-QUICKWINS-PLAN.md QF-2).
- * `attributes` omitted rather than sent as `{}`/`null`; `devices` must contain at least one entry
- * (`AssetSpec`'s own validation, not re-checked here) — the response is a full `AssetDetails`
- * (`AssetDetailsResponse`, 201).
+ * Mirrors `dto.CreateAssetRequest`, the body of `POST /api/assets` (docs/UX-QUICKWINS-PLAN.md QF-2;
+ * `deviceIds` added by docs/REALTIME-PLAN.md §4's backend follow-up batch). `attributes` omitted
+ * rather than sent as `{}`/`null`; `devices`/`deviceIds` may be combined freely, but at least one
+ * device between the two is required (`AssetSpec`'s own validation, not re-checked here) — the
+ * response is a full `AssetDetails` (`AssetDetailsResponse`, 201).
+ *
+ * **`deviceIds`** is the "promote to asset" flow: existing, currently-unowned device ids (canonical
+ * UUID strings) to assign to the new asset in the same call — validated exactly like `POST
+ * /api/assets/{id}/devices` (must exist, must not be soft-deleted, must not already belong to
+ * another asset). This is what let `features/devices/devices-page-logic.ts#buildCreateAssetRequestForDevice`
+ * drop its own re-register-then-archive workaround: promoting a device to its own asset no longer
+ * creates a second `Device` row at all, see that function's own doc comment.
  */
 export interface CreateAssetRequest {
   readonly displayName: string;
   readonly category: string;
   readonly attributes?: Record<string, string>;
-  readonly devices: readonly CreateAssetDeviceSpec[];
+  readonly devices?: readonly CreateAssetDeviceSpec[];
+  readonly deviceIds?: readonly string[];
 }
 
 /**
@@ -510,6 +527,14 @@ export type DetectionEventState = 'OPEN' | 'CLOSED';
  * unrelated {@link LiveEvent} shape below — not this one, and not as a `DetectionEvent`. The two
  * are genuinely different domain concepts (see `LiveEvent`'s own doc comment) — `core/live/live-store.ts`
  * exposes `LiveEvent`s on its own `liveEvents` signal, unconsumed by `EventsStore` this cycle.
+ *
+ * **Update, docs/REALTIME-PLAN.md §4's backend follow-up batch**: this shape is now *also* the
+ * payload of the `detection-events` `GET /api/live` topic (always-on, FIFO, snapshot-on-connect
+ * oldest-first — see {@link LiveEnvelope}) — the "still no SSE topic" claim two paragraphs up (about
+ * `LiveEvent`, the *generic*-domain-`Event` topic) never applied to this interface; this is the one
+ * that gained a live source. `core/events/events-store.ts#EventsStore` projects it exactly like
+ * `TelemetryStore`/`DetectionsStore` project their own topics — live when `LiveStore` is open, the
+ * existing `GET /api/events` poll otherwise.
  */
 export interface DetectionEvent {
   readonly id: string;
@@ -548,8 +573,10 @@ export interface LiveConnected {
  * domain's generic `Event`/`EventType` (`DEVICE_ONLINE`/`DEVICE_OFFLINE`/`STREAM_STARTED`/
  * `STREAM_STOPPED`/`PIPELINE_ERROR`/`DETECTION`/`TRAINING`) — a different, older domain concept
  * than the debounced, tracked-over-time `DetectionEvent` (`OPEN`/`CLOSED`, `peakConfidence`,
- * `label`) that `/api/events` and `core/events/events-store.ts` serve. There is still no SSE topic (or any
- * REST endpoint) carrying `DetectionEvent`s — see that interface's own doc comment. `type` is the
+ * `label`) that `/api/events` and `core/events/events-store.ts` serve. **`DetectionEvent` gained its own
+ * `detection-events` SSE topic** (docs/REALTIME-PLAN.md §4's backend follow-up batch — see that
+ * interface's own doc comment); this `event` topic/`LiveEvent` shape remains the one with no read
+ * side beyond this live feed — still no REST endpoint and no consumer in this app. `type` is the
  * domain `EventType` enum's `name()` (e.g. `"STREAM_STARTED"`), not one of this file's own
  * `AssetStatus`/`LifecycleState`-style unions — left as a plain `string` rather than an enumerated
  * union that would need to track the Java enum by hand for a signal nothing in this app renders yet.
@@ -564,18 +591,37 @@ export interface LiveEvent {
 }
 
 /**
+ * Mirrors `dto.DevicesSnapshotResponse` — the payload of the always-on `devices` `GET /api/live`
+ * topic (docs/REALTIME-PLAN.md §4's backend follow-up batch, extending the R-c channel beyond its
+ * original scope). The combined device-list + active-stream-list snapshot `core/fleet/fleet-store.ts#FleetStore`
+ * otherwise polls via `GET /api/devices`+`GET /api/streams` every 5s — both lists travel in one
+ * envelope under the channel's one shared `seq` deliberately, so a consumer can never observe a
+ * device list and an active-stream list snapshotted at different moments. Always a full snapshot,
+ * like `fleet`'s own payload — never a diff.
+ */
+export interface DevicesSnapshot {
+  readonly devices: readonly Device[];
+  readonly streams: readonly ActiveStream[];
+}
+
+/**
  * Mirrors `dto.LiveEnvelopeResponse` — the shape of every regular (default-named) `GET /api/live`
  * SSE `data:` line; the event's own `id:` field carries `seq` as a string (which is what makes
  * `EventSource`'s automatic `Last-Event-ID` resume work with no client code at all). A discriminated
- * union on `type` so a `switch` narrows `payload` to the right shape per branch — the four `type`
+ * union on `type` so a `switch` narrows `payload` to the right shape per branch — the six `type`
  * values and their payloads are fixed 1:1 with `LiveTopicKind`'s wire values and
- * `LiveUpdateRegistry`'s own javadoc (vision-api).
+ * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events` (docs/REALTIME-PLAN.md
+ * §4's backend follow-up batch) are, like `fleet`/`event`, always-on — every connection gets them
+ * regardless of the `topics` query parameter, so there is no subscribe/unsubscribe management for
+ * either on this side, only envelope routing by `type`.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
   | { readonly seq: number; readonly assetId: string; readonly type: 'telemetry'; readonly payload: readonly TelemetrySample[] }
   | { readonly seq: number; readonly assetId: string; readonly type: 'detections'; readonly payload: DetectionResult }
-  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'event'; readonly payload: LiveEvent };
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'event'; readonly payload: LiveEvent }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'devices'; readonly payload: DevicesSnapshot }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
