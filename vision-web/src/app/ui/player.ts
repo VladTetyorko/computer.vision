@@ -22,14 +22,17 @@ import {
 import {
   COLD_START_RETRY_DELAY_MS,
   INITIAL_PACING_STATE,
+  STALL_WATCHDOG_MS,
   advancePacing,
   cyclePacingDelayMs,
   initialTransportState,
   isStalled,
   reduceTransportRecovery,
   shouldAttemptWhep,
+  type PacingEvent,
   type PacingState,
   type PlayerPhase,
+  type RecoveryEvent,
   type Transport,
   type TransportRecoveryState,
 } from './player-recovery';
@@ -43,9 +46,34 @@ import {
 export type { PlayerPhase, Transport } from './player-recovery';
 export type { BoxesMode } from './detection-overlay-logic';
 
+/**
+ * Console prefix for this component's diagnostic logging (docs/MVP3-PLAN.md follow-up: the "Fly
+ * shows an empty box, no error" investigation). This codebase has no logging service/convention
+ * (grep-verified before adding this) — plain `console.*` with a stable prefix, mirroring the one
+ * `[fly]` uses in `pages/fly/fly.ts`. Kept deliberately terse: one line per state transition, not a
+ * trace of every tick, so a real incident's console isn't itself a wall of noise.
+ */
+const LOG_PREFIX = '[player]';
+
 const LATENCY_SAMPLE_MS = 1_000;
 const OVERLAY_REDRAW_MS = 200;
 const WATCHDOG_TICK_MS = 2_000;
+
+/**
+ * Cap on consecutive `hls.recoverMediaError()` calls within one attach lifetime, reset the moment
+ * a fragment actually buffers (real progress). **Load-bearing, not a nicety**: hls.js's own error
+ * model expects the caller to bound this — a persistently broken source (the underlying stream
+ * never actually produces valid media, e.g. a dead upstream RTSP feed that never publishes a
+ * frame) can make `recoverMediaError()` immediately re-trigger another fatal `MEDIA_ERROR`, and
+ * calling it again unconditionally forever turns into a tight, unyielding recovery cycle — each
+ * cycle cheap alone, but with no cap the browser tab pins a CPU core and its memory climbs without
+ * bound, which reads as "the tab is frozen", not "the video won't play" (confirmed live: opening
+ * `/fly` against an asset whose video source never produces frames hung the whole tab, not just
+ * the player). Once the cap is hit, this degrades to the exact same timer-based, capped-backoff
+ * `scheduleReconnect` path every other fatal error already takes — never a silent, ever-tighter
+ * spin.
+ */
+const MEDIA_ERROR_RECOVERY_LIMIT = 3;
 
 /** How long a WHEP attach waits for `ontrack` after the answer is applied — see class doc. */
 const WHEP_NO_TRACK_TIMEOUT_MS = 6_000;
@@ -382,6 +410,44 @@ export class Player {
    */
   private readonly pacingState = signal<PacingState>(INITIAL_PACING_STATE);
 
+  /**
+   * Dispatches a `RecoveryEvent` through `reduceTransportRecovery` and logs the resulting
+   * transition — the NgRx/Redux idiom this file's two reducers (`reduceRecovery`/
+   * `reduceTransportRecovery` in `player-recovery.ts`, already pure `(state, action) => state`
+   * functions) were missing: every other piece of this class already *computes* the next state
+   * correctly, but nothing surfaced *which action fired and what actually changed* — exactly the
+   * transparency gap that made the hard-freeze bug (see the reattach effect's own doc comment
+   * above) invisible until this incident's CDP profiling. Every call site in this file that used
+   * to write `this.transportState.set(reduceTransportRecovery(this.transportState(), event))`
+   * directly now goes through here instead, so the console's action log is complete, not
+   * best-effort at a few hand-picked spots. A no-op transition (`next === prev`, e.g. `'stopped'`
+   * dispatched twice in a row) logs nothing — only genuine phase/transport changes are noise
+   * worth seeing.
+   */
+  private dispatchRecovery(event: RecoveryEvent): TransportRecoveryState {
+    const prev = this.transportState();
+    const next = reduceTransportRecovery(prev, event);
+    if (next !== prev) {
+      console.info(
+        `${LOG_PREFIX} [action] ${event} → phase ${prev.recovery.phase}→${next.recovery.phase}` +
+          (next.transport !== prev.transport ? `, transport ${prev.transport}→${next.transport}` : ''),
+      );
+    }
+    this.transportState.set(next);
+    return next;
+  }
+
+  /** The `PacingState` analog of `dispatchRecovery` above — same reasoning, same log shape. */
+  private dispatchPacing(event: PacingEvent, nowMs: number): PacingState {
+    const prev = this.pacingState();
+    const next = advancePacing(prev, event, nowMs);
+    if (next !== prev) {
+      console.info(`${LOG_PREFIX} [action] pacing/${event} → cycleAttempt ${prev.cycleAttempt}→${next.cycleAttempt}`);
+    }
+    this.pacingState.set(next);
+    return next;
+  }
+
   protected readonly reconnectHint = computed(() => {
     // Reads the saga-wide pacing counter, not `transportState().recovery.attempt` (which resets on
     // every WHEP→HLS fallback) — see `PacingState`'s doc comment for why the two differ on purpose.
@@ -429,9 +495,13 @@ export class Player {
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private overlayTimer: ReturnType<typeof setInterval> | null = null;
   private mediaAbort: AbortController | null = null;
+  /** Consecutive `recoverMediaError()` calls since the last real progress — see `MEDIA_ERROR_RECOVERY_LIMIT`. */
+  private mediaErrorRecoveryCount = 0;
   private lastProgressAt = 0;
   private currentSrc: string | null = null;
   private generation = 0;
+  /** The `src`/`whepUrl`/`suspended`/`stopped` tuple the reattach effect last actually acted on — see its own doc comment. */
+  private lastAttachKey: string | null = null;
   /** `document.hidden` as of the latency timer's last tick — see `startLatencySampling`'s doc. */
   private wasDocumentHidden = false;
 
@@ -449,6 +519,30 @@ export class Player {
       const whepUrl = this.whepUrl();
       const suspended = this.suspended();
       const stopped = this.stopped();
+      const key = `${src} ${whepUrl} ${suspended} ${stopped}`;
+      if (key === this.lastAttachKey) {
+        // **The hard-freeze fix (distinct from the `stopped`-state freeze fix below — see that
+        // one's own doc comment for the *other* incident it closed).** Confirmed live
+        // (CDP-profiled against `/live/:deviceId`, both a genuinely healthy stream and a dead
+        // one): this effect can be re-run by Angular's own change-detection/effect-flush
+        // machinery with every tracked input signal reading back byte-for-byte identical to last
+        // time — no `src`, `whepUrl`, `suspended`, or `stopped` actually changed (verified with
+        // instance/run counters logged during the investigation: the same `Player` instance, same
+        // values, run after run, hundreds of times a second, indefinitely). `reattach()` itself
+        // has no reason to distrust that and redoes the *entire* attach from scratch every time
+        // (`teardown()` — destroying any in-flight `RTCPeerConnection`/`Hls` — then a brand new
+        // WHEP POST or HLS load): each cycle alone is cheap, but at hundreds of cycles a second
+        // the tab's main thread never gets a spare tick for anything else, including its own
+        // DevTools/CDP protocol handling — which is the literal mechanism behind "the whole tab
+        // hard-freezes" (both `/fly` and `/live/:deviceId` exhibit it; not a WHEP/HLS/mediamtx
+        // problem, and not specific to a broken source). This equality check makes the effect
+        // idempotent against a spurious re-notification with no value change — `reattach()`'s own
+        // `generation` counter already guards *stale* async work landing late, but nothing
+        // previously guarded against *starting* redundant work in the first place.
+        console.info(`${LOG_PREFIX} reattach effect re-notified with unchanged inputs — skipping`);
+        return;
+      }
+      this.lastAttachKey = key;
       // Read inputs before the async teardown so the effect tracks them.
       void this.reattach(src, whepUrl, suspended, stopped);
     });
@@ -524,12 +618,14 @@ export class Player {
     // even if the host is still feeding a (possibly stale/flapping) `src`/`whepUrl` — see the
     // `stopped` input's own doc comment for why this is the actual freeze fix.
     if (stopped) {
-      this.transportState.set(reduceTransportRecovery(this.transportState(), 'stopped'));
+      console.info(`${LOG_PREFIX} stopped — not attaching`);
+      this.dispatchRecovery('stopped');
       return;
     }
 
     if ((!src && !whepUrl) || suspended) {
-      this.transportState.set(reduceTransportRecovery(this.transportState(), 'reset'));
+      console.info(`${LOG_PREFIX} nothing to attach`, { hasSrc: !!src, hasWhepUrl: !!whepUrl, suspended });
+      this.dispatchRecovery('reset');
       return;
     }
 
@@ -541,9 +637,14 @@ export class Player {
     this.pacingState.set(INITIAL_PACING_STATE);
     const usesWhep = whepUrl !== null && shouldAttemptWhep(this.pacingState(), true, Date.now());
     this.transportState.set(reduceTransportRecovery(initialTransportState(usesWhep), 'attachStarted'));
+    console.info(`${LOG_PREFIX} source selected: ${usesWhep ? 'WHEP' : 'HLS'}`, {
+      chosenUrl: usesWhep ? whepUrl : src,
+      whepUrl,
+      hlsUrl: src,
+    });
 
     if (usesWhep && whepUrl) {
-      this.pacingState.update((s) => advancePacing(s, 'whepAttempted', Date.now()));
+      this.dispatchPacing('whepAttempted', Date.now());
       await this.beginWhepAttach(generation, whepUrl, src);
     } else if (src) {
       await this.beginAttach(generation, src);
@@ -566,9 +667,10 @@ export class Player {
     const now = Date.now();
     const tryWhep = this.currentWhepUrl !== null && shouldAttemptWhep(this.pacingState(), true, now);
     this.transportState.set(reduceTransportRecovery(initialTransportState(tryWhep), 'attachStarted'));
+    console.info(`${LOG_PREFIX} [action] attachStarted (new cycle) → transport ${tryWhep ? 'webrtc' : 'hls'}`);
 
     if (tryWhep && this.currentWhepUrl !== null) {
-      this.pacingState.update((s) => advancePacing(s, 'whepAttempted', now));
+      this.dispatchPacing('whepAttempted', now);
       void this.beginWhepAttach(generation, this.currentWhepUrl, this.currentSrc);
     } else {
       void this.beginAttach(generation, this.currentSrc);
@@ -597,7 +699,8 @@ export class Player {
       return; // src changed / component destroyed while the chunk was loading
     }
     if (!Hls.isSupported()) {
-      this.transportState.set(reduceTransportRecovery(this.transportState(), 'unsupported'));
+      console.error(`${LOG_PREFIX} this browser cannot play HLS (hls.js reports unsupported)`);
+      this.dispatchRecovery('unsupported');
       this.message.set('This browser cannot play HLS.');
       return;
     }
@@ -613,14 +716,17 @@ export class Player {
     this.hls = hls;
     hls.attachMedia(video);
     hls.loadSource(src);
+    console.info(`${LOG_PREFIX} HLS attach starting`, { src });
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => void video.play().catch(() => undefined));
     hls.on(Hls.Events.FRAG_BUFFERED, () => {
       this.lastProgressAt = Date.now();
+      this.mediaErrorRecoveryCount = 0; // real progress — the recovery cap starts fresh
       const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
-      this.transportState.set(reduceTransportRecovery(this.transportState(), 'firstSegment'));
-      this.pacingState.update((s) => advancePacing(s, 'playing', Date.now())); // docs/MVP2-PLAN.md §S, S-c
+      this.dispatchRecovery('firstSegment');
+      this.dispatchPacing('playing', Date.now()); // docs/MVP2-PLAN.md §S, S-c
       if (wasReconnecting) {
+        console.info(`${LOG_PREFIX} HLS recovered — fragment buffered again`);
         this.maybeSnapToLive('recovered'); // see docs/MVP2-PLAN.md §V, V-b — a fresh reattach earns a live-edge snap.
       }
     });
@@ -629,15 +735,46 @@ export class Player {
         return;
       }
       if (this.isColdStartMiss(data)) {
-        this.transportState.set(reduceTransportRecovery(this.transportState(), 'playlistNotReady'));
+        console.info(`${LOG_PREFIX} HLS playlist not ready yet (cold start) — retrying`, {
+          details: data.details,
+          responseCode: data.response?.code,
+        });
+        this.dispatchRecovery('playlistNotReady');
         this.scheduleColdStartRetry(generation);
         return;
       }
-      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-        hls.recoverMediaError(); // hls.js's own lighter-weight recovery, not a full reattach
-        return;
+      if (data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR) {
+        // The exact shape a dev-server missing the `/hls` proxy entry produces: the request
+        // succeeds (200) but the body is the SPA's own `index.html`, which hls.js correctly
+        // refuses to parse as a playlist — see vision-web/proxy.conf.json and its own comment.
+        console.error(
+          `${LOG_PREFIX} got HTML instead of HLS playlist — is the /hls proxy configured? ` +
+            '(vision-web/proxy.conf.json needs a "/hls" entry pointing at the backend; ng serve must be restarted after editing it)',
+          { src },
+        );
       }
-      this.transportState.set(reduceTransportRecovery(this.transportState(), 'fatalError'));
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        this.mediaErrorRecoveryCount++;
+        if (this.mediaErrorRecoveryCount <= MEDIA_ERROR_RECOVERY_LIMIT) {
+          console.warn(
+            `${LOG_PREFIX} HLS media error (recovery attempt ${this.mediaErrorRecoveryCount}/${MEDIA_ERROR_RECOVERY_LIMIT}) — calling hls.recoverMediaError()`,
+            { details: data.details },
+          );
+          hls.recoverMediaError(); // hls.js's own lighter-weight recovery, not a full reattach
+          return;
+        }
+        console.error(
+          `${LOG_PREFIX} HLS media error recovery exhausted after ${MEDIA_ERROR_RECOVERY_LIMIT} attempts — the underlying ` +
+            'stream is likely never producing valid media (e.g. a dead upstream source); falling back to a full, ' +
+            'timer-based reconnect instead of retrying recoverMediaError() again',
+          { details: data.details },
+        );
+        // Falls through to the generic fatal-error path just below, same as any other
+        // unrecoverable error — `teardownMedia()`'s own reset (see above) zeroes the count again
+        // once the scheduled reconnect actually rebuilds `hls` from scratch.
+      }
+      console.warn(`${LOG_PREFIX} HLS fatal error — reconnecting`, { type: data.type, details: data.details });
+      this.dispatchRecovery('fatalError');
       this.message.set(data.details ?? 'The stream could not be loaded.');
       this.scheduleReconnect(generation);
     });
@@ -676,8 +813,7 @@ export class Player {
       }, COLD_START_RETRY_DELAY_MS);
       return;
     }
-    const next = advancePacing(pacing, 'cycleFailed', Date.now());
-    this.pacingState.set(next);
+    const next = this.dispatchPacing('cycleFailed', Date.now());
     this.coldStartTimer = setTimeout(() => this.beginNextCycle(generation), cyclePacingDelayMs(next));
   }
 
@@ -688,9 +824,9 @@ export class Player {
    */
   private scheduleReconnect(generation: number): void {
     this.clearReconnectTimer(); // see its own doc comment — never leave a prior backoff orphaned
-    const next = advancePacing(this.pacingState(), 'cycleFailed', Date.now());
-    this.pacingState.set(next);
+    const next = this.dispatchPacing('cycleFailed', Date.now());
     const delay = cyclePacingDelayMs(next);
+    console.warn(`${LOG_PREFIX} scheduling reconnect in ${delay}ms (cycle attempt ${next.cycleAttempt})`);
     this.reconnectTimer = setTimeout(() => this.beginNextCycle(generation), delay);
   }
 
@@ -706,7 +842,8 @@ export class Player {
       }
       this.tickPacingHealth();
       if (isStalled(this.lastProgressAt, Date.now())) {
-        this.transportState.set(reduceTransportRecovery(this.transportState(), 'stalled'));
+        console.warn(`${LOG_PREFIX} no HLS fragment progress for ${STALL_WATCHDOG_MS}ms — reconnecting`);
+        this.dispatchRecovery('stalled');
         this.message.set('No new video for a while — reconnecting.');
         this.scheduleReconnect(generation);
       }
@@ -722,7 +859,7 @@ export class Player {
    */
   private tickPacingHealth(): void {
     if (this.transportState().recovery.phase === 'playing') {
-      this.pacingState.update((s) => advancePacing(s, 'healthTick', Date.now()));
+      this.dispatchPacing('healthTick', Date.now());
     }
   }
 
@@ -736,8 +873,8 @@ export class Player {
       () => {
         this.lastProgressAt = Date.now();
         const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
-        this.transportState.set(reduceTransportRecovery(this.transportState(), 'firstSegment'));
-        this.pacingState.update((s) => advancePacing(s, 'playing', Date.now())); // docs/MVP2-PLAN.md §S, S-c
+        this.dispatchRecovery('firstSegment');
+        this.dispatchPacing('playing', Date.now()); // docs/MVP2-PLAN.md §S, S-c
         if (wasReconnecting) {
           this.maybeSnapToLive('recovered'); // see docs/MVP2-PLAN.md §V, V-b — mirrors the hls.js FRAG_BUFFERED handler above.
         }
@@ -751,7 +888,8 @@ export class Player {
         if (generation !== this.generation) {
           return;
         }
-        this.transportState.set(reduceTransportRecovery(this.transportState(), 'fatalError'));
+        console.warn(`${LOG_PREFIX} native HLS playback error — reconnecting`, { error: video.error?.message });
+        this.dispatchRecovery('fatalError');
         this.message.set('The browser could not load this stream.');
         this.scheduleReconnect(generation);
       },
@@ -851,8 +989,10 @@ export class Player {
     this.teardownWhep();
     this.lastFrameAt = Date.now();
     this.startWhepWatchdog(generation, hlsFallbackSrc);
+    console.info(`${LOG_PREFIX} WHEP attach starting`, { whepUrl });
 
     if (typeof RTCPeerConnection === 'undefined') {
+      console.error(`${LOG_PREFIX} WHEP unsupported — this browser has no RTCPeerConnection`);
       this.handleWhepFailure(generation, hlsFallbackSrc, 'unsupported');
       return;
     }
@@ -869,6 +1009,7 @@ export class Player {
         if (generation !== this.generation) {
           return;
         }
+        console.info(`${LOG_PREFIX} WHEP ontrack fired`, { kind: event.track.kind, streams: event.streams.length });
         const video = this.video().nativeElement;
         const stream = event.streams[0];
         if (stream && video.srcObject !== stream) {
@@ -878,8 +1019,8 @@ export class Player {
         this.lastFrameAt = Date.now();
         this.behindLive.set(0); // WHEP is effectively live — see class doc.
         this.clearWhepNoTrackTimer();
-        this.transportState.set(reduceTransportRecovery(this.transportState(), 'firstSegment'));
-        this.pacingState.update((s) => advancePacing(s, 'playing', Date.now())); // docs/MVP2-PLAN.md §S, S-c
+        this.dispatchRecovery('firstSegment');
+        this.dispatchPacing('playing', Date.now()); // docs/MVP2-PLAN.md §S, S-c
         if (this.overlayTimer === null) {
           this.startOverlayLoop(); // ontrack can fire more than once on renegotiation
         }
@@ -890,7 +1031,9 @@ export class Player {
           return;
         }
         const state = pc.iceConnectionState;
+        console.info(`${LOG_PREFIX} WHEP ICE connection state: ${state}`);
         if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+          console.warn(`${LOG_PREFIX} WHEP ICE negotiation ${state} — treating as a WHEP failure`);
           this.handleWhepFailure(generation, hlsFallbackSrc, 'stalled');
         }
       };
@@ -913,6 +1056,7 @@ export class Player {
       if (generation !== this.generation) {
         return;
       }
+      console.info(`${LOG_PREFIX} WHEP POST ${whepUrl} → HTTP ${response.status}`);
       if (!response.ok) {
         throw new Error(`WHEP offer rejected: HTTP ${response.status}`);
       }
@@ -923,10 +1067,11 @@ export class Player {
       await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
       this.scheduleWhepNoTrackTimeout(generation, hlsFallbackSrc);
-    } catch {
+    } catch (error) {
       if (generation !== this.generation || controller.signal.aborted) {
         return;
       }
+      console.warn(`${LOG_PREFIX} WHEP negotiation failed`, { error });
       this.handleWhepFailure(generation, hlsFallbackSrc, 'fatalError');
     }
   }
@@ -952,6 +1097,9 @@ export class Player {
   private scheduleWhepNoTrackTimeout(generation: number, hlsFallbackSrc: string | null): void {
     this.whepNoTrackTimer = setTimeout(() => {
       if (generation === this.generation) {
+        console.warn(
+          `${LOG_PREFIX} WHEP connected but no track arrived within ${WHEP_NO_TRACK_TIMEOUT_MS}ms — treating as a WHEP failure`,
+        );
         this.handleWhepFailure(generation, hlsFallbackSrc, 'stalled');
       }
     }, WHEP_NO_TRACK_TIMEOUT_MS);
@@ -972,6 +1120,7 @@ export class Player {
       }
       this.tickPacingHealth();
       if (isStalled(this.lastFrameAt, Date.now())) {
+        console.warn(`${LOG_PREFIX} no WHEP frame progress for ${STALL_WATCHDOG_MS}ms — reconnecting`);
         this.handleWhepFailure(generation, hlsFallbackSrc, 'stalled');
       }
     }, WATCHDOG_TICK_MS);
@@ -997,26 +1146,31 @@ export class Player {
       return;
     }
     this.teardownWhep();
-    const next = reduceTransportRecovery(this.transportState(), event);
-    this.transportState.set(next);
+    const next = this.dispatchRecovery(event);
 
     if (next.transport === 'hls') {
       if (hlsFallbackSrc) {
+        console.warn(`${LOG_PREFIX} WHEP failed (${event}) before ever playing — falling back to HLS`, {
+          hlsFallbackSrc,
+        });
         void this.beginAttach(generation, hlsFallbackSrc);
       } else {
+        console.error(`${LOG_PREFIX} WHEP failed (${event}) and no HLS fallback URL is available for this stream`);
         this.message.set('WebRTC playback failed and no HLS fallback is available for this stream.');
       }
       return;
     }
 
     const whepUrl = this.currentWhepUrl;
-    const pacingNext = advancePacing(this.pacingState(), 'cycleFailed', Date.now());
-    this.pacingState.set(pacingNext);
+    const pacingNext = this.dispatchPacing('cycleFailed', Date.now());
     const delay = cyclePacingDelayMs(pacingNext);
+    console.warn(
+      `${LOG_PREFIX} WHEP failed (${event}) after having played before — retrying WHEP in ${delay}ms`,
+    );
     this.clearReconnectTimer(); // see its own doc comment — never leave a prior backoff orphaned
     this.reconnectTimer = setTimeout(() => {
       if (generation === this.generation && whepUrl !== null) {
-        this.pacingState.update((s) => advancePacing(s, 'whepAttempted', Date.now()));
+        this.dispatchPacing('whepAttempted', Date.now());
         void this.beginWhepAttach(generation, whepUrl, hlsFallbackSrc);
       }
     }, delay);
@@ -1194,6 +1348,7 @@ export class Player {
     this.clearReconnectTimer();
     this.mediaAbort?.abort();
     this.mediaAbort = null;
+    this.mediaErrorRecoveryCount = 0; // a fresh `hls` instance below starts the recovery cap over
     if (this.hls) {
       this.hls.destroy();
       this.hls = null;

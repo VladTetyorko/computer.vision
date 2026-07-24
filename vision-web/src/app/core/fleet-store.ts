@@ -24,6 +24,15 @@ import type {
 const POLL_INTERVAL_MS = 5_000;
 
 /**
+ * Console prefix for this store's diagnostic logging — this codebase has no logging
+ * service/convention (grep-verified), so plain `console.*` with a stable prefix, mirroring
+ * `ui/player.ts`'s `[player]`/`pages/fly/fly.ts`'s `[fly]`. Deliberately placed here rather than in
+ * each calling page: this is the one place every stream-start request/response actually passes
+ * through, regardless of which page (Fly, Live, asset detail, Wall's Watch action) triggered it.
+ */
+const LOG_PREFIX = '[fleet]';
+
+/**
  * Single source of truth for devices and active streams.
  *
  * Every page reads the same two signals, so the Wall, the Devices tab and a Live view
@@ -155,17 +164,28 @@ export class FleetStore {
   }
 
   async start(deviceId: string, request: StartStreamRequest = {}): Promise<StartStreamResult | null> {
+    console.info(`${LOG_PREFIX} POST /api/devices/${deviceId}/stream`, { request });
     return this.run(async () => {
       const result = await this.api.startStream(deviceId, request);
+      console.info(`${LOG_PREFIX} stream start response`, {
+        streamId: result.streamId,
+        viewUrl: result.viewUrl,
+        whepUrl: result.whepUrl,
+      });
       await this.refresh({ quiet: true });
       if (!result.viewUrl) {
+        console.warn(`${LOG_PREFIX} stream ${result.streamId} started with no viewUrl — nothing to watch yet`);
         this.toasts.info('Stream started, but no publisher is wired — there is nothing to watch yet.');
+      }
+      if (!result.whepUrl) {
+        console.info(`${LOG_PREFIX} stream ${result.streamId} has no whepUrl — the player will use HLS only`);
       }
       return result;
     });
   }
 
   async stop(streamId: string): Promise<boolean> {
+    console.info(`${LOG_PREFIX} POST /api/streams/${streamId}/stop`);
     const result = await this.run(async () => {
       await this.api.stopStream(streamId);
       await this.refresh({ quiet: true });
@@ -297,6 +317,7 @@ export class FleetStore {
     try {
       return await action();
     } catch (error) {
+      console.warn(`${LOG_PREFIX} action failed`, { error });
       this.toasts.error(describeHttpError(error));
       return null;
     }

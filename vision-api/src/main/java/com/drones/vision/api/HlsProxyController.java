@@ -15,9 +15,11 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -85,6 +87,8 @@ public class HlsProxyController {
     private static final String HLS_PREFIX = "/hls/";
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(15);
+    /** How much of a non-2xx upstream error body to include in the WARN log line — enough to identify the problem, not a full dump. */
+    private static final int ERROR_BODY_PREVIEW_MAX_CHARS = 200;
 
     private final URI hlsUpstreamBase;
 
@@ -102,6 +106,7 @@ public class HlsProxyController {
         URI upstreamUri = buildUpstreamUri(request);
         try {
             HttpResponse<byte[]> upstreamResponse = fetch(upstreamUri, request.getHeader(HttpHeaders.COOKIE));
+            logProxyOutcome(request, upstreamResponse);
 
             HttpHeaders headers = new HttpHeaders();
             upstreamResponse.headers().firstValue("content-type")
@@ -130,6 +135,41 @@ public class HlsProxyController {
             throw new HlsUpstreamUnavailableException(
                     "Interrupted while fetching upstream HLS for stream " + streamId, e);
         }
+    }
+
+    /**
+     * DEBUG-logs every proxied request's path and upstream status; WARN-logs the two failure
+     * shapes an operator actually hits in practice — a non-2xx upstream response (with a preview of
+     * its body, since mediamtx's own error bodies are short and diagnostic) and an upstream {@code
+     * Content-Type} of {@code text/html}, which means some *other* service (not mediamtx) is
+     * actually bound to the configured HLS port — this happened for real when uvicorn squatted on
+     * mediamtx's default {@code 8888} (see this module's {@code hls-base} config comments).
+     */
+    private static void logProxyOutcome(HttpServletRequest request, HttpResponse<byte[]> upstreamResponse) {
+        String path = request.getRequestURI();
+        int status = upstreamResponse.statusCode();
+        LOG.log(System.Logger.Level.DEBUG, () -> "Proxied " + path + " -> upstream status " + status);
+
+        Optional<String> contentType = upstreamResponse.headers().firstValue("content-type");
+        if (contentType.isPresent() && contentType.get().toLowerCase(Locale.ROOT).contains("text/html")) {
+            LOG.log(System.Logger.Level.WARNING, () -> "Upstream served HTML for " + path + " (Content-Type: "
+                    + contentType.get() + ") -- wrong service on the HLS port?");
+        }
+
+        if (status < 200 || status >= 300) {
+            String bodyPreview = bodyPreview(upstreamResponse.body());
+            LOG.log(System.Logger.Level.WARNING, () -> "Upstream returned " + status + " for " + path
+                    + (bodyPreview.isEmpty() ? "" : ": " + bodyPreview));
+        }
+    }
+
+    /** First {@value #ERROR_BODY_PREVIEW_MAX_CHARS} characters of a (presumed textual) upstream error body, or {@code ""} for an empty/absent one. */
+    private static String bodyPreview(byte[] body) {
+        if (body == null || body.length == 0) {
+            return "";
+        }
+        String text = new String(body, 0, Math.min(body.length, ERROR_BODY_PREVIEW_MAX_CHARS), StandardCharsets.UTF_8);
+        return text.length() > ERROR_BODY_PREVIEW_MAX_CHARS ? text.substring(0, ERROR_BODY_PREVIEW_MAX_CHARS) : text;
     }
 
     private URI buildUpstreamUri(HttpServletRequest request) {

@@ -59,6 +59,8 @@ import java.util.Objects;
 @RestController
 public class StreamController {
 
+    private static final System.Logger LOG = System.getLogger(StreamController.class.getName());
+
     /** Default {@code limit} for {@link #detections} when the query parameter is absent. */
     private static final int DEFAULT_DETECTIONS_LIMIT = 50;
 
@@ -91,7 +93,10 @@ public class StreamController {
                                       @RequestBody(required = false) StartStreamRequest request) {
         PipelineConfig config = (request == null ? StartStreamRequest.EMPTY : request).mergeOntoDefaults();
         StreamId streamId = streamService.start(DeviceId.of(deviceId), config);
-        return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
+        StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
+        LOG.log(System.Logger.Level.INFO, () -> "Started stream " + response.streamId() + " for device " + deviceId
+                + " viewUrl=" + response.viewUrl() + " whepUrl=" + response.whepUrl());
+        return response;
     }
 
     /**
@@ -118,6 +123,7 @@ public class StreamController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void stop(@PathVariable String streamId) {
         streamService.stop(StreamId.of(streamId));
+        LOG.log(System.Logger.Level.INFO, () -> "Stopped stream " + streamId);
     }
 
     /**

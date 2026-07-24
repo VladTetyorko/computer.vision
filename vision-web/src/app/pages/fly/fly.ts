@@ -40,6 +40,13 @@ import type { AssetDetails, AssetSummary, DetectionEvent } from '../../core/api/
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
 /**
+ * Console prefix for this page's diagnostic logging (the "Fly shows only the asset name and an
+ * empty box" investigation) — this codebase has no logging service/convention (grep-verified), so
+ * plain `console.*` with a stable prefix, mirroring `ui/player.ts`'s own `[player]`.
+ */
+const LOG_PREFIX = '[fly]';
+
+/**
  * `/fly` — the operator cockpit and the app's default landing page (docs/MVP3-PLAN.md §C-b, the
  * "one job, one page" persona: *flies ONE drone at a time; everything else is noise*).
  *
@@ -172,6 +179,27 @@ export class FlyPage {
       }
     });
 
+    // Logs exactly what `<vision-player>` is being fed (docs/MVP3-PLAN.md follow-up: makes an
+    // "empty box, no error" report diagnosable from the console alone) — every time the primary
+    // device's stream entry changes, not just once, since the whole point is to catch a stream
+    // that flips between present/absent as `FleetStore`'s own poll lands.
+    effect(() => {
+      const device = this.primaryDevice();
+      const stream = this.stream();
+      if (!device) {
+        return;
+      }
+      if (!stream) {
+        console.info(`${LOG_PREFIX} primary device ${device.id} has no active stream yet`);
+        return;
+      }
+      console.info(`${LOG_PREFIX} primary device ${device.id} stream`, {
+        streamId: stream.streamId,
+        viewUrl: stream.viewUrl,
+        whepUrl: stream.whepUrl,
+      });
+    });
+
     // Any device on the asset resolves the same owning-asset/open-usage pair (mirrors
     // `AssetDetailPage`'s identical effect) — start tracking as soon as the asset has *any*
     // TELEMETRY-capable device, regardless of which VIDEO device is currently primary.
@@ -219,10 +247,16 @@ export class FlyPage {
       this.pickerAssets.set(assets);
       this.pickerError.set(false);
       const resolved = resolveActiveAssetId(assets, this.requestedAssetId(), this.settings.flyAssetId());
+      console.info(`${LOG_PREFIX} picker loaded ${assets.length} asset(s)`, {
+        requestedAssetId: this.requestedAssetId(),
+        rememberedAssetId: this.settings.flyAssetId(),
+        resolved,
+      });
       if (resolved) {
         this.selectAsset(resolved);
       }
-    } catch {
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not load the asset picker`, { error });
       this.pickerError.set(true);
     }
   }
@@ -250,10 +284,11 @@ export class FlyPage {
     try {
       const details = await this.api.getAsset(assetId);
       this.asset.set(details);
-    } catch {
+    } catch (error) {
       if (this.asset() === undefined) {
         // The very first load for this pick failed — a genuine dead end, not a background hiccup
         // on top of an already-working cockpit (that case silently keeps the stale data instead).
+        console.warn(`${LOG_PREFIX} could not load asset ${assetId} — returning to the picker`, { error });
         this.toasts.error('Could not load that drone — it may have been removed.');
         this.activeAssetId.set(undefined);
         this.settings.flyAssetId.set(null);
@@ -266,6 +301,7 @@ export class FlyPage {
     if (assetId === this.activeAssetId()) {
       return;
     }
+    console.info(`${LOG_PREFIX} selecting asset ${assetId}`);
     this.settings.flyAssetId.set(assetId);
     this.activeAssetId.set(assetId);
     this.asset.set(undefined);
@@ -298,6 +334,7 @@ export class FlyPage {
   }
 
   protected onTransport(transport: Transport): void {
+    console.info(`${LOG_PREFIX} player transport changed to ${transport}`);
     this.transport.set(transport);
   }
 
@@ -308,6 +345,7 @@ export class FlyPage {
     if (!device) {
       return;
     }
+    console.info(`${LOG_PREFIX} starting stream for device ${device.id}`);
     this.busy.set(true);
     try {
       await this.fleet.start(device.id, this.settings.effective());

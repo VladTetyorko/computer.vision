@@ -51,7 +51,13 @@ export class App {
 
   constructor() {
     // Warms the Leaflet chunk on idle (docs/CYCLES-PLAN.md §9, CU-b item 2) — after render so it
-    // never competes with first paint or the initial fleet fetch.
-    afterNextRender(() => inject(LeafletWarmup).schedule());
+    // never competes with first paint or the initial fleet fetch. `inject()` is called here, in
+    // the constructor's own injection context, and the resolved instance captured in a const —
+    // NOT inside the `afterNextRender` callback itself, which runs *after* render completes and is
+    // therefore no longer an injection context (calling `inject()` there throws NG0203 at runtime,
+    // confirmed live: every page load logged an uncaught `RuntimeError: NG0203` from this exact
+    // line before this fix, on every route, since `App` is the root component and always mounts).
+    const leafletWarmup = inject(LeafletWarmup);
+    afterNextRender(() => leafletWarmup.schedule());
   }
 }

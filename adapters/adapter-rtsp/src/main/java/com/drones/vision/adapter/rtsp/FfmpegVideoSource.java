@@ -20,6 +20,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -217,7 +218,19 @@ public final class FfmpegVideoSource implements VideoSourcePort {
     private static final int PUBLISHER_BUFFER_CAPACITY = 4;
     private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
 
+    private static final System.Logger LOG = System.getLogger(FfmpegVideoSource.class.getName());
+
     private final Map<StreamId, StreamRuntime> runtimes = new ConcurrentHashMap<>();
+    /**
+     * Consecutive open-failure count per stream — purely to give the WARN log below "attempt N"
+     * context (e.g. a dead RTSP path retried endlessly by the {@code vision-application} stream
+     * supervisor, {@code SupervisedPublisher}, on a 1s→30s backoff). This class has no knowledge of
+     * the supervisor's own backoff timer — each retry is just another {@link #open}/{@link #openAny}
+     * call — so this is a local, best-effort counter, not the supervisor's authoritative one. Reset
+     * to zero the moment a grabber actually starts successfully (see {@link StreamRuntime#runGrabLoop}),
+     * and removed entirely on an explicit {@link #close(StreamId)}.
+     */
+    private final Map<StreamId, AtomicInteger> consecutiveOpenFailures = new ConcurrentHashMap<>();
 
     public FfmpegVideoSource() {
         ensureQuietLogging();
@@ -320,7 +333,7 @@ public final class FfmpegVideoSource implements VideoSourcePort {
             throw new IllegalArgumentException("uri must not be null");
         }
         Map<String, String> effectiveOptions = options == null ? Map.of() : options;
-        StreamRuntime runtime = new StreamRuntime(id, uri, effectiveOptions);
+        StreamRuntime runtime = new StreamRuntime(id, uri, effectiveOptions, consecutiveOpenFailures);
         StreamRuntime previous = runtimes.put(id, runtime);
         if (previous != null) {
             previous.close(); // defensive: an id must not have two live runtimes
@@ -335,6 +348,7 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         if (runtime != null) {
             runtime.close();
         }
+        consecutiveOpenFailures.remove(id);
     }
 
     /**
@@ -397,6 +411,7 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         private final Map<String, String> options;
         private final boolean loop;
         private final boolean paced;
+        private final Map<StreamId, AtomicInteger> consecutiveOpenFailures;
         private final SubmissionPublisher<VideoFrame> publisher =
                 new SubmissionPublisher<>(ForkJoinPool.commonPool(), PUBLISHER_BUFFER_CAPACITY);
         private final AtomicLong sequence = new AtomicLong();
@@ -404,12 +419,14 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         private final AtomicBoolean closed = new AtomicBoolean(false);
         private volatile Thread grabThread;
 
-        StreamRuntime(StreamId streamId, URI uri, Map<String, String> options) {
+        StreamRuntime(StreamId streamId, URI uri, Map<String, String> options,
+                      Map<StreamId, AtomicInteger> consecutiveOpenFailures) {
             this.streamId = streamId;
             this.uri = uri;
             this.options = options;
             this.loop = booleanOption(options, OPTION_LOOP, DEFAULT_LOOP);
             this.paced = PROTOCOL_FILE.equalsIgnoreCase(uri.getScheme());
+            this.consecutiveOpenFailures = consecutiveOpenFailures;
         }
 
         void start() {
@@ -424,6 +441,11 @@ public final class FfmpegVideoSource implements VideoSourcePort {
             try {
                 grabber = newGrabber();
                 grabber.start();
+                // A successful connect/DESCRIBE is proof this stream is no longer stuck failing to
+                // open at all (e.g. a dead RTSP path returning 404) -- reset the WARN-log attempt
+                // counter below, mirroring MediamtxStreamPublisher.StreamState's own
+                // reset-on-recovery convention (adapter-publish-hls).
+                consecutiveOpenFailures.remove(streamId);
                 // Real-time pacing baseline (file sources only, see class javadoc):
                 // -1 means "no previous frame yet" -- the next grabbed frame sets the
                 // baseline without sleeping, whether that is the very first frame or
@@ -470,7 +492,20 @@ public final class FfmpegVideoSource implements VideoSourcePort {
             } catch (Exception e) {
                 errored = true;
                 if (!stopRequested.get()) {
-                    // Unrecoverable grab failure: signal onError and stop producing frames.
+                    // Unrecoverable grab failure: signal onError and stop producing frames. This is
+                    // the only place a dead/unreachable source (e.g. an RTSP DESCRIBE 404 against a
+                    // path nothing is publishing to) becomes visible anywhere but FFmpeg's own
+                    // stderr -- log it at WARN with the source and a local consecutive-failure count
+                    // before handing off to the caller (vision-application's SupervisedPublisher,
+                    // which retries this exact open() with a 1s->30s exponential backoff,
+                    // indefinitely, until it succeeds).
+                    int attempt = consecutiveOpenFailures
+                            .computeIfAbsent(streamId, unused -> new AtomicInteger())
+                            .incrementAndGet();
+                    LOG.log(System.Logger.Level.WARNING, () -> "Video source error for stream "
+                            + streamId.value() + " at " + uri + " (consecutive failure " + attempt
+                            + "); will be retried with backoff by the stream supervisor, dropping "
+                            + "frames until it recovers", e);
                     publisher.closeExceptionally(e);
                 }
             } finally {
