@@ -10,7 +10,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/fleet/device-logic';
-import { ageSeconds, isStale } from '../../core/telemetry/telemetry-logic';
+import { ageSeconds, isStale, trackingIdChanged } from '../../core/telemetry/telemetry-logic';
 import { filterEvents, relativeTimeLabel } from '../../core/events/events-logic';
 import {
   DEVICE_ACTION_LABELS,
@@ -186,6 +186,22 @@ export class AssetDetailPage {
   protected readonly assignDraft = signal('');
   protected readonly loadingAssignable = signal(false);
 
+  // --- Telemetry/detections re-entry guards (docs/REALTIME-PLAN.md Phase R-a item 2, R-c
+  // follow-up) — mirrors `FlyPage`'s own identical pair exactly (see its doc comment): the last
+  // deviceId/streamId the corresponding constructor effect below actually acted on, compared by
+  // value (`core/telemetry/telemetry-logic.ts#trackingIdChanged`), never by the enclosing `asset()`/
+  // `stream()` object's own identity, which is a fresh reference every ~5s poll tick regardless of
+  // whether the tracked id changed. Without this, re-entering `telemetry.track()`/`detections.track()`
+  // with an unchanged id every tick was worse than a wasted re-fetch: `TelemetryStore`/`DetectionsStore`'s
+  // own `track()` tears down and rebuilds its `LiveStore` subscription on every call, and doing that
+  // from inside an already-executing effect let a write deep inside that teardown (the store's own
+  // internal `currentAssetIdSignal`) get attributed back to *this* effect — re-notifying it with
+  // `asset()`/`assetTelemetryDevices()` unchanged, and re-entering `track()` again, in a tight loop
+  // paced only by how fast the store's own async lookups resolved (confirmed live: ~50-90 track/untrack
+  // cycles/sec against a real backend, not the 5s poll cadence at all).
+  private lastTelemetryDeviceId: string | undefined = undefined;
+  private lastDetectionsStreamId: string | undefined = undefined;
+
   constructor() {
     effect(() => {
       const id = this.assetId();
@@ -203,17 +219,32 @@ export class AssetDetailPage {
     // Passes `assetId` — already the route param, no lookup needed (docs/REALTIME-PLAN.md Phase
     // R-a item 3) — so `TelemetryStore` resolves the open usage with one `getAsset()` instead of
     // listing the whole fleet to find which asset owns `devices[0]`.
+    //
+    // **Guarded on the derived deviceId primitive** (docs/REALTIME-PLAN.md Phase R-a item 2, R-c
+    // follow-up) — see the `lastTelemetryDeviceId` field's own doc comment for why this is not
+    // optional here the way a bare "avoid a redundant re-fetch" guard would be.
     effect(() => {
       const devices = this.asset()?.devices ?? [];
-      if (this.assetTelemetryDevices().length > 0) {
-        this.telemetry.track(devices[0].id, this.assetId());
+      const deviceId = this.assetTelemetryDevices().length > 0 ? devices[0].id : undefined;
+      if (!trackingIdChanged(deviceId, this.lastTelemetryDeviceId)) {
+        return;
+      }
+      this.lastTelemetryDeviceId = deviceId;
+      if (deviceId) {
+        this.telemetry.track(deviceId, this.assetId());
       } else {
         this.telemetry.reset();
       }
     });
 
+    // Detections only make sense while this asset is actively streaming. Guarded on the derived
+    // streamId primitive for the identical reason as telemetry above.
     effect(() => {
       const streamId = this.stream()?.streamId;
+      if (!trackingIdChanged(streamId, this.lastDetectionsStreamId)) {
+        return;
+      }
+      this.lastDetectionsStreamId = streamId;
       if (streamId) {
         // Already has the route's own `assetId` (docs/REALTIME-PLAN.md §4, Phase R-c) — lets
         // `DetectionsStore` subscribe to live `detections:<assetId>` instead of only polling.

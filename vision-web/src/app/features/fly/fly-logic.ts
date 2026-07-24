@@ -3,6 +3,14 @@ import { formatDuration } from '../../core/stream-info-logic';
 import type { BoxesMode } from '../../shared/player/player';
 
 /**
+ * Re-exported from `core/telemetry/telemetry-logic.ts`, which is now its canonical home
+ * (docs/REALTIME-PLAN.md §4 Phase R-c follow-up — see that function's own doc comment for why:
+ * `features/asset-detail/asset-detail.ts` needed the identical guard). Kept here too so this page's
+ * own existing `trackingIdChanged` import site keeps working verbatim.
+ */
+export { trackingIdChanged } from '../../core/telemetry/telemetry-logic';
+
+/**
  * Pure, Angular-free logic behind `FlyPage` (docs/MVP3-PLAN.md §C-b) — split out so picker
  * ordering, remembered/requested-asset resolution, the "Replay last flight" link, watch-mode
  * parsing, and the keyboard boxes-cycle are unit-testable without HTTP, the router, or `document`,
@@ -97,21 +105,6 @@ export const TICKER_MAX_EVENTS = 4;
  */
 export function isSwitcherOptionSelected(candidateAssetId: string, activeAssetId: string | undefined): boolean {
   return candidateAssetId === activeAssetId;
-}
-
-/**
- * Whether a tracking effect (docs/REALTIME-PLAN.md Phase R-a item 2) should re-enter its store's
- * `track()`/`reset()` this run: only when the derived id primitive actually changed from the id it
- * last acted on. `FlyPage`'s own `asset()`/`stream()` signals are fresh objects on every ~5s poll
- * tick even when nothing about the tracked device/stream changed (signals compare with
- * `Object.is`), so an effect reading them re-fires on that cadence regardless — without this check,
- * re-entering `telemetry.track()`/`detections.track()` with an *unchanged* id was the diagnosed O(N)
- * amplification bug and the detections-strip flicker (docs/REALTIME-PLAN.md §0). Mirrors
- * `core/map/map-store.ts#reconcileTrackers`'s own reconcile-by-id idiom: compare the id *value*, never
- * the enclosing object's identity.
- */
-export function trackingIdChanged(nextId: string | undefined, lastActedOnId: string | undefined): boolean {
-  return nextId !== lastActedOnId;
 }
 
 // --- Picker asset card (docs/UX-REWORK-PLAN.md §U-a2 §3 — "the info-less asset card on Fly ...

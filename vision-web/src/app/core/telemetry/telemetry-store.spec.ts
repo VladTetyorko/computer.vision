@@ -203,7 +203,11 @@ describe('TelemetryStore', () => {
     expect(store.hasTelemetry()).toBe(false);
   });
 
-  it('re-entering track() with the same assetId again still costs exactly one more getAsset() call, not a fleet listing', async () => {
+  it('re-entering track() with the same (deviceId, assetId) is a no-op — no second getAsset() call at all', async () => {
+    // Defense in depth (docs/REALTIME-PLAN.md §4 Phase R-c follow-up): a caller-side guard
+    // (`trackingIdChanged`, `AssetDetailPage`/`FlyPage`) is the primary fix for the re-entry churn
+    // bug, but this store's own `track()` no-ops on an unchanged `(deviceId, assetId)` pair too, so
+    // an unguarded call site (or a caller-side guard bug) can't reopen the same tight loop.
     const asset: AssetDetails = {
       ...summaryFor('a-7'),
       devices: [{ id: 'dev-7' } as never],
@@ -222,10 +226,43 @@ describe('TelemetryStore', () => {
     await flush();
     await flush();
 
-    expect(api.getAsset).toHaveBeenCalledTimes(2); // one per track() call, never O(fleet size)
+    expect(api.getAsset).toHaveBeenCalledOnce(); // the second track() call never re-entered startTracking()
     expect(api.listAssets).not.toHaveBeenCalled();
 
     store.reset();
+  });
+
+  it('N successive track() calls with the same id — even with no caller-side guard at all — subscribe live exactly once and never untrack', async () => {
+    // Simulates the exact churn class this test suite exists to guard against: an effect reading a
+    // fresh `AssetDetails` object every poll tick, re-entering `track()` with unchanged primitives
+    // each time (docs/REALTIME-PLAN.md §4 Phase R-c follow-up — the `AssetDetailPage` bug, not just
+    // R-a's slower-paced original). Without the `lastTrackKey` guard, each of these calls would tear
+    // down and rebuild the live subscription — the `untrack`/`track` log-spam loop this fix closes.
+    const asset: AssetDetails = {
+      ...summaryFor('a-17'),
+      devices: [{ id: 'dev-17' } as never],
+      recentUsages: [{ usageId: 'u-17', startedAt: '2026-07-24T00:00:00Z', sampleCount: 0 }],
+    };
+    const api = stubApi({
+      getAsset: vi.fn().mockResolvedValue(asset),
+      usageTelemetry: vi.fn().mockResolvedValue([]),
+    });
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    for (let i = 0; i < 5; i++) {
+      // A fresh object every call — mirrors a poll-refreshed `AssetDetails` — but the same ids.
+      store.track('dev-17', 'a-17');
+    }
+    await flush();
+    await flush();
+
+    expect(live.trackTelemetry).toHaveBeenCalledExactlyOnceWith('a-17');
+    expect(live.untrackTelemetry).not.toHaveBeenCalled();
+    expect(api.getAsset).toHaveBeenCalledOnce(); // only the first call actually started a lookup
+
+    store.reset();
+    expect(live.untrackTelemetry).toHaveBeenCalledExactlyOnceWith('a-17'); // reset() still releases it
   });
 
   it('silently degrades when getAsset(assetId) fails, rather than falling back to listAssets()', async () => {

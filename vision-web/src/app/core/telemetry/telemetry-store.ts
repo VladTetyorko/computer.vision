@@ -4,7 +4,12 @@ import type { AssetDetails, TelemetrySample } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
 import { ageSeconds, deriveTrail, findOwningAsset, isStale, selectOpenUsage } from './telemetry-logic';
-import { type AssetScopedTransport, mergeTelemetrySamples, resolveAssetScopedTransport } from '../live/live-fallback-logic';
+import {
+  type AssetScopedTransport,
+  mergeTelemetrySamples,
+  resolveAssetScopedTransport,
+  trackSessionKey,
+} from '../live/live-fallback-logic';
 
 /** How often a tracked usage's telemetry is re-read while **polling** (the fallback) is active. */
 const POLL_INTERVAL_MS = 2_000;
@@ -73,6 +78,21 @@ export class TelemetryStore {
   private tracking = false;
   /** The last known-open usage id — reused by `applyTransport`'s poll branch across transport flips. */
   private currentUsageId: string | undefined;
+  /**
+   * The `(deviceId, assetId)` pair the current/in-flight `track()` session is for, or `undefined`
+   * after `reset()` — defense in depth (docs/REALTIME-PLAN.md Phase R-c follow-up,
+   * `core/telemetry/telemetry-logic.ts#trackingIdChanged`'s own doc comment) against a caller that
+   * re-enters `track()` with an unchanged id: without this, every call unconditionally tore down and
+   * rebuilt the session, and doing so from inside an already-executing caller effect let a write deep
+   * inside that teardown (`currentAssetIdSignal`, below) get attributed back to the *caller's* effect,
+   * re-notifying it with nothing it actually reads changed — a tight, self-sustaining track/untrack
+   * loop, not merely a wasted re-fetch. A caller-side guard (`AssetDetailPage`/`FlyPage`'s own
+   * `trackingIdChanged` checks) is the primary fix; this is the second layer, for any call site that
+   * doesn't guard itself (`LivePage`/`WallTile`, both always passing the same `deviceId` with no
+   * `assetId` — harmless today since `assetId` never actually changes there, but not guaranteed to
+   * stay that way).
+   */
+  private lastTrackKey: string | undefined;
 
   /**
    * Reads live (`LiveStore.telemetryFor`, merged with the one-time backfill) or the poll fallback,
@@ -140,8 +160,16 @@ export class TelemetryStore {
    * Calling again (e.g. the route's `deviceId` changed) supersedes any in-flight lookup, tears down
    * the previous session's subscription/poll, and clears prior samples immediately, so a stale
    * device's trail never lingers into the next.
+   *
+   * **A no-op when `(deviceId, assetId)` is unchanged from the current/in-flight session** — see
+   * `lastTrackKey`'s own doc comment for why this matters beyond avoiding a wasted re-fetch.
    */
   track(deviceId: string, assetId?: string): void {
+    const key = trackSessionKey(deviceId, assetId);
+    if (this.lastTrackKey === key) {
+      return;
+    }
+    this.lastTrackKey = key;
     void this.startTracking(deviceId, assetId);
   }
 
@@ -149,6 +177,7 @@ export class TelemetryStore {
   reset(): void {
     this.generation++;
     this.tracking = false;
+    this.lastTrackKey = undefined;
     this.teardownTracking();
     this.currentAssetIdSignal.set(undefined);
     this.currentUsageId = undefined;

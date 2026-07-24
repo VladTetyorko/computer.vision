@@ -4,7 +4,7 @@ import type { DetectionResult } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
 import { cvStatus, deriveChips } from './detections-logic';
-import { type AssetScopedTransport, resolveAssetScopedTransport } from '../live/live-fallback-logic';
+import { type AssetScopedTransport, resolveAssetScopedTransport, trackSessionKey } from '../live/live-fallback-logic';
 
 /** How often a tracked stream's recent detections are re-read while **polling** (the fallback) is active. */
 const POLL_INTERVAL_MS = 2_000;
@@ -78,6 +78,14 @@ export class DetectionsStore {
   private tracking = false;
   /** The stream currently being tracked — reused by `applyTransport`'s poll branch across transport flips. */
   private currentStreamId: string | undefined;
+  /**
+   * The `(streamId, assetId)` pair the current session is for, or `undefined` after `reset()` —
+   * defense in depth against a caller re-entering `track()` with an unchanged id; see
+   * `TelemetryStore`'s identical `lastTrackKey` field for the full reasoning (this store's own
+   * `track()` has no `await` at all, so the risk here is an even *tighter* same-tick re-notify loop,
+   * not just an async one).
+   */
+  private lastTrackKey: string | undefined;
 
   /** Whichever source is currently active — every other computed below derives from this. */
   readonly results = computed<readonly DetectionResult[]>(() =>
@@ -135,8 +143,17 @@ export class DetectionsStore {
    * Starts tracking `streamId`'s recent detections. Calling again (e.g. the stream changed)
    * supersedes any in-flight poll/subscription and clears prior results immediately, so a stale
    * stream's chips never linger into the next.
+   *
+   * **A no-op when `(streamId, assetId)` is unchanged from the current session** — see
+   * `lastTrackKey`'s own doc comment for why this matters beyond avoiding redundant work.
    */
   track(streamId: string, assetId?: string): void {
+    const key = trackSessionKey(streamId, assetId);
+    if (this.lastTrackKey === key) {
+      return;
+    }
+    this.lastTrackKey = key;
+
     const generation = ++this.generation;
     this.tracking = false;
     this.teardownTracking(); // tears down the *previous* session's subscription/poll, if any
@@ -156,6 +173,7 @@ export class DetectionsStore {
   reset(): void {
     this.generation++;
     this.tracking = false;
+    this.lastTrackKey = undefined;
     this.teardownTracking();
     this.currentAssetIdSignal.set(undefined);
     this.currentStreamId = undefined;

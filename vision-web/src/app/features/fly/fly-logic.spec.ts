@@ -12,7 +12,6 @@ import {
   resolveActiveAssetId,
   sortAssetsForPicker,
   streamStateLabel,
-  trackingIdChanged,
 } from './fly-logic';
 
 function asset(partial: Partial<AssetSummary>): AssetSummary {
@@ -143,27 +142,8 @@ describe('isSwitcherOptionSelected (BROKEN #2 — switcher selection race, docs/
   });
 });
 
-describe('trackingIdChanged (docs/REALTIME-PLAN.md Phase R-a item 2)', () => {
-  it('is false when the same id is derived again — the re-entry guard\'s whole point', () => {
-    expect(trackingIdChanged('dev-1', 'dev-1')).toBe(false);
-  });
-
-  it('is true the first time an id is ever derived (nothing tracked yet)', () => {
-    expect(trackingIdChanged('dev-1', undefined)).toBe(true);
-  });
-
-  it('is true when the tracked id genuinely switches to a different device/stream', () => {
-    expect(trackingIdChanged('dev-2', 'dev-1')).toBe(true);
-  });
-
-  it('is true when the id disappears (asset lost telemetry / stream stopped)', () => {
-    expect(trackingIdChanged(undefined, 'dev-1')).toBe(true);
-  });
-
-  it('is false when nothing was ever tracked and still is not', () => {
-    expect(trackingIdChanged(undefined, undefined)).toBe(false);
-  });
-});
+// `trackingIdChanged` itself is tested in `core/telemetry/telemetry-logic.spec.ts` now that it
+// lives there (docs/REALTIME-PLAN.md §4 Phase R-c follow-up) — `fly-logic.ts` only re-exports it.
 
 describe('streamStateLabel (docs/UX-REWORK-PLAN.md §U-a2 — the picker card states its stream state as a word)', () => {
   it('reads "Streaming" for a streaming asset', () => {

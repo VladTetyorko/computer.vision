@@ -276,6 +276,25 @@ describe('DetectionsStore', () => {
     expect(live.untrackDetections).toHaveBeenCalledExactlyOnceWith('a-14');
   });
 
+  it('N successive track() calls with the same (streamId, assetId) — even with no caller-side guard — subscribe live exactly once and never untrack', () => {
+    // Mirrors `TelemetryStore`'s identical churn-simulation test (docs/REALTIME-PLAN.md §4 Phase
+    // R-c follow-up) — this store's own `track()` has no `await` at all, so an unguarded caller
+    // re-entering with the same id risked an even *tighter* same-tick re-notify loop.
+    const api = stubApi();
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    for (let i = 0; i < 5; i++) {
+      store.track('s-17', 'a-17'); // a fresh call each time — mirrors a poll-refreshed `stream()` object
+    }
+
+    expect(live.trackDetections).toHaveBeenCalledExactlyOnceWith('a-17');
+    expect(live.untrackDetections).not.toHaveBeenCalled();
+
+    store.reset();
+    expect(live.untrackDetections).toHaveBeenCalledExactlyOnceWith('a-17'); // reset() still releases it
+  });
+
   it('re-tracking a different assetId releases the old live subscription and subscribes to the new one', () => {
     const api = stubApi();
     const live = stubLiveStore('open');

@@ -41,23 +41,31 @@
             [disabled]="!eventClickable(event)"
             (click)="open.emit(event)"
           >
-            <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
-              <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
-            </span>
-            <span class="event-main">
-              <span class="event-label">{{ event.label }}</span>
-              <span class="event-meta muted">
-                {{ sourceLabel(event) }} · {{ (event.peakConfidence * 100).toFixed(0) }}%
+            <!-- Top line: state, label, time, action — none of these ever give up space (docs/
+                 UX-REWORK-PLAN.md's own "keep the time/action clear" ask); the source name gets a
+                 full-width line of its own below instead of fighting these four for room. -->
+            <span class="event-row-top">
+              <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
+                <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
               </span>
+              <span class="event-label">{{ event.label }}</span>
+              <span class="event-time faint">{{ relativeTime(event) }}</span>
+              <!-- Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — a row's own hover
+                   style doesn't say it opens anything; the verb dictionary's own two terms (an
+                   event resolves to either an asset's detail page or its live view), and an
+                   unresolvable event shows neither, matching its own disabled state. -->
+              @if (eventActionLabel(event); as action) {
+                <span class="event-affordance faint">{{ action }} ›</span>
+              }
             </span>
-            <span class="event-time faint">{{ relativeTime(event) }}</span>
-            <!-- Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — a row's own hover
-                 style doesn't say it opens anything; the verb dictionary's own two terms (an
-                 event resolves to either an asset's detail page or its live view), and an
-                 unresolvable event shows neither, matching its own disabled state. -->
-            @if (eventActionLabel(event); as action) {
-              <span class="event-affordance faint">{{ action }} ›</span>
-            }
+            <span class="event-meta muted">
+              <!-- A device/asset name can be one long, unbreakable token (no spaces to wrap on —
+                   e.g. a real simulated-source filename) — truncated with an ellipsis rather than
+                   overflowing past this row's own bounds; `title` keeps the full value one hover/
+                   focus away. -->
+              <span class="event-source" [title]="sourceLabel(event)">{{ sourceLabel(event) }}</span>
+              <span class="event-confidence">· {{ (event.peakConfidence * 100).toFixed(0) }}%</span>
+            </span>
           </button>
         </li>
       }

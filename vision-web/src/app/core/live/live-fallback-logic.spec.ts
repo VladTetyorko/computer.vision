@@ -8,6 +8,7 @@ import {
   mergeTelemetrySamples,
   resolveAssetScopedTransport,
   telemetryTopic,
+  trackSessionKey,
 } from './live-fallback-logic';
 import type { TelemetrySample } from '../api/models';
 
@@ -35,6 +36,24 @@ describe('resolveAssetScopedTransport', () => {
 
   it('falls back to poll when there is no assetId, even while open', () => {
     expect(resolveAssetScopedTransport('open', undefined)).toBe('poll');
+  });
+});
+
+describe('trackSessionKey (docs/REALTIME-PLAN.md §4 Phase R-c follow-up)', () => {
+  it('is stable for the same (primaryId, assetId) pair', () => {
+    expect(trackSessionKey('dev-1', 'a-1')).toBe(trackSessionKey('dev-1', 'a-1'));
+  });
+
+  it('differs when the primary id differs', () => {
+    expect(trackSessionKey('dev-1', 'a-1')).not.toBe(trackSessionKey('dev-2', 'a-1'));
+  });
+
+  it('differs when the assetId differs', () => {
+    expect(trackSessionKey('dev-1', 'a-1')).not.toBe(trackSessionKey('dev-1', 'a-2'));
+  });
+
+  it('differs between an omitted assetId and one that looks like the separator-joined empty string', () => {
+    expect(trackSessionKey('dev-1', undefined)).not.toBe(trackSessionKey('dev-1 ', undefined));
   });
 });
 

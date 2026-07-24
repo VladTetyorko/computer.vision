@@ -11,6 +11,7 @@ import {
   shouldPoll,
   telemetryAgeSeverity,
   telemetryDevices,
+  trackingIdChanged,
 } from './telemetry-logic';
 
 function usage(partial: Partial<AssetUsage>): AssetUsage {
@@ -206,6 +207,28 @@ describe('telemetryAgeSeverity', () => {
   it('is red past the red threshold', () => {
     expect(telemetryAgeSeverity(10.01)).toBe('red');
     expect(telemetryAgeSeverity(60)).toBe('red');
+  });
+});
+
+describe('trackingIdChanged (docs/REALTIME-PLAN.md Phase R-a item 2; moved here Phase R-c follow-up)', () => {
+  it('is false when the same id is derived again — the re-entry guard\'s whole point', () => {
+    expect(trackingIdChanged('dev-1', 'dev-1')).toBe(false);
+  });
+
+  it('is true the first time an id is ever derived (nothing tracked yet)', () => {
+    expect(trackingIdChanged('dev-1', undefined)).toBe(true);
+  });
+
+  it('is true when the tracked id genuinely switches to a different device/stream', () => {
+    expect(trackingIdChanged('dev-2', 'dev-1')).toBe(true);
+  });
+
+  it('is true when the id disappears (asset lost telemetry / stream stopped)', () => {
+    expect(trackingIdChanged(undefined, 'dev-1')).toBe(true);
+  });
+
+  it('is false when nothing was ever tracked and still is not', () => {
+    expect(trackingIdChanged(undefined, undefined)).toBe(false);
   });
 });
 

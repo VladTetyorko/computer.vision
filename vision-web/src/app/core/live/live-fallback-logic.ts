@@ -57,6 +57,21 @@ export function resolveAssetScopedTransport(
   return assetId !== undefined && isLiveAvailable(connectionState) ? 'live' : 'poll';
 }
 
+/**
+ * A stable key for "the session `track(primaryId, assetId?)` would start" — `TelemetryStore`/
+ * `DetectionsStore` compare this against the key their *current* (or in-flight) session was opened
+ * with, and no-op a `track()` call whose key is unchanged (docs/REALTIME-PLAN.md §4 Phase R-c
+ * follow-up — see either store's own `lastTrackKey` doc comment for why this matters beyond
+ * avoiding a wasted re-fetch: re-entering `track()` re-runs its internal teardown, which reads that
+ * store's own `currentAssetIdSignal` while a *caller's* effect may still be the active reactive
+ * consumer, letting the later write re-notify that caller's effect for no reason it actually reads
+ * changed — a tight, self-sustaining loop, not just redundant work). A plain space can't appear in
+ * a `deviceId`/`streamId`/`assetId` (all server-issued UUIDs or route params), so it's a safe separator.
+ */
+export function trackSessionKey(primaryId: string, assetId: string | undefined): string {
+  return `${primaryId} ${assetId ?? ''}`;
+}
+
 // --- Per-asset topic ref-counting (docs/REALTIME-PLAN.md §4, item 2) --------------------------
 // Several consumers can track the same asset's telemetry/detections at once (e.g. a Fly cockpit
 // and a Wall tile both watching the same drone) — the server only needs one subscription per topic

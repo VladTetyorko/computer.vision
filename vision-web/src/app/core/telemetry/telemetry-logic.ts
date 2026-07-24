@@ -151,3 +151,33 @@ export function telemetryAgeSeverity(age: number): TelemetryAgeSeverity {
   }
   return age > STALE_AFTER_SECONDS ? 'amber' : 'fresh';
 }
+
+/**
+ * Whether a tracking effect (docs/REALTIME-PLAN.md Phase R-a item 2) should re-enter its store's
+ * `track()`/`reset()` this run: only when the derived id primitive actually changed from the id it
+ * last acted on. A page's own `asset()`/`stream()` signals are fresh objects on every ~5s poll tick
+ * even when nothing about the tracked device/stream actually changed (signals compare with
+ * `Object.is`), so an effect reading them re-fires on that cadence regardless — without this guard,
+ * re-entering `TelemetryStore`/`DetectionsStore`'s `track()` with an *unchanged* id was the
+ * diagnosed O(N) amplification bug (`FlyPage`) and, worse, a self-sustaining track/untrack
+ * oscillation entirely decoupled from any poll cadence (`AssetDetailPage`, docs/REALTIME-PLAN.md §4
+ * Phase R-c follow-up): re-entering `track()` re-runs its internal teardown, which reads that
+ * store's own `currentAssetIdSignal` — a read that (because it happens synchronously while the
+ * *caller's* effect is still the active reactive consumer) gets attributed to the caller's effect,
+ * not the store's own internal one; the later write to that same signal (once `track()`'s async
+ * lookup resolves) then re-notifies the caller's effect even though nothing it actually reads
+ * changed, closing a loop paced only by however fast the store's own lookups resolve. Mirrors
+ * `core/map/map-store.ts#reconcileTrackers`'s own reconcile-by-id idiom: compare the id *value*,
+ * never the enclosing object's identity.
+ *
+ * Originally `features/fly/fly-logic.ts#trackingIdChanged`; moved here (docs/REALTIME-PLAN.md §4
+ * Phase R-c follow-up) when `features/asset-detail/asset-detail.ts` needed the identical guard for
+ * its own telemetry/detections tracking effects — this codebase has no precedent for one page
+ * importing another page's module (see `core/fleet/device-logic.ts`'s doc comment for the original
+ * precedent this follows), so a shared `core/` home was used instead, the same "second consumer
+ * needs it, move it to core/" precedent as `groupTelemetryByDevice`/`batterySeverity` above.
+ * `fly-logic.ts` re-exports this so its own existing import site keeps working verbatim.
+ */
+export function trackingIdChanged(nextId: string | undefined, lastActedOnId: string | undefined): boolean {
+  return nextId !== lastActedOnId;
+}
