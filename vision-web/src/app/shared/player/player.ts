@@ -1696,6 +1696,13 @@ export class Player {
     this.reconnectTimer = setTimeout(() => {
       if (generation === this.generation && whepUrl !== null) {
         this.dispatchPacing('whepAttempted', Date.now());
+
+        // --- THE FIX GOES HERE ---
+        this.transportState.set(
+          reduceTransportRecovery(this.transportState(), 'attachStarted')
+        );
+        // -------------------------
+
         void this.beginWhepAttach(generation, whepUrl, hlsFallbackSrc);
       }
     }, delay);

@@ -7,10 +7,11 @@
   position: relative;
   height: 100%;
   min-height: 420px;
-  border-radius: var(--radius);
+  border-radius: var(--radius, 8px);
   overflow: hidden;
-  background: #0b0f14;
-  border: 1px solid var(--border);
+  /* Swapped harsh #0b0f14 for a softer, natural slate dark gray */
+  background: var(--bg-surface, #1e293b);
+  border: 1px solid var(--border, #334155);
 }
 
 .map-host {
@@ -43,9 +44,9 @@
 }
 
 .controls .btn.active {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
+  background: var(--accent, #3b82f6); /* Clean blue fallback */
+  color: var(--accent-text, #ffffff); /* Pure white text */
+  border-color: var(--accent, #3b82f6);
 }
 
 .badge {
@@ -54,9 +55,10 @@
   bottom: 0.5rem;
   z-index: 1000;
   padding: 0.2rem 0.55rem;
-  border-radius: var(--radius-pill);
-  background: rgb(0 0 0 / 60%);
-  color: var(--warn);
+  border-radius: var(--radius-pill, 9999px);
+  /* Replaced harsh pure black with a softer, readable glass effect */
+  background: var(--panel-raised, rgb(30 41 59 / 85%));
+  color: var(--warn, #eab308); /* Natural yellow/orange warning */
   font-size: 0.72rem;
   backdrop-filter: blur(4px);
 }
@@ -68,12 +70,12 @@
    which (unlike this component's scoped stylesheet) already applies everywhere unconditionally. */
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: rgb(0 0 0 / 55%);
-  color: var(--text-faint);
+  background: var(--panel-raised, rgb(30 41 59 / 75%));
+  color: var(--text-faint, #94a3b8);
 }
 
 :host ::ng-deep .leaflet-control-attribution a {
-  color: var(--text-muted);
+  color: var(--text-muted, #cbd5e1);
 }
 
 :host ::ng-deep .fleet-drone-marker .drone-arrow {
@@ -81,17 +83,18 @@
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-bottom: 15px solid var(--accent);
+  border-bottom: 15px solid var(--accent, #3b82f6);
   transform-origin: 50% 60%;
-  filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
+  /* Softened the drop shadow to look less stark against the map */
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 40%));
 }
 
 :host ::ng-deep .fleet-offline-marker .offline-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--text-faint);
-  border: 2px solid rgb(0 0 0 / 55%);
+  background: var(--text-faint, #94a3b8);
+  border: 2px solid var(--panel-raised, #1e293b);
   opacity: 0.85;
 }
 
@@ -105,20 +108,21 @@
 
 :host ::ng-deep .fleet-popup .popup-title {
   font-weight: 600;
-  color: var(--text);
+  color: var(--text, #f8fafc); /* Crisp off-white */
 }
 
 :host ::ng-deep .fleet-popup .popup-meta {
-  color: var(--text-muted);
+  color: var(--text-muted, #cbd5e1); /* Light gray */
   font-size: 0.72rem;
 }
 
 :host ::ng-deep .fleet-popup .popup-row {
   font-size: 0.78rem;
+  color: var(--text, #e2e8f0);
 }
 
 :host ::ng-deep .fleet-popup .popup-row.faint {
-  color: var(--text-faint);
+  color: var(--text-faint, #94a3b8); /* Medium gray */
 }
 
 :host ::ng-deep .fleet-popup .watch-btn,
@@ -134,13 +138,14 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--warn);
-  border: 2px solid rgb(0 0 0 / 55%);
-  box-shadow: 0 0 0 2px rgb(255 179 64 / 25%);
+  background: var(--warn, #f59e0b);
+  border: 2px solid var(--panel-raised, #1e293b);
+  /* Synced the glow ring with the amber warning color */
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
 }
 
 :host ::ng-deep .event-marker-open .event-marker-dot {
-  background: var(--live);
+  background: var(--live, #ef4444); /* Red pulse for active alerts */
   animation: event-marker-pulse 2s ease-in-out infinite;
 }
 

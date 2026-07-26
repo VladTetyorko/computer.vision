@@ -722,11 +722,11 @@ tbody tr:last-child td {
    (U-a2 audit finding). Theme the popup box itself to match the app. */
 .leaflet-popup-content-wrapper,
 .leaflet-popup-tip {
-    background: var(--panel-raised, #1c2027);
-    color: var(--text, #dfe6f0);
-    box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+  background: gray;
+  color: white;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
 }
 
 .leaflet-popup-close-button {
-    color: var(--text-faint, #8b93a1);
+  color: blue;
 }

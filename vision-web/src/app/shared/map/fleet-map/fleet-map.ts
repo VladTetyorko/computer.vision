@@ -12,13 +12,13 @@ import {
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
-import { SettingsStore, type MapLayerId } from '../../core/settings/settings-store';
-import { EventsStore } from '../../core/events/events-store';
-import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../core/events/events-logic';
-import type { DetectionEvent } from '../../core/api/models';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from './leaflet-loader';
-import { FleetMapStore } from '../../core/map/map-store';
-import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../core/map/map-logic';
+import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
+import { EventsStore } from '../../../core/events/events-store';
+import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../../core/events/events-logic';
+import type { DetectionEvent } from '../../../core/api/models';
+import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../leaflet-loader';
+import { FleetMapStore } from '../../../core/map/map-store';
+import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 
 /** Padding so the outermost markers aren't flush against the map's edge after a fit. */
 const FIT_PADDING: Leaflet.PointTuple = [48, 48];
@@ -457,7 +457,7 @@ export class FleetMap {
       );
     }
     rows.push(
-      `<button type="button" class="btn small watch-btn" data-asset-id="${escapeHtml(marker.assetId)}" title="Watch live on its own page">Watch live</button>`,
+      `<button type="button" class="btn small watch-btn" data-asset-id="${escapeHtml(marker.assetId)}" title="Watch live on its own page">Open asset</button>`,
     );
     return `<div class="fleet-popup">${rows.join('')}</div>`;
   }

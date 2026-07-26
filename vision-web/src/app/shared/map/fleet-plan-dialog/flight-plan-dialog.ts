@@ -14,9 +14,9 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type * as Leaflet from 'leaflet';
-import type { RouteMode } from '../../core/api/models';
-import { SettingsStore, type MapLayerId } from '../../core/settings/settings-store';
-import { MAP_LAYERS, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from './leaflet-loader';
+import type { RouteMode } from '../../../core/api/models';
+import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
+import { MAP_LAYERS, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../leaflet-loader';
 import {
   DEFAULT_ROUTE_MODE,
   DEFAULT_SPEED_MPS,
@@ -32,7 +32,7 @@ import {
   type EditorWaypoint,
   type FlightPlanForm,
   type HomePoint,
-} from './flight-plan-logic';
+} from '../flight-plan-logic';
 
 const DEFAULT_ZOOM = 14;
 

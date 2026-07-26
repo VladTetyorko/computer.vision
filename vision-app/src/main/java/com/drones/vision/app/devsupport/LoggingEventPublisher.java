@@ -20,5 +20,5 @@ public final class LoggingEventPublisher implements EventPublisherPort {
     public void publish(Event event) {
         log.debug("event id={} streamId={} type={} message={} attributes={}",
                 event.id(), event.streamId(), event.type(), event.message(), event.attributes());
-    }r
+    }
 }
