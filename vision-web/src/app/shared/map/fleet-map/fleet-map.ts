@@ -16,7 +16,7 @@ import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-
 import { EventsStore } from '../../../core/events/events-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../../core/events/events-logic';
 import type { DetectionEvent } from '../../../core/api/models';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../leaflet-loader';
+import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
 import { FleetMapStore } from '../../../core/map/map-store';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 

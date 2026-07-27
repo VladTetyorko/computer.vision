@@ -6,7 +6,7 @@ import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { FleetMapStore } from '../../core/map/map-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
-import { FleetMap } from '../../shared/map/fleet-map';
+import { FleetMap } from '../../shared/map/fleet-map/fleet-map';
 import { AssetPanel } from './asset-panel';
 import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
 import type { AssetAttention, FleetSummary } from '../../core/api/models';

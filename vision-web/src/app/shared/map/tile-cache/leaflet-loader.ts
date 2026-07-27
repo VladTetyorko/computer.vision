@@ -1,5 +1,5 @@
 import type * as Leaflet from 'leaflet';
-import type { MapLayerId } from '../../core/settings/settings-store';
+import type { MapLayerId } from '../../../core/settings/settings-store';
 import { getCachedTile, putCachedTile } from './tile-cache-db';
 import { tileCacheKey } from './tile-cache-logic';
 

@@ -16,7 +16,7 @@ import { FormsModule } from '@angular/forms';
 import type * as Leaflet from 'leaflet';
 import type { RouteMode } from '../../../core/api/models';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
-import { MAP_LAYERS, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../leaflet-loader';
+import { MAP_LAYERS, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
 import {
   DEFAULT_ROUTE_MODE,
   DEFAULT_SPEED_MPS,

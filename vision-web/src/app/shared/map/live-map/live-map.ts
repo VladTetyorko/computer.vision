@@ -13,7 +13,7 @@ import type * as Leaflet from 'leaflet';
 import { TelemetryStore } from '../../../core/telemetry/telemetry-store';
 import type { GeoPosition, TelemetrySample } from '../../../core/api/models';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../leaflet-loader';
+import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
 
 const DEFAULT_ZOOM = 17;
 

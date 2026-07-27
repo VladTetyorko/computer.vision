@@ -24,7 +24,7 @@ import { videoDevices } from '../../core/fleet/device-logic';
 import { telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
-import { LiveMap } from '../../shared/map/live-map';
+import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { FlyOsd } from './fly-osd';
 import {

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { SettingsStore } from '../../core/settings/settings-store';
-import { FlightPlanDialog } from '../../shared/map/flight-plan-dialog';
+import { FlightPlanDialog } from '../../shared/map/fleet-plan-dialog/flight-plan-dialog';
 import { OnboardingStore } from './onboarding-store';
 import { WIZARD_STEPS, type ConnectMethod, type WizardStep } from './onboarding-logic';
 

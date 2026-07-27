@@ -21,7 +21,7 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { TelemetryOsd } from './telemetry-osd';
-import { LiveMap } from '../../shared/map/live-map';
+import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 
 /** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already

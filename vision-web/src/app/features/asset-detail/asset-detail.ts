@@ -26,7 +26,7 @@ import { formatDuration } from '../../core/stream-info-logic';
 import { registrationNumberOf, withRegistrationNumber, withoutRegistrationNumber } from '../../core/fleet/asset-attributes';
 import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
 import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
-import { LiveMap } from '../../shared/map/live-map';
+import { LiveMap } from '../../shared/map/live-map/live-map';
 import {
   attributeRowsToRecord,
   attributesToRows,
