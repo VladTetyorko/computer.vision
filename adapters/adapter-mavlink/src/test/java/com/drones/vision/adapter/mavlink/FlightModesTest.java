@@ -3,6 +3,7 @@ package com.drones.vision.adapter.mavlink;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class FlightModesTest {
 
@@ -88,5 +89,31 @@ class FlightModesTest {
         assertEquals("Mode 9", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_FIXED_WING, 9));
         assertEquals("Mode 2", FlightModes.name(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, 2));
         assertEquals("Mode 8", FlightModes.name(AUTOPILOT_GENERIC, MAV_TYPE_QUADROTOR, 8));
+    }
+
+    @Test
+    void resolvesTheRtlCustomModeForEveryArdupilotVehicleFamily() {
+        assertEquals(6, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_QUADROTOR, "RTL"));
+        assertEquals(11, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_FIXED_WING, "RTL"));
+        assertEquals(11, FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER, "RTL"));
+    }
+
+    @Test
+    void resolvesTheBetaflightRtlCustomModeEvenThoughBetaflightIsNotCommandable() {
+        // FlightModes is a pure name<->number lookup with no opinion on which firmwares this
+        // platform is willing to command -- MavlinkFlightCommander rejects Betaflight itself
+        // before ever consulting this table. See customModeFor's own javadoc.
+        assertEquals(6, FlightModes.customModeFor(AUTOPILOT_GENERIC, MAV_TYPE_QUADROTOR, "RTL"));
+    }
+
+    @Test
+    void customModeForReturnsNullForAnUnknownModeName() {
+        assertNull(FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_QUADROTOR, "NotAMode"));
+    }
+
+    @Test
+    void customModeForReturnsNullWhenNoTableIsSelected() {
+        assertNull(FlightModes.customModeFor(AUTOPILOT_PX4, MAV_TYPE_QUADROTOR, "RTL"));
+        assertNull(FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GCS, "RTL"));
     }
 }

@@ -112,6 +112,38 @@ final class FlightModes {
         return "Mode " + customMode;
     }
 
+    /**
+     * Reverse of {@link #name}: the numeric {@code custom_mode} for a named mode within the table
+     * selected by {@code autopilot}/{@code mavType} (docs/DRONE-INFRA-PLAN.md I-e Stage 1 —
+     * {@code MavlinkFlightCommander}'s return-to-home mode resolution). {@code null} when the
+     * firmware/vehicle combination has no table at all, or the table has no entry with exactly
+     * this name — never a guessed/fabricated mode number.
+     *
+     * <p>This is a pure name lookup with no awareness of which firmwares this platform is willing
+     * to actually <em>command</em> — Betaflight's table, for instance, does contain an entry named
+     * {@code "RTL"} that this method will happily resolve, even though Betaflight's own RC link
+     * does not process {@code MAV_CMD_DO_SET_MODE} at all. Deciding which firmwares are
+     * commandable is the caller's job (see {@code MavlinkFlightCommander}), not this class's — see
+     * its own class javadoc for why: this table only knows mode names, never which firmwares
+     * accept remote mode-set commands.
+     *
+     * @param autopilot {@code HEARTBEAT.autopilot} raw value
+     * @param mavType   {@code HEARTBEAT.type} raw value; consulted only to pick an ArduPilot vehicle-family table
+     * @param modeName  the exact mode name as returned by {@link #name}, e.g. {@code "RTL"}
+     */
+    static Integer customModeFor(int autopilot, int mavType, String modeName) {
+        Map<Integer, String> table = tableFor(autopilot, mavType);
+        if (table == null) {
+            return null;
+        }
+        for (Map.Entry<Integer, String> entry : table.entrySet()) {
+            if (entry.getValue().equals(modeName)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
     private static Map<Integer, String> tableFor(int autopilot, int mavType) {
         if (autopilot == AUTOPILOT_ARDUPILOTMEGA) {
             if (COPTER_MAV_TYPES.contains(mavType)) {

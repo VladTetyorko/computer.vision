@@ -7,9 +7,13 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 
+import io.dronefleet.mavlink.common.CommandAck;
+
+import java.net.DatagramSocket;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
@@ -167,6 +171,62 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     List<MavlinkSocketHub.ClaimedVehicle> claimedVehicles(String bindKey) {
         MavlinkSocketHub hub = hubs.get(bindKey);
         return hub == null ? List.of() : hub.claimedVehicles();
+    }
+
+    /**
+     * The bind key ({@code host:port}) a supported device's {@code udp://host:port} stream
+     * resolves to — the same key {@link #open}/{@link #close} use internally to find/create a
+     * {@link MavlinkSocketHub}. docs/DRONE-INFRA-PLAN.md I-e Stage 1: lets {@code
+     * MavlinkFlightCommander} address the same hub this device's telemetry uses, without
+     * duplicating the host-defaulting logic. Callers must have already confirmed {@link
+     * #supports(Device)} — this assumes a non-null URI with a port, exactly like {@link #open}.
+     */
+    String bindKeyFor(Device device) {
+        URI uri = device.stream().uri();
+        return bindKey(bindHost(uri), uri.getPort());
+    }
+
+    /**
+     * docs/DRONE-INFRA-PLAN.md I-e Stage 1: {@code deviceId}'s current command-TX coordinates on
+     * the hub for {@code bindKey}, or {@code null} if no hub is active for that address or the
+     * device holds no claim on it right now — delegates to {@link MavlinkSocketHub#commandTarget}.
+     */
+    MavlinkSocketHub.CommandTarget commandTarget(String bindKey, DeviceId deviceId) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        return hub == null ? null : hub.commandTarget(deviceId);
+    }
+
+    /**
+     * The shared socket for {@code bindKey}'s hub, so a command sender can push a reply through
+     * the same socket that receives that hub's traffic instead of opening a second one
+     * (docs/DRONE-INFRA-PLAN.md I-e Stage 1). {@code null} if no active hub.
+     */
+    DatagramSocket socket(String bindKey) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        return hub == null ? null : hub.socket();
+    }
+
+    /**
+     * docs/DRONE-INFRA-PLAN.md I-e Stage 1: registers interest in the next {@code COMMAND_ACK}
+     * matching {@code sysid}/{@code commandId} on {@code bindKey}'s hub — delegates to {@link
+     * MavlinkSocketHub#awaitAck}. Returns an already-failed future (never {@code null}) if no hub
+     * is active for that address, so callers can treat both cases uniformly.
+     */
+    CompletableFuture<CommandAck> awaitAck(String bindKey, int sysid, int commandId) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        if (hub == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("No active MAVLink gateway for " + bindKey));
+        }
+        return hub.awaitAck(sysid, commandId);
+    }
+
+    /** docs/DRONE-INFRA-PLAN.md I-e Stage 1: releases a waiter registered via {@link #awaitAck}, idempotent. */
+    void cancelAckWait(String bindKey, int sysid, int commandId) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        if (hub != null) {
+            hub.cancelAckWait(sysid, commandId);
+        }
     }
 
     private void closeRuntime(DeviceRuntime runtime) {

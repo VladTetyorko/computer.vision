@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.InetSocketAddress;
 
 /**
  * Bridges a bound {@link DatagramSocket} to a continuous {@link InputStream} so {@link
@@ -24,6 +25,16 @@ import java.net.DatagramSocket;
  * close-to-unblock idiom {@code adapter-mjpeg}'s {@code MjpegVideoSource} uses for its blocked
  * HTTP body read.
  *
+ * <h2>Last source address (docs/DRONE-INFRA-PLAN.md I-e Stage 1)</h2>
+ * {@link #lastSourceAddress()} exposes the sender address of the most recently received datagram.
+ * Every TX side in this module ({@code MavlinkFeedTransmitter}, a real telemetry radio/SITL
+ * instance) writes exactly one MAVLink message per datagram (see {@code MavlinkUdpOutputStream}'s
+ * own javadoc), so — for the common case, ignoring the deliberately-unhandled malformed-frame
+ * resync above — the datagram whose bytes fed a given decoded message is knowable to the caller
+ * simply by reading this accessor immediately after the message that consumed it was decoded, on
+ * this same thread. {@link MavlinkSocketHub} uses this to remember where a claimed vehicle was
+ * last heard from, so a command can be sent back to it.
+ *
  * <p>Not thread-safe: only ever driven by the one background read thread that owns the socket,
  * matching every other per-open runtime's read-thread convention in this codebase.
  */
@@ -36,6 +47,7 @@ final class MavlinkUdpInputStream extends InputStream {
     private final byte[] buffer = new byte[MAX_DATAGRAM_BYTES];
     private int length;
     private int position;
+    private InetSocketAddress lastSourceAddress;
 
     MavlinkUdpInputStream(DatagramSocket socket) {
         this.socket = socket;
@@ -49,15 +61,27 @@ final class MavlinkUdpInputStream extends InputStream {
         return buffer[position++] & 0xFF;
     }
 
+    /**
+     * The source address of the most recently received datagram, or {@code null} before the
+     * first one has arrived. See class javadoc for the one-datagram-per-message correspondence
+     * this relies on.
+     */
+    InetSocketAddress lastSourceAddress() {
+        return lastSourceAddress;
+    }
+
     /** Blocks until a non-empty datagram arrives; a zero-length datagram (a bare UDP "ping") is skipped. */
     private void fill() throws IOException {
         int received;
+        InetSocketAddress source;
         do {
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
             socket.receive(packet);
             received = packet.getLength();
+            source = new InetSocketAddress(packet.getAddress(), packet.getPort());
         } while (received <= 0);
         length = received;
         position = 0;
+        lastSourceAddress = source;
     }
 }

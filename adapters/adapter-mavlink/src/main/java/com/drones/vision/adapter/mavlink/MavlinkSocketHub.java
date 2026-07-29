@@ -5,6 +5,7 @@ import com.drones.vision.domain.model.Telemetry;
 
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.MavlinkMessage;
+import io.dronefleet.mavlink.common.CommandAck;
 import io.dronefleet.mavlink.minimal.Heartbeat;
 
 import java.io.OutputStream;
@@ -17,6 +18,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -66,13 +68,31 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * belong to one physical vehicle, and reusing one across a re-election would leak the old
  * vehicle's stale values into the new one's first samples.
  *
+ * <h2>Command TX seam (docs/DRONE-INFRA-PLAN.md I-e Stage 1)</h2>
+ * This hub is receive-only by construction (one read thread, no outbound traffic of its own), but
+ * it is the only place that knows a claimed vehicle's <b>last-seen UDP source address</b> — the
+ * one piece of information a command sender needs that {@link MavlinkTelemetryDecoder}/{@link
+ * MavlinkTelemetrySource} never tracked before (source-address demux was descoped for
+ * <i>routing</i>, see above, but sending a reply still needs an address to send it to). Each
+ * {@link VehicleRegistration} therefore also remembers {@code lastSourceAddress}, refreshed
+ * alongside {@code lastHeardMillis} on every message from that vehicle (see {@link #routeMessage}
+ * and {@link MavlinkUdpInputStream#lastSourceAddress()}), exposed via {@link
+ * #commandTarget(DeviceId)}. A command sender ({@code MavlinkFlightCommander}) reuses this hub's
+ * own shared socket ({@link #socket()}) to send rather than opening a second one, and registers a
+ * one-shot waiter for the matching {@code COMMAND_ACK} via {@link #awaitAck}/{@link
+ * #cancelAckWait} — a narrow seam into this hub's own read loop instead of a second socket reader
+ * duplicating {@link MavlinkUdpInputStream}'s resync/demux machinery just to watch for one reply.
+ *
  * <h2>Threading</h2>
- * {@link #register}/{@link #unregister}/{@link #unclaimedVehicles()} are called from whatever
- * thread calls {@link MavlinkTelemetrySource#open}/{@code close}; message routing and claim/
- * re-election decisions happen only on this hub's own dedicated read thread. All mutable state
- * shared between them ({@code registrations}, {@code claimsBySysid}, {@code unclaimed}) is
- * guarded by one monitor ({@link #lock}) — no concurrent collections, no volatile fields beyond
- * the socket/thread handles {@link #unregister} must reach from a caller thread to shut down.
+ * {@link #register}/{@link #unregister}/{@link #unclaimedVehicles()}/{@link
+ * #commandTarget(DeviceId)}/{@link #awaitAck}/{@link #cancelAckWait} are called from whatever
+ * thread calls {@link MavlinkTelemetrySource#open}/{@code close}/{@code commandTarget}/the flight
+ * commander; message routing and claim/re-election decisions happen only on this hub's own
+ * dedicated read thread. All mutable state shared between them ({@code registrations}, {@code
+ * claimsBySysid}, {@code unclaimed}, {@code ackWaiters}) is guarded by one monitor ({@link
+ * #lock}) — no concurrent collections, no volatile fields beyond the socket/thread handles {@link
+ * #unregister} must reach from a caller thread to shut down (also read by {@link #socket()} for
+ * command TX, for the same reason).
  *
  * <p>Not a domain/port type — package-private, owned entirely by {@link MavlinkTelemetrySource},
  * the only class that constructs, registers with, or queries one.
@@ -90,6 +110,7 @@ final class MavlinkSocketHub {
     private final List<VehicleRegistration> registrations = new ArrayList<>();
     private final Map<Integer, VehicleRegistration> claimsBySysid = new HashMap<>();
     private final LinkedHashMap<Integer, UnclaimedVehicle> unclaimed = new LinkedHashMap<>();
+    private final Map<AckKey, CompletableFuture<CommandAck>> ackWaiters = new HashMap<>();
 
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private volatile Thread readThread;
@@ -176,6 +197,61 @@ final class MavlinkSocketHub {
         }
     }
 
+    /**
+     * The current shared socket, so a command sender can push a reply through the same socket
+     * this hub reads from instead of opening a second one (docs/DRONE-INFRA-PLAN.md I-e Stage 1).
+     * {@code null} before the read thread has bound, or once this hub has shut down.
+     */
+    DatagramSocket socket() {
+        return socket;
+    }
+
+    /**
+     * The command-TX coordinates for {@code deviceId}'s current claim on this hub — its sysid,
+     * last-known firmware/mavType (from the most recent {@code HEARTBEAT}, possibly {@code null}
+     * if none has arrived yet), and last-seen UDP source address (docs/DRONE-INFRA-PLAN.md I-e
+     * Stage 1) — or {@code null} if {@code deviceId} holds no claim on this hub right now (never
+     * opened here, pinned to a sysid never yet heard, or an unpinned claim re-elected away).
+     */
+    CommandTarget commandTarget(DeviceId deviceId) {
+        synchronized (lock) {
+            for (VehicleRegistration r : registrations) {
+                if (r.deviceId.equals(deviceId) && r.claimedSysid != null) {
+                    return new CommandTarget(r.claimedSysid, r.firmware, r.mavType, r.lastSourceAddress);
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Registers interest in the next {@code COMMAND_ACK} carrying {@code commandId} (a raw
+     * {@code MAV_CMD_*} value) from {@code sysid} — the narrow read-loop seam described in this
+     * class's own javadoc (docs/DRONE-INFRA-PLAN.md I-e Stage 1). The returned future completes on
+     * this hub's read thread the instant a matching ack is routed; it is never completed at all if
+     * none ever arrives, so the caller must apply its own timeout (e.g. {@code
+     * future.get(timeout, unit)}) and always pair this with {@link #cancelAckWait} in a {@code
+     * finally} block to avoid leaking a waiter nothing will ever complete.
+     */
+    CompletableFuture<CommandAck> awaitAck(int sysid, int commandId) {
+        CompletableFuture<CommandAck> future = new CompletableFuture<>();
+        synchronized (lock) {
+            ackWaiters.put(new AckKey(sysid, commandId), future);
+        }
+        return future;
+    }
+
+    /**
+     * Releases a waiter registered via {@link #awaitAck}. Idempotent — safe to call whether the
+     * future already completed, already timed out on the caller's side, or was never actually
+     * pending (e.g. this hub shut down first).
+     */
+    void cancelAckWait(int sysid, int commandId) {
+        synchronized (lock) {
+            ackWaiters.remove(new AckKey(sysid, commandId));
+        }
+    }
+
     private void runReadLoop() {
         boolean errored = false;
         DatagramSocket sock = null;
@@ -185,14 +261,14 @@ final class MavlinkSocketHub {
             sock.bind(new InetSocketAddress(bindHost, port));
             socket = sock;
 
-            MavlinkConnection connection = MavlinkConnection.create(
-                    new MavlinkUdpInputStream(sock), OutputStream.nullOutputStream());
+            MavlinkUdpInputStream input = new MavlinkUdpInputStream(sock);
+            MavlinkConnection connection = MavlinkConnection.create(input, OutputStream.nullOutputStream());
 
             while (!closed.get()) {
                 // Blocks; malformed/garbage datagrams are resynced past internally by
                 // MavlinkConnection/MavlinkFrameReader -- see MavlinkTelemetrySource's javadoc.
                 MavlinkMessage<?> message = connection.next();
-                routeMessage(message);
+                routeMessage(message, input.lastSourceAddress());
             }
         } catch (Exception e) {
             if (shutdown()) {
@@ -215,10 +291,12 @@ final class MavlinkSocketHub {
         }
     }
 
-    private void routeMessage(MavlinkMessage<?> message) {
+    private void routeMessage(MavlinkMessage<?> message, InetSocketAddress sourceAddress) {
         int sysid = message.getOriginSystemId();
         long now = System.currentTimeMillis();
         VehicleRegistration owner;
+        CommandAck ack = message.getPayload() instanceof CommandAck a ? a : null;
+        CompletableFuture<CommandAck> ackWaiter = null;
         synchronized (lock) {
             owner = claimsBySysid.get(sysid);
             if (owner != null) {
@@ -227,10 +305,17 @@ final class MavlinkSocketHub {
                 owner = claim(sysid, now);
             }
             if (owner != null) {
+                owner.lastSourceAddress = sourceAddress;
                 captureHeartbeatInfo(owner, message);
             } else {
                 recordUnclaimed(sysid, message, now);
             }
+            if (ack != null) {
+                ackWaiter = ackWaiters.remove(new AckKey(sysid, ack.command().value()));
+            }
+        }
+        if (ackWaiter != null) {
+            ackWaiter.complete(ack);
         }
         if (owner != null) {
             Telemetry sample = owner.decoder.accept(message);
@@ -349,6 +434,7 @@ final class MavlinkSocketHub {
         private MavlinkTelemetryDecoder decoder;
         private String firmware; // docs/DRONE-INFRA-PLAN.md I-b -- from the most recent HEARTBEAT, null until one arrives
         private Integer mavType; // ditto
+        private InetSocketAddress lastSourceAddress; // docs/DRONE-INFRA-PLAN.md I-e Stage 1 -- null until this claim has actually been heard from
 
         private VehicleRegistration(DeviceId deviceId, Integer pinnedSysid, SubmissionPublisher<Telemetry> publisher) {
             this.deviceId = deviceId;
@@ -363,5 +449,19 @@ final class MavlinkSocketHub {
 
     /** A sysid on this hub's socket currently claimed by an open device (docs/DRONE-INFRA-PLAN.md I-b). */
     record ClaimedVehicle(int sysid, DeviceId deviceId, String firmware, Integer mavType, Instant lastHeard) {
+    }
+
+    /**
+     * A currently-claimed vehicle's command-TX coordinates (docs/DRONE-INFRA-PLAN.md I-e Stage 1):
+     * which sysid, its firmware/mavType (for RTL mode-number resolution — {@code null} until a
+     * {@code HEARTBEAT} has actually arrived, same "unknown until observed" honesty as {@link
+     * UnclaimedVehicle}/{@link ClaimedVehicle}), and where to send a reply ({@code null} only in
+     * the unreachable case of a claim with no traffic behind it at all — see {@link #commandTarget}).
+     */
+    record CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress) {
+    }
+
+    /** Key a pending {@link #awaitAck} waiter is registered/matched under: which vehicle, which command. */
+    private record AckKey(int sysid, int commandId) {
     }
 }
