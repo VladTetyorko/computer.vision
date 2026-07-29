@@ -108,6 +108,21 @@ of a few bytes on a channel whose payloads are already tiny. Data flow is one-di
 *Revisit trigger:* browser-originated low-latency pilot input (MVP4 command TX) — that
 wants a WebSocket or WebRTC data channel, decided in that plan, not this one.
 
+*Deep-dive addendum (2026-07-29, second look at FE↔BE specifically):* the frontend opens
+exactly **one** `EventSource` total (`live-store.ts`); the server side
+(`LiveUpdateRegistry`) already implements resume (`Last-Event-ID` + `LiveRingBuffer`),
+per-topic coalescing (`COALESCE_MILLIS`), proxy-keepalive heartbeat comments, and
+no-reconnect topic updates (PATCH). A WS migration would rebuild all of that by hand
+(reconnect/backoff, resume protocol, ping/pong, an in-band topic protocol) to arrive at
+the same latency — SSE and WS are identical once the connection is up. Per-message
+framing difference (~10 bytes) is noise at this app's event rates. The one honest
+SSE limitation found: over plain HTTP (no TLS → browsers stay on HTTP/1.1) each open
+tab's SSE connection counts against the browser's ~6-per-host connection cap alongside
+HLS segment fetches — irrelevant at 1–2 tabs (the single-operator reality), and the
+correct fix at 3+ tabs is TLS+HTTP/2 (SSE then multiplexes for free) or a SharedWorker
+sharing the one connection, not a protocol change (WS sidesteps the cap but still pays
+one socket per tab and loses the built-ins).
+
 **Laptop ↔ GPU box — keep gRPC bidi.** Binary protobuf detections (~10× smaller than
 JSON-over-WS), HTTP/2 flow control, per-frame deadlines, and the whole
 correlation/backpressure/teardown machinery in `GrpcDetectionPort` that a WS channel
