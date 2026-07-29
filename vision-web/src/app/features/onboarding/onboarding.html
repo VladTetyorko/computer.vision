@@ -223,6 +223,22 @@
                     Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
                     e.g. <code>rtsp_transport = tcp</code>.
                   </p>
+                  @if (store.protocol() === 'srt') {
+                    <p class="muted hint">
+                      SRT: <code>mode</code> = <code>listener</code> (accept the drone/encoder
+                      dialing in — the common case) or <code>caller</code> (this app dials out to
+                      an encoder instead); <code>latency</code> in ms tunes the loss-recovery
+                      buffer (defaults to ~120). <code>streamid</code>/<code>passphrase</code> are
+                      also available.
+                    </p>
+                  } @else if (store.protocol() === 'udp') {
+                    <p class="muted hint">
+                      UDP: leave the URI's host as <code>0.0.0.0</code> to accept from any sender,
+                      or give a specific host to accept only from that source. MPEG-TS framing is
+                      assumed; <code>fifo_size</code>/<code>overrun_nonfatal</code>/<code>buffer_size</code>
+                      are available for a lossy link.
+                    </p>
+                  }
                   @for (row of store.options(); track $index) {
                     <div class="option-row">
                       <input

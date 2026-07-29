@@ -9,8 +9,15 @@
  * adapter's own source, not assumed:
  *
  * - `rtsp` — `adapters/adapter-rtsp/.../FfmpegVideoSource#supports` (`PROTOCOL_RTSP = "rtsp"`)
- * - `file` — the same `FfmpegVideoSource#supports` (`PROTOCOL_FILE = "file"`, `uri` scheme must be `file:`)
  * - `mjpeg` — `adapters/adapter-mjpeg/.../MjpegVideoSource#supports` (`PROTOCOL = "mjpeg"`, `uri` scheme `http`/`https`)
+ * - `srt` — the same `FfmpegVideoSource#supports` as `rtsp`/`file`, extended in
+ *   docs/DRONE-INFRA-PLAN.md I-h wave A (`adapters/adapter-rtsp/**`, landed concurrently with this
+ *   task) to accept the `srt` protocol string; **not** independently re-verified against that
+ *   adapter's source here — this task's own file scope was `vision-web/**` only, so the plan's own
+ *   frozen contract (protocol string `srt`, `uri` scheme `srt:`) is the source of truth for this entry.
+ * - `udp` — the same `FfmpegVideoSource#supports`, same I-h wave A, protocol string `udp` (MPEG-TS
+ *   assumed), same not-independently-re-verified caveat as `srt` above.
+ * - `file` — the same `FfmpegVideoSource#supports` (`PROTOCOL_FILE = "file"`, `uri` scheme must be `file:`)
  * - `v4l2` — `adapters/adapter-v4l2/.../V4l2VideoSource#supports` (`PROTOCOL_V4L2 = "v4l2"`, `uri` scheme must be `file:`, a device path)
  * - `sim` — `adapters/adapter-simulation/.../SimulatedVideoSource#supports` (`PROTOCOL = "sim"`) and
  *   `SimulatedTelemetrySource#supports` (same `"sim"`, requires the `TELEMETRY` capability too)
@@ -21,6 +28,19 @@
  * `MavlinkFeedTransmitter`'s own `supports(FeedSpec)`) — those back the Simulate wizard's
  * `rtsp`/`mjpeg`/mavlink-telemetry *transmission* path (rehearsing the protocol by emitting a feed),
  * never a device this page can register to consume.
+ *
+ * **List order is grouped by likelihood/relatedness, not alphabetical or add-order** (docs/DRONE-INFRA-PLAN.md
+ * I-h wave B — 8 entries is enough that scanability started to matter): network camera/video streams
+ * first (`rtsp`, `mjpeg`, `srt`, `udp` — the ones an operator is most often choosing between), then
+ * local sources (`v4l2`, `file`), then the two special-purpose entries (`sim`, `mavlink`) last. Plain
+ * reordering was chosen over `<optgroup>`-style visual grouping: the register form's `<select>`
+ * (`features/onboarding/onboarding.html`) already renders one flat `@for` over this array with no
+ * group data attached to `ProtocolOption`, and true optgroups would need either a new field here
+ * (breaking "keep the list's existing shape" — every consumer, `placeholderForProtocol`/
+ * `isKnownProtocol`/`protocolSelectionFor` included, assumes a flat array) or a second lookup
+ * structure kept in sync with this one by hand; each option's own `{{ value }} — {{ hint }}` rendering
+ * already gives a one-line description right in the dropdown, which was judged enough for a
+ * single-digit-length list without the added surface. Revisit if the list keeps growing.
  *
  * **Must be kept in sync with the adapter set** (each `adapters/adapter-*` module's own `MODULE.md`)
  * — a future ingest adapter needs its protocol string added here too, or its devices are only
@@ -42,19 +62,33 @@ export const REGISTERABLE_PROTOCOLS: readonly ProtocolOption[] = [
     placeholder: 'rtsp://192.168.1.50:554/stream',
   },
   {
-    value: 'file',
-    hint: 'A video file already on the server, played on a loop',
-    placeholder: 'file:///srv/videos/flight.mp4',
-  },
-  {
     value: 'mjpeg',
     hint: 'HTTP MJPEG camera or stream endpoint',
     placeholder: 'http://192.168.1.60:8080/video',
   },
   {
+    value: 'srt',
+    hint:
+      'Low-latency drone/FPV video over SRT (4G/5G, long-range links) — the drone usually dials ' +
+      'in, so set mode=listener under Stream options; leave it as caller to dial out to an encoder.',
+    placeholder: 'srt://0.0.0.0:8890',
+  },
+  {
+    value: 'udp',
+    hint:
+      'MPEG-TS over UDP (ground-station encoder, e.g. ffmpeg -f mpegts udp://…) — this app listens ' +
+      'on the port, it does not dial out',
+    placeholder: 'udp://0.0.0.0:5600',
+  },
+  {
     value: 'v4l2',
     hint: 'USB/local camera attached to this machine (Linux V4L2)',
     placeholder: 'file:///dev/video0',
+  },
+  {
+    value: 'file',
+    hint: 'A video file already on the server, played on a loop',
+    placeholder: 'file:///srv/videos/flight.mp4',
   },
   {
     value: 'sim',

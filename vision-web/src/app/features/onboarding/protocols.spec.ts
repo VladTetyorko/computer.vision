@@ -8,12 +8,14 @@ import {
 } from './protocols';
 
 describe('REGISTERABLE_PROTOCOLS', () => {
-  it('lists exactly the six protocols the app actually consumes, verified against each adapter\'s own supports()', () => {
+  it('lists exactly the eight protocols the app actually consumes, grouped network-stream / local / special (docs/DRONE-INFRA-PLAN.md I-h wave B)', () => {
     expect(REGISTERABLE_PROTOCOLS.map((option) => option.value)).toEqual([
       'rtsp',
-      'file',
       'mjpeg',
+      'srt',
+      'udp',
       'v4l2',
+      'file',
       'sim',
       'mavlink',
     ]);
@@ -51,6 +53,8 @@ describe('placeholderForProtocol', () => {
     expect(placeholderForProtocol('v4l2')).toBe('file:///dev/video0');
     expect(placeholderForProtocol('sim')).toBe('sim://demo');
     expect(placeholderForProtocol('mavlink')).toBe('udp://0.0.0.0:14550');
+    expect(placeholderForProtocol('srt')).toBe('srt://0.0.0.0:8890');
+    expect(placeholderForProtocol('udp')).toBe('udp://0.0.0.0:5600');
   });
 
   it('falls back to a generic placeholder for an unrecognized protocol', () => {
@@ -78,5 +82,37 @@ describe('protocolSelectionFor', () => {
 
   it('trims whitespace before resolving', () => {
     expect(protocolSelectionFor('  rtsp  ')).toEqual({ select: 'rtsp', custom: '' });
+  });
+});
+
+describe('srt / udp (docs/DRONE-INFRA-PLAN.md I-h wave B — low-latency drone video ingest)', () => {
+  it('are known protocols', () => {
+    expect(isKnownProtocol('srt')).toBe(true);
+    expect(isKnownProtocol('udp')).toBe(true);
+  });
+
+  it('resolve straight to the select via protocolSelectionFor, like every other known protocol', () => {
+    expect(protocolSelectionFor('srt')).toEqual({ select: 'srt', custom: '' });
+    expect(protocolSelectionFor('udp')).toEqual({ select: 'udp', custom: '' });
+  });
+
+  it('srt\'s hint carries the listener-vs-caller guidance inline (mode=listener is the common drone case)', () => {
+    const srt = REGISTERABLE_PROTOCOLS.find((option) => option.value === 'srt');
+    expect(srt?.hint).toContain('mode=listener');
+    expect(srt?.hint).toContain('caller');
+  });
+
+  it('udp\'s hint states this app listens rather than dials out', () => {
+    const udp = REGISTERABLE_PROTOCOLS.find((option) => option.value === 'udp');
+    expect(udp?.hint.toLowerCase()).toContain('listens');
+  });
+
+  it('are grouped with the other network-stream protocols, ahead of the local/special-purpose ones', () => {
+    const values = REGISTERABLE_PROTOCOLS.map((option) => option.value);
+    const networkStreamProtocols = ['rtsp', 'mjpeg', 'srt', 'udp'];
+    const localAndSpecialProtocols = ['v4l2', 'file', 'sim', 'mavlink'];
+    const lastNetworkIndex = Math.max(...networkStreamProtocols.map((p) => values.indexOf(p)));
+    const firstOtherIndex = Math.min(...localAndSpecialProtocols.map((p) => values.indexOf(p)));
+    expect(lastNetworkIndex).toBeLessThan(firstOtherIndex);
   });
 });

@@ -2573,3 +2573,98 @@ home"` and `"return-home"` (the URL path fragment, from `VisionApi.returnHome`'s
 body) are the only two strings from this wave found in an initial chunk, confirming the API-client
 surface is the *only* eager addition, same as every past cycle's own verification method. Still
 comfortably inside the 360 kB error budget.
+
+## I-h wave B — SRT + UDP/MPEG-TS ingest in the connect flow (docs/DRONE-INFRA-PLAN.md I-h)
+
+UI half of I-h's low-latency drone video ingest: `srt`/`udp` added to the Register method's
+protocol picker, plus small connect-flow polish. Wave A (`adapters/adapter-rtsp/**`,
+`FfmpegVideoSource#supports` accepting the two protocol strings) lands concurrently, out of this
+task's file scope (`vision-web/**` only) — built against the plan's own frozen contract, not
+against that adapter's source.
+
+- **`features/onboarding/protocols.ts`** — `REGISTERABLE_PROTOCOLS` gains two entries:
+  - **`srt`** — hint: *"Low-latency drone/FPV video over SRT (4G/5G, long-range links) — the
+    drone usually dials in, so set mode=listener under Stream options; leave it as caller to dial
+    out to an encoder."* Placeholder **`srt://0.0.0.0:8890`** — a listener URI (this app binds and
+    waits), the more common real-world posture per the plan's own reasoning: a field-deployed
+    encoder on a dynamic cellular IP dials in to this platform's stable address, not the other way
+    around; port 8890 is mediamtx's own well-known default SRT port (this repo already runs
+    mediamtx), picked as a recognizable, plausible example rather than an arbitrary number. The
+    `mode`/`latency`/`streamid`/`passphrase` knobs from the plan's frozen contract are **not**
+    embedded in the placeholder URI as query params — they go through the existing
+    `StreamDescriptor.options` key/value editor (see below), the same mechanism `mavlink`'s
+    `sysid` option already uses in this exact form; the placeholder therefore stays a bare
+    `srt://host:port`, matching the plan's own written form.
+  - **`udp`** — hint: *"MPEG-TS over UDP (ground-station encoder, e.g. ffmpeg -f mpegts udp://…) —
+    this app listens on the port, it does not dial out."* Placeholder **`udp://0.0.0.0:5600`** —
+    5600 is the de facto standard UDP video port in the FPV/drone world (ArduPilot SITL video,
+    QGroundControl's default, most gstreamer/ffmpeg drone recipes), the obvious realistic example.
+  - Header doc comment's verified-adapter list extended for both — explicitly flagged as sourced
+    from the plan's frozen contract, **not** independently re-verified against
+    `adapter-rtsp`'s own source (this task's file scope stayed `vision-web/**`), unlike the other
+    six entries which were each checked against their adapter's actual `supports()`.
+  - **List reordered** (not restructured into `<optgroup>`s): network-stream protocols first
+    (`rtsp`, `mjpeg`, `srt`, `udp` — the ones an operator is usually choosing between), then local
+    sources (`v4l2`, `file`), then the two special-purpose entries (`sim`, `mavlink`) last. Chose
+    plain reordering over visual `<optgroup>` grouping: the register form's `<select>`
+    (`onboarding.html`) renders one flat `@for` over `ProtocolOption[]` with no group data on the
+    type, and true optgroups would need either a new field (breaking the array's flat shape every
+    consumer — `placeholderForProtocol`/`isKnownProtocol`/`protocolSelectionFor` — assumes) or a
+    second hand-maintained lookup; each `<option>` already renders `{{ value }} — {{ hint }}`
+    inline, judged enough for an 8-item list. `ProtocolOption`'s shape/typing and the three helper
+    functions are byte-for-byte unchanged.
+- **`onboarding.html`** register form, advanced-mode "Stream options" panel (`settings.advancedMode()`
+  gate, pre-existing key/value option-row editor, `store.addOptionRow()`/`updateOptionKey`/
+  `updateOptionValue` — this *is* the form's one StreamDescriptor-options editor, confirmed before
+  writing anything, so no new editor was built) — gained two protocol-conditional inline hint
+  paragraphs, `@if (store.protocol() === 'srt')` / `@else if (store.protocol() === 'udp')`,
+  spelling out `mode`/`latency` (srt) and the host-filtering/MPEG-TS-assumed behavior + low-latency
+  option keys (udp) right next to the option rows an operator would fill in. The `srt` hint's own
+  `ProtocolOption.hint` text (visible in the `<select>` even before opening advanced mode) already
+  carries the essential listener-vs-caller guidance too — belt-and-suspenders, since advanced mode
+  is off by default and the options editor itself is invisible until it's on.
+- **Drone-onboarding wizard's `'drone'` Connect method** (docs/DRONE-INFRA-PLAN.md I-g, wave B,
+  `drone-config-logic.ts`/`onboarding-store.ts`/`onboarding.html`'s `chooseDroneMethod()` tile) —
+  verified, not touched: it builds a hardcoded `protocol: 'mavlink'` device
+  (`buildDroneDeviceSpec`) and never reads `REGISTERABLE_PROTOCOLS` at all, so it has no srt/udp
+  surface to add — that method is MAVLink-telemetry-only by design (I-g's own scope), unrelated to
+  this video-ingest wave. The **register-manually** flow (`chooseMethod('register')`, the only
+  place `REGISTERABLE_PROTOCOLS` is rendered — the whole 3/4/5-choice Connect step lives in this
+  one wizard now, `features/devices/` no longer renders any of it, see the U-d entry above) picks
+  up `srt`/`udp` automatically, protocol-select markup unchanged. The test-before-save probe
+  (`POST /api/devices/probe`, Test step) needed no wiring — `buildProbeRequest`
+  (`onboarding-logic.ts`) is already protocol-agnostic, forwarding whatever `protocol`/`uri`/
+  `options` the form holds.
+- **Doc-debt flagged, not fixed here (out of this task's scope)**: I-g wave B itself (commit
+  `29230e3`, `drone-config-logic.ts` + the `'drone'` `ConnectMethod`/its wizard sub-step/the
+  firmware×link picker) landed with **no MODULE.md entry at all** — this section only covers I-h
+  wave B's own changes plus what was read, read-only, to verify against it. A future task should
+  add I-g wave B's own entry.
+
+### Tests
+
+`features/onboarding/protocols.spec.ts` only touched (no other spec file changed by this task):
+the `REGISTERABLE_PROTOCOLS` array-order assertion updated to the new 8-entry order,
+`placeholderForProtocol('srt'/'udp')` assertions added to the existing case, and one new `describe`
+block (`srt / udp`, 5 new `it`s) covering `isKnownProtocol`, `protocolSelectionFor`, the srt hint's
+`mode=listener`/`caller` content, the udp hint's "listens" content, and a grouping-order assertion
+(every network-stream protocol index precedes every local/special one) — **12 → 17 cases in this
+file**. **Full suite: 1037/1037 passing.** The last number recorded in this doc (1009/1009, the I-e
+Stage 1 entry above) is **not** a safe baseline for this task's own delta — I-g wave B (commit
+`29230e3`, see the doc-debt note above) landed its own new/extended spec files
+(`drone-config-logic.spec.ts`, `onboarding-logic.spec.ts` +11) in between without updating this
+file, so most of the 1009 → 1037 gap predates this task; this task's own contribution is exactly
+the +5 above. `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production`: **340.06 kB raw / 95.99 kB transfer initial** — measured
+delta against a same-tree baseline build (this task's own 3 changed files stashed out, rebuilt,
+restored) rather than the last-recorded MODULE.md number, since I-g wave B's undocumented landing
+(see above) makes the prior recorded figure an unsafe comparison point: **initial total unchanged**
+(340.06/96.00 kB → 340.06/95.99 kB, sub-0.01 kB rounding noise — `protocols.ts`/`onboarding.html`
+are both reachable only through the lazy `onboarding` route chunk). **`onboarding` lazy chunk: 71.96
+kB → 73.40 kB raw / 18.06 kB → 18.54 kB transfer (+1.44 kB raw / +0.48 kB transfer)** — the two new
+`ProtocolOption` entries' hint/placeholder strings plus the two new template hint paragraphs, the
+entire cost of this wave. Pre-existing budget warnings (300 kB initial, 6 kB `onboarding.css`)
+unchanged by this task, carried from before it.
