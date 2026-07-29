@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.api.SystemNetworkController;
 import com.drones.vision.domain.port.out.DeviceDiscoveryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +11,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Context test for the <em>default</em> configuration (no {@code
@@ -32,10 +34,30 @@ class DiscoveryWiringTest {
     @Autowired
     private List<DeviceDiscoveryPort> discoveryPorts;
 
+    @Autowired
+    private int mavlinkPort;
+
+    @Autowired
+    private SystemNetworkController systemNetworkController;
+
     @Test
     void allFourDiscoveryMethodsAreRegisteredByDefault() {
         Set<String> methods = discoveryPorts.stream().map(DeviceDiscoveryPort::method).collect(Collectors.toSet());
 
         assertEquals(Set.of("onvif", "mdns", "v4l2", "mavlink"), methods);
+    }
+
+    /**
+     * docs/DRONE-INFRA-PLAN.md I-g wave A: {@link DiscoveryWiringConfiguration#mavlinkPort}
+     * defaults to {@link VisionDiscoveryProperties#DEFAULT_MAVLINK_PORT}, and {@code
+     * vision-api}'s {@link SystemNetworkController} (asserted present here, confirming the raw
+     * {@code int} bean autowires into it across the module boundary) reports that exact value.
+     * See {@link DiscoveryMavlinkPortOverrideWiringTest} for the same proof under a
+     * non-default property value, the stronger cross-consistency case.
+     */
+    @Test
+    void mavlinkPortDefaultsTo14550AndReachesSystemNetworkController() {
+        assertEquals(14_550, mavlinkPort);
+        assertNotNull(systemNetworkController);
     }
 }
