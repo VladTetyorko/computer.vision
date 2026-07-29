@@ -91,6 +91,43 @@ capturedAt timestamps taken from RTSP RTP time (the frontend overlay sync matche
 depends on honest capture timestamps), and stream lifecycle mapping (path name ↔
 StreamId).
 
+## Transport decisions (WebSocket vs what we have)
+
+Evaluated 2026-07-29, prompted by "should we use WebSockets for stability/weight?".
+Answer: **no transport swap — both existing choices are already the stable-and-light
+option for their leg; the stability lever is tuning, not replacing.**
+
+**Browser ↔ backend — keep SSE.** The live channel is one multiplexed connection
+(topics added/removed via PATCH without reconnecting — no per-topic connection
+explosion), `EventSource` native auto-reconnect, `Last-Event-ID` resume backed by
+`LiveRingBuffer` replay, reconnect topic restoration in `live-store.ts`, plus a polling
+fallback. WebSocket has *none* of that natively — switching means rebuilding reconnect,
+resume, and heartbeat by hand to arrive at equal resilience, for a frame-overhead saving
+of a few bytes on a channel whose payloads are already tiny. Data flow is one-directional
+(commands go over REST), so WS's bidirectionality buys nothing today.
+*Revisit trigger:* browser-originated low-latency pilot input (MVP4 command TX) — that
+wants a WebSocket or WebRTC data channel, decided in that plan, not this one.
+
+**Laptop ↔ GPU box — keep gRPC bidi.** Binary protobuf detections (~10× smaller than
+JSON-over-WS), HTTP/2 flow control, per-frame deadlines, and the whole
+correlation/backpressure/teardown machinery in `GrpcDetectionPort` that a WS channel
+would force us to reimplement. What a flaky Wi-Fi/VPN link actually needs is **channel
+keepalive tuning** so half-open TCP dies fast instead of lingering:
+- **P1 task (after the grpc-bom pin lands, same module):** configure the
+  `ManagedChannelBuilder` with `keepAliveTime(~20s)`, `keepAliveTimeout(~5s)`,
+  `keepAliveWithoutCalls(true)`, and set the matching server-side permit knobs in
+  cv-service's `grpc.server` options (`grpc.keepalive_permit_without_calls`,
+  `grpc.http2.min_ping_interval_without_data_ms`) so the server doesn't GOAWAY the
+  pinging client. Expose as `vision.cv.keepalive-*` properties only if defaults prove
+  wrong in the field.
+
+**Multi-node future — MQTT, but not yet.** If the platform grows past two machines
+(several GPU workers, multiple operator stations, field relays), a broker with QoS,
+retained messages, and last-will (free "node online/offline" presence) is the standard
+drone-ops answer for telemetry/detection fan-out. Adding a broker for a 2-machine setup
+is pure overhead. *Trigger:* 3+ independent producers/consumers, or a link that needs
+store-and-forward.
+
 ## Non-goals
 
 - No WebSocket detection-ingest endpoint on the backend (gRPC bidi already covers it,
