@@ -9,12 +9,14 @@ test_real_model.py for the real-weights integration test.
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 
 import numpy as np
 import pytest
 
+import cv_service.inference as inference_module
 from cv_service.inference import (
     DEFAULT_CONFIDENCE,
     DEFAULT_IMGSZ,
@@ -22,6 +24,7 @@ from cv_service.inference import (
     ENCODING_JPEG,
     ModelUnavailableError,
     YoloDetector,
+    _parse_device,
     decode_frame,
     map_detections,
 )
@@ -52,8 +55,9 @@ class FakeModel:
         self._result = result
         self.calls: list[dict] = []
 
-    def predict(self, frame, conf=None, imgsz=None, verbose=None):
-        self.calls.append({"frame": frame, "conf": conf, "imgsz": imgsz, "verbose": verbose})
+    def predict(self, frame, conf=None, imgsz=None, verbose=None, **kwargs):
+        call = {"frame": frame, "conf": conf, "imgsz": imgsz, "verbose": verbose, **kwargs}
+        self.calls.append(call)
         return [self._result]
 
 
@@ -305,3 +309,112 @@ def test_warmup_failure_raises_model_unavailable():
 
     with pytest.raises(ModelUnavailableError, match="warmup inference failed"):
         YoloDetector(model_name="fake-model", model=BoomingModel())
+
+
+# --- device / CV_DEVICE -----------------------------------------------------
+#
+# `_parse_device` is the same forgiving-parse idiom as `_parse_imgsz`
+# (`cv_service.concurrency._resolve_max_concurrent_inferences` follows suit
+# for CV_MAX_CONCURRENT_INFERENCES) -- tested directly against raw strings
+# below. `YoloDetector`'s own device *resolution* (constructor kwarg vs. the
+# module-level `DEFAULT_DEVICE` it falls back to) is tested by monkeypatching
+# `inference_module.DEFAULT_DEVICE` directly rather than the `CV_DEVICE` env
+# var + reload -- `DEFAULT_DEVICE` is resolved once at import time (mirrors
+# `DEFAULT_MAX_CONCURRENT_INFERENCES`), so patching the already-resolved
+# module attribute is what actually simulates "the env resolved to X at
+# import time" for a single test.
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("cpu", "cpu"),
+        ("cuda", "cuda"),
+        ("cuda:0", "cuda:0"),
+        ("0", "0"),
+        ("  cuda:0  ", "cuda:0"),
+    ],
+)
+def test_parse_device(raw, expected):
+    assert _parse_device(raw) == expected
+
+
+def test_cv_device_env_unset_resolves_to_none(monkeypatch):
+    monkeypatch.delenv("CV_DEVICE", raising=False)
+
+    assert _parse_device(os.environ.get("CV_DEVICE")) is None
+
+
+def test_cv_device_env_blank_resolves_to_none(monkeypatch):
+    monkeypatch.setenv("CV_DEVICE", "   ")
+
+    assert _parse_device(os.environ.get("CV_DEVICE")) is None
+
+
+def test_cv_device_env_value_passes_through(monkeypatch):
+    monkeypatch.setenv("CV_DEVICE", "cuda:0")
+
+    assert _parse_device(os.environ.get("CV_DEVICE")) == "cuda:0"
+
+
+def test_yolo_detector_device_defaults_to_none_when_env_unset(monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", None)
+    detector = YoloDetector(model_name="fake-model", model=_empty_fake_model())
+
+    assert detector.device is None
+
+
+def test_yolo_detector_device_honors_env_default(monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", "cuda:0")
+    detector = YoloDetector(model_name="fake-model", model=_empty_fake_model())
+
+    assert detector.device == "cuda:0"
+
+
+def test_yolo_detector_device_constructor_kwarg_overrides_env(monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", "cuda:1")
+    detector = YoloDetector(model_name="fake-model", model=_empty_fake_model(), device="cpu")
+
+    assert detector.device == "cpu"
+
+
+def test_detect_passes_device_kwarg_to_predict_when_set(bgr_frame, monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", None)
+    fake_model = _empty_fake_model()
+    detector = YoloDetector(model_name="fake-model", model=fake_model, device="cuda:0")
+
+    detector.detect(width=4, height=3, encoding=ENCODING_BGR24, data=bgr_frame.tobytes())
+
+    assert fake_model.calls[-1]["device"] == "cuda:0"
+
+
+def test_warmup_passes_device_kwarg_to_predict_when_set(monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", None)
+    fake_model = _empty_fake_model()
+
+    YoloDetector(model_name="fake-model", model=fake_model, device="cuda:0")
+
+    assert fake_model.calls[0]["device"] == "cuda:0"
+
+
+def test_detect_omits_device_kwarg_entirely_when_unset(bgr_frame, monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", None)
+    fake_model = _empty_fake_model()
+    detector = YoloDetector(model_name="fake-model", model=fake_model)
+
+    detector.detect(width=4, height=3, encoding=ENCODING_BGR24, data=bgr_frame.tobytes())
+
+    assert detector.device is None
+    assert "device" not in fake_model.calls[-1]
+
+
+def test_warmup_omits_device_kwarg_entirely_when_unset(monkeypatch):
+    monkeypatch.setattr(inference_module, "DEFAULT_DEVICE", None)
+    fake_model = _empty_fake_model()
+
+    YoloDetector(model_name="fake-model", model=fake_model)
+
+    assert "device" not in fake_model.calls[0]

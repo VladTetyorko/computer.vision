@@ -65,6 +65,14 @@ RUN python -c "import os; from ultralytics import YOLO; YOLO('yolo11n.pt')" \
     && yolo export model=yolo11n.pt format=openvino imgsz=${CV_IMGSZ} \
     && test -d yolo11n_openvino_model
 ENV CV_MODEL=yolo11n_openvino_model
+# CV_DEVICE selects the explicit inference device (see cv_service/inference.py,
+# DEFAULT_DEVICE) -- left unset here on purpose: this image runs OpenVINO CPU
+# inference, and OpenVINO's own device strings ("CPU"/"GPU"/"AUTO") aren't
+# the same namespace as PyTorch/Ultralytics CUDA device strings ("cuda:0"),
+# so setting one here would be misleading, not just redundant. For a
+# CUDA-capable deployment (plain PyTorch `.pt` weights, not this image --
+# see cv-service/DEPLOY-GPU.md), uncomment and set e.g.:
+# ENV CV_DEVICE=cuda:0
 
 EXPOSE 50051
 

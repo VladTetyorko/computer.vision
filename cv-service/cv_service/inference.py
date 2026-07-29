@@ -54,6 +54,32 @@ DEFAULT_CONFIDENCE = 0.25
 DEFAULT_IMGSZ = 416
 
 
+def _parse_device(raw: str | None) -> str | None:
+    """Parse the `CV_DEVICE` env var: unset/blank -> None ("ultralytics auto").
+
+    Any non-blank value (`"cpu"`, `"cuda"`, `"cuda:0"`, `"0"`, ...) is passed
+    through as-is -- ultralytics/torch own validating device strings, this
+    function doesn't enumerate or second-guess them. Whitespace is stripped
+    so a stray env-file trailing space doesn't turn into a bogus device
+    string. Mirrors `_parse_imgsz`'s forgiving-parse idiom, but there's no
+    "garbage" case here (any non-empty string is a legal device spec).
+    """
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    return stripped or None
+
+
+# Default inference device, resolved once at import time from the CV_DEVICE
+# env var (same forgiving-parse idiom as CV_IMGSZ). `None` means "don't pass
+# device= to predict() at all" -- ultralytics then auto-selects CUDA if
+# available, CPU otherwise, exactly today's behavior. Set explicitly (e.g.
+# "cuda:0") to make the inference device observable/deterministic rather
+# than relying on ultralytics' own auto-detection, primarily for GPU-box
+# deployments (see cv-service/DEPLOY-GPU.md).
+DEFAULT_DEVICE = _parse_device(os.environ.get("CV_DEVICE"))
+
+
 class ModelUnavailableError(RuntimeError):
     """Raised when the YOLO backend could not be constructed.
 
@@ -179,9 +205,19 @@ class YoloDetector:
     here requires it).
     """
 
-    def __init__(self, model_name: str | None = None, *, model: Any = None) -> None:
+    def __init__(
+        self,
+        model_name: str | None = None,
+        *,
+        model: Any = None,
+        device: str | None = None,
+    ) -> None:
         self._model_name = model_name or os.environ.get("CV_MODEL", DEFAULT_MODEL)
         self._imgsz = _parse_imgsz(os.environ.get("CV_IMGSZ"))
+        # Constructor kwarg overrides the env-resolved default, same
+        # precedence idiom as `model_name` above (falsy -- None or "" --
+        # falls through to the env-resolved default).
+        self._device = device or DEFAULT_DEVICE
 
         if model is not None:
             # Test seam: inject a fake model, skip ultralytics entirely.
@@ -204,6 +240,12 @@ class YoloDetector:
 
             LOGGER.info("loaded YOLO model %r", self._model_name)
 
+        LOGGER.info(
+            "cv-service inference device=%s (model=%r)",
+            self._device if self._device is not None else "auto",
+            self._model_name,
+        )
+
         self._warmup()
 
     @property
@@ -213,6 +255,23 @@ class YoloDetector:
     @property
     def imgsz(self) -> int:
         return self._imgsz
+
+    @property
+    def device(self) -> str | None:
+        """Resolved inference device, or `None` for "ultralytics auto"."""
+        return self._device
+
+    def _predict_kwargs(self, **kwargs: Any) -> dict[str, Any]:
+        """Common `predict()` kwargs, adding `device=` only when resolved.
+
+        Omitting the `device` kwarg entirely (rather than passing `None`)
+        when `CV_DEVICE`/the constructor override is unset keeps behavior
+        byte-identical to before this knob existed -- ultralytics' own
+        `select_device('')` auto-detection still runs untouched.
+        """
+        if self._device is not None:
+            kwargs["device"] = self._device
+        return kwargs
 
     def _warmup(self) -> None:
         """Run one dummy `predict()` at construction time.
@@ -225,10 +284,16 @@ class YoloDetector:
         tests assert on this construction-time call. A failure here is
         treated the same as a load failure: `ModelUnavailableError`, which
         server.py's caller degrades to the echo path instead of crashing.
+        This is also where a bad/unavailable CV_DEVICE (e.g. "cuda:0" with
+        no GPU) surfaces -- ultralytics raises during predict(), which this
+        method already converts to ModelUnavailableError like any other
+        warmup failure, so no special handling is needed for that case.
         """
         warmup_frame = np.zeros((self._imgsz, self._imgsz, 3), dtype=np.uint8)
         try:
-            self._model.predict(warmup_frame, imgsz=self._imgsz, verbose=False)
+            self._model.predict(
+                warmup_frame, **self._predict_kwargs(imgsz=self._imgsz, verbose=False)
+            )
         except Exception as exc:  # noqa: BLE001 - any warmup failure means "unavailable"
             raise ModelUnavailableError(
                 f"warmup inference failed for model {self._model_name!r}: {exc}"
@@ -249,7 +314,9 @@ class YoloDetector:
         conf = confidence_threshold if confidence_threshold else DEFAULT_CONFIDENCE
 
         start = time.monotonic()
-        results = self._model.predict(frame, conf=conf, imgsz=self._imgsz, verbose=False)
+        results = self._model.predict(
+            frame, **self._predict_kwargs(conf=conf, imgsz=self._imgsz, verbose=False)
+        )
         inference_millis = int(round((time.monotonic() - start) * 1000))
 
         frame_height, frame_width = frame.shape[0], frame.shape[1]
