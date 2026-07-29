@@ -191,6 +191,52 @@ addresses) is designed out.
 scanner wiring and the endpoint can never disagree; vision-api + vision-app) ·
 B (frontend: wizard flow per above; vision-web only) — parallel, disjoint.
 
+### I-h — low-latency drone video ingest (SRT + UDP/MPEG-TS) + connect-flow usability (approved 2026-07-29)
+
+Goal: accept the two video transports real drone/FPV kit actually uses over lossy cellular/
+long-range links, and make picking any ingest protocol in the app obvious. Pure RX — no
+command surface. `FfmpegVideoSource` (adapter-rtsp) is already JavaCV/FFmpeg-backed, which
+decodes SRT and UDP/MPEG-TS today; only its `supports()` gate + per-protocol demuxer options
+are missing, so this is a contained extension, not a new adapter.
+
+Why these two: **SRT** is the de-facto standard for low-latency drone video over 4G/5G and
+long-range links (DJI transmission, Herelink, cheap SRT encoders, OBS) — packet-loss-resilient
+with a tunable latency budget, exactly the lossy-link case RTSP handles badly. **UDP/MPEG-TS**
+is the classic ground-station/encoder output (`ffmpeg … -f mpegts udp://…`, analog-to-digital
+boxes). Both compose with the existing publish path (ingest → republish to mediamtx for HLS/
+WHEP viewing) unchanged, and with CV detection unchanged.
+
+**Frozen contract (UI ↔ adapter):**
+- Protocol strings: **`srt`** and **`udp`** (lower-case, as `StreamDescriptor.protocol()`).
+- `srt` URI: `srt://host:port` (caller — app dials the encoder) or `srt://0.0.0.0:port` +
+  option `mode=listener` (app binds, encoder dials in). Options (all optional, sane defaults):
+  `latency` (ms, SRT's core knob, default ~120), `mode` (caller|listener), `streamid`,
+  `passphrase`. Adapter owns exact FFmpeg AVOption names.
+- `udp` URI: `udp://0.0.0.0:port` (listen) or `udp://host:port`. Options: `fifo_size`,
+  `overrun_nonfatal`, `buffer_size`; MPEG-TS assumed. Low-latency defaults applied.
+- The probe (test-before-save, `ProbeService`) and `VideoSourceRegistry` auto-dispatch by
+  `supports()` — **zero application/api change**; probe works for both the moment the adapter
+  claims the protocol.
+
+**Waves (parallel, disjoint):**
+- **A — adapter** (`adapters/adapter-rtsp/**`): `FfmpegVideoSource#supports` accepts `srt`/`udp`;
+  per-protocol option application (rtsp options stay rtsp-only); loopback integration tests
+  (UDP/MPEG-TS via a JavaCV recorder pushing to a local port; SRT gated on libsrt presence in
+  the ffmpeg build, skip cleanly if absent, same posture as the docker-gated tests elsewhere);
+  MODULE.md updated (its class javadoc already enumerates supported protocols — extend it).
+- **B — UI usability** (`vision-web/**`): add `srt`/`udp` to `REGISTERABLE_PROTOCOLS`
+  (`features/onboarding/protocols.ts`) with plain-words hints + realistic placeholders; verify
+  the register-manually and drone-onboarding connect flows present them well (grouped/ordered so
+  the common choices lead); a short "what's this?" affordance per protocol so an operator picks
+  right without docs. Connect-flow polish: sensible default option hints (SRT latency, listener
+  vs caller) surfaced inline. vitest for the protocol-list logic.
+
+**Future scalability note (not this wave):** mediamtx natively ingests SRT/RTMP/WHIP on its own
+ports — a drone could push straight to mediamtx and the app consume that path, moving ingest
+decode off the backend entirely (the same push-vs-pull lever as CV-SCALE-PLAN §S5). Direct
+in-app ingest (this wave) is the incremental step; mediamtx-native ingest is the scale step,
+sequenced when backend ingest decode becomes the measured ceiling.
+
 ### I-f — fleet ops infra (future, mostly needs TX or U-e)
 Log/blackbox ingest (dataflash via MAVFTP, BF blackbox upload), parameter drift audit
 (PARAM_REQUEST_LIST fleet-wide), firmware version dashboard (AUTOPILOT_VERSION), multi-site
