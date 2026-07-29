@@ -160,6 +160,35 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
      */
     static final float JPEG_QUALITY = 0.8f;
 
+    /**
+     * HTTP/2 keepalive PING interval for a real-TCP channel (host/port
+     * constructors only — the bring-your-own-channel seam is a test concern,
+     * not a real-transport one). Over a flaky Wi-Fi/VPN link between the
+     * backend and the CV service, a half-open connection with no traffic can
+     * otherwise sit unnoticed until an app-level timeout catches it; pinging
+     * every {@value} seconds — including on an idle channel, see {@link
+     * #KEEPALIVE_WITHOUT_CALLS} — bounds that to a few seconds instead. See
+     * {@code docs/REMOTE-CV-PLAN.md} "Transport decisions" and the matching
+     * server-side permit options in {@code cv_service/server.py}.
+     */
+    static final long KEEPALIVE_TIME_SECONDS = 20;
+
+    /**
+     * How long a keepalive PING may go unacknowledged before the channel
+     * considers the connection dead and reconnects. Well under {@link
+     * #KEEPALIVE_TIME_SECONDS} so a lost link is confirmed within one ping
+     * cycle, not stacked on top of the next one.
+     */
+    static final long KEEPALIVE_TIMEOUT_SECONDS = 5;
+
+    /**
+     * Send keepalive PINGs even when no RPC is in flight. Without this, a
+     * stream sitting idle between frames (or during {@code StreamPipeline}'s
+     * outage backoff) would never be probed at all, defeating the point of
+     * keepalive on exactly the case it needs to catch.
+     */
+    static final boolean KEEPALIVE_WITHOUT_CALLS = true;
+
     private static final long CHANNEL_SHUTDOWN_TIMEOUT_SECONDS = 5;
 
     private final ManagedChannel channel;
@@ -172,9 +201,11 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
     /**
      * Convenience constructor: builds a plaintext {@link ManagedChannel} to
      * {@code host:port} with the default wire-tuning knobs ({@value
-     * #MAX_DETECT_WIDTH}px / {@value #JPEG_QUALITY} quality). The CV service
-     * is reached over a private/internal network (docker-compose) so
-     * plaintext is deliberate, not an oversight.
+     * #MAX_DETECT_WIDTH}px / {@value #JPEG_QUALITY} quality) and HTTP/2
+     * keepalive tuning (see {@link #GrpcDetectionPort(String, int, int,
+     * float)}). The CV service is reached over a private/internal network
+     * (docker-compose, or a Wi-Fi/VPN link to a remote GPU box) so plaintext
+     * is deliberate, not an oversight.
      */
     public GrpcDetectionPort(String host, int port) {
         this(host, port, MAX_DETECT_WIDTH, JPEG_QUALITY);
@@ -184,10 +215,18 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
      * Like {@link #GrpcDetectionPort(String, int)}, but with explicit
      * wire-tuning knobs — see class javadoc's "Payload shrinking" section
      * and {@link #GrpcDetectionPort(ManagedChannel, int, float)} for the
-     * validated parameters.
+     * validated parameters. The built channel also gets HTTP/2 keepalive
+     * ({@link #KEEPALIVE_TIME_SECONDS}/{@link #KEEPALIVE_TIMEOUT_SECONDS}/
+     * {@link #KEEPALIVE_WITHOUT_CALLS}) so a half-open connection over a
+     * flaky link is detected within seconds instead of lingering.
      */
     public GrpcDetectionPort(String host, int port, int detectWidth, float jpegQuality) {
-        this(ManagedChannelBuilder.forAddress(host, port).usePlaintext().build(), detectWidth, jpegQuality);
+        this(ManagedChannelBuilder.forAddress(host, port)
+                .usePlaintext()
+                .keepAliveTime(KEEPALIVE_TIME_SECONDS, TimeUnit.SECONDS)
+                .keepAliveTimeout(KEEPALIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(KEEPALIVE_WITHOUT_CALLS)
+                .build(), detectWidth, jpegQuality);
     }
 
     /**

@@ -206,3 +206,30 @@ concern at typical stream counts.
    occasionally wedging the gRPC channel permanently in `CONNECTING` after
    a genuine connect failure; confirm it's in place if reconnection ever
    looks stuck.)
+5. **Keepalive on a half-open link (`docs/REMOTE-CV-PLAN.md` "Transport
+   decisions" P1).** Item 4 above covers a *clean* stop (process killed, port
+   blocked) — TCP/gRPC notices that quickly on its own. Keepalive exists for
+   the messier case: a link that goes silently dead with no FIN/RST at all
+   (a Wi-Fi drop, a VPN tunnel blackhole, a NAT/router mapping expiring) —
+   the OS TCP stack itself can take minutes to notice a socket like that is
+   dead (its own retransmission-timeout defaults are *not* seconds), and
+   nothing above it would find out any sooner without an explicit
+   liveness check. HTTP/2 keepalive pings are that explicit check: the
+   client (`GrpcDetectionPort`) pings every `KEEPALIVE_TIME_SECONDS`
+   (20s, including on an otherwise-idle stream — `keepAliveWithoutCalls`)
+   and gives up on the connection after `KEEPALIVE_TIMEOUT_SECONDS` (5s)
+   with no ack; this service's own `_KEEPALIVE_SERVER_OPTIONS` permits
+   those pings (`grpc.keepalive_permit_without_calls`) instead of GOAWAY-ing
+   the client for "abusive" pinging, and pings back
+   (`grpc.keepalive_time_ms`/`grpc.keepalive_timeout_ms`) to detect a dead
+   client and free that stream's server-side thread just as promptly. To
+   verify: with a stream actively detecting, firewall-drop the network path
+   between the laptop and the GPU box for under a minute (rather than
+   stopping `cv-service`, so the socket goes half-open instead of closing
+   cleanly), then restore it. Backend logs (`GrpcDetectionPort`'s
+   `WARNING`-level transport-error/timeout lines) should report the outage
+   within roughly `KEEPALIVE_TIME_SECONDS + KEEPALIVE_TIMEOUT_SECONDS` (~25s
+   worst case) instead of the connection quietly sitting on the OS's own,
+   much longer, TCP-level failure detection — and detection should resume
+   automatically once the link is back, via the same probe/backoff recovery
+   item 4 describes.

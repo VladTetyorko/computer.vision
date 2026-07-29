@@ -571,6 +571,38 @@ class GrpcDetectionPortTest {
         assertTrue(ex.getMessage().contains("detectWidth"), "message should mention detectWidth: " + ex.getMessage());
     }
 
+    /**
+     * docs/REMOTE-CV-PLAN.md "Transport decisions" P1: HTTP/2 keepalive on a
+     * real-TCP channel must ping often enough (and confirm loss fast enough)
+     * to catch a half-open connection within seconds, not app-level-timeout
+     * later. Actually proving a dropped connection is detected within N
+     * seconds needs a real flaky-network harness (out of unit-test reach,
+     * and exactly what the task calls out as not worth making flaky here) --
+     * this asserts the constants themselves are sane and wired: a timeout
+     * comfortably shorter than the ping interval, and both well under the
+     * per-frame {@link GrpcDetectionPort#RESPONSE_TIMEOUT_SECONDS} response
+     * timeout so keepalive detects loss before the app-level path would. The
+     * real-TCP tests elsewhere in this class (e.g. {@link
+     * #detectRecoversAfterRealConnectFailureOnceServerStarts}) already build
+     * a {@code GrpcDetectionPort} via the host/port constructor these values
+     * are applied on, so a misconfigured {@code ManagedChannelBuilder} call
+     * (e.g. a bad time unit) would fail the whole suite, not just this test.
+     */
+    @Test
+    void keepaliveConstantsAreSaneForAFlakyLink() {
+        assertTrue(GrpcDetectionPort.KEEPALIVE_TIME_SECONDS > 0,
+                "keepalive ping interval must be positive");
+        assertTrue(GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS > 0,
+                "keepalive ack timeout must be positive");
+        assertTrue(GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS < GrpcDetectionPort.KEEPALIVE_TIME_SECONDS,
+                "keepalive ack timeout should be well under the ping interval, not stacked on top of it");
+        assertTrue(GrpcDetectionPort.KEEPALIVE_TIME_SECONDS + GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS
+                        < TimeUnit.MINUTES.toSeconds(1),
+                "a half-open connection should be caught within about a minute, not lingering for many");
+        assertTrue(GrpcDetectionPort.KEEPALIVE_WITHOUT_CALLS,
+                "an idle stream (no in-flight detect() calls) is exactly the case that needs probing");
+    }
+
     @Test
     void detectPassesJpegFrameThroughByteIdentical() throws Exception {
         CapturingServicer servicer = new CapturingServicer();

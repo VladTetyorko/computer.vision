@@ -62,6 +62,26 @@ LOGGER = logging.getLogger("cv_service.server")
 
 DEFAULT_PORT = 50051
 
+# HTTP/2 keepalive tuning for a flaky Wi-Fi/VPN link between the laptop
+# (backend, adapter-cv-grpc) and this service -- docs/REMOTE-CV-PLAN.md
+# "Transport decisions" P1. The client channel
+# (`GrpcDetectionPort.KEEPALIVE_TIME_SECONDS`) pings every 20s, including
+# while idle; a grpc Python server otherwise GOAWAYs ("too_many_pings") a
+# client pinging with no active calls, so `keepalive_permit_without_calls`
+# is required for the client-side tuning to have any effect at all.
+# `http2.min_ping_interval_without_data_ms` (10s, half the client's 20s
+# interval, leaving jitter headroom) is the floor below which the server
+# would otherwise still reject pings as abusive. The server also pings its
+# own side (`keepalive_time_ms`/`keepalive_timeout_ms`) so it detects a dead
+# client and frees that stream's thread promptly, not just the other way
+# around.
+_KEEPALIVE_SERVER_OPTIONS = [
+    ("grpc.keepalive_permit_without_calls", 1),
+    ("grpc.http2.min_ping_interval_without_data_ms", 10000),
+    ("grpc.keepalive_time_ms", 30000),
+    ("grpc.keepalive_timeout_ms", 10000),
+]
+
 
 def _build_default_detector() -> Optional["YoloDetector"]:
     """Try to construct the default `YoloDetector`; `None` if unavailable.
@@ -438,8 +458,14 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
 
 
 def serve(port: int = DEFAULT_PORT) -> grpc.Server:
-    """Build, start, and return a gRPC server bound to ``port``."""
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    """Build, start, and return a gRPC server bound to ``port``.
+
+    Configured with ``_KEEPALIVE_SERVER_OPTIONS`` (see module-level comment)
+    so this server tolerates and reciprocates the client channel's HTTP/2
+    keepalive pings instead of GOAWAY-ing it or leaving a dead client's
+    stream thread parked indefinitely.
+    """
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), options=_KEEPALIVE_SERVER_OPTIONS)
     cv_pb2_grpc.add_InferenceServicer_to_server(InferenceServicer(), server)
     cv_pb2_grpc.add_TrainingServicer_to_server(TrainingServicer(), server)
     server.add_insecure_port(f"[::]:{port}")
