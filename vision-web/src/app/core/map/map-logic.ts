@@ -105,6 +105,14 @@ export function snapshotFromSamples(samples: readonly TelemetrySample[]): AssetT
  * `features/command/asset-panel.ts`'s Status tab, both of which only ever have a `FleetMarker` to
  * read from, not the fleet-summary row). Absent for the `offline` bucket (no live telemetry poller
  * — see `buildMarker`) or before the first sample of a freshly-`streaming` asset arrives.
+ *
+ * `firmware` (docs/DRONE-INFRA-PLAN.md I-e Stage 1, new) — the identical "same place, same
+ * absence rule" as the four fields above, added specifically so
+ * `features/command/asset-panel.ts`'s "Bring home" button (`shared/ui/return-home-button.ts`) can
+ * gate visibility (`core/telemetry/flight-state-logic.ts#canCommandReturnHome`) from data this
+ * panel already has, without a second `TelemetryStore` poller — `AssetAttention` carries no
+ * firmware field at all (the fleet-summary DTO was never widened for it), so this marker-level
+ * field is the only source Command has.
  */
 export interface FleetMarker {
   readonly assetId: string;
@@ -123,6 +131,8 @@ export interface FleetMarker {
   readonly armed?: boolean;
   readonly failsafe?: boolean;
   readonly gpsFixType?: number;
+  /** docs/DRONE-INFRA-PLAN.md I-e Stage 1 — see this interface's own doc comment above. */
+  readonly firmware?: string;
   /**
    * docs/FC-INTEGRATIONS-PLAN.md F-e — the same raw `TelemetrySample.extra` map `flightMode`/etc.
    * above are decoded from, passed through verbatim so `features/command/asset-panel.ts`'s Status
@@ -182,6 +192,7 @@ export function buildMarker(
     armed: latest?.flightState?.armed,
     failsafe: latest?.flightState?.failsafe,
     gpsFixType: latest?.flightState?.gpsFixType,
+    firmware: latest?.flightState?.firmware,
     extra: latest?.extra,
   };
 }

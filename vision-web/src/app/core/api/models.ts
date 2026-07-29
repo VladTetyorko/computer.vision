@@ -794,3 +794,21 @@ export interface UsageRecording {
   readonly start?: string;
   readonly durationSeconds?: number;
 }
+
+// --- Guarded command TX (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) ----------------
+
+/**
+ * Mirrors the `202` body of `POST /api/assets/{assetId}/return-home` (docs/DRONE-INFRA-PLAN.md I-e
+ * Stage 1's frozen contract) — a command was sent either way; this only says whether the vehicle
+ * acknowledged it. `ACCEPTED` = a `COMMAND_ACK` arrived within the timeout; `NO_ACK` = the UDP
+ * packet went out with no acknowledgement heard back in time — honest, not necessarily a failure
+ * (the vehicle may still have executed it). A `404`/`409` never reaches this type at all — those
+ * are `HttpErrorResponse`s (`404` unknown asset, `409 {message}` not commandable), handled by the
+ * caller's own catch, not a third member of this union.
+ */
+export type ReturnHomeResult = 'ACCEPTED' | 'NO_ACK';
+
+/** The response body itself — see {@link ReturnHomeResult}'s own doc comment for what each value means. */
+export interface ReturnHomeResponse {
+  readonly result: ReturnHomeResult;
+}

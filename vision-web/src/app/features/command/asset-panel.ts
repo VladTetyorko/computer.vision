@@ -1,7 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { Player } from '../../shared/player/player';
+import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { attentionAgeLabel, attentionReasons, batteryAttentionSeverity } from './command-logic';
-import { deriveDiagnostics, gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
+import { canCommandReturnHome, deriveDiagnostics, gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import type { AssetAttention, ActiveStream } from '../../core/api/models';
 import type { FleetMarker } from '../../core/map/map-logic';
 
@@ -31,7 +32,7 @@ export type AssetPanelTab = 'status' | 'telemetry' | 'video';
  */
 @Component({
   selector: 'vision-asset-panel',
-  imports: [Player],
+  imports: [Player, ReturnHomeButton],
   templateUrl: './asset-panel.html',
   styleUrl: './asset-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -70,6 +71,16 @@ export class AssetPanel {
    * feeds from `TelemetryStore`; here fed from the marker's own `extra` (see that field's own doc
    * comment on `FleetMarker` for why this panel needs no second telemetry poller). */
   protected readonly diagnostics = computed(() => deriveDiagnostics(this.marker()?.extra));
+
+  /**
+   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates the panel-actions row's `<vision-return-home-button>`
+   * (`asset-panel.html`). Fed from `marker()` alone (`firmware`/`sampleAgeSeconds`), the same
+   * "no second `TelemetryStore` poller" reuse this panel's Mode/Armed/GPS/diagnostics facts already
+   * establish above — `AssetAttention` carries no firmware field at all, only the live marker does.
+   */
+  protected readonly canBringHome = computed(() =>
+    canCommandReturnHome(this.marker()?.firmware, this.marker()?.sampleAgeSeconds),
+  );
 
   protected selectTab(tab: AssetPanelTab): void {
     this.activeTab.set(tab);

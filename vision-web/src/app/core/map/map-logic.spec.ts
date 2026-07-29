@@ -204,6 +204,28 @@ describe('buildMarker', () => {
     });
   });
 
+  describe('firmware (docs/DRONE-INFRA-PLAN.md I-e Stage 1 — feeds asset-panel.ts\'s "Bring home" gate)', () => {
+    it('sources it from the latest sample\'s own flightState, same place as flightMode/armed/etc.', () => {
+      const telemetry: AssetTelemetrySnapshot = {
+        latest: sample({ latitude: 5, longitude: 6, flightState: { firmware: 'ardupilot' } }),
+        trail: [],
+      };
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+      expect(marker?.firmware).toBe('ardupilot');
+    });
+
+    it('is undefined when the latest sample carries no flightState at all', () => {
+      const telemetry: AssetTelemetrySnapshot = { latest: sample({ batteryPercent: 40 }), trail: [] };
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+      expect(marker?.firmware).toBeUndefined();
+    });
+
+    it('is absent entirely for the offline bucket (no live telemetry poller)', () => {
+      const marker = buildMarker(asset({ status: 'OFFLINE', lastKnownPosition: POSITION }), undefined, 0);
+      expect(marker).not.toHaveProperty('firmware');
+    });
+  });
+
   describe('extra (docs/FC-INTEGRATIONS-PLAN.md F-e — feeds asset-panel.ts\'s Status-tab diagnostics)', () => {
     it('passes the latest sample\'s extra map through verbatim', () => {
       const telemetry: AssetTelemetrySnapshot = { latest: sample({ extra: { windSpeedMps: 4.2 } }), trail: [] };

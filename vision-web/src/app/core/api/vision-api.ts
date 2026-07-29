@@ -19,6 +19,7 @@ import type {
   ProbeDeviceRequest,
   ProbeDeviceResult,
   RegisterDeviceRequest,
+  ReturnHomeResponse,
   ScanRequest,
   ScanResult,
   SettableLifecycleState,
@@ -392,6 +393,25 @@ export class VisionApi {
   usageRecording(usageId: string): Promise<UsageRecording> {
     return firstValueFrom(
       this.http.get<UsageRecording>(`/api/usages/${encodeURIComponent(usageId)}/recording`),
+    );
+  }
+
+  // --- Guarded command TX (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
+  // The RX-only doctrine's one deliberate exception, staged and guarded: a single command, sent
+  // only after the caller's own mandatory confirm dialog (`shared/ui/return-home-button.ts`).
+
+  /**
+   * Commands the asset's active mavlink device to RTL (`202 {result}` either way it was sent — see
+   * `ReturnHomeResponse`'s own doc comment). `404` (unknown asset) and `409 {message}` (not
+   * commandable: no active mavlink device, a firmware without RTL capability, or a vehicle never
+   * heard on the socket) both reject the returned promise as an `HttpErrorResponse` — `409`'s
+   * `message` is surfaced verbatim by `describeHttpError` (`core/api-error.ts`'s own switch already
+   * handles it), not decoded here. No client-side dry-run/precondition check before sending — the
+   * caller's own confirm dialog is what makes this safe to call directly.
+   */
+  returnHome(assetId: string): Promise<ReturnHomeResponse> {
+    return firstValueFrom(
+      this.http.post<ReturnHomeResponse>(`/api/assets/${encodeURIComponent(assetId)}/return-home`, {}),
     );
   }
 }

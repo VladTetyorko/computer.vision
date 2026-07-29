@@ -2447,3 +2447,129 @@ New: `core/geofence/geofence-logic.ts`/`.spec.ts`, `core/geofence/geofence-store
 `features/fly/fly-osd.ts`/`fly.ts`/`.html`, `shared/map/fleet-map/fleet-map.ts`/`.css`,
 `shared/map/live-map/live-map.ts`/`.css`, `shared/ui/notification-bell.ts`, `features/wall/wall.ts`,
 `core/events/events-logic.ts`(+`.spec.ts`), `features/replay/replay-logic.ts`(+`.spec.ts`)/`replay.ts`/`.html`/`.css`/`replay.routes.ts`.
+
+## I-e Stage 1, wave 3 — "Bring home" UI (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract)
+
+The RX-only doctrine's one deliberate, guarded exception, staged: a single command,
+`MAV_CMD_DO_SET_MODE → RTL`, reachable from exactly two places (Fly's cockpit HUD, Command's
+`AssetPanel`), always behind a mandatory confirm dialog, never optimistic. Wave 1
+(`FlightCommandPort`/`MavlinkFlightCommander`, `vision-domain`/`adapter-mavlink`) and wave 2
+(`POST /api/assets/{assetId}/return-home`, `FlightCommandController`/`FlightCommandService`,
+`vision-api`/`vision-application`) landed in parallel, outside this module's own scope — this wave
+was coded against the plan's own frozen wire contract (`202 {result: "ACCEPTED"|"NO_ACK"}` / `404`
+/ `409 {message}`) and only cross-checked against the landed backend DTO/controller afterward,
+read-only, to confirm the assumption (`ReturnHomeResponse(String result)`,
+`POST /api/assets/{id}/return-home`, `@ResponseStatus(HttpStatus.ACCEPTED)`) — an exact match, no
+rework needed.
+
+**New**: `shared/ui/confirm-dialog.ts`/`.html`/`.css`, `shared/ui/return-home-button.ts`/`.html`/`.css`,
+`shared/ui/return-home-button-logic.ts`(+`.spec.ts`). **Reshaped**: `core/api/models.ts`
+(`ReturnHomeResult`/`ReturnHomeResponse`), `core/api/vision-api.ts`(+`.spec.ts` — `returnHome(assetId)`),
+`core/telemetry/flight-state-logic.ts`(+`.spec.ts` — `canCommandReturnHome`), `core/map/map-logic.ts`
+(+`.spec.ts` — `FleetMarker.firmware`), `core/toast.service.ts`(+`.spec.ts` — the new `warning` kind
++ `warn()`), `shared/ui/toast-host.ts` (`.toast.warning` CSS), `features/fly/fly.ts`/`.html`,
+`features/command/asset-panel.ts`/`.html`.
+
+- **`core/telemetry/flight-state-logic.ts#canCommandReturnHome(firmware, ageSeconds)`** — the one
+  gate, per the plan: `firmware === 'ardupilot'` (INAV masquerades as ArduPilot on the wire — this
+  one check is deliberately the *complete* gate, Betaflight/unknown firmware never reports that
+  string) **and** telemetry is fresh, reusing `isStale`/`STALE_AFTER_SECONDS` (`core/telemetry/telemetry-logic.ts`)
+  directly rather than a second "fresh enough to command" constant. Takes plain `firmware`/`ageSeconds`
+  values, not a whole `TelemetrySample` — mirrors `deriveDiagnostics`'s own reasoning: this gate's
+  two call sites already have the answer in different shapes (Fly's `TelemetryStore.latest()` sample
+  + a `nowMs` read; Command's `FleetMarker`, whose `sampleAgeSeconds` is already precomputed and
+  carries no nested `flightState` at all). **Note**: `ageSeconds !== undefined` is checked explicitly
+  ahead of `isStale` — `isStale(undefined)` itself returns `false` (its own "unknown, don't assume
+  bad" contract), but "no telemetry sample at all" must never read as "fresh enough to command"; the
+  two absent-data rules diverge on purpose here (caught by a spec case, not just reasoned about).
+- **`core/map/map-logic.ts#FleetMarker` gained `firmware?: string`**, sourced in `buildMarker` from
+  the same place `flightMode`/`armed`/`failsafe`/`gpsFixType` already are (the streaming asset's
+  latest sample's own `flightState`) — the identical F-d/F-e reuse rationale, needed here because
+  `AssetAttention` (the fleet-summary DTO `AssetPanel`'s other inputs come from) carries no firmware
+  field at all; this marker-level field is Command's only source.
+- **`shared/ui/confirm-dialog.ts`** (`<vision-confirm-dialog>`, new) — the first reusable modal
+  confirm in `shared/ui/`: a true `position: fixed` backdrop (`z-index: 150`, mirrors
+  `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`'s/`features/command/geofence-zone-dialog.ts`'s
+  own convention), not Fly's page-local `.hud-confirm`/`.inline-confirm-card` scrim — needed because
+  this dialog has to render correctly from two different host layouts (Fly's full-bleed cockpit,
+  Command's docked side panel), neither of which it can lean on. `message`/`confirmLabel`/
+  `cancelLabel`/`busy` inputs, `confirmed`/`cancelled` outputs. Deliberately no backdrop-click or
+  `Escape` dismissal — every close is an explicit button click, per the plan's own poka-yoke wording
+  ("never skippable").
+- **`shared/ui/return-home-button.ts`** (`<vision-return-home-button>`, new) — the shared "one
+  component, two call sites" button (the same precedent `shared/ui/weather-chip.ts`/
+  `shared/player/detections-strip.ts` established), reused verbatim by `FlyPage`/`AssetPanel`.
+  Unlike `weather-chip.ts` (host-provided store, no HTTP of its own), this component owns its HTTP
+  call and toast directly — `VisionApi`/`ToastService` are both `providedIn: 'root'`, so no
+  page-scoped `providers` entry is needed, and there's no shared store a one-shot command like this
+  could sensibly live behind. Inputs: `assetId`/`assetDisplayName` (the confirm text —
+  `"Command <name> to return home?"`), `canCommand` (the host's own `canCommandReturnHome` verdict —
+  gating is the host's job, this component only renders it, hidden entirely when `false`), `compact`
+  (mirrors `<vision-player [compact]>`'s naming — both call sites pass `true`, a small `.btn.danger.small`).
+  `:host { display: contents }` (mirrors the dialog components' own convention) so the button lands
+  as a plain sibling in whatever flex row the host places it in (`fly.html`'s `.hud-header`,
+  `asset-panel.html`'s `.panel-actions`), inheriting each row's own button sizing for free. Click →
+  `confirmOpen` → `<vision-confirm-dialog>` → on confirm, `busy=true` (disables both dialog buttons
+  and the trigger button itself — no double-fire, a plain signal, not a state machine; this is a
+  single one-shot request, not a saga with retries the way `player-recovery.ts`'s reconnect logic
+  is) → `VisionApi.returnHome(assetId)` → `returnHomeToastFor(result)`'s pure verdict (`shared/ui/return-home-button-logic.ts`,
+  new, unit-tested — `ACCEPTED` → `ToastService.ok('Return home commanded')`, `NO_ACK` →
+  `ToastService.warn('Command sent — no acknowledgement from aircraft')`) or, on a rejected promise,
+  `ToastService.error(describeHttpError(error))` (`core/api-error.ts`'s existing switch already
+  surfaces a `409`'s `message` verbatim and a network failure's status-0 case generically — no new
+  error decoding needed here). **No optimistic UI, ever** (the plan's own wording): the button's job
+  ends the moment the request settles; the aircraft's actual mode change arrives later over ordinary
+  telemetry (`flightState.mode` → an RTL-family value), which `flightBanner`/`<vision-failsafe-banner>`
+  already turns into "Return to home active" on its own, no wiring needed from this button.
+- **`core/toast.service.ts` gained a `warning` kind + `warn(text)`** (no `action`, unlike `ok`/`notify` —
+  there's nothing useful to click from a NO_ACK toast) — mirrors E-b's own precedent for adding
+  `notification` (own `DISMISS_AFTER_MS` entry, 7s, between `notification`'s 6s and `error`'s 9s;
+  own `.toast.warning` CSS in `shared/ui/toast-host.ts`, the app's existing `--warn` amber, distinct
+  from `.error`'s red — a NO_ACK command genuinely went out, it isn't a failure).
+- **Fly cockpit (`fly.ts`/`.html`)**: `canBringHome` computed (mirrors `preflightItems`'s own
+  "re-derives whenever the tracked sample changes, not a continuously-ticking clock" convention) →
+  `<vision-return-home-button>` placed in `.hud-header`, right after the drone switcher and before
+  the `?` shortcuts button — literally adjacent to (directly below, when it's showing) the failsafe
+  banner at the very top edge, and outside `.hud-controls`' Start/Stop/Replay row (a deliberate
+  command, not a stream control). No new absolutely-positioned HUD island/offset math needed (the
+  header row's own flex layout already has room), unlike `.hud-preflight`/`.hud-diagnostics`'s own
+  "approximate, not computed" bottom-row offsets.
+- **Command (`asset-panel.ts`/`.html`)**: `canBringHome` computed, fed from `marker()`'s own
+  `firmware`/`sampleAgeSeconds` (no second `TelemetryStore` poller — the same reuse this panel's
+  Mode/Armed/GPS/diagnostics facts already established) → `<vision-return-home-button>` appended to
+  the existing `.row.panel-actions` (Watch live / Details / **Bring home**); `.panel-actions .btn { flex:1 }`
+  applies to it for free through the `display: contents` host.
+- **Deliberately not extracted as its own reducer**: the button's `busy` guard against
+  double-fire/re-entrant clicks is a plain `signal(false)`/try-finally, not a pure state-machine
+  file — a single one-shot request has nothing for a reducer to model beyond "in flight or not",
+  unlike `player-recovery.ts`'s genuinely multi-transition reconnect saga.
+
+### Tests
+
+**994/994 → 1009/1009** (+15, all pure-logic; no new component-level specs for `ConfirmDialog`/
+`ReturnHomeButton` — matches this codebase's own standing precedent for dumb HUD/panel pieces,
+`FailsafeBanner`/`PreflightChecklist`/`DiagnosticsCard`/`AssetPanel` all have none either):
+`core/telemetry/flight-state-logic.spec.ts` (+7 — `canCommandReturnHome`: ardupilot+fresh true,
+wrong firmware false, no firmware false, stale false, no-sample false — the `isStale(undefined)`
+divergence case specifically, both-absent false, case-sensitivity), `core/api/vision-api.spec.ts`
+(+2 — `returnHome`'s empty-body POST + id-escaping), `core/map/map-logic.spec.ts` (+3 —
+`FleetMarker.firmware` sourced/absent/offline-bucket-omitted, mirroring the existing
+`flightMode`/`extra` describe blocks), `core/toast.service.spec.ts` (+2 — `warn()`'s kind/text,
+the five-kind dismiss-ordering case extended to include `warning`), `shared/ui/return-home-button-logic.spec.ts`
+(+2, new file — `returnHomeToastFor`'s two outcomes). `npm run test:ci` green; `npx tsc --noEmit`
+clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production`: **340.00 kB raw / 96.01 kB transfer initial** — up only
++0.24 kB raw / +0.07 kB transfer from the prior recorded 339.76/95.94 (§G/§W's own baseline), the
+same small, unavoidable tax every past cycle's new eager `VisionApi` method has paid (`returnHome`
++ `ToastService.warn`/the widened `ToastKind` + `.toast.warning`'s few CSS bytes in the
+always-mounted `ToastHost` — all `providedIn: 'root'`/app-root-mounted, hence eager by construction).
+**`ConfirmDialog`/`ReturnHomeButton`/`return-home-button-logic.ts` all stay lazy** — grep-verified:
+`"no acknowledgement from aircraft"` appears in exactly one dist chunk, an unnamed shared chunk
+reachable only from the `fly`/`command` lazy route chunks, absent from every initial chunk; `"Bring
+home"` and `"return-home"` (the URL path fragment, from `VisionApi.returnHome`'s own eager method
+body) are the only two strings from this wave found in an initial chunk, confirming the API-client
+surface is the *only* eager addition, same as every past cycle's own verification method. Still
+comfortably inside the 360 kB error budget.

@@ -61,31 +61,42 @@ describe('ToastService', () => {
     expect(service.toasts()[1].action?.label).toBe('Watch live');
   });
 
-  it('info()/error() take no action — only ok()/notify() do', () => {
+  it('info()/error()/warn() take no action — only ok()/notify() do', () => {
     const service = create();
     service.info('fyi');
     service.error('boom');
+    service.warn('careful');
     expect(service.toasts().every((t) => t.action === undefined)).toBe(true);
   });
 
-  it('auto-dismisses each kind after its own duration, ok/info/notification/error shortest to longest', () => {
+  it('warn() pushes a warning-kind toast (docs/DRONE-INFRA-PLAN.md I-e Stage 1\'s NO_ACK outcome)', () => {
+    const service = create();
+    service.warn('no acknowledgement');
+    expect(service.toasts()).toEqual([{ id: expect.any(Number), kind: 'warning', text: 'no acknowledgement', action: undefined }]);
+  });
+
+  it('auto-dismisses each kind after its own duration, ok/info/notification/warning/error shortest to longest', () => {
     const service = create();
     service.ok('a');
     service.info('b');
     service.notify('c');
+    service.warn('e');
     service.error('d');
-    expect(service.toasts()).toHaveLength(4);
+    expect(service.toasts()).toHaveLength(5);
 
     vi.advanceTimersByTime(4_000);
-    expect(service.toasts().map((t) => t.kind)).toEqual(['info', 'notification', 'error']);
+    expect(service.toasts().map((t) => t.kind)).toEqual(['info', 'notification', 'warning', 'error']);
 
     vi.advanceTimersByTime(1_000); // 5s total
-    expect(service.toasts().map((t) => t.kind)).toEqual(['notification', 'error']);
+    expect(service.toasts().map((t) => t.kind)).toEqual(['notification', 'warning', 'error']);
 
     vi.advanceTimersByTime(1_000); // 6s total
+    expect(service.toasts().map((t) => t.kind)).toEqual(['warning', 'error']);
+
+    vi.advanceTimersByTime(1_000); // 7s total
     expect(service.toasts().map((t) => t.kind)).toEqual(['error']);
 
-    vi.advanceTimersByTime(3_000); // 9s total
+    vi.advanceTimersByTime(2_000); // 9s total
     expect(service.toasts()).toEqual([]);
   });
 });

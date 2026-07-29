@@ -1,0 +1,33 @@
+:host {
+  display: contents;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150; /* above the app header (20) and the toast host (100) is fine to overlap briefly */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgb(4 6 10 / 72%);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  width: min(24rem, 100%);
+  margin-bottom: 0;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.dialog p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+}

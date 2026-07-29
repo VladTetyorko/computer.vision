@@ -109,6 +109,38 @@ export function flightBanner(sample: TelemetrySample | undefined): FlightBanner 
   return null;
 }
 
+// --- "Bring home" gate (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -----------------
+
+/**
+ * Whether the "Bring home" button (`shared/ui/return-home-button.ts`, Fly's cockpit HUD + Command's
+ * `AssetPanel`) may be shown for the currently-flown/selected asset: `firmware === 'ardupilot'`
+ * **and** telemetry is fresh — nothing else. INAV masquerades as ArduPilot on the wire
+ * (`FlightState.firmware`'s own doc comment in `core/api/models.ts`), so this one check is
+ * deliberately the *complete* gate per the plan, not a partial one a Betaflight/unknown firmware
+ * could slip through; Betaflight reports its own name, never `'ardupilot'`, so it's excluded by the
+ * same single check with no second branch needed.
+ *
+ * Freshness reuses `isStale`/`STALE_AFTER_SECONDS` directly (`core/telemetry/telemetry-logic.ts`) —
+ * the exact bar the OSD's own age chip and `derivePreflight`'s Telemetry-link row already use, not
+ * a second, redundant "fresh enough to command" constant. **Note the `ageSeconds !== undefined`
+ * check ahead of it**: `isStale(undefined)` itself returns `false` (its own contract is "unknown,
+ * don't assume bad" — see `telemetryLinkItem`'s own separate `sample === undefined` branch above,
+ * which exists for the identical reason), but "no telemetry sample at all" must never read as
+ * "fresh enough to command" — the two absent-data rules diverge on purpose here, so this can't
+ * simply delegate to `isStale` alone.
+ *
+ * Takes `firmware`/`ageSeconds` as plain values, not a whole `TelemetrySample` — mirrors
+ * `deriveDiagnostics`'s own reasoning below (that function's doc comment): this gate's two call
+ * sites already have the answer in a different shape each (Fly's `TelemetryStore.latest()` sample
+ * plus a `nowMs` read via `ageSeconds`; Command's `core/map/map-logic.ts#FleetMarker`, whose own
+ * `sampleAgeSeconds` is already precomputed and carries no nested `flightState` at all) — a
+ * `TelemetrySample`-shaped parameter would force one of the two to fabricate a fake sample just to
+ * satisfy the type.
+ */
+export function canCommandReturnHome(firmware: string | undefined, ageSeconds: number | undefined): boolean {
+  return firmware === 'ardupilot' && ageSeconds !== undefined && !isStale(ageSeconds);
+}
+
 // --- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) ------------------------------------
 
 export type PreflightState = 'ok' | 'fail' | 'unknown';

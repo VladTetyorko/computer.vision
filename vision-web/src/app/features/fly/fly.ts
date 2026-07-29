@@ -21,8 +21,8 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
-import { telemetryDevices } from '../../core/telemetry/telemetry-logic';
-import { deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
+import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-logic';
+import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { WeatherStore } from '../../core/weather/weather-store';
@@ -34,6 +34,7 @@ import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
 import { PreflightChecklist } from './preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
+import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -90,7 +91,17 @@ const LOG_PREFIX = '[fly]';
  */
 @Component({
   selector: 'vision-fly',
-  imports: [RouterLink, Player, LiveMap, DetectionsStrip, FlyOsd, FailsafeBanner, PreflightChecklist, DiagnosticsCard],
+  imports: [
+    RouterLink,
+    Player,
+    LiveMap,
+    DetectionsStrip,
+    FlyOsd,
+    FailsafeBanner,
+    PreflightChecklist,
+    DiagnosticsCard,
+    ReturnHomeButton,
+  ],
   templateUrl: './fly.html',
   styleUrl: './fly.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -216,6 +227,18 @@ export class FlyPage {
   /** docs/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
    * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */
   protected readonly diagnosticsRows = computed(() => deriveDiagnostics(this.telemetry.latest()?.extra));
+
+  /**
+   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates `<vision-return-home-button>` (below,
+   * `fly.html`'s `.hud-header`). Same "re-derive whenever the tracked sample changes, not a
+   * continuously-ticking clock" convention as `preflightItems` above: `telemetry.latest()` itself
+   * already re-emits roughly every poll/live-update tick while the vehicle is transmitting, so this
+   * tracks freshness closely enough without a dedicated 1s timer.
+   */
+  protected readonly canBringHome = computed(() => {
+    const sample = this.telemetry.latest();
+    return canCommandReturnHome(sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
+  });
 
   // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) --------------------------------------
   /** The live telemetry fix when one exists, else the asset's own last-known position — "best position we have right now". */

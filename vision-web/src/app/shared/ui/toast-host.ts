@@ -66,6 +66,15 @@ import { ToastService, type ToastAction } from '../../core/toast.service';
       color: #a9c8ff;
     }
 
+    /* docs/DRONE-INFRA-PLAN.md I-e Stage 1's "Bring home" NO_ACK toast — sent, not acknowledged: a
+       genuine amber (the app's existing --warn hue, same as .chip.warn), never .error's red (the
+       command did go out) and never .ok's green (nothing was actually confirmed). */
+    .toast.warning {
+      background: var(--warn-soft);
+      border-color: #6b4a12;
+      color: #ffd699;
+    }
+
     button {
       background: none;
       border: none;

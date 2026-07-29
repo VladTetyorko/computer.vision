@@ -130,5 +130,16 @@
   <div class="row panel-actions">
     <button type="button" class="btn secondary small" (click)="watchLive.emit()">Watch live</button>
     <button type="button" class="btn secondary small" (click)="openDetails.emit()">Details</button>
+    <!-- "Bring home" (docs/DRONE-INFRA-PLAN.md I-e Stage 1) — same gating/confirm/toast as Fly's
+         cockpit HUD button, `shared/ui/return-home-button.ts`'s other call site. No optimistic UI:
+         a successful send only toasts — the aircraft's actual mode change arrives later over
+         ordinary telemetry, which this panel's own Mode fact (Status tab, above) and the rail's
+         attention rank already reflect on their own, no wiring needed here. -->
+    <vision-return-home-button
+      [assetId]="asset().assetId"
+      [assetDisplayName]="asset().displayName"
+      [canCommand]="canBringHome()"
+      [compact]="true"
+    />
   </div>
 </div>

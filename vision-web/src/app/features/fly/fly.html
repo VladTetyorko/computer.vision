@@ -114,6 +114,22 @@
           <option [value]="ALL_DRONES_OPTION">All drones…</option>
         </select>
       </label>
+
+      <!-- ---- "Bring home" (docs/DRONE-INFRA-PLAN.md I-e Stage 1) ---------------------------
+           Near the failsafe banner (flush above this row when it's showing) rather than folded
+           into `.hud-controls`' Start/Stop/Replay row below — a deliberate command, not a stream
+           control. `<vision-return-home-button>` hides itself entirely unless `canBringHome()`.
+           No optimistic UI here: a successful send only shows a toast — the aircraft's actual mode
+           change arrives later over ordinary telemetry (`flightState.mode` → an RTL-family value),
+           which `flightBanner`/`<vision-failsafe-banner>` above already turns into "Return to home
+           active" on its own, with no wiring needed from this button. -->
+      <vision-return-home-button
+        [assetId]="a.assetId"
+        [assetDisplayName]="a.displayName"
+        [canCommand]="canBringHome()"
+        [compact]="true"
+      />
+
       <button type="button" class="icon-btn shortcuts-btn" (click)="shortcutsOpen.set(true)" title="Keyboard shortcuts (?)">
         ?
       </button>

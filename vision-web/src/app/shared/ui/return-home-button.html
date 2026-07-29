@@ -1,0 +1,23 @@
+@if (canCommand()) {
+  <button
+    type="button"
+    class="btn danger return-home-btn"
+    [class.small]="compact()"
+    (click)="requestReturnHome()"
+    [disabled]="busy()"
+    title="Command this aircraft to return home (RTL)"
+  >
+    Bring home
+  </button>
+
+  @if (confirmOpen()) {
+    <vision-confirm-dialog
+      [message]="confirmMessage()"
+      confirmLabel="Confirm"
+      cancelLabel="Cancel"
+      [busy]="busy()"
+      (confirmed)="confirm()"
+      (cancelled)="cancel()"
+    />
+  }
+}

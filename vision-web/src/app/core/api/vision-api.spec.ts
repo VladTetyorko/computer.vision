@@ -379,4 +379,20 @@ describe('VisionApi', () => {
     http.expectOne({ method: 'GET', url: '/api/usages/u-1/recording' }).flush({ available: false });
     await expect(promise).resolves.toEqual({ available: false });
   });
+
+  // --- Guarded command TX (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
+
+  it('commands an asset to return home with an empty body', async () => {
+    const promise = api.returnHome('a-1');
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a-1/return-home' });
+    expect(request.request.body).toEqual({});
+    request.flush({ result: 'ACCEPTED' });
+    await expect(promise).resolves.toEqual({ result: 'ACCEPTED' });
+  });
+
+  it('escapes the asset id in the return-home path', async () => {
+    const promise = api.returnHome('a/1 x');
+    http.expectOne({ method: 'POST', url: '/api/assets/a%2F1%20x/return-home' }).flush({ result: 'NO_ACK' });
+    await expect(promise).resolves.toEqual({ result: 'NO_ACK' });
+  });
 });

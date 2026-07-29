@@ -1,0 +1,13 @@
+<div class="backdrop">
+  <div class="dialog card" role="alertdialog" aria-modal="true">
+    <p>{{ message() }}</p>
+    <div class="row dialog-actions">
+      <button type="button" class="btn danger" (click)="confirmed.emit()" [disabled]="busy()">
+        {{ busy() ? 'Sending…' : confirmLabel() }}
+      </button>
+      <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">
+        {{ cancelLabel() }}
+      </button>
+    </div>
+  </div>
+</div>

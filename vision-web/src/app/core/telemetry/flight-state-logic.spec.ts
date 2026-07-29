@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlightState, TelemetrySample } from '../api/models';
 import {
+  canCommandReturnHome,
   derivePreflight,
   deriveDiagnostics,
   ekfSeverity,
@@ -120,6 +121,37 @@ describe('flightBanner', () => {
         text: 'Landing',
       });
     }
+  });
+});
+
+describe('canCommandReturnHome (docs/DRONE-INFRA-PLAN.md I-e Stage 1)', () => {
+  it('is true for ardupilot firmware with fresh telemetry', () => {
+    expect(canCommandReturnHome('ardupilot', 0)).toBe(true);
+    expect(canCommandReturnHome('ardupilot', 5)).toBe(true); // exactly STALE_AFTER_SECONDS — not stale yet
+  });
+
+  it('is false for the wrong firmware, even with fresh telemetry', () => {
+    expect(canCommandReturnHome('betaflight', 0)).toBe(false);
+  });
+
+  it('is false with no firmware reported at all', () => {
+    expect(canCommandReturnHome(undefined, 0)).toBe(false);
+  });
+
+  it('is false once telemetry is stale, even for ardupilot', () => {
+    expect(canCommandReturnHome('ardupilot', 5.01)).toBe(false);
+  });
+
+  it('is false with no sample at all — ageSeconds undefined never reads as fresh, unlike isStale(undefined)', () => {
+    expect(canCommandReturnHome('ardupilot', undefined)).toBe(false);
+  });
+
+  it('is false with neither firmware nor a sample', () => {
+    expect(canCommandReturnHome(undefined, undefined)).toBe(false);
+  });
+
+  it('is case-sensitive — only the exact "ardupilot" firmware string qualifies', () => {
+    expect(canCommandReturnHome('ArduPilot', 0)).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-export type ToastKind = 'ok' | 'error' | 'info' | 'notification';
+export type ToastKind = 'ok' | 'error' | 'info' | 'notification' | 'warning';
 
 /** An optional follow-up the user can take straight from the toast (docs/CYCLES-PLAN.md §4's "Watch"). */
 export interface ToastAction {
@@ -19,13 +19,17 @@ export interface Toast {
  * Errors linger long enough to read; confirmations get out of the way. `notification` (docs/UX-REWORK-PLAN.md
  * §U-c: "new events arrive as transient toasts") sits between `ok`/`info` — a background event the
  * operator didn't ask for, worth slightly longer than a confirmation they *did* trigger, but this
- * app has no reason to make it linger as long as an `error`.
+ * app has no reason to make it linger as long as an `error`. `warning` (docs/DRONE-INFRA-PLAN.md I-e
+ * Stage 1, new — the "Bring home" button's own `NO_ACK` outcome: sent, but not acknowledged) sits
+ * just past `notification` — not a failure (the command genuinely went out), but worth noticeably
+ * longer than a plain confirmation to actually read and act on.
  */
 const DISMISS_AFTER_MS: Record<ToastKind, number> = {
   ok: 4_000,
   info: 5_000,
-  error: 9_000,
   notification: 6_000,
+  warning: 7_000,
+  error: 9_000,
 };
 
 @Injectable({ providedIn: 'root' })
@@ -59,6 +63,15 @@ export class ToastService {
    */
   notify(text: string, action?: ToastAction): void {
     this.push('notification', text, action);
+  }
+
+  /**
+   * A command genuinely sent but not confirmed (docs/DRONE-INFRA-PLAN.md I-e Stage 1 — the
+   * "Bring home" button's `NO_ACK` outcome). No `action` — unlike `ok`/`notify`, there is nothing
+   * useful for the operator to click from the toast itself, only the fact worth reading.
+   */
+  warn(text: string): void {
+    this.push('warning', text);
   }
 
   dismiss(id: number): void {
