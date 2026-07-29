@@ -142,7 +142,15 @@ Wave 2 wire contract (frozen — waves build against this):
   never auto-triggered, no keyboard shortcut (poka-yoke: commanding an aircraft is a
   deliberate two-step act).
 
-### I-g — guided drone onboarding (approved 2026-07-29) — add real hardware in minutes
+### I-g — guided drone onboarding — DONE (2026-07-29, both waves green)
+
+Wave A: `GET /api/system/network` + shared `vision.discovery.mavlink-port` (scanner and
+endpoint read one property — can't disagree); vision-api 277/277, vision-app 107/107.
+Wave B: onboarding wizard firmware×link picker + pre-filled copy-paste configs
+(parameterized by the server's real address+port) + listen-and-create; vision-web
+1032 tests, tsc clean, production build green. Original spec below.
+
+### I-g spec — add real hardware in minutes
 
 Goal: an operator with a Betaflight / INAV / ArduPilot aircraft adds it to the app with
 near-zero configuration knowledge. Two halves: the app *guides and pre-fills*, the drone
