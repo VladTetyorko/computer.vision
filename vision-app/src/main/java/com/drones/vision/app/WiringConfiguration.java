@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
+import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
@@ -26,6 +27,7 @@ import com.drones.vision.application.DefaultAssetService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
 import com.drones.vision.application.DefaultFleetSummaryService;
+import com.drones.vision.application.DefaultFlightCommandService;
 import com.drones.vision.application.DefaultGeofenceService;
 import com.drones.vision.application.DefaultProbeService;
 import com.drones.vision.application.DefaultReplayService;
@@ -35,6 +37,7 @@ import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ProbeService;
@@ -54,6 +57,7 @@ import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.domain.port.out.FlightCommandPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
@@ -248,6 +252,24 @@ public class WiringConfiguration {
     @Bean
     public MavlinkTelemetrySource mavlinkTelemetrySource() {
         return new MavlinkTelemetrySource();
+    }
+
+    /**
+     * The one deliberate command-TX path (docs/DRONE-INFRA-PLAN.md I-e, Stage 1 — "bring it
+     * home"): sends {@code MAV_CMD_DO_SET_MODE} return-to-home reusing the exact same shared
+     * socket {@link #mavlinkTelemetrySource} already has open for RX, rather than opening a second
+     * one of its own — the same instance-borrowing pattern {@code
+     * DiscoveryWiringConfiguration#mavlinkHeartbeatScanner} already uses. {@link
+     * #mavlinkTelemetrySource} is wired unconditionally (see its own javadoc), so this bean is too
+     * — there is no {@code vision.mavlink.*}-shaped property to key a conditional off of. Declared
+     * as the concrete adapter type, like {@link #mavlinkFeedTransmitter}, not the {@link
+     * FlightCommandPort} interface — {@link #flightCommandService} below resolves it by that
+     * interface type regardless, the same "concrete bean, matched by interface where needed" idiom
+     * this class already uses throughout.
+     */
+    @Bean
+    public MavlinkFlightCommander mavlinkFlightCommander(MavlinkTelemetrySource mavlinkTelemetrySource) {
+        return new MavlinkFlightCommander(mavlinkTelemetrySource);
     }
 
     /**
@@ -481,6 +503,20 @@ public class WiringConfiguration {
     @Bean
     public CategoryService categoryService(CategoryRepositoryPort categoryRepositoryPort) {
         return new DefaultCategoryService(categoryRepositoryPort);
+    }
+
+    /**
+     * Guarded flight command TX (docs/DRONE-INFRA-PLAN.md I-e, Stage 1 — "bring it home"): the
+     * service behind {@code FlightCommandController} (vision-api, component-scanned). {@link
+     * #mavlinkFlightCommander} is the one {@link FlightCommandPort} bean in this context today,
+     * resolved here by its interface type — a one-line assembly over already-wired collaborators,
+     * mirroring {@link #categoryService}'s shape.
+     */
+    @Bean
+    public FlightCommandService flightCommandService(AssetService assetService,
+                                                       FlightCommandPort flightCommandPort,
+                                                       AuditTrailPort auditTrailPort) {
+        return new DefaultFlightCommandService(assetService, flightCommandPort, auditTrailPort);
     }
 
     /**

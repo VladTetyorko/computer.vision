@@ -1,6 +1,7 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
+import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
@@ -8,6 +9,7 @@ import com.drones.vision.api.AssetImageController;
 import com.drones.vision.api.DeviceProbeController;
 import com.drones.vision.api.EventController;
 import com.drones.vision.api.FleetController;
+import com.drones.vision.api.FlightCommandController;
 import com.drones.vision.api.GeofenceController;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
@@ -15,6 +17,7 @@ import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ProbeService;
@@ -29,6 +32,7 @@ import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.domain.port.out.FlightCommandPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
@@ -43,6 +47,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -204,6 +209,22 @@ class AssetWiringTest {
     @Autowired
     private GeofenceController geofenceController;
 
+    /** docs/DRONE-INFRA-PLAN.md I-e Stage 1: the guarded return-to-home command service. */
+    @Autowired
+    private FlightCommandService flightCommandService;
+
+    /** docs/DRONE-INFRA-PLAN.md I-e Stage 1: the one {@link FlightCommandPort} bean in this context. */
+    @Autowired
+    private FlightCommandPort flightCommandPort;
+
+    /** docs/DRONE-INFRA-PLAN.md I-e Stage 1: the concrete adapter {@link #flightCommandPort} resolves to. */
+    @Autowired
+    private MavlinkFlightCommander mavlinkFlightCommander;
+
+    /** docs/DRONE-INFRA-PLAN.md I-e Stage 1: {@code POST /api/assets/{id}/return-home}. */
+    @Autowired
+    private FlightCommandController flightCommandController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -231,6 +252,20 @@ class AssetWiringTest {
         assertNotNull(geofenceMonitor, "GeofenceMonitor bean must be registered (docs/OPS-CORE-PLAN.md §G)");
         assertNotNull(geofenceService, "GeofenceService bean must be registered (docs/OPS-CORE-PLAN.md §G)");
         assertNotNull(geofenceController, "GeofenceController must resolve its constructor dependency (docs/OPS-CORE-PLAN.md §G)");
+        assertNotNull(flightCommandService, "FlightCommandService bean must be registered (docs/DRONE-INFRA-PLAN.md I-e Stage 1)");
+        assertNotNull(flightCommandController, "FlightCommandController must resolve its constructor dependency (docs/DRONE-INFRA-PLAN.md I-e Stage 1)");
+    }
+
+    /**
+     * docs/DRONE-INFRA-PLAN.md I-e Stage 1: {@link #flightCommandService} is constructed against
+     * the same {@link FlightCommandPort} bean the context resolves elsewhere — there is only one,
+     * {@link #mavlinkFlightCommander}, so the two autowired references above must be the exact same
+     * instance.
+     */
+    @Test
+    void flightCommandServiceIsWiredAgainstTheMavlinkCommander() {
+        assertSame(mavlinkFlightCommander, flightCommandPort,
+                "the FlightCommandPort bean FlightCommandService is constructed with must be the MavlinkFlightCommander bean");
     }
 
     @Test

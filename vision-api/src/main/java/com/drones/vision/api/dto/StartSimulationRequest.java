@@ -4,6 +4,7 @@ import com.drones.vision.application.RouteMode;
 import com.drones.vision.application.SimulationSpec;
 import com.drones.vision.application.SimulationTransport;
 import com.drones.vision.application.TelemetryPlan;
+import com.drones.vision.application.TelemetryTransport;
 import com.drones.vision.application.Waypoint;
 
 import java.util.Arrays;
@@ -40,9 +41,27 @@ import java.util.stream.Collectors;
  * @param telemetry   an optional configurable flight plan (docs/CYCLES-PLAN.md §7, CT-a) replacing
  *                     the bare circular home-point track with a piecewise-linear route; {@code
  *                     null}/absent keeps today's behavior
+ * @param telemetryTransport how the telemetry device reaches its {@code TelemetrySourcePort} —
+ *                     {@code "SIM"} (in-process, the default) or {@code "MAVLINK"} (pushed over
+ *                     real UDP and ingested back through the platform's own MAVLink RX path,
+ *                     adapter-mavlink's own natural follow-up — see {@link SimulationSpec}'s own
+ *                     {@code telemetryTransport} javadoc), matched case-insensitively; {@code
+ *                     null}/absent defaults to {@code "SIM"}. Orthogonal to {@link #transport()}
+ *                     (video) — every combination of the two is valid
  */
 public record StartSimulationRequest(String displayName, String videoPath, Double latitude, Double longitude,
-                                      Boolean autoStart, String transport, TelemetryRequest telemetry) {
+                                      Boolean autoStart, String transport, TelemetryRequest telemetry,
+                                      String telemetryTransport) {
+
+    /**
+     * Convenience constructor defaulting {@link #telemetryTransport()} to {@code null} (resolved to
+     * {@link TelemetryTransport#SIM} by {@link #toSpec()}). Keeps every pre-existing 7-arg call
+     * site source-compatible.
+     */
+    public StartSimulationRequest(String displayName, String videoPath, Double latitude, Double longitude,
+                                   Boolean autoStart, String transport, TelemetryRequest telemetry) {
+        this(displayName, videoPath, latitude, longitude, autoStart, transport, telemetry, null);
+    }
 
     /**
      * Converts this request into a {@link SimulationSpec}, defaulting {@link #autoStart()} to
@@ -51,17 +70,18 @@ public record StartSimulationRequest(String displayName, String videoPath, Doubl
      * simulation).
      *
      * @return the input for {@code SimulationService#simulate}
-     * @throws IllegalArgumentException if {@link #transport()} doesn't match a known {@link
-     *                                   SimulationTransport} name, a {@code null}/blank {@link
-     *                                   #videoPath()} is combined with a non-{@code "direct"} {@link
-     *                                   #transport()} (docs/CYCLES-PLAN.md §9), or {@link
-     *                                   #telemetry()} is present but invalid (see {@link
+     * @throws IllegalArgumentException if {@link #transport()} or {@link #telemetryTransport()}
+     *                                   doesn't match a known enum name, a {@code null}/blank
+     *                                   {@link #videoPath()} is combined with a non-{@code
+     *                                   "direct"} {@link #transport()} (docs/CYCLES-PLAN.md §9), or
+     *                                   {@link #telemetry()} is present but invalid (see {@link
      *                                   TelemetryRequest#toPlan()})
      */
     public SimulationSpec toSpec() {
         return new SimulationSpec(displayName, videoPath == null || videoPath.isBlank() ? null : videoPath,
                 latitude, longitude, autoStart == null || autoStart,
-                parseTransport(transport), telemetry == null ? null : telemetry.toPlan());
+                parseTransport(transport), telemetry == null ? null : telemetry.toPlan(),
+                parseTelemetryTransport(telemetryTransport));
     }
 
     /**
@@ -80,6 +100,24 @@ public record StartSimulationRequest(String displayName, String videoPath, Doubl
         }
         throw new IllegalArgumentException("Unknown transport: " + raw + " (valid values: "
                 + Arrays.stream(SimulationTransport.values()).map(Enum::name).collect(Collectors.joining(", "))
+                + ")");
+    }
+
+    /**
+     * Case-insensitive lookup against {@link TelemetryTransport} names, {@code null}/blank
+     * defaulting to {@link TelemetryTransport#SIM} — mirrors {@link #parseTransport(String)}.
+     */
+    private static TelemetryTransport parseTelemetryTransport(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return TelemetryTransport.SIM;
+        }
+        for (TelemetryTransport candidate : TelemetryTransport.values()) {
+            if (candidate.name().equalsIgnoreCase(raw)) {
+                return candidate;
+            }
+        }
+        throw new IllegalArgumentException("Unknown telemetryTransport: " + raw + " (valid values: "
+                + Arrays.stream(TelemetryTransport.values()).map(Enum::name).collect(Collectors.joining(", "))
                 + ")");
     }
 

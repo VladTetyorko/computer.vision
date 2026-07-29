@@ -6,6 +6,7 @@ import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.SimulationSpec;
 import com.drones.vision.application.SimulationTransport;
 import com.drones.vision.application.TelemetryPlan;
+import com.drones.vision.application.TelemetryTransport;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
@@ -395,6 +396,54 @@ class SimulationControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
                 .andExpect(jsonPath("$.message").value(allOf(containsString("udp"), containsString("DIRECT"),
                         containsString("RTSP"), containsString("MJPEG"))));
+
+        verifyNoInteractions(simulationService);
+    }
+
+    // ---- telemetryTransport (docs/DRONE-INFRA-PLAN.md's own natural follow-up) ----
+
+    @Test
+    void simulateDefaultsTelemetryTransportToSimWhenFieldIsAbsent() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"videoPath\":\"/data/clips/drone.mp4\"}"))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertEquals(TelemetryTransport.SIM, captor.getValue().telemetryTransport());
+    }
+
+    @Test
+    void simulateParsesMavlinkTelemetryTransportCaseInsensitively() throws Exception {
+        when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
+                .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
+
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetryTransport":"MavLink"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<SimulationSpec> captor = ArgumentCaptor.forClass(SimulationSpec.class);
+        verify(simulationService).simulate(captor.capture(), any(), any());
+        assertEquals(TelemetryTransport.MAVLINK, captor.getValue().telemetryTransport());
+    }
+
+    @Test
+    void simulateReturns400ForAnUnknownTelemetryTransportAndNeverTouchesTheService() throws Exception {
+        String body = """
+                {"videoPath":"/data/clips/drone.mp4","telemetryTransport":"lora"}
+                """;
+
+        mockMvc.perform(post("/api/simulations").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"))
+                .andExpect(jsonPath("$.message")
+                        .value(allOf(containsString("lora"), containsString("SIM"), containsString("MAVLINK"))));
 
         verifyNoInteractions(simulationService);
     }
