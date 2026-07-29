@@ -142,6 +142,47 @@ Wave 2 wire contract (frozen — waves build against this):
   never auto-triggered, no keyboard shortcut (poka-yoke: commanding an aircraft is a
   deliberate two-step act).
 
+### I-g — guided drone onboarding (approved 2026-07-29) — add real hardware in minutes
+
+Goal: an operator with a Betaflight / INAV / ArduPilot aircraft adds it to the app with
+near-zero configuration knowledge. Two halves: the app *guides and pre-fills*, the drone
+side becomes *copy-paste* because every generated snippet already carries this app's own
+reachable IP and MAVLink port — the single biggest source of setup failure (typed-wrong
+addresses) is designed out.
+
+**Flow (extends the existing U-d wizard — no new UX concepts):** the Connect step gains a
+`drone` entry point beside the existing methods:
+1. **Firmware & link picker**: firmware (ArduPilot | INAV | Betaflight) × link (ELRS
+   backpack | ESP32/WiFi bridge | Companion computer). Each combination maps to one
+   recipe; impossible/degraded combos are labeled honestly (e.g. INAV = monitor-only,
+   Betaflight below 2025.12 = hard no-go — wording from `infra/edge/`).
+2. **Configure-your-drone step**: the tailored recipe rendered in-wizard with
+   copy-paste blocks parameterized by the server's real LAN address + MAVLink port
+   (from the new network endpoint below): FC serial/protocol settings, backpack/bridge
+   target fields, and for the companion path a **downloadable, pre-filled
+   `mavlink-router main.conf`** (client-side blob). Content adapted from
+   `infra/edge/*.md` — the wizard embeds, never contradicts, those docs.
+   Multi-NIC hosts: all site-local addresses listed, first one pre-selected, operator
+   can switch (poka-yoke: never silently guess the wrong network).
+3. **Listen step**: the existing mavlink heartbeat discovery scan, auto-repeating,
+   rendering found vehicles live (name "ArduPilot quadcopter (sysid 7)", firmware badge,
+   mode, armed, claimed-elsewhere label). Pick → existing probe (test-before-save) →
+   create-step prefills (name, category `drone`, mavlink device
+   `udp://0.0.0.0:<port>` + `sysid` option pinned to the heard vehicle).
+4. Create → done, deep-link to Fly. Companion-path users may add the paired RTSP video
+   device in the same asset (existing multi-device create).
+
+**Frozen wire contract (wave B builds against this):**
+- `GET /api/system/network` → `200 {"addresses": [{"address": "192.168.0.104",
+  "interfaceName": "wlp2s0"}], "mavlinkPort": 14550}` — site-local IPv4 of up,
+  non-loopback interfaces, sorted by interface name; `mavlinkPort` = the same port the
+  heartbeat scanner listens on. Never errors for "no addresses" — empty list, UI copes
+  (shows a "couldn't detect my address" manual field).
+
+**Waves:** A (backend: endpoint + a shared `vision.discovery.mavlink-port` property so
+scanner wiring and the endpoint can never disagree; vision-api + vision-app) ·
+B (frontend: wizard flow per above; vision-web only) — parallel, disjoint.
+
 ### I-f — fleet ops infra (future, mostly needs TX or U-e)
 Log/blackbox ingest (dataflash via MAVFTP, BF blackbox upload), parameter drift audit
 (PARAM_REQUEST_LIST fleet-wide), firmware version dashboard (AUTOPILOT_VERSION), multi-site
