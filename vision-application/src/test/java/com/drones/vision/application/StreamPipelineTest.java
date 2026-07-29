@@ -16,6 +16,7 @@ import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
@@ -40,6 +41,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Flow;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -141,7 +143,13 @@ class StreamPipelineTest {
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, LongSupplier clock) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
-                detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
+                detectionRepositoryPort, eventPublisher, null, null, null, null, null, clock);
+    }
+
+    private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, OverlayPort overlayPort,
+                                     Supplier<Telemetry> telemetrySupplier) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, overlayPort, null, null, null, telemetrySupplier);
     }
 
     /**
@@ -157,7 +165,7 @@ class StreamPipelineTest {
      */
     private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock) {
         StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
-                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null, clock);
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null, null, null, clock);
         pipeline.onSubscribe(NOOP_SUBSCRIPTION);
         return pipeline;
     }
@@ -684,7 +692,94 @@ class StreamPipelineTest {
         verify(overlayPort).render(captor.capture());
         assertEquals(f1, captor.getValue().frame());
         assertEquals(result.detections(), captor.getValue().detections());
-        assertNull(captor.getValue().telemetry(), "no telemetry input reaches StreamPipeline yet (see class javadoc)");
+        assertNull(captor.getValue().telemetry(), "no telemetrySupplier was configured on this pipeline");
+    }
+
+    // --- Telemetry-OSD input (closes adapter-overlay/MODULE.md's "OSD gate not reachable" gap) ---
+
+    private Telemetry telemetrySample() {
+        return new Telemetry(device.id(), Instant.now(), 50.45, 30.52, 100.0, 90.0, 77.0, Map.of());
+    }
+
+    @Test
+    void overlayReceivesTheSuppliedTelemetrySampleWhenOverlayTelemetryIsEnabledAndASupplierIsConfigured() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99);
+        when(overlayPort.render(any())).thenReturn(rendered);
+        Telemetry sample = telemetrySample();
+        Supplier<Telemetry> telemetrySupplier = () -> sample;
+
+        // config(30, 2) defaults overlayTelemetry=true; no detections have completed, so the
+        // telemetry sample alone is what makes overlayIfNeeded render at all -- proving the "either
+        // detections or telemetry" condition, not just "both present".
+        pipeline(publisher, config(30, 2), overlayPort, telemetrySupplier).start();
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort).render(captor.capture());
+        assertEquals(sample, captor.getValue().telemetry());
+        assertTrue(captor.getValue().detections().isEmpty());
+        verify(streamPublisherPort).publish(streamId, rendered);
+    }
+
+    @Test
+    void overlayTelemetryStaysNullWhenOverlayTelemetryFlagIsDisabledEvenWithASupplierConfigured() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        when(overlayPort.render(any())).thenReturn(frame(99));
+        Supplier<Telemetry> telemetrySupplier = this::telemetrySample;
+
+        // overlayTelemetry=false via the 6-arg PipelineConfig ctor -- detections still drive
+        // rendering (non-empty), but the OSD gate itself must stay shut.
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, false, Set.of());
+        pipeline(publisher, config, overlayPort, telemetrySupplier).start();
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort, atLeastOnce()).render(captor.capture());
+        assertTrue(captor.getAllValues().stream().allMatch(a -> a.telemetry() == null),
+                "overlayTelemetry=false must keep every AnnotatedFrame's telemetry null regardless of the supplier");
+    }
+
+    @Test
+    void telemetrySupplierThrowingIsSwallowedAndOverlayStillRendersWithNullTelemetry() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        when(overlayPort.render(any())).thenReturn(frame(99));
+        Supplier<Telemetry> throwingSupplier = () -> {
+            throw new RuntimeException("telemetry backend unavailable");
+        };
+
+        assertDoesNotThrow(
+                () -> pipeline(publisher, config(30, 2), overlayPort, throwingSupplier).start(),
+                "a throwing telemetrySupplier must never break the frame path");
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort, atLeastOnce()).render(captor.capture());
+        assertTrue(captor.getAllValues().stream().allMatch(a -> a.telemetry() == null),
+                "a throwing supplier must be treated exactly like 'no sample available'");
+        verify(streamPublisherPort, never()).streamEnded(streamId);
+    }
+
+    @Test
+    void overlayNeverInvokedWhenNoDetectionsAndNoTelemetrySampleAreAvailable() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        Supplier<Telemetry> emptySupplier = () -> null;
+
+        pipeline(publisher, config(30, 2), overlayPort, emptySupplier).start();
+
+        verify(streamPublisherPort).publish(streamId, f);
+        verifyNoInteractions(overlayPort);
     }
 
     @Test

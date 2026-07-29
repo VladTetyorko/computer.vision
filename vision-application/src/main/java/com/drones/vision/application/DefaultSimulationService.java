@@ -15,6 +15,8 @@ import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
 
+import java.io.IOException;
+import java.net.DatagramSocket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -37,21 +39,32 @@ import java.util.concurrent.ConcurrentHashMap;
  * SimulationSpec#videoPath()} is {@code null} (docs/CYCLES-PLAN.md §9, CU-a); or — for a wired
  * {@link SimulationTransport} ({@link SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG})
  * — pointing at a feed pushed out by whichever {@link FeedTransmitterPort} {@link #feedTransmitters}
- * selects for that transport) and a {@code "sim"}-protocol telemetry device — and delegates the
- * actual creation/streaming to {@link AssetService}, so every rule {@code AssetService#create}/
- * {@code #startStream} already enforces (category validation, audit, device registration) applies
- * here too instead of being duplicated.
+ * selects for that transport) and a telemetry device — {@code "sim"}-protocol by default, or {@code
+ * "mavlink"}-protocol when {@link SimulationSpec#telemetryTransport()} is {@link
+ * TelemetryTransport#MAVLINK} (a real UDP feed via {@code MavlinkFeedTransmitter}, adapter-mavlink's
+ * own natural follow-up — see {@link #wireMavlinkTelemetryDevice} and adapter-mavlink/MODULE.md's
+ * Gotchas), independently of whichever {@link SimulationTransport} the video device uses — and
+ * delegates the actual creation/streaming to {@link AssetService}, so every rule {@code
+ * AssetService#create}/{@code #startStream} already enforces (category validation, audit, device
+ * registration) applies here too instead of being duplicated.
  *
  * <p>{@link #resumeAll} (the simulated-feed resume-on-boot mechanism) is the read side of the same
  * bookkeeping: given a persisted, {@code ACTIVE}, {@code simulated}-category asset whose {@code
  * rtsp} video device structurally looks like one of this app's own TX-fed feeds, it rebuilds the
  * {@link FeedSpec} that would have produced it and restarts the transmit side — see that method's
- * own javadoc for the full "frozen video after a restart" story this closes.
+ * own javadoc for the full "frozen video after a restart" story this closes. <b>A MAVLink telemetry
+ * feed is never a candidate</b> — {@link #telemetryFeedByAsset} is never consulted by {@link
+ * #resumeAll} at all, and its own device-matching (video-capability, {@code rtsp}-protocol) can
+ * never accidentally match a {@code mavlink}-protocol, telemetry-capability device in the first
+ * place; the TX side is exactly as ephemeral as {@link SimulationTransport#MJPEG}'s own excluded
+ * case (a freshly allocated loopback port every JVM start, so a persisted device's URI is already
+ * stale after any restart regardless of any matching heuristic) — only a fresh {@link #simulate}
+ * call can give one a valid feed again.
  *
  * <h2>Threading</h2>
- * {@link #feedByAsset} is the only mutable state, a {@link ConcurrentHashMap} safe for concurrent
- * {@link #simulate}/{@link #stop}/{@link #resumeAll} calls across different assets; all other
- * shared state is reached through the injected collaborators.
+ * {@link #feedByAsset}/{@link #telemetryFeedByAsset} are the only mutable state, both {@link
+ * ConcurrentHashMap}s safe for concurrent {@link #simulate}/{@link #stop}/{@link #resumeAll} calls
+ * across different assets; all other shared state is reached through the injected collaborators.
  */
 public final class DefaultSimulationService implements SimulationService {
 
@@ -115,13 +128,74 @@ public final class DefaultSimulationService implements SimulationService {
     /** See {@link #awaitFeedEstablished()}. RTSP-specific; MJPEG never pays this delay. */
     static final long RTSP_FEED_ESTABLISH_DELAY_MILLIS = 1000L;
 
+    /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the MAVLink telemetry transport. */
+    private static final String TELEMETRY_PROTOCOL_MAVLINK = "mavlink";
+
+    /** Loopback host every MAVLink-transport simulation's telemetry feed binds/pushes to. */
+    private static final String MAVLINK_LOOPBACK_HOST = "127.0.0.1";
+
+    /**
+     * {@code MavlinkTelemetrySource}/{@code MavlinkFeedTransmitter} (adapter-mavlink) option key
+     * pinning a device/feed to one MAVLink system id. Duplicated here, not imported, since
+     * vision-application may not depend on any adapter module (ArchUnit-enforced) — the same
+     * reasoning as {@link #FEED_PATH_PREFIX}'s own duplication of {@code RtspFeedTransmitter}'s URL
+     * convention.
+     */
+    private static final String MAVLINK_OPTION_SYSID = "sysid";
+
+    /**
+     * Fixed system id every MAVLink-transport simulation's feed/device uses. Sysid uniqueness
+     * exists in the real fleet gateway (adapter-mavlink's {@code MavlinkSocketHub}) purely to
+     * disambiguate several vehicles sharing <em>one</em> real UDP port — here, every simulation
+     * allocates its own fresh loopback port ({@link #allocateLoopbackUdpPort()}), so no two
+     * MAVLink-transport simulations ever share a destination and a fixed sysid can never collide.
+     */
+    static final int MAVLINK_TELEMETRY_SYSID = 1;
+
+    /** {@code MavlinkFeedTransmitter}'s (adapter-mavlink) option key for its required flight route. */
+    private static final String MAVLINK_OPTION_ROUTE = "route";
+
+    /** {@code MavlinkFeedTransmitter}'s option key for cruise speed along the route. */
+    private static final String MAVLINK_OPTION_SPEED_MPS = "speedMps";
+
+    /**
+     * Offset (degrees latitude) of the second point in the minimal two-point route {@link
+     * #mavlinkRoute} synthesizes when {@link SimulationSpec#plan()} carries no {@link
+     * TelemetryPlan#route()}. Unlike {@code SimulatedTelemetrySource} (adapter-simulation), {@code
+     * MavlinkFeedTransmitter} has no home-point-only circular-track fallback of its own — its {@code
+     * route} option is required and throws without one (adapter-mavlink/MODULE.md) — so a bare
+     * lat/lon (or no lat/lon at all) still needs <em>some</em> route. {@code MavlinkRoute}'s
+     * LOOP-only engine turns two distinct points into a there-and-back oscillation rather than a
+     * fixed point, so the synthesized feed still visibly moves.
+     */
+    static final double MAVLINK_FALLBACK_ROUTE_OFFSET_DEGREES = 0.001; // ~110m at the equator
+
+    /**
+     * Mirrors {@code SimulatedTelemetrySource}'s own default circular-track center
+     * (adapter-simulation/MODULE.md) so a MAVLink-transport simulation with no explicit lat/lon/plan
+     * still starts near the same default location a SIM-transport one would. Duplicated, not
+     * shared, for the same cross-module reason as {@link #MAVLINK_OPTION_SYSID}.
+     */
+    static final double MAVLINK_FALLBACK_LATITUDE = 50.45;
+    static final double MAVLINK_FALLBACK_LONGITUDE = 30.52;
+
     private final AssetService assetService;
     private final CategoryRepositoryPort categoryRepository;
     private final FeedTransmitterRegistry feedTransmitters;
     private final URI mediamtxRtspBase;
 
-    /** Tracks which transmitter/{@link FeedId} pair (if any) backs each wired-transport asset's feed. */
+    /** Tracks which transmitter/{@link FeedId} pair (if any) backs each wired-transport asset's video feed. */
     private final Map<AssetId, TrackedFeed> feedByAsset = new ConcurrentHashMap<>();
+
+    /**
+     * Tracks which transmitter/{@link FeedId} pair (if any) backs each MAVLink-transport asset's
+     * telemetry feed — kept separate from {@link #feedByAsset} since video and telemetry transports
+     * are orthogonal (docs/DRONE-INFRA-PLAN.md's natural follow-up): an asset can have a tracked
+     * video feed, a tracked telemetry feed, both, or neither, independently. Never consulted by
+     * {@link #resumeAll} — see the class javadoc's "A MAVLink telemetry feed is never a candidate"
+     * paragraph.
+     */
+    private final Map<AssetId, TrackedFeed> telemetryFeedByAsset = new ConcurrentHashMap<>();
 
     /**
      * @param mediamtxRtspBase this app's own configured mediamtx RTSP push target (the same {@code
@@ -149,34 +223,59 @@ public final class DefaultSimulationService implements SimulationService {
 
         String displayName = resolveDisplayName(spec.displayName(), videoPath);
 
-        boolean wired = spec.transport() != SimulationTransport.DIRECT;
-        FeedId feedId = wired ? FeedId.random() : null;
-        FeedTransmitterPort transmitter = null;
+        boolean wiredVideo = spec.transport() != SimulationTransport.DIRECT;
+        FeedId videoFeedId = wiredVideo ? FeedId.random() : null;
+        FeedTransmitterPort videoTransmitter = null;
         DeviceRegistration videoDevice;
-        if (wired) {
+        if (wiredVideo) {
             // spec's compact ctor guarantees videoPath != null whenever transport != DIRECT.
-            WiredVideoDevice wiredDevice = wireVideoDevice(displayName, videoPath, feedId, spec.transport());
+            WiredVideoDevice wiredDevice = wireVideoDevice(displayName, videoPath, videoFeedId, spec.transport());
             videoDevice = wiredDevice.device();
-            transmitter = wiredDevice.transmitter();
+            videoTransmitter = wiredDevice.transmitter();
         } else if (videoPath == null) {
             videoDevice = syntheticVideoDevice(displayName);
         } else {
             videoDevice = videoDevice(displayName, videoPath);
         }
 
+        boolean mavlinkTelemetry = spec.telemetryTransport() == TelemetryTransport.MAVLINK;
+        FeedId telemetryFeedId = null;
+        FeedTransmitterPort telemetryTransmitter = null;
+        DeviceRegistration telemetryDevice;
+        if (mavlinkTelemetry) {
+            try {
+                WiredTelemetryDevice wiredTelemetryDevice = wireMavlinkTelemetryDevice(displayName, spec);
+                telemetryDevice = wiredTelemetryDevice.device();
+                telemetryTransmitter = wiredTelemetryDevice.transmitter();
+                telemetryFeedId = wiredTelemetryDevice.feedId();
+            } catch (RuntimeException e) {
+                // Video and telemetry transports are independent -- a telemetry-wiring failure must
+                // still unwind an already-started video feed, exactly like assetService.create's own
+                // catch block below unwinds both when it fails.
+                stopFeedQuietly(videoTransmitter, videoFeedId);
+                throw e;
+            }
+        } else {
+            telemetryDevice = telemetryDevice(displayName, spec);
+        }
+
         Map<String, String> attributes = videoPath == null ? Map.of() : Map.of("source", videoPath.toString());
         AssetSpec assetSpec = new AssetSpec(displayName, SIMULATED_CATEGORY, attributes,
-                List.of(videoDevice, telemetryDevice(displayName, spec)));
+                List.of(videoDevice, telemetryDevice));
 
         Asset asset;
         try {
             asset = assetService.create(assetSpec, ownership, actor);
         } catch (RuntimeException e) {
-            stopFeedQuietly(transmitter, feedId);
+            stopFeedQuietly(videoTransmitter, videoFeedId);
+            stopFeedQuietly(telemetryTransmitter, telemetryFeedId);
             throw e;
         }
-        if (feedId != null) {
-            feedByAsset.put(asset.id(), new TrackedFeed(transmitter, feedId));
+        if (videoFeedId != null) {
+            feedByAsset.put(asset.id(), new TrackedFeed(videoTransmitter, videoFeedId));
+        }
+        if (telemetryFeedId != null) {
+            telemetryFeedByAsset.put(asset.id(), new TrackedFeed(telemetryTransmitter, telemetryFeedId));
         }
 
         StreamId streamId = null;
@@ -188,7 +287,9 @@ public final class DefaultSimulationService implements SimulationService {
                 streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
             } catch (RuntimeException e) {
                 feedByAsset.remove(asset.id());
-                stopFeedQuietly(transmitter, feedId);
+                telemetryFeedByAsset.remove(asset.id());
+                stopFeedQuietly(videoTransmitter, videoFeedId);
+                stopFeedQuietly(telemetryTransmitter, telemetryFeedId);
                 throw e;
             }
         }
@@ -225,9 +326,13 @@ public final class DefaultSimulationService implements SimulationService {
     public void stop(AssetId assetId) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         assetService.stopStream(assetId);
-        TrackedFeed tracked = feedByAsset.remove(assetId);
-        if (tracked != null) {
-            tracked.transmitter().stop(tracked.feedId());
+        TrackedFeed video = feedByAsset.remove(assetId);
+        if (video != null) {
+            video.transmitter().stop(video.feedId());
+        }
+        TrackedFeed telemetry = telemetryFeedByAsset.remove(assetId);
+        if (telemetry != null) {
+            telemetry.transmitter().stop(telemetry.feedId());
         }
     }
 
@@ -452,8 +557,113 @@ public final class DefaultSimulationService implements SimulationService {
     /** A newly wired video device and the transmitter that started its feed, for post-create tracking. */
     private record WiredVideoDevice(DeviceRegistration device, FeedTransmitterPort transmitter) {}
 
+    /** A newly wired MAVLink telemetry device and the transmitter/feed id that started its feed, for post-create tracking. */
+    private record WiredTelemetryDevice(DeviceRegistration device, FeedTransmitterPort transmitter, FeedId feedId) {}
+
     /** Which {@link FeedTransmitterPort} started a tracked asset's feed, so {@link #stop} stops it via the same adapter. */
     private record TrackedFeed(FeedTransmitterPort transmitter, FeedId feedId) {}
+
+    /**
+     * Builds a {@code "mavlink"}-protocol telemetry device backed by a real {@code
+     * MavlinkFeedTransmitter} feed (adapter-mavlink's own natural follow-up, see that module's
+     * MODULE.md Gotchas): allocates a free loopback UDP port, starts a feed pushing to it, and
+     * registers a device listening on that same address — the "one shared {@code udp://host:port}
+     * for both ends" contract {@code MavlinkFeedTransmitter}'s own javadoc documents ({@code
+     * FeedSpec#source()} is repurposed as the transmit <em>destination</em> for that transmitter,
+     * unlike the RTSP/MJPEG transmitters' {@code source()}, which names a local video <em>file</em>
+     * — read carefully before assuming symmetry with {@link #wireVideoDevice}). The device is pinned
+     * to {@link #MAVLINK_TELEMETRY_SYSID} via the {@code sysid} option so it deterministically claims
+     * the one vehicle this feed transmits, rather than leaving it to unpinned first-heard-wins
+     * claiming (adapter-mavlink/MODULE.md) — harmless either way since the port is exclusive to this
+     * one feed, but deterministic is simpler to reason about.
+     */
+    private WiredTelemetryDevice wireMavlinkTelemetryDevice(String displayName, SimulationSpec spec) {
+        int port = allocateLoopbackUdpPort();
+        URI destination = URI.create("udp://" + MAVLINK_LOOPBACK_HOST + ":" + port);
+
+        Map<String, String> deviceOptions = Map.of(MAVLINK_OPTION_SYSID, String.valueOf(MAVLINK_TELEMETRY_SYSID));
+        DeviceRegistration device = new DeviceRegistration(displayName + " · telemetry", Set.of(Capability.TELEMETRY),
+                new StreamDescriptor(TELEMETRY_PROTOCOL_MAVLINK, destination, deviceOptions));
+
+        FeedSpec feedSpec = new FeedSpec(TELEMETRY_PROTOCOL_MAVLINK, destination, mavlinkFeedOptions(spec));
+        FeedTransmitterPort transmitter = feedTransmitters.transmitterFor(feedSpec);
+        FeedId feedId = FeedId.random();
+        transmitter.start(feedId, feedSpec);
+        return new WiredTelemetryDevice(device, transmitter, feedId);
+    }
+
+    /**
+     * Binds an ephemeral {@link DatagramSocket} purely to learn a currently-free loopback UDP port,
+     * then releases it immediately so {@code MavlinkFeedTransmitter}/{@code MavlinkTelemetrySource}
+     * (adapter-mavlink) can each open their own socket on it afterward. A small TOCTOU race is
+     * possible — another process could grab the port between this close and the transmitter's own
+     * bind — accepted as good-enough for dev/demo tooling, the same posture this class already takes
+     * for RTSP's fixed startup delay (see {@link #awaitFeedEstablished()}'s own javadoc).
+     */
+    private static int allocateLoopbackUdpPort() {
+        try (DatagramSocket socket = new DatagramSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to allocate a loopback UDP port for a MAVLink telemetry feed", e);
+        }
+    }
+
+    /**
+     * Maps {@link SimulationSpec#plan()} onto {@code MavlinkFeedTransmitter}'s (adapter-mavlink)
+     * supported options — {@code route} (required by that transmitter) and {@code speedMps} — the
+     * same "a route-carrying plan wins" precedence {@link #telemetryDevice} already applies for
+     * {@code SimulatedTelemetrySource}. Unlike that method, {@code route} can never be left unset
+     * here: {@code MavlinkFeedTransmitter#start} throws without one, so a plan with no route (or no
+     * plan at all) falls back to {@link #mavlinkRoute}'s synthesized minimal route.
+     *
+     * <p>{@code batteryDrainPerSecond}/{@code positionRateHz}/{@code failsafeBatteryPercent} are
+     * left unset (the transmitter's own defaults apply) since neither {@link TelemetryPlan} nor
+     * {@link SimulationSpec} carries anything to map them from — not a dropped field, since there
+     * was never one to drop. {@link TelemetryPlan#mode()} <em>is</em> a real drop whenever it names
+     * anything other than {@link RouteMode#LOOP}: {@code MavlinkFeedTransmitter}'s route engine
+     * ({@code MavlinkRoute}) only loops, unlike {@code adapter-simulation}'s fuller {@code
+     * RoutePlan} — logged at {@code WARNING}, honest rather than silently ignored.
+     */
+    private static Map<String, String> mavlinkFeedOptions(SimulationSpec spec) {
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put(MAVLINK_OPTION_ROUTE, mavlinkRoute(spec));
+        // Explicit, not left to MavlinkFeedTransmitter's own default coinciding with
+        // MAVLINK_TELEMETRY_SYSID by coincidence -- the transmitted messages must claim the exact
+        // sysid the telemetry device itself is pinned to (StreamDescriptor.options["sysid"] above).
+        options.put(MAVLINK_OPTION_SYSID, String.valueOf(MAVLINK_TELEMETRY_SYSID));
+        TelemetryPlan plan = spec.plan();
+        if (plan != null) {
+            if (plan.speedMps() != null) {
+                options.put(MAVLINK_OPTION_SPEED_MPS, formatDouble(plan.speedMps()));
+            }
+            if (plan.mode() != null && plan.mode() != RouteMode.LOOP) {
+                LOG.log(System.Logger.Level.WARNING, () -> "TelemetryPlan#mode()=" + plan.mode()
+                        + " is not supported by the MAVLink telemetry transport (its route engine only loops, "
+                        + "see adapter-mavlink/MODULE.md) -- ignoring; the feed will loop regardless");
+            }
+        }
+        return options;
+    }
+
+    /**
+     * The {@code route} option value for a MAVLink-transport telemetry feed: {@link
+     * SimulationSpec#plan()}'s route, serialized exactly like {@link #telemetryDevice} already does
+     * for {@code SimulatedTelemetrySource}, when one is given — otherwise a synthesized minimal
+     * two-point route (see {@link #MAVLINK_FALLBACK_ROUTE_OFFSET_DEGREES}'s own javadoc for why one
+     * is needed at all) anchored at {@link SimulationSpec#latitude()}/{@link
+     * SimulationSpec#longitude()}, or {@link #MAVLINK_FALLBACK_LATITUDE}/{@link
+     * #MAVLINK_FALLBACK_LONGITUDE} when even those are absent.
+     */
+    private static String mavlinkRoute(SimulationSpec spec) {
+        TelemetryPlan plan = spec.plan();
+        if (plan != null && plan.route() != null) {
+            return serializeRoute(plan.route());
+        }
+        double lat = spec.latitude() != null ? spec.latitude() : MAVLINK_FALLBACK_LATITUDE;
+        double lon = spec.longitude() != null ? spec.longitude() : MAVLINK_FALLBACK_LONGITUDE;
+        double offsetLat = lat + MAVLINK_FALLBACK_ROUTE_OFFSET_DEGREES;
+        return formatDouble(lat) + "," + formatDouble(lon) + ";" + formatDouble(offsetLat) + "," + formatDouble(lon);
+    }
 
     /** {@code SimulatedTelemetrySource} (adapter-simulation) device option keys this method emits. */
     private static final String TELEMETRY_OPTION_LAT = "lat";

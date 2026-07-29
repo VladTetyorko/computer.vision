@@ -30,13 +30,32 @@ package com.drones.vision.application;
  *                     (pushed over the wire via {@code FeedTransmitterPort} and ingested back,
  *                     docs/CYCLES-PLAN.md §3, §5, both requiring a non-{@code null} {@link
  *                     #videoPath()}); must not be {@code null}
- * @param plan         an optional configurable flight plan (docs/CYCLES-PLAN.md §7, CT-a) for the
- *                     synthetic telemetry track — {@code null} keeps today's circular home-point
- *                     track ({@link #latitude()}/{@link #longitude()}); when given, it wins over
- *                     those bare fields
+ * @param plan               an optional configurable flight plan (docs/CYCLES-PLAN.md §7, CT-a) for
+ *                           the synthetic telemetry track — {@code null} keeps today's circular
+ *                           home-point track ({@link #latitude()}/{@link #longitude()}); when
+ *                           given, it wins over those bare fields
+ * @param telemetryTransport how the telemetry device reaches its {@code TelemetrySourcePort} —
+ *                           {@link TelemetryTransport#SIM} (in-process, the default) or {@link
+ *                           TelemetryTransport#MAVLINK} (pushed over real UDP via {@code
+ *                           MavlinkFeedTransmitter} and ingested back through {@code
+ *                           MavlinkTelemetrySource}, adapter-mavlink's own natural follow-up — see
+ *                           that module's MODULE.md Gotchas). Orthogonal to {@link #transport()}
+ *                           (video): every combination of the two is valid, since video and
+ *                           telemetry are separate devices on the same simulated asset — there is no
+ *                           videoPath-shaped cross-check to make here the way {@link #transport()}
+ *                           itself needs one. Nullable at this constructor purely so every
+ *                           pre-existing (7-arg-and-shorter) call site keeps compiling unchanged;
+ *                           the compact constructor immediately normalizes a {@code null} to {@link
+ *                           TelemetryTransport#SIM} (rather than leaving it nullable forever the way
+ *                           {@link #plan()} does), so {@link #telemetryTransport()} is guaranteed
+ *                           non-{@code null} once this record exists — the same "how" role {@link
+ *                           #transport()} plays, which is why this mirrors {@code transport}'s
+ *                           always-resolved convention rather than {@code plan}'s genuinely-optional
+ *                           one
  */
 public record SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
-                              boolean autoStart, SimulationTransport transport, TelemetryPlan plan) {
+                              boolean autoStart, SimulationTransport transport, TelemetryPlan plan,
+                              TelemetryTransport telemetryTransport) {
 
     public SimulationSpec {
         if (videoPath != null && videoPath.isBlank()) {
@@ -48,6 +67,27 @@ public record SimulationSpec(String displayName, String videoPath, Double latitu
         if (videoPath == null && transport != SimulationTransport.DIRECT) {
             throw new IllegalArgumentException("SimulationSpec transport " + transport + " requires a videoPath");
         }
+        if (telemetryTransport == null) {
+            telemetryTransport = TelemetryTransport.SIM;
+        }
+    }
+
+    /**
+     * Convenience constructor defaulting {@link #telemetryTransport()} to {@code null} (normalized
+     * to {@link TelemetryTransport#SIM} by the compact constructor). Keeps every pre-existing 7-arg
+     * call site source-compatible.
+     *
+     * @param displayName see the canonical constructor
+     * @param videoPath   see the canonical constructor
+     * @param latitude    see the canonical constructor
+     * @param longitude   see the canonical constructor
+     * @param autoStart   see the canonical constructor
+     * @param transport   see the canonical constructor
+     * @param plan        see the canonical constructor
+     */
+    public SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
+                           boolean autoStart, SimulationTransport transport, TelemetryPlan plan) {
+        this(displayName, videoPath, latitude, longitude, autoStart, transport, plan, null);
     }
 
     /**
@@ -67,7 +107,7 @@ public record SimulationSpec(String displayName, String videoPath, Double latitu
      */
     public SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
                            boolean autoStart, SimulationTransport transport) {
-        this(displayName, videoPath, latitude, longitude, autoStart, transport, null);
+        this(displayName, videoPath, latitude, longitude, autoStart, transport, null, null);
     }
 
     /**
@@ -83,6 +123,6 @@ public record SimulationSpec(String displayName, String videoPath, Double latitu
      */
     public SimulationSpec(String displayName, String videoPath, Double latitude, Double longitude,
                            boolean autoStart) {
-        this(displayName, videoPath, latitude, longitude, autoStart, SimulationTransport.DIRECT, null);
+        this(displayName, videoPath, latitude, longitude, autoStart, SimulationTransport.DIRECT, null, null);
     }
 }

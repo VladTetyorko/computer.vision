@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -55,6 +56,7 @@ class DefaultSimulationServiceTest {
     private CategoryRepositoryPort categoryRepository;
     private FeedTransmitterPort feedTransmitter;
     private FeedTransmitterPort mjpegTransmitter;
+    private FeedTransmitterPort mavlinkTransmitter;
     private SimulationService service;
     private Ownership ownership;
     private UserId actor;
@@ -65,13 +67,25 @@ class DefaultSimulationServiceTest {
         categoryRepository = mock(CategoryRepositoryPort.class);
         feedTransmitter = mock(FeedTransmitterPort.class);
         mjpegTransmitter = mock(FeedTransmitterPort.class);
+        mavlinkTransmitter = mock(FeedTransmitterPort.class);
         service = new DefaultSimulationService(assetService, categoryRepository,
-                new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter)), MEDIAMTX_RTSP_BASE);
+                new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter, mavlinkTransmitter)),
+                MEDIAMTX_RTSP_BASE);
         actor = UserId.random();
         ownership = new Ownership(actor, GroupId.random());
 
         when(categoryRepository.findById(SIMULATED))
                 .thenReturn(Optional.of(new DeviceCategory(SIMULATED, "Simulated", null, List.of())));
+        // Protocol-aware, like the real MavlinkFeedTransmitter#supports() -- a blanket any()->true
+        // stub would wrongly make this mock "support" rtsp/mjpeg FeedSpecs too, breaking every
+        // pre-existing unsupported-protocol test (the registry picks the *first* supporting
+        // transmitter, and mavlinkTransmitter is registered last, but still gets probed).
+        when(mavlinkTransmitter.supports(any())).thenAnswer(invocation -> {
+            FeedSpec spec = invocation.getArgument(0, FeedSpec.class);
+            return spec != null && "mavlink".equals(spec.protocol());
+        });
+        when(mavlinkTransmitter.start(any(), any())).thenAnswer(invocation ->
+                new StreamDescriptor("mavlink", invocation.getArgument(1, FeedSpec.class).source(), Map.of()));
     }
 
     // --- Path validation -------------------------------------------------------
@@ -659,6 +673,267 @@ class DefaultSimulationServiceTest {
         verify(feedTransmitter, times(1)).stop(any());
     }
 
+    // --- mavlink telemetry transport (docs/DRONE-INFRA-PLAN.md's natural follow-up) ----------------
+
+    @Test
+    void simulateDefaultsTelemetryTransportToSimAndNeverTouchesMavlinkTransmitter(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false);
+
+        assertEquals(TelemetryTransport.SIM, spec.telemetryTransport(),
+                "the shorter convenience constructors must default telemetryTransport to SIM");
+
+        service.simulate(spec, ownership, actor);
+
+        DeviceRegistration telemetry = capturedAssetSpec().devices().get(1);
+        assertEquals("sim", telemetry.stream().protocol());
+        verifyNoInteractions(mavlinkTransmitter);
+    }
+
+    @Test
+    void simulationSpecNormalizesAnExplicitNullTelemetryTransportToSim() {
+        SimulationSpec spec =
+                new SimulationSpec("My Drone", null, null, null, false, SimulationTransport.DIRECT, null, null);
+
+        assertEquals(TelemetryTransport.SIM, spec.telemetryTransport());
+    }
+
+    @Test
+    void simulateWithMavlinkTelemetryTransportRegistersAMavlinkDeviceWithSysidAndALoopbackUdpUri(
+            @TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        List<Waypoint> route = List.of(new Waypoint(1.0, 2.0, null), new Waypoint(3.0, 4.0, null));
+        TelemetryPlan plan = new TelemetryPlan(null, null, route);
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, plan, TelemetryTransport.MAVLINK);
+
+        service.simulate(spec, ownership, actor);
+
+        DeviceRegistration telemetry = capturedAssetSpec().devices().get(1);
+        assertEquals("My Drone · telemetry", telemetry.name());
+        assertEquals(Set.of(Capability.TELEMETRY), telemetry.capabilities());
+        assertEquals("mavlink", telemetry.stream().protocol());
+        assertEquals("udp", telemetry.stream().uri().getScheme());
+        assertEquals("127.0.0.1", telemetry.stream().uri().getHost());
+        assertTrue(telemetry.stream().uri().getPort() > 0, "a free loopback port must have been allocated");
+        assertEquals(Map.of("sysid", "1"), telemetry.stream().options());
+
+        ArgumentCaptor<FeedSpec> feedSpecCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(mavlinkTransmitter).start(any(), feedSpecCaptor.capture());
+        assertEquals("mavlink", feedSpecCaptor.getValue().protocol());
+        assertEquals(telemetry.stream().uri(), feedSpecCaptor.getValue().source(),
+                "the feed's destination and the RX device's own listen uri must be the exact same udp://host:port "
+                        + "-- MavlinkFeedTransmitter#source() is a destination, not a source file (unlike rtsp/mjpeg)");
+    }
+
+    @Test
+    void simulateWithMavlinkTelemetryTransportMapsThePlanRouteAndSpeedIntoFeedOptions(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        List<Waypoint> route = List.of(new Waypoint(50.45, 30.52, null), new Waypoint(50.46, 30.53, 120.0));
+        TelemetryPlan plan = new TelemetryPlan(15.0, RouteMode.LOOP, route);
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, plan, TelemetryTransport.MAVLINK);
+
+        service.simulate(spec, ownership, actor);
+
+        ArgumentCaptor<FeedSpec> feedSpecCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(mavlinkTransmitter).start(any(), feedSpecCaptor.capture());
+        assertEquals(Map.of("route", "50.45,30.52;50.46,30.53,120.0", "sysid", "1", "speedMps", "15.0"),
+                feedSpecCaptor.getValue().options());
+    }
+
+    @Test
+    void simulateWithMavlinkTelemetryTransportIgnoresAnUnsupportedRouteModeAndStillStartsTheFeed(
+            @TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        List<Waypoint> route = List.of(new Waypoint(1.0, 2.0, null), new Waypoint(3.0, 4.0, null));
+        TelemetryPlan plan = new TelemetryPlan(null, RouteMode.BOUNCE, route);
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, plan, TelemetryTransport.MAVLINK);
+
+        assertDoesNotThrow(() -> service.simulate(spec, ownership, actor));
+
+        ArgumentCaptor<FeedSpec> feedSpecCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(mavlinkTransmitter).start(any(), feedSpecCaptor.capture());
+        assertEquals(Map.of("route", "1.0,2.0;3.0,4.0", "sysid", "1"), feedSpecCaptor.getValue().options(),
+                "mode=BOUNCE is not supported by MavlinkFeedTransmitter's LOOP-only route engine -- it must be "
+                        + "dropped (honestly, via a WARNING log), not mapped to any option and not thrown on");
+    }
+
+    @Test
+    void simulateWithMavlinkTelemetryTransportSynthesizesATwoPointRouteFromBareLatLonWhenNoPlanIsGiven(
+            @TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), 50.45, 30.52, false,
+                SimulationTransport.DIRECT, null, TelemetryTransport.MAVLINK);
+
+        service.simulate(spec, ownership, actor);
+
+        ArgumentCaptor<FeedSpec> feedSpecCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(mavlinkTransmitter).start(any(), feedSpecCaptor.capture());
+        double offsetLat = 50.45 + DefaultSimulationService.MAVLINK_FALLBACK_ROUTE_OFFSET_DEGREES;
+        String expectedRoute = 50.45 + "," + 30.52 + ";" + offsetLat + "," + 30.52;
+        assertEquals(expectedRoute, feedSpecCaptor.getValue().options().get("route"),
+                "MavlinkFeedTransmitter's route option is required (no circular-track fallback of its own) -- a "
+                        + "bare lat/lon with no plan must still synthesize a minimal (moving) two-point route");
+    }
+
+    @Test
+    void simulateWithMavlinkTelemetryTransportSynthesizesARouteFromTheDefaultCenterWhenNeitherPlanNorLatLonIsGiven(
+            @TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, null, TelemetryTransport.MAVLINK);
+
+        service.simulate(spec, ownership, actor);
+
+        ArgumentCaptor<FeedSpec> feedSpecCaptor = ArgumentCaptor.forClass(FeedSpec.class);
+        verify(mavlinkTransmitter).start(any(), feedSpecCaptor.capture());
+        double lat = DefaultSimulationService.MAVLINK_FALLBACK_LATITUDE;
+        double lon = DefaultSimulationService.MAVLINK_FALLBACK_LONGITUDE;
+        double offsetLat = lat + DefaultSimulationService.MAVLINK_FALLBACK_ROUTE_OFFSET_DEGREES;
+        String expectedRoute = lat + "," + lon + ";" + offsetLat + "," + lon;
+        assertEquals(expectedRoute, feedSpecCaptor.getValue().options().get("route"));
+    }
+
+    @Test
+    void mavlinkTelemetryTransportComposesWithRtspVideoTransport(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubCreate();
+        // Protocol-scoped, unlike the rtsp-only tests' blanket any()->true stub: this test's video
+        // FeedSpec (rtsp) and telemetry FeedSpec (mavlink) both flow through the same registry, so a
+        // blanket stub would wrongly make feedTransmitter "support" (and be selected for) the mavlink
+        // spec too, since it is probed first in registration order.
+        stubFeedTransmitterSupportsRtspOnly();
+        when(feedTransmitter.start(any(), any()))
+                .thenReturn(new StreamDescriptor("rtsp", URI.create("rtsp://localhost:8554/feed-both"), Map.of()));
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.RTSP, null, TelemetryTransport.MAVLINK);
+
+        service.simulate(spec, ownership, actor);
+
+        AssetSpec created = capturedAssetSpec();
+        assertEquals("rtsp", created.devices().get(0).stream().protocol());
+        assertEquals("mavlink", created.devices().get(1).stream().protocol());
+        verify(feedTransmitter).start(any(), any());
+        verify(mavlinkTransmitter).start(any(), any());
+    }
+
+    @Test
+    void mavlinkTelemetryTransportComposesWithANullVideoPathSyntheticSimulation() {
+        stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", null, null, null, false, SimulationTransport.DIRECT,
+                null, TelemetryTransport.MAVLINK);
+
+        service.simulate(spec, ownership, actor);
+
+        AssetSpec created = capturedAssetSpec();
+        assertEquals("sim", created.devices().get(0).stream().protocol());
+        assertEquals("mavlink", created.devices().get(1).stream().protocol());
+        verify(mavlinkTransmitter).start(any(), any());
+    }
+
+    @Test
+    void stopStopsTheMavlinkTelemetryFeedViaTheTransmitterThatStartedIt(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        Asset created = stubCreate();
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, null, TelemetryTransport.MAVLINK);
+        service.simulate(spec, ownership, actor);
+        ArgumentCaptor<FeedId> feedIdCaptor = ArgumentCaptor.forClass(FeedId.class);
+        verify(mavlinkTransmitter).start(feedIdCaptor.capture(), any());
+
+        service.stop(created.id());
+
+        verify(assetService).stopStream(created.id());
+        verify(mavlinkTransmitter).stop(feedIdCaptor.getValue());
+        verify(feedTransmitter, never()).stop(any());
+    }
+
+    @Test
+    void simulateStopsTheMavlinkTelemetryFeedWhenAssetServiceCreateThrows(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        when(assetService.create(any(), any(), any())).thenThrow(new IllegalStateException("category vanished"));
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.DIRECT, null, TelemetryTransport.MAVLINK);
+
+        assertThrows(IllegalStateException.class, () -> service.simulate(spec, ownership, actor));
+
+        ArgumentCaptor<FeedId> feedIdCaptor = ArgumentCaptor.forClass(FeedId.class);
+        verify(mavlinkTransmitter).start(feedIdCaptor.capture(), any());
+        verify(mavlinkTransmitter).stop(feedIdCaptor.getValue());
+    }
+
+    @Test
+    void simulateStopsTheMavlinkTelemetryFeedWhenStartStreamThrows(@TempDir Path tempDir) throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        Asset created = stubCreate();
+        when(assetService.startStream(any(), any(), any())).thenThrow(new IllegalStateException("device offline"));
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, true,
+                SimulationTransport.DIRECT, null, TelemetryTransport.MAVLINK);
+
+        assertThrows(IllegalStateException.class, () -> service.simulate(spec, ownership, actor));
+
+        ArgumentCaptor<FeedId> feedIdCaptor = ArgumentCaptor.forClass(FeedId.class);
+        verify(mavlinkTransmitter).start(feedIdCaptor.capture(), any());
+        verify(mavlinkTransmitter).stop(feedIdCaptor.getValue());
+
+        // The feed must have been untracked too: stopping the (failed) asset afterwards must not
+        // attempt to stop the same feed a second time.
+        service.stop(created.id());
+        verify(mavlinkTransmitter, times(1)).stop(feedIdCaptor.getValue());
+    }
+
+    @Test
+    void simulateStopsTheAlreadyStartedVideoFeedWhenMavlinkTelemetryWiringFailsAfterward(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        stubFeedTransmitterSupportsRtspOnly(); // must not also shadow the mavlink spec, see the test above
+        when(feedTransmitter.start(any(), any()))
+                .thenReturn(new StreamDescriptor("rtsp", URI.create("rtsp://localhost:8554/feed-video-only"), Map.of()));
+        when(mavlinkTransmitter.supports(any())).thenReturn(false); // no transmitter supports mavlink this time
+        SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, false,
+                SimulationTransport.RTSP, null, TelemetryTransport.MAVLINK);
+
+        assertThrows(IllegalArgumentException.class, () -> service.simulate(spec, ownership, actor));
+
+        ArgumentCaptor<FeedId> feedIdCaptor = ArgumentCaptor.forClass(FeedId.class);
+        verify(feedTransmitter).start(feedIdCaptor.capture(), any());
+        verify(feedTransmitter).stop(feedIdCaptor.getValue());
+        verifyNoInteractions(assetService);
+    }
+
+    @Test
+    void resumeAllNeverResumesAMavlinkTelemetryDeviceEvenAlongsideAResumableRtspVideoDevice(@TempDir Path tempDir)
+            throws IOException {
+        Path file = videoFile(tempDir, "clip.mp4");
+        FeedId videoFeedId = FeedId.random();
+        Device videoDevice = rtspVideoDevice(feedUri(videoFeedId));
+        Device mavlinkTelemetryDevice = new Device(DeviceId.random(), "drone · telemetry",
+                Set.of(Capability.TELEMETRY),
+                new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:55000"), Map.of("sysid", "1")));
+        Asset asset = simulatedAsset(videoDevice, Map.of("source", file.toString()));
+        AssetSummary summary = summaryOf(asset);
+        when(assetService.assets()).thenReturn(List.of(summary));
+        when(assetService.details(asset.id()))
+                .thenReturn(new AssetDetails(summary, List.of(videoDevice, mavlinkTelemetryDevice), List.of()));
+        when(feedTransmitter.supports(any())).thenReturn(true);
+
+        List<AssetId> resumed = service.resumeAll();
+
+        assertEquals(List.of(asset.id()), resumed);
+        verify(feedTransmitter).start(eq(videoFeedId), any());
+        verifyNoInteractions(mavlinkTransmitter);
+    }
+
     // --- resumeAll() -------------------------------------------------------------
 
     @Test
@@ -831,6 +1106,19 @@ class DefaultSimulationServiceTest {
         Path file = dir.resolve(name);
         Files.writeString(file, "not a real video, just enough bytes to exist and be readable");
         return file;
+    }
+
+    /**
+     * Restricts {@link #feedTransmitter}'s {@code supports()} stub to rtsp-protocol specs only --
+     * needed whenever a test's video (rtsp) and telemetry (mavlink) {@link FeedSpec}s both flow
+     * through the same {@link FeedTransmitterRegistry} in one call: the pre-existing blanket {@code
+     * any()->true} idiom other tests in this file use is only safe when exactly one FeedSpec
+     * protocol is ever probed per test, since the registry selects the first transmitter (in
+     * registration order) whose {@code supports()} returns {@code true}.
+     */
+    private void stubFeedTransmitterSupportsRtspOnly() {
+        when(feedTransmitter.supports(any())).thenAnswer(invocation ->
+                "rtsp".equals(invocation.getArgument(0, FeedSpec.class).protocol()));
     }
 
     private Asset stubCreate() {

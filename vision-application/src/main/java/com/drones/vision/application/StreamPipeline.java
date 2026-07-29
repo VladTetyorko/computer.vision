@@ -9,6 +9,7 @@ import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
@@ -25,6 +26,7 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * Per-stream pipeline runtime: subscribes to a video source, publishes every
@@ -50,32 +52,43 @@ import java.util.function.LongSupplier;
  *       path never depends on the CV service being healthy.</li>
  *   <li><b>Overlay burn-in</b> (docs/MVP1-PLAN.md §C8, smoothed per
  *       docs/CYCLES-PLAN.md §12 CP-c; optional per docs/MVP2-PLAN.md §V,
- *       V-e): when an {@link OverlayPort} is configured (constructor
- *       argument, nullable — {@code null} keeps today's raw-publish behavior
- *       everywhere) and {@link PipelineConfig#overlayBurnIn()} is {@code
- *       true} (the default) and {@link
- *       #extrapolator}'s boxes at this frame's capture time are non-empty,
- *       each frame is rendered through {@link OverlayPort#render} — as an
- *       {@link AnnotatedFrame} carrying the extrapolated detections and a
- *       {@code null} telemetry sample, since this pipeline has no telemetry
- *       input yet — before being published. The extrapolator tracks the two
- *       most recently completed results and, between them, moves each
- *       matched box toward where it is predicted to be at the publishing
- *       frame's timestamp instead of freezing it at its last detected
- *       position — see {@link DetectionExtrapolator} for the matching/
- *       velocity/cap details; {@link #latestDetections()} (the REST-facing
- *       surface) is unaffected, it always returns the raw latest result.
- *       {@link PipelineConfig#overlayTelemetry()}'s telemetry-OSD gate
- *       cannot activate until a later task plumbs a telemetry input into
- *       this class, so today only detections-only burn-in ships. Without an
- *       {@code OverlayPort} (the default) or before any detection has
- *       completed, the raw frame is published unchanged, exactly as before
- *       this feature. A renderer that throws is treated as a purely
- *       cosmetic failure, never a pipeline failure: the raw frame is
- *       published instead, and at most one {@code WARNING} is logged per
- *       failure run (a boolean latch, reset the next time rendering
- *       succeeds) so a persistently broken renderer never spams logs on
- *       every frame.</li>
+ *       V-e; telemetry OSD input added later): when an {@link OverlayPort}
+ *       is configured (constructor argument, nullable — {@code null} keeps
+ *       today's raw-publish behavior everywhere) and {@link
+ *       PipelineConfig#overlayBurnIn()} is {@code true} (the default) and
+ *       either {@link #extrapolator}'s boxes at this frame's capture time
+ *       are non-empty or a telemetry sample resolves (see below), the frame
+ *       is rendered through {@link OverlayPort#render} — as an {@link
+ *       AnnotatedFrame} carrying the extrapolated detections and that
+ *       telemetry sample — before being published. The extrapolator tracks
+ *       the two most recently completed results and, between them, moves
+ *       each matched box toward where it is predicted to be at the
+ *       publishing frame's timestamp instead of freezing it at its last
+ *       detected position — see {@link DetectionExtrapolator} for the
+ *       matching/velocity/cap details; {@link #latestDetections()} (the
+ *       REST-facing surface) is unaffected, it always returns the raw
+ *       latest result. The telemetry sample burned in — activating {@link
+ *       PipelineConfig#overlayTelemetry()}'s OSD gate — comes from an
+ *       optional {@code telemetrySupplier} (constructor argument, nullable):
+ *       when {@link #overlayPort} is configured, {@link
+ *       PipelineConfig#overlayTelemetry()} is {@code true}, and a supplier
+ *       was given, it is invoked once per published frame — it must
+ *       therefore be cheap (an in-memory read, never I/O) — and its result
+ *       (possibly {@code null}, meaning "no sample right now") is what's
+ *       passed as {@link AnnotatedFrame#telemetry()}; any of the three
+ *       absent yields {@code null} exactly as before this input existed. A
+ *       supplier that throws is treated exactly like "no sample available"
+ *       (caught, {@code null} used instead) — never a pipeline failure —
+ *       with the same once-per-failure-run {@code WARNING} throttling the
+ *       renderer itself uses (see below). Without an {@code OverlayPort}
+ *       (the default), before any detection has completed and with no
+ *       telemetry sample either, the raw frame is published unchanged,
+ *       exactly as before this feature. A renderer that throws is treated
+ *       as a purely cosmetic failure, never a pipeline failure: the raw
+ *       frame is published instead, and at most one {@code WARNING} is
+ *       logged per failure run (a boolean latch, reset the next time
+ *       rendering succeeds) so a persistently broken renderer never spams
+ *       logs on every frame.</li>
  * </ul>
  *
  * <h2>Inference sampling</h2>
@@ -185,6 +198,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionEventEngine eventEngine;
     private final AssetId assetId;
     private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final Supplier<Telemetry> telemetrySupplier;
     private final LongSupplier nanoTimeSource;
     private final DetectionExtrapolator extrapolator = new DetectionExtrapolator();
 
@@ -201,6 +215,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     // a renderer that keeps throwing, without needing outage/backoff machinery: overlay failures
     // are cosmetic, not a resilience concern like detection failures are.
     private boolean overlayFailureLogged = false;
+
+    // Same latch idiom as overlayFailureLogged above, for a throwing telemetrySupplier: reading a
+    // telemetry sample for OSD burn-in is likewise cosmetic, never a resilience concern.
+    private boolean telemetrySupplierFailureLogged = false;
 
     // Frame-arrival cadence measurement state. Only ever touched from within
     // onNext(), which Flow.Subscriber's contract serializes (signals are
@@ -293,7 +311,32 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                            DetectionEventEngine eventEngine, AssetId assetId,
                            LiveUpdatePublisherPort liveUpdatePublisherPort) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, System::nanoTime);
+                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, null);
+    }
+
+    /**
+     * Same as the 12-argument constructor, plus a {@link Supplier} of the telemetry sample to burn
+     * into the OSD (see the class javadoc's "Overlay burn-in" section).
+     *
+     * @param telemetrySupplier nullable — {@code null} (every other constructor's default) means
+     *                           {@link PipelineConfig#overlayTelemetry()}'s OSD gate can never
+     *                           activate for this pipeline, exactly as before this constructor
+     *                           existed. When given, it is called at most once per published frame
+     *                           (only when {@link #overlayPort} is configured and {@code
+     *                           overlayTelemetry()} is {@code true}) and must therefore be cheap —
+     *                           an in-memory read of the freshest known sample, never blocking I/O.
+     *                           A {@code null} result (or a thrown exception, caught and treated the
+     *                           same way) means "no sample right now," not a failure.
+     */
+    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
+                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
+                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
+                           EventPublisherPort eventPublisher, OverlayPort overlayPort,
+                           DetectionEventEngine eventEngine, AssetId assetId,
+                           LiveUpdatePublisherPort liveUpdatePublisherPort, Supplier<Telemetry> telemetrySupplier) {
+        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
+                eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
+                System::nanoTime);
     }
 
     /**
@@ -306,7 +349,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                    EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
-                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort, LongSupplier nanoTimeSource) {
+                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource) {
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -320,6 +364,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.eventEngine = eventEngine; // nullable: no detection-event tracking when absent
         this.assetId = assetId; // nullable: no owning asset, or live updates not wired
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
+        this.telemetrySupplier = telemetrySupplier; // nullable: no telemetry-OSD input when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
         this.sampleEveryNthFrame = everyNth(ASSUMED_SOURCE_FPS);
     }
@@ -393,31 +438,30 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Renders {@code frame} through {@link #overlayPort} when one is configured, {@link
-     * PipelineConfig#overlayBurnIn()} is {@code true}, and {@link #extrapolator}'s boxes at {@code
-     * frame}'s capture time have something to draw, returning the raw {@code frame} otherwise (no
-     * overlay configured, burn-in disabled, or nothing detected yet). Detection is always run
-     * against the raw {@code frame}, never the rendered one — overlay is purely a publish-time
-     * presentation concern.
+     * PipelineConfig#overlayBurnIn()} is {@code true}, and either {@link #extrapolator}'s boxes at
+     * {@code frame}'s capture time or {@link #telemetrySampleFor()} have something to draw,
+     * returning the raw {@code frame} otherwise (no overlay configured, burn-in disabled, or
+     * nothing to draw at all yet). Detection is always run against the raw {@code frame}, never the
+     * rendered one — overlay is purely a publish-time presentation concern.
      *
      * <p><b>What {@code overlayBurnIn=false} actually skips</b> (docs/MVP2-PLAN.md §V, V-e): the
-     * {@link #extrapolator}{@code .at(...)} lookup (matching/extrapolation math) below, {@link
+     * {@link #extrapolator}{@code .at(...)}/{@link #telemetrySampleFor()} lookups below, {@link
      * OverlayPort#render}'s Java2D work (decode/allocate a fresh image, draw boxes/OSD, re-encode),
      * and the extra {@link VideoFrame} instance {@code render} returns — every publish falls
      * straight through to the raw, already-decoded frame. This is the pipeline's only burn-in
-     * decision point, so it gates telemetry-OSD burn-in identically to detection-box burn-in once a
-     * telemetry input exists here (today neither runs without a configured {@link #overlayPort}
-     * regardless of this flag, since telemetry is always passed as {@code null} — see the class
-     * javadoc). What it does <b>not</b> skip: {@link #extrapolator}{@code .accept} (called from
-     * {@link #onDetectionResult}, independent of this method) keeps running either way — it is
-     * cheap (bookkeeping over at most two results) and turning it off per-config would only save
-     * that bookkeeping, not the Java2D/copy cost this flag exists to avoid.
+     * decision point, gating telemetry-OSD burn-in identically to detection-box burn-in. What it
+     * does <b>not</b> skip: {@link #extrapolator}{@code .accept} (called from {@link
+     * #onDetectionResult}, independent of this method) keeps running either way — it is cheap
+     * (bookkeeping over at most two results) and turning it off per-config would only save that
+     * bookkeeping, not the Java2D/copy cost this flag exists to avoid.
      *
      * <p>The detections passed to the renderer are {@link #extrapolator}'s output at {@code
      * frame.capturedAt()} (docs/CYCLES-PLAN.md &sect;12, CP-c), not the raw {@link
      * #latestDetections}, so burned-in boxes track between completed inferences instead of jumping
      * — same source-timestamp timebase as {@code DetectionResult.capturedAt}, never mixed with wall
      * clock. {@link #latestDetections()} (the REST-facing surface) is unaffected — it always
-     * returns the raw latest result.
+     * returns the raw latest result. The telemetry sample comes from {@link #telemetrySampleFor()}
+     * — see that method's own javadoc for its own failure-handling.
      *
      * <p>A renderer exception is swallowed: overlay is cosmetic and must never be able to disrupt
      * the video path. The raw frame is published in that case, and at most one {@code WARNING} is
@@ -429,11 +473,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             return frame;
         }
         List<Detection> detections = extrapolator.at(frame.capturedAt());
-        if (detections.isEmpty()) {
+        Telemetry telemetry = telemetrySampleFor();
+        if (detections.isEmpty() && telemetry == null) {
             return frame;
         }
         try {
-            VideoFrame rendered = overlayPort.render(new AnnotatedFrame(frame, detections, null));
+            VideoFrame rendered = overlayPort.render(new AnnotatedFrame(frame, detections, telemetry));
             overlayFailureLogged = false;
             return rendered;
         } catch (RuntimeException e) {
@@ -443,6 +488,39 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                         + " overlay rendering failed, publishing raw frames until it recovers: " + e.getMessage());
             }
             return frame;
+        }
+    }
+
+    /**
+     * Resolves the telemetry sample to burn into this frame's OSD ({@link
+     * PipelineConfig#overlayTelemetry()}), or {@code null} when it cannot/should not run: {@link
+     * #config}{@code .overlayTelemetry()} is {@code false}, or no {@link #telemetrySupplier} was
+     * configured (both mirror how {@link #overlayIfNeeded} itself is skipped when {@link
+     * #overlayPort} is absent — this method is only ever called from there, once per published
+     * frame, so {@link #telemetrySupplier} must be cheap, an in-memory read, never blocking I/O).
+     *
+     * <p>A supplier that throws is treated exactly like "no sample right now," never a pipeline
+     * failure — telemetry burn-in is cosmetic, same as overlay rendering itself. At most one {@code
+     * WARNING} is logged per run of failures (a boolean latch, reset the next time the supplier
+     * succeeds, mirroring {@link #overlayFailureLogged}'s own throttling) so a persistently broken
+     * supplier never spams logs on every frame.
+     */
+    private Telemetry telemetrySampleFor() {
+        if (!config.overlayTelemetry() || telemetrySupplier == null) {
+            return null;
+        }
+        try {
+            Telemetry sample = telemetrySupplier.get();
+            telemetrySupplierFailureLogged = false;
+            return sample;
+        } catch (RuntimeException e) {
+            if (!telemetrySupplierFailureLogged) {
+                telemetrySupplierFailureLogged = true;
+                LOG.log(System.Logger.Level.WARNING, () -> "stream " + streamId.value()
+                        + " telemetry supplier failed, publishing without an OSD sample until it recovers: "
+                        + e.getMessage());
+            }
+            return null;
         }
     }
 

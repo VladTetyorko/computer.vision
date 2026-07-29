@@ -7,6 +7,7 @@ import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
@@ -27,6 +28,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Supplier;
 
 /**
  * The one implementation of {@link StreamService}: one supervised pipeline per stream.
@@ -109,7 +111,12 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Same as the 7-argument constructor, plus an {@link OverlayPort} collaborator threaded into
-     * every {@link StreamPipeline} this service starts (docs/MVP1-PLAN.md §C8 bullet 2).
+     * every {@link StreamPipeline} this service starts (docs/MVP1-PLAN.md §C8 bullet 2). When both
+     * this and {@code usageTracker} are present, {@link #start} also builds and threads a telemetry
+     * supplier (see that method's own comments) so {@link
+     * com.drones.vision.domain.model.PipelineConfig#overlayTelemetry()}'s OSD gate becomes
+     * reachable, closing the gap adapter-overlay/MODULE.md documented ("OSD gate not reachable" —
+     * {@code StreamPipeline} had no telemetry input at all).
      *
      * @param overlayPort nullable, following the same convention as {@code usageTracker}: {@code
      *                     null} means no overlay rendering, exactly today's behavior.
@@ -229,15 +236,25 @@ public final class DefaultStreamService implements StreamService {
             DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
                     : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
                             detectionEventRepositoryPort);
-            // docs/REALTIME-PLAN.md §4: resolved once, here, rather than re-resolved per completed
-            // detection result -- a device's owning asset does not change while its stream runs.
-            // Skipped entirely (not just discarded) when there's no LiveUpdatePublisherPort to hand
-            // the result to, so a lookup nobody will ever read is never even attempted.
-            AssetId ownerAssetId = (usageTracker == null || liveUpdatePublisherPort == null) ? null
-                    : usageTracker.resolveAsset(deviceId).orElse(null);
+            // docs/REALTIME-PLAN.md §4 / telemetry-OSD input: resolved once, here, rather than
+            // re-resolved per completed detection result / per published frame -- a device's owning
+            // asset does not change while its stream runs. Skipped entirely (not just discarded)
+            // unless something could actually read the result -- a configured LiveUpdatePublisherPort
+            // (announces every completed result), or a configured OverlayPort (may need it to build
+            // the telemetry supplier below) -- so a lookup nobody will ever read is never even
+            // attempted.
+            AssetId ownerAssetId = (usageTracker == null || (liveUpdatePublisherPort == null && overlayPort == null))
+                    ? null : usageTracker.resolveAsset(deviceId).orElse(null);
+            // Telemetry-OSD input (closes the "OSD gate not reachable" gap, see
+            // adapter-overlay/MODULE.md): only built when StreamPipeline could ever actually read it
+            // -- an OverlayPort to render through and a resolved owning asset to read telemetry for.
+            // StreamPipeline itself further gates on PipelineConfig#overlayTelemetry() per call.
+            Supplier<Telemetry> telemetrySupplier = (usageTracker != null && overlayPort != null && ownerAssetId != null)
+                    ? () -> usageTracker.latestTelemetry(ownerAssetId).orElse(null)
+                    : null;
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, supervisedSource, detectionPort,
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
-                    ownerAssetId, liveUpdatePublisherPort);
+                    ownerAssetId, liveUpdatePublisherPort, telemetrySupplier);
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pipeline, Instant.now()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,

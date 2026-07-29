@@ -1,5 +1,6 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.DetectionResult;
@@ -11,6 +12,7 @@ import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
@@ -18,6 +20,7 @@ import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
 import org.junit.jupiter.api.BeforeEach;
@@ -359,7 +362,9 @@ class DefaultStreamServiceTest {
     @Test
     void neverResolvesOrAnnouncesLiveUpdatesWhenNoLiveUpdatePublisherIsConfigured() {
         // Documents/protects the nullable-collaborator contract: usageTracker.resolveAsset must
-        // never even be called when there's no LiveUpdatePublisherPort to hand the result to.
+        // never even be called when there's neither a LiveUpdatePublisherPort to hand the result to
+        // nor an OverlayPort that could ever read a telemetry supplier built from it (see the
+        // telemetry-supplier tests below).
         UsageTracker usageTracker = mock(UsageTracker.class);
         StreamService withTracker = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker);
@@ -367,6 +372,44 @@ class DefaultStreamServiceTest {
         withTracker.start(device.id(), PipelineConfig.defaults());
 
         verify(usageTracker, never()).resolveAsset(any());
+    }
+
+    // --- Telemetry-OSD input (closes adapter-overlay/MODULE.md's "OSD gate not reachable" gap) ---
+
+    @Test
+    void resolvesTheOwningAssetAndThreadsATelemetrySupplierIntoThePipelineWhenOverlayIsConfigured() {
+        UsageTracker usageTracker = mock(UsageTracker.class);
+        AssetId assetId = AssetId.random();
+        when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
+        Telemetry sample = new Telemetry(device.id(), Instant.now(), 50.45, 30.52, 100.0, 90.0, 77.0, Map.of());
+        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(sample));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(overlayPort.render(any())).thenReturn(frame);
+        StreamService withOverlay = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, overlayPort);
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        // Never completes: with PipelineConfig.defaults()'s overlayTelemetry=true, the telemetry
+        // sample alone (no detections at all) is what must trigger overlay rendering.
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>());
+
+        withOverlay.start(device.id(), PipelineConfig.defaults());
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort).render(captor.capture());
+        assertEquals(sample, captor.getValue().telemetry());
+    }
+
+    @Test
+    void neverBuildsATelemetrySupplierWhenNoUsageTrackerIsConfiguredEvenWithAnOverlayPort() {
+        // Documents/protects the nullable-collaborator contract the other direction: an OverlayPort
+        // with no UsageTracker at all must never throw building/using a telemetry supplier.
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        StreamService withOverlayOnly = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, overlayPort);
+
+        assertDoesNotThrow(() -> withOverlayOnly.start(device.id(), PipelineConfig.defaults()));
     }
 
     /** A {@link Flow.Publisher} that delivers exactly one frame on its first {@code request()} call. */
