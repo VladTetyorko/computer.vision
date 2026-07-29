@@ -103,6 +103,35 @@ The RX-only doctrine ends only here, on purpose, with stages:
 Needs: `FlightCommandPort` (domain), TX path on the gateway socket (it's already bidirectional
 UDP), per-firmware capability matrix, U-e roles before stage 2+ (who may command what).
 
+### I-e Stage 1 — APPROVED (explicit user go, 2026-07-29) — frozen contract
+
+Wave 1 (in flight): `FlightCommandPort` (vision-domain, `supports(Device)` +
+`returnToHome(Device) -> CommandResult {ACCEPTED, NO_ACK}`, throws on unsupported
+firmware/unheard vehicle/explicit MAV_RESULT denial) + `MavlinkFlightCommander`
+(adapter-mavlink: COMMAND_LONG DO_SET_MODE via the hub's shared socket to the vehicle's
+last-heard source address, RTL mode from FlightModes by firmware+mavType, COMMAND_ACK
+await ~2s; Betaflight not commandable) + SITL smoke test (docker+image-gated).
+
+Wave 2 wire contract (frozen — waves build against this):
+- `POST /api/assets/{assetId}/return-home` (no body) →
+  - `202 {"result": "ACCEPTED" | "NO_ACK"}` — command sent (NO_ACK = UDP sent, no
+    COMMAND_ACK within timeout; honest, may still have landed);
+  - `404` unknown asset;
+  - `409 {"message": …}` — not commandable: no active mavlink telemetry device, firmware
+    without RTL capability (Betaflight/unknown), or vehicle never heard on the socket;
+  - `503`-shaped failures stay 409 with message (Stage 1 keeps one refusal code).
+- Application: `FlightCommandService` resolving asset → active mavlink device →
+  port; audit-logged via `AuditTrailPort` (action per existing audit conventions,
+  attributes {assetId, command:"RTL", result}); an `Event(COMMAND_SENT)` on the events
+  topic only if EventType growth proves trivial — else audit-only for Stage 1.
+- UI (wave 3): "Bring home" button in Fly cockpit + Command asset panel; visible only
+  when latest telemetry `flightState.firmware == "ardupilot"` (INAV masquerades as
+  ArduPilot — correct by design) and telemetry is fresh; ALWAYS a confirm dialog
+  ("Command <asset> to return home?"); result toast (ACCEPTED green / NO_ACK amber
+  "sent, no acknowledgement"); 409 message surfaced verbatim. Red-adjacent styling,
+  never auto-triggered, no keyboard shortcut (poka-yoke: commanding an aircraft is a
+  deliberate two-step act).
+
 ### I-f — fleet ops infra (future, mostly needs TX or U-e)
 Log/blackbox ingest (dataflash via MAVFTP, BF blackbox upload), parameter drift audit
 (PARAM_REQUEST_LIST fleet-wide), firmware version dashboard (AUTOPILOT_VERSION), multi-site
