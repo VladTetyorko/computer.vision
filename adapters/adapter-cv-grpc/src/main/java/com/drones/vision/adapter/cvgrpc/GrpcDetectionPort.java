@@ -86,20 +86,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * </ul>
  *
  * <h2>Payload shrinking for large BGR24 frames</h2>
- * A {@link PixelFormat#BGR24} frame wider than {@value #MAX_DETECT_WIDTH}px
- * (the full-resolution raw frames the RTSP/file RX path produces, e.g.
- * 1280&times;720 at ~2.7&nbsp;MB uncompressed) is downscaled to
- * {@value #MAX_DETECT_WIDTH}px wide (aspect preserved, integer height
- * rounding) and JPEG-encoded before being sent, as
- * {@code IMAGE_ENCODING_JPEG} with the scaled width/height. {@code JPEG}
- * frames and {@code BGR24} frames already {@value #MAX_DETECT_WIDTH}px wide
- * or narrower pass through byte-identical, exactly as before this existed.
- * Detections come back with box coordinates normalized to {@code [0,1]} and
- * are correlated purely by {@code sequence} — {@link DetectionResult} never
- * references the source frame's pixel dimensions — so <b>no coordinate
- * mapping back to the original resolution is needed or performed</b>; the
- * correlation/pending-map/session/teardown machinery below is entirely
- * unaffected by this and does not need to know it happens.
+ * A {@link PixelFormat#BGR24} frame wider than this instance's configured
+ * {@code detectWidth} (default {@value #MAX_DETECT_WIDTH}px — the
+ * full-resolution raw frames the RTSP/file RX path produces, e.g.
+ * 1280&times;720 at ~2.7&nbsp;MB uncompressed) is downscaled to exactly
+ * {@code detectWidth}px wide (aspect preserved, integer height rounding) and
+ * JPEG-encoded at this instance's configured {@code jpegQuality} (default
+ * {@value #JPEG_QUALITY}) before being sent, as {@code IMAGE_ENCODING_JPEG}
+ * with the scaled width/height — see the {@code (host, port, detectWidth,
+ * jpegQuality)}/{@code (channel, detectWidth, jpegQuality)} constructors to
+ * override either, e.g. a narrower width over a slow VPN link. {@code JPEG}
+ * frames and {@code BGR24} frames already at or narrower than
+ * {@code detectWidth} pass through byte-identical, exactly as before this
+ * existed. Detections come back with box coordinates normalized to
+ * {@code [0,1]} and are correlated purely by {@code sequence} — {@link
+ * DetectionResult} never references the source frame's pixel dimensions —
+ * so <b>no coordinate mapping back to the original resolution is needed or
+ * performed</b>; the correlation/pending-map/session/teardown machinery
+ * below is entirely unaffected by this and does not need to know it
+ * happens.
  *
  * <h2>Stream lifecycle</h2>
  * There is no idle eviction. Callers that know a stream has ended should call
@@ -133,42 +138,92 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
     static final long RESPONSE_TIMEOUT_SECONDS = 2;
 
     /**
-     * Widest a {@link PixelFormat#BGR24} frame may be before it is
+     * Default widest a {@link PixelFormat#BGR24} frame may be before it is
      * downscaled and JPEG-encoded instead of sent raw — see class javadoc's
-     * "Payload shrinking" section. Package-private, adapter-internal (not a
-     * {@code PipelineConfig} knob): it tunes the wire payload, not detection
-     * behavior, and {@code cv-service}'s own inference input size
+     * "Payload shrinking" section. Adapter-internal wire-payload tuning (not
+     * a {@code PipelineConfig} knob): it tunes the wire payload, not
+     * detection behavior, and {@code cv-service}'s own inference input size
      * (`CV_IMGSZ`, see `cv-service/MODULE.md`) is independent of it.
+     * Overridable per instance via the {@code detectWidth} constructor
+     * parameter (e.g. {@code vision.cv.detect-width}, vision-app).
      */
     static final int MAX_DETECT_WIDTH = 640;
 
-    /** JPEG quality passed to the encoder for the downscale path above; ~0.8 balances size vs. detail. */
-    private static final float JPEG_QUALITY = 0.8f;
+    /** Smallest {@code detectWidth} a constructor accepts — below this, detection quality degrades sharply. */
+    static final int MIN_DETECT_WIDTH = 64;
+
+    /**
+     * Default JPEG quality passed to the encoder for the downscale path
+     * above; ~0.8 balances size vs. detail. Overridable per instance via the
+     * {@code jpegQuality} constructor parameter (e.g. {@code
+     * vision.cv.jpeg-quality}, vision-app).
+     */
+    static final float JPEG_QUALITY = 0.8f;
 
     private static final long CHANNEL_SHUTDOWN_TIMEOUT_SECONDS = 5;
 
     private final ManagedChannel channel;
     private final InferenceGrpc.InferenceStub asyncStub;
+    private final int detectWidth;
+    private final float jpegQuality;
     private final ConcurrentHashMap<StreamId, StreamSession> sessions = new ConcurrentHashMap<>();
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
      * Convenience constructor: builds a plaintext {@link ManagedChannel} to
-     * {@code host:port}. The CV service is reached over a private/internal
-     * network (docker-compose) so plaintext is deliberate, not an oversight.
+     * {@code host:port} with the default wire-tuning knobs ({@value
+     * #MAX_DETECT_WIDTH}px / {@value #JPEG_QUALITY} quality). The CV service
+     * is reached over a private/internal network (docker-compose) so
+     * plaintext is deliberate, not an oversight.
      */
     public GrpcDetectionPort(String host, int port) {
-        this(ManagedChannelBuilder.forAddress(host, port).usePlaintext().build());
+        this(host, port, MAX_DETECT_WIDTH, JPEG_QUALITY);
+    }
+
+    /**
+     * Like {@link #GrpcDetectionPort(String, int)}, but with explicit
+     * wire-tuning knobs — see class javadoc's "Payload shrinking" section
+     * and {@link #GrpcDetectionPort(ManagedChannel, int, float)} for the
+     * validated parameters.
+     */
+    public GrpcDetectionPort(String host, int port, int detectWidth, float jpegQuality) {
+        this(ManagedChannelBuilder.forAddress(host, port).usePlaintext().build(), detectWidth, jpegQuality);
     }
 
     /**
      * Test/advanced seam: bring your own channel (e.g. an in-process channel
-     * in tests). {@link #close()} shuts this channel down regardless of who
-     * built it.
+     * in tests) with the default wire-tuning knobs ({@value
+     * #MAX_DETECT_WIDTH}px / {@value #JPEG_QUALITY} quality). {@link
+     * #close()} shuts this channel down regardless of who built it.
      */
     public GrpcDetectionPort(ManagedChannel channel) {
+        this(channel, MAX_DETECT_WIDTH, JPEG_QUALITY);
+    }
+
+    /**
+     * Canonical constructor: bring your own channel and wire-tuning knobs.
+     * {@link #close()} shuts this channel down regardless of who built it.
+     *
+     * @param detectWidth widest a {@link PixelFormat#BGR24} frame may be
+     *                    before it is downscaled+JPEG-encoded (see class
+     *                    javadoc's "Payload shrinking" section); must be
+     *                    {@code >= }{@value #MIN_DETECT_WIDTH}
+     * @param jpegQuality JPEG encoder quality for the downscale path; must
+     *                    be in {@code (0, 1]}
+     * @throws IllegalArgumentException if either parameter is out of range
+     */
+    public GrpcDetectionPort(ManagedChannel channel, int detectWidth, float jpegQuality) {
         this.channel = Objects.requireNonNull(channel, "channel must not be null");
         this.asyncStub = InferenceGrpc.newStub(channel);
+        if (detectWidth < MIN_DETECT_WIDTH) {
+            throw new IllegalArgumentException(
+                    "detectWidth must be >= " + MIN_DETECT_WIDTH + ", was " + detectWidth);
+        }
+        if (jpegQuality <= 0f || jpegQuality > 1f) {
+            throw new IllegalArgumentException("jpegQuality must be in (0,1], was " + jpegQuality);
+        }
+        this.detectWidth = detectWidth;
+        this.jpegQuality = jpegQuality;
     }
 
     @Override
@@ -188,7 +243,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
         FrameRequest request;
         try {
-            request = buildRequest(frame, config, encoding);
+            request = buildRequest(frame, config, encoding, detectWidth, jpegQuality);
         } catch (IOException | RuntimeException e) {
             // Conversion (downscale/JPEG-encode) failure: fails only this frame's stage, exactly
             // like a malformed response does for one pending future -- no session is created or
@@ -248,14 +303,14 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
     /**
      * Builds the wire request, downscaling+JPEG-re-encoding a {@code BGR24}
-     * frame wider than {@value #MAX_DETECT_WIDTH}px first (see class
-     * javadoc's "Payload shrinking" section). Everything else passes through
+     * frame wider than {@code detectWidth}px first (see class javadoc's
+     * "Payload shrinking" section). Everything else passes through
      * unchanged. Runs synchronously on the caller thread.
      *
      * @throws IOException if the JPEG encoder fails (see {@link #encodeJpeg})
      */
-    private static FrameRequest buildRequest(VideoFrame frame, PipelineConfig config, ImageEncoding encoding)
-            throws IOException {
+    private static FrameRequest buildRequest(VideoFrame frame, PipelineConfig config, ImageEncoding encoding,
+                                              int detectWidth, float jpegQuality) throws IOException {
         FrameRequest.Builder builder = FrameRequest.newBuilder()
                 .setStreamId(frame.streamId().value().toString())
                 .setSequence(frame.sequence())
@@ -264,8 +319,8 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
                 .setModelVersion(config.model().version())
                 .setConfidenceThreshold((float) config.confidenceThreshold());
 
-        if (encoding == ImageEncoding.IMAGE_ENCODING_BGR24 && frame.width() > MAX_DETECT_WIDTH) {
-            return withDownscaledJpeg(builder, frame);
+        if (encoding == ImageEncoding.IMAGE_ENCODING_BGR24 && frame.width() > detectWidth) {
+            return withDownscaledJpeg(builder, frame, detectWidth, jpegQuality);
         }
 
         return builder
@@ -276,10 +331,10 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
                 .build();
     }
 
-    private static FrameRequest withDownscaledJpeg(FrameRequest.Builder builder, VideoFrame frame)
-            throws IOException {
-        int scaledWidth = MAX_DETECT_WIDTH;
-        int scaledHeight = Math.round((float) frame.height() * MAX_DETECT_WIDTH / frame.width());
+    private static FrameRequest withDownscaledJpeg(FrameRequest.Builder builder, VideoFrame frame,
+                                                    int detectWidth, float jpegQuality) throws IOException {
+        int scaledWidth = detectWidth;
+        int scaledHeight = Math.round((float) frame.height() * detectWidth / frame.width());
 
         BufferedImage source = wrapBgr24(frame.width(), frame.height(), frame.data());
         BufferedImage scaled = new BufferedImage(scaledWidth, scaledHeight, BufferedImage.TYPE_3BYTE_BGR);
@@ -291,7 +346,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
             g.dispose();
         }
 
-        byte[] jpeg = encodeJpeg(scaled);
+        byte[] jpeg = encodeJpeg(scaled, jpegQuality);
         return builder
                 .setWidth(scaledWidth)
                 .setHeight(scaledHeight)
@@ -314,8 +369,8 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
         return image;
     }
 
-    /** Encodes {@code image} as a JPEG at {@value #JPEG_QUALITY} quality via an explicit ImageWriter. */
-    private static byte[] encodeJpeg(BufferedImage image) throws IOException {
+    /** Encodes {@code image} as a JPEG at {@code jpegQuality} via an explicit ImageWriter. */
+    private static byte[] encodeJpeg(BufferedImage image, float jpegQuality) throws IOException {
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
         if (!writers.hasNext()) {
             throw new IOException("No JPEG ImageWriter available on this JVM");
@@ -324,7 +379,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
         try {
             JPEGImageWriteParam param = new JPEGImageWriteParam(null);
             param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-            param.setCompressionQuality(JPEG_QUALITY);
+            param.setCompressionQuality(jpegQuality);
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             try (ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {

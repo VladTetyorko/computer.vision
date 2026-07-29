@@ -26,11 +26,22 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
  * EventPublisherPort} decorator ({@link LiveUpdateEventPublisher}, which would otherwise wrap
  * {@link DetectionSessionCleanupEventPublisher} one layer further out by default) — see {@link
  * LiveWiringTest}/{@link LiveDisabledWiringTest} for that feature's own coverage.
+ *
+ * <p>{@code vision.cv.detect-width}/{@code vision.cv.jpeg-quality} (docs/REMOTE-CV-PLAN.md P1
+ * item 5) are set here to non-default values purely to prove Spring binds the kebab-case
+ * property names onto {@link VisionCvProperties#detectWidth()}/{@link
+ * VisionCvProperties#jpegQuality()} and the context still starts cleanly with them threaded into
+ * {@code WiringConfiguration#detectionPort} — {@code GrpcDetectionPort} exposes no getter for
+ * either (they only affect wire behavior, asserted directly in adapter-cv-grpc's own {@code
+ * GrpcDetectionPortTest}), so a successful context load plus the {@code GrpcDetectionPort}
+ * {@code instanceof} check below is the full extent of what this class can observe.
  */
 @SpringBootTest(properties = {
         "vision.publish.enabled=false",
         "vision.cv.enabled=true",
         "vision.cv.endpoint=localhost:59321",
+        "vision.cv.detect-width=480",
+        "vision.cv.jpeg-quality=0.6",
         "vision.live.enabled=false"
 })
 class CvEnabledWiringTest {

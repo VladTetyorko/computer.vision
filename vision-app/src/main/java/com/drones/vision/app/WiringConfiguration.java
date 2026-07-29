@@ -298,7 +298,10 @@ public class WiringConfiguration {
      * Selects the {@link DetectionPort} implementation per {@link VisionCvProperties#enabled()}
      * (docs/MVP1-PLAN.md §C7 bullet 4): {@code true} wires {@code GrpcDetectionPort}
      * (adapter-cv-grpc) against {@link VisionCvProperties#host()}/{@link
-     * VisionCvProperties#port()}; {@code false} (the default) keeps today's {@link
+     * VisionCvProperties#port()}, with its wire-tuning knobs from {@link
+     * VisionCvProperties#detectWidth()}/{@link VisionCvProperties#jpegQuality()}
+     * (docs/REMOTE-CV-PLAN.md P1 item 5 — e.g. a narrower {@code detectWidth} over a slow VPN
+     * link needs no rebuild); {@code false} (the default) keeps today's {@link
      * NoopDetectionPort}. No explicit {@code destroyMethod} is declared here — {@code @Bean}'s
      * default {@code "(inferred)"} destroy method already detects and calls a public no-arg
      * {@code close()}/{@code shutdown()} on whichever concrete type the bean actually is at
@@ -311,7 +314,8 @@ public class WiringConfiguration {
     @Bean
     public DetectionPort detectionPort(VisionCvProperties cvProperties) {
         if (cvProperties.enabled()) {
-            return new GrpcDetectionPort(cvProperties.host(), cvProperties.port());
+            return new GrpcDetectionPort(cvProperties.host(), cvProperties.port(),
+                    cvProperties.detectWidth(), cvProperties.jpegQuality());
         }
         return new NoopDetectionPort();
     }
