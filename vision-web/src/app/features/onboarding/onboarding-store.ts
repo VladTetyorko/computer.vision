@@ -15,10 +15,20 @@ import {
   buildTestDroneRequest,
   type SimulateMode,
 } from '../../core/fleet/simulation-logic';
-import { buildMavlinkScanRequest, isClaimedVehicle, prefillFromVehicle } from './drone-scan-logic';
+import { buildMavlinkScanRequest, isClaimedVehicle } from './drone-scan-logic';
+import {
+  buildDroneDeviceSpec,
+  linkCompatibility,
+  configSnippets,
+  type ConfigBlock,
+  type Firmware,
+  type LinkCompatibility,
+  type LinkType,
+} from './drone-config-logic';
 import { buildTelemetryRequest, type FlightPlanForm } from '../../shared/map/flight-plan-logic';
 import type {
   DiscoveredDevice,
+  NetworkAddress,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   ScanResult,
@@ -51,6 +61,14 @@ interface OptionRow {
 
 /** Scan durations worth offering — mirrors the pre-wizard Devices page's own choice exactly. */
 const SCAN_TIMEOUTS = [2_000, 4_000, 8_000] as const;
+
+/**
+ * The MAVLink heartbeat scanner's well-known listen port (docs/DRONE-INFRA-PLAN.md I-g) — used only
+ * as `mavlinkPort`'s initial value until `GET /api/system/network` resolves, so the "configure your
+ * drone" sub-step never renders with an empty port while the request is in flight. Every real value
+ * comes from the network response itself (`SystemNetworkResponse#mavlinkPort`), never assumed.
+ */
+const DEFAULT_MAVLINK_PORT = 14_550;
 
 /** Shown under the Simulate mode selector — one sentence per mode, docs/CYCLES-PLAN.md §4's own wording. */
 const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
@@ -264,26 +282,115 @@ export class OnboardingStore {
    * path). A no-op for an already-claimed vehicle (the UI never offers this action for one, but a
    * defensive check costs nothing — see `isClaimedVehicle`'s own doc comment for why one can exist
    * in the results list at all).
+   *
+   * **The one shared "Use" handler for both entry points that reach the `listen` method**
+   * (docs/DRONE-INFRA-PLAN.md I-g's own "listen is the scan" wording — the guided `drone` method
+   * hands off to this exact method/UI verbatim once configured, see `finishDroneConfigAndListen`
+   * below): protocol/uri/options come from `buildDroneDeviceSpec` (`drone-config-logic.ts`), pinned
+   * to this platform's own authoritative `mavlinkPort` (from `GET /api/system/network`) rather than
+   * trusting the scan candidate's own echoed `uri`/`address` — strictly more robust (a candidate with
+   * no `uri` at all previously fell back to its raw `address`, which is not always a well-formed
+   * `udp://` URI), and it's what "the pin that makes multi-drone-on-one-port work (I-a)" means in
+   * practice. `suggestedCategory` still comes straight off the candidate — `drone-scan-logic.ts`'s own
+   * `prefillFromVehicle` is unaffected by this change and stays fully in use/tested for its own direct
+   * callers and coverage elsewhere in this module's test surface.
    */
   useDroneVehicle(candidate: DiscoveredDevice): void {
     if (isClaimedVehicle(candidate)) {
       return;
     }
-    const prefill = prefillFromVehicle(candidate);
-    const selection = protocolSelectionFor(prefill.protocol);
+    const spec = buildDroneDeviceSpec(candidate, this.mavlinkPort());
+    const selection = protocolSelectionFor(spec.protocol);
     this.protocolSelect.set(selection.select);
     this.customProtocol.set(selection.custom);
-    this.uri.set(prefill.uri);
-    this.options.set(
-      prefill.options ? Object.entries(prefill.options).map(([key, value]) => ({ key, value })) : [],
-    );
+    this.uri.set(spec.uri);
+    this.options.set(spec.options ? Object.entries(spec.options).map(([key, value]) => ({ key, value })) : []);
     this.connectMethod.set('register');
     if (this.displayName().trim().length === 0) {
       this.displayName.set(candidate.name);
     }
-    if (prefill.suggestedCategory && this.category().trim().length === 0) {
-      this.chooseCategory(prefill.suggestedCategory);
+    if (candidate.suggestedCategory && this.category().trim().length === 0) {
+      this.chooseCategory(candidate.suggestedCategory);
     }
+  }
+
+  // --- Connect: "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g, wave B) — the guided firmware×link
+  //     picker + parameterized copy-paste config, both sub-states of this one Connect step
+  //     (deliberately not added to `onboarding-logic.ts#WizardStep`, per the plan's own "minimize new
+  //     wizard-state surface" instruction). Once configured, `finishDroneConfigAndListen` hands off to
+  //     the existing `listen` method above verbatim — no second scanner, no second vehicle-list UI. ---
+
+  /**
+   * `'picker'` (firmware×link + compatibility verdict) → `'config'` (the parameterized snippets).
+   * Not part of `WizardStep` — this is purely "where inside the Connect step's `drone` method are we",
+   * the same relationship `connectMethod` itself already has to `WizardStep`.
+   */
+  readonly droneSubStep = signal<'picker' | 'config'>('picker');
+  readonly droneFirmware = signal<Firmware | null>(null);
+  readonly droneLink = signal<LinkType | null>(null);
+
+  readonly networkAddresses = signal<readonly NetworkAddress[]>([]);
+  readonly mavlinkPort = signal<number>(DEFAULT_MAVLINK_PORT);
+  /** The address actually used to render snippets — pre-selected from `networkAddresses`, editable
+   *  (manual-entry fallback) when that list came back empty. */
+  readonly selectedServerAddress = signal<string>('');
+
+  readonly droneCompatibility = computed<LinkCompatibility | null>(() => {
+    const firmware = this.droneFirmware();
+    const link = this.droneLink();
+    return firmware && link ? linkCompatibility(firmware, link) : null;
+  });
+
+  /** Re-renders live off `selectedServerAddress` — editing the address selector recomputes every block. */
+  readonly droneConfigBlocks = computed<readonly ConfigBlock[]>(() => {
+    const firmware = this.droneFirmware();
+    const link = this.droneLink();
+    const address = this.selectedServerAddress().trim();
+    if (!firmware || !link || address.length === 0) {
+      return [];
+    }
+    return configSnippets(firmware, link, address, this.mavlinkPort());
+  });
+
+  chooseDroneMethod(): void {
+    this.connectMethod.set('drone');
+    this.droneSubStep.set('picker');
+  }
+
+  chooseDroneFirmware(firmware: Firmware): void {
+    this.droneFirmware.set(firmware);
+  }
+
+  chooseDroneLink(link: LinkType): void {
+    this.droneLink.set(link);
+  }
+
+  setSelectedServerAddress(address: string): void {
+    this.selectedServerAddress.set(address);
+  }
+
+  /** Poka-yoke mirrors the picker's own disabled Continue button — a `no-go` combo can't advance here either. */
+  continueToDroneConfig(): void {
+    if (this.droneCompatibility()?.level === 'no-go') {
+      return;
+    }
+    this.droneSubStep.set('config');
+  }
+
+  backFromDroneConfig(): void {
+    this.droneSubStep.set('picker');
+  }
+
+  /**
+   * The hand-off (docs/DRONE-INFRA-PLAN.md I-g step 3, "listen is the scan"): switches straight to
+   * the existing `listen` method and starts its scan, exactly as if the operator had picked that
+   * tile directly from the method grid. Everything past this point — the vehicle list, claimed-vehicle
+   * dimming, `useDroneVehicle`'s "Use" pivot to `register`, probe, create — is the pre-existing I-b
+   * flow, entirely unmodified by this method.
+   */
+  async finishDroneConfigAndListen(): Promise<void> {
+    this.connectMethod.set('listen');
+    await this.scanForDrones();
   }
 
   // --- Connect: simulate -----------------------------------------------------------------------
@@ -536,6 +643,7 @@ export class OnboardingStore {
 
   constructor() {
     void this.loadCategoryOptions();
+    void this.loadSystemNetwork();
     inject(DestroyRef).onDestroy(() => this.revokePreview());
   }
 
@@ -545,6 +653,28 @@ export class OnboardingStore {
       this.categoryOptions.set(deriveCategoryOptions(assets));
     } catch {
       // Silent-degrade — the fallback list (DEFAULT_CATEGORY_OPTIONS) is already in place.
+    }
+  }
+
+  /**
+   * Fetched once, up front, so the "configure your drone" sub-step's snippets are ready to render
+   * the moment the operator gets there (docs/DRONE-INFRA-PLAN.md I-g) — not fetched lazily on first
+   * pick, which would show a blank/loading config panel on an otherwise-instant step transition.
+   * Silent-degrade on failure exactly like `loadCategoryOptions` above: `mavlinkPort` keeps its
+   * `DEFAULT_MAVLINK_PORT` fallback and `networkAddresses` stays `[]`, which is the same UI state
+   * `SystemNetworkResponse#addresses` being genuinely empty already has to handle (the manual-address
+   * input) — no separate error state needed.
+   */
+  private async loadSystemNetwork(): Promise<void> {
+    try {
+      const network = await this.api.systemNetwork();
+      this.networkAddresses.set(network.addresses);
+      this.mavlinkPort.set(network.mavlinkPort);
+      if (network.addresses.length > 0) {
+        this.selectedServerAddress.set(network.addresses[0].address);
+      }
+    } catch {
+      // Silent-degrade — see this method's own doc comment.
     }
   }
 }

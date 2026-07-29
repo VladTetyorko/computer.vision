@@ -234,6 +234,31 @@
     background: var(--accent);
 }
 
+/* "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — a quadcopter-arm cross, distinct from every
+   other glyph's circular/ring motif above (this is the one method whose whole point is real
+   hardware, not a scan or a synthetic source). No base circle: the `::before`/`::after` bars alone
+   read as an "X" of rotor arms. */
+.glyph-drone {
+    border: none;
+}
+
+.glyph-drone::before,
+.glyph-drone::after {
+    content: "";
+    position: absolute;
+    inset: 3px 9px;
+    border-radius: 2px;
+    background: var(--accent);
+}
+
+.glyph-drone::before {
+    transform: rotate(45deg);
+}
+
+.glyph-drone::after {
+    transform: rotate(-45deg);
+}
+
 .method-title {
     font-weight: 600;
     color: var(--text);
@@ -380,6 +405,38 @@ td.actions {
 
 .vehicle-actions .disabled-reason {
     margin-top: 0;
+}
+
+/* ---- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) --------------------------------------- */
+
+.drone-compat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0.85rem;
+}
+
+.config-block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: 0.75rem 0.9rem;
+    margin-bottom: 0.75rem;
+}
+
+.config-body {
+    margin: 0.6rem 0 0;
+    padding: 0.6rem 0.7rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 16rem;
+    overflow-y: auto;
 }
 
 .flight-plan-summary {

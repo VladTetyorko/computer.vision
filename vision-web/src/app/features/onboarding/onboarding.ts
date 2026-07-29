@@ -2,10 +2,19 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { SettingsStore } from '../../core/settings/settings-store';
+import { ToastService } from '../../core/toast.service';
 import { FlightPlanDialog } from '../../shared/map/fleet-plan-dialog/flight-plan-dialog';
 import { OnboardingStore } from './onboarding-store';
 import { WIZARD_STEPS, type ConnectMethod, type WizardStep } from './onboarding-logic';
 import { isClaimedVehicle, vehicleDetailChips, type VehicleDetailChip } from './drone-scan-logic';
+import {
+  FIRMWARES,
+  FIRMWARE_LABELS,
+  LINKS,
+  LINK_HINTS,
+  LINK_LABELS,
+  type ConfigBlock,
+} from './drone-config-logic';
 import type { DiscoveredDevice } from '../../core/api/models';
 
 interface StepDescriptor {
@@ -25,6 +34,7 @@ const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
   discover: 'Discover on network',
   simulate: 'Simulate',
   listen: 'Listen for drones',
+  drone: 'Add a real drone',
 };
 
 /**
@@ -51,6 +61,7 @@ const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
 export class OnboardingPage {
   protected readonly store = inject(OnboardingStore);
   protected readonly settings = inject(SettingsStore);
+  private readonly toasts = inject(ToastService);
 
   protected readonly steps: readonly StepDescriptor[] = WIZARD_STEPS.map((step) => ({
     step,
@@ -58,6 +69,15 @@ export class OnboardingPage {
   }));
 
   protected readonly connectMethodLabels = CONNECT_METHOD_LABELS;
+
+  // --- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — the picker's own option lists/labels,
+  //     same "defined in the component, not the store" convention `CONNECT_METHOD_LABELS`/`STEP_LABELS`
+  //     already follow above.
+  protected readonly firmwareOptions = FIRMWARES;
+  protected readonly linkOptions = LINKS;
+  protected readonly firmwareLabels = FIRMWARE_LABELS;
+  protected readonly linkLabels = LINK_LABELS;
+  protected readonly linkHints = LINK_HINTS;
 
   protected readonly categoryName = computed(() => {
     const slug = this.store.category();
@@ -70,6 +90,11 @@ export class OnboardingPage {
       case 'register':
       case 'discover':
       case 'listen':
+      case 'drone':
+        // 'drone' never actually reaches Create — it always hands off to 'listen' first
+        // (`OnboardingStore#finishDroneConfigAndListen`), which itself always pivots to 'register'
+        // on "Use" — kept as a real branch anyway, same "unreachable in practice, still correct"
+        // precedent 'discover'/'listen' already established here.
         return `${this.store.protocol()} — ${this.store.uri()}`;
       case 'simulate':
         return this.simulateSummary();
@@ -117,5 +142,48 @@ export class OnboardingPage {
       void this.store.choosePhoto(file);
     }
     input.value = ''; // lets the same file be re-selected later (e.g. right after "Remove")
+  }
+
+  // --- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) -------------------------------------------
+
+  /**
+   * The Connect step's "‹ back" row is shared by every method (`onboarding.html`'s
+   * `.method-chosen-row`); for `drone` specifically it must step back one sub-state
+   * (`config` → `picker`) before falling through to the generic "leave this method entirely" — every
+   * other method has only one sub-state, so this is the one place that distinction matters.
+   */
+  protected onConnectBack(): void {
+    if (this.store.connectMethod() === 'drone' && this.store.droneSubStep() === 'config') {
+      this.store.backFromDroneConfig();
+      return;
+    }
+    this.store.connectMethod.set(null);
+  }
+
+  /**
+   * Copies one config block's body (docs/DRONE-INFRA-PLAN.md I-g) — mirrors
+   * `shared/player/stream-info-panel.ts#copyViewUrl`'s existing `navigator.clipboard` + toast
+   * try/catch precedent verbatim rather than inventing a second clipboard affordance.
+   */
+  protected async copyBlock(block: ConfigBlock): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(block.body);
+      this.toasts.ok(`"${block.title}" copied.`);
+    } catch {
+      this.toasts.error('Could not copy automatically — select the text above and copy it manually.');
+    }
+  }
+
+  /** Client-side `Blob` → `<a download>` (docs/DRONE-INFRA-PLAN.md I-g) — only blocks with a `filename` offer this. */
+  protected downloadBlock(block: ConfigBlock): void {
+    if (!block.filename) {
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([block.body], { type: 'text/plain' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = block.filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 }

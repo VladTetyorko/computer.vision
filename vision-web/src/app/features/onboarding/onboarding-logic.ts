@@ -31,8 +31,19 @@ export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test'
  * vehicle flips the method to `register` with the connect form prefilled
  * (`OnboardingStore#useDroneVehicle`), the same "candidate → register" pivot `discover` already
  * uses.
+ *
+ * `drone` (docs/DRONE-INFRA-PLAN.md I-g, wave B — "Add a real drone") is a fifth tile: a guided
+ * firmware×link picker plus parameterized copy-paste config snippets
+ * (`drone-config-logic.ts#linkCompatibility`/`configSnippets`), entirely **sub-states of this one
+ * Connect step** (`OnboardingStore#droneSubStep`, `'picker' | 'config'`, deliberately not part of
+ * this file's own `WizardStep` machine — see that signal's own doc comment). It behaves exactly
+ * like `discover`/`listen` in every gate below too — never itself advanceable — for the identical
+ * reason: once the operator has configured the aircraft, `OnboardingStore#finishDroneConfigAndListen`
+ * flips the method straight to `listen`, handing off to that method's own already-existing scan/
+ * pick/register-pivot flow verbatim (per the plan's own "listen is the scan" wording — no second
+ * scanner, no second vehicle-list UI). `drone` therefore never itself reaches `test`/`create`.
  */
-export type ConnectMethod = 'register' | 'discover' | 'simulate' | 'listen';
+export type ConnectMethod = 'register' | 'discover' | 'simulate' | 'listen' | 'drone';
 
 /**
  * The next step for the wizard's own forward-only "Next"/submit action. `simulate` skips `test`
@@ -90,9 +101,10 @@ export interface ConnectDraft {
 
 /**
  * Connect step: `register` needs a protocol and a URI (mirrors the pre-wizard Register form's own
- * `canSubmit`); `discover`/`listen` alone (no candidate chosen yet — see {@link ConnectMethod}'s doc
- * comment) never satisfy this, since neither carries a protocol/URI of its own until "Use" flips the
- * method to `register`; `simulate` needs a video path only for the two file-based modes.
+ * `canSubmit`); `discover`/`listen`/`drone` alone (no candidate chosen yet — see
+ * {@link ConnectMethod}'s doc comment) never satisfy this, since none of the three carries a
+ * protocol/URI of its own until "Use" flips the method to `register`; `simulate` needs a video path
+ * only for the two file-based modes.
  */
 export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
   switch (draft.method) {
@@ -102,6 +114,7 @@ export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
       return !simulateNeedsVideoPath(draft.simMode) || draft.simVideoPath.trim().length > 0;
     case 'discover':
     case 'listen':
+    case 'drone':
     case null:
       return false;
   }

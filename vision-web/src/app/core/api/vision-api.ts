@@ -27,6 +27,7 @@ import type {
   StartSimulationRequest,
   StartStreamRequest,
   StartStreamResult,
+  SystemNetworkResponse,
   TelemetrySample,
   UpdateLiveTopicsRequest,
   UsageRecording,
@@ -413,5 +414,19 @@ export class VisionApi {
     return firstValueFrom(
       this.http.post<ReturnHomeResponse>(`/api/assets/${encodeURIComponent(assetId)}/return-home`, {}),
     );
+  }
+
+  // --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -----------
+
+  /**
+   * This platform's own reachable LAN address(es) + the MAVLink heartbeat scanner's listen port —
+   * backs the onboarding wizard's "Add a real drone" Connect method: every generated config
+   * snippet is parameterized by these so the operator never types an address
+   * (`features/onboarding/drone-config-logic.ts#configSnippets`). Always `200`, even with an empty
+   * `addresses` list (`SystemNetworkResponse`'s own doc comment) — no try/catch special-casing
+   * needed here, the wizard's own store degrades on either an empty list or a rejected promise.
+   */
+  systemNetwork(): Promise<SystemNetworkResponse> {
+    return firstValueFrom(this.http.get<SystemNetworkResponse>('/api/system/network'));
   }
 }

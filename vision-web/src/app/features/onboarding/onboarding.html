@@ -142,14 +142,22 @@
               <span class="method-title">Listen for drones</span>
               <span class="method-sub">Scan for MAVLink heartbeats on UDP 14550 — no typing, no sysid.</span>
             </button>
+            <button type="button" class="method-tile" (click)="store.chooseDroneMethod()">
+              <span class="method-glyph glyph-drone" aria-hidden="true"></span>
+              <span class="method-title">Add a real drone</span>
+              <span class="method-sub">
+                Betaflight/INAV/ArduPilot, guided — copy-paste settings with this platform's own
+                address and port already filled in.
+              </span>
+            </button>
           </div>
         } @else {
           <div class="row method-chosen-row">
             <button
               type="button"
               class="btn secondary small back-btn"
-              (click)="store.connectMethod.set(null)"
-              aria-label="Back to connect methods"
+              (click)="onConnectBack()"
+              aria-label="Back"
             >
               ‹
             </button>
@@ -393,6 +401,154 @@
               }
             }
 
+            <!-- ---- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — a guided firmware×link picker
+                 then parameterized copy-paste config, both sub-states of this one method (not a
+                 WizardStep of their own — see onboarding-logic.ts's ConnectMethod doc comment).
+                 Finishing the config hands off straight to the "listen" case above, verbatim. -->
+            @case ('drone') {
+              @switch (store.droneSubStep()) {
+                @case ('picker') {
+                  <p class="muted hint">
+                    Pick the firmware and the link carrying its MAVLink telemetry — every combination
+                    maps to one recipe from <code>infra/edge/</code>, labeled honestly when it's
+                    degraded or not supported.
+                  </p>
+
+                  <div class="field">
+                    <span class="label">Firmware</span>
+                    <div class="segmented" role="group" aria-label="Firmware">
+                      @for (firmware of firmwareOptions; track firmware) {
+                        <button
+                          type="button"
+                          class="btn secondary small"
+                          [class.active]="store.droneFirmware() === firmware"
+                          (click)="store.chooseDroneFirmware(firmware)"
+                        >
+                          {{ firmwareLabels[firmware] }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <span class="label">Link</span>
+                    <div class="segmented" role="group" aria-label="Link">
+                      @for (link of linkOptions; track link) {
+                        <button
+                          type="button"
+                          class="btn secondary small"
+                          [class.active]="store.droneLink() === link"
+                          (click)="store.chooseDroneLink(link)"
+                        >
+                          {{ linkLabels[link] }}
+                        </button>
+                      }
+                    </div>
+                    @if (store.droneLink(); as link) {
+                      <p class="muted hint">{{ linkHints[link] }}</p>
+                    }
+                  </div>
+
+                  @if (store.droneCompatibility(); as compat) {
+                    <div class="drone-compat">
+                      <span
+                        class="chip"
+                        [class.ok]="compat.level === 'full'"
+                        [class.warn]="compat.level === 'monitor-only'"
+                        [class.danger]="compat.level === 'no-go'"
+                      >
+                        @switch (compat.level) {
+                          @case ('full') { Full support }
+                          @case ('monitor-only') { Monitor-only }
+                          @case ('no-go') { Not supported }
+                        }
+                      </span>
+                      <p class="muted hint">{{ compat.note }}</p>
+                    </div>
+
+                    <div class="row">
+                      <button
+                        type="button"
+                        class="btn"
+                        [disabled]="compat.level === 'no-go'"
+                        (click)="store.continueToDroneConfig()"
+                      >
+                        Continue to configuration
+                      </button>
+                    </div>
+                    @if (compat.level === 'no-go') {
+                      <p class="disabled-reason">
+                        This combination can't carry MAVLink telemetry today — pick a different
+                        firmware or link.
+                      </p>
+                    }
+                  } @else {
+                    <p class="disabled-reason">Choose both a firmware and a link to see compatibility.</p>
+                  }
+                }
+
+                @case ('config') {
+                  <p class="muted hint">
+                    Copy these onto the aircraft/link — this platform's own reachable address and
+                    MAVLink port are already filled in below.
+                  </p>
+
+                  <div class="field">
+                    <label class="label" for="drone-address">This platform's address</label>
+                    @if (store.networkAddresses().length > 0) {
+                      <select
+                        id="drone-address"
+                        name="droneAddress"
+                        [ngModel]="store.selectedServerAddress()"
+                        (ngModelChange)="store.setSelectedServerAddress($event)"
+                      >
+                        @for (addr of store.networkAddresses(); track addr.address) {
+                          <option [value]="addr.address">{{ addr.address }} ({{ addr.interfaceName }})</option>
+                        }
+                      </select>
+                    } @else {
+                      <input
+                        id="drone-address"
+                        name="droneAddress"
+                        [ngModel]="store.selectedServerAddress()"
+                        (ngModelChange)="store.setSelectedServerAddress($event)"
+                        placeholder="Couldn't detect an address — enter this host's LAN IP"
+                      />
+                    }
+                    <p class="muted hint">
+                      MAVLink port <span class="mono">{{ store.mavlinkPort() }}</span>
+                      @if (store.networkAddresses().length > 1) {
+                        — multiple network interfaces detected, switch above if this isn't the right one.
+                      }
+                    </p>
+                  </div>
+
+                  @for (block of store.droneConfigBlocks(); track block.title) {
+                    <div class="config-block">
+                      <div class="spread">
+                        <h3>{{ block.title }}</h3>
+                        <div class="row">
+                          <button type="button" class="btn secondary small" (click)="copyBlock(block)">Copy</button>
+                          @if (block.filename) {
+                            <button type="button" class="btn secondary small" (click)="downloadBlock(block)">
+                              Download {{ block.filename }}
+                            </button>
+                          }
+                        </div>
+                      </div>
+                      <pre class="config-body mono">{{ block.body }}</pre>
+                    </div>
+                  }
+
+                  <div class="row">
+                    <button type="button" class="btn" (click)="store.finishDroneConfigAndListen()">
+                      Continue — listen for it
+                    </button>
+                  </div>
+                }
+              }
+            }
+
             @case ('simulate') {
               <div class="field wide">
                 <label class="label" for="sim-mode">Mode</label>
@@ -506,6 +662,9 @@
               }
               @case ('listen') {
                 Pick "Use" on a heard vehicle, or switch to Register manually.
+              }
+              @case ('drone') {
+                Finish the picker and configuration steps above, then listen for the vehicle.
               }
               @case ('register') {
                 Enter a protocol and a URI.

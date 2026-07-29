@@ -812,3 +812,28 @@ export type ReturnHomeResult = 'ACCEPTED' | 'NO_ACK';
 export interface ReturnHomeResponse {
   readonly result: ReturnHomeResult;
 }
+
+// --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) --------------
+
+/** One site-local IPv4 address this platform's host is reachable on. Mirrors `dto.NetworkAddressResponse`. */
+export interface NetworkAddress {
+  readonly address: string;
+  readonly interfaceName: string;
+}
+
+/**
+ * Mirrors `dto.SystemNetworkResponse`, the body of `GET /api/system/network` (docs/DRONE-INFRA-PLAN.md
+ * I-g's frozen wire contract) — every site-local IPv4 address of an up, non-loopback interface, sorted
+ * by interface name, plus the MAVLink heartbeat scanner's own listen port (shared with the backend's
+ * `vision.discovery.mavlink-port` property so the two can never disagree). This is what lets the
+ * onboarding wizard's "Add a real drone" config snippets carry this platform's own reachable
+ * address/port instead of asking the operator to type one in (`features/onboarding/drone-config-logic.ts#configSnippets`).
+ *
+ * `addresses` is never absent, but **may be empty** — a host with no detectable site-local interface
+ * is not an error (the plan's own wording: "Never errors for 'no addresses'"); the wizard degrades to
+ * a manual-address text input rather than treating an empty list as a failed fetch.
+ */
+export interface SystemNetworkResponse {
+  readonly addresses: readonly NetworkAddress[];
+  readonly mavlinkPort: number;
+}

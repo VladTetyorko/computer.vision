@@ -395,4 +395,22 @@ describe('VisionApi', () => {
     http.expectOne({ method: 'POST', url: '/api/assets/a%2F1%20x/return-home' }).flush({ result: 'NO_ACK' });
     await expect(promise).resolves.toEqual({ result: 'NO_ACK' });
   });
+
+  // --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -------------
+
+  it('fetches this platform\'s own reachable addresses + mavlink port', async () => {
+    const promise = api.systemNetwork();
+    const request = http.expectOne({ method: 'GET', url: '/api/system/network' });
+    request.flush({ addresses: [{ address: '192.168.0.104', interfaceName: 'wlp2s0' }], mavlinkPort: 14550 });
+    await expect(promise).resolves.toEqual({
+      addresses: [{ address: '192.168.0.104', interfaceName: 'wlp2s0' }],
+      mavlinkPort: 14550,
+    });
+  });
+
+  it('tolerates an empty addresses list — never a special-cased error path', async () => {
+    const promise = api.systemNetwork();
+    http.expectOne({ method: 'GET', url: '/api/system/network' }).flush({ addresses: [], mavlinkPort: 14550 });
+    await expect(promise).resolves.toEqual({ addresses: [], mavlinkPort: 14550 });
+  });
 });

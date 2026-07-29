@@ -29,10 +29,11 @@ describe('nextStep', () => {
     expect(nextStep('profile', 'simulate')).toBe('connect');
   });
 
-  it('goes connect -> test for register/discover/listen', () => {
+  it('goes connect -> test for register/discover/listen/drone', () => {
     expect(nextStep('connect', 'register')).toBe('test');
     expect(nextStep('connect', 'discover')).toBe('test');
     expect(nextStep('connect', 'listen')).toBe('test');
+    expect(nextStep('connect', 'drone')).toBe('test');
   });
 
   it('skips test entirely for simulate — connect -> create', () => {
@@ -71,7 +72,7 @@ describe('prevStep', () => {
   });
 
   it('round-trips with nextStep for every method', () => {
-    for (const method of ['register', 'discover', 'simulate', 'listen'] as const) {
+    for (const method of ['register', 'discover', 'simulate', 'listen', 'drone'] as const) {
       let step = nextStep('profile', method);
       step = nextStep(step, method);
       if (method !== 'simulate') {
@@ -122,6 +123,12 @@ describe('canAdvanceFromConnect', () => {
   it('never advances directly from listen either (docs/DRONE-INFRA-PLAN.md I-b) — same candidate-must-flip-to-register rule', () => {
     expect(
       canAdvanceFromConnect(connectDraft({ method: 'listen', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })),
+    ).toBe(false);
+  });
+
+  it('never advances directly from drone either (docs/DRONE-INFRA-PLAN.md I-g) — it hands off to listen before anything can advance', () => {
+    expect(
+      canAdvanceFromConnect(connectDraft({ method: 'drone', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })),
     ).toBe(false);
   });
 
