@@ -103,7 +103,17 @@ The RX-only doctrine ends only here, on purpose, with stages:
 Needs: `FlightCommandPort` (domain), TX path on the gateway socket (it's already bidirectional
 UDP), per-firmware capability matrix, U-e roles before stage 2+ (who may command what).
 
-### I-e Stage 1 — APPROVED (explicit user go, 2026-07-29) — frozen contract
+### I-e Stage 1 — DONE (2026-07-29, all three waves landed + SITL-verified)
+
+Implemented exactly per the frozen contract below. Verified end-to-end at the adapter
+level against a genuine flying ArduPilot SITL aircraft
+(`MavlinkSitlReturnHomeIntegrationTest`: DO_SET_MODE → COMMAND_ACK ACCEPTED → telemetry
+reports mode=RTL, first attempt, 16s). Also landed alongside: MAVLINK sim telemetry
+transport (SimulationSpec.telemetryTransport, REST-exposed), telemetry into
+StreamPipeline (burned-in OSD gate finally reachable), and the I-c SITL smoke test.
+Stages 2+ (arm/disarm, mode select, missions) remain parked pending their own explicit go.
+
+#### Frozen contract (as approved)
 
 Wave 1 (in flight): `FlightCommandPort` (vision-domain, `supports(Device)` +
 `returnToHome(Device) -> CommandResult {ACCEPTED, NO_ACK}`, throws on unsupported
