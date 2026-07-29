@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.Flow;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -110,6 +111,16 @@ class MavlinkTelemetrySourceTest {
 
         assertDoesNotThrow(() -> source.close(device.id()));
         assertDoesNotThrow(() -> source.close(device.id()), "close() must be idempotent");
+    }
+
+    @Test
+    void bindKeyCombinesHostAndPort() {
+        assertEquals("0.0.0.0:14550", MavlinkTelemetrySource.bindKey("0.0.0.0", 14550));
+    }
+
+    @Test
+    void unclaimedVehiclesIsEmptyForABindKeyThatWasNeverOpened() {
+        assertTrue(new MavlinkTelemetrySource().unclaimedVehicles("127.0.0.1:9999").isEmpty());
     }
 
     private static int freePort() throws Exception {

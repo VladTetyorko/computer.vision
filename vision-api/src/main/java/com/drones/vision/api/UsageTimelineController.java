@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.dto.UsageRecordingResponse;
 import com.drones.vision.api.dto.UsageTimelineResponse;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.UsageTimeline;
@@ -13,9 +14,13 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for flight replay (docs/MVP2-PLAN.md §R, R-a): a single endpoint serving a
- * downsampled, time-windowed view over one {@code AssetUsage}'s telemetry (and, in future,
- * detection) history — the data source for R-b's replay cockpit.
+ * Driving REST adapter for flight replay (docs/MVP2-PLAN.md §R, R-a): a downsampled,
+ * time-windowed view over one {@code AssetUsage}'s telemetry/detection history, plus (docs/
+ * OPS-CORE-PLAN.md §R, R-b) that same usage's recorded-clip URL, if one is available — both
+ * usage-scoped reads share the single {@link ReplayService} collaborator, so the second endpoint
+ * joins this controller rather than standing up a new one for one more method (see {@code
+ * .claude/skills/java-clean-code/SKILL.md}: "can an existing service/controller own this method
+ * instead of a new type?").
  *
  * <p>Kept as its own controller rather than folded into {@link AssetController} (which already
  * hosts the older {@code GET /api/usages/{usageId}/telemetry}) — no standalone "usages controller"
@@ -67,5 +72,23 @@ public class UsageTimelineController {
         Instant to = toMs == null ? null : Instant.ofEpochMilli(toMs);
         UsageTimeline timeline = replayService.timeline(UsageId.of(usageId), from, to, maxPoints);
         return UsageTimelineResponse.from(timeline);
+    }
+
+    /**
+     * Serves a usage's recording/clip-export URL, if one is available (docs/OPS-CORE-PLAN.md §R).
+     *
+     * <p>An unknown usage id surfaces as {@link java.util.NoSuchElementException} (→404); a
+     * malformed UUID surfaces as {@link IllegalArgumentException} (→400) — both via {@link
+     * ApiExceptionHandler}, same idiom as {@link #timeline}. A known usage with nothing to play
+     * back (no video stream ever attached, or the configured stream publisher has no
+     * recording/playback endpoint) is <b>not</b> an error — it still returns {@code 200
+     * {"available":false}}, per the plan's "honest-cheap availability check" design.
+     *
+     * @param usageId the usage id, as a canonical UUID string
+     * @return the resolved recording, or {@code {"available":false}} when none exists
+     */
+    @GetMapping("/api/usages/{usageId}/recording")
+    public UsageRecordingResponse recording(@PathVariable String usageId) {
+        return UsageRecordingResponse.from(replayService.recordingFor(UsageId.of(usageId)));
     }
 }

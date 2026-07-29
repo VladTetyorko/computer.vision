@@ -68,7 +68,7 @@
     }
   </div>
 } @else if (asset(); as a) {
-  <div class="cockpit" #stage>
+  <div class="cockpit" #stage [class.banner-active]="failsafeBanner() !== null">
     <div class="stage-video">
       <vision-player
         [src]="stream()?.viewUrl ?? null"
@@ -87,6 +87,15 @@
         <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
       }
     </div>
+
+    <!-- ---- Failsafe / RTH / landing banner (docs/FC-INTEGRATIONS-PLAN.md F-d) — above the video,
+         below the two modal overlays; shifts the header/OSD/ticker/map rows down while showing
+         (`.cockpit.banner-active`, fly.css) rather than overlapping them. -->
+    @if (failsafeBanner(); as banner) {
+      <div class="hud hud-banner">
+        <vision-failsafe-banner [banner]="banner" />
+      </div>
+    }
 
     <!-- ---- Header: exit, drone switcher, help ------------------------------------------- -->
     <div class="hud hud-header">
@@ -112,7 +121,7 @@
 
     <!-- ---- OSD chip bar ------------------------------------------------------------------ -->
     <div class="hud hud-osd">
-      <vision-fly-osd [latencySeconds]="latencySeconds()" [transport]="transport()" />
+      <vision-fly-osd [latencySeconds]="latencySeconds()" [transport]="transport()" [windLimitMps]="windLimitMps()" />
     </div>
 
     <!-- ---- Events ticker ------------------------------------------------------------------ -->
@@ -138,7 +147,7 @@
     <!-- ---- Map inset (M) ------------------------------------------------------------------- -->
     @if (mapVisible() && hasTelemetryDevice()) {
       <div class="hud hud-map">
-        <vision-live-map />
+        <vision-live-map [zones]="geofence.zones()" />
       </div>
     }
 
@@ -176,6 +185,22 @@
         @if (detectionsStripOpen()) {
           <vision-detections-strip />
         }
+      </div>
+    }
+
+    <!-- ---- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden in
+         watch mode, and once the FC itself confirms armed. -->
+    @if (showPreflightChecklist()) {
+      <div class="hud hud-preflight">
+        <vision-preflight-checklist [items]="preflightItems()" />
+      </div>
+    }
+
+    <!-- ---- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
+         vibration/EKF/rangefinder/mission progress); hidden entirely with no diagnostic keys. -->
+    @if (diagnosticsRows().length > 0) {
+      <div class="hud hud-diagnostics">
+        <vision-diagnostics-card [rows]="diagnosticsRows()" />
       </div>
     }
 

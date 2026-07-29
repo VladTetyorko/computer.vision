@@ -26,6 +26,10 @@
   gap: 0.6rem;
 }
 
+.topbar-right {
+  gap: 0.75rem;
+}
+
 .brand-label {
   font-size: 0.78rem;
   font-weight: 600;
@@ -147,6 +151,19 @@
 
 .severity-chip {
   flex: none;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+/* Failsafe rail chip (docs/FC-INTEGRATIONS-PLAN.md F-d) — `--live` red, this app's one color
+   reserved exclusively for a genuine failsafe (never the generic `--danger` a plain critical
+   severity chip already uses), so a failsafe row reads as distinctly more urgent than any other
+   critical reason at a glance. */
+.fs-chip {
+  flex: none;
+  background: color-mix(in srgb, var(--live) 18%, transparent);
+  border-color: transparent;
+  color: var(--live);
   font-weight: 700;
   letter-spacing: 0.03em;
 }

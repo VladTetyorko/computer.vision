@@ -3,6 +3,7 @@ package com.drones.vision.adapter.simulation;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.Telemetry;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SimulatedTelemetrySourceTest {
@@ -401,5 +403,195 @@ class SimulatedTelemetrySourceTest {
         } finally {
             source.close(device.id());
         }
+    }
+
+    // --- F-c: synthetic FlightState -----------------------------------------------------
+
+    /**
+     * Subscribes to {@code publisher}, awaits at least {@code atLeast} samples (5s budget, same as
+     * every other test in this class), and returns them as an immutable snapshot in delivery order.
+     */
+    private static List<Telemetry> collectSamples(Flow.Publisher<Telemetry> publisher, int atLeast)
+            throws InterruptedException {
+        List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch latch = new CountDownLatch(atLeast);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(Telemetry item) {
+                collected.add(item);
+                latch.countDown();
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+            }
+
+            @Override
+            public void onComplete() {
+            }
+        });
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "expected at least " + atLeast + " telemetry samples within 5s");
+        return List.copyOf(collected);
+    }
+
+    @Test
+    void nominalFlightStateAfterStartupIsArmedLoiterWithMildJitter() throws InterruptedException {
+        SimulatedTelemetrySource source = fastSource(20L);
+        Device device = telemetryDevice(Map.of());
+
+        try {
+            List<Telemetry> snapshot = collectSamples(source.open(device), 15);
+            // Skip a generous margin past the startup window: the scheduler may fire a tick or two
+            // before subscribe() lands (see honorsLatLonOptionsAsTrackCenter's comment above), so the
+            // first *observed* sample isn't guaranteed to be tick 0.
+            List<Telemetry> nominal = snapshot.subList(10, snapshot.size());
+            assertTrue(nominal.size() >= 5);
+
+            for (Telemetry sample : nominal) {
+                FlightState flightState = sample.flightState();
+                assertNotNull(flightState, "every sample must carry a FlightState");
+                assertEquals(SimulatedTelemetrySource.FLIGHT_STATE_FIRMWARE, flightState.firmware());
+                assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_LOITER, flightState.mode());
+                assertTrue(flightState.armed());
+                assertFalse(flightState.failsafe());
+                assertEquals(3, flightState.gpsFixType());
+                assertTrue(flightState.satellites() >= SimulatedTelemetrySource.NOMINAL_SATELLITES - 1
+                                && flightState.satellites() <= SimulatedTelemetrySource.NOMINAL_SATELLITES + 1,
+                        "satellites must stay within +/-1 of the nominal count");
+                assertEquals(SimulatedTelemetrySource.NOMINAL_HDOP, flightState.hdop(), 0.15);
+                assertTrue(flightState.rssiPercent() >= SimulatedTelemetrySource.NOMINAL_RSSI_PERCENT - 5
+                                && flightState.rssiPercent() <= SimulatedTelemetrySource.NOMINAL_RSSI_PERCENT + 5,
+                        "rssiPercent must stay close to the nominal value");
+                assertTrue(flightState.armingBlockers().isEmpty());
+            }
+        } finally {
+            source.close(device.id());
+        }
+    }
+
+    @Test
+    void startupRampsDisarmedWithArmingBlockerThenArms() throws InterruptedException {
+        SimulatedTelemetrySource source = fastSource(20L);
+        Device device = telemetryDevice(Map.of());
+
+        try {
+            List<Telemetry> snapshot =
+                    collectSamples(source.open(device), (int) SimulatedTelemetrySource.STARTUP_DISARMED_TICKS + 10);
+
+            // Same latent subscribe race as above -- look for the disarmed startup state among the
+            // earliest observed samples rather than pinning it to sample #0.
+            boolean sawDisarmedStartup = snapshot.stream().limit(3).anyMatch(sample -> {
+                FlightState flightState = sample.flightState();
+                return Boolean.FALSE.equals(flightState.armed())
+                        && flightState.armingBlockers().contains(SimulatedTelemetrySource.STARTUP_ARMING_BLOCKER);
+            });
+            assertTrue(sawDisarmedStartup, "expected a disarmed sample with the synthetic arming blocker early on");
+
+            int previousGpsFixType = 0;
+            for (Telemetry sample : snapshot) {
+                int gpsFixType = sample.flightState().gpsFixType();
+                assertTrue(gpsFixType >= previousGpsFixType, "gpsFixType must ramp up, never regress, during startup");
+                previousGpsFixType = gpsFixType;
+            }
+
+            FlightState lastObserved = snapshot.get(snapshot.size() - 1).flightState();
+            assertTrue(lastObserved.armed(), "aircraft must be armed once past the startup window");
+            assertTrue(lastObserved.armingBlockers().isEmpty(), "the synthetic arming blocker must clear once armed");
+            assertEquals(3, lastObserved.gpsFixType());
+        } finally {
+            source.close(device.id());
+        }
+    }
+
+    @Test
+    void batteryDrivenFlightStateSwitchesToRtlThenLandAsBatteryDrains() throws InterruptedException {
+        SimulatedTelemetrySource source = fastSource(20L);
+        Device device = telemetryDevice(Map.of("batteryDrainPerSecond", "100"));
+
+        try {
+            List<Telemetry> snapshot = collectSamples(source.open(device), 55);
+
+            boolean sawRtl = false;
+            boolean sawLand = false;
+            for (Telemetry sample : snapshot) {
+                FlightState flightState = sample.flightState();
+                assertNotNull(flightState);
+                double batteryPercent = sample.batteryPercent();
+                if (batteryPercent < SimulatedTelemetrySource.LAND_BATTERY_PERCENT_THRESHOLD) {
+                    assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_LAND, flightState.mode());
+                    assertTrue(flightState.failsafe());
+                    assertTrue(flightState.armed());
+                    sawLand = true;
+                } else if (batteryPercent < SimulatedTelemetrySource.RTL_BATTERY_PERCENT_THRESHOLD) {
+                    assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_RTL, flightState.mode());
+                    assertTrue(flightState.failsafe());
+                    assertTrue(flightState.armed());
+                    sawRtl = true;
+                } else if (Boolean.TRUE.equals(flightState.armed())) {
+                    assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_LOITER, flightState.mode());
+                    assertFalse(flightState.failsafe());
+                }
+            }
+            assertTrue(sawRtl, "expected at least one sample in the RTL battery band (< 20%)");
+            assertTrue(sawLand, "expected at least one sample in the Land battery band (< 8%)");
+        } finally {
+            source.close(device.id());
+        }
+    }
+
+    @Test
+    void flightStateSequenceIsDeterministicForTheSameDeviceId() throws InterruptedException {
+        long periodMillis = 20L;
+        DeviceId deviceId = DeviceId.random();
+        Device device = new Device(deviceId, "drone-1", Set.of(Capability.TELEMETRY),
+                new StreamDescriptor("sim", URI.create("sim://drone-1"), Map.of()));
+
+        SimulatedTelemetrySource sourceA = fastSource(periodMillis);
+        SimulatedTelemetrySource sourceB = fastSource(periodMillis);
+        try {
+            List<FlightState> runA = flightStatesOf(collectSamples(sourceA.open(device), 20));
+            List<FlightState> runB = flightStatesOf(collectSamples(sourceB.open(device), 20));
+
+            // The two runs race subscribe() independently, so they may observe different numbers of
+            // leading ticks (same latent race as elsewhere in this class) and can't be compared from
+            // index 0. But the sample where `armed` first flips to true is, by construction, always
+            // real tick STARTUP_DISARMED_TICKS (flightStateFor only reports armed=false while
+            // n < STARTUP_DISARMED_TICKS) -- an anchor independent of how each run happened to start,
+            // so aligning both runs there and comparing from there on directly tests determinism.
+            int armedAtA = firstArmedIndex(runA);
+            int armedAtB = firstArmedIndex(runB);
+            assertTrue(armedAtA >= 0 && armedAtB >= 0,
+                    "expected to observe the disarmed-to-armed transition in both runs");
+
+            List<FlightState> alignedA = runA.subList(armedAtA, runA.size());
+            List<FlightState> alignedB = runB.subList(armedAtB, runB.size());
+            int overlap = Math.min(alignedA.size(), alignedB.size());
+            assertTrue(overlap >= 5, "expected a meaningful overlap to compare after aligning on the arming transition");
+
+            assertEquals(alignedA.subList(0, overlap), alignedB.subList(0, overlap),
+                    "the same device id must always produce the same FlightState sequence once aligned on tick "
+                            + "number (seeded jitter)");
+        } finally {
+            sourceA.close(device.id());
+            sourceB.close(device.id());
+        }
+    }
+
+    private static int firstArmedIndex(List<FlightState> flightStates) {
+        for (int i = 0; i < flightStates.size(); i++) {
+            if (Boolean.TRUE.equals(flightStates.get(i).armed())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static List<FlightState> flightStatesOf(List<Telemetry> samples) {
+        return samples.stream().map(Telemetry::flightState).toList();
     }
 }

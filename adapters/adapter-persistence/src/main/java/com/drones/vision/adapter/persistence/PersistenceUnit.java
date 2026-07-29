@@ -6,6 +6,7 @@ import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
+import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -64,6 +65,7 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(TelemetrySampleEntity.class);
         configuration.addAnnotatedClass(DetectionResultEntity.class);
         configuration.addAnnotatedClass(AssetImageEntity.class);
+        configuration.addAnnotatedClass(GeofenceZoneEntity.class);
         return configuration.buildSessionFactory();
     }
 }

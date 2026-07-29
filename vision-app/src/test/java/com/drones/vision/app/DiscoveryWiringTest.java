@@ -14,8 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Context test for the <em>default</em> configuration (no {@code
  * vision.discovery.*} overrides): asserts {@link DiscoveryWiringConfiguration}
- * registers all three {@code adapter-discovery} scanners per {@code
- * vision.discovery.enabled}'s default of {@code true}.
+ * registers all three {@code adapter-discovery} scanners plus {@code
+ * adapter-mavlink}'s {@code MavlinkHeartbeatScanner} (docs/DRONE-INFRA-PLAN.md
+ * I-b) per {@code vision.discovery.enabled}'s default of {@code true}.
  *
  * <p>{@code vision.publish.enabled=false} is set for determinism, same as
  * {@link com.drones.vision.VisionApplicationTests} and {@link
@@ -32,9 +33,9 @@ class DiscoveryWiringTest {
     private List<DeviceDiscoveryPort> discoveryPorts;
 
     @Test
-    void allThreeDiscoveryMethodsAreRegisteredByDefault() {
+    void allFourDiscoveryMethodsAreRegisteredByDefault() {
         Set<String> methods = discoveryPorts.stream().map(DeviceDiscoveryPort::method).collect(Collectors.toSet());
 
-        assertEquals(Set.of("onvif", "mdns", "v4l2"), methods);
+        assertEquals(Set.of("onvif", "mdns", "v4l2", "mavlink"), methods);
     }
 }

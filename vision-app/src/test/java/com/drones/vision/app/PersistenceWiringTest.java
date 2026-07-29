@@ -6,6 +6,7 @@ import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
+import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
@@ -13,6 +14,7 @@ import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
+import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -64,6 +66,9 @@ class PersistenceWiringTest {
     private AssetImageRepositoryPort assetImageRepositoryPort;
 
     @Autowired
+    private GeofenceRepositoryPort geofenceRepositoryPort;
+
+    @Autowired
     private ApplicationContext applicationContext;
 
     @Test
@@ -99,6 +104,11 @@ class PersistenceWiringTest {
     @Test
     void defaultConfigurationKeepsInMemoryAssetImageRepository() {
         assertInstanceOf(InMemoryAssetImageRepository.class, assetImageRepositoryPort);
+    }
+
+    @Test
+    void defaultConfigurationKeepsInMemoryGeofenceRepository() {
+        assertInstanceOf(InMemoryGeofenceRepository.class, geofenceRepositoryPort);
     }
 
     @Test

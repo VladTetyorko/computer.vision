@@ -69,6 +69,15 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * together with the player's own "behind live" estimate (V-b) to see the
  * full glass-to-glass picture.
  *
+ * <h2>Recording playback (docs/OPS-CORE-PLAN.md §R)</h2>
+ * This class does no recording of its own: mediamtx's native recorder
+ * (docker-compose.yml's {@code MTX_PATHDEFAULTS_RECORD}) segments every
+ * published path to disk, and {@link #playbackUrl} is pure string formatting
+ * against mediamtx's playback HTTP server's {@code /get} endpoint — the same
+ * "never proxied, media-server address handed to the viewer verbatim"
+ * treatment as {@link #whepUrl}, for the same reason (a byte-range-seekable
+ * clip fetch is not something a simple reverse proxy adds value forwarding).
+ *
  * <p>Plain class with no framework dependency — instantiated directly by
  * {@code vision-app}'s wiring configuration.
  */
@@ -149,25 +158,83 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     private static final long MAX_BACKOFF_MS = 10_000L;
     private static final String HLS_PLAYLIST_SUFFIX = "/index.m3u8";
     private static final String WHEP_PATH_SUFFIX = "/whep";
+    private static final String PLAYBACK_GET_PATH = "/get";
+    /**
+     * docs/OPS-CORE-PLAN.md §R: port the {@link #MediamtxStreamPublisher(URI, URI, URI)}
+     * convenience constructor derives a playback base at, when the caller hasn't configured one
+     * explicitly — matches docker-compose.yml's host-mapped playback port (mediamtx's own
+     * container-side default is {@code 9996}; this stack's compose maps host {@code 19996} to it,
+     * the same "renumbered to dodge collisions" convention as {@code hls-base}/{@code whep-base}'s
+     * own 18888/18889).
+     */
+    static final int DEFAULT_PLAYBACK_PORT = 19996;
 
     private final URI rtspPushBase;
     private final URI hlsViewBase;
     private final URI whepViewBase;
+    private final URI playbackViewBase;
     private final Map<StreamId, StreamState> streams = new ConcurrentHashMap<>();
 
     /**
-     * @param rtspPushBase base RTSP URL of the mediamtx sidecar to push to, e.g. {@code rtsp://localhost:8554}
-     * @param hlsViewBase  base HTTP URL of mediamtx's HLS egress, e.g. {@code http://localhost:8888}
-     * @param whepViewBase base HTTP URL of mediamtx's WebRTC/WHEP egress, e.g. {@code http://localhost:8889};
-     *                     unlike {@code hlsViewBase} (which {@code vision-app} typically points at an
-     *                     app-relative proxy path, see {@link #viewUrl}'s javadoc), this is handed to
-     *                     viewers verbatim — see {@link #whepUrl}
+     * @param rtspPushBase     base RTSP URL of the mediamtx sidecar to push to, e.g. {@code rtsp://localhost:8554}
+     * @param hlsViewBase      base HTTP URL of mediamtx's HLS egress, e.g. {@code http://localhost:8888}
+     * @param whepViewBase     base HTTP URL of mediamtx's WebRTC/WHEP egress, e.g. {@code http://localhost:8889};
+     *                         unlike {@code hlsViewBase} (which {@code vision-app} typically points at an
+     *                         app-relative proxy path, see {@link #viewUrl}'s javadoc), this is handed to
+     *                         viewers verbatim — see {@link #whepUrl}
+     * @param playbackViewBase base HTTP URL of mediamtx's playback server (docs/OPS-CORE-PLAN.md §R), e.g.
+     *                         {@code http://localhost:19996}; {@code null} when this stream publisher has no
+     *                         recording/playback configured, in which case {@link #playbackUrl} always returns
+     *                         {@link Optional#empty()} (honest absence, not an error) — unlike {@code
+     *                         rtspPushBase}/{@code hlsViewBase}/{@code whepViewBase}, this one is genuinely
+     *                         optional. Never proxied, for the same reason as {@code whepViewBase}: handed to
+     *                         the viewer verbatim.
      */
-    public MediamtxStreamPublisher(URI rtspPushBase, URI hlsViewBase, URI whepViewBase) {
+    public MediamtxStreamPublisher(URI rtspPushBase, URI hlsViewBase, URI whepViewBase, URI playbackViewBase) {
         ensureQuietLogging();
         this.rtspPushBase = Objects.requireNonNull(rtspPushBase, "rtspPushBase must not be null");
         this.hlsViewBase = Objects.requireNonNull(hlsViewBase, "hlsViewBase must not be null");
         this.whepViewBase = Objects.requireNonNull(whepViewBase, "whepViewBase must not be null");
+        this.playbackViewBase = playbackViewBase;
+    }
+
+    /**
+     * Convenience overload for callers that don't configure a playback base explicitly. As of
+     * docs/OPS-CORE-PLAN.md R-a, that's {@code vision-app}'s {@code WiringConfiguration} — this
+     * task's file scope is adapter-publish-hls + docker-compose.yml only, so wiring an explicit
+     * {@code vision.publish.mediamtx.playback-base} property through {@code
+     * VisionPublishProperties}/{@code WiringConfiguration} is a follow-up (see this module's
+     * MODULE.md), not done here. This overload derives a best-effort playback base instead of
+     * leaving recording unreachable in the meantime: {@code whepViewBase}'s own host at {@value
+     * #DEFAULT_PLAYBACK_PORT} (matching docker-compose.yml's host-mapped playback port) —
+     * {@code whepViewBase} is the closest existing analog (also never proxied, also handed to the
+     * browser verbatim, see the 4-arg constructor's javadoc), so the same host is a reasonable
+     * inference for a same-stack mediamtx. Falls back to no playback configured (the 4-arg
+     * constructor's {@code null}) if {@code whepViewBase} has no host component to copy — this
+     * never throws on a bad guess, since an unconfigured playback base is honest absence, not a
+     * fatal error (the 4-arg constructor's own null-checks still apply to the other three bases).
+     *
+     * <p>Deliberately an overload rather than updating every call site (this module's own usual
+     * convention when new-but-always-available config is added, see {@code whepViewBase}'s own
+     * history in this class's MODULE.md) — {@code vision-app}, the one production call site, is
+     * out of this task's scope to edit.
+     */
+    public MediamtxStreamPublisher(URI rtspPushBase, URI hlsViewBase, URI whepViewBase) {
+        this(rtspPushBase, hlsViewBase, whepViewBase, derivePlaybackViewBase(whepViewBase));
+    }
+
+    /**
+     * @return {@code scheme://host:}{@value #DEFAULT_PLAYBACK_PORT} copied from {@code
+     *         whepViewBase}, or {@code null} if {@code whepViewBase} is {@code null} or has no
+     *         host component (e.g. malformed input, left for the 4-arg constructor's own
+     *         null-check to reject) — never throws.
+     */
+    private static URI derivePlaybackViewBase(URI whepViewBase) {
+        if (whepViewBase == null || whepViewBase.getHost() == null) {
+            return null;
+        }
+        String scheme = whepViewBase.getScheme() != null ? whepViewBase.getScheme() : "http";
+        return URI.create(scheme + "://" + whepViewBase.getHost() + ":" + DEFAULT_PLAYBACK_PORT);
     }
 
     // -- native log quieting --------------------------------------------------
@@ -296,6 +363,38 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
             return Optional.empty();
         }
         return Optional.of(URI.create(withoutTrailingSlash(whepViewBase.toString()) + "/" + id.value() + WHEP_PATH_SUFFIX));
+    }
+
+    /**
+     * mediamtx's playback server serves a clip for any {@code [start, start + duration)} window
+     * of a recorded path at {@code {playbackViewBase}/get?path={streamId}&start={RFC3339}
+     * &duration={seconds}} — the {@code path} value is the exact same mediamtx path name {@link
+     * #viewUrl}/{@link #whepUrl} already use ({@code streamId.value()}), since recording is keyed
+     * on the same path every published stream already lives at. {@code start} uses {@link
+     * Instant#toString()} verbatim (already RFC3339/ISO-8601 with a trailing {@code Z}, which is
+     * exactly the {@code time.RFC3339} format mediamtx's own playback server parses with, verified
+     * against mediamtx v1.19.3's {@code internal/playback/on_get.go}); {@code duration} is rounded
+     * to the nearest whole second (mediamtx's own {@code duration} parameter accepts fractional
+     * seconds too, but callers of this port only ever have second-granularity usage windows to
+     * begin with — see docs/OPS-CORE-PLAN.md §R's {@code AssetUsage}-based join — so sub-second
+     * precision would be false precision, not a real distinction).
+     *
+     * <p>Returns {@link Optional#empty()} whenever {@code playbackViewBase} is unconfigured (see
+     * the constructors' javadoc) or {@code id} is {@code null} — mirrors {@link #viewUrl}/{@link
+     * #whepUrl}'s {@code null}-id handling. {@code start}/{@code duration} are required inputs once
+     * a playback base and stream id are present, so a {@code null} for either is a caller bug,
+     * not an absence to represent — same idiom as this codebase's application layer, per CLAUDE.md.
+     */
+    @Override
+    public Optional<URI> playbackUrl(StreamId id, Instant start, Duration duration) {
+        if (playbackViewBase == null || id == null) {
+            return Optional.empty();
+        }
+        Objects.requireNonNull(start, "start must not be null");
+        Objects.requireNonNull(duration, "duration must not be null");
+        long durationSeconds = Math.round(duration.toMillis() / 1000.0);
+        return Optional.of(URI.create(withoutTrailingSlash(playbackViewBase.toString()) + PLAYBACK_GET_PATH
+                + "?path=" + id.value() + "&start=" + start + "&duration=" + durationSeconds));
     }
 
     // -- publish machinery --------------------------------------------------

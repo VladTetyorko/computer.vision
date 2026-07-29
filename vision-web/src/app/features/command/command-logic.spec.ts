@@ -93,6 +93,98 @@ describe('attentionReasons', () => {
     );
     expect(reasons.map((r) => r.kind)).toEqual(['battery-critical', 'telemetry-stale', 'open-events']);
   });
+
+  describe('failsafe (docs/FC-INTEGRATIONS-PLAN.md F-d)', () => {
+    it('flags failsafe only for an explicit true, never fabricated from absent/false data', () => {
+      expect(attentionReasons(asset({ failsafe: undefined }))).toEqual([]);
+      expect(attentionReasons(asset({ failsafe: false }))).toEqual([]);
+      const reasons = attentionReasons(asset({ failsafe: true }));
+      expect(reasons).toHaveLength(1);
+      expect(reasons[0]).toEqual({
+        kind: 'failsafe',
+        severity: 'critical',
+        text: 'Failsafe active — returning to home.',
+      });
+    });
+
+    it('ranks above every other reason, including battery-critical', () => {
+      const reasons = attentionReasons(asset({ failsafe: true, batteryPercent: 5, openEventCount: 3 }));
+      expect(reasons.map((r) => r.kind)).toEqual(['failsafe', 'battery-critical', 'open-events']);
+    });
+  });
+
+  describe('gps-degraded (docs/FC-INTEGRATIONS-PLAN.md F-d)', () => {
+    it('never fires with no gpsFixType given at all', () => {
+      expect(attentionReasons(asset(), undefined)).toEqual([]);
+    });
+
+    it('never fires for a healthy (3D+) fix', () => {
+      expect(attentionReasons(asset(), 3)).toEqual([]);
+    });
+
+    it('flags a 2D fix as a warning', () => {
+      const reasons = attentionReasons(asset(), 2);
+      expect(reasons).toHaveLength(1);
+      expect(reasons[0].kind).toBe('gps-degraded');
+      expect(reasons[0].severity).toBe('warning');
+    });
+
+    it('flags no-GPS/no-fix as critical', () => {
+      expect(attentionReasons(asset(), 0)[0].severity).toBe('critical');
+      expect(attentionReasons(asset(), 1)[0].severity).toBe('critical');
+    });
+
+    it('ranks between battery-low and open-events', () => {
+      const reasons = attentionReasons(asset({ batteryPercent: 15, openEventCount: 1 }), 2);
+      expect(reasons.map((r) => r.kind)).toEqual(['battery-low', 'gps-degraded', 'open-events']);
+    });
+  });
+});
+
+describe('geofence-breach (docs/OPS-CORE-PLAN.md §G-c)', () => {
+  it('never fires with no breaches given at all', () => {
+    expect(attentionReasons(asset())).toEqual([]);
+    expect(attentionReasons(asset(), undefined, [])).toEqual([]);
+  });
+
+  it('fires with one active breach, naming the zone', () => {
+    const reasons = attentionReasons(asset(), undefined, [
+      { assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' },
+    ]);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ kind: 'geofence-breach', severity: 'critical', text: 'KEEP-OUT breach — North perimeter.' });
+  });
+
+  it('ranks above every other reason, including failsafe', () => {
+    const reasons = attentionReasons(
+      asset({ failsafe: true, batteryPercent: 5 }),
+      undefined,
+      [{ assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' }],
+    );
+    expect(reasons.map((r) => r.kind)).toEqual(['geofence-breach', 'failsafe', 'battery-critical']);
+  });
+
+  it('joins multiple active breaches into one reason', () => {
+    const reasons = attentionReasons(asset(), undefined, [
+      { assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' },
+      { assetId: 'a-0', zoneId: 'z-2', zoneName: 'Charging pad', kind: 'KEEP_IN', direction: 'enter' },
+    ]);
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0].text).toBe('KEEP-OUT breach — North perimeter; KEEP-IN breach — Charging pad.');
+  });
+});
+
+describe('buildEntityRows — geofenceBreachesByAssetId (docs/OPS-CORE-PLAN.md §G-c)', () => {
+  it('feeds breaches into each asset\'s own reason, by id, ranking it above every other asset', () => {
+    const breaching = asset({ assetId: 'b', displayName: 'Breaching' });
+    const critical = asset({ assetId: 'c', displayName: 'Zulu-critical', batteryPercent: 5 });
+    const breachesByAssetId = new Map([
+      ['b', [{ assetId: 'b', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT' as const, direction: 'enter' as const }]],
+    ]);
+    const rows = buildEntityRows([breaching, critical], undefined, breachesByAssetId);
+    expect(rows.map((row) => row.asset.assetId)).toEqual(['b', 'c']);
+    expect(rows[0].severity).toBe('critical');
+  });
 });
 
 describe('attentionAgeLabel', () => {
@@ -155,6 +247,17 @@ describe('buildEntityRows', () => {
     const original = [...list];
     buildEntityRows(list);
     expect(list).toEqual(original);
+  });
+
+  it('feeds gpsFixTypeByAssetId into each asset\'s own gps-degraded reason, by id', () => {
+    const degraded = asset({ assetId: 'd', displayName: 'Degraded' });
+    const healthy = asset({ assetId: 'h', displayName: 'Healthy' });
+    const noMarker = asset({ assetId: 'n', displayName: 'NoMarker' });
+    const gpsFixTypeByAssetId = new Map([['d', 1], ['h', 3]]);
+    const rows = buildEntityRows([degraded, healthy, noMarker], gpsFixTypeByAssetId);
+    expect(rows.find((r) => r.asset.assetId === 'd')!.severity).toBe('critical');
+    expect(rows.find((r) => r.asset.assetId === 'h')!.severity).toBe('ok');
+    expect(rows.find((r) => r.asset.assetId === 'n')!.severity).toBe('ok');
   });
 
   it('holds at scale (N=100): pure selection logic never issues a request and stays correct', () => {

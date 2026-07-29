@@ -5,16 +5,30 @@
       @if (summary(); as s) {
         <span class="chip">{{ s.totalAssets }} assets</span>
       }
+      <vision-weather-chip />
     </div>
-    <label class="row archived-toggle">
-      <input
-        type="checkbox"
-        [checked]="includeArchived()"
-        (change)="toggleIncludeArchived($any($event.target).checked)"
-      />
-      <span class="muted">Include archived</span>
-    </label>
+    <div class="row topbar-right">
+      <button type="button" class="btn secondary small" (click)="toggleZonesPanel()">
+        Zones ({{ geofence.zones().length }})
+      </button>
+      <label class="row archived-toggle">
+        <input
+          type="checkbox"
+          [checked]="includeArchived()"
+          (change)="toggleIncludeArchived($any($event.target).checked)"
+        />
+        <span class="muted">Include archived</span>
+      </label>
+    </div>
   </div>
+
+  @if (zonesPanelOpen()) {
+    <vision-zones-panel
+      [assetPositions]="assetPositions()"
+      [centerHint]="weatherPosition() ?? null"
+      (closePanel)="toggleZonesPanel()"
+    />
+  }
 
   @if (summaryError() && summary() === undefined) {
     <div class="topbar-notice">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</div>
@@ -46,6 +60,9 @@
                 >
                   <span class="dot" [class.live]="row.asset.streaming"></span>
                   <span class="rail-name truncate">{{ row.asset.displayName }}</span>
+                  @if (row.asset.failsafe === true) {
+                    <span class="chip fs-chip" title="Failsafe active">FS</span>
+                  }
                   <span class="rail-category faint truncate">{{ row.asset.categoryName }}</span>
                   @if (row.severity !== 'ok') {
                     <span class="chip severity-chip" [class.danger]="row.severity === 'critical'" [class.warn]="row.severity === 'warning'">
@@ -88,6 +105,7 @@
       } @else {
         <vision-fleet-map
           class="command-map"
+          [zones]="geofence.zones()"
           (watch)="watchAsset($event)"
           (preview)="selectAsset($event)"
           (openEventAsset)="openEventAsset($event)"

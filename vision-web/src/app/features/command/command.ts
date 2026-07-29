@@ -7,7 +7,14 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { FleetMapStore } from '../../core/map/map-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { FleetMap } from '../../shared/map/fleet-map/fleet-map';
+import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { activeGeofenceBreaches, groupBreachesByAsset } from '../../core/geofence/geofence-logic';
+import { LiveStore } from '../../core/live/live-store';
+import { WeatherStore } from '../../core/weather/weather-store';
+import { fleetCentroid } from '../../core/weather/weather-logic';
+import { WeatherChip } from '../../shared/ui/weather-chip';
 import { AssetPanel } from './asset-panel';
+import { ZonesPanel } from './zones-panel';
 import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
 import type { AssetAttention, FleetSummary } from '../../core/api/models';
 
@@ -59,18 +66,23 @@ const PANEL_OPEN_KEY = 'vision.command.panelOpen';
  */
 @Component({
   selector: 'vision-command',
-  imports: [FleetMap, AssetPanel, RouterLink],
+  imports: [FleetMap, AssetPanel, ZonesPanel, WeatherChip, RouterLink],
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to the pre-§U-c page's own `FleetMapStore`.
-  providers: [FleetMapStore],
+  // `WeatherStore` (docs/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
+  // comment for why it can't be a shared root singleton.
+  providers: [FleetMapStore, WeatherStore],
 })
 export class CommandPage {
   private readonly router = inject(Router);
   private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
   protected readonly mapStore = inject(FleetMapStore);
+  protected readonly geofence = inject(GeofenceStore);
+  private readonly liveStore = inject(LiveStore);
+  private readonly weather = inject(WeatherStore);
 
   /**
    * `?asset=<id>` deep link (docs/UX-REWORK-PLAN.md §U-c's "preserve ?asset deep links if map
@@ -87,7 +99,50 @@ export class CommandPage {
   protected readonly summaryError = signal(false);
   protected readonly includeArchived = signal(false);
 
-  protected readonly entityRows = computed(() => buildEntityRows(this.summary()?.assets ?? []));
+  /**
+   * `assetId → gpsFixType`, built from the embedded `<vision-fleet-map>`'s own `FleetMapStore`
+   * (docs/FC-INTEGRATIONS-PLAN.md F-d) — feeds `command-logic.ts#attentionReasons`' `gps-degraded`
+   * reason via `buildEntityRows`'s own optional second argument; an asset with no live marker
+   * (not currently plotted) simply has no entry, so that one reason never fires for it — see
+   * `gpsDegradedReason`'s own doc comment for why this can't be read off `AssetAttention` directly.
+   */
+  private readonly gpsFixTypeByAssetId = computed(() => {
+    const byAssetId = new Map<string, number>();
+    for (const marker of this.mapStore.markers()) {
+      if (marker.gpsFixType !== undefined) {
+        byAssetId.set(marker.assetId, marker.gpsFixType);
+      }
+    }
+    return byAssetId;
+  });
+
+  /**
+   * `assetId → active breaches` (docs/OPS-CORE-PLAN.md §G-c), derived from `LiveStore.liveEvents()`
+   * — the generic `event` SSE topic GEOFENCE_BREACH rides (see `LiveEvent`'s own doc comment for
+   * why this is a *different* feed than `EventsStore`'s `DetectionEvent`s). Feeds
+   * `buildEntityRows`' new top-rank `geofence-breach` reason, same "optional map, by assetId"
+   * shape as `gpsFixTypeByAssetId` above.
+   */
+  private readonly geofenceBreachesByAssetId = computed(() =>
+    groupBreachesByAsset(activeGeofenceBreaches(this.liveStore.liveEvents())),
+  );
+
+  protected readonly entityRows = computed(() =>
+    buildEntityRows(this.summary()?.assets ?? [], this.gpsFixTypeByAssetId(), this.geofenceBreachesByAssetId()),
+  );
+
+  // --- Zones panel (docs/OPS-CORE-PLAN.md §G-c) --------------------------------------------------
+  protected readonly zonesPanelOpen = signal(false);
+
+  /** Every asset's currently-known position — threaded to the Zones panel's own draw-dialog advisory. */
+  protected readonly assetPositions = computed(() => this.mapStore.markers().map((marker) => marker.position));
+
+  // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) ------------------------------------------
+  // Command's chip centers on the fleet centroid, not any one asset — this page's own fleet-summary
+  // poll carries no per-asset `attributes`, so the wind limit here is always the plan's own default
+  // rather than a specific asset's `windLimitMps` override (see `WeatherChip`'s own doc comment;
+  // Fly's chip, scoped to one selected asset, is the one that reads that attribute).
+  protected readonly weatherPosition = computed(() => fleetCentroid(this.assetPositions()));
 
   // --- Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7 / §U-c bullet 5) -------------------
   protected readonly railOpen = signal(readPersistedFlag(RAIL_OPEN_KEY, true));
@@ -154,6 +209,10 @@ export class CommandPage {
         void this.selectAsset(requested);
       }
     });
+
+    // Keeps the weather chip fresh as the fleet centroid moves — `WeatherStore.track` itself
+    // no-ops instantly unless the 10-minute cache is actually stale (docs/OPS-CORE-PLAN.md §W).
+    effect(() => this.weather.track(this.weatherPosition()));
   }
 
   private async refreshSummary(): Promise<void> {
@@ -177,6 +236,10 @@ export class CommandPage {
 
   protected toggleRail(): void {
     this.railOpen.update((open) => !open);
+  }
+
+  protected toggleZonesPanel(): void {
+    this.zonesPanelOpen.update((open) => !open);
   }
 
   protected togglePanelCollapse(): void {

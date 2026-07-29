@@ -6,6 +6,7 @@ import com.drones.vision.domain.model.CategoryId;
 import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionEventState;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
@@ -129,10 +130,14 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
         Telemetry latest = usageTracker.latestTelemetry(asset.id()).orElse(null);
         Double batteryPercent = latest == null ? null : latest.batteryPercent();
         Long telemetryAgeMs = latest == null ? null : Duration.between(latest.at(), now).toMillis();
+        FlightState flightState = latest == null ? null : latest.flightState();
+        String flightMode = flightState == null ? null : flightState.mode();
+        Boolean armed = flightState == null ? null : flightState.armed();
+        Boolean failsafe = flightState == null ? null : flightState.failsafe();
 
         return new AssetAttention(asset.id(), asset.displayName(), asset.category(), summary.categoryName(),
                 asset.state(), summary.status() == AssetStatus.STREAMING, streamId, batteryPercent, telemetryAgeMs,
-                openEventCounts.getOrDefault(asset.id(), 0));
+                openEventCounts.getOrDefault(asset.id(), 0), flightMode, armed, failsafe);
     }
 
     private List<CategoryCounts> categoryCounts(List<AssetSummary> summaries) {

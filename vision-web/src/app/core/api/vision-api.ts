@@ -13,6 +13,8 @@ import type {
   Device,
   DeviceEdit,
   FleetSummary,
+  GeofenceZone,
+  GeofenceZoneRequest,
   LiveSubscription,
   ProbeDeviceRequest,
   ProbeDeviceResult,
@@ -26,6 +28,7 @@ import type {
   StartStreamResult,
   TelemetrySample,
   UpdateLiveTopicsRequest,
+  UsageRecording,
   UsageTimeline,
 } from './models';
 
@@ -352,6 +355,43 @@ export class VisionApi {
         `/api/live/${encodeURIComponent(connectionId)}/topics`,
         request,
       ),
+    );
+  }
+
+  // --- Geofencing (docs/OPS-CORE-PLAN.md §G's frozen wire contract) ---------------------------
+
+  /** Every known zone, server-sorted by name. */
+  listGeofences(): Promise<GeofenceZone[]> {
+    return firstValueFrom(this.http.get<GeofenceZone[]>('/api/geofences'));
+  }
+
+  /** 400 for a polygon with fewer than 3 vertices — `core/geofence/geofence-logic.ts#canSaveZone` checks first. */
+  createGeofence(request: GeofenceZoneRequest): Promise<GeofenceZone> {
+    return firstValueFrom(this.http.post<GeofenceZone>('/api/geofences', request));
+  }
+
+  /** Wholesale replace — the wire contract has no partial-patch geofence endpoint; 404 unknown id. */
+  updateGeofence(id: string, request: GeofenceZoneRequest): Promise<GeofenceZone> {
+    return firstValueFrom(
+      this.http.put<GeofenceZone>(`/api/geofences/${encodeURIComponent(id)}`, request),
+    );
+  }
+
+  /** Idempotent. */
+  deleteGeofence(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/geofences/${encodeURIComponent(id)}`));
+  }
+
+  // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------
+
+  /**
+   * The recording/clip-export URL for one usage's flight window, if one is available. Always a
+   * `200` — `{available: false}` for a usage with nothing to play back is not an error, see
+   * `UsageRecording`'s own doc comment.
+   */
+  usageRecording(usageId: string): Promise<UsageRecording> {
+    return firstValueFrom(
+      this.http.get<UsageRecording>(`/api/usages/${encodeURIComponent(usageId)}/recording`),
     );
   }
 }

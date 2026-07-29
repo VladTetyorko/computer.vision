@@ -8,14 +8,17 @@ import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
+import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * {@link ReplayService} default implementation: reads {@link AssetUsageRepositoryPort}, {@link
@@ -53,6 +56,12 @@ import java.util.Objects;
  * requested window loses its <b>earliest</b> ones (the query's own newest-first-then-limit
  * behavior) — the mirror image of telemetry's earliest-biased truncation, and just as real a limit
  * for a very long/high-rate flight, though far less likely to bite at this cap.
+ *
+ * <h2>Recording (docs/OPS-CORE-PLAN.md §R)</h2>
+ * {@link #recordingFor(UsageId)} is a second, much smaller read: {@code streamId()} is again the
+ * join key (empty when {@code null}), and the resolved {@code [startedAt, endedAt-or-now)} window
+ * is handed straight to {@link StreamPublisherPort#playbackUrl} — no telemetry/detection fetch, no
+ * downsampling, just a config-cheap lookup.
  */
 public final class DefaultReplayService implements ReplayService {
 
@@ -79,15 +88,26 @@ public final class DefaultReplayService implements ReplayService {
     private final AssetUsageRepositoryPort usageRepository;
     private final TelemetryRepositoryPort telemetryRepository;
     private final DetectionRepositoryPort detectionRepository;
+    private final StreamPublisherPort streamPublisherPort;
 
+    /**
+     * @param streamPublisherPort resolves the actual recording/clip-export URL for {@link
+     *                            #recordingFor(UsageId)} (docs/OPS-CORE-PLAN.md §R); required —
+     *                            {@code vision-app} always wires a real bean here (either the
+     *                            mediamtx-backed publisher or its no-op fallback), so there is no
+     *                            nullable-collaborator case to handle.
+     */
     public DefaultReplayService(AssetUsageRepositoryPort usageRepository,
                                  TelemetryRepositoryPort telemetryRepository,
-                                 DetectionRepositoryPort detectionRepository) {
+                                 DetectionRepositoryPort detectionRepository,
+                                 StreamPublisherPort streamPublisherPort) {
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
         this.telemetryRepository =
                 Objects.requireNonNull(telemetryRepository, "telemetryRepository must not be null");
         this.detectionRepository =
                 Objects.requireNonNull(detectionRepository, "detectionRepository must not be null");
+        this.streamPublisherPort =
+                Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
     }
 
     @Override
@@ -119,6 +139,21 @@ public final class DefaultReplayService implements ReplayService {
 
         return new UsageTimeline(usage, windowFrom, windowTo, thin(telemetry, effectiveMaxPoints),
                 thin(detections, effectiveMaxPoints));
+    }
+
+    @Override
+    public Optional<UsageRecording> recordingFor(UsageId usageId) {
+        Objects.requireNonNull(usageId, "usageId must not be null");
+        AssetUsage usage = usageRepository.findById(usageId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown usage: " + usageId.value()));
+        if (usage.streamId() == null) {
+            return Optional.empty();
+        }
+        Instant start = usage.startedAt();
+        Instant end = usage.endedAt() != null ? usage.endedAt() : Instant.now();
+        Duration duration = Duration.between(start, end);
+        return streamPublisherPort.playbackUrl(usage.streamId(), start, duration)
+                .map(url -> new UsageRecording(url, start, duration.getSeconds()));
     }
 
     /**

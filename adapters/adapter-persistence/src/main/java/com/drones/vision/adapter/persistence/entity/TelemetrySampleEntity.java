@@ -1,5 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
+import com.drones.vision.domain.model.FlightState;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -21,6 +23,16 @@ import java.util.UUID;
  * generates it) and never surfaces back to the domain — the round-tripped {@code Telemetry} is
  * identified only by {@code (usageId, deviceId, at)}, exactly as the in-memory reference
  * implementation identifies samples (by list position within a usage, i.e. not at all).
+ *
+ * <p>{@code flightState} (docs/FC-INTEGRATIONS-PLAN.md F-b) stores the whole {@link FlightState}
+ * as one nullable jsonb column via the same Hibernate native JSON support {@code
+ * DetectionResultEntity#detections} already uses for a plain immutable record tree — no
+ * persistence-local wrapper type is needed, {@link FlightState} (plus its {@code List<String>
+ * armingBlockers}) serializes/deserializes as-is. {@code null} means either the sample pre-dates
+ * this column (older row) or the device reported no flight-controller state at all — both read
+ * back as {@link com.drones.vision.domain.model.Telemetry#flightState()} {@code == null}, exactly
+ * matching {@code Telemetry}'s own nullable-9th-component contract; there is no way to distinguish
+ * the two cases from this column alone, and nothing needs to.
  *
  * <p>No FK to {@code asset_usages}/{@code devices} — same no-cross-entity-FK convention as the
  * P-a schema. {@code (usage_id, at)} is indexed (see {@code V3__history.sql}) for {@code
@@ -63,13 +75,17 @@ public class TelemetrySampleEntity {
     @Column(name = "extra", columnDefinition = "jsonb", nullable = false)
     private Map<String, Double> extra = new LinkedHashMap<>();
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "flight_state", columnDefinition = "jsonb")
+    private FlightState flightState;
+
     /** JPA only. */
     protected TelemetrySampleEntity() {
     }
 
     public TelemetrySampleEntity(UUID id, UUID usageId, UUID deviceId, Instant at, Double latitude, Double longitude,
                                   Double altitudeMeters, Double headingDegrees, Double batteryPercent,
-                                  Map<String, Double> extra) {
+                                  Map<String, Double> extra, FlightState flightState) {
         this.id = id;
         this.usageId = usageId;
         this.deviceId = deviceId;
@@ -80,6 +96,7 @@ public class TelemetrySampleEntity {
         this.headingDegrees = headingDegrees;
         this.batteryPercent = batteryPercent;
         this.extra = new LinkedHashMap<>(extra);
+        this.flightState = flightState;
     }
 
     public UUID id() {
@@ -120,5 +137,9 @@ public class TelemetrySampleEntity {
 
     public Map<String, Double> extra() {
         return extra;
+    }
+
+    public FlightState flightState() {
+        return flightState;
     }
 }

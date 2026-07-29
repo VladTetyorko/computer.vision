@@ -26,6 +26,7 @@ import com.drones.vision.application.DefaultAssetService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
 import com.drones.vision.application.DefaultFleetSummaryService;
+import com.drones.vision.application.DefaultGeofenceService;
 import com.drones.vision.application.DefaultProbeService;
 import com.drones.vision.application.DefaultReplayService;
 import com.drones.vision.application.DefaultSimulationService;
@@ -34,6 +35,8 @@ import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.GeofenceMonitor;
+import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
@@ -51,6 +54,7 @@ import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
@@ -377,6 +381,31 @@ public class WiringConfiguration {
     }
 
     /**
+     * Evaluates live telemetry against the enabled {@code GeofenceZone} set and raises {@code
+     * GEOFENCE_BREACH} events on edge transitions (docs/OPS-CORE-PLAN.md §G) — threaded into
+     * {@link #usageTracker} below (its 7-argument constructor) as a nullable-by-convention but
+     * always-real collaborator here, the same "no `if enabled`" posture as {@code
+     * liveUpdatePublisherPort} threaded through the same constructor.
+     */
+    @Bean
+    public GeofenceMonitor geofenceMonitor(GeofenceRepositoryPort geofenceRepositoryPort,
+                                            EventPublisherPort eventPublisherPort,
+                                            LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        return new GeofenceMonitor(geofenceRepositoryPort, eventPublisherPort, liveUpdatePublisherPort);
+    }
+
+    /**
+     * CRUD/list over geofence zones (docs/OPS-CORE-PLAN.md §G) behind {@code GeofenceController}
+     * (vision-api, component-scanned) — a one-line assembly, mirroring {@link #replayService}'s
+     * shape.
+     */
+    @Bean
+    public GeofenceService geofenceService(GeofenceRepositoryPort geofenceRepositoryPort,
+                                            GeofenceMonitor geofenceMonitor) {
+        return new DefaultGeofenceService(geofenceRepositoryPort, geofenceMonitor);
+    }
+
+    /**
      * Drives {@link com.drones.vision.domain.model.AssetUsage} lifecycle and
      * telemetry sampling from {@link StreamService}'s start/stop
      * notifications — see {@link #streamService} below, which is
@@ -388,6 +417,11 @@ public class WiringConfiguration {
      * com.drones.vision.app.devsupport.NoopLiveUpdatePublisher}, see {@link
      * #liveUpdatePublisherPort}), so every appended telemetry sample is announced regardless of
      * {@link VisionLiveProperties#enabled()}; the no-op branch makes that announcement free.
+     *
+     * <p>{@code geofenceMonitor} (docs/OPS-CORE-PLAN.md §G) is likewise threaded through
+     * unconditionally — {@link #geofenceMonitor} is always a real bean, so every appended
+     * telemetry sample is also evaluated for geofence breaches regardless of whether any zone has
+     * been configured yet (an empty zone set is simply never a breach).
      */
     @Bean
     public UsageTracker usageTracker(AssetRepositoryPort assetRepositoryPort,
@@ -395,9 +429,10 @@ public class WiringConfiguration {
                                       AssetUsageRepositoryPort assetUsageRepositoryPort,
                                       TelemetryRepositoryPort telemetryRepositoryPort,
                                       List<TelemetrySourcePort> telemetrySources,
-                                      LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                                      LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                      GeofenceMonitor geofenceMonitor) {
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort);
+                telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort, geofenceMonitor);
     }
 
     /**
@@ -445,17 +480,23 @@ public class WiringConfiguration {
     }
 
     /**
-     * Flight replay (docs/MVP2-PLAN.md §R, R-a/R-a2): the read side behind {@code
-     * UsageTimelineController} (vision-api, component-scanned) — the one bean R-a's own writeup
-     * flagged as missing, closed here. All three collaborators are already wired above/in {@link
+     * Flight replay (docs/MVP2-PLAN.md §R, R-a/R-a2) plus its recording/clip-export read
+     * (docs/OPS-CORE-PLAN.md §R, R-b): the read side behind {@code UsageTimelineController}
+     * (vision-api, component-scanned) — the one bean R-a's own writeup flagged as missing, closed
+     * here. All four collaborators are already wired above/in {@link
      * PersistenceWiringConfiguration}, so this is a one-line assembly, mirroring {@link
-     * #categoryService}'s shape.
+     * #categoryService}'s shape. {@code streamPublisherPort} (up from three collaborators to four,
+     * R-b) is the same bean {@link #streamService} already resolves {@code viewUrl}/{@code
+     * whepUrl} through — {@link DefaultReplayService#recordingFor} calls its {@code playbackUrl}
+     * for the resolved usage window.
      */
     @Bean
     public ReplayService replayService(AssetUsageRepositoryPort assetUsageRepositoryPort,
                                         TelemetryRepositoryPort telemetryRepositoryPort,
-                                        DetectionRepositoryPort detectionRepositoryPort) {
-        return new DefaultReplayService(assetUsageRepositoryPort, telemetryRepositoryPort, detectionRepositoryPort);
+                                        DetectionRepositoryPort detectionRepositoryPort,
+                                        StreamPublisherPort streamPublisherPort) {
+        return new DefaultReplayService(assetUsageRepositoryPort, telemetryRepositoryPort, detectionRepositoryPort,
+                streamPublisherPort);
     }
 
     /**

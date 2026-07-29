@@ -22,11 +22,18 @@ import { EventsStore } from '../../core/events/events-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { telemetryDevices } from '../../core/telemetry/telemetry-logic';
+import { deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
+import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { WeatherStore } from '../../core/weather/weather-store';
+import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
 import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { FlyOsd } from './fly-osd';
+import { FailsafeBanner } from './failsafe-banner';
+import { PreflightChecklist } from './preflight-checklist';
+import { DiagnosticsCard } from './diagnostics-card';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -83,12 +90,14 @@ const LOG_PREFIX = '[fly]';
  */
 @Component({
   selector: 'vision-fly',
-  imports: [RouterLink, Player, LiveMap, DetectionsStrip, FlyOsd],
+  imports: [RouterLink, Player, LiveMap, DetectionsStrip, FlyOsd, FailsafeBanner, PreflightChecklist, DiagnosticsCard],
   templateUrl: './fly.html',
   styleUrl: './fly.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `LivePage`/`AssetDetailPage`.
-  providers: [TelemetryStore, DetectionsStore],
+  // `WeatherStore` (docs/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
+  // comment for why it can't be a shared root singleton.
+  providers: [TelemetryStore, DetectionsStore, WeatherStore],
 })
 export class FlyPage {
   /**
@@ -110,6 +119,8 @@ export class FlyPage {
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
   protected readonly events = inject(EventsStore);
+  protected readonly geofence = inject(GeofenceStore);
+  private readonly weather = inject(WeatherStore);
 
   private readonly stageHost = viewChild<ElementRef<HTMLDivElement>>('stage');
 
@@ -179,6 +190,45 @@ export class FlyPage {
   protected readonly telemetryDevicesList = computed(() => telemetryDevices(this.asset()?.devices ?? []));
   protected readonly hasTelemetryDevice = computed(() => this.telemetryDevicesList().length > 0);
 
+  // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md
+  // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
+  // already reads, no second telemetry source.
+  protected readonly failsafeBanner = computed(() => flightBanner(this.telemetry.latest()));
+
+  /** Re-derives whenever the tracked sample/primary-device/live state changes — a ground-check
+   * glance, not a live-ticking instrument (the OSD's own age chip is that); see
+   * `flight-state-logic.ts#derivePreflight`'s own doc comment for why `Date.now()` is read here,
+   * at the call site, rather than inside that pure function. */
+  protected readonly preflightItems = computed(() =>
+    derivePreflight(this.telemetry.latest(), this.primaryDevice() !== undefined, this.live(), Date.now()),
+  );
+
+  /** Pre-arm ground check — hidden once watch-mode drops the controls entirely, or once the FC
+   * itself confirms armed (the OSD chip bar is the live instrument from that point on). */
+  protected readonly showPreflightChecklist = computed(() => {
+    if (this.watchMode()) {
+      return false;
+    }
+    const sample = this.telemetry.latest();
+    return sample === undefined || sample.flightState?.armed !== true;
+  });
+
+  /** docs/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
+   * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */
+  protected readonly diagnosticsRows = computed(() => deriveDiagnostics(this.telemetry.latest()?.extra));
+
+  // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) --------------------------------------
+  /** The live telemetry fix when one exists, else the asset's own last-known position — "best position we have right now". */
+  private readonly weatherPosition = computed(() => {
+    const latest = this.telemetry.latest();
+    if (latest?.latitude !== undefined && latest.longitude !== undefined) {
+      return { latitude: latest.latitude, longitude: latest.longitude };
+    }
+    return this.asset()?.lastKnownPosition;
+  });
+  /** `AssetDetails.attributes['windLimitMps']` when present, else the plan's own 10 m/s default. */
+  protected readonly windLimitMps = computed(() => parseWindLimitMps(this.asset()?.attributes));
+
   protected readonly latencySeconds = signal<number | null>(null);
   protected readonly transport = signal<Transport>('hls');
   protected readonly boxesMode = signal<BoxesMode>('overlay');
@@ -214,6 +264,10 @@ export class FlyPage {
     // restored whatever was last saved.
     effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
     effect(() => writePersistedFlag(DETECTIONS_STRIP_OPEN_KEY, this.detectionsStripOpen()));
+
+    // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherStore.track`
+    // itself no-ops instantly unless the 10-minute cache is actually stale (docs/OPS-CORE-PLAN.md §W).
+    effect(() => this.weather.track(this.weatherPosition()));
 
     // Latches once `live()` is ever observed true for the current primary device — see `stopped`'s
     // own doc comment above.

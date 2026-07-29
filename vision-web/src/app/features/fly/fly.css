@@ -260,6 +260,37 @@
   margin-left: 0;
 }
 
+/* Failsafe/RTH/landing banner (docs/FC-INTEGRATIONS-PLAN.md F-d) — a true full-width strip flush to
+   the top edge, above the ordinary HUD layer's z-index but below the two modal overlays
+   (`hud-confirm`/`hud-shortcuts`, z-index: 20). `min-height` on `<vision-failsafe-banner>`'s own
+   `.banner` fixes this row's height so the `.banner-active` shift below stays accurate regardless of
+   which kind is showing (all three kinds render one line at this app's ≥1280px floor). */
+.hud-banner {
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+}
+
+/* Geometric shift, not a z-index chase (mirrors `.hud-map`'s own BROKEN #1 fix above) — every row
+   that would otherwise sit under the banner moves down by its ~2.2rem height instead of letting the
+   banner paint over (and block clicks on) the header's own controls. */
+.cockpit.banner-active .hud-header {
+  top: 2.95rem;
+}
+
+.cockpit.banner-active .hud-osd {
+  top: 5.8rem;
+}
+
+.cockpit.banner-active .hud-map {
+  top: 5.8rem;
+}
+
+.cockpit.banner-active .hud-ticker {
+  top: 8.5rem;
+}
+
 .hud-osd {
   top: 3.6rem;
   left: 0.75rem;
@@ -399,6 +430,22 @@
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+
+/* Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — left column, clear of both the centered
+   `.hud-controls` row and `.hud-secondary`'s own tile strip (also left-anchored, but shorter). */
+.hud-preflight {
+  left: 0.75rem;
+  bottom: 5.7rem;
+}
+
+/* Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — right column, mirroring `.hud-preflight`'s own
+   fixed offset above `.hud-controls`/`.hud-secondary`, clear of `.hud-detections` below it (which
+   is only ever its own toggle button plus, when opened, the strip) and `.hud-map` above it at this
+   app's ≥1280px viewport floor — an approximate, not computed, offset, same as `.hud-preflight`'s. */
+.hud-diagnostics {
+  right: 0.75rem;
+  bottom: 5.7rem;
 }
 
 /* Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own inline

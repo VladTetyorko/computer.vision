@@ -8,7 +8,7 @@
     <div class="card empty">
       <h3>Replay unavailable</h3>
       <p>{{ errorMessage() }}</p>
-      <a class="btn" [routerLink]="['/assets', assetId()]">Back to asset</a>
+      <a class="btn" [routerLink]="backLink()">Back</a>
     </div>
   } @else if (usageOpen()) {
     <div class="card empty">
@@ -20,13 +20,13 @@
       @if (videoDeviceId(); as deviceId) {
         <a class="btn" [routerLink]="['/live', deviceId]">Watch live</a>
       } @else {
-        <a class="btn" [routerLink]="['/assets', assetId()]">Back to asset</a>
+        <a class="btn" [routerLink]="backLink()">Back</a>
       }
     </div>
   } @else if (timeline(); as t) {
     <div class="page-head">
       <div>
-        <a class="back-link" [routerLink]="['/assets', assetId()]">← {{ asset()?.displayName ?? 'Asset' }}</a>
+        <a class="back-link" [routerLink]="backLink()">← {{ asset()?.displayName ?? 'Back' }}</a>
         <h1>Flight replay</h1>
         <p>
           {{ clockLabel(fromMs()) }} – {{ clockLabel(toMs()) }}
@@ -51,6 +51,44 @@
             [markerPosition]="markerPosition()"
             [markerHeadingDegrees]="markerSample()?.headingDegrees"
           />
+        }
+      </section>
+
+      <!-- ---- Recording video + clip export (docs/OPS-CORE-PLAN.md §R, R-c) -------------------- -->
+      <section class="card span-2 recording-card">
+        <header>
+          <h2>Recording</h2>
+        </header>
+
+        @if (videoAvailable()) {
+          <video
+            #recordingVideo
+            class="recording-video"
+            [src]="recording()!.url"
+            controls
+            preload="metadata"
+            (timeupdate)="onVideoTimeUpdate()"
+            (error)="onVideoError()"
+          ></video>
+
+          <div class="row clip-actions">
+            <button type="button" class="btn secondary small" (click)="markClipStart()">Mark clip start</button>
+            <button type="button" class="btn secondary small" (click)="markClipEnd()">Mark clip end</button>
+            @if (hasClipSelection()) {
+              <button type="button" class="btn secondary small" (click)="clearClipSelection()">Clear selection</button>
+            }
+            @if (downloadClipUrl(); as href) {
+              <a class="btn small" [href]="href" download>Download clip</a>
+            }
+          </div>
+          <p class="muted hint">
+            {{ hasClipSelection() ? 'Clip covers the marked start/end.' : 'No selection — clip covers the whole flight.' }}
+          </p>
+        } @else {
+          <div class="empty-recording">
+            <p class="muted">No recording for this flight.</p>
+            <p class="faint hint">Recording must be enabled in mediamtx (<code>MTX_PATHDEFAULTS_RECORD=yes</code>) for a clip to be available.</p>
+          </div>
         }
       </section>
 
@@ -103,6 +141,8 @@
 
         @if (t.detections.length === 0) {
           <p class="muted hint">No detections recorded for this flight.</p>
+        } @else if (detectionStripCapNote(); as note) {
+          <p class="muted hint">{{ note }}</p>
         }
       </section>
 

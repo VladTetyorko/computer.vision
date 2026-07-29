@@ -1,0 +1,47 @@
+## infra/edge/systemd/vision-rtsp-push.service
+#
+# Pushes the companion computer's camera to this platform's mediamtx sidecar
+# over RTSP -- mediamtx (docker-compose.yml, port 8554) accepts an RTSP
+# ANNOUNCE/publish on any path with zero per-path setup, so this unit is the
+# entire video half of the companion-computer recipe.
+#
+#   sudo cp vision-rtsp-push.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vision-rtsp-push
+#
+# Edit the two CHANGE-ME values in ExecStart below: the platform host/port
+# (default matches docker-compose.yml's mediamtx `8554:8554` RTSP mapping)
+# and the feed name (becomes the stream path, e.g. rtsp://platform:8554/
+# feed-drone1 -- pick something unique per aircraft/rig).
+#
+# Encoding profile mirrors this platform's own publisher
+# (adapter-publish-hls/MODULE.md's MediamtxStreamPublisher): veryfast/
+# zerolatency/1s GOP so segments land on mediamtx's pinned 1s
+# hlsSegmentDuration; bitrate capped low (1.5 Mbps) for LTE/constrained-WiFi
+# uplinks -- raise -b:v/-maxrate/-bufsize if your link has headroom.
+#
+# Camera source: USB/V4L2 webcam via /dev/video0, shown below. For the
+# official RPi camera module (CSI, no V4L2 node on recent Raspberry Pi OS
+# without the legacy camera stack), pipe `rpicam-vid`/`libcamera-vid`
+# instead, e.g. replace ExecStart with a shell wrapper running
+# `rpicam-vid -t 0 --codec yuv420 -o - | ffmpeg -f rawvideo ... -i - ...`.
+
+[Unit]
+Description=Push companion camera to vision platform (RTSP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ffmpeg -nostdin -f v4l2 -framerate 30 -video_size 1280x720 \
+  -i /dev/video0 \
+  -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
+  -g 30 -keyint_min 30 -sc_threshold 0 \
+  -b:v 1500k -maxrate 1500k -bufsize 3000k \
+  -f rtsp -rtsp_transport tcp \
+  rtsp://CHANGE-ME-platform-host:8554/feed-CHANGE-ME-name
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

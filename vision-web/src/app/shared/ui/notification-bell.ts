@@ -1,9 +1,12 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
+import { LiveStore } from '../../core/live/live-store';
 import { ToastService } from '../../core/toast.service';
-import { eventNotificationText, resolveEventTarget } from '../../core/events/events-logic';
+import { eventNotificationText, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
+import { geofenceBreachToastMessage } from '../../core/geofence/geofence-logic';
 import { EventsRail } from './events-rail';
 import { newlyOpenedEvents, unreadEvents } from './notification-logic';
 import type { DetectionEvent } from '../../core/api/models';
@@ -38,6 +41,23 @@ import type { DetectionEvent } from '../../core/api/models';
  * poll doesn't re-toast it). Opening the dropdown does **not** suppress future toasts for events
  * that arrive afterward, and a toast firing does **not** count as "read" — a manager who dismissed a
  * toast without clicking it should still see that event as unread in the dropdown.
+ *
+ * **Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1)**: clicking a row (or its own toast's
+ * action) first tries `core/events/events-logic.ts#resolveReplayDeepLink` — a lazy, click-time-only
+ * lookup (`VisionApi.getAsset(event.assetId)`, never done per-row on render) for a **finished**
+ * usage covering the event's own `firstSeen` — and navigates to `/replay?asset=…&usage=…&t=…`,
+ * scrubbed to that exact moment, when one resolves; otherwise falls back to the pre-existing
+ * `resolveEventTarget` behavior (asset detail / live cockpit) unchanged.
+ *
+ * **Geofence breaches (docs/OPS-CORE-PLAN.md §G-c)** ride a *different* feed —
+ * `LiveStore.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
+ * dropdown list (see `LiveEvent`'s own doc comment for why the two are genuinely different domain
+ * concepts). This component is still where they toast from (the app's one "background thing just
+ * happened" chrome), via a second, independent id-tracking set (`toastedBreachIds`/
+ * `seededBreachToasts`, mirroring `toastedIds`/`seededToasts` exactly) — deliberately **not**
+ * folded into the unread-badge count or the dropdown list itself, since both are typed to
+ * `DetectionEvent` and a breach isn't one; a future cycle that wants breaches counted in the badge
+ * too would need to widen that typing, out of this batch's own scope.
  */
 @Component({
   selector: 'vision-notification-bell',
@@ -48,8 +68,10 @@ import type { DetectionEvent } from '../../core/api/models';
 })
 export class NotificationBell {
   private readonly router = inject(Router);
+  private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
+  private readonly liveStore = inject(LiveStore);
   protected readonly events = inject(EventsStore);
 
   private readonly readIds = signal<ReadonlySet<string>>(new Set());
@@ -59,6 +81,10 @@ export class NotificationBell {
    * `core/events/events-store.ts`'s own private `seenIds`). */
   private readonly toastedIds = new Set<string>();
   private seededToasts = false;
+
+  /** The identical dedup idiom, for `GEOFENCE_BREACH` `LiveEvent`s — see class doc's own "Geofence breaches" paragraph. */
+  private readonly toastedBreachIds = new Set<string>();
+  private seededBreachToasts = false;
 
   constructor() {
     this.events.activate();
@@ -81,6 +107,31 @@ export class NotificationBell {
         this.toastNewEvent(event);
       }
     });
+
+    // Geofence breach toasts (docs/OPS-CORE-PLAN.md §G-c) — a separate feed, a separate dedup set,
+    // identical "seed silently, toast only what arrives after" rule as the effect above.
+    effect(() => {
+      const current = this.liveStore.liveEvents();
+      if (!this.seededBreachToasts) {
+        for (const event of current) {
+          this.toastedBreachIds.add(event.id);
+        }
+        this.seededBreachToasts = true;
+        return;
+      }
+      // `liveEvents` is newest-first; iterate oldest-of-the-new-batch-first so a toast burst (rare,
+      // but possible on reconnect) reads in the order the breaches actually happened.
+      for (const event of [...current].reverse()) {
+        if (this.toastedBreachIds.has(event.id)) {
+          continue;
+        }
+        this.toastedBreachIds.add(event.id);
+        const message = geofenceBreachToastMessage(event);
+        if (message) {
+          this.toasts.error(message);
+        }
+      }
+    });
   }
 
   /** The native `<details>` `toggle` event (`notification-bell.html`) — opening marks everything read. */
@@ -93,19 +144,39 @@ export class NotificationBell {
   /** The dropdown's own `<vision-events-rail>` row click — resolves and navigates, then closes. */
   protected onRailOpen(event: DetectionEvent, details: HTMLDetailsElement): void {
     details.open = false;
-    this.navigate(event);
+    void this.navigate(event);
   }
 
   private toastNewEvent(event: DetectionEvent): void {
     const text = eventNotificationText(event);
     const target = resolveEventTarget(event, this.fleet.streams());
     const action = target
-      ? { label: target.kind === 'asset' ? 'Details' : 'Watch live', onClick: () => this.navigate(event) }
+      ? { label: target.kind === 'asset' ? 'Details' : 'Watch live', onClick: () => void this.navigate(event) }
       : undefined;
     this.toasts.notify(`${text.title} — ${text.body}`, action);
   }
 
-  private navigate(event: DetectionEvent): void {
+  /**
+   * Navigates to the replay deep link (docs/OPS-CORE-PLAN.md §Q1) when a finished covering usage
+   * resolves — a lazy, click-time-only lookup (see class doc) — else falls back to
+   * `resolveEventTarget`'s pre-existing asset/live-cockpit target, unchanged.
+   */
+  private async navigate(event: DetectionEvent): Promise<void> {
+    if (event.assetId) {
+      try {
+        const asset = await this.api.getAsset(event.assetId);
+        const deepLink = resolveReplayDeepLink(event, asset.recentUsages);
+        if (deepLink) {
+          void this.router.navigate(['/replay'], {
+            queryParams: { asset: event.assetId, usage: deepLink.usageId, t: deepLink.offsetMs },
+          });
+          return;
+        }
+      } catch {
+        // Falls through to the pre-existing target below — a failed lookup is never worse than
+        // the behavior this app already had before Q1.
+      }
+    }
     const target = resolveEventTarget(event, this.fleet.streams());
     if (!target) {
       return;

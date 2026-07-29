@@ -67,6 +67,12 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
               }
             </span>
           }
+          <!-- Mode badge (docs/FC-INTEGRATIONS-PLAN.md F-d) — red when failsafe, otherwise the
+               plain neutral chip look every other wall-tile chip already uses; omitted entirely
+               with no flightState yet, never a fabricated placeholder. -->
+          @if (modeLabel(); as mode) {
+            <span class="chip mode-chip" [class.failsafe]="failsafe()">{{ mode }}</span>
+          }
           <!-- Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
                used to be the bare device name itself, silently clickable; it now states itself. -->
           <a
@@ -133,6 +139,20 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
       border-color: var(--danger);
     }
 
+    .mode-chip {
+      font-size: 0.72rem;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    /* --live red is reserved for exactly this — a genuine failsafe (see styles.css's own token
+       doc comment) — never the generic .telemetry-chip.stale's --danger. */
+    .mode-chip.failsafe {
+      color: var(--live);
+      border-color: var(--live);
+    }
+
     /* Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
        own default to fit alongside the telemetry chip and boxes toggle at wall-tile scale. */
     .watch-link {
@@ -184,6 +204,10 @@ export class WallTile {
     const meters = this.telemetry.latest()?.altitudeMeters;
     return meters === undefined ? null : `${meters.toFixed(0)}m`;
   });
+
+  /** The FC's own human mode name (docs/FC-INTEGRATIONS-PLAN.md F-d) — no badge at all until one is reported. */
+  protected readonly modeLabel = computed(() => this.telemetry.latest()?.flightState?.mode ?? null);
+  protected readonly failsafe = computed(() => this.telemetry.latest()?.flightState?.failsafe === true);
 
   constructor() {
     const host = inject(ElementRef<HTMLElement>).nativeElement;

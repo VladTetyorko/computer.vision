@@ -67,6 +67,28 @@
   color: var(--danger);
 }
 
+/* GPS fix severity (docs/FC-INTEGRATIONS-PLAN.md F-d) — kept distinct from `.stale-text` above:
+   one primary signal color per severity, amber for a degraded-but-present fix, red only for
+   no-fix/no-GPS (never for the plain '—' unknown state — see `asset-panel.html`'s own guard). */
+.gps-warn-text {
+  color: var(--warn);
+}
+
+.gps-critical-text {
+  color: var(--danger);
+}
+
+/* Diagnostics rows (docs/FC-INTEGRATIONS-PLAN.md F-e) — same one-color-per-severity idiom as the
+   GPS facts above, kept as its own pair rather than reusing `.gps-warn-text`/`.gps-critical-text`
+   verbatim so a non-GPS row's class name doesn't read as GPS-specific. */
+.diag-warn-text {
+  color: var(--warn);
+}
+
+.diag-bad-text {
+  color: var(--danger);
+}
+
 .hint {
   font-size: 0.8rem;
   margin: 0;

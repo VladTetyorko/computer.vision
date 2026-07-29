@@ -18,6 +18,7 @@ import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
@@ -867,6 +868,63 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$[0].batteryPercent").value(87.5));
 
         verify(telemetryRepositoryPort).findByUsage(usageId, 100);
+    }
+
+    @Test
+    void telemetryOmitsFlightStateAndExtraWhenTheSampleCarriesNeither() throws Exception {
+        UsageId usageId = UsageId.random();
+        DeviceId deviceId = DeviceId.random();
+        Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), 50.45, 30.52, 120.0, 90.0,
+                87.5, Map.of());
+        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+
+        mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].flightState").doesNotExist())
+                .andExpect(jsonPath("$[0].extra").doesNotExist());
+    }
+
+    @Test
+    void telemetryIncludesFlightStateAndExtraWhenTheSampleCarriesThem() throws Exception {
+        // docs/FC-INTEGRATIONS-PLAN.md F-b: FlightStateResponse mirrors the frozen wire contract
+        // field-for-field, and per-field nullability (only some FlightState fields known here)
+        // must survive the DTO mapping honestly rather than fabricating the rest.
+        UsageId usageId = UsageId.random();
+        DeviceId deviceId = DeviceId.random();
+        FlightState flightState = new FlightState("ardupilot", "RTL", true, true, 3, 12, 0.9, 87,
+                List.of("Arm: Compass not calibrated"));
+        Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), 50.45, 30.52, 120.0, 90.0,
+                87.5, Map.of("groundspeedMps", 12.3), flightState);
+        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+
+        mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].flightState.firmware").value("ardupilot"))
+                .andExpect(jsonPath("$[0].flightState.mode").value("RTL"))
+                .andExpect(jsonPath("$[0].flightState.armed").value(true))
+                .andExpect(jsonPath("$[0].flightState.failsafe").value(true))
+                .andExpect(jsonPath("$[0].flightState.gpsFixType").value(3))
+                .andExpect(jsonPath("$[0].flightState.satellites").value(12))
+                .andExpect(jsonPath("$[0].flightState.hdop").value(0.9))
+                .andExpect(jsonPath("$[0].flightState.rssiPercent").value(87))
+                .andExpect(jsonPath("$[0].flightState.armingBlockers", hasSize(1)))
+                .andExpect(jsonPath("$[0].flightState.armingBlockers[0]").value("Arm: Compass not calibrated"))
+                .andExpect(jsonPath("$[0].extra.groundspeedMps").value(12.3));
+    }
+
+    @Test
+    void telemetryOmitsFlightStateWhenPresentButAllFieldsUnknownAndArmingBlockersEmpty() throws Exception {
+        UsageId usageId = UsageId.random();
+        DeviceId deviceId = DeviceId.random();
+        Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), null, null, null, null,
+                null, Map.of(), FlightState.empty());
+        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+
+        mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].flightState").exists())
+                .andExpect(jsonPath("$[0].flightState.firmware").doesNotExist())
+                .andExpect(jsonPath("$[0].flightState.armingBlockers").doesNotExist());
     }
 
     @Test

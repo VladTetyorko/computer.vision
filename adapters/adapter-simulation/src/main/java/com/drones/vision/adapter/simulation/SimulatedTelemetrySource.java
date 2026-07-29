@@ -3,11 +3,14 @@ package com.drones.vision.adapter.simulation;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -66,6 +69,21 @@ import java.util.concurrent.Flow;
  *
  * <p>Plain class with no framework dependency — instantiated directly by
  * {@code vision-app}'s wiring configuration.
+ *
+ * <p>Every sample also carries a synthetic {@link FlightState} (docs/FC-INTEGRATIONS-PLAN.md F-c),
+ * so the flight-controller-aware UI (failsafe banner, preflight checklist, OSD chips) has something
+ * real to show without hardware or a MAVLink link. For the first {@value #STARTUP_DISARMED_TICKS}
+ * samples of a subscription the aircraft looks like it's still on the ground: {@code armed=false},
+ * one synthetic arming blocker, and {@code gpsFixType} ramping {@code 1 → 3}; after that it flies
+ * nominally ({@code firmware="ardupilot"}, {@code mode="Loiter"}, armed, no failsafe, 3D fix, ~12
+ * satellites, ~0.8 HDOP, ~90% RSSI, all with mild deterministic jitter) until the same drained
+ * {@code batteryPercent} this class already computes crosses a threshold: below {@value
+ * #RTL_BATTERY_PERCENT_THRESHOLD}% the mode switches to {@code "RTL"} with {@code failsafe=true};
+ * below {@value #LAND_BATTERY_PERCENT_THRESHOLD}% it switches to {@code "Land"} (failsafe stays
+ * true) — a scripted "battery-driven drama" for dev demos of the RTH/failsafe banner. The jitter
+ * (and the whole per-tick sequence, since it's a pure function of tick index and battery percent)
+ * is seeded per device from a hash of {@link DeviceId}, so two runs against the same device id
+ * reproduce an identical {@link FlightState} sequence.
  */
 public final class SimulatedTelemetrySource implements TelemetrySourcePort {
 
@@ -75,6 +93,22 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
     static final double DEFAULT_CENTER_LONGITUDE = 30.52;
     static final double TRACK_RADIUS_METERS = 200.0;
     static final double BATTERY_DRAIN_PERCENT_PER_SECOND = 0.05;
+
+    /** Number of leading samples per subscription where the synthetic aircraft is still disarmed. */
+    static final long STARTUP_DISARMED_TICKS = 5L;
+    /** Below this drained battery percent (exclusive), the synthetic mode switches to RTL + failsafe. */
+    static final double RTL_BATTERY_PERCENT_THRESHOLD = 20.0;
+    /** Below this drained battery percent (exclusive), the synthetic mode switches to Land (still failsafe). */
+    static final double LAND_BATTERY_PERCENT_THRESHOLD = 8.0;
+
+    static final String FLIGHT_STATE_FIRMWARE = "ardupilot";
+    static final String FLIGHT_MODE_LOITER = "Loiter";
+    static final String FLIGHT_MODE_RTL = "RTL";
+    static final String FLIGHT_MODE_LAND = "Land";
+    static final String STARTUP_ARMING_BLOCKER = "PreArm: GPS: waiting for home";
+    static final int NOMINAL_SATELLITES = 12;
+    static final double NOMINAL_HDOP = 0.8;
+    static final int NOMINAL_RSSI_PERCENT = 90;
 
     /** One full lap of the circular track every this many samples. */
     private static final long TICKS_PER_LAP = 60L;
@@ -172,6 +206,12 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
         private final ScheduledExecutorService executor;
         private final AtomicLong tick = new AtomicLong();
         private final AtomicBoolean closed = new AtomicBoolean(false);
+        /**
+         * Drives the mild {@link FlightState} jitter (satellites/hdop/rssi); seeded from a hash of
+         * {@link #deviceId} so the whole per-tick {@link FlightState} sequence is reproducible for a
+         * given device id, touched only by this runtime's single scheduler thread.
+         */
+        private final Random flightStateJitter;
         /** Cumulative distance flown along {@link #routePlan}; touched only by this runtime's single scheduler thread. */
         private double distanceMeters;
 
@@ -184,11 +224,17 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
             this.routePlan = routePlan;
             this.speedMps = speedMps;
             this.batteryDrainPercentPerSecond = batteryDrainPercentPerSecond;
+            this.flightStateJitter = new Random(seedFor(deviceId));
             this.executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "sim-telemetry-" + deviceId.value());
                 thread.setDaemon(true);
                 return thread;
             });
+        }
+
+        /** Deterministic per-device seed: a device id always yields the same {@link FlightState} jitter sequence. */
+        private static long seedFor(DeviceId deviceId) {
+            return deviceId.value().getMostSignificantBits() ^ deviceId.value().getLeastSignificantBits();
         }
 
         void start() {
@@ -203,7 +249,9 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
                 long n = tick.getAndIncrement();
                 double elapsedSeconds = (n * periodMillis) / 1000.0;
                 double batteryPercent = Math.max(0.0, 100.0 - batteryDrainPercentPerSecond * elapsedSeconds);
-                Telemetry sample = routePlan != null ? routeSample(batteryPercent) : circularSample(n, batteryPercent);
+                FlightState flightState = flightStateFor(n, batteryPercent);
+                Telemetry sample = routePlan != null
+                        ? routeSample(batteryPercent, flightState) : circularSample(n, batteryPercent, flightState);
                 publisher.submit(sample);
             } catch (RuntimeException e) {
                 publisher.closeExceptionally(e);
@@ -212,15 +260,15 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
         }
 
         /** The tick just advances distance by {@code speedMps * tickSeconds} and asks the plan for the rest. */
-        private Telemetry routeSample(double batteryPercent) {
+        private Telemetry routeSample(double batteryPercent, FlightState flightState) {
             distanceMeters += speedMps * (periodMillis / 1000.0);
             RoutePlan.Position position = routePlan.positionAt(distanceMeters);
             return new Telemetry(deviceId, Instant.now(), position.latitude(), position.longitude(),
-                    position.altitudeMeters(), position.headingDegrees(), batteryPercent, Map.of());
+                    position.altitudeMeters(), position.headingDegrees(), batteryPercent, Map.of(), flightState);
         }
 
         /** Unchanged since before CT-a: a point on a ~{@value #TRACK_RADIUS_METERS}m circle, tangent heading. */
-        private Telemetry circularSample(long n, double batteryPercent) {
+        private Telemetry circularSample(long n, double batteryPercent, FlightState flightState) {
             double angle = (n % TICKS_PER_LAP) / (double) TICKS_PER_LAP * 2 * Math.PI;
 
             double northMeters = TRACK_RADIUS_METERS * Math.cos(angle);
@@ -234,7 +282,51 @@ public final class SimulatedTelemetrySource implements TelemetrySourcePort {
             double headingDegrees = (Math.toDegrees(Math.atan2(Math.cos(angle), -Math.sin(angle))) + 360.0) % 360.0;
 
             return new Telemetry(deviceId, Instant.now(), latitude, longitude, null, headingDegrees,
-                    batteryPercent, Map.of());
+                    batteryPercent, Map.of(), flightState);
+        }
+
+        /**
+         * Synthetic {@link FlightState} for tick {@code n}: disarmed with a ramping GPS fix and one
+         * arming blocker for the first {@value #STARTUP_DISARMED_TICKS} ticks (startup realism), then
+         * a nominal armed Loiter state — unless {@code batteryPercent} (the same drained value the
+         * sample's own {@code batteryPercent} carries) has crossed the RTL/Land thresholds, gating the
+         * "battery-driven drama" behind having armed in the first place (an aircraft can't RTL/Land
+         * while still on the ground disarmed).
+         */
+        private FlightState flightStateFor(long n, double batteryPercent) {
+            int satellites = Math.max(0, NOMINAL_SATELLITES + jitterInt(1));
+            double hdop = Math.max(0.0, NOMINAL_HDOP + jitterDouble(0.1));
+            int rssiPercent = clampPercent(NOMINAL_RSSI_PERCENT + jitterInt(3));
+
+            if (n < STARTUP_DISARMED_TICKS) {
+                int gpsFixType = (int) Math.min(3L, 1L + n);
+                return new FlightState(FLIGHT_STATE_FIRMWARE, FLIGHT_MODE_LOITER, false, false, gpsFixType,
+                        satellites, hdop, rssiPercent, List.of(STARTUP_ARMING_BLOCKER));
+            }
+            if (batteryPercent < LAND_BATTERY_PERCENT_THRESHOLD) {
+                return new FlightState(FLIGHT_STATE_FIRMWARE, FLIGHT_MODE_LAND, true, true, 3,
+                        satellites, hdop, rssiPercent, List.of());
+            }
+            if (batteryPercent < RTL_BATTERY_PERCENT_THRESHOLD) {
+                return new FlightState(FLIGHT_STATE_FIRMWARE, FLIGHT_MODE_RTL, true, true, 3,
+                        satellites, hdop, rssiPercent, List.of());
+            }
+            return new FlightState(FLIGHT_STATE_FIRMWARE, FLIGHT_MODE_LOITER, true, false, 3,
+                    satellites, hdop, rssiPercent, List.of());
+        }
+
+        /** Deterministic (seeded) integer jitter in {@code [-magnitude, magnitude]}; 0 if magnitude &lt;= 0. */
+        private int jitterInt(int magnitude) {
+            return magnitude <= 0 ? 0 : flightStateJitter.nextInt(2 * magnitude + 1) - magnitude;
+        }
+
+        /** Deterministic (seeded) double jitter in {@code [-magnitude, magnitude]}; 0 if magnitude &lt;= 0. */
+        private double jitterDouble(double magnitude) {
+            return magnitude <= 0 ? 0.0 : (flightStateJitter.nextDouble() * 2 - 1) * magnitude;
+        }
+
+        private static int clampPercent(int value) {
+            return Math.max(0, Math.min(100, value));
         }
 
         void close() {

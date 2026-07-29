@@ -93,7 +93,19 @@ export function snapshotFromSamples(samples: readonly TelemetrySample[]): AssetT
   };
 }
 
-/** One asset's fully-derived marker: where to plot it and what its popup shows. */
+/**
+ * One asset's fully-derived marker: where to plot it and what its popup shows.
+ *
+ * `flightMode`/`armed`/`failsafe`/`gpsFixType` (docs/FC-INTEGRATIONS-PLAN.md F-d) all come from the
+ * same place `headingDegrees`/`batteryPercent` already do — the streaming asset's own latest
+ * telemetry sample's `flightState` (see `buildMarker`) — never from `AssetSummary` itself, which
+ * carries none of this (unlike `AssetAttention`'s own `flightMode`/`armed`/`failsafe`, a *different*,
+ * fleet-summary-level derivation `features/command/command-logic.ts` reads directly off that DTO
+ * instead — this marker-level set exists for `shared/map/fleet-map/fleet-map.ts`'s popup and
+ * `features/command/asset-panel.ts`'s Status tab, both of which only ever have a `FleetMarker` to
+ * read from, not the fleet-summary row). Absent for the `offline` bucket (no live telemetry poller
+ * — see `buildMarker`) or before the first sample of a freshly-`streaming` asset arrives.
+ */
 export interface FleetMarker {
   readonly assetId: string;
   readonly displayName: string;
@@ -107,6 +119,18 @@ export interface FleetMarker {
   readonly batteryPercent?: number;
   readonly trail: readonly GeoPosition[];
   readonly sampleAgeSeconds?: number;
+  readonly flightMode?: string;
+  readonly armed?: boolean;
+  readonly failsafe?: boolean;
+  readonly gpsFixType?: number;
+  /**
+   * docs/FC-INTEGRATIONS-PLAN.md F-e — the same raw `TelemetrySample.extra` map `flightMode`/etc.
+   * above are decoded from, passed through verbatim so `features/command/asset-panel.ts`'s Status
+   * tab can feed it straight into `core/telemetry/flight-state-logic.ts#deriveDiagnostics` without a
+   * second `TelemetryStore` poller — same reuse rationale as every other marker-level field here.
+   * Absent entirely for the `offline` bucket, like every other live-telemetry-sourced field.
+   */
+  readonly extra?: Record<string, number>;
 }
 
 /**
@@ -154,6 +178,11 @@ export function buildMarker(
     batteryPercent: latest?.batteryPercent,
     trail: telemetry?.trail ?? [],
     sampleAgeSeconds: ageSeconds(latest?.at, nowMs),
+    flightMode: latest?.flightState?.mode,
+    armed: latest?.flightState?.armed,
+    failsafe: latest?.flightState?.failsafe,
+    gpsFixType: latest?.flightState?.gpsFixType,
+    extra: latest?.extra,
   };
 }
 

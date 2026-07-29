@@ -109,11 +109,12 @@ public final class JpaTelemetryRepository implements TelemetryRepositoryPort {
     private static TelemetrySampleEntity toEntity(UsageId usageId, Telemetry telemetry) {
         return new TelemetrySampleEntity(UUID.randomUUID(), usageId.value(), telemetry.deviceId().value(),
                 telemetry.at(), telemetry.latitude(), telemetry.longitude(), telemetry.altitudeMeters(),
-                telemetry.headingDegrees(), telemetry.batteryPercent(), telemetry.extra());
+                telemetry.headingDegrees(), telemetry.batteryPercent(), telemetry.extra(), telemetry.flightState());
     }
 
     private static Telemetry toDomain(TelemetrySampleEntity entity) {
         return new Telemetry(new DeviceId(entity.deviceId()), entity.at(), entity.latitude(), entity.longitude(),
-                entity.altitudeMeters(), entity.headingDegrees(), entity.batteryPercent(), entity.extra());
+                entity.altitudeMeters(), entity.headingDegrees(), entity.batteryPercent(), entity.extra(),
+                entity.flightState());
     }
 }

@@ -159,3 +159,18 @@
   width: 100%;
   justify-content: center;
 }
+
+/* ---- Geofence zones (docs/OPS-CORE-PLAN.md §G-c) — the permanent center label naming each zone --- */
+
+:host ::ng-deep .zone-label {
+  background: var(--panel-raised, rgb(30 41 59 / 85%));
+  border: 1px solid var(--border, #334155);
+  color: var(--text, #e2e8f0);
+  font-size: 0.7rem;
+  padding: 0.1rem 0.4rem;
+  box-shadow: none;
+}
+
+:host ::ng-deep .zone-label::before {
+  display: none; /* Leaflet's default tooltip arrow reads oddly for a permanent, centered label */
+}

@@ -221,6 +221,33 @@ export interface Category {
 }
 
 /**
+ * Mirrors `domain.model.FlightState`, surfaced as `dto.TelemetrySampleResponse#flightState`
+ * (docs/FC-INTEGRATIONS-PLAN.md — the frozen wire contract; F-a/F-b land the backend half in
+ * parallel with this UI cycle). Flight-controller state merged from MAVLink telemetry
+ * (ArduPilot/INAV/Betaflight, decoded by `adapter-mavlink`) — every field independently absent
+ * ("null unknown" in the Java record's own doc comment) except `armingBlockers`, which the
+ * backend only omits when empty (never sends `null`); every reader here treats a missing
+ * `armingBlockers` as "no blockers known", identical to an empty array.
+ *
+ * `mode` is a human-readable name (`"RTL"`, `"Loiter"`, `"Angle"` — see
+ * `core/telemetry/flight-state-logic.ts`'s own doc comment for the exact RTL/landing mode-name
+ * sets it matches against), not a numeric `custom_mode`. `gpsFixType` is the raw
+ * `GPS_FIX_TYPE` ordinal 0–6 (`core/telemetry/flight-state-logic.ts#gpsFixLabel`/`gpsSeverity`
+ * are the only place this app decodes it into a label/severity).
+ */
+export interface FlightState {
+  readonly firmware?: string;
+  readonly mode?: string;
+  readonly armed?: boolean;
+  readonly failsafe?: boolean;
+  readonly gpsFixType?: number;
+  readonly satellites?: number;
+  readonly hdop?: number;
+  readonly rssiPercent?: number;
+  readonly armingBlockers?: readonly string[];
+}
+
+/**
  * Mirrors `dto.TelemetrySampleResponse`. Every field except `deviceId`/`at` is absent when the
  * underlying sample did not carry that reading — not every device reports every field.
  *
@@ -228,6 +255,14 @@ export interface Category {
  * the telemetry device it came from, which is what makes multi-telemetry grouping possible (an
  * asset's usage can mix samples from more than one TELEMETRY-capable device; see
  * `features/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`).
+ *
+ * `flightState`/`extra` (docs/FC-INTEGRATIONS-PLAN.md, frozen wire contract) are this cycle's own
+ * additions: `flightState` is absent when the sample's device never emitted a `HEARTBEAT` yet
+ * (never TELEMETRY-MAVLink-capable at all, or the very first sample or two); `extra` is the
+ * previously-dropped-at-this-DTO `Telemetry.extra` map, now surfaced — `groundspeedMps` is the one
+ * key `features/fly/fly-osd.ts` reads today (closing that component's own previously-documented
+ * "no speed reading" gap), `batteryVoltage`/`vxMps` etc. ride along unread. Absent (not `{}`) when
+ * empty, same `@JsonInclude(NON_NULL)`-adjacent convention as everything else in this file.
  */
 export interface TelemetrySample {
   readonly deviceId: string;
@@ -237,6 +272,8 @@ export interface TelemetrySample {
   readonly altitudeMeters?: number;
   readonly headingDegrees?: number;
   readonly batteryPercent?: number;
+  readonly flightState?: FlightState;
+  readonly extra?: Record<string, number>;
 }
 
 /**
@@ -521,6 +558,16 @@ export interface CategoryCounts {
  * **No `sourceState` field** — the backend deliberately doesn't invent a "reconnecting"/"degraded"
  * read (see the DTO's own doc comment); `features/command/command-logic.ts`'s attention rules key off
  * `batteryPercent`/`telemetryAgeMs`/`openEventCount` only, never a fabricated fourth signal.
+ *
+ * `flightMode`/`armed`/`failsafe` (docs/FC-INTEGRATIONS-PLAN.md, frozen wire contract) are this
+ * cycle's own additions — the same "latest-telemetry derivation as `batteryPercent`" the backend
+ * DTO's own doc comment describes, so they follow the identical absence rule: absent whenever the
+ * asset has never reported a `FlightState`-carrying sample, not `null`. `features/command/command-logic.ts`'s
+ * new `failsafe` attention reason reads `failsafe` directly; `gpsFixType` (GPS fix quality) is
+ * deliberately **not** among these three — the wire contract doesn't surface it at the fleet-summary
+ * level, only per-sample (`TelemetrySample.flightState.gpsFixType`) — see
+ * `core/map/map-logic.ts#FleetMarker`'s own doc comment for where a GPS reading is sourced from
+ * instead (the map's own live telemetry snapshot, not this DTO).
  */
 export interface AssetAttention {
   readonly assetId: string;
@@ -533,6 +580,9 @@ export interface AssetAttention {
   readonly batteryPercent?: number;
   readonly telemetryAgeMs?: number;
   readonly openEventCount: number;
+  readonly flightMode?: string;
+  readonly armed?: boolean;
+  readonly failsafe?: boolean;
 }
 
 /**
@@ -690,4 +740,57 @@ export interface UpdateLiveTopicsRequest {
 export interface LiveSubscription {
   readonly connectionId: string;
   readonly topics: readonly string[];
+}
+
+// --- Geofencing (docs/OPS-CORE-PLAN.md §G's frozen wire contract) ------------------------------
+
+/** Mirrors `domain.model.ZoneKind` — `KEEP_IN` (must stay inside) vs. `KEEP_OUT` (must stay outside). */
+export type ZoneKind = 'KEEP_IN' | 'KEEP_OUT';
+
+/**
+ * Mirrors `dto.GeofenceZoneResponse`, the body of `GET/POST /api/geofences` and
+ * `PUT /api/geofences/{id}` (docs/OPS-CORE-PLAN.md §G). `polygon` vertices are `{latitude,
+ * longitude}` only — a zone's own `maxAltitudeMeters` is the one altitude concept a zone carries,
+ * never a per-vertex one (each `GeoPosition`'s own `altitudeMeters` is always absent here).
+ * `maxAltitudeMeters` is absent (not `null`) for "no ceiling", same `@JsonInclude(NON_NULL)`
+ * convention as every other optional numeric field in this file.
+ */
+export interface GeofenceZone {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: ZoneKind;
+  readonly polygon: readonly GeoPosition[];
+  readonly maxAltitudeMeters?: number;
+  readonly enabled: boolean;
+}
+
+/**
+ * Mirrors `dto.GeofenceZoneRequest` — the shared create/update body (`POST /api/geofences`,
+ * `PUT /api/geofences/{id}`): the response shape minus `id`. `PUT` is a wholesale replacement
+ * (the backend has no partial-patch geofence endpoint), so a rename/enable-toggle must resend
+ * every field, not just the one that changed — see `core/geofence/geofence-store.ts`.
+ */
+export interface GeofenceZoneRequest {
+  readonly name: string;
+  readonly kind: ZoneKind;
+  readonly polygon: readonly GeoPosition[];
+  readonly maxAltitudeMeters?: number;
+  readonly enabled: boolean;
+}
+
+// --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------
+
+/**
+ * Mirrors `dto.UsageRecordingResponse`, the body of `GET /api/usages/{usageId}/recording`
+ * (docs/OPS-CORE-PLAN.md §R). `url`/`start`/`durationSeconds` are each omitted entirely (not
+ * `null`) when `available` is `false` — a known usage with nothing to play back is not an error,
+ * just an honest `{"available":false}`; `features/replay/**`'s empty state handles it. `url` is
+ * mediamtx's own playback `/get` URL for `[start, start + durationSeconds)` — never proxied, POST/
+ * fetched straight from it, same "absolute origin, never rewritten" rule as `ActiveStream#whepUrl`.
+ */
+export interface UsageRecording {
+  readonly available: boolean;
+  readonly url?: string;
+  readonly start?: string;
+  readonly durationSeconds?: number;
 }

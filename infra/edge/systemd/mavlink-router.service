@@ -1,0 +1,30 @@
+## infra/edge/systemd/mavlink-router.service
+#
+# Install at /etc/systemd/system/mavlink-router.service (or skip this file
+# entirely if installing mavlink-router via `apt install mavlink-router` on
+# Debian/Ubuntu-class images -- the package ships this same unit already,
+# pointed at the same default /etc/mavlink-router/main.conf path). Provided
+# here for images/installs that only fetch the mavlink-router binary itself.
+#
+#   sudo cp main.conf /etc/mavlink-router/main.conf   # edit the CHANGE-ME values first
+#   sudo cp mavlink-router.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now mavlink-router
+
+[Unit]
+Description=mavlink-router: flight-controller UART to platform UDP bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mavlink-router -c /etc/mavlink-router/main.conf
+Restart=on-failure
+RestartSec=2
+# Needs access to the UART device node (dialout group membership is not
+# enough for a systemd service with no controlling tty) -- run as root
+# unless your image grants the service user explicit device ACLs.
+User=root
+
+[Install]
+WantedBy=multi-user.target

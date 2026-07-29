@@ -13,7 +13,9 @@ import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceCategory;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.domain.model.GeofenceZone;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.ModelRef;
@@ -23,12 +25,15 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.model.ZoneId;
+import com.drones.vision.domain.model.ZoneKind;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
+import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 
 import jakarta.persistence.EntityManager;
@@ -500,6 +505,45 @@ class PostgresDockerIntegrationTest {
             assertEquals(1, repository.findByUsage(usageA, 10).size());
             assertEquals(1, repository.findByUsage(usageB, 10).size());
         }
+
+        /**
+         * docs/FC-INTEGRATIONS-PLAN.md F-b: {@code flight_state} round-trips a full {@link
+         * FlightState} — including its own nullable sub-fields and a non-empty {@code
+         * armingBlockers} — through the jsonb column via the same {@code @JdbcTypeCode(SqlTypes.JSON)}
+         * idiom {@code DetectionResultEntity#detections} already uses for a plain record tree.
+         */
+        @Test
+        void savedSampleWithFlightStateRoundTripsIt() {
+            UsageId usageId = UsageId.random();
+            FlightState flightState = new FlightState("ardupilot", "RTL", true, true, 3, 12, 0.9, 87,
+                    List.of("Arm: Compass not calibrated"));
+            Telemetry telemetry = new Telemetry(DeviceId.random(), NOW, 50.45, 30.52, 120.0, 90.0, 76.5,
+                    Map.of("rssi", -55.0), flightState);
+
+            repository.save(usageId, telemetry);
+
+            List<Telemetry> found = repository.findByUsage(usageId, 10);
+            assertEquals(List.of(telemetry), found);
+            assertEquals(flightState, found.get(0).flightState());
+        }
+
+        /**
+         * A sample with no {@code flightState} at all (the pre-existing 8-arg {@code Telemetry}
+         * convenience ctor, same shape every pre-F-b row in this table has) must read back with
+         * {@code flightState() == null} — the honest-null contract a real pre-migration row would
+         * also satisfy, since the column itself is nullable (see {@link
+         * #v6MigrationAddsANullableFlightStateColumnOnTopOfV1ThroughV5}).
+         */
+        @Test
+        void savedSampleWithoutFlightStateRoundTripsAsNull() {
+            UsageId usageId = UsageId.random();
+            Telemetry telemetry = new Telemetry(DeviceId.random(), NOW, null, null, null, null, null, Map.of());
+
+            repository.save(usageId, telemetry);
+
+            List<Telemetry> found = repository.findByUsage(usageId, 10);
+            assertNull(found.get(0).flightState());
+        }
     }
 
     @Nested
@@ -643,6 +687,89 @@ class PostgresDockerIntegrationTest {
         }
     }
 
+    /** docs/OPS-CORE-PLAN.md §G — every {@link GeofenceRepositoryPort} method, upsert semantics. */
+    @Nested
+    class GeofenceRepositoryTests {
+
+        private final GeofenceRepositoryPort repository = new JpaGeofenceRepository(entityManagerFactory);
+
+        private List<GeoPosition> triangle() {
+            return List.of(
+                    new GeoPosition(10.0, 20.0, null),
+                    new GeoPosition(10.0, 21.0, null),
+                    new GeoPosition(11.0, 20.5, null));
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(ZoneId.random()).isEmpty());
+        }
+
+        @Test
+        void savedKeepOutZoneRoundTripsWithAltitudeCeiling() {
+            GeofenceZone zone = new GeofenceZone(ZoneId.random(), "Airport", ZoneKind.KEEP_OUT, triangle(), 50.0,
+                    true);
+
+            repository.save(zone);
+
+            Optional<GeofenceZone> found = repository.findById(zone.id());
+            assertTrue(found.isPresent());
+            assertEquals(zone, found.get());
+        }
+
+        @Test
+        void savedKeepInZoneWithNoAltitudeCeilingRoundTripsWithNullMaxAltitude() {
+            GeofenceZone zone = new GeofenceZone(ZoneId.random(), "Site", ZoneKind.KEEP_IN, triangle(), null, false);
+
+            repository.save(zone);
+
+            Optional<GeofenceZone> found = repository.findById(zone.id());
+            assertTrue(found.isPresent());
+            assertNull(found.get().maxAltitudeMeters());
+            assertFalse(found.get().enabled());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingId() {
+            ZoneId id = ZoneId.random();
+            repository.save(new GeofenceZone(id, "Original", ZoneKind.KEEP_OUT, triangle(), null, true));
+            repository.save(new GeofenceZone(id, "Renamed", ZoneKind.KEEP_IN, triangle(), 30.0, false));
+
+            Optional<GeofenceZone> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals("Renamed", found.get().name());
+            assertEquals(ZoneKind.KEEP_IN, found.get().kind());
+            assertEquals(30.0, found.get().maxAltitudeMeters());
+            assertFalse(found.get().enabled());
+        }
+
+        @Test
+        void findAllReturnsEverySavedZone() {
+            GeofenceZone first = new GeofenceZone(ZoneId.random(), "Zone A", ZoneKind.KEEP_OUT, triangle(), null,
+                    true);
+            GeofenceZone second = new GeofenceZone(ZoneId.random(), "Zone B", ZoneKind.KEEP_IN, triangle(), 20.0,
+                    true);
+            repository.save(first);
+            repository.save(second);
+
+            List<GeofenceZone> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void deleteByIdIsIdempotentAndRemovesTheZone() {
+            GeofenceZone zone = new GeofenceZone(ZoneId.random(), "Temp", ZoneKind.KEEP_OUT, triangle(), null, true);
+            repository.save(zone);
+
+            repository.deleteById(zone.id());
+            assertTrue(repository.findById(zone.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.deleteById(zone.id());
+        }
+    }
+
     /**
      * docs/MVP2-PLAN.md P-b's retention guard, in test form: uses the small-cap constructor
      * overload (rather than the production {@value JpaTelemetryRepository#DEFAULT_RETENTION_LIMIT_PER_USAGE}
@@ -774,6 +901,58 @@ class PostgresDockerIntegrationTest {
                     .getSingleResult();
             assertEquals("YES", column[0], "stream_id must stay nullable so pre-V4 rows keep reading back as null");
             assertEquals("uuid", column[1]);
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/FC-INTEGRATIONS-PLAN.md F-b: {@code V6__telemetry_flight_state.sql} must apply cleanly
+     * on top of the V1-V5 schema {@link #migrateAndOpen} already migrated for every other test in
+     * this class, adding {@code telemetry_samples.flight_state} as a nullable jsonb column
+     * (additive, no backfill) rather than requiring a fresh database — same shape/rationale as
+     * {@link #v4MigrationAddsANullableStreamIdColumnOnTopOfV1ThroughV3}.
+     */
+    @Test
+    void v6MigrationAddsANullableFlightStateColumnOnTopOfV1ThroughV5() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] column = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'telemetry_samples' and column_name = 'flight_state'")
+                    .getSingleResult();
+            assertEquals("YES", column[0],
+                    "flight_state must stay nullable so pre-V6 rows keep reading back as null");
+            assertEquals("jsonb", column[1]);
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/OPS-CORE-PLAN.md §G: {@code V7__geofence_zones.sql} must apply cleanly on top of the
+     * V1-V6 schema {@link #migrateAndOpen} already migrated for every other test in this class,
+     * creating the new {@code geofence_zones} table (a brand-new table, nothing else changed) —
+     * same "prove the schema itself, not just a round-trip" reasoning as {@link
+     * #v4MigrationAddsANullableStreamIdColumnOnTopOfV1ThroughV3}/{@link
+     * #v6MigrationAddsANullableFlightStateColumnOnTopOfV1ThroughV5}.
+     */
+    @Test
+    void v7MigrationCreatesTheGeofenceZonesTableOnTopOfV1ThroughV6() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] polygonColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'geofence_zones' and column_name = 'polygon'")
+                    .getSingleResult();
+            assertEquals("NO", polygonColumn[0], "polygon is required");
+            assertEquals("jsonb", polygonColumn[1]);
+
+            String maxAltitudeNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns where table_name = 'geofence_zones' "
+                                    + "and column_name = 'max_altitude_meters'")
+                    .getSingleResult();
+            assertEquals("YES", maxAltitudeNullable, "max_altitude_meters must be nullable (no ceiling)");
         } finally {
             em.close();
         }

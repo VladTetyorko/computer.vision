@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { Player } from '../../shared/player/player';
 import { attentionAgeLabel, attentionReasons, batteryAttentionSeverity } from './command-logic';
+import { deriveDiagnostics, gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import type { AssetAttention, ActiveStream } from '../../core/api/models';
 import type { FleetMarker } from '../../core/map/map-logic';
 
@@ -49,9 +50,26 @@ export class AssetPanel {
 
   protected readonly activeTab = signal<AssetPanelTab>('status');
 
-  protected readonly reasons = computed(() => attentionReasons(this.asset()));
+  /** `marker()?.gpsFixType` feeds the same `gps-degraded` reason the rail's own row rank uses — see `command-logic.ts#gpsDegradedReason`'s doc comment. */
+  protected readonly reasons = computed(() => attentionReasons(this.asset(), this.marker()?.gpsFixType));
   protected readonly ageLabel = computed(() => attentionAgeLabel(this.asset()));
   protected readonly batterySeverity = computed(() => batteryAttentionSeverity(this.marker()?.batteryPercent));
+
+  // --- Mode / Armed / GPS (docs/FC-INTEGRATIONS-PLAN.md F-d) — prefer the live marker (fresher,
+  // sourced from the latest telemetry sample's own `flightState`) and fall back to the
+  // fleet-summary-level `AssetAttention` fields (still honest, just possibly a poll cycle behind);
+  // GPS has no fleet-summary-level fallback at all (see `AssetAttention`'s own doc comment) — a
+  // selected-but-not-currently-plotted asset simply shows '—', never a fabricated fix.
+  protected readonly modeLabel = computed(() => this.marker()?.flightMode ?? this.asset().flightMode);
+  protected readonly armed = computed(() => this.marker()?.armed ?? this.asset().armed);
+  protected readonly gpsFixType = computed(() => this.marker()?.gpsFixType);
+  protected readonly gpsLabel = computed(() => gpsFixLabel(this.gpsFixType()));
+  protected readonly gpsSeverityTier = computed(() => gpsSeverity(this.gpsFixType()));
+
+  /** docs/FC-INTEGRATIONS-PLAN.md F-e — reuses the same pure derivation `features/fly/diagnostics-card.ts`
+   * feeds from `TelemetryStore`; here fed from the marker's own `extra` (see that field's own doc
+   * comment on `FleetMarker` for why this panel needs no second telemetry poller). */
+  protected readonly diagnostics = computed(() => deriveDiagnostics(this.marker()?.extra));
 
   protected selectTab(tab: AssetPanelTab): void {
     this.activeTab.set(tab);

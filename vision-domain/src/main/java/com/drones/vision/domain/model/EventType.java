@@ -10,5 +10,6 @@ public enum EventType {
     STREAM_STARTED,
     STREAM_STOPPED,
     PIPELINE_ERROR,
-    TRAINING
+    TRAINING,
+    GEOFENCE_BREACH
 }

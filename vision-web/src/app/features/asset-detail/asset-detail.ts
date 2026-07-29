@@ -4,6 +4,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
+import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
@@ -89,6 +90,7 @@ export class AssetDetailPage {
   private readonly api = inject(VisionApi);
   private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
+  private readonly undoToast = inject(UndoToastService);
 
   protected readonly fleet = inject(FleetStore);
   protected readonly settings = inject(SettingsStore);
@@ -584,10 +586,10 @@ export class AssetDetailPage {
     this.busy.set(true);
     try {
       const result = await this.api.deleteAsset(asset.assetId);
-      this.toasts.ok(
+      this.undoToast.showUndo(
         `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
           `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
-        { label: 'Undo', onClick: () => void this.restoreAssetNow() },
+        () => void this.restoreAssetNow(),
       );
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
     } catch (error) {
@@ -645,7 +647,7 @@ export class AssetDetailPage {
         void this.setDeviceLifecycle(device, 'ACTIVE');
         break;
       case 'deactivate':
-        void this.setDeviceLifecycle(device, 'DEACTIVATED');
+        void this.deactivateDeviceNow(device);
         break;
       case 'archive':
         void this.archiveDeviceNow(device);
@@ -670,10 +672,28 @@ export class AssetDetailPage {
     this.busyDeviceId.set(device.id);
     try {
       await this.api.deleteDevice(device.id);
-      this.toasts.ok(`Archived "${device.name}".`, {
-        label: 'Undo',
-        onClick: () => void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE),
-      });
+      this.undoToast.showUndo(`Archived "${device.name}".`, () =>
+        void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE),
+      );
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
+  /**
+   * Deactivate now offers an Undo toast too (docs/OPS-CORE-PLAN.md §Q2) — mirrors
+   * `features/devices/devices.ts#deactivateDeviceNow` exactly (same bypass-`FleetStore` reasoning
+   * as `archiveDeviceNow` above: `FleetStore.setDeviceState`'s own success toast has no Undo
+   * action). `activate`/the explicit `restore` kebab entry are unchanged.
+   */
+  protected async deactivateDeviceNow(device: Device): Promise<void> {
+    this.busyDeviceId.set(device.id);
+    try {
+      await this.api.setDeviceState(device.id, 'DEACTIVATED');
+      this.undoToast.showUndo(`Deactivated "${device.name}".`, () => void this.setDeviceLifecycle(device, 'ACTIVE'));
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
     } catch (error) {
       this.toasts.error(describeHttpError(error));

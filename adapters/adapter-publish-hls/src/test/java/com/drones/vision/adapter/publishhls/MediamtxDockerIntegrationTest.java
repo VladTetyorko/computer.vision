@@ -60,6 +60,14 @@ class MediamtxDockerIntegrationTest {
 
     private static final String IMAGE = "bluenviron/mediamtx:latest";
     private static final Duration PLAYLIST_TIMEOUT = Duration.ofSeconds(30);
+    /**
+     * docs/OPS-CORE-PLAN.md §R: the recording/playback test below deliberately pins the exact
+     * image tag docker-compose.yml pins ({@code bluenviron/mediamtx:1.19.3}), not the {@code
+     * :latest} the other tests in this class use — recording/playback is new, stack-specific
+     * config this test is meant to validate against the real version this app actually ships with,
+     * not whatever "latest" happens to resolve to on a given day.
+     */
+    private static final String RECORDING_IMAGE = "bluenviron/mediamtx:1.19.3";
 
     @Test
     @Timeout(value = 120, unit = TimeUnit.SECONDS)
@@ -249,6 +257,104 @@ class MediamtxDockerIntegrationTest {
         } finally {
             removeContainerQuietly(containerName);
         }
+    }
+
+    /**
+     * docs/OPS-CORE-PLAN.md §R end-to-end check: a real mediamtx started with the same
+     * record/playback env vars docker-compose.yml sets ({@code MTX_PATHDEFAULTS_RECORD},
+     * {@code MTX_PATHDEFAULTS_RECORDDELETEAFTER}, {@code MTX_PLAYBACK}, {@code
+     * MTX_PLAYBACKADDRESS}) records a short published stream to disk, and {@link
+     * MediamtxStreamPublisher#playbackUrl} — the exact URL production code builds, not a
+     * hand-rolled one — fetches it back as an MP4 clip.
+     *
+     * <p>mediamtx only finalizes/flushes a path's in-progress recording segment once the path is
+     * unpublished (verified manually against this same image/env before writing this test: a
+     * short ffmpeg push followed by a clean disconnect made the segment appear on disk and become
+     * servable within a few seconds — recording is not on a fixed segment-duration boundary here,
+     * mediamtx's own default {@code recordSegmentDuration} is 1 hour), so this test calls {@link
+     * StreamPublisherPort#streamEnded} (which stops the {@code FFmpegFrameRecorder}, cleanly
+     * closing the RTSP push) before polling the playback endpoint, then polls rather than asserting
+     * immediately since that finalization is not instantaneous.
+     */
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void recordedStreamIsFetchableAsMp4ThroughPlaybackUrl() throws Exception {
+        String containerName = "vision-publish-hls-it-" + java.util.UUID.randomUUID();
+        try {
+            startContainerWithRecording(containerName);
+            int rtspPort = resolveHostPort(containerName, "8554/tcp");
+            int playbackPort = resolveHostPort(containerName, "9996/tcp");
+            awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
+            awaitTcpPortOpen(playbackPort, Duration.ofSeconds(10));
+
+            StreamPublisherPort publisher = new MediamtxStreamPublisher(
+                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"),
+                    URI.create("http://localhost:8889"), // HLS/WHEP not exercised by this recording-focused test
+                    URI.create("http://localhost:" + playbackPort));
+            StreamId streamId = StreamId.random();
+            Device device = new Device(DeviceId.random(), "recording-it-camera",
+                    Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://recording-it"), Map.of()));
+
+            Instant recordingStart = Instant.now();
+            publisher.streamStarted(streamId, device);
+            AtomicBoolean keepPumping = new AtomicBoolean(true);
+            Thread pump = startFramePump(publisher, streamId, keepPumping);
+            Duration pumpDuration = Duration.ofSeconds(4);
+            Thread.sleep(pumpDuration.toMillis());
+            keepPumping.set(false);
+            pump.join(Duration.ofSeconds(5).toMillis());
+            // Cleanly stops the FFmpegFrameRecorder (closes the RTSP push), which is what makes
+            // mediamtx unpublish the path and finalize its recording segment -- see javadoc above.
+            publisher.streamEnded(streamId);
+
+            URI playbackUrl = publisher.playbackUrl(streamId, recordingStart, pumpDuration)
+                    .orElseThrow(() -> new AssertionError("expected a playback URL (playback base was configured)"));
+
+            byte[] clip = pollForPlayableClip(playbackUrl, Duration.ofSeconds(30));
+
+            assertTrue(clip.length > 8, "expected a non-empty MP4 clip, got " + clip.length + " bytes");
+            String boxType = new String(clip, 4, 4, StandardCharsets.US_ASCII);
+            assertEquals("ftyp", boxType, "expected an MP4 'ftyp' box at the start of the clip");
+        } finally {
+            removeContainerQuietly(containerName);
+        }
+    }
+
+    private static void startContainerWithRecording(String name) throws IOException, InterruptedException {
+        ProcessResult result = run(Duration.ofSeconds(90),
+                "docker", "run", "-d", "--rm", "--name", name, "-p", "0:8554", "-p", "0:8888", "-p", "0:9996",
+                "-e", "MTX_PATHDEFAULTS_RECORD=yes",
+                "-e", "MTX_PATHDEFAULTS_RECORDDELETEAFTER=72h",
+                "-e", "MTX_PLAYBACK=yes",
+                "-e", "MTX_PLAYBACKADDRESS=:9996",
+                RECORDING_IMAGE);
+        if (result.exitCode() != 0) {
+            fail("failed to start mediamtx container (recording+playback): " + result.output());
+        }
+    }
+
+    /**
+     * Polls {@code playbackUrl} until it returns {@code 200} with a non-empty body (mediamtx
+     * returns {@code 404}/{@code 400} until the requested window's recording segment has been
+     * finalized to disk, see this test method's own javadoc) or {@code timeout} elapses.
+     */
+    private static byte[] pollForPlayableClip(URI playbackUrl, Duration timeout) throws InterruptedException {
+        HttpClient client = HttpClient.newHttpClient();
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                HttpRequest request = HttpRequest.newBuilder(playbackUrl).timeout(Duration.ofSeconds(5)).GET().build();
+                HttpResponse<byte[]> response = client.send(request, HttpResponse.BodyHandlers.ofByteArray());
+                if (response.statusCode() == 200 && response.body().length > 0) {
+                    return response.body();
+                }
+            } catch (IOException e) {
+                // not ready yet; keep polling until the deadline
+            }
+            Thread.sleep(500);
+        }
+        fail("playback URL " + playbackUrl + " never returned a non-empty 200 within " + timeout);
+        throw new AssertionError("unreachable");
     }
 
     /**

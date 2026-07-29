@@ -15,7 +15,7 @@ import {
   updateWaypointAltitude,
   type EditorWaypoint,
   type FlightPlanForm,
-} from './flight-plan-logic';
+} from '../flight-plan-logic';
 
 function waypoint(partial: Partial<EditorWaypoint> = {}): EditorWaypoint {
   return { latitude: 10, longitude: 20, altitudeMeters: 60, ...partial };

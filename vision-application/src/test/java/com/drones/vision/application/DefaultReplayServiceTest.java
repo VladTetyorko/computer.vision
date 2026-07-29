@@ -10,10 +10,12 @@ import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
+import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,6 +43,7 @@ class DefaultReplayServiceTest {
     private AssetUsageRepositoryPort usageRepository;
     private TelemetryRepositoryPort telemetryRepository;
     private DetectionRepositoryPort detectionRepository;
+    private StreamPublisherPort streamPublisherPort;
     private DefaultReplayService service;
     private UsageId usageId;
     private AssetId assetId;
@@ -50,7 +53,9 @@ class DefaultReplayServiceTest {
         usageRepository = mock(AssetUsageRepositoryPort.class);
         telemetryRepository = mock(TelemetryRepositoryPort.class);
         detectionRepository = mock(DetectionRepositoryPort.class);
-        service = new DefaultReplayService(usageRepository, telemetryRepository, detectionRepository);
+        streamPublisherPort = mock(StreamPublisherPort.class);
+        service = new DefaultReplayService(usageRepository, telemetryRepository, detectionRepository,
+                streamPublisherPort);
         usageId = UsageId.random();
         assetId = AssetId.random();
     }
@@ -73,6 +78,10 @@ class DefaultReplayServiceTest {
 
     private AssetUsage closedUsageWithStream(Instant startedAt, Instant endedAt) {
         return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0, STREAM_ID);
+    }
+
+    private AssetUsage openUsageWithStream(Instant startedAt) {
+        return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0, STREAM_ID);
     }
 
     @Test
@@ -315,5 +324,75 @@ class DefaultReplayServiceTest {
         UsageTimeline timeline = service.timeline(usageId, null, null, 1_000_000);
 
         assertEquals(DefaultReplayService.MAX_POINTS_CEILING, timeline.telemetry().size());
+    }
+
+    // ---- recordingFor (docs/OPS-CORE-PLAN.md §R) ----
+
+    @Test
+    void recordingForThrowsNoSuchElementExceptionForUnknownUsage() {
+        when(usageRepository.findById(usageId)).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class, () -> service.recordingFor(usageId));
+    }
+
+    @Test
+    void recordingForIsEmptyAndStreamPublisherIsNeverCalledWhenUsageHasNoStreamId() {
+        Instant start = Instant.parse("2026-07-01T00:00:00Z");
+        when(usageRepository.findById(usageId)).thenReturn(Optional.of(closedUsage(start, start.plusSeconds(60))));
+
+        Optional<UsageRecording> recording = service.recordingFor(usageId);
+
+        assertTrue(recording.isEmpty());
+        verifyNoInteractions(streamPublisherPort);
+    }
+
+    @Test
+    void recordingForIsEmptyWhenStreamPublisherHasNoPlaybackUrl() {
+        Instant start = Instant.parse("2026-07-01T00:00:00Z");
+        Instant end = start.plusSeconds(60);
+        when(usageRepository.findById(usageId)).thenReturn(Optional.of(closedUsageWithStream(start, end)));
+        when(streamPublisherPort.playbackUrl(eq(STREAM_ID), eq(start), any(Duration.class)))
+                .thenReturn(Optional.empty());
+
+        Optional<UsageRecording> recording = service.recordingFor(usageId);
+
+        assertTrue(recording.isEmpty());
+    }
+
+    @Test
+    void recordingForResolvesUrlStartAndDurationForAClosedUsage() {
+        Instant start = Instant.parse("2026-07-01T00:00:00Z");
+        Instant end = start.plusSeconds(90);
+        URI url = URI.create("http://localhost:19996/get?path=abc&start=2026-07-01T00%3A00%3A00Z&duration=90");
+        when(usageRepository.findById(usageId)).thenReturn(Optional.of(closedUsageWithStream(start, end)));
+        when(streamPublisherPort.playbackUrl(STREAM_ID, start, Duration.ofSeconds(90)))
+                .thenReturn(Optional.of(url));
+
+        UsageRecording recording = service.recordingFor(usageId).orElseThrow();
+
+        assertEquals(url, recording.url());
+        assertEquals(start, recording.start());
+        assertEquals(90L, recording.durationSeconds());
+    }
+
+    @Test
+    void recordingForUsesNowAsTheEndForAnOpenUsage() {
+        Instant start = Instant.parse("2026-07-01T00:00:00Z");
+        when(usageRepository.findById(usageId)).thenReturn(Optional.of(openUsageWithStream(start)));
+        when(streamPublisherPort.playbackUrl(eq(STREAM_ID), eq(start), any(Duration.class)))
+                .thenReturn(Optional.of(URI.create("http://localhost:19996/get?path=abc")));
+
+        Instant before = Instant.now();
+        UsageRecording recording = service.recordingFor(usageId).orElseThrow();
+        Instant after = Instant.now();
+
+        // durationSeconds() truncates to whole seconds, so allow +/-1s slack against the
+        // [before, after] window straddling the real "now" the service resolved internally.
+        long minExpectedSeconds = Duration.between(start, before).getSeconds() - 1;
+        long maxExpectedSeconds = Duration.between(start, after).getSeconds() + 1;
+        assertTrue(recording.durationSeconds() >= minExpectedSeconds,
+                "expected durationSeconds >= " + minExpectedSeconds + " but was " + recording.durationSeconds());
+        assertTrue(recording.durationSeconds() <= maxExpectedSeconds,
+                "expected durationSeconds <= " + maxExpectedSeconds + " but was " + recording.durationSeconds());
     }
 }

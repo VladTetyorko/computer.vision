@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.UsageId;
 
 import java.time.Instant;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 /**
  * Serves a scrubbable replay window over one finished (or still-open) {@link
@@ -48,4 +49,21 @@ public interface ReplayService {
      *                                   before the resolved {@code from}
      */
     UsageTimeline timeline(UsageId usageId, Instant from, Instant to, int maxPoints);
+
+    /**
+     * Resolves a recording/clip-export URL for one usage's flight window (docs/OPS-CORE-PLAN.md
+     * §R): {@code start} is the usage's {@code startedAt}, {@code duration} runs to its {@code
+     * endedAt} (or "now" for a still-open usage), and the actual URL comes from {@code
+     * StreamPublisherPort#playbackUrl} for that window.
+     *
+     * <p>This is an honest-cheap check (configuration presence, not a round trip to the media
+     * server) — {@link Optional#empty()} covers both "this usage never had a video stream"
+     * ({@code streamId() == null}) and "the configured stream publisher has no recording/playback
+     * endpoint at all", never an error.
+     *
+     * @param usageId the usage to resolve a recording for
+     * @return the recording, or {@link Optional#empty()} when none is available
+     * @throws NoSuchElementException if no usage exists with {@code usageId}
+     */
+    Optional<UsageRecording> recordingFor(UsageId usageId);
 }

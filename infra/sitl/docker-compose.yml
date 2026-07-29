@@ -1,0 +1,36 @@
+# infra/sitl/docker-compose.yml
+#
+# Single-instance template for the ArduPilot SITL image (see Dockerfile) --
+# directly runnable for the "one instance, CI-style smoke test" case:
+#
+#   docker compose up -d --build
+#   docker compose logs -f
+#   docker compose down
+#
+# For N>1 real vehicles, use ./up.sh N / ./down.sh instead (docs/DRONE-
+# INFRA-PLAN.md I-c): plain `docker compose --scale` gives every replica
+# identical environment variables, which cannot produce N *distinct*
+# SYSID_THISMAV values -- distinct sysids are the entire point of a fleet,
+# so up.sh fans out N `docker run`s off this same image instead. This file
+# stays the single source of truth for the image/defaults either way.
+services:
+  sitl:
+    build: .
+    image: vision-sitl:4.7.0
+    container_name: vision-sitl-1
+    environment:
+      SYSID_THISMAV: "${SYSID_THISMAV:-1}"
+      INSTANCE: "${INSTANCE:-0}"
+      # host.docker.internal: the docker host itself -- this platform LISTENS
+      # on UDP (adapter-mavlink/MODULE.md, "udp://host:port means listen, not
+      # connect"), so SITL must push *to* it, never the reverse.
+      MAVLINK_TARGET_HOST: "${MAVLINK_TARGET_HOST:-host.docker.internal}"
+      MAVLINK_TARGET_PORT: "${MAVLINK_TARGET_PORT:-14550}"
+      SITL_HOME: "${SITL_HOME:--35.363261,149.165230,584,353}"
+      SITL_SPEEDUP: "${SITL_SPEEDUP:-1}"
+      TAKEOFF_ALT_M: "${TAKEOFF_ALT_M:-20}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    labels:
+      - "vision.sitl.fleet=true"

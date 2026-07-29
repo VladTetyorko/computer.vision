@@ -8,12 +8,15 @@ import com.drones.vision.api.AssetImageController;
 import com.drones.vision.api.DeviceProbeController;
 import com.drones.vision.api.EventController;
 import com.drones.vision.api.FleetController;
+import com.drones.vision.api.GeofenceController;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.GeofenceMonitor;
+import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
@@ -26,6 +29,7 @@ import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import org.junit.jupiter.api.Test;
@@ -91,6 +95,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * for the same "small, focused, asset-model-adjacent bean" reasoning as {@link ReplayService}
  * above, and {@link FleetController} is asserted to resolve its constructor dependency, mirroring
  * {@link EventController}'s own assertion.
+ *
+ * <p>Further extended for docs/OPS-CORE-PLAN.md §G (geofencing): {@link GeofenceRepositoryPort}/
+ * {@link GeofenceMonitor}/{@link GeofenceService} are asserted here too, for the same "small,
+ * focused, asset-model-adjacent bean" reasoning as {@link ReplayService} above, and {@link
+ * GeofenceController} is asserted to resolve its constructor dependency, mirroring {@link
+ * FleetController}'s own assertion.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 class AssetWiringTest {
@@ -178,6 +188,22 @@ class AssetWiringTest {
     @Autowired
     private AssetImageController assetImageController;
 
+    /** docs/OPS-CORE-PLAN.md §G: geofence zone CRUD (in-memory store by default). */
+    @Autowired
+    private GeofenceRepositoryPort geofenceRepositoryPort;
+
+    /** docs/OPS-CORE-PLAN.md §G: breach evaluation on the telemetry hot path. */
+    @Autowired
+    private GeofenceMonitor geofenceMonitor;
+
+    /** docs/OPS-CORE-PLAN.md §G: the CRUD service behind {@code GeofenceController}. */
+    @Autowired
+    private GeofenceService geofenceService;
+
+    /** docs/OPS-CORE-PLAN.md §G: {@code GET/POST /api/geofences}, {@code PUT}/{@code DELETE /api/geofences/{id}}. */
+    @Autowired
+    private GeofenceController geofenceController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -201,6 +227,10 @@ class AssetWiringTest {
         assertNotNull(deviceProbeController, "DeviceProbeController must resolve its constructor dependency");
         assertNotNull(assetImageRepositoryPort, "AssetImageRepositoryPort bean must be registered (docs/UX-REWORK-PLAN.md §U-d item 3)");
         assertNotNull(assetImageController, "AssetImageController must resolve its constructor dependency");
+        assertNotNull(geofenceRepositoryPort, "GeofenceRepositoryPort bean must be registered (docs/OPS-CORE-PLAN.md §G)");
+        assertNotNull(geofenceMonitor, "GeofenceMonitor bean must be registered (docs/OPS-CORE-PLAN.md §G)");
+        assertNotNull(geofenceService, "GeofenceService bean must be registered (docs/OPS-CORE-PLAN.md §G)");
+        assertNotNull(geofenceController, "GeofenceController must resolve its constructor dependency (docs/OPS-CORE-PLAN.md §G)");
     }
 
     @Test

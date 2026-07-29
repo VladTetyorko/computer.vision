@@ -16,6 +16,9 @@ import { WebrtcCertificateService } from './webrtc-certificate';
 import type { Detection, DetectionResult } from '../../core/api/models';
 import {
   DEFAULT_SLACK_BATCHES,
+  detectionModelKey,
+  distinctModelKeys,
+  modelHue,
   selectDetectionResult,
   shouldDrawOverlay,
   type BoxesMode,
@@ -307,6 +310,16 @@ interface DrawnBox {
           <span class="dot" [class.live]="phase() === 'playing'"></span>{{ latencyLabel() }}
         </div>
       }
+
+      @if (showModelLegend()) {
+        <div class="model-legend" title="Detection models in this frame" aria-hidden="true">
+          @for (key of overlayModelKeys(); track key) {
+            <span class="legend-chip">
+              <span class="swatch" [style.background]="modelSwatch(key)"></span>{{ key }}
+            </span>
+          }
+        </div>
+      }
     </div>
   `,
   styles: `
@@ -398,6 +411,42 @@ interface DrawnBox {
       font-family: var(--mono);
       font-variant-numeric: tabular-nums;
       color: #dfe6f0;
+    }
+
+    /* docs/OPS-CORE-PLAN.md §Q3b: only rendered once >=2 distinct models mix in the same frame — see
+       showModelLegend's own doc comment. Top-right, clear of the bottom-left latency badge and any
+       host chrome along the frame's own top edge (unlike the badge, this frame has no such host
+       overlay to dodge, so a fixed top corner is safe here). */
+    .model-legend {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.2rem;
+      pointer-events: none;
+    }
+
+    .legend-chip {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: var(--radius-pill);
+      background: rgb(0 0 0 / 55%);
+      backdrop-filter: blur(4px);
+      font-size: 0.68rem;
+      font-family: var(--mono);
+      color: #dfe6f0;
+      white-space: nowrap;
+    }
+
+    .swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
 
     .spinner {
@@ -577,6 +626,30 @@ export class Player {
       shouldDrawOverlay(this.boxesMode(), this.detections().length > 0) &&
       this.phase() === 'playing',
   );
+
+  /**
+   * The batch the canvas overlay is currently drawing — the same `selectDetectionResult` pick
+   * `redrawOverlay` uses, mirrored here as a `computed` purely so the legend chip below has a
+   * reactive read of "what's on screen right now" without duplicating the sync logic. Recomputes
+   * whenever `detections()`/`boxesMode()`/`phase()`/`behindLive()` change; a legend a redraw-cycle
+   * stale by a frame or two (this doesn't tick on the overlay's own `OVERLAY_REDRAW_MS` timer) is a
+   * non-issue for a chip that only ever says "which models are present", not exact box positions.
+   */
+  private readonly overlayResult = computed<DetectionResult | undefined>(() =>
+    shouldDrawOverlay(this.boxesMode(), this.detections().length > 0) && this.phase() === 'playing'
+      ? selectDetectionResult(this.detections(), Date.now(), this.behindLive(), DEFAULT_SLACK_BATCHES)
+      : undefined,
+  );
+
+  /** docs/OPS-CORE-PLAN.md §Q3b: every distinct model key in the batch currently on screen. */
+  protected readonly overlayModelKeys = computed(() => distinctModelKeys(this.overlayResult()?.detections ?? []));
+  /** The legend chip only earns its place once ≥2 models actually mix in the same frame. */
+  protected readonly showModelLegend = computed(() => this.overlayModelKeys().length >= 2);
+
+  /** The legend swatch's own color — same `modelHue` the canvas boxes are stroked with. */
+  protected modelSwatch(modelKey: string): string {
+    return modelHue(modelKey);
+  }
 
   private hls: HlsType | null = null;
   private latencyTimer: ReturnType<typeof setInterval> | null = null;
@@ -1838,17 +1911,25 @@ export class Player {
     return { x: (elementWidth - width) / 2, y: 0, width, height };
   }
 
+  /**
+   * Box color is per-model (docs/OPS-CORE-PLAN.md §Q3b, `modelHue`/`detectionModelKey` —
+   * `detection-overlay-logic.ts`): a single-model stream's boxes stay the exact `#4f8cff` this
+   * always drew (no prefixed label → `DEFAULT_MODEL_KEY`), composite-model boxes get a stable hue
+   * per member. Hover still overrides to the same amber it always has, for every model alike —
+   * hover means "this box", not "this model".
+   */
   private drawBox(ctx: CanvasRenderingContext2D, rect: DrawnBox, detection: Detection): void {
     const hovered = this.hoveredDetection() === detection;
+    const modelKey = detectionModelKey(detection);
     ctx.lineWidth = hovered ? 3 : 2;
-    ctx.strokeStyle = hovered ? '#ffd479' : '#4f8cff';
+    ctx.strokeStyle = hovered ? '#ffd479' : modelHue(modelKey);
     ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
 
     const label = `${detection.label} ${(detection.confidence * 100).toFixed(0)}%`;
     ctx.font = '11px ui-monospace, monospace';
     const metrics = ctx.measureText(label);
     const labelHeight = 14;
-    ctx.fillStyle = hovered ? 'rgb(255 212 121 / 90%)' : 'rgb(79 140 255 / 85%)';
+    ctx.fillStyle = hovered ? 'rgb(255 212 121 / 90%)' : modelHue(modelKey, 85);
     ctx.fillRect(rect.x, Math.max(0, rect.y - labelHeight), metrics.width + 6, labelHeight);
     ctx.fillStyle = '#04101f';
     ctx.fillText(label, rect.x + 3, Math.max(labelHeight - 3, rect.y - 3));

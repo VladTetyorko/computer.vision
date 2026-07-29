@@ -26,11 +26,19 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param telemetryAgeMs   milliseconds since the freshest telemetry sample, or absent under the
  *                         same condition as {@code batteryPercent}
  * @param openEventCount   how many {@code OPEN} detection events currently name this asset
+ * @param flightMode       the freshest telemetry sample's flight-controller mode name (e.g.
+ *                         {@code "RTL"}), absent under the same condition as {@code batteryPercent}
+ *                         (docs/FC-INTEGRATIONS-PLAN.md F-b)
+ * @param armed            the freshest telemetry sample's armed flag, absent under the same
+ *                         condition as {@code flightMode}
+ * @param failsafe         the freshest telemetry sample's failsafe flag, absent under the same
+ *                         condition as {@code flightMode}
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetAttentionResponse(String assetId, String displayName, String categoryId, String categoryName,
                                       String lifecycle, boolean streaming, String streamId, Double batteryPercent,
-                                      Long telemetryAgeMs, int openEventCount) {
+                                      Long telemetryAgeMs, int openEventCount, String flightMode, Boolean armed,
+                                      Boolean failsafe) {
 
     /**
      * Maps an {@link AssetAttention} read model to its wire representation.
@@ -49,6 +57,9 @@ public record AssetAttentionResponse(String assetId, String displayName, String 
                 attention.streamId() == null ? null : attention.streamId().value().toString(),
                 attention.batteryPercent(),
                 attention.telemetryAgeMs(),
-                attention.openEventCount());
+                attention.openEventCount(),
+                attention.flightMode(),
+                attention.armed(),
+                attention.failsafe());
     }
 }

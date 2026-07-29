@@ -50,7 +50,7 @@ class FleetControllerTest {
         AssetId assetId = AssetId.random();
         StreamId streamId = StreamId.random();
         AssetAttention row = new AssetAttention(assetId, "Drone A", new CategoryId("drone"), "Drone",
-                LifecycleState.ACTIVE, true, streamId, 87.5, 1500L, 2);
+                LifecycleState.ACTIVE, true, streamId, 87.5, 1500L, 2, "RTL", true, true);
         when(fleetSummaryService.summary(false)).thenReturn(new FleetSummary(List.of(drone), List.of(row), 2));
 
         mockMvc.perform(get("/api/fleet/summary"))
@@ -74,13 +74,16 @@ class FleetControllerTest {
                 .andExpect(jsonPath("$.assets[0].streamId").value(streamId.value().toString()))
                 .andExpect(jsonPath("$.assets[0].batteryPercent").value(87.5))
                 .andExpect(jsonPath("$.assets[0].telemetryAgeMs").value(1500))
-                .andExpect(jsonPath("$.assets[0].openEventCount").value(2));
+                .andExpect(jsonPath("$.assets[0].openEventCount").value(2))
+                .andExpect(jsonPath("$.assets[0].flightMode").value("RTL"))
+                .andExpect(jsonPath("$.assets[0].armed").value(true))
+                .andExpect(jsonPath("$.assets[0].failsafe").value(true));
     }
 
     @Test
     void summaryOmitsAbsentOptionalFieldsOnAnAssetRow() throws Exception {
         AssetAttention row = new AssetAttention(AssetId.random(), "Drone B", new CategoryId("drone"), "Drone",
-                LifecycleState.ACTIVE, false, null, null, null, 0);
+                LifecycleState.ACTIVE, false, null, null, null, 0, null, null, null);
         when(fleetSummaryService.summary(false)).thenReturn(new FleetSummary(List.of(), List.of(row), 1));
 
         mockMvc.perform(get("/api/fleet/summary"))
@@ -88,7 +91,10 @@ class FleetControllerTest {
                 .andExpect(jsonPath("$.assets[0].streaming").value(false))
                 .andExpect(jsonPath("$.assets[0].streamId").doesNotExist())
                 .andExpect(jsonPath("$.assets[0].batteryPercent").doesNotExist())
-                .andExpect(jsonPath("$.assets[0].telemetryAgeMs").doesNotExist());
+                .andExpect(jsonPath("$.assets[0].telemetryAgeMs").doesNotExist())
+                .andExpect(jsonPath("$.assets[0].flightMode").doesNotExist())
+                .andExpect(jsonPath("$.assets[0].armed").doesNotExist())
+                .andExpect(jsonPath("$.assets[0].failsafe").doesNotExist());
     }
 
     @Test

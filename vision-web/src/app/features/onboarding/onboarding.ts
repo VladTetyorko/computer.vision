@@ -5,6 +5,8 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { FlightPlanDialog } from '../../shared/map/fleet-plan-dialog/flight-plan-dialog';
 import { OnboardingStore } from './onboarding-store';
 import { WIZARD_STEPS, type ConnectMethod, type WizardStep } from './onboarding-logic';
+import { isClaimedVehicle, vehicleDetailChips, type VehicleDetailChip } from './drone-scan-logic';
+import type { DiscoveredDevice } from '../../core/api/models';
 
 interface StepDescriptor {
   readonly step: WizardStep;
@@ -22,6 +24,7 @@ const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
   register: 'Register manually',
   discover: 'Discover on network',
   simulate: 'Simulate',
+  listen: 'Listen for drones',
 };
 
 /**
@@ -66,6 +69,7 @@ export class OnboardingPage {
     switch (this.store.connectMethod()) {
       case 'register':
       case 'discover':
+      case 'listen':
         return `${this.store.protocol()} — ${this.store.uri()}`;
       case 'simulate':
         return this.simulateSummary();
@@ -93,6 +97,17 @@ export class OnboardingPage {
 
   protected detailPairs(details: Record<string, string>): { key: string; value: string }[] {
     return Object.entries(details).map(([key, value]) => ({ key, value }));
+  }
+
+  // --- "Listen for drones" results list (docs/DRONE-INFRA-PLAN.md I-b) — thin template helpers over
+  //     `drone-scan-logic.ts`'s own pure functions, same pattern as `detailPairs` above.
+
+  protected droneVehicleClaimed(candidate: DiscoveredDevice): boolean {
+    return isClaimedVehicle(candidate);
+  }
+
+  protected droneVehicleChips(candidate: DiscoveredDevice): readonly VehicleDetailChip[] {
+    return vehicleDetailChips(candidate);
   }
 
   protected onPhotoSelected(event: Event): void {

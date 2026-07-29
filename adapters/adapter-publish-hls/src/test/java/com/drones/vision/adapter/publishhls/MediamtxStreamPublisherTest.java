@@ -16,6 +16,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
@@ -136,6 +137,147 @@ class MediamtxStreamPublisherTest {
                 URI.create("http://localhost:8889"));
 
         assertEquals(Optional.empty(), publisher.whepUrl(null));
+    }
+
+    // -- playbackUrl (docs/OPS-CORE-PLAN.md §R) ---------------------------------
+
+    @Test
+    void playbackUrlFormatsGetUrlWithPathStartAndDuration() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"), URI.create("http://localhost:19996"));
+        StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
+        Instant start = Instant.parse("2026-01-15T10:00:00Z");
+
+        Optional<URI> playbackUrl = publisher.playbackUrl(id, start, Duration.ofSeconds(30));
+
+        assertEquals(Optional.of(URI.create("http://localhost:19996/get"
+                        + "?path=11111111-1111-1111-1111-111111111111&start=2026-01-15T10:00:00Z&duration=30")),
+                playbackUrl);
+    }
+
+    @Test
+    void playbackUrlToleratesTrailingSlashOnPlaybackBase() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"), URI.create("http://localhost:19996/"));
+        StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
+        Instant start = Instant.parse("2026-01-15T10:00:00Z");
+
+        Optional<URI> playbackUrl = publisher.playbackUrl(id, start, Duration.ofSeconds(30));
+
+        assertEquals(Optional.of(URI.create("http://localhost:19996/get"
+                        + "?path=11111111-1111-1111-1111-111111111111&start=2026-01-15T10:00:00Z&duration=30")),
+                playbackUrl);
+    }
+
+    @Test
+    void playbackUrlReturnsEmptyForNullStreamId() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"), URI.create("http://localhost:19996"));
+
+        assertEquals(Optional.empty(),
+                publisher.playbackUrl(null, Instant.parse("2026-01-15T10:00:00Z"), Duration.ofSeconds(30)));
+    }
+
+    /**
+     * The 4-arg constructor's {@code playbackViewBase} is genuinely optional (unlike the other
+     * three bases) — a publisher constructed without one (explicit {@code null}) must return
+     * {@link Optional#empty()} rather than build a URL against a nonexistent base, since not every
+     * deployment has recording/playback configured (docs/OPS-CORE-PLAN.md §R).
+     */
+    @Test
+    void playbackUrlReturnsEmptyWhenPlaybackBaseUnconfigured() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"), null);
+
+        assertEquals(Optional.empty(),
+                publisher.playbackUrl(StreamId.random(), Instant.parse("2026-01-15T10:00:00Z"), Duration.ofSeconds(30)));
+    }
+
+    /**
+     * mediamtx's playback {@code /get} endpoint takes {@code duration} in seconds; a sub-second
+     * java.time.Duration is rounded to the nearest whole second (round-half-up) rather than
+     * truncated or passed through as a fraction — see {@link MediamtxStreamPublisher#playbackUrl}'s
+     * javadoc for why sub-second precision would be false precision for this port's callers.
+     */
+    @Test
+    void playbackUrlRoundsDurationToNearestWholeSecond() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"), URI.create("http://localhost:19996"));
+        StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
+        Instant start = Instant.parse("2026-01-15T10:00:00Z");
+
+        assertTrue(publisher.playbackUrl(id, start, Duration.ofMillis(1499)).orElseThrow().toString()
+                .endsWith("duration=1"));
+        assertTrue(publisher.playbackUrl(id, start, Duration.ofMillis(1500)).orElseThrow().toString()
+                .endsWith("duration=2"));
+        assertTrue(publisher.playbackUrl(id, start, Duration.ofMillis(2500)).orElseThrow().toString()
+                .endsWith("duration=3"));
+    }
+
+    /**
+     * mediamtx keys recordings on the same path name every published stream already lives at
+     * (there is no separate "recording path" concept) — {@code playbackUrl}'s {@code path=} query
+     * value must therefore be exactly the same {@code streamId.value()} string {@link #viewUrl}
+     * and {@link #whepUrl} already format into their own URLs, not some independently-derived name.
+     */
+    @Test
+    void playbackUrlPathNameMatchesViewUrlAndWhepUrlPathNaming() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"), URI.create("http://localhost:19996"));
+        StreamId id = StreamId.random();
+
+        String hlsPathSegment = publisher.viewUrl(id).orElseThrow().toString()
+                .substring("http://localhost:8888/".length());
+        String whepPathSegment = publisher.whepUrl(id).orElseThrow().toString()
+                .substring("http://localhost:8889/".length());
+        String playbackQuery = publisher.playbackUrl(id, Instant.now(), Duration.ofSeconds(1)).orElseThrow().getQuery();
+
+        assertEquals(id.value() + "/index.m3u8", hlsPathSegment);
+        assertEquals(id.value() + "/whep", whepPathSegment);
+        assertTrue(playbackQuery.contains("path=" + id.value()));
+    }
+
+    /**
+     * The 3-arg constructor is a convenience overload for callers (currently {@code vision-app})
+     * that don't configure a playback base explicitly — it derives one from {@code whepViewBase}'s
+     * own host at the compose-mapped playback port (docs/OPS-CORE-PLAN.md §R), so recording
+     * playback works out of the box against this stack's own docker-compose.yml without any
+     * wiring change.
+     */
+    @Test
+    void playbackUrlIsDerivedFromWhepBaseHostViaConvenienceConstructor() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
+                URI.create("http://localhost:8889"));
+        StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
+        Instant start = Instant.parse("2026-01-15T10:00:00Z");
+
+        Optional<URI> playbackUrl = publisher.playbackUrl(id, start, Duration.ofSeconds(30));
+
+        assertEquals(Optional.of(URI.create("http://localhost:19996/get"
+                        + "?path=11111111-1111-1111-1111-111111111111&start=2026-01-15T10:00:00Z&duration=30")),
+                playbackUrl);
+    }
+
+    /**
+     * If {@code whepViewBase} has no host component to copy (malformed input — in production it's
+     * always an absolute mediamtx origin, see {@code whepViewBase}'s javadoc), the convenience
+     * constructor leaves playback unconfigured rather than building a broken guess: {@code
+     * playbackUrl} then honestly reports "no recording available" instead of throwing.
+     */
+    @Test
+    void playbackUrlIsEmptyViaConvenienceConstructorWhenWhepBaseHasNoHost() {
+        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
+                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"), URI.create("/whep"));
+
+        assertEquals(Optional.empty(),
+                publisher.playbackUrl(StreamId.random(), Instant.parse("2026-01-15T10:00:00Z"), Duration.ofSeconds(30)));
     }
 
     // -- resilience ------------------------------------------------------------

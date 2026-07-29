@@ -7,6 +7,7 @@ import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionEventId;
 import com.drones.vision.domain.model.DetectionEventState;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.Ownership;
@@ -161,7 +162,8 @@ class DefaultFleetSummaryServiceTest {
         when(streamService.streams()).thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
 
         Instant sampleAt = Instant.now().minusMillis(3000);
-        Telemetry sample = new Telemetry(deviceId, sampleAt, 1.0, 2.0, null, null, 42.0, Map.of());
+        FlightState flightState = new FlightState("ardupilot", "RTL", true, true, 3, 12, 0.9, 87, List.of());
+        Telemetry sample = new Telemetry(deviceId, sampleAt, 1.0, 2.0, null, null, 42.0, Map.of(), flightState);
         when(usageTracker.latestTelemetry(asset.id())).thenReturn(Optional.of(sample));
 
         DetectionEvent openForThisAsset = new DetectionEvent(DetectionEventId.random(), streamId, asset.id(),
@@ -186,6 +188,26 @@ class DefaultFleetSummaryServiceTest {
         assertTrue(row.telemetryAgeMs() >= 2900 && row.telemetryAgeMs() < 15000,
                 "telemetryAgeMs should reflect roughly 3s since the sample: " + row.telemetryAgeMs());
         assertEquals(1, row.openEventCount(), "only THIS asset's OPEN event must be counted");
+        assertEquals("RTL", row.flightMode());
+        assertEquals(true, row.armed());
+        assertEquals(true, row.failsafe());
+    }
+
+    @Test
+    void summaryLeavesFlightModeArmedAndFailsafeAbsentWhenTelemetryHasNoFlightState() {
+        DeviceId deviceId = DeviceId.random();
+        Asset asset = asset("Drone C", DRONE, LifecycleState.ACTIVE, deviceId);
+        when(assetService.assets(false)).thenReturn(List.of(summary(asset, "Drone", AssetStatus.OFFLINE)));
+
+        Telemetry sample = new Telemetry(deviceId, Instant.now(), 1.0, 2.0, null, null, 42.0, Map.of());
+        when(usageTracker.latestTelemetry(asset.id())).thenReturn(Optional.of(sample));
+
+        FleetSummary result = service.summary(false);
+
+        AssetAttention row = result.assets().get(0);
+        assertNull(row.flightMode());
+        assertNull(row.armed());
+        assertNull(row.failsafe());
     }
 
     @Test
@@ -201,5 +223,8 @@ class DefaultFleetSummaryServiceTest {
         assertNull(row.batteryPercent());
         assertNull(row.telemetryAgeMs());
         assertEquals(0, row.openEventCount());
+        assertNull(row.flightMode());
+        assertNull(row.armed());
+        assertNull(row.failsafe());
     }
 }

@@ -1,6 +1,7 @@
 package com.drones.vision.api;
 
 import com.drones.vision.application.ReplayService;
+import com.drones.vision.application.UsageRecording;
 import com.drones.vision.application.UsageTimeline;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.AssetUsage;
@@ -13,10 +14,12 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -205,5 +208,50 @@ class UsageTimelineControllerTest {
                 .andExpect(jsonPath("$.to").value("2026-07-22T10:05:00Z"));
 
         verify(replayService).timeline(eq(usageId), eq(null), eq(null), eq(500));
+    }
+
+    // ---- recording (docs/OPS-CORE-PLAN.md §R, R-b) ----
+
+    @Test
+    void recordingReturns200WithAvailableTrueAndTheResolvedRecording() throws Exception {
+        Instant start = Instant.parse("2026-07-22T10:00:00Z");
+        URI url = URI.create("http://localhost:19996/get?path=abc&start=2026-07-22T10%3A00%3A00Z&duration=60");
+        when(replayService.recordingFor(usageId)).thenReturn(Optional.of(new UsageRecording(url, start, 60L)));
+
+        mockMvc.perform(get("/api/usages/{usageId}/recording", usageId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(true))
+                .andExpect(jsonPath("$.url").value(url.toString()))
+                .andExpect(jsonPath("$.start").value("2026-07-22T10:00:00Z"))
+                .andExpect(jsonPath("$.durationSeconds").value(60));
+    }
+
+    @Test
+    void recordingReturns200WithAvailableFalseWhenNoneIsResolved() throws Exception {
+        when(replayService.recordingFor(usageId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/usages/{usageId}/recording", usageId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.url").doesNotExist())
+                .andExpect(jsonPath("$.start").doesNotExist())
+                .andExpect(jsonPath("$.durationSeconds").doesNotExist());
+    }
+
+    @Test
+    void recordingReturns404ForUnknownUsage() throws Exception {
+        when(replayService.recordingFor(usageId))
+                .thenThrow(new NoSuchElementException("Unknown usage: " + usageId.value()));
+
+        mockMvc.perform(get("/api/usages/{usageId}/recording", usageId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void recordingReturns400ForMalformedUsageId() throws Exception {
+        mockMvc.perform(get("/api/usages/{usageId}/recording", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 }

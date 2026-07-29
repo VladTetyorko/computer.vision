@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ActiveStream, DetectionEvent, Device } from '../api/models';
+import type { ActiveStream, AssetUsage, DetectionEvent, Device } from '../api/models';
 import {
   MAX_EVENT_MARKERS,
   advanceCursor,
@@ -8,13 +8,25 @@ import {
   distinctLabels,
   eventNotificationText,
   filterEvents,
+  findCoveringUsage,
   formatConfidence,
   mergeEvents,
   relativeTimeLabel,
   resolveEventTarget,
+  resolveReplayDeepLink,
   selectEventMarkers,
   shouldNotify,
 } from './events-logic';
+
+function usage(partial: Partial<AssetUsage> = {}): AssetUsage {
+  return {
+    usageId: 'u-1',
+    startedAt: '2026-07-23T10:00:00.000Z',
+    endedAt: '2026-07-23T10:10:00.000Z',
+    sampleCount: 100,
+    ...partial,
+  };
+}
 
 function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
   return {
@@ -295,5 +307,50 @@ describe('eventNotificationText', () => {
   it('renders a capitalized label title and a confidence body', () => {
     const text = eventNotificationText(event({ label: 'person', peakConfidence: 0.87 }));
     expect(text).toEqual({ title: 'Person detected', body: '87% confidence' });
+  });
+});
+
+describe('findCoveringUsage (docs/OPS-CORE-PLAN.md §Q1)', () => {
+  it('finds the finished usage whose window covers the given instant', () => {
+    const usages = [usage({ usageId: 'u-2', startedAt: '2026-07-23T11:00:00.000Z', endedAt: '2026-07-23T11:10:00.000Z' }), usage()];
+    expect(findCoveringUsage(usages, '2026-07-23T10:05:00.000Z')?.usageId).toBe('u-1');
+  });
+
+  it('treats an open usage\'s window as covering up to "now"', () => {
+    const openUsage = usage({ usageId: 'u-open', endedAt: undefined });
+    expect(findCoveringUsage([openUsage], new Date().toISOString())?.usageId).toBe('u-open');
+  });
+
+  it('is undefined when nothing covers the instant (a gap between usages)', () => {
+    expect(findCoveringUsage([usage()], '2026-07-23T09:00:00.000Z')).toBeUndefined();
+  });
+
+  it('is undefined for an empty usage list', () => {
+    expect(findCoveringUsage([], '2026-07-23T10:05:00.000Z')).toBeUndefined();
+  });
+});
+
+describe('resolveReplayDeepLink (docs/OPS-CORE-PLAN.md §Q1)', () => {
+  it('resolves the covering finished usage and the offset from its own start', () => {
+    const e = event({ firstSeen: '2026-07-23T10:02:30.000Z' });
+    const deepLink = resolveReplayDeepLink(e, [usage()]);
+    expect(deepLink).toEqual({ usageId: 'u-1', offsetMs: 150_000 });
+  });
+
+  it('is undefined when the covering usage is still open — replay would just redirect to live', () => {
+    const openUsage = usage({ endedAt: undefined });
+    const e = event({ firstSeen: '2026-07-23T10:02:30.000Z' });
+    expect(resolveReplayDeepLink(e, [openUsage])).toBeUndefined();
+  });
+
+  it('is undefined when no usage covers the event at all', () => {
+    const e = event({ firstSeen: '2026-07-23T09:00:00.000Z' });
+    expect(resolveReplayDeepLink(e, [usage()])).toBeUndefined();
+  });
+
+  it('never returns a negative offset', () => {
+    // firstSeen exactly at the usage's own start.
+    const e = event({ firstSeen: '2026-07-23T10:00:00.000Z' });
+    expect(resolveReplayDeepLink(e, [usage()])?.offsetMs).toBe(0);
   });
 });

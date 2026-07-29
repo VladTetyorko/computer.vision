@@ -49,4 +49,21 @@ class TelemetryTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new Telemetry(id, now, null, null, null, null, null, null));
     }
+
+    @Test
+    void eightArgConstructorDefaultsFlightStateToNull() {
+        Telemetry telemetry = new Telemetry(DeviceId.random(), Instant.now(), null, null, null, null, null, Map.of());
+
+        assertNull(telemetry.flightState());
+    }
+
+    @Test
+    void nineArgConstructorAcceptsAnExplicitFlightState() {
+        FlightState flightState = new FlightState("ardupilot", "RTL", true, true, 3, 12, 0.9, 87, java.util.List.of());
+
+        Telemetry telemetry = new Telemetry(DeviceId.random(), Instant.now(), null, null, null, null, null, Map.of(),
+                flightState);
+
+        assertEquals(flightState, telemetry.flightState());
+    }
 }

@@ -186,3 +186,30 @@
 .chips-wrap {
     flex-wrap: wrap;
 }
+
+/* ---- Recording video + clip export (docs/OPS-CORE-PLAN.md §R, R-c) ------------------------- */
+
+.recording-video {
+    width: 100%;
+    max-height: 26rem;
+    border-radius: var(--radius-sm);
+    background: #000;
+    display: block;
+}
+
+.clip-actions {
+    margin-top: 0.6rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.empty-recording {
+    padding: 1.5rem 1rem;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.empty-recording p {
+    margin: 0.2rem 0;
+}

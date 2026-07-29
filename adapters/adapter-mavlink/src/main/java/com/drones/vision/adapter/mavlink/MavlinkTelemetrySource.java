@@ -7,49 +7,55 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 
-import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.MavlinkMessage;
-
-import java.io.IOException;
-import java.io.OutputStream;
-import java.net.DatagramSocket;
-import java.net.InetSocketAddress;
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * {@link TelemetrySourcePort} implementation that ingests MAVLink 2 telemetry over UDP — the
- * de-facto transport for telemetry radios and ArduPilot/PX4 SITL (docs/MVP2-PLAN.md X-a).
- * Supports {@link StreamDescriptor#protocol()} {@code "mavlink"} with a {@code udp://host:port}
- * {@link StreamDescriptor#uri()}.
+ * de-facto transport for telemetry radios and ArduPilot/PX4 SITL (docs/MVP2-PLAN.md X-a) — and,
+ * as of docs/DRONE-INFRA-PLAN.md I-a, the fleet gateway: N vehicles sharing one well-known GCS
+ * port (14550), matching how every real radio bridge actually behaves in the field. Supports
+ * {@link StreamDescriptor#protocol()} {@code "mavlink"} with a {@code udp://host:port} {@link
+ * StreamDescriptor#uri()}.
  *
  * <h2>{@code udp://host:port} means <b>listen</b>, not connect</h2>
- * A telemetry radio or SITL instance <b>pushes</b> datagrams to this app; this adapter does not
- * dial out. {@code host} is the local address to <b>bind</b> the listening socket to (blank/absent
- * falls back to the wildcard {@value #DEFAULT_BIND_HOST}, i.e. all interfaces); {@code port} is
- * the local UDP port to bind and listen on. The sender's own address is irrelevant and never
- * validated — any datagram arriving on the bound port is read.
+ * A telemetry radio or SITL instance <b>pushes</b> datagrams to this app; this adapter never
+ * dials out. {@code host} is the local bind address (blank/absent falls back to the wildcard
+ * {@value #DEFAULT_BIND_HOST}, i.e. all interfaces); {@code port} is the local UDP port. The
+ * sender's own address is irrelevant and never validated — any datagram arriving on the bound
+ * port is read, which is exactly how multiple vehicles end up sharing one port.
  *
- * <p>{@link #supports(Device)} requires {@link Capability#TELEMETRY} and a {@code "mavlink"}/{@code
- * "udp"} descriptor with a positive port. Each {@link #open(Device)} call binds a fresh {@link
- * DatagramSocket} and starts one dedicated platform thread ({@code mavlink-telemetry-<id>})
- * running a blocking read loop: {@link MavlinkUdpInputStream} bridges the socket to the byte
- * stream {@link MavlinkConnection} expects, and {@link MavlinkTelemetryDecoder} merges each
- * decoded message into a {@link Telemetry} sample, submitted to a per-device {@link
- * SubmissionPublisher} (mirroring {@code adapter-simulation}'s {@code SimulatedTelemetrySource},
- * this module's closest reference implementation).
+ * <h2>One socket, many vehicles ({@link MavlinkSocketHub})</h2>
+ * Every {@link #open(Device)} call for the same bind address ({@code host:port}) shares one
+ * {@link MavlinkSocketHub} — one {@code DatagramSocket}, one read thread, reference-counted
+ * across every device registered against it; the socket closes once the last device sharing it
+ * calls {@link #close(DeviceId)}. The hub demultiplexes incoming traffic by MAVLink system id
+ * (see its own javadoc for why source-address demux was descoped) and routes each device only
+ * the messages from the vehicle it claims:
+ * <ul>
+ *   <li>{@code StreamDescriptor.options[}{@value #OPTION_SYSID}{@code ]} — a positive integer
+ *       1–255 <b>pins</b> this device to exactly that system id; missing/blank/malformed/
+ *       out-of-range falls back to <b>unpinned</b> (lenient, same idiom as every other option in
+ *       this module).</li>
+ *   <li>An unpinned device claims the first system id heard on the socket that nothing else
+ *       already claims, and may re-elect to a different (still-unclaimed) system id after its
+ *       claimed vehicle has been silent for 30s — see {@link MavlinkSocketHub} for the exact
+ *       claim/re-election rules.</li>
+ * </ul>
+ * Vehicles heard but claimed by nobody are not silently dropped — see {@link
+ * MavlinkSocketHub#unclaimedVehicles()} (docs/DRONE-INFRA-PLAN.md I-b consumes this next).
  *
  * <h2>Robustness</h2>
  * Unparseable/garbage datagrams are never fatal — {@code MavlinkConnection#next()} itself scans
  * for the next valid frame-start marker and silently drops anything that fails to parse or fails
  * CRC (see {@link MavlinkUdpInputStream}'s javadoc for the full reasoning), so this adapter adds
  * no extra try/catch around individual reads for that case. The only exception path that reaches
- * this class's own {@code catch} is a genuine {@link IOException} from the socket itself — most
- * commonly {@link #close(DeviceId)} closing it to unblock the read thread, which is treated as a
+ * a device's own publisher is a genuine {@link java.io.IOException} from the shared socket
+ * itself — almost always the hub's own close unblocking the read thread, which is treated as a
  * graceful shutdown, not an error.
  *
  * <p>Plain class with no framework dependency — instantiated directly by {@code vision-app}'s
@@ -61,9 +67,25 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     private static final String SCHEME_UDP = "udp";
     static final String DEFAULT_BIND_HOST = "0.0.0.0";
 
-    private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 5_000L;
+    /** {@code StreamDescriptor.options} key for pinning a device to one MAVLink system id (docs/DRONE-INFRA-PLAN.md I-a). */
+    static final String OPTION_SYSID = "sysid";
+    private static final int MIN_SYSID = 1;
+    private static final int MAX_SYSID = 255;
 
+    private static final long DEFAULT_SILENCE_WINDOW_MILLIS = 30_000L;
+
+    private final long silenceWindowMillis;
+    private final Map<String, MavlinkSocketHub> hubs = new ConcurrentHashMap<>();
     private final Map<DeviceId, DeviceRuntime> runtimes = new ConcurrentHashMap<>();
+
+    public MavlinkTelemetrySource() {
+        this(DEFAULT_SILENCE_WINDOW_MILLIS);
+    }
+
+    /** Test-only hook: a shorter unpinned re-election silence window than the production 30s default. */
+    MavlinkTelemetrySource(long silenceWindowMillis) {
+        this.silenceWindowMillis = silenceWindowMillis;
+    }
 
     @Override
     public boolean supports(Device device) {
@@ -84,21 +106,77 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
             throw new IllegalArgumentException("MavlinkTelemetrySource does not support device: " + device);
         }
         URI uri = device.stream().uri();
-        DeviceRuntime runtime = new DeviceRuntime(device.id(), bindHost(uri), uri.getPort());
+        String host = bindHost(uri);
+        int port = uri.getPort();
+        String bindKey = bindKey(host, port);
+        Integer pinnedSysid = pinnedSysidOption(device.stream().options());
+
+        SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
+        MavlinkSocketHub.VehicleRegistration[] registrationHolder = new MavlinkSocketHub.VehicleRegistration[1];
+        hubs.compute(bindKey, (key, existing) -> {
+            MavlinkSocketHub hub = existing == null || existing.isClosed()
+                    ? new MavlinkSocketHub(host, port, silenceWindowMillis)
+                    : existing;
+            registrationHolder[0] = hub.register(device.id(), pinnedSysid, publisher);
+            return hub;
+        });
+
+        DeviceRuntime runtime = new DeviceRuntime(bindKey, registrationHolder[0]);
         DeviceRuntime previous = runtimes.put(device.id(), runtime);
         if (previous != null) {
-            previous.close(); // defensive: a device id must not have two live runtimes
+            closeRuntime(previous); // defensive: a device id must not have two live runtimes
         }
-        runtime.start();
-        return runtime.publisher;
+        return publisher;
     }
 
     @Override
     public void close(DeviceId id) {
         DeviceRuntime runtime = runtimes.remove(id);
         if (runtime != null) {
-            runtime.close();
+            closeRuntime(runtime);
         }
+    }
+
+    /**
+     * Vehicles heard on the given bind address ({@code host:port}, see {@link #bindKey}) that no
+     * currently-open device claims — delegates to {@link MavlinkSocketHub#unclaimedVehicles()};
+     * empty when nothing has ever been opened on that address. Package-private: docs/
+     * DRONE-INFRA-PLAN.md I-b is the intended future consumer, once it exists.
+     */
+    List<MavlinkSocketHub.UnclaimedVehicle> unclaimedVehicles(String bindKey) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        return hub == null ? List.of() : hub.unclaimedVehicles();
+    }
+
+    /**
+     * Whether a hub for this bind address is currently active (i.e. some device has it open right
+     * now). docs/DRONE-INFRA-PLAN.md I-b: lets {@code MavlinkHeartbeatScanner} borrow an already-
+     * running hub's socket instead of trying (and failing) to bind a port the gateway already owns.
+     */
+    boolean hasActiveHub(String bindKey) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        return hub != null && !hub.isClosed();
+    }
+
+    /**
+     * Vehicles currently claimed by an open device on the given bind address — delegates to {@link
+     * MavlinkSocketHub#claimedVehicles()}; empty when nothing is open on that address. Package-
+     * private, same "future consumer" shape as {@link #unclaimedVehicles}: docs/DRONE-INFRA-PLAN.md
+     * I-b (`MavlinkHeartbeatScanner`) is the consumer.
+     */
+    List<MavlinkSocketHub.ClaimedVehicle> claimedVehicles(String bindKey) {
+        MavlinkSocketHub hub = hubs.get(bindKey);
+        return hub == null ? List.of() : hub.claimedVehicles();
+    }
+
+    private void closeRuntime(DeviceRuntime runtime) {
+        hubs.compute(runtime.bindKey(), (key, hub) -> {
+            if (hub == null) {
+                return null;
+            }
+            boolean hubNowEmpty = hub.unregister(runtime.registration());
+            return hubNowEmpty ? null : hub;
+        });
     }
 
     private static String bindHost(URI uri) {
@@ -106,85 +184,26 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         return host == null || host.isBlank() ? DEFAULT_BIND_HOST : host;
     }
 
-    /** Per-open runtime: a dedicated UDP read thread feeding a {@link SubmissionPublisher}. */
-    private static final class DeviceRuntime {
-        private final DeviceId deviceId;
-        private final String bindHost;
-        private final int port;
-        private final SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
-        private final AtomicBoolean closed = new AtomicBoolean(false);
-        private volatile Thread readThread;
-        private volatile DatagramSocket socket;
+    /** The key {@link MavlinkSocketHub}s are shared under: one hub per distinct bind address. */
+    static String bindKey(String host, int port) {
+        return host + ":" + port;
+    }
 
-        DeviceRuntime(DeviceId deviceId, String bindHost, int port) {
-            this.deviceId = deviceId;
-            this.bindHost = bindHost;
-            this.port = port;
+    /** Lenient like every other option in this module: missing/blank/malformed/out-of-range (not 1-255) -> unpinned. */
+    private static Integer pinnedSysidOption(Map<String, String> options) {
+        String raw = options.get(OPTION_SYSID);
+        if (raw == null || raw.isBlank()) {
+            return null;
         }
-
-        void start() {
-            readThread = new Thread(this::runReadLoop, "mavlink-telemetry-" + deviceId.value());
-            readThread.setDaemon(true);
-            readThread.start();
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value >= MIN_SYSID && value <= MAX_SYSID ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
         }
+    }
 
-        private void runReadLoop() {
-            boolean errored = false;
-            DatagramSocket sock = null;
-            try {
-                sock = new DatagramSocket(null);
-                sock.setReuseAddress(true);
-                sock.bind(new InetSocketAddress(bindHost, port));
-                socket = sock;
-
-                MavlinkConnection connection = MavlinkConnection.create(
-                        new MavlinkUdpInputStream(sock), OutputStream.nullOutputStream());
-                MavlinkTelemetryDecoder decoder = new MavlinkTelemetryDecoder(deviceId);
-
-                while (!closed.get()) {
-                    // Blocks; malformed/garbage datagrams are resynced past internally by
-                    // MavlinkConnection/MavlinkFrameReader -- see class javadoc.
-                    MavlinkMessage<?> message = connection.next();
-                    Telemetry sample = decoder.accept(message);
-                    if (sample != null) {
-                        publisher.submit(sample);
-                    }
-                }
-            } catch (Exception e) {
-                errored = true;
-                if (!closed.get()) {
-                    // Unrecoverable failure (not a malformed datagram -- those never reach here):
-                    // signal onError, per TelemetrySourcePort's contract.
-                    publisher.closeExceptionally(e);
-                }
-            } finally {
-                closeQuietly(sock);
-                if (!errored) {
-                    publisher.close();
-                }
-            }
-        }
-
-        void close() {
-            if (closed.compareAndSet(false, true)) {
-                closeQuietly(socket); // unblocks a pending receive()
-                Thread thread = readThread;
-                if (thread != null && thread != Thread.currentThread()) {
-                    thread.interrupt(); // best-effort; a blocked receive() may not respond to this alone
-                    try {
-                        thread.join(CLOSE_JOIN_TIMEOUT_MILLIS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                publisher.close();
-            }
-        }
-
-        private static void closeQuietly(DatagramSocket socket) {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
-            }
-        }
+    /** This device's share of a {@link MavlinkSocketHub}: which hub, and its registration within it. */
+    private record DeviceRuntime(String bindKey, MavlinkSocketHub.VehicleRegistration registration) {
     }
 }

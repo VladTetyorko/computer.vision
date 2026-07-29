@@ -1,7 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { batterySeverity, telemetryAgeSeverity } from '../../core/telemetry/telemetry-logic';
+import { gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import { formatLatency, transportLabel } from '../../core/stream-info-logic';
+import { DEFAULT_WIND_LIMIT_MPS } from '../../core/weather/weather-logic';
+import { WeatherChip } from '../../shared/ui/weather-chip';
 import type { Transport } from '../../shared/player/player';
 
 /**
@@ -23,16 +26,37 @@ import type { Transport } from '../../shared/player/player';
  * value is store-backed anywhere, both are `shared/player/player.ts`'s own measurements piped up through its
  * `latencyChanged`/`transportChanged` outputs so this bar never re-measures independently.
  *
- * **Speed is not shown — an honest gap, not an oversight.** No current telemetry sample carries a
- * ground-speed reading (`core/api/models.ts#TelemetrySample` has no such field; the only "speed" in
- * the wire contract is `TelemetryPlanRequest.speedMps`, a *target* for the simulator's own route,
- * never a live measurement). Per this codebase's own "implements what current APIs already serve"
- * convention (`shared/player/stream-info-panel.ts`'s own resolution/FPS gap sets the precedent), the chip is
- * omitted rather than fabricated — a future cycle that adds a real speed reading server-side is
- * where this bar would grow it.
+ * **Ground speed (docs/FC-INTEGRATIONS-PLAN.md F-d) closes this component's own previously-documented
+ * gap** — this doc comment used to record "no current telemetry sample carries a ground-speed
+ * reading" as an honest omission; `TelemetrySample.extra['groundspeedMps']` (the frozen wire
+ * contract's own `Telemetry.extra` map, now surfaced) is that reading, decoded from MAVLink
+ * `VFR_HUD`/`GLOBAL_POSITION_INT` server-side. Rendered as `X.Xm/s`, one decimal, omitted (not
+ * `0.0m/s`) when the key is absent — a device with no flight-controller MAVLink link (the sim's own
+ * older samples, a bare GPS-only source) still renders no speed chip at all, never a fabricated `0`.
+ * **Mode/GPS/armed/RSSI chips** are this same cycle's other additions, all sourced from the latest
+ * sample's `flightState` (`core/telemetry/flight-state-logic.ts#gpsFixLabel`/`gpsSeverity` decode
+ * the GPS one) — each independently omitted when its own field is absent, same poka-yoke rule as
+ * every other chip here.
+ *
+ * **Wind chip (docs/FC-INTEGRATIONS-PLAN.md F-e)** — `extra['windSpeedMps']`/
+ * `extra['windDirectionDegrees']`, the same ArduPilot-only `WIND`-message extras
+ * `core/telemetry/flight-state-logic.ts#deriveDiagnostics`'s own wind row reads (this chip is a
+ * second, compact rendering of the identical data for at-a-glance HUD reading, not a duplicate
+ * derivation — no severity tier, F-e defines none for wind). The arrow rotates to
+ * `windDirectionDegrees` only when that key is present; the speed alone still renders without it.
+ *
+ * **Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W)** — `<vision-weather-chip>`, always rendered
+ * (outside the `hasTelemetry()` branch, alongside the transport chip, since it's a pre-flight/
+ * ambient forecast advisory independent of whether telemetry — or a flight at all — exists yet). It
+ * injects `WeatherStore` from `FlyPage`'s own `providers` directly (DI resolves through the
+ * component tree regardless of which template renders the consumer, the same "DI-shares the host's
+ * instance" idiom this whole file already follows for `TelemetryStore`) — **not the same thing as
+ * this component's own "Wind" chip two paragraphs up**, see `WeatherChip`'s own doc comment for the
+ * telemetry-instrument-vs-ambient-forecast distinction.
  */
 @Component({
   selector: 'vision-fly-osd',
+  imports: [WeatherChip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="osd-bar">
@@ -49,9 +73,43 @@ import type { Transport } from '../../shared/player/player';
         <span class="chip">
           <span class="k">Hdg</span><span class="v">{{ headingLabel() }}</span>
         </span>
+        @if (groundSpeedLabel(); as speed) {
+          <span class="chip">
+            <span class="k">GS</span><span class="v">{{ speed }}</span>
+          </span>
+        }
+        @if (modeLabel(); as mode) {
+          <span class="chip">
+            <span class="k">Mode</span><span class="v">{{ mode }}</span>
+          </span>
+        }
+        @if (gpsFixType() !== undefined) {
+          <span class="chip" [class]="'gps-' + gpsSeverityTier()">
+            <span class="k">GPS</span><span class="v">{{ gpsLabel() }}</span>
+          </span>
+        }
+        @if (armed() !== undefined) {
+          <span class="chip" [class.armed-chip]="armed()" [class.disarmed-chip]="!armed()">
+            <span class="v">{{ armed() ? 'ARMED' : 'DISARMED' }}</span>
+          </span>
+        }
+        @if (rssiPercent() !== undefined) {
+          <span class="chip">
+            <span class="k">RSSI</span><span class="v">{{ rssiPercent() }}%</span>
+          </span>
+        }
+        @if (windSpeedLabel(); as wind) {
+          <span class="chip">
+            <span class="k">Wind</span><span class="v">{{ wind }}</span>
+            @if (windDirectionDegrees(); as direction) {
+              <span class="wind-arrow" [style.transform]="'rotate(' + direction + 'deg)'" aria-hidden="true">➤</span>
+            }
+          </span>
+        }
       } @else {
         <span class="chip dim">No telemetry</span>
       }
+      <vision-weather-chip [limitMps]="windLimitMps()" />
       <span class="chip dim transport-chip">{{ transportLabelText() }}</span>
     </div>
   `,
@@ -110,6 +168,39 @@ import type { Transport } from '../../shared/player/player';
     .age-red .v {
       color: #ff9a9a;
     }
+
+    .gps-warn .v {
+      color: var(--warn);
+    }
+
+    .gps-critical {
+      border-color: rgb(255 93 93 / 45%);
+    }
+
+    .gps-critical .v {
+      color: #ff9a9a;
+    }
+
+    /* Armed/disarmed are both routine states, not a severity tier (.chip's plain default is the
+       usual "nothing wrong" color here) — armed reads a mild green-ish (the --ok token's own hue,
+       softened, not the saturated .chip.ok fill) so it doesn't compete with --live/--danger for
+       attention; disarmed is dimmed rather than colored at all — a grounded drone is the normal,
+       safe state, not something to flag. */
+    .armed-chip .v {
+      color: #8ce7b4;
+    }
+
+    .disarmed-chip {
+      opacity: 0.65;
+    }
+
+    /* Wind chip (docs/FC-INTEGRATIONS-PLAN.md F-e) — the arrow glyph rotates in place via its own
+       inline transform (the direction degrees), no severity color (F-e defines no threshold). */
+    .wind-arrow {
+      display: inline-block;
+      font-size: 0.7rem;
+      line-height: 1;
+    }
   `,
 })
 export class FlyOsd {
@@ -119,6 +210,8 @@ export class FlyOsd {
   readonly latencySeconds = input<number | null>(null);
   /** `shared/player/player.ts`'s own live transport, piped up via its `transportChanged` output. */
   readonly transport = input<Transport>('hls');
+  /** `AssetDetails.attributes['windLimitMps']`, resolved by `FlyPage` (docs/OPS-CORE-PLAN.md §W) — defaults to 10 m/s. */
+  readonly windLimitMps = input<number>(DEFAULT_WIND_LIMIT_MPS);
 
   private readonly batteryPercent = computed(() => this.store.latest()?.batteryPercent);
   protected readonly batteryLabel = computed(() => {
@@ -146,6 +239,39 @@ export class FlyOsd {
     const heading = this.store.latest()?.headingDegrees;
     return heading === undefined ? '—' : `${heading.toFixed(0)}°`;
   });
+
+  /** `Telemetry.extra['groundspeedMps']` — see this class's own doc comment for the gap this closes. */
+  protected readonly groundSpeedLabel = computed(() => {
+    const mps = this.store.latest()?.extra?.['groundspeedMps'];
+    return mps === undefined ? undefined : `${mps.toFixed(1)}m/s`;
+  });
+
+  private readonly flightState = computed(() => this.store.latest()?.flightState);
+
+  /** The FC's own human mode name (`"RTL"`, `"Loiter"`, …) — no chip at all until one is reported. */
+  protected readonly modeLabel = computed(() => this.flightState()?.mode);
+
+  protected readonly gpsFixType = computed(() => this.flightState()?.gpsFixType);
+  protected readonly gpsSeverityTier = computed(() => gpsSeverity(this.gpsFixType()));
+  protected readonly gpsLabel = computed(() => {
+    const fixType = this.gpsFixType();
+    const satellites = this.flightState()?.satellites;
+    const label = gpsFixLabel(fixType);
+    return satellites === undefined ? label : `${label} · ${satellites} sat`;
+  });
+
+  /** `true`/`false` each render their own chip; `undefined` (no flightState yet) renders none at all. */
+  protected readonly armed = computed(() => this.flightState()?.armed);
+
+  protected readonly rssiPercent = computed(() => this.flightState()?.rssiPercent);
+
+  /** `TelemetrySample.extra['windSpeedMps']` (docs/FC-INTEGRATIONS-PLAN.md F-e) — `undefined` renders no chip at all. */
+  protected readonly windSpeedLabel = computed(() => {
+    const mps = this.store.latest()?.extra?.['windSpeedMps'];
+    return mps === undefined ? undefined : `${mps.toFixed(1)}m/s`;
+  });
+
+  protected readonly windDirectionDegrees = computed(() => this.store.latest()?.extra?.['windDirectionDegrees']);
 
   protected readonly transportLabelText = computed(
     () => `${transportLabel(this.transport())} · ${formatLatency(this.latencySeconds())}`,

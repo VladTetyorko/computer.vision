@@ -7,6 +7,7 @@ import {
   computed,
   effect,
   inject,
+  input,
   output,
   signal,
   viewChild,
@@ -15,10 +16,11 @@ import type * as Leaflet from 'leaflet';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
 import { EventsStore } from '../../../core/events/events-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../../core/events/events-logic';
-import type { DetectionEvent } from '../../../core/api/models';
+import type { DetectionEvent, GeofenceZone } from '../../../core/api/models';
 import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
 import { FleetMapStore } from '../../../core/map/map-store';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
+import { zoneKindLabel, zoneLayerStyle } from '../../../core/geofence/geofence-logic';
 
 /** Padding so the outermost markers aren't flush against the map's edge after a fit. */
 const FIT_PADDING: Leaflet.PointTuple = [48, 48];
@@ -103,10 +105,15 @@ function escapeHtml(value: string): string {
  * the map must never yank the fleet view away from where the assets actually are. A popup shows
  * label/confidence/first-and-last-seen and, per the plan's own honestly-scoped fallback, a
  * **"Details"** button (docs/UX-REWORK-PLAN.md U-a2 item 1 — was "Open asset") when `assetId`
- * resolved — R-b's replay route needs a `usageId` that `AssetUsageResponse` does not expose (no
- * way to resolve *which* usage was open at the event's `firstSeen` from any current API — see the
- * module's own MODULE.md Gotcha for the full trace), so linking to a specific replay moment was
- * rejected as unbuildable this cycle, not merely skipped.
+ * resolved — still just the asset detail page, not a replay deep link, even though
+ * docs/OPS-CORE-PLAN.md §Q1 later gave `core/events/events-logic.ts#resolveReplayDeepLink` enough
+ * to resolve one (`AssetDetails.recentUsages` now carries the usage window needed — the original
+ * "no current API exposes that link" gap this doc comment used to record is closed). Deliberately
+ * **not** wired in here regardless: that resolution needs an async `VisionApi.getAsset` lookup at
+ * click time, and this component's event popups are raw HTML driven by one delegated click
+ * listener on the map container (see class doc), not a place that comfortably hosts an async
+ * navigation decision — `shared/ui/notification-bell.ts`/`features/wall/wall.ts` (both already
+ * Angular components with router/HTTP access) are where that lookup actually lives instead.
  */
 @Component({
   selector: 'vision-fleet-map',
@@ -140,6 +147,19 @@ export class FleetMap {
   /** Emits the assetId behind an event popup's "Details" button (docs/MVP2-PLAN.md §E, E-b bullet 3). */
   readonly openEventAsset = output<string>();
 
+  /**
+   * The geofence zones layer (docs/OPS-CORE-PLAN.md §G-c) — `CommandPage` passes `GeofenceStore.zones()`
+   * straight through; empty by default so every other host (none exist yet, but the input costs
+   * nothing to leave generally available) sees no change. Rendered as a third, independent Leaflet
+   * layer alongside the asset markers and event markers — a polygon per zone, styled by
+   * `core/geofence/geofence-logic.ts#zoneLayerStyle`, with a permanent center label naming the zone
+   * (`bindTooltip(..., {permanent: true})`) since a dashed outline alone doesn't say *which* zone it
+   * is. Purely informational here — no click handling, no popup; renaming/enabling/deleting a zone
+   * is the Zones panel's own job (`features/command/zones-panel.ts`), not something this read-only
+   * map layer offers a way into.
+   */
+  readonly zones = input<readonly GeofenceZone[]>([]);
+
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
   protected readonly autoFit = signal(true);
@@ -153,6 +173,7 @@ export class FleetMap {
   private tileLayer: Leaflet.TileLayer | null = null;
   private readonly markerHandles = new Map<string, MarkerHandle>();
   private readonly eventMarkerHandles = new Map<string, Leaflet.Marker>();
+  private readonly zoneLayerHandles = new Map<string, Leaflet.Polygon>();
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
   private generation = 0;
@@ -185,6 +206,11 @@ export class FleetMap {
     // fingerprint/bounds above (see class doc): a stray old event elsewhere must never yank the
     // fleet view away from where the assets actually are.
     effect(() => this.applyEventMarkers(this.eventMarkers()));
+
+    // Zones are a fourth, independent layer (docs/OPS-CORE-PLAN.md §G-c) — also excluded from
+    // auto-fit for the identical reason: a zone drawn far from the fleet's current position must
+    // never yank the map away from the assets themselves.
+    effect(() => this.applyZones(this.zones()));
 
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
@@ -249,6 +275,7 @@ export class FleetMap {
       this.fitToMarkers(markers);
     }
     this.applyEventMarkers(this.eventMarkers());
+    this.applyZones(this.zones());
   }
 
   private applyMarkers(markers: readonly FleetMarker[]): void {
@@ -398,6 +425,44 @@ export class FleetMap {
     return `<div class="fleet-popup event-popup">${rows.join('')}</div>`;
   }
 
+  // --- Geofence zones (docs/OPS-CORE-PLAN.md §G-c) — read-only, see the `zones` input's own doc comment --
+
+  private applyZones(zones: readonly GeofenceZone[]): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return; // map chunk/instance not ready yet — `initMap()` re-applies once it is
+    }
+
+    const seen = new Set<string>();
+    for (const zone of zones) {
+      seen.add(zone.id);
+      this.upsertZoneLayer(L, map, zone);
+    }
+    for (const id of [...this.zoneLayerHandles.keys()]) {
+      if (!seen.has(id)) {
+        this.zoneLayerHandles.get(id)?.remove();
+        this.zoneLayerHandles.delete(id);
+      }
+    }
+  }
+
+  private upsertZoneLayer(L: typeof Leaflet, map: Leaflet.Map, zone: GeofenceZone): void {
+    const style = zoneLayerStyle(zone.kind, zone.enabled);
+    const points = zone.polygon.map((vertex) => L.latLng(vertex.latitude, vertex.longitude));
+    const label = `${zoneKindLabel(zone.kind)}: ${zone.name}${zone.enabled ? '' : ' (disabled)'}`;
+    let polygon = this.zoneLayerHandles.get(zone.id);
+    if (!polygon) {
+      polygon = L.polygon(points, { ...style, interactive: false }).addTo(map);
+      polygon.bindTooltip(escapeHtml(label), { permanent: true, direction: 'center', className: 'zone-label' });
+      this.zoneLayerHandles.set(zone.id, polygon);
+    } else {
+      polygon.setLatLngs(points);
+      polygon.setStyle(style);
+      polygon.setTooltipContent(escapeHtml(label));
+    }
+  }
+
   private fitToMarkers(markers: readonly FleetMarker[]): void {
     const L = this.leaflet;
     if (!L || !this.map || markers.length === 0) {
@@ -442,6 +507,12 @@ export class FleetMap {
       `<div class="popup-meta">${escapeHtml(marker.categoryName)}</div>`,
       `<span class="chip ${marker.live ? 'ok' : ''}">${marker.live ? 'Streaming' : 'Offline'}</span>`,
     ];
+    if (marker.flightMode !== undefined) {
+      // Mode line (docs/FC-INTEGRATIONS-PLAN.md F-d) — red text when failsafe, the one severity
+      // color `--live` is reserved for; otherwise the popup's own plain text color.
+      const failsafeStyle = marker.failsafe === true ? ' style="color: var(--live); font-weight: 600;"' : '';
+      rows.push(`<div class="popup-row"${failsafeStyle}>Mode ${escapeHtml(marker.flightMode)}</div>`);
+    }
     if (marker.batteryPercent !== undefined) {
       rows.push(`<div class="popup-row">Battery ${marker.batteryPercent.toFixed(0)}%</div>`);
     }
@@ -471,6 +542,10 @@ export class FleetMap {
       marker.remove();
     }
     this.eventMarkerHandles.clear();
+    for (const polygon of this.zoneLayerHandles.values()) {
+      polygon.remove();
+    }
+    this.zoneLayerHandles.clear();
     this.map?.remove();
     this.map = null;
     this.tileLayer = null;

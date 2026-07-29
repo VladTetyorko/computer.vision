@@ -3,12 +3,21 @@ import type { DetectionResult, TelemetrySample } from '../../core/api/models';
 import {
   DETECTION_MATCH_TOLERANCE_MS,
   advancePlaybackClock,
+  buildClipDownloadUrl,
   bucketDetections,
+  capDetectionBuckets,
   clampToRange,
   isDetectionNear,
   nearestDetectionResult,
   nearestSample,
+  parseDeepLinkOffsetMs,
+  selectedClipWindow,
+  shouldSeekVideo,
   trailPrefix,
+  videoOffsetSeconds,
+  videoTimeToAtMs,
+  wholeFlightClipWindow,
+  type DetectionDensityBucket,
 } from './replay-logic';
 
 function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
@@ -172,6 +181,51 @@ describe('bucketDetections', () => {
   });
 });
 
+describe('capDetectionBuckets', () => {
+  function bucketList(count: number): DetectionDensityBucket[] {
+    return Array.from({ length: count }, (_, i) => ({ atMs: sec(i), count: 1 }));
+  }
+
+  it('passes an under-cap list through unchanged, totalCount matching its own length', () => {
+    const buckets = bucketList(5);
+    expect(capDetectionBuckets(buckets, 200)).toEqual({ buckets, totalCount: 5 });
+  });
+
+  it('is a no-op at exactly the cap', () => {
+    const buckets = bucketList(200);
+    const capped = capDetectionBuckets(buckets, 200);
+    expect(capped.buckets).toEqual(buckets);
+    expect(capped.totalCount).toBe(200);
+  });
+
+  it('keeps only the latest `cap` buckets (the tail) when over cap, and reports the pre-cap total', () => {
+    const buckets = bucketList(250);
+    const capped = capDetectionBuckets(buckets, 200);
+    expect(capped.totalCount).toBe(250);
+    expect(capped.buckets).toHaveLength(200);
+    expect(capped.buckets[0]).toBe(buckets[50]); // the tail starts at index 250-200=50
+    expect(capped.buckets[capped.buckets.length - 1]).toBe(buckets[249]);
+  });
+
+  it('defaults to DETECTION_STRIP_CAP (200) when no cap is given', () => {
+    const buckets = bucketList(201);
+    const capped = capDetectionBuckets(buckets);
+    expect(capped.buckets).toHaveLength(200);
+    expect(capped.totalCount).toBe(201);
+  });
+
+  it('keeps the kept slice ascending (it is the tail of an already-ascending list)', () => {
+    const buckets = bucketList(210);
+    const capped = capDetectionBuckets(buckets, 200);
+    const atMsValues = capped.buckets.map((b) => b.atMs);
+    expect(atMsValues).toEqual([...atMsValues].sort((a, b) => a - b));
+  });
+
+  it('handles an empty list', () => {
+    expect(capDetectionBuckets([], 200)).toEqual({ buckets: [], totalCount: 0 });
+  });
+});
+
 describe('clampToRange', () => {
   it('clamps into [fromMs, toMs]', () => {
     expect(clampToRange(sec(-5), T0, sec(10))).toBe(T0);
@@ -216,5 +270,115 @@ describe('advancePlaybackClock', () => {
   it('is already stopped when starting exactly at toMs', () => {
     const tick = advancePlaybackClock(sec(100), 1000, 1, T0, sec(100));
     expect(tick).toEqual({ atMs: sec(100), playing: false });
+  });
+});
+
+describe('videoOffsetSeconds (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+  it('converts a scrub position into the video\'s own currentTime, seconds', () => {
+    expect(videoOffsetSeconds(sec(30), T0)).toBe(30);
+  });
+
+  it('never goes negative — a scrub position before the recording\'s own start clamps to 0', () => {
+    expect(videoOffsetSeconds(T0 - 5000, T0)).toBe(0);
+  });
+});
+
+describe('videoTimeToAtMs (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+  it('converts the video\'s own currentTime back into an absolute atMs', () => {
+    expect(videoTimeToAtMs(30, T0, T0, sec(100))).toBe(sec(30));
+  });
+
+  it('clamps into the replay window', () => {
+    expect(videoTimeToAtMs(-10, T0, T0, sec(100))).toBe(T0);
+    expect(videoTimeToAtMs(200, T0, T0, sec(100))).toBe(sec(100));
+  });
+});
+
+describe('shouldSeekVideo (docs/OPS-CORE-PLAN.md §R, R-c — the guarded-effect threshold)', () => {
+  it('is false for drift within the threshold (ordinary 1x playback)', () => {
+    expect(shouldSeekVideo(30, 30.1)).toBe(false);
+  });
+
+  it('is true once drift exceeds the threshold (a scrub/jump)', () => {
+    expect(shouldSeekVideo(30, 45)).toBe(true);
+  });
+
+  it('respects a custom threshold', () => {
+    expect(shouldSeekVideo(30, 30.4, 0.5)).toBe(false);
+    expect(shouldSeekVideo(30, 30.6, 0.5)).toBe(true);
+  });
+});
+
+describe('wholeFlightClipWindow (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+  it('spans the whole replay window, anchored off the recording\'s own start', () => {
+    expect(wholeFlightClipWindow(T0, T0, sec(120))).toEqual({ startOffsetMs: 0, durationMs: 120_000 });
+  });
+
+  it('offsets when the recording started before the replay window\'s own from', () => {
+    expect(wholeFlightClipWindow(T0 - 5000, T0, sec(120))).toEqual({ startOffsetMs: 5000, durationMs: 120_000 });
+  });
+});
+
+describe('selectedClipWindow (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+  it('uses the current selection when both marks are set and well-ordered', () => {
+    expect(selectedClipWindow(T0, sec(10), sec(40), T0, sec(120))).toEqual({ startOffsetMs: 10_000, durationMs: 30_000 });
+  });
+
+  it('falls back to the whole flight with no selection', () => {
+    expect(selectedClipWindow(T0, undefined, undefined, T0, sec(120))).toEqual({ startOffsetMs: 0, durationMs: 120_000 });
+  });
+
+  it('falls back to the whole flight when only one mark is set', () => {
+    expect(selectedClipWindow(T0, sec(10), undefined, T0, sec(120))).toEqual({ startOffsetMs: 0, durationMs: 120_000 });
+  });
+
+  it('falls back to the whole flight when the marks are inverted', () => {
+    expect(selectedClipWindow(T0, sec(40), sec(10), T0, sec(120))).toEqual({ startOffsetMs: 0, durationMs: 120_000 });
+  });
+});
+
+describe('buildClipDownloadUrl (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+  const baseUrl = 'http://mediamtx.local:19996/get?path=stream-1&start=2026-07-23T10%3A00%3A00Z&duration=600';
+
+  it('replaces start/duration for a sub-window, keeping path and every other part of the URL', () => {
+    const url = buildClipDownloadUrl(baseUrl, { startOffsetMs: 30_000, durationMs: 60_000 });
+    expect(url).toBeDefined();
+    const parsed = new URL(url!);
+    expect(parsed.searchParams.get('path')).toBe('stream-1');
+    expect(parsed.searchParams.get('start')).toBe('2026-07-23T10:00:30.000Z');
+    expect(parsed.searchParams.get('duration')).toBe('60');
+    expect(parsed.origin).toBe('http://mediamtx.local:19996');
+  });
+
+  it('rounds duration to the nearest whole second', () => {
+    const url = buildClipDownloadUrl(baseUrl, { startOffsetMs: 0, durationMs: 1_499 });
+    expect(new URL(url!).searchParams.get('duration')).toBe('1');
+  });
+
+  it('never emits a zero-or-negative duration', () => {
+    const url = buildClipDownloadUrl(baseUrl, { startOffsetMs: 0, durationMs: 10 });
+    expect(new URL(url!).searchParams.get('duration')).toBe('1');
+  });
+
+  it('is undefined for an unparseable URL', () => {
+    expect(buildClipDownloadUrl('not a url', { startOffsetMs: 0, durationMs: 1000 })).toBeUndefined();
+  });
+
+  it('is undefined when the URL carries no start param to anchor against', () => {
+    expect(buildClipDownloadUrl('http://mediamtx.local:19996/get?path=stream-1', { startOffsetMs: 0, durationMs: 1000 })).toBeUndefined();
+  });
+});
+
+describe('parseDeepLinkOffsetMs (docs/OPS-CORE-PLAN.md §Q1)', () => {
+  it('parses a numeric string', () => {
+    expect(parseDeepLinkOffsetMs('1500')).toBe(1500);
+  });
+
+  it('is undefined for an absent value', () => {
+    expect(parseDeepLinkOffsetMs(undefined)).toBeUndefined();
+  });
+
+  it('is undefined for a non-numeric value, never NaN', () => {
+    expect(parseDeepLinkOffsetMs('soon')).toBeUndefined();
   });
 });

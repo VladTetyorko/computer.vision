@@ -215,6 +215,25 @@
     transform: scale(0.55) rotate(45deg);
 }
 
+/* "Listen for drones" (docs/DRONE-INFRA-PLAN.md I-b) — concentric rings, echoing a radar/heartbeat
+   sweep rather than `.glyph-discover`'s dashed-ring "scanning" mark, so the two read as distinct at
+   a glance despite both being scan-based methods. */
+.glyph-listen::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    border: 1px solid var(--accent);
+}
+
+.glyph-listen::before {
+    content: "";
+    position: absolute;
+    inset: 9px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
 .method-title {
     font-weight: 600;
     color: var(--text);
@@ -303,6 +322,64 @@ td.actions {
     padding: 0.5rem 0.7rem;
     font-size: 0.82rem;
     margin-bottom: 0.75rem;
+}
+
+/* "Listen for drones" results (docs/DRONE-INFRA-PLAN.md I-b) — one row per heard vehicle, not the
+   general Discover table above: fewer columns (name + a couple of chips), so a row reads cleanly
+   even dimmed for an already-claimed vehicle. */
+.vehicle-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.vehicle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+}
+
+/* Poka-yoke (docs/DRONE-INFRA-PLAN.md I-b: "no accidental duplicate assets") — dimmed, not hidden,
+   so an already-registered vehicle is still visible proof the scan heard it, just not actionable. */
+.vehicle-row.claimed {
+    opacity: 0.6;
+}
+
+.vehicle-main {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 0;
+}
+
+.vehicle-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+}
+
+.vehicle-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.vehicle-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.2rem;
+}
+
+.vehicle-actions .disabled-reason {
+    margin-top: 0;
 }
 
 .flight-plan-summary {

@@ -15,6 +15,7 @@ import {
   buildTestDroneRequest,
   type SimulateMode,
 } from '../../core/fleet/simulation-logic';
+import { buildMavlinkScanRequest, isClaimedVehicle, prefillFromVehicle } from './drone-scan-logic';
 import { buildTelemetryRequest, type FlightPlanForm } from '../../shared/map/flight-plan-logic';
 import type {
   DiscoveredDevice,
@@ -223,6 +224,65 @@ export class OnboardingStore {
     }
     if (!candidate.uri) {
       this.toasts.info(`${candidate.method} could not supply a stream URI — check the address before registering.`);
+    }
+  }
+
+  // --- Connect: "Listen for drones" (docs/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only scan,
+  //     distinct from the general `discover` method above; see `drone-scan-logic.ts`'s own doc
+  //     comment for why this is a separate pure-logic module rather than folded into that one. ------
+
+  readonly droneScanning = signal(false);
+  readonly droneScanResult = signal<ScanResult | null>(null);
+
+  /**
+   * No `timeoutMs` is sent — the scanner self-time-boxes (docs/DRONE-INFRA-PLAN.md I-b: "scans take
+   * ~5-10s"), so unlike the general scan above there is no timeout picker to read from. "Allow
+   * cancel-by-navigation" (the plan's own wording): leaving `/add-source` destroys this
+   * per-route-provided store (see this class's own doc comment), so an in-flight scan's eventual
+   * response simply has nowhere left to land — no `AbortController` needed for that guarantee.
+   */
+  async scanForDrones(): Promise<void> {
+    this.droneScanning.set(true);
+    try {
+      const result = await this.api.scan(buildMavlinkScanRequest());
+      this.droneScanResult.set(result);
+      if (result.failedMethods.length > 0) {
+        this.toasts.error('The MAVLink scanner failed — check that nothing else is bound to its port.');
+      }
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.droneScanning.set(false);
+    }
+  }
+
+  /**
+   * Fills the register fields from an unclaimed heard vehicle and switches to the register
+   * sub-view — the same "candidate → register" pivot `useCandidate` uses, plus
+   * `suggestedCategory` (docs/DRONE-INFRA-PLAN.md I-b — closes this wizard's own previously-documented
+   * gap of never wiring a discovery suggestion into the Profile step's category picker, for this one
+   * path). A no-op for an already-claimed vehicle (the UI never offers this action for one, but a
+   * defensive check costs nothing — see `isClaimedVehicle`'s own doc comment for why one can exist
+   * in the results list at all).
+   */
+  useDroneVehicle(candidate: DiscoveredDevice): void {
+    if (isClaimedVehicle(candidate)) {
+      return;
+    }
+    const prefill = prefillFromVehicle(candidate);
+    const selection = protocolSelectionFor(prefill.protocol);
+    this.protocolSelect.set(selection.select);
+    this.customProtocol.set(selection.custom);
+    this.uri.set(prefill.uri);
+    this.options.set(
+      prefill.options ? Object.entries(prefill.options).map(([key, value]) => ({ key, value })) : [],
+    );
+    this.connectMethod.set('register');
+    if (this.displayName().trim().length === 0) {
+      this.displayName.set(candidate.name);
+    }
+    if (prefill.suggestedCategory && this.category().trim().length === 0) {
+      this.chooseCategory(prefill.suggestedCategory);
     }
   }
 

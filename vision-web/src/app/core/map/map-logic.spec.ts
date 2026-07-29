@@ -164,6 +164,64 @@ describe('buildMarker', () => {
     expect(marker?.position).toEqual(POSITION);
     expect(marker?.batteryPercent).toBe(40);
   });
+
+  describe('flightMode/armed/failsafe/gpsFixType (docs/FC-INTEGRATIONS-PLAN.md F-d)', () => {
+    it('sources all four from the latest sample\'s own flightState', () => {
+      const telemetry: AssetTelemetrySnapshot = {
+        latest: sample({
+          latitude: 5,
+          longitude: 6,
+          flightState: { mode: 'RTL', armed: true, failsafe: true, gpsFixType: 3 },
+        }),
+        trail: [],
+      };
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+      expect(marker?.flightMode).toBe('RTL');
+      expect(marker?.armed).toBe(true);
+      expect(marker?.failsafe).toBe(true);
+      expect(marker?.gpsFixType).toBe(3);
+    });
+
+    it('is undefined for a streaming asset with no telemetry snapshot yet — never fabricated', () => {
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), undefined, 0);
+      expect(marker?.flightMode).toBeUndefined();
+      expect(marker?.armed).toBeUndefined();
+      expect(marker?.failsafe).toBeUndefined();
+      expect(marker?.gpsFixType).toBeUndefined();
+    });
+
+    it('is undefined when the latest sample carries no flightState at all', () => {
+      const telemetry: AssetTelemetrySnapshot = { latest: sample({ batteryPercent: 40 }), trail: [] };
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+      expect(marker?.flightMode).toBeUndefined();
+      expect(marker?.armed).toBeUndefined();
+    });
+
+    it('is absent entirely for the offline bucket (no live telemetry poller)', () => {
+      const marker = buildMarker(asset({ status: 'OFFLINE', lastKnownPosition: POSITION }), undefined, 0);
+      expect(marker).not.toHaveProperty('flightMode');
+      expect(marker).not.toHaveProperty('gpsFixType');
+    });
+  });
+
+  describe('extra (docs/FC-INTEGRATIONS-PLAN.md F-e — feeds asset-panel.ts\'s Status-tab diagnostics)', () => {
+    it('passes the latest sample\'s extra map through verbatim', () => {
+      const telemetry: AssetTelemetrySnapshot = { latest: sample({ extra: { windSpeedMps: 4.2 } }), trail: [] };
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+      expect(marker?.extra).toEqual({ windSpeedMps: 4.2 });
+    });
+
+    it('is undefined when the latest sample carries no extra', () => {
+      const telemetry: AssetTelemetrySnapshot = { latest: sample(), trail: [] };
+      const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+      expect(marker?.extra).toBeUndefined();
+    });
+
+    it('is absent entirely for the offline bucket', () => {
+      const marker = buildMarker(asset({ status: 'OFFLINE', lastKnownPosition: POSITION }), undefined, 0);
+      expect(marker).not.toHaveProperty('extra');
+    });
+  });
 });
 
 describe('buildMarkers', () => {

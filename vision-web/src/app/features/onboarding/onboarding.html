@@ -137,6 +137,11 @@
               <span class="method-title">Simulate</span>
               <span class="method-sub">Zero hardware — a file, an RTSP rehearsal, or a moving test drone.</span>
             </button>
+            <button type="button" class="method-tile" (click)="store.chooseMethod('listen')">
+              <span class="method-glyph glyph-listen" aria-hidden="true"></span>
+              <span class="method-title">Listen for drones</span>
+              <span class="method-sub">Scan for MAVLink heartbeats on UDP 14550 — no typing, no sysid.</span>
+            </button>
           </div>
         } @else {
           <div class="row method-chosen-row">
@@ -325,6 +330,69 @@
               }
             }
 
+            <!-- ---- "Listen for drones" (docs/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only
+                 scan, distinct from the general "Discover on network" method above. No timeout
+                 picker: the scanner self-time-boxes (~5-10s). -->
+            @case ('listen') {
+              <div class="row scan-row">
+                <button type="button" class="btn" (click)="store.scanForDrones()" [disabled]="store.droneScanning()">
+                  {{ store.droneScanning() ? 'Listening…' : store.droneScanResult() ? 'Scan again' : 'Scan' }}
+                </button>
+              </div>
+
+              <p class="muted hint">
+                Listens for MAVLink heartbeats on UDP 14550 (~5-10 seconds, then stops on its own —
+                leaving this page cancels it). Every distinct vehicle heard is listed below, whether
+                or not it's already registered.
+              </p>
+
+              @if (store.droneScanning()) {
+                <div class="empty"><p class="faint">Listening for heartbeats…</p></div>
+              } @else if (store.droneScanResult(); as result) {
+                @if (result.failedMethods.length > 0) {
+                  <div class="failed">
+                    The MAVLink scanner failed — check that nothing else is bound to its port.
+                  </div>
+                }
+
+                @if (result.devices.length === 0) {
+                  <div class="empty">
+                    <p>No drones heard on UDP 14550 — check the link recipes in infra/edge/.</p>
+                    <button type="button" class="btn secondary small" (click)="store.scanForDrones()">
+                      Scan again
+                    </button>
+                  </div>
+                } @else {
+                  <ul class="vehicle-list">
+                    @for (vehicle of result.devices; track vehicle.address + vehicle.name) {
+                      <li class="vehicle-row" [class.claimed]="droneVehicleClaimed(vehicle)">
+                        <div class="vehicle-main">
+                          <span class="vehicle-name">{{ vehicle.name }}</span>
+                          <div class="vehicle-chips">
+                            @for (chip of droneVehicleChips(vehicle); track chip.key) {
+                              <span class="chip" [title]="chip.value">{{ chip.label }}: {{ chip.value }}</span>
+                            }
+                          </div>
+                        </div>
+                        @if (droneVehicleClaimed(vehicle)) {
+                          <div class="vehicle-actions">
+                            <button type="button" class="btn secondary small" disabled>Use</button>
+                            <p class="disabled-reason">Already registered</p>
+                          </div>
+                        } @else {
+                          <button type="button" class="btn secondary small" (click)="store.useDroneVehicle(vehicle)">
+                            Use
+                          </button>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+              } @else {
+                <div class="empty"><p class="faint">No scan run yet.</p></div>
+              }
+            }
+
             @case ('simulate') {
               <div class="field wide">
                 <label class="label" for="sim-mode">Mode</label>
@@ -435,6 +503,9 @@
             @switch (store.connectMethod()) {
               @case ('discover') {
                 Pick "Use" on a discovered candidate, or switch to Register manually.
+              }
+              @case ('listen') {
+                Pick "Use" on a heard vehicle, or switch to Register manually.
               }
               @case ('register') {
                 Enter a protocol and a URI.

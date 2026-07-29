@@ -6,6 +6,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
+import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { buildSyntheticRegisterRequest } from '../../core/fleet/simulation-logic';
 import {
@@ -76,6 +77,7 @@ export class DevicesPage {
 
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
+  private readonly undoToast = inject(UndoToastService);
   private readonly router = inject(Router);
 
   protected readonly fleet = inject(FleetStore);
@@ -306,9 +308,9 @@ export class DevicesPage {
    * Archive executes immediately, no confirm dialog (docs/UX-REWORK-PLAN.md §U-a2 item 3b —
    * "Undo over confirm"): the previous inline confirm panel (`archiveConfirmAssetId`) is gone.
    * Calls `VisionApi.deleteAsset` directly rather than `FleetStore.deleteAsset` — that method's own
-   * `run()`-wrapped success toast (still exactly what devices archived/usages retained/streams
-   * stopped) has no Undo action and can't gain one without touching `core/fleet/fleet-store.ts`
-   * (out of this task's scope this batch), so this page fires its own toast instead, mirroring
+   * `run()`-wrapped success toast has no Undo action and can't gain one without touching
+   * `core/fleet/fleet-store.ts` (out of this task's scope this batch), so this page fires its own
+   * `UndoToastService` toast instead (docs/OPS-CORE-PLAN.md §Q2), mirroring
    * `FleetStore#assignDevice`/`#unassignDevice`'s own precedent of a bespoke try/catch when the
    * generic wrapper's toast isn't the one a caller needs.
    */
@@ -317,13 +319,10 @@ export class DevicesPage {
     this.busyAssetId.set(assetId);
     try {
       const result = await this.api.deleteAsset(assetId);
-      this.toasts.ok(
+      this.undoToast.showUndo(
         `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
           `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
-        {
-          label: 'Undo',
-          onClick: () => void this.undoArchiveAsset(assetId, result.displayName, result.devicesDeleted),
-        },
+        () => void this.undoArchiveAsset(assetId, result.displayName, result.devicesDeleted),
       );
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
     } catch (error) {
@@ -427,7 +426,7 @@ export class DevicesPage {
         void this.setDeviceLifecycle(row.device, 'ACTIVE');
         break;
       case 'deactivate':
-        void this.setDeviceLifecycle(row.device, 'DEACTIVATED');
+        void this.deactivateDeviceNow(row.device);
         break;
       case 'archive':
         void this.archiveDeviceNow(row.device);
@@ -457,10 +456,31 @@ export class DevicesPage {
     this.busyDeviceId.set(device.id);
     try {
       await this.api.deleteDevice(device.id);
-      this.toasts.ok(`Archived "${device.name}".`, {
-        label: 'Undo',
-        onClick: () => void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE),
-      });
+      this.undoToast.showUndo(`Archived "${device.name}".`, () =>
+        void this.setDeviceLifecycle(device, RESTORE_TARGET_STATE),
+      );
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
+  /**
+   * Deactivate now offers an Undo toast too (docs/OPS-CORE-PLAN.md §Q2), not just Archive — until
+   * this landed, deactivating went straight through `setDeviceLifecycle`/`FleetStore.setDeviceState`,
+   * whose own plain, action-less confirmation auto-dismissed with no way back short of re-opening
+   * this row's kebab. Bypasses `FleetStore.setDeviceState` for the same reason `archiveDeviceNow`
+   * bypasses `FleetStore.deleteDevice` — its toast has no Undo action to offer. `activate`/the
+   * explicit `restore` kebab entry are unchanged (re-activating isn't the kind of silent-immediacy
+   * step this item is about).
+   */
+  protected async deactivateDeviceNow(device: Device): Promise<void> {
+    this.busyDeviceId.set(device.id);
+    try {
+      await this.api.setDeviceState(device.id, 'DEACTIVATED');
+      this.undoToast.showUndo(`Deactivated "${device.name}".`, () => void this.setDeviceLifecycle(device, 'ACTIVE'));
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshWarehouse()]);
     } catch (error) {
       this.toasts.error(describeHttpError(error));

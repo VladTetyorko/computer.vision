@@ -96,3 +96,18 @@
   line-height: 1;
   filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
 }
+
+/* ---- Geofence zones (docs/OPS-CORE-PLAN.md §G-c), read-only — mirrors fleet-map.css's own rule -- */
+
+:host ::ng-deep .zone-label {
+  background: rgb(0 0 0 / 65%);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.68rem;
+  padding: 0.1rem 0.35rem;
+  box-shadow: none;
+}
+
+:host ::ng-deep .zone-label::before {
+  display: none;
+}

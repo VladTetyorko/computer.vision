@@ -5,6 +5,8 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
 
 import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -97,6 +99,31 @@ public interface StreamPublisherPort {
      * @return the WHEP URL, or {@link Optional#empty()} if this publisher has no WebRTC viewing endpoint
      */
     default Optional<URI> whepUrl(StreamId id) {
+        return Optional.empty();
+    }
+
+    /**
+     * Where a recorded clip covering {@code [start, start + duration)} of this stream can be
+     * played back or downloaded, if this publisher has durable recording configured
+     * (docs/OPS-CORE-PLAN.md §R — recording is delegated to the media server, not this
+     * application).
+     *
+     * <p>Unlike {@link #viewUrl}, and for the exact same reason {@link #whepUrl} is never proxied:
+     * an implementation that has one returns the recording server's own origin URL directly, not an
+     * app-relative path — a byte-range-seekable clip fetch is not something a simple app-level
+     * reverse proxy adds any value forwarding. Callers must be prepared for {@link
+     * Optional#empty()} — the default, returned by any implementation that has not configured
+     * recording/playback (e.g. a no-op/dev-support publisher, or one whose media server has
+     * recording disabled) — and treat it as "no recording available" rather than an error.
+     *
+     * @param streamId the stream to look up
+     * @param start    start of the requested window
+     * @param duration length of the requested window; how a value that extends past what was
+     *                 actually recorded is handled is left to the implementation/media server
+     * @return the playback/clip-export URL, or {@link Optional#empty()} if this publisher has no
+     *         recording/playback endpoint
+     */
+    default Optional<URI> playbackUrl(StreamId streamId, Instant start, Duration duration) {
         return Optional.empty();
     }
 }

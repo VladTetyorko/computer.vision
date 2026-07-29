@@ -1,4 +1,4 @@
-import type { ActiveStream, DetectionEvent, Device } from '../api/models';
+import type { ActiveStream, AssetUsage, DetectionEvent, Device } from '../api/models';
 import { formatDuration } from '../stream-info-logic';
 
 /**
@@ -159,6 +159,48 @@ export function resolveEventTarget(
   }
   const stream = streams.find((candidate) => candidate.streamId === event.streamId);
   return stream ? { kind: 'live', id: stream.deviceId } : undefined;
+}
+
+// --- Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) --------------------------------------
+
+/**
+ * The usage from `usages` whose own window covers `atIso` — an open usage's window runs to `now`
+ * (mirrors `features/replay/replay.ts`'s own "open one = watch live instead" framing: a usage with
+ * no `endedAt` yet is still "covering" the present moment). `undefined` when nothing covers it
+ * (a gap between usages, or an event that predates every retained usage).
+ */
+export function findCoveringUsage(usages: readonly AssetUsage[], atIso: string): AssetUsage | undefined {
+  const atMs = Date.parse(atIso);
+  return usages.find((usage) => {
+    const startMs = Date.parse(usage.startedAt);
+    const endMs = usage.endedAt !== undefined ? Date.parse(usage.endedAt) : Date.now();
+    return atMs >= startMs && atMs <= endMs;
+  });
+}
+
+export interface ReplayDeepLink {
+  readonly usageId: string;
+  /** Milliseconds from the covering usage's own `startedAt` to the event's `firstSeen` — never negative. */
+  readonly offsetMs: number;
+}
+
+/**
+ * Resolves the `/replay?asset=…&usage=…&t=…` deep link for `event` (docs/OPS-CORE-PLAN.md §Q1),
+ * given the owning asset's already-fetched `recentUsages` (a lazy, click-time-only lookup — see
+ * `shared/ui/notification-bell.ts`'s own doc comment for why this is never done per-row on render).
+ * `undefined` when no usage covers the event's own `firstSeen`, **or** when the covering usage is
+ * still open — an open usage's replay page redirects to "Watch live" instead of rendering
+ * (`features/replay/replay.ts`'s own R-b rule), so linking there would just be an extra hop; the
+ * caller's existing `resolveEventTarget` fallback (which already offers "Watch live" for a live
+ * stream) is the more direct answer in that case.
+ */
+export function resolveReplayDeepLink(event: DetectionEvent, recentUsages: readonly AssetUsage[]): ReplayDeepLink | undefined {
+  const usage = findCoveringUsage(recentUsages, event.firstSeen);
+  if (!usage || usage.endedAt === undefined) {
+    return undefined;
+  }
+  const offsetMs = Math.max(0, Date.parse(event.firstSeen) - Date.parse(usage.startedAt));
+  return { usageId: usage.usageId, offsetMs };
 }
 
 // --- Map markers ----------------------------------------------------------------------------

@@ -19,13 +19,20 @@ export type WizardStep = 'profile' | 'connect' | 'test' | 'create';
 export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'create'];
 
 /**
- * The Connect step's three entry points (docs/UX-REWORK-PLAN.md §U-d — "the existing 3-choice
- * connect component (port / resource / simulate) stays"). `discover` is never the method a probe or
- * a create request is built against — picking "Use" on a scan candidate switches the method to
+ * The Connect step's entry points (docs/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
+ * component (port / resource / simulate) stays"). `discover` is never the method a probe or a
+ * create request is built against — picking "Use" on a scan candidate switches the method to
  * `register` with the candidate's fields prefilled, exactly like the pre-wizard Devices page did
  * (`useCandidate`, moved here verbatim in behavior).
+ *
+ * `listen` (docs/DRONE-INFRA-PLAN.md I-b — "Listen for drones") is a fourth tile, alongside the
+ * original three, for a MAVLink-heartbeat-only scan (`drone-scan-logic.ts`): it behaves exactly
+ * like `discover` in every gate below — never itself advanceable — since picking an unclaimed
+ * vehicle flips the method to `register` with the connect form prefilled
+ * (`OnboardingStore#useDroneVehicle`), the same "candidate → register" pivot `discover` already
+ * uses.
  */
-export type ConnectMethod = 'register' | 'discover' | 'simulate';
+export type ConnectMethod = 'register' | 'discover' | 'simulate' | 'listen';
 
 /**
  * The next step for the wizard's own forward-only "Next"/submit action. `simulate` skips `test`
@@ -83,9 +90,9 @@ export interface ConnectDraft {
 
 /**
  * Connect step: `register` needs a protocol and a URI (mirrors the pre-wizard Register form's own
- * `canSubmit`); `discover` alone (no candidate chosen yet — see {@link ConnectMethod}'s doc comment)
- * never satisfies this, since it carries no protocol/URI of its own until "Use" flips the method to
- * `register`; `simulate` needs a video path only for the two file-based modes.
+ * `canSubmit`); `discover`/`listen` alone (no candidate chosen yet — see {@link ConnectMethod}'s doc
+ * comment) never satisfy this, since neither carries a protocol/URI of its own until "Use" flips the
+ * method to `register`; `simulate` needs a video path only for the two file-based modes.
  */
 export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
   switch (draft.method) {
@@ -94,6 +101,7 @@ export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
     case 'simulate':
       return !simulateNeedsVideoPath(draft.simMode) || draft.simVideoPath.trim().length > 0;
     case 'discover':
+    case 'listen':
     case null:
       return false;
   }

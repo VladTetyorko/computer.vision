@@ -6,6 +6,7 @@ import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
+import com.drones.vision.adapter.persistence.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.PersistenceUnit;
 import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
@@ -14,6 +15,7 @@ import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
+import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
@@ -21,6 +23,7 @@ import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
+import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -44,7 +47,7 @@ import org.springframework.context.annotation.Configuration;
  * {@link EntityManagerFactory} opens a real database connection and runs Flyway, so it must not
  * even be attempted when persistence is disabled — {@link org.springframework.boot.autoconfigure.condition.ConditionalOnProperty}
  * keeps the bean method itself from ever running in that case (same idiom {@code
- * DiscoveryWiringConfiguration} uses for its scanner beans). The six port beans below then
+ * DiscoveryWiringConfiguration} uses for its scanner beans). The eight port beans below then
  * consume it through {@link ObjectProvider}, which tolerates the bean being entirely absent when
  * disabled — {@link ObjectProvider#getObject()} is only ever called on the branch where {@link
  * VisionPersistenceProperties#enabled()} guarantees it exists.
@@ -129,5 +132,15 @@ public class PersistenceWiringConfiguration {
             return new JpaAssetImageRepository(entityManagerFactory.getObject());
         }
         return new InMemoryAssetImageRepository();
+    }
+
+    /** docs/OPS-CORE-PLAN.md §G — geofence zones, same toggle idiom as the seven above. */
+    @Bean
+    public GeofenceRepositoryPort geofenceRepositoryPort(VisionPersistenceProperties properties,
+                                                           ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaGeofenceRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryGeofenceRepository();
     }
 }

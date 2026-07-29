@@ -6,6 +6,7 @@ import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
+import com.drones.vision.adapter.persistence.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
@@ -13,6 +14,7 @@ import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
+import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -114,6 +116,16 @@ class PersistenceWiringConfigurationTest {
     }
 
     @Test
+    void enabledSelectsJpaGeofenceRepository() {
+        when(entityManagerFactoryProvider.getObject()).thenReturn(mock(EntityManagerFactory.class));
+        VisionPersistenceProperties enabled = new VisionPersistenceProperties(true,
+                VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
+
+        assertInstanceOf(JpaGeofenceRepository.class,
+                configuration.geofenceRepositoryPort(enabled, entityManagerFactoryProvider));
+    }
+
+    @Test
     void disabledSelectsInMemoryRepositoriesWithoutTouchingTheProvider() {
         VisionPersistenceProperties disabled = new VisionPersistenceProperties(false,
                 VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
@@ -132,5 +144,7 @@ class PersistenceWiringConfigurationTest {
                 configuration.detectionRepositoryPort(disabled, entityManagerFactoryProvider));
         assertInstanceOf(InMemoryAssetImageRepository.class,
                 configuration.assetImageRepositoryPort(disabled, entityManagerFactoryProvider));
+        assertInstanceOf(InMemoryGeofenceRepository.class,
+                configuration.geofenceRepositoryPort(disabled, entityManagerFactoryProvider));
     }
 }

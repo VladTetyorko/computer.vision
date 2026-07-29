@@ -157,6 +157,39 @@ export function bucketDetections(
   return [...buckets.values()].sort((a, b) => a.atMs - b.atMs);
 }
 
+/** `capDetectionBuckets`'s own default — docs/OPS-CORE-PLAN.md §Q3a's pinned cap. */
+export const DETECTION_STRIP_CAP = 200;
+
+/** `capDetectionBuckets`'s result: the (possibly-trimmed) buckets to render, plus the pre-cap total. */
+export interface CappedDetectionBuckets {
+  readonly buckets: readonly DetectionDensityBucket[];
+  readonly totalCount: number;
+}
+
+/**
+ * Caps the scrub bar's density strip at the latest `cap` buckets (docs/OPS-CORE-PLAN.md §Q3a) — a
+ * pure slice, no virtualization library. `bucketDetections` already keeps the strip cheap by
+ * summarizing into a fixed `bucketCount` of slots (well under this cap under today's own
+ * `DEFAULT_DETECTION_BUCKETS`), so this rarely trims anything in practice; it exists as the strip's
+ * own last-resort backstop should a caller ever ask for finer bucketing on an unusually long
+ * flight, rather than trusting bucket-count tuning alone to keep the DOM cheap forever.
+ *
+ * `buckets` is assumed ascending by `atMs` (`bucketDetections`'s own contract) — keeping the tail
+ * (`slice(totalCount - cap)`) is what makes "latest" literal and keeps the kept slice itself still
+ * ascending, no re-sort needed. `totalCount` is the pre-cap length, so a caller can render "showing
+ * latest N of totalCount" only when `totalCount > buckets.length` (i.e. something was actually cut).
+ */
+export function capDetectionBuckets(
+  buckets: readonly DetectionDensityBucket[],
+  cap: number = DETECTION_STRIP_CAP,
+): CappedDetectionBuckets {
+  const totalCount = buckets.length;
+  return {
+    buckets: totalCount > cap ? buckets.slice(totalCount - cap) : buckets,
+    totalCount,
+  };
+}
+
 // --- Playback clock (docs/MVP2-PLAN.md §R, R-b: play/pause + 1x/4x/16x speed) -------------------
 
 /** The three speeds the cockpit's transport control offers. */
@@ -198,4 +231,116 @@ export function advancePlaybackClock(
   const advanced = atMs + Math.max(0, deltaRealMs) * speed;
   const clamped = clampToRange(advanced, fromMs, toMs);
   return { atMs: clamped, playing: clamped < toMs };
+}
+
+// --- Recording video pane (docs/OPS-CORE-PLAN.md §R, R-c) ----------------------------------------
+// `GET /api/usages/{usageId}/recording` resolves a clip whose `start` is exactly the usage's own
+// `startedAt` (`ReplayService#recordingFor`'s own contract — "start is the usage's own startedAt")
+// — "clip t=0 aligns with usage start". Every function below anchors off that `recordingStartMs`
+// directly, not `fromMs` (`UsageTimeline.from`, which defaults to the same instant but is a
+// logically separate field), since the two coinciding is the recording endpoint's own promise, not
+// this page's replay-window one.
+
+/** `atMs` (the timeline's scrub position) → the video's own `currentTime`, in seconds, never negative. */
+export function videoOffsetSeconds(atMs: number, recordingStartMs: number): number {
+  return Math.max(0, (atMs - recordingStartMs) / 1000);
+}
+
+/** The video's own `currentTime` (seconds) → an absolute scrub `atMs`, clamped into the replay window. */
+export function videoTimeToAtMs(currentSeconds: number, recordingStartMs: number, fromMs: number, toMs: number): number {
+  return clampToRange(recordingStartMs + currentSeconds * 1000, fromMs, toMs);
+}
+
+/** Below this many seconds of drift, a programmatic reseek is skipped — see `ReplayPage`'s own guarded-effect doc comment for why. */
+export const VIDEO_SEEK_THRESHOLD_SECONDS = 0.25;
+
+/**
+ * Whether the atMs→video sync effect should actually call `video.currentTime = targetSeconds` —
+ * `false` once the video's own position is already within `thresholdSeconds` of the target, which
+ * is what keeps ordinary 1× playback (where the video's own `timeupdate` and the timeline's own
+ * scrub position drift apart by only a few tens of milliseconds per tick) from reseeking on every
+ * single frame; a genuine scrub/jump (density-strip click, drag, or ≥4× playback) always exceeds
+ * the threshold and reseeks immediately.
+ */
+export function shouldSeekVideo(
+  currentSeconds: number,
+  targetSeconds: number,
+  thresholdSeconds: number = VIDEO_SEEK_THRESHOLD_SECONDS,
+): boolean {
+  return Math.abs(currentSeconds - targetSeconds) > thresholdSeconds;
+}
+
+// --- Clip export (docs/OPS-CORE-PLAN.md §R, R-c: "Download clip") --------------------------------
+
+export interface ClipWindow {
+  /** Offset from the recording's own `start`, milliseconds — never negative. */
+  readonly startOffsetMs: number;
+  /** The clip's own length, milliseconds — always positive. */
+  readonly durationMs: number;
+}
+
+/** The "whole flight" clip window — every second of the replay's own `[fromMs, toMs)` range, anchored off the recording's own start. */
+export function wholeFlightClipWindow(recordingStartMs: number, fromMs: number, toMs: number): ClipWindow {
+  return {
+    startOffsetMs: Math.max(0, fromMs - recordingStartMs),
+    durationMs: Math.max(1000, toMs - fromMs),
+  };
+}
+
+/**
+ * The current selection's clip window when both marks are set and well-ordered, else the whole
+ * flight (docs/OPS-CORE-PLAN.md §R, R-c: "current selected window (or whole flight if no selection)").
+ */
+export function selectedClipWindow(
+  recordingStartMs: number,
+  selectionStartMs: number | undefined,
+  selectionEndMs: number | undefined,
+  fromMs: number,
+  toMs: number,
+): ClipWindow {
+  if (selectionStartMs !== undefined && selectionEndMs !== undefined && selectionEndMs > selectionStartMs) {
+    return { startOffsetMs: Math.max(0, selectionStartMs - recordingStartMs), durationMs: selectionEndMs - selectionStartMs };
+  }
+  return wholeFlightClipWindow(recordingStartMs, fromMs, toMs);
+}
+
+/**
+ * Builds the "Download clip" `<a download>` href: given the recording's own base `/get` URL (whose
+ * `start`/`duration` query params already describe the *whole* recorded window) and a `window`
+ * (offsets relative to that same `start`), returns a new URL with `start`/`duration` replaced to
+ * describe just that sub-window — the `path` query param (and every other part of the URL) is left
+ * untouched, so this works regardless of whether `recordingUrl` points at this app's own origin or
+ * mediamtx's own playback server directly. `undefined` when `recordingUrl` doesn't parse as a URL
+ * or carries no `start` param to anchor against (never a broken href).
+ */
+export function buildClipDownloadUrl(recordingUrl: string, window: ClipWindow): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(recordingUrl);
+  } catch {
+    return undefined;
+  }
+  const baseStart = parsed.searchParams.get('start');
+  if (baseStart === null) {
+    return undefined;
+  }
+  const baseStartMs = Date.parse(baseStart);
+  if (Number.isNaN(baseStartMs)) {
+    return undefined;
+  }
+  const durationSeconds = Math.max(1, Math.round(window.durationMs / 1000));
+  parsed.searchParams.set('start', new Date(baseStartMs + window.startOffsetMs).toISOString());
+  parsed.searchParams.set('duration', String(durationSeconds));
+  return parsed.toString();
+}
+
+// --- Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) ----------------------------------------
+
+/** Parses the `?t=` deep-link query param (a plain offset-ms string) — `undefined` for anything absent/non-numeric, never `NaN`. */
+export function parseDeepLinkOffsetMs(raw: string | undefined): number | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

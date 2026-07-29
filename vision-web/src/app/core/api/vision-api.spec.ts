@@ -321,4 +321,62 @@ describe('VisionApi', () => {
     http.expectOne({ method: 'DELETE', url: '/api/assets/a-1/image' }).flush(null);
     await promise;
   });
+
+  // --- Geofencing (docs/OPS-CORE-PLAN.md §G's frozen wire contract) --------------------------
+
+  it('lists geofence zones', async () => {
+    const promise = api.listGeofences();
+    http.expectOne({ method: 'GET', url: '/api/geofences' }).flush([]);
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it('creates a geofence zone', async () => {
+    const request = {
+      name: 'North perimeter',
+      kind: 'KEEP_OUT' as const,
+      polygon: [
+        { latitude: 1, longitude: 1 },
+        { latitude: 2, longitude: 2 },
+        { latitude: 3, longitude: 1 },
+      ],
+      enabled: true,
+    };
+    const promise = api.createGeofence(request);
+    const captured = http.expectOne({ method: 'POST', url: '/api/geofences' });
+    expect(captured.request.body).toEqual(request);
+    captured.flush({ id: 'z-1', ...request });
+    await expect(promise).resolves.toMatchObject({ id: 'z-1' });
+  });
+
+  it('replaces a geofence zone wholesale on update', async () => {
+    const request = {
+      name: 'Renamed',
+      kind: 'KEEP_IN' as const,
+      polygon: [
+        { latitude: 1, longitude: 1 },
+        { latitude: 2, longitude: 2 },
+        { latitude: 3, longitude: 1 },
+      ],
+      enabled: false,
+    };
+    const promise = api.updateGeofence('z-1', request);
+    const captured = http.expectOne({ method: 'PUT', url: '/api/geofences/z-1' });
+    expect(captured.request.body).toEqual(request);
+    captured.flush({ id: 'z-1', ...request });
+    await expect(promise).resolves.toMatchObject({ enabled: false });
+  });
+
+  it('deletes a geofence zone', async () => {
+    const promise = api.deleteGeofence('z-1');
+    http.expectOne({ method: 'DELETE', url: '/api/geofences/z-1' }).flush(null);
+    await promise;
+  });
+
+  // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) -------------
+
+  it('fetches a usage recording', async () => {
+    const promise = api.usageRecording('u-1');
+    http.expectOne({ method: 'GET', url: '/api/usages/u-1/recording' }).flush({ available: false });
+    await expect(promise).resolves.toEqual({ available: false });
+  });
 });

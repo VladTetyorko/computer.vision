@@ -6,14 +6,29 @@ import {
   afterNextRender,
   effect,
   inject,
+  input,
   signal,
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
 import { TelemetryStore } from '../../../core/telemetry/telemetry-store';
-import type { GeoPosition, TelemetrySample } from '../../../core/api/models';
+import type { GeoPosition, GeofenceZone, TelemetrySample } from '../../../core/api/models';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
 import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
+import { zoneKindLabel, zoneLayerStyle } from '../../../core/geofence/geofence-logic';
+
+const ESCAPE_MAP: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+/** Tooltip content is raw HTML handed to Leaflet, not an Angular template — escape the zone's own name. */
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ESCAPE_MAP[char]);
+}
 
 const DEFAULT_ZOOM = 17;
 
@@ -63,6 +78,16 @@ export class LiveMap {
   /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
   protected readonly layers = MAP_LAYERS;
 
+  /**
+   * Geofence zones, read-only (docs/OPS-CORE-PLAN.md §G-c: "Fly map shows zones read-only, same
+   * styles"). `FlyPage` passes `GeofenceStore.zones()`; empty by default, so `AssetDetailPage`
+   * (this component's other host — see class doc) sees no change at all. Same rendering as
+   * `shared/map/fleet-map/fleet-map.ts`'s own zones layer — a styled polygon per zone plus a
+   * permanent center label — this map has no click-to-manage affordance either way (that lives in
+   * Command's own Zones panel).
+   */
+  readonly zones = input<readonly GeofenceZone[]>([]);
+
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
   protected readonly autoFollow = signal(true);
@@ -75,6 +100,7 @@ export class LiveMap {
   private marker: Leaflet.Marker | null = null;
   private startFlag: Leaflet.Marker | null = null;
   private trailLine: Leaflet.Polyline | null = null;
+  private readonly zoneLayerHandles = new Map<string, Leaflet.Polygon>();
   private hasCentered = false;
   private generation = 0;
 
@@ -92,6 +118,9 @@ export class LiveMap {
     // item 6) — a no-op until `initMap()` has created `this.map` (it applies the initial layer
     // itself once the Leaflet chunk lands, same pattern as the telemetry effect above).
     effect(() => this.applyLayer(this.settings.mapLayer()));
+
+    // Geofence zones (docs/OPS-CORE-PLAN.md §G-c) — see the `zones` input's own doc comment.
+    effect(() => this.applyZones(this.zones()));
 
     // Leaflet sizes itself from the DOM at creation time; expanding/collapsing the inset
     // resizes that DOM out from under it, so it must be told to remeasure. `invalidateSize()`
@@ -149,6 +178,44 @@ export class LiveMap {
 
     // The signals may already carry data by the time the chunk finishes loading.
     this.applyTelemetry(this.store.trail(), this.store.latest(), this.autoFollow());
+    this.applyZones(this.zones());
+  }
+
+  // --- Geofence zones (docs/OPS-CORE-PLAN.md §G-c), read-only — see the `zones` input's own doc comment --
+
+  private applyZones(zones: readonly GeofenceZone[]): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return; // map chunk/instance not ready yet — `initMap()` re-applies once it is
+    }
+    const seen = new Set<string>();
+    for (const zone of zones) {
+      seen.add(zone.id);
+      this.upsertZoneLayer(L, map, zone);
+    }
+    for (const id of [...this.zoneLayerHandles.keys()]) {
+      if (!seen.has(id)) {
+        this.zoneLayerHandles.get(id)?.remove();
+        this.zoneLayerHandles.delete(id);
+      }
+    }
+  }
+
+  private upsertZoneLayer(L: typeof Leaflet, map: Leaflet.Map, zone: GeofenceZone): void {
+    const style = zoneLayerStyle(zone.kind, zone.enabled);
+    const points = zone.polygon.map((vertex) => L.latLng(vertex.latitude, vertex.longitude));
+    const label = `${zoneKindLabel(zone.kind)}: ${zone.name}${zone.enabled ? '' : ' (disabled)'}`;
+    let polygon = this.zoneLayerHandles.get(zone.id);
+    if (!polygon) {
+      polygon = L.polygon(points, { ...style, interactive: false }).addTo(map);
+      polygon.bindTooltip(escapeHtml(label), { permanent: true, direction: 'center', className: 'zone-label' });
+      this.zoneLayerHandles.set(zone.id, polygon);
+    } else {
+      polygon.setLatLngs(points);
+      polygon.setStyle(style);
+      polygon.setTooltipContent(escapeHtml(label));
+    }
   }
 
   private applyTelemetry(
@@ -227,6 +294,10 @@ export class LiveMap {
 
   private teardown(): void {
     this.generation++;
+    for (const polygon of this.zoneLayerHandles.values()) {
+      polygon.remove();
+    }
+    this.zoneLayerHandles.clear();
     this.map?.remove();
     this.map = null;
     this.tileLayer = null;

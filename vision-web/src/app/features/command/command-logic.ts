@@ -1,6 +1,8 @@
 import type { AssetAttention } from '../../core/api/models';
 import { formatDuration } from '../../core/stream-info-logic';
 import { TELEMETRY_AGE_RED_SECONDS } from '../../core/telemetry/telemetry-logic';
+import { gpsSeverity } from '../../core/telemetry/flight-state-logic';
+import { geofenceBreachReasonText, type GeofenceBreach } from '../../core/geofence/geofence-logic';
 
 /**
  * Pure, Angular-free logic behind `CommandPage` (docs/UX-REWORK-PLAN.md §U-c — the map-first
@@ -35,7 +37,14 @@ export const BATTERY_CRITICAL_PERCENT = 10;
  */
 export const TELEMETRY_STALE_MS = TELEMETRY_AGE_RED_SECONDS * 1000;
 
-export type AttentionReasonKind = 'battery-critical' | 'telemetry-stale' | 'battery-low' | 'open-events';
+export type AttentionReasonKind =
+  | 'geofence-breach'
+  | 'failsafe'
+  | 'battery-critical'
+  | 'telemetry-stale'
+  | 'battery-low'
+  | 'gps-degraded'
+  | 'open-events';
 export type AttentionSeverity = 'critical' | 'warning';
 
 export interface AttentionReason {
@@ -47,18 +56,33 @@ export interface AttentionReason {
 
 /**
  * How urgently each reason kind reads, highest first — an asset's overall rank is the max of its
- * own triggered reasons' ranks (see `buildEntityRows`), so an asset with *any* rank-4/3 reason
- * always outranks one with only rank-2/1 reasons, regardless of how many of the latter it has.
+ * own triggered reasons' ranks (see `buildEntityRows`), so an asset with *any* higher-rank reason
+ * always outranks one with only lower-rank reasons, regardless of how many of the latter it has.
  *
- * Battery-critical and telemetry-stale share the top two ranks deliberately, both above battery-low
- * and open-events: a dead battery mid-flight and a lost telemetry link mid-flight are the same kind
- * of "this drone may not come back" risk. Battery-low is a step down — worth watching, not yet
- * urgent. Open detection events rank lowest — informational, not a safety condition.
+ * `geofence-breach` (docs/OPS-CORE-PLAN.md §G-c) is the new **very top** rank, above even
+ * `failsafe` — an aircraft that has physically crossed a keep-out/keep-in boundary is an active,
+ * external, safety-and-legal-exposure event happening *right now* to something a manager doesn't
+ * control the way a failsafe (an onboard, self-correcting response) already is; it outranks every
+ * other signal precisely because a breach can co-occur with any of them and still needs to be the
+ * first thing a manager's eye lands on.
+ *
+ * `failsafe` (docs/FC-INTEGRATIONS-PLAN.md F-d) is the next rank, above battery-critical — a
+ * flight controller reporting an active failsafe is otherwise the single most urgent "this drone
+ * needs attention right now" signal this app has, worse than a low/critical battery reading alone
+ * (a failsafe can itself be *caused* by one, but the failsafe state is the more actionable fact).
+ * Battery-critical and telemetry-stale share the next two ranks deliberately, both above
+ * battery-low: a dead battery mid-flight and a lost telemetry link mid-flight are the same kind of
+ * "this drone may not come back" risk. `gps-degraded` (new) ranks below battery-low but above
+ * open-events — a degraded fix matters, but a battery running low is the more universally urgent of
+ * the two. Open detection events rank lowest — informational, not a safety condition.
  */
 const REASON_RANK: Readonly<Record<AttentionReasonKind, number>> = {
-  'battery-critical': 4,
-  'telemetry-stale': 3,
-  'battery-low': 2,
+  'geofence-breach': 7,
+  failsafe: 6,
+  'battery-critical': 5,
+  'telemetry-stale': 4,
+  'battery-low': 3,
+  'gps-degraded': 2,
   'open-events': 1,
 };
 
@@ -120,13 +144,78 @@ function openEventsReason(openEventCount: number): AttentionReason | undefined {
 }
 
 /**
+ * `asset.failsafe` (docs/FC-INTEGRATIONS-PLAN.md F-d, `AssetAttention`'s own new field) —
+ * `undefined`/`false` never trigger a reason, only an explicit `true` (never fabricated from
+ * absent flight-controller data). States what the aircraft is doing, not an instruction — same
+ * poka-yoke rule `core/telemetry/flight-state-logic.ts#flightBanner` follows for the cockpit's own
+ * banner text.
+ */
+function failsafeReason(asset: AssetAttention): AttentionReason | undefined {
+  if (asset.failsafe !== true) {
+    return undefined;
+  }
+  return { kind: 'failsafe', severity: 'critical', text: 'Failsafe active — returning to home.' };
+}
+
+/**
+ * `gpsFixType` is deliberately a *parameter*, not read off `AssetAttention` — the fleet-summary DTO
+ * doesn't surface GPS quality (only `flightMode`/`armed`/`failsafe` do, see that interface's own doc
+ * comment), so a caller with access to this asset's live marker (`core/map/map-logic.ts#FleetMarker`)
+ * passes its `gpsFixType` in; a caller with no marker for this asset (not currently plotted/live)
+ * simply omits it, and this reason never fires — "unknown" silently means "not evaluated", not "ok".
+ * Reuses `flight-state-logic.ts#gpsSeverity` rather than re-deriving the same fix-quality tiers.
+ */
+function gpsDegradedReason(gpsFixType: number | undefined): AttentionReason | undefined {
+  if (gpsFixType === undefined) {
+    return undefined;
+  }
+  const severity = gpsSeverity(gpsFixType);
+  if (severity === 'ok') {
+    return undefined;
+  }
+  return {
+    kind: 'gps-degraded',
+    severity: severity === 'critical' ? 'critical' : 'warning',
+    text: `GPS fix degraded (fix type ${gpsFixType}).`,
+  };
+}
+
+/**
+ * `geofenceBreaches` (docs/OPS-CORE-PLAN.md §G-c, optional) is, like `gpsFixType`, not carried by
+ * `AssetAttention` at all — it's derived from the generic `LiveEvent` feed
+ * (`core/geofence/geofence-logic.ts#activeGeofenceBreaches`, sourced from `LiveStore.liveEvents()`),
+ * not the fleet-summary DTO. An empty/absent array never fires this reason — "no breach known", not
+ * "definitely not breaching" (the honest-unknown rule every other optional reason input here follows).
+ */
+function geofenceBreachReason(breaches: readonly GeofenceBreach[] | undefined): AttentionReason | undefined {
+  if (!breaches || breaches.length === 0) {
+    return undefined;
+  }
+  return { kind: 'geofence-breach', severity: 'critical', text: geofenceBreachReasonText(breaches) };
+}
+
+/**
  * Every reason `asset` triggers, most severe first. An asset with none of these returns an empty
  * array — "all quiet" for that asset (still shown in the rail, just at the bottom, unflagged).
+ *
+ * `gpsFixType` (docs/FC-INTEGRATIONS-PLAN.md F-d, optional) and `geofenceBreaches`
+ * (docs/OPS-CORE-PLAN.md §G-c, optional) are the two reason inputs not carried by `AssetAttention`
+ * itself — see `gpsDegradedReason`'s/`geofenceBreachReason`'s own doc comments for where a caller
+ * sources each.
  */
-export function attentionReasons(asset: AssetAttention): readonly AttentionReason[] {
-  const reasons = [batteryReason(asset.batteryPercent), telemetryReason(asset), openEventsReason(asset.openEventCount)].filter(
-    (reason): reason is AttentionReason => reason !== undefined,
-  );
+export function attentionReasons(
+  asset: AssetAttention,
+  gpsFixType?: number,
+  geofenceBreaches?: readonly GeofenceBreach[],
+): readonly AttentionReason[] {
+  const reasons = [
+    geofenceBreachReason(geofenceBreaches),
+    failsafeReason(asset),
+    batteryReason(asset.batteryPercent),
+    telemetryReason(asset),
+    gpsDegradedReason(gpsFixType),
+    openEventsReason(asset.openEventCount),
+  ].filter((reason): reason is AttentionReason => reason !== undefined);
   return [...reasons].sort((a, b) => REASON_RANK[b.kind] - REASON_RANK[a.kind]);
 }
 
@@ -159,10 +248,27 @@ function rowRank(row: EntityRow): number {
  * 3. Alphabetical by display name (case-insensitive) as the final, deterministic tie-break —
  *    this is also what orders the quiet assets among themselves, once every flagged one sorts
  *    ahead of them.
+ *
+ * `gpsFixTypeByAssetId` (docs/FC-INTEGRATIONS-PLAN.md F-d, optional) feeds each asset's own
+ * `gps-degraded` reason (see `gpsDegradedReason`'s own doc comment) — `CommandPage` builds this from
+ * `FleetMapStore.markers()`; an asset with no entry (not currently plotted/live) simply never
+ * triggers that one reason, exactly like every other "unknown, not fabricated" gap in this app.
+ *
+ * `geofenceBreachesByAssetId` (docs/OPS-CORE-PLAN.md §G-c, optional) is the identical shape for the
+ * new top-rank `geofence-breach` reason — `CommandPage` builds this from
+ * `core/geofence/geofence-logic.ts#groupBreachesByAsset(activeGeofenceBreaches(liveStore.liveEvents()))`.
  */
-export function buildEntityRows(assets: readonly AssetAttention[]): readonly EntityRow[] {
+export function buildEntityRows(
+  assets: readonly AssetAttention[],
+  gpsFixTypeByAssetId?: ReadonlyMap<string, number>,
+  geofenceBreachesByAssetId?: ReadonlyMap<string, readonly GeofenceBreach[]>,
+): readonly EntityRow[] {
   const rows: EntityRow[] = assets.map((asset) => {
-    const reasons = attentionReasons(asset);
+    const reasons = attentionReasons(
+      asset,
+      gpsFixTypeByAssetId?.get(asset.assetId),
+      geofenceBreachesByAssetId?.get(asset.assetId),
+    );
     return { asset, reasons, severity: reasons[0]?.severity ?? 'ok' };
   });
   return [...rows].sort((a, b) => {

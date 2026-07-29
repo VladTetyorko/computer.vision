@@ -77,6 +77,12 @@ class UsageTrackerTest {
                 liveUpdatePublisherPort);
     }
 
+    /** docs/OPS-CORE-PLAN.md §G: same as {@link #tracker}, plus a {@link GeofenceMonitor} collaborator. */
+    private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
+        return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
+                null, geofenceMonitor);
+    }
+
     /**
      * docs/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
      * backoff instead of production's real 1s-30s one, via the package-private test-seam
@@ -84,7 +90,7 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
+                null, null, TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20));
     }
 
     @Test
@@ -221,6 +227,40 @@ class UsageTrackerTest {
         source.emit(telemetryDevice.id(), sample);
 
         verify(liveUpdatePublisherPort).publishTelemetryAppended(asset.id(), sample);
+    }
+
+    @Test
+    void appliedSampleInvokesTheConfiguredGeofenceMonitor() {
+        // docs/OPS-CORE-PLAN.md §G: applySample is the single write path for a telemetry sample --
+        // the geofence evaluation rides along with the persist/live-update steps, attributed to the
+        // owning asset.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        GeofenceMonitor geofenceMonitor = mock(GeofenceMonitor.class);
+        UsageTracker tracker = tracker(List.of(source), geofenceMonitor);
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        verify(geofenceMonitor).evaluate(asset.id(), sample);
+    }
+
+    @Test
+    void appliedSampleNeverThrowsWhenNoGeofenceMonitorIsConfigured() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source)); // no GeofenceMonitor configured
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        source.emit(telemetryDevice.id(), telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0));
+        // No exception must be thrown -- the nullable-collaborator contract holds even under a real emit.
     }
 
     @Test

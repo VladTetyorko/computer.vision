@@ -1,4 +1,4 @@
-import type { DetectionResult } from '../../core/api/models';
+import type { Detection, DetectionResult } from '../../core/api/models';
 
 /**
  * Pure logic behind the client-side vector detection overlay (docs/CYCLES-PLAN.md §11, CD-b item
@@ -86,4 +86,79 @@ function averageBatchIntervalMs(results: readonly DetectionResult[]): number {
  */
 export function shouldDrawOverlay(mode: BoxesMode, hasResult: boolean): boolean {
   return mode === 'overlay' && hasResult;
+}
+
+// --- Composite-model box hues (docs/OPS-CORE-PLAN.md §Q3b) --------------------------------------
+
+/**
+ * The key `modelHue` colors a box by — cv-service's composite mode (docs/CV-MODELS-PLAN.md item
+ * 4, `registry.py#detect_composite`) prefixes every `label` `"{short_name}:{label}"` (e.g.
+ * `"orion12l:tank"`) only when more than one member model actually ran, so this is the *one*
+ * signal that distinguishes which member produced a given box.
+ *
+ * Deliberately **not** `Detection.modelId`: in composite mode every detection in the same batch
+ * carries the identical `modelId` (the request's own comma-joined composite id, e.g.
+ * `"yolo11n.pt,orion12l.pt"`) — proto's `Detection` message has no per-detection model-tag field,
+ * so `modelId` can't distinguish members within one batch even though it exists on the wire. A
+ * plain single-model stream never prefixes its labels at all (`tag_labels` is only true for >1
+ * resolved member — see that function's own doc comment), so `DEFAULT_MODEL_KEY` is what every
+ * detection from *any* single model — not just cv-service's own default — resolves to.
+ */
+export const DEFAULT_MODEL_KEY = 'default';
+
+export function detectionModelKey(detection: Pick<Detection, 'label'>): string {
+  const separatorIndex = detection.label.indexOf(':');
+  return separatorIndex > 0 ? detection.label.slice(0, separatorIndex) : DEFAULT_MODEL_KEY;
+}
+
+/** Fixed to sit in the same vivid/legible band as `--accent` (`#4f8cff` ≈ `hsl(219 100% 65%)`) so a
+ *  hashed model color never reads as washed-out or too dark against the video underneath. */
+const MODEL_HUE_SATURATION = 90;
+const MODEL_HUE_LIGHTNESS = 65;
+
+/** The exact color every box has always been drawn in — see `modelHue`'s own doc comment. */
+export const DEFAULT_BOX_COLOR = '#4f8cff';
+/** `DEFAULT_BOX_COLOR` at 85% alpha, byte-identical to the label background this file always drew. */
+const DEFAULT_BOX_FILL = 'rgb(79 140 255 / 85%)';
+
+/** Simple deterministic string hash (djb2-ish) → a hue in `[0, 360)`, no external dependency. */
+function hashHue(key: string): number {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return hash % 360;
+}
+
+/**
+ * Stable per-model box color (docs/OPS-CORE-PLAN.md §Q3b): `DEFAULT_MODEL_KEY` always resolves to
+ * the exact color every box has always been drawn in — a single-model stream (the overwhelming
+ * common case, whichever model it happens to be) sees zero visual change. Any other key hashes
+ * deterministically into a hue at a fixed saturation/lightness, so the same model always draws the
+ * same color across frames, reconnects, and page loads with no stateful color registry to keep in
+ * sync. `alphaPercent` (default fully opaque, for the box stroke) also covers the semi-transparent
+ * label background `shared/player/player.ts#drawBox` paints behind each box's text.
+ */
+export function modelHue(modelKey: string, alphaPercent = 100): string {
+  if (modelKey === DEFAULT_MODEL_KEY) {
+    return alphaPercent >= 100 ? DEFAULT_BOX_COLOR : DEFAULT_BOX_FILL;
+  }
+  const hue = hashHue(modelKey);
+  return alphaPercent >= 100
+    ? `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}%)`
+    : `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}% / ${alphaPercent}%)`;
+}
+
+/**
+ * Every distinct model key present in `detections`, in first-seen order — `shared/player/player.ts`'s
+ * legend gate shows a chip only when this has ≥2 entries: "the frame actually on screen mixes
+ * models right now", not merely "composite mode is configured" (a frame where only one member
+ * model detected anything still reads, correctly, as single-model).
+ */
+export function distinctModelKeys(detections: readonly Pick<Detection, 'label'>[]): readonly string[] {
+  const seen = new Set<string>();
+  for (const detection of detections) {
+    seen.add(detectionModelKey(detection));
+  }
+  return [...seen];
 }

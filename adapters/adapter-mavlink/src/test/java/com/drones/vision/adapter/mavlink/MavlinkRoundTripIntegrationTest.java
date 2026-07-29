@@ -8,9 +8,13 @@ import com.drones.vision.domain.model.FeedSpec;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.Telemetry;
 
+import io.dronefleet.mavlink.MavlinkConnection;
+import io.dronefleet.mavlink.ardupilotmega.Wind;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.io.InputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -24,14 +28,20 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Full TX→wire→RX round trip over real loopback UDP sockets — no hardware, no docker: {@link
  * MavlinkFeedTransmitter} flies a two-waypoint loop and {@link MavlinkTelemetrySource} ingests it
- * back, proving a moving position (and draining battery) actually arrives end to end. A second
- * test proves garbage UDP datagrams interleaved with real traffic never take the RX side down.
+ * back, proving a moving position (and draining battery) actually arrives end to end. A third
+ * test (docs/FC-INTEGRATIONS-PLAN.md F-e) proves a real ardupilotmega-dialect-only {@code WIND}
+ * datagram, sent raw alongside the transmitter's own traffic, survives the real UDP path into a
+ * {@link Telemetry} sample — confirming {@link MavlinkTelemetryDecoder}'s dialect-selection
+ * mechanism note against the real socket/thread path, not just the golden-bytes unit tests. A
+ * fourth test proves garbage UDP datagrams interleaved with real traffic never take the RX side
+ * down.
  */
 class MavlinkRoundTripIntegrationTest {
 
@@ -99,9 +109,202 @@ class MavlinkRoundTripIntegrationTest {
 
             List<Telemetry> withBattery = collected.stream().filter(t -> t.batteryPercent() != null).toList();
             assertTrue(!withBattery.isEmpty(), "expected at least one battery-reporting sample (SYS_STATUS)");
+
+            // docs/FC-INTEGRATIONS-PLAN.md F-a: the nominal (non-failsafe) heartbeat reports armed + Loiter.
+            List<Telemetry> withFlightState = collected.stream().filter(t -> t.flightState() != null).toList();
+            assertTrue(!withFlightState.isEmpty(), "expected at least one flight-state-bearing sample (HEARTBEAT)");
+            assertTrue(withFlightState.stream().anyMatch(t -> Boolean.TRUE.equals(t.flightState().armed())
+                            && "Loiter".equals(t.flightState().mode())),
+                    "expected an armed, mode=Loiter sample from the nominal heartbeat");
         } finally {
             transmitter.stop(feedId);
             rxSource.close(rxDeviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void aDrainedBatteryTriggersAFailsafeRtlSampleOnTheRxSide() throws Exception {
+        MavlinkFeedTransmitter transmitter = new MavlinkFeedTransmitter();
+        MavlinkTelemetrySource rxSource = new MavlinkTelemetrySource();
+        FeedId feedId = FeedId.random();
+        DeviceId rxDeviceId = DeviceId.random();
+        int port = freePort();
+
+        try {
+            // A high failsafeBatteryPercent + a steep drain rate guarantees the very first
+            // re-sent heartbeat (1s in) already reports the drained battery below the threshold.
+            FeedSpec spec = new FeedSpec("mavlink", URI.create("udp://127.0.0.1:" + port),
+                    Map.of("route", ROUTE, "speedMps", "20", "positionRateHz", "5",
+                            "batteryDrainPerSecond", "50", "failsafeBatteryPercent", "99"));
+            StreamDescriptor txDescriptor = transmitter.start(feedId, spec);
+
+            Device rxDevice = new Device(rxDeviceId, "failsafe-drone", Set.of(Capability.TELEMETRY),
+                    new StreamDescriptor(txDescriptor.protocol(), txDescriptor.uri(), Map.of()));
+
+            List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+            AtomicReference<Throwable> errorRef = new AtomicReference<>();
+            Object monitor = new Object();
+
+            Flow.Publisher<Telemetry> publisher = rxSource.open(rxDevice);
+            publisher.subscribe(new Flow.Subscriber<>() {
+                @Override
+                public void onSubscribe(Flow.Subscription subscription) {
+                    subscription.request(Long.MAX_VALUE);
+                }
+
+                @Override
+                public void onNext(Telemetry item) {
+                    collected.add(item);
+                    synchronized (monitor) {
+                        monitor.notifyAll();
+                    }
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    errorRef.set(throwable);
+                    synchronized (monitor) {
+                        monitor.notifyAll();
+                    }
+                }
+
+                @Override
+                public void onComplete() {
+                }
+            });
+
+            boolean sawFailsafeRtl = false;
+            long deadline = System.currentTimeMillis() + 20_000L;
+            synchronized (monitor) {
+                while (!sawFailsafeRtl && System.currentTimeMillis() < deadline) {
+                    sawFailsafeRtl = collected.stream().anyMatch(t -> t.flightState() != null
+                            && Boolean.TRUE.equals(t.flightState().failsafe())
+                            && "RTL".equals(t.flightState().mode()));
+                    if (!sawFailsafeRtl) {
+                        monitor.wait(500);
+                    }
+                }
+            }
+
+            assertNull(errorRef.get(), "a real TX->wire->RX round trip must not error");
+            assertTrue(sawFailsafeRtl, "expected a failsafe=true, mode=RTL sample once the drained battery fell "
+                    + "below failsafeBatteryPercent; got " + collected.size() + " samples");
+        } finally {
+            transmitter.stop(feedId);
+            rxSource.close(rxDeviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void anArdupilotmegaWindMessageSurvivesTheRealUdpPathIntoATelemetrySample() throws Exception {
+        MavlinkFeedTransmitter transmitter = new MavlinkFeedTransmitter();
+        MavlinkTelemetrySource rxSource = new MavlinkTelemetrySource();
+        FeedId feedId = FeedId.random();
+        DeviceId rxDeviceId = DeviceId.random();
+        int port = freePort();
+
+        try {
+            // The transmitter's own HEARTBEAT already reports autopilot=ARDUPILOTMEGA (docs/
+            // FC-INTEGRATIONS-PLAN.md F-a) at 1Hz -- exactly the traffic that teaches the shared
+            // MavlinkConnection inside MavlinkSocketHub's read loop the ardupilotmega dialect for
+            // this sysid, per MavlinkTelemetryDecoder's class javadoc.
+            FeedSpec spec = new FeedSpec("mavlink", URI.create("udp://127.0.0.1:" + port),
+                    Map.of("route", ROUTE, "speedMps", "20", "positionRateHz", "5"));
+            StreamDescriptor txDescriptor = transmitter.start(feedId, spec);
+
+            Device rxDevice = new Device(rxDeviceId, "wind-drone", Set.of(Capability.TELEMETRY),
+                    new StreamDescriptor(txDescriptor.protocol(), txDescriptor.uri(), Map.of()));
+
+            List<Telemetry> collected = Collections.synchronizedList(new ArrayList<>());
+            AtomicReference<Throwable> errorRef = new AtomicReference<>();
+            Object monitor = new Object();
+
+            Flow.Publisher<Telemetry> publisher = rxSource.open(rxDevice);
+            publisher.subscribe(new Flow.Subscriber<>() {
+                @Override
+                public void onSubscribe(Flow.Subscription subscription) {
+                    subscription.request(Long.MAX_VALUE);
+                }
+
+                @Override
+                public void onNext(Telemetry item) {
+                    collected.add(item);
+                    synchronized (monitor) {
+                        monitor.notifyAll();
+                    }
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    errorRef.set(throwable);
+                    synchronized (monitor) {
+                        monitor.notifyAll();
+                    }
+                }
+
+                @Override
+                public void onComplete() {
+                }
+            });
+
+            // Let at least one real sample through first, so the shared connection has certainly
+            // already resolved the dialect for this sysid before the raw WIND datagram below.
+            awaitAtLeast(collected, monitor, 1, java.time.Duration.ofSeconds(15));
+
+            sendRawWindDatagram(port, MavlinkFeedTransmitter.DEFAULT_MAV_SYSTEM_ID);
+
+            boolean sawWind;
+            long deadline = System.currentTimeMillis() + 15_000L;
+            synchronized (monitor) {
+                sawWind = containsWindSample(collected);
+                while (!sawWind && System.currentTimeMillis() < deadline) {
+                    monitor.wait(500);
+                    sawWind = containsWindSample(collected);
+                }
+            }
+
+            assertNull(errorRef.get(), "a real ardupilotmega WIND datagram must not error the RX side");
+            assertTrue(sawWind, "expected a Telemetry sample carrying extra.windSpeedMps from a real "
+                    + "WIND datagram; got " + collected.size() + " samples total");
+
+            Telemetry withWind;
+            synchronized (collected) { // Collections.synchronizedList requires manual sync while iterating
+                withWind = collected.stream()
+                        .filter(t -> t.extra().containsKey("windSpeedMps"))
+                        .findFirst()
+                        .orElseThrow();
+            }
+            assertEquals(6.2, withWind.extra().get("windSpeedMps"), 1e-6);
+            assertEquals(275.5, withWind.extra().get("windDirectionDegrees"), 1e-6);
+        } finally {
+            transmitter.stop(feedId);
+            rxSource.close(rxDeviceId);
+        }
+    }
+
+    /**
+     * {@code collected} is a {@link Collections#synchronizedList}, whose individual mutating calls
+     * (like {@code onNext}'s {@code add}) are each thread-safe, but iterating (what {@code
+     * .stream()} does) is not, per its own contract — the caller must hold the list's own monitor
+     * for the duration of the iteration to avoid a {@link java.util.ConcurrentModificationException}
+     * racing against a concurrent {@code add} from the still-live feed's onNext callback.
+     */
+    private static boolean containsWindSample(List<Telemetry> collected) {
+        synchronized (collected) {
+            return collected.stream().anyMatch(t -> t.extra().containsKey("windSpeedMps"));
+        }
+    }
+
+    /** Sends one raw {@code WIND} (ardupilotmega dialect) datagram directly to {@code port}, bypassing {@link MavlinkFeedTransmitter} entirely. */
+    private static void sendRawWindDatagram(int port, int sysid) throws Exception {
+        try (DatagramSocket socket = new DatagramSocket()) {
+            InetAddress loopback = InetAddress.getByName("127.0.0.1");
+            MavlinkConnection connection = MavlinkConnection.create(
+                    InputStream.nullInputStream(), new MavlinkUdpOutputStream(socket, loopback, port));
+            Wind wind = Wind.builder().direction(275.5f).speed(6.2f).speedZ(0f).build();
+            connection.send2(sysid, MavlinkFeedTransmitter.MAV_COMPONENT_ID, wind);
         }
     }
 

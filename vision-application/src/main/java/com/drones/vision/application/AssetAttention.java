@@ -20,6 +20,13 @@ import com.drones.vision.domain.model.StreamId;
  * is no honest "reconnecting"/"degraded" signal to read today; a future task that adds either a
  * queryable event store or a supervision-state read method can add this field then.
  *
+ * <p>{@code flightMode}/{@code armed}/{@code failsafe} (docs/FC-INTEGRATIONS-PLAN.md F-b) are a
+ * different case from {@code sourceState} above, not another exception to the same rule: they are
+ * cleanly readable today, straight off the freshest telemetry sample's {@link
+ * com.drones.vision.domain.model.FlightState}, with the same honest-null behavior as {@code
+ * batteryPercent} when no sample (or no flight state on that sample) exists — so they were added,
+ * not omitted.
+ *
  * @param assetId        the asset
  * @param displayName    human-readable name
  * @param categoryId     the asset's category
@@ -41,10 +48,22 @@ import com.drones.vision.domain.model.StreamId;
  *                       question is most useful once it has gone quiet
  * @param openEventCount how many {@code OPEN} detection events currently name this asset, within
  *                       {@link DefaultFleetSummaryService#OPEN_EVENTS_SCAN_LIMIT}'s scan window
+ * @param flightMode     the freshest telemetry sample's flight-controller mode name (e.g.
+ *                       {@code "RTL"}, {@code "Loiter"}), or {@code null} if the asset has never
+ *                       reported telemetry, or has but with no {@code flightState} attached
+ *                       (docs/FC-INTEGRATIONS-PLAN.md F-b) — same honest-null discipline as {@code
+ *                       batteryPercent}, not a fabricated read: this is {@link
+ *                       com.drones.vision.domain.model.FlightState#mode()} carried straight
+ *                       through, never guessed at
+ * @param armed          the freshest telemetry sample's armed flag, or {@code null} under the same
+ *                       condition as {@code flightMode}
+ * @param failsafe       the freshest telemetry sample's failsafe flag, or {@code null} under the
+ *                       same condition as {@code flightMode}
  */
 public record AssetAttention(AssetId assetId, String displayName, CategoryId categoryId, String categoryName,
                               LifecycleState lifecycle, boolean streaming, StreamId streamId,
-                              Double batteryPercent, Long telemetryAgeMs, int openEventCount) {
+                              Double batteryPercent, Long telemetryAgeMs, int openEventCount,
+                              String flightMode, Boolean armed, Boolean failsafe) {
 
     public AssetAttention {
         if (assetId == null) {

@@ -1,0 +1,78 @@
+<div class="backdrop" role="dialog" aria-modal="true" [attr.aria-label]="'New ' + kindLabel() + ' zone'" (click)="cancel()">
+  <div class="dialog" (click)="$event.stopPropagation()">
+    <header class="dialog-head">
+      <div>
+        <h2>New {{ kindLabel() }} zone</h2>
+        <p class="muted hint">Click the map to add a boundary point. Drag a point to move it.</p>
+      </div>
+      <button type="button" class="btn secondary small" (click)="cancel()" [attr.aria-label]="'Close ' + kindLabel() + ' zone editor'">×</button>
+    </header>
+
+    <div class="dialog-body">
+      <div class="map-pane">
+        <div #mapHost class="map-host"></div>
+        @if (!tilesOk()) {
+          <div class="tiles-warning">Map tiles unavailable — boundary points still work, just no basemap.</div>
+        }
+        <div class="controls layers" role="group" aria-label="Map layer">
+          @for (layer of layers; track layer.id) {
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="settings.mapLayer() === layer.id"
+              (click)="setLayer(layer.id)"
+            >
+              {{ layer.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="plan-pane">
+        <div class="field">
+          <label class="label" for="zone-name">Zone name</label>
+          <input id="zone-name" name="zoneName" type="text" [ngModel]="name()" (ngModelChange)="name.set($event)" placeholder="e.g. North perimeter" />
+        </div>
+
+        <h3>Boundary points ({{ vertices().length }})</h3>
+
+        @if (vertices().length === 0) {
+          <p class="muted hint">No points yet — click the map to add one.</p>
+        } @else {
+          <ol class="waypoint-list">
+            @for (vertex of vertices(); track $index) {
+              <li class="waypoint-row">
+                <span class="waypoint-index">{{ $index + 1 }}</span>
+                <span class="waypoint-coords mono truncate">{{ vertex.latitude.toFixed(5) }}, {{ vertex.longitude.toFixed(5) }}</span>
+                <button
+                  type="button"
+                  class="btn secondary small"
+                  (click)="removeAt($index)"
+                  [attr.aria-label]="'Remove point ' + ($index + 1)"
+                >
+                  Remove
+                </button>
+              </li>
+            }
+          </ol>
+          <div class="row">
+            <button type="button" class="btn secondary small" (click)="clearVertices()">Clear all points</button>
+          </div>
+        }
+
+        @if (vertexCountReason(); as reason) {
+          <p class="disabled-reason">{{ reason }}</p>
+        }
+
+        @if (outsideCount(); as count) {
+          <p class="advisory">{{ count }} asset{{ count === 1 ? '' : 's' }} currently outside this zone.</p>
+        }
+      </div>
+    </div>
+
+    <footer class="dialog-foot">
+      <button type="button" class="btn secondary" (click)="cancel()">Cancel</button>
+      <button type="button" class="btn" [disabled]="!canSave()" (click)="save()">Save {{ kindLabel() }} zone</button>
+    </footer>
+  </div>
+</div>

@@ -1,0 +1,64 @@
+<div class="backdrop" role="dialog" aria-modal="true" aria-label="Geofence zones" (click)="close()">
+  <div class="dialog" (click)="$event.stopPropagation()">
+    <header class="dialog-head">
+      <div>
+        <h2>Geofence zones</h2>
+        <p class="muted hint">Keep-out and keep-in boundaries — breaches raise a top-priority attention flag and a notification.</p>
+      </div>
+      <button type="button" class="btn secondary small" (click)="close()" aria-label="Close zones panel">×</button>
+    </header>
+
+    <div class="row new-zone-actions">
+      <button type="button" class="btn secondary" (click)="startDraw('KEEP_IN')">+ New keep-in zone</button>
+      <button type="button" class="btn secondary" (click)="startDraw('KEEP_OUT')">+ New keep-out zone</button>
+    </div>
+
+    @if (!geofence.loaded()) {
+      <p class="muted hint">Loading zones…</p>
+    } @else if (sortedZones().length === 0) {
+      <p class="muted hint">No zones drawn yet.</p>
+    } @else {
+      <ul class="zone-list">
+        @for (zone of sortedZones(); track zone.id) {
+          <li class="zone-row" [class.disabled-zone]="!zone.enabled">
+            <span class="chip" [class.danger]="zone.kind === 'KEEP_OUT'" [class.accent]="zone.kind === 'KEEP_IN'">
+              {{ zoneKindLabel(zone.kind) }}
+            </span>
+
+            @if (renamingZoneId() === zone.id) {
+              <input
+                class="rename-input"
+                type="text"
+                [ngModel]="renameDraft()"
+                (ngModelChange)="renameDraft.set($event)"
+                (keydown.enter)="confirmRename(zone)"
+                (keydown.escape)="cancelRename()"
+              />
+              <button type="button" class="btn small" (click)="confirmRename(zone)">Save</button>
+              <button type="button" class="btn secondary small" (click)="cancelRename()">Cancel</button>
+            } @else {
+              <button type="button" class="zone-name-btn truncate" (click)="startRename(zone)" title="Rename">
+                {{ zone.name }}
+              </button>
+              <label class="row enable-toggle">
+                <input type="checkbox" [checked]="zone.enabled" (change)="toggleEnabled(zone, $any($event.target).checked)" />
+                <span class="muted">{{ zone.enabled ? 'Enabled' : 'Disabled' }}</span>
+              </label>
+              <button type="button" class="btn danger-action small" (click)="removeZone(zone)">Delete</button>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</div>
+
+@if (drawKind(); as kind) {
+  <vision-geofence-zone-dialog
+    [kind]="kind"
+    [assetPositions]="assetPositions()"
+    [centerHint]="centerHint()"
+    (saved)="saveDraw($event)"
+    (cancelled)="cancelDraw()"
+  />
+}

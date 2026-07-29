@@ -98,6 +98,16 @@ services:
       # port or the browser will try to reach a UDP port nothing is actually
       # listening on.
       - "8189:8189/udp" # WebRTC media (ICE/RTP)
+      # Playback server (docs/OPS-CORE-PLAN.md §R): host 19996, same 1:1
+      # host:container style as the other mediamtx ports above -- container's
+      # own default is 9996 (mediamtx's own PlaybackAddress default,
+      # ":9996"), set explicitly below via MTX_PLAYBACKADDRESS for the same
+      # "pin, don't silently inherit" reason as the MTX_HLS* block further
+      # down. Serves GET /get?path=&start=&duration= (clip export -- see
+      # MediamtxStreamPublisher#playbackUrl, adapter-publish-hls/MODULE.md)
+      # and GET /list?path= (recorded ranges) over the recordings written by
+      # MTX_PATHDEFAULTS_RECORD below.
+      - "19996:9996" # Playback API (recording clip export)
     environment:
       # mediamtx's default ICE candidate gathering (webrtcIPsFromInterfaces:
       # true) advertises this *container's* own network-namespace IPs (e.g.
@@ -172,6 +182,52 @@ services:
       MTX_HLSSEGMENTDURATION: "1s"
       MTX_HLSPARTDURATION: "200ms"
       MTX_HLSSEGMENTCOUNT: "7"
+      # docs/OPS-CORE-PLAN.md §R (recording + clip export): mediamtx's own
+      # native recorder, not a custom sidecar. Env var names verified against
+      # mediamtx v1.19.3's own source (internal/conf/env/env.go builds each
+      # var as "MTX_" + the struct field's json tag, uppercased, with no
+      # other transformation -- same rule already documented above for
+      # MTX_HLS*; internal/conf/path.go's per-path `Record`/`RecordDeleteAfter`
+      # fields live under the top-level `pathDefaults` struct (conf.go), so
+      # their env vars are MTX_PATHDEFAULTS_RECORD* not MTX_RECORD*).
+      #   - MTX_PATHDEFAULTS_RECORD=yes: turns on recording for every path by
+      #     default (per-path override still possible via the API, unused
+      #     here). Segments are muxed as fMP4 (mediamtx's own default
+      #     recordFormat, left unset -- not "mpegts"), which is what the
+      #     playback server's /get endpoint below serves back out.
+      #   - MTX_PATHDEFAULTS_RECORDDELETEAFTER=72h: retention. mediamtx's own
+      #     default is 24h; 72h is this stack's default per docs/OPS-CORE-PLAN.md
+      #     §R so a flight recorded Friday evening is still available for a
+      #     Monday-morning review.
+      #   - Segments land at mediamtx's own default recordPath
+      #     ("./recordings/%path/%Y-%m-%d_%H-%M-%S-%f", unset/un-overridden
+      #     here) -- NOT changed to an absolute path, because the mediamtx
+      #     image (docker/standard.Dockerfile upstream, FROM scratch, no
+      #     WORKDIR) runs with cwd "/", so that relative path already
+      #     resolves to /recordings/... inside the container. The
+      #     mediamtx-recordings volume below is mounted at exactly that
+      #     path, so recordings land on a named Docker volume, never bind-
+      #     mounted into this repo's worktree.
+      #   - MTX_PLAYBACK=yes / MTX_PLAYBACKADDRESS=:9996: mediamtx's own
+      #     playback HTTP server (":9996" is also mediamtx's own default,
+      #     pinned explicitly for the same future-drift reason as the
+      #     MTX_HLS* block above), exposing GET /get?path=&start=&duration=
+      #     (single-MP4 clip export -- this IS clip export, no custom
+      #     trimming code needed, see MediamtxStreamPublisher#playbackUrl)
+      #     and GET /list?path= (recorded ranges). Mapped to host 19996
+      #     above.
+      MTX_PATHDEFAULTS_RECORD: "yes"
+      MTX_PATHDEFAULTS_RECORDDELETEAFTER: "72h"
+      MTX_PLAYBACK: "yes"
+      MTX_PLAYBACKADDRESS: ":9996"
+    volumes:
+      # Named volume, NOT a repo bind mount (docs/OPS-CORE-PLAN.md §R) --
+      # recordings are potentially large fMP4 segments with a 72h retention
+      # window; keeping them on a Docker-managed volume keeps the worktree
+      # clean and lets `docker volume rm mediamtx-recordings` wipe them
+      # independently of the repo. See the MTX_PATHDEFAULTS_RECORD* comment
+      # above for why /recordings (not some other path) is the mount point.
+      - mediamtx-recordings:/recordings
 
   cv-service:
     # Context is the repo root: the Dockerfile copies /proto (shared contract) in addition to /cv-service.
@@ -250,3 +306,7 @@ services:
 
 volumes:
   postgres-data:
+  # docs/OPS-CORE-PLAN.md §R: mediamtx's recorded fMP4 segments (72h
+  # retention, MTX_PATHDEFAULTS_RECORDDELETEAFTER above). Docker-managed, not
+  # a bind mount -- see the mediamtx service's own volumes: comment.
+  mediamtx-recordings:
