@@ -1,5 +1,26 @@
 # Deploying cv-service on a GPU box
 
+> **Deployed reality (2026-07-29): the actual remote box, GB4005
+> (`vlad@192.168.0.106`), has NO NVIDIA GPU** — it's an Intel Gemini Lake
+> mini-PC (2 cores, 7.6 GB RAM, UHD 600). The CUDA-specific parts of this
+> runbook (`CV_DEVICE=cuda:0`, `nvidia-smi`, default-PyPI torch wheel) do
+> not apply there; what was actually done instead:
+> - Sources arrive by **rsync** (no git on the box, repo has no remote):
+>   `rsync -az --exclude .venv --exclude cv_service/gen --exclude __pycache__
+>   cv-service proto vlad@192.168.0.106:~/vision/`
+> - Install with the **CPU torch wheel** (`--extra-index-url
+>   https://download.pytorch.org/whl/cpu`), the opposite of step 2's advice.
+> - Speedup path is **OpenVINO**, not CUDA: `pip install openvino`, then
+>   `yolo export model=yolo26n.pt format=openvino imgsz=416`, and the systemd
+>   unit sets `CV_MODEL=yolo26n_openvino_model` (no `CV_DEVICE`).
+> - Measured over the wire from the laptop: yolo26n PyTorch CPU ≈ 230 ms/frame,
+>   OpenVINO IR ≈ **135–150 ms/frame** (~7 fps ceiling; keep per-stream
+>   `inferenceFps` ≤ 5 against this box). `orion12l` is not real-time here.
+> - Unit installed as `/etc/systemd/system/cv-service.service`
+>   (`systemctl status cv-service`, logs via `journalctl -u cv-service`).
+>
+> The rest of this runbook remains the reference for a real CUDA box.
+
 Runbook for running `cv-service` on a separate CUDA-capable machine while the
 laptop keeps running the Spring Boot backend, the Angular frontend, and
 mediamtx. Background/design: `docs/REMOTE-CV-PLAN.md` — the short version is
