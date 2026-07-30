@@ -1,13 +1,13 @@
 .page-head p {
     display: flex;
-    gap: 0.35rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
 }
 
 .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto 320px;
-    gap: 0.75rem;
+    gap: var(--space-16);
     align-items: start;
 }
 
@@ -46,7 +46,7 @@
 .side {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-16);
     min-width: 0;
 }
 
@@ -54,21 +54,18 @@
     margin-bottom: 0;
 }
 
-.notice {
-    margin-top: 0.75rem;
-    background: var(--warn-soft);
-    border: 1px solid #5a4413;
-    color: #ffd479;
-    border-radius: var(--radius-sm);
-    padding: 0.55rem 0.75rem;
-    font-size: 0.82rem;
-}
-
+/* `<vision-notice>` (shared/ui/notice.ts) now owns the amber banner's box entirely — this
+   stylesheet only styles the inline `<code>` inside its projected message (and the plain
+   `.hint code` case), since the shared component has no opinion on that. */
 .notice code,
 .hint code {
     font-family: var(--mono);
+    /* Bespoke 25% black wash for an inline code chip — much lighter than either `--scrim` (55%) or
+       `--scrim-strong` (70%), and not a video/map compositing overlay, so neither canonical scrim
+       step reproduces this look without visibly darkening the chip (docs/STYLE-TOKENS-PLAN.md
+       §Geometry note's "bespoke opacity... genuinely needed" exception). Left literal; flagged. */
     background: rgb(0 0 0 / 25%);
-    padding: 0.05rem 0.3rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: 4px;
 }
 
@@ -81,7 +78,7 @@
 dl {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: 0.35rem 0.75rem;
+    gap: var(--space-8) var(--space-16);
     margin: 0;
     font-size: 0.82rem;
 }
@@ -96,8 +93,8 @@ dd {
 }
 
 .options {
-    margin-top: 0.9rem;
-    padding-top: 0.7rem;
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
@@ -106,19 +103,19 @@ dd {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-size: 0.7rem;
-    margin-bottom: 0.4rem;
+    margin-bottom: var(--space-8);
 }
 
 .opt {
     display: flex;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.15rem 0;
+    gap: var(--space-16);
+    padding: var(--space-2) 0;
 }
 
 .hint {
     font-size: 0.78rem;
-    margin: 0.6rem 0 0.5rem;
+    margin: var(--space-8) 0 var(--space-8);
 }
 
 /* The "boxes: Overlay/Burned/Off" toggle group used to carry its own local `.boxes-toggle`
@@ -128,10 +125,11 @@ dd {
    precedent as the kebab menu (see vision-web/MODULE.md's U-a2 map/command/shell entry). */
 
 input[type="range"] {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-16);
 }
 
 @media (max-width: 900px) {
+    /* --bp-md */
     .layout,
     .layout.rail-collapsed {
         grid-template-columns: 1fr;

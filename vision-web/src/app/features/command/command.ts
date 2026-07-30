@@ -13,6 +13,7 @@ import { LiveStore } from '../../core/live/live-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { fleetCentroid } from '../../core/weather/weather-logic';
 import { WeatherChip } from '../../shared/ui/weather-chip';
+import { Notice } from '../../shared/ui/notice';
 import { AssetPanel } from './asset-panel';
 import { ZonesPanel } from './zones-panel';
 import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
@@ -66,7 +67,7 @@ const PANEL_OPEN_KEY = 'vision.command.panelOpen';
  */
 @Component({
   selector: 'vision-command',
-  imports: [FleetMap, AssetPanel, ZonesPanel, WeatherChip, RouterLink],
+  imports: [FleetMap, AssetPanel, ZonesPanel, WeatherChip, RouterLink, Notice],
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

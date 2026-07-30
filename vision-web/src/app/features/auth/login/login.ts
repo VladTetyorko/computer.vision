@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angu
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth-store';
+import { Notice } from '../../../shared/ui/notice';
 
 /**
  * The login screen (docs/U-AUTH-PLAN.md wave 4) — the one destination `core/auth/auth-guard.ts`
@@ -21,7 +22,7 @@ import { AuthStore } from '../../../core/auth/auth-store';
  */
 @Component({
   selector: 'vision-login',
-  imports: [FormsModule],
+  imports: [FormsModule, Notice],
   templateUrl: './login.html',
   styleUrl: './login.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

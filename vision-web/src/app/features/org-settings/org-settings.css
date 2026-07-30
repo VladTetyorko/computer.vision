@@ -11,20 +11,20 @@
 .org-form {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--space-16);
 }
 
 /* Auto-fit columns: three-ish on desktop, collapsing to one on a phone without a media query. */
 .org-form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-  gap: 0.75rem 0.9rem;
+  gap: var(--space-16);
 }
 
 .org-field {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-4);
   min-width: 0;
 }
 
@@ -42,7 +42,7 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--space-16);
 }
 
 .org-form-actions .btn {
@@ -52,7 +52,7 @@
 .org-check {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--space-8);
   font-size: 0.85rem;
   color: var(--text-muted);
   cursor: pointer;
@@ -69,16 +69,16 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--space-8);
 }
 
 .org-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem 1rem;
+  gap: var(--space-16);
   flex-wrap: wrap;
-  padding: 0.7rem 0.8rem;
+  padding: var(--space-16);
   background: var(--panel-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -87,7 +87,7 @@
 .org-row-main {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: var(--space-4);
   min-width: 0;
   flex: 1 1 16rem;
 }
@@ -104,14 +104,14 @@
 .org-row-groups {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-top: 0.15rem;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
 }
 
 .org-row-actions {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-8);
   flex-wrap: wrap;
 }
 
@@ -121,14 +121,14 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--space-2);
 }
 
 .org-tree-row {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem 0.4rem 0.2rem;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-8) var(--space-8) var(--space-4);
   border-radius: var(--radius-sm);
   min-width: 0;
 }

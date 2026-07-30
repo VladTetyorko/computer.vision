@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { OrgStore } from '../../core/org/org-store';
 import { flattenGroupTree, roleOptions } from '../../core/org/org-logic';
 import { roleLabel } from '../../core/auth/auth-logic';
+import { EmptyState } from '../../shared/ui/empty-state';
 import type { CreateUserRequest, Role } from '../../core/api/models';
 
 type Tab = 'users' | 'groups';
@@ -25,7 +26,7 @@ type Tab = 'users' | 'groups';
  */
 @Component({
   selector: 'vision-org-settings',
-  imports: [FormsModule],
+  imports: [FormsModule, EmptyState],
   templateUrl: './org-settings.html',
   styleUrl: './org-settings.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

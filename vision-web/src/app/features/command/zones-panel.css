@@ -9,8 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  background: rgb(4 6 10 / 72%);
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
   backdrop-filter: blur(2px);
 }
 
@@ -22,21 +22,21 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 1.15rem 1.25rem;
+  padding: var(--space-16) var(--space-24);
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--space-16);
 }
 
 .dialog-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-16);
 }
 
 .dialog-head h2 {
-  margin: 0 0 0.2rem;
+  margin: 0 0 var(--space-4);
   font-size: 1.05rem;
 }
 
@@ -55,14 +55,14 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-8);
 }
 
 .zone-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.6rem;
+  gap: var(--space-8);
+  padding: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-raised);
@@ -81,7 +81,7 @@
   font-size: 0.85rem;
   text-align: left;
   cursor: pointer;
-  padding: 0.15rem 0.3rem;
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--radius-sm);
 }
 

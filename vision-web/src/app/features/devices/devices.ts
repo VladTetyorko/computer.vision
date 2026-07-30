@@ -8,6 +8,8 @@ import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { Icon } from '../../shared/ui/icon';
+import { KebabMenu } from '../../shared/ui/kebab-menu';
+import { EmptyState } from '../../shared/ui/empty-state';
 import {
   type AssetDetails,
   type Device,
@@ -51,7 +53,7 @@ type DeviceViewMode = 'list' | 'grid';
  */
 @Component({
   selector: 'vision-devices',
-  imports: [FormsModule, Icon],
+  imports: [FormsModule, Icon, KebabMenu, EmptyState],
   templateUrl: './devices.html',
   styleUrl: './devices.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

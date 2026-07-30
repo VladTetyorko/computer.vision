@@ -19,6 +19,8 @@ import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { TelemetryOsd } from './telemetry-osd';
 import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
+import { Notice } from '../../shared/ui/notice';
+import { EmptyState } from '../../shared/ui/empty-state';
 
 /** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
  * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
@@ -28,7 +30,7 @@ const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
 
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip, StreamInfoPanel],
+  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip, StreamInfoPanel, Notice, EmptyState],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

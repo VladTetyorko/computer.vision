@@ -19,7 +19,7 @@ import type { PreflightItem } from '../../core/telemetry/flight-state-logic';
   selector: 'vision-preflight-checklist',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="checklist">
+    <div class="checklist surface-hud-strong">
       <h3>Pre-flight</h3>
       <ul>
         @for (item of items(); track item.label) {
@@ -37,20 +37,17 @@ import type { PreflightItem } from '../../core/telemetry/flight-state-logic';
   styles: `
     .checklist {
       pointer-events: auto;
-      background: rgb(6 9 14 / 78%);
-      backdrop-filter: blur(6px);
-      border: 1px solid rgb(255 255 255 / 9%);
       border-radius: var(--radius);
-      padding: 0.6rem 0.75rem;
+      padding: var(--space-8) var(--space-16);
       width: 15rem;
     }
 
     h3 {
-      margin: 0 0 0.4rem;
+      margin: 0 0 var(--space-8);
       font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      color: rgb(231 236 243 / 65%);
+      color: color-mix(in srgb, var(--text) 65%, transparent);
     }
 
     ul {
@@ -59,16 +56,16 @@ import type { PreflightItem } from '../../core/telemetry/flight-state-logic';
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.3rem;
+      gap: var(--space-4);
     }
 
     li {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
-      gap: 0.4rem;
+      gap: var(--space-8);
       font-size: 0.78rem;
-      color: #e7ecf3;
+      color: var(--text);
     }
 
     .glyph {
@@ -87,21 +84,21 @@ import type { PreflightItem } from '../../core/telemetry/flight-state-logic';
 
     .detail {
       flex-basis: 100%;
-      padding-left: 1.4rem;
+      padding-left: var(--space-24);
       font-size: 0.72rem;
-      color: rgb(231 236 243 / 62%);
+      color: color-mix(in srgb, var(--text) 62%, transparent);
     }
 
     .row-ok .glyph {
-      color: #8ce7b4;
+      color: var(--color-success-text);
     }
 
     .row-fail .glyph {
-      color: #ff9a9a;
+      color: var(--color-danger-text);
     }
 
     .row-fail .detail {
-      color: #ff9a9a;
+      color: var(--color-danger-text);
     }
 
     .row-unknown .glyph {

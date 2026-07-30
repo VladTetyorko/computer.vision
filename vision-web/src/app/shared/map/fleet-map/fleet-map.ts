@@ -510,7 +510,7 @@ export class FleetMap {
     if (marker.flightMode !== undefined) {
       // Mode line (docs/FC-INTEGRATIONS-PLAN.md F-d) — red text when failsafe, the one severity
       // color `--live` is reserved for; otherwise the popup's own plain text color.
-      const failsafeStyle = marker.failsafe === true ? ' style="color: var(--live); font-weight: 600;"' : '';
+      const failsafeStyle = marker.failsafe === true ? ' style="color: var(--color-live); font-weight: 600;"' : '';
       rows.push(`<div class="popup-row"${failsafeStyle}>Mode ${escapeHtml(marker.flightMode)}</div>`);
     }
     if (marker.batteryPercent !== undefined) {

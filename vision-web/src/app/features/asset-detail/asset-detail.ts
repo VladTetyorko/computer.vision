@@ -38,6 +38,9 @@ import { LiveMap } from '../../shared/map/live-map/live-map';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Icon } from '../../shared/ui/icon';
+import { KebabMenu } from '../../shared/ui/kebab-menu';
+import { EmptyState } from '../../shared/ui/empty-state';
+import { Stat } from '../../shared/ui/stat';
 import { PilotsCard } from './pilots-card';
 import {
   attributeRowsToRecord,
@@ -118,7 +121,7 @@ const STREAM_EVENTS_LIMIT = 50;
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, LiveMap, PilotsCard, SectionHeader, SidePanel, Icon],
+  imports: [RouterLink, LiveMap, PilotsCard, SectionHeader, SidePanel, Icon, KebabMenu, EmptyState, Stat],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

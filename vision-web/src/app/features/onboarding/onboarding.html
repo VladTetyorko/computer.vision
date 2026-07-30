@@ -299,10 +299,10 @@
 
               @if (store.scanResult(); as result) {
                 @if (result.failedMethods.length > 0) {
-                  <div class="failed">
+                  <vision-notice variant="danger">
                     Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
                     errored, not because the network is empty.
-                  </div>
+                  </vision-notice>
                 }
 
                 @if (result.devices.length === 0) {
@@ -374,9 +374,9 @@
                 <div class="empty"><p class="faint">Listening for heartbeats…</p></div>
               } @else if (store.droneScanResult(); as result) {
                 @if (result.failedMethods.length > 0) {
-                  <div class="failed">
+                  <vision-notice variant="danger">
                     The MAVLink scanner failed — check that nothing else is bound to its port.
-                  </div>
+                  </vision-notice>
                 }
 
                 @if (result.devices.length === 0) {
@@ -707,7 +707,7 @@
         @if (store.probing()) {
           <div class="empty"><p class="faint">Connecting…</p></div>
         } @else if (store.lastProbeError(); as error) {
-          <div class="failed">{{ error }}</div>
+          <vision-notice variant="danger">{{ error }}</vision-notice>
         } @else if (store.lastProbeResult(); as result) {
           <div class="test-result">
             <img

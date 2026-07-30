@@ -7,7 +7,7 @@
   height: 360px;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #0b0f14;
+  background: var(--bg);
   border: 1px solid var(--border);
 }
 
@@ -18,35 +18,35 @@
 
 .controls {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: var(--space-8);
+  right: var(--space-8);
   z-index: 1000; /* above Leaflet's own panes */
   display: flex;
-  gap: 0.35rem;
+  gap: var(--space-8);
 }
 
 .controls.layers {
-  left: 0.5rem;
+  left: var(--space-8);
   right: auto;
   flex-wrap: wrap;
   max-width: calc(100% - 1rem);
 }
 
 .controls .btn.active {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
 }
 
 .badge {
   position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
+  left: var(--space-8);
+  bottom: var(--space-8);
   z-index: 1000;
-  padding: 0.2rem 0.55rem;
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: rgb(0 0 0 / 60%);
-  color: var(--warn);
+  background: var(--scrim);
+  color: var(--color-warn);
   font-size: 0.72rem;
   backdrop-filter: blur(4px);
 }
@@ -54,7 +54,7 @@
 /* Everything below targets DOM Leaflet creates itself — see live-map.css's identical note. */
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: rgb(0 0 0 / 55%);
+  background: var(--scrim);
   color: var(--text-faint);
 }
 
@@ -67,7 +67,7 @@
   height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-bottom: 18px solid var(--accent);
+  border-bottom: 18px solid var(--color-info);
   transform-origin: 50% 60%;
-  filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
+  filter: drop-shadow(0 0 2px var(--scrim-strong));
 }

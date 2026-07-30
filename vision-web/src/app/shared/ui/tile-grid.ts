@@ -28,7 +28,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
          share one bottom baseline (and their "soon" badges line up) instead of a ragged edge. */
       grid-auto-rows: 1fr;
       align-items: stretch;
-      gap: var(--space-4);
+      gap: var(--space-16);
     }
 
     @media (max-width: 900px) {

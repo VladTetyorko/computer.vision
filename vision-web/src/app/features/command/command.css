@@ -16,18 +16,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.6rem 1rem;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-16);
   border-bottom: 1px solid var(--border);
   background: var(--bg);
 }
 
 .topbar-left {
-  gap: 0.6rem;
+  gap: var(--space-8);
 }
 
 .topbar-right {
-  gap: 0.75rem;
+  gap: var(--space-16);
 }
 
 .brand-label {
@@ -39,21 +39,12 @@
 }
 
 .archived-toggle {
-  gap: 0.4rem;
+  gap: var(--space-8);
   font-size: 0.82rem;
 }
 
 .archived-toggle input {
   width: auto;
-}
-
-.topbar-notice {
-  flex: none;
-  padding: 0.4rem 1rem;
-  background: var(--warn-soft);
-  border-bottom: 1px solid #5a4413;
-  color: #ffd479;
-  font-size: 0.78rem;
 }
 
 /* ---- Body — the collapsible-rail × collapsible-panel grid (command-logic.ts#commandGridColumns
@@ -75,21 +66,21 @@
   overflow-y: auto;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 0.75rem 0.6rem;
+  padding: var(--space-16) var(--space-8);
 }
 
 .rail-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.6rem;
-  padding: 0 0.15rem;
+  margin-bottom: var(--space-8);
+  padding: 0 var(--space-2);
 }
 
 .hint {
   font-size: 0.8rem;
   margin: 0;
-  padding: 0 0.15rem;
+  padding: 0 var(--space-2);
 }
 
 .rail-list {
@@ -98,16 +89,16 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-4);
 }
 
 .rail-row {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--space-8);
   text-align: left;
-  padding: 0.4rem 0.5rem;
+  padding: var(--space-8);
   border-left: 3px solid transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -120,11 +111,11 @@
 }
 
 .rail-row.critical {
-  border-left-color: var(--danger);
+  border-left-color: var(--color-danger);
 }
 
 .rail-row.warning {
-  border-left-color: var(--warn);
+  border-left-color: var(--color-warn);
 }
 
 /* Declared after .critical/.warning so "which row did I click" always wins the shared
@@ -132,8 +123,8 @@
    and outline carry selection even while the border shows severity on flagged rows. */
 .rail-row.selected {
   background: var(--panel-raised);
-  border-left-color: var(--accent);
-  outline: 1px solid var(--accent);
+  border-left-color: var(--color-info);
+  outline: 1px solid var(--color-info);
   outline-offset: -1px;
 }
 
@@ -161,9 +152,9 @@
    critical reason at a glance. */
 .fs-chip {
   flex: none;
-  background: color-mix(in srgb, var(--live) 18%, transparent);
+  background: color-mix(in srgb, var(--color-live) 18%, transparent);
   border-color: transparent;
-  color: var(--live);
+  color: var(--color-live);
   font-weight: 700;
   letter-spacing: 0.03em;
 }
@@ -205,7 +196,7 @@
 .command-stage {
   position: relative;
   min-width: 0;
-  background: #0b0f14;
+  background: var(--bg);
 }
 
 .command-map {
@@ -226,8 +217,8 @@
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 2rem;
-  gap: 0.5rem;
+  padding: var(--space-32);
+  gap: var(--space-8);
   color: var(--text-muted);
 }
 
@@ -242,7 +233,7 @@
 }
 
 .empty-actions {
-  margin-top: 0.5rem;
+  margin-top: var(--space-8);
 }
 
 /* ---- Detail panel (docs/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------- */
@@ -255,7 +246,7 @@
 }
 
 /* ---- Narrow viewports: stack instead of collapsing to unreadably thin grid tracks -------------- */
-@media (max-width: 900px) {
+@media (max-width: 900px) { /* --bp-md */
   .command-body {
     grid-template-columns: 1fr !important;
     grid-auto-rows: auto;

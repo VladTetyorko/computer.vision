@@ -93,7 +93,7 @@ const CLOCK_TICK_MS = 1_000;
   `,
   styles: `
     .source-row {
-      margin-bottom: 0.6rem;
+      margin-bottom: var(--space-8);
     }
 
     .source-desc {
@@ -104,8 +104,8 @@ const CLOCK_TICK_MS = 1_000;
     .facts {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0.5rem 1rem;
-      margin: 0 0 0.65rem;
+      gap: var(--space-8) var(--space-16);
+      margin: 0 0 var(--space-8);
     }
 
     .fact dt {
@@ -116,7 +116,7 @@ const CLOCK_TICK_MS = 1_000;
     }
 
     .fact dd {
-      margin: 0.1rem 0 0;
+      margin: var(--space-2) 0 0;
       font-size: 0.85rem;
       /* docs/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts ("Streaming for",
          "Latency") with text facts ("Transport", the "Detections" chip); tabular-nums only (not
@@ -125,7 +125,7 @@ const CLOCK_TICK_MS = 1_000;
     }
 
     .tech-details {
-      margin-top: 0.75rem;
+      margin-top: var(--space-16);
       font-size: 0.8rem;
     }
 
@@ -135,7 +135,7 @@ const CLOCK_TICK_MS = 1_000;
     }
 
     .tech-details dl {
-      margin: 0.5rem 0 0;
+      margin: var(--space-8) 0 0;
     }
 
     .tech-details dt {
@@ -143,11 +143,11 @@ const CLOCK_TICK_MS = 1_000;
       font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-top: 0.4rem;
+      margin-top: var(--space-8);
     }
 
     .tech-details dd {
-      margin: 0.1rem 0 0;
+      margin: var(--space-2) 0 0;
     }
   `,
 })

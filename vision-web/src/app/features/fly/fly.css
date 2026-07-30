@@ -3,7 +3,7 @@
 .picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: 0.85rem;
+  gap: var(--space-16);
 }
 
 /* Asset card rebuild (docs/UX-REWORK-PLAN.md §U-a2 §3) — a flex column so the header row, category,
@@ -13,7 +13,7 @@
 .picker-card {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-8);
   text-align: left;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -37,7 +37,7 @@
 .picker-card-facts {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: var(--space-4);
   margin: 0;
 }
 
@@ -49,7 +49,7 @@
 .picker-card-facts .fact {
   display: flex;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: var(--space-8);
   font-size: 0.78rem;
 }
 
@@ -75,11 +75,11 @@
    row ends on the same line. */
 .picker-card-cta {
   margin-top: auto;
-  padding-top: 0.4rem;
+  padding-top: var(--space-8);
   border-top: 1px solid var(--border);
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--color-info);
 }
 
 .skeleton-line,
@@ -141,7 +141,7 @@
   height: calc(100vh - var(--header-height));
   min-height: 20rem;
   overflow: hidden;
-  background: #000;
+  background: var(--black);
   /* Cosmetic fix (docs/UX-QUICKWINS-PLAN.md QF-1): a hairline seam between the sticky app header
      (app.css's `.app-header`) and this full-bleed view showed a ghosted sliver of the header's own
      text at 1440x900/1920x1080 — `100vh - var(--header-height)` and the header's own real box each
@@ -152,14 +152,14 @@
      box's `z-index: auto`), so it's invisible whenever there's no gap to hide, and it changes no
      layout/height, so it can't introduce a matching gap at the opposite edge the way nudging this
      box's own height/margin would. */
-  box-shadow: 0 -2px 0 #000;
+  box-shadow: 0 -2px 0 var(--black);
 }
 
 .cockpit-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: var(--space-32);
 }
 
 .cockpit-loading .skeleton-card {
@@ -180,7 +180,7 @@
    `.surface-hud` cluster pills already carry their own chrome). */
 .grid-telemetry {
   grid-area: telemetry;
-  padding: 0.55rem var(--space-4);
+  padding: var(--space-8) var(--space-16);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -194,10 +194,10 @@
   width: 100%;
   max-width: 34rem;
   margin: 0 auto;
-  padding: 0 var(--space-4) var(--space-2);
+  padding: 0 var(--space-16) var(--space-8);
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-4);
   overflow: hidden;
 }
 
@@ -206,8 +206,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-3);
+  gap: var(--space-16);
+  padding: var(--space-16);
 }
 
 /* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids/order: flight · cv · detections
@@ -217,8 +217,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-2);
+  gap: var(--space-8);
+  padding: var(--space-16) var(--space-8);
 }
 
 .rail-item {
@@ -231,12 +231,12 @@
    shared `vision-icon-button` from the host page rather than baked into that component. */
 .rail-dot {
   position: absolute;
-  top: 0.15rem;
-  right: 0.15rem;
+  top: var(--space-2);
+  right: var(--space-2);
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--color-danger);
   pointer-events: none;
 }
 
@@ -259,7 +259,7 @@
   grid-area: main;
   position: relative;
   overflow: hidden;
-  background: #000;
+  background: var(--black);
 }
 
 .stage-video {
@@ -291,11 +291,11 @@
 }
 
 .notice {
-  background: var(--warn-soft);
-  border: 1px solid #5a4413;
-  color: #ffd479;
+  background: var(--color-warn-soft);
+  border: 1px solid var(--color-warn-line);
+  color: var(--color-warn-text);
   border-radius: var(--radius-sm);
-  padding: 0.5rem 0.85rem;
+  padding: var(--space-8) var(--space-16);
   font-size: 0.8rem;
   max-width: 32rem;
   text-align: center;
@@ -305,31 +305,31 @@
 
 .main-header {
   position: absolute;
-  top: var(--space-3);
-  left: var(--space-3);
-  right: var(--space-3);
+  top: var(--space-16);
+  left: var(--space-16);
+  right: var(--space-16);
   z-index: 6;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-8);
   /* docs/DRONE-INFRA-PLAN.md I-e Stage 1: "Bring home" can add a second pill-shaped control to this
      row alongside the exit link/switcher — wrapping (rather than `overflow: hidden`/clipping
      off-screen) is the safe default; a wrapped second line still reads fine over the video, unlike a
      silently-clipped control nobody can click. */
   flex-wrap: wrap;
-  row-gap: 0.4rem;
+  row-gap: var(--space-8);
 }
 
 .icon-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.3rem 0.65rem;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
   background: var(--hud-bg);
   backdrop-filter: blur(var(--hud-blur));
   border: var(--hud-border);
-  color: #e7ecf3;
+  color: var(--text);
   font-size: 0.78rem;
   cursor: pointer;
 }
@@ -349,12 +349,12 @@
   max-width: 16rem;
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-8);
   background: var(--hud-bg);
   backdrop-filter: blur(var(--hud-blur));
   border: var(--hud-border);
   border-radius: var(--radius-pill);
-  padding: 0.3rem 0.65rem 0.3rem 0.75rem;
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-16);
   cursor: pointer;
 }
 
@@ -364,7 +364,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgb(231 236 243 / 60%);
+  color: color-mix(in srgb, var(--text) 60%, transparent);
 }
 
 .switcher {
@@ -372,14 +372,14 @@
   min-width: 0;
   background: transparent;
   border: none;
-  color: #e7ecf3;
+  color: var(--text);
   padding: 0;
   font-size: 0.78rem;
   cursor: pointer;
 }
 
 .switcher:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--color-info);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
@@ -399,8 +399,8 @@
    map inset hides"). */
 .main-map {
   position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
+  top: var(--space-16);
+  right: var(--space-16);
   width: min(22rem, 32vw);
   /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
      (400+) from escaping to the root and painting over this page's own header overlay above. */
@@ -417,26 +417,26 @@
 
 .main-secondary {
   position: absolute;
-  left: var(--space-3);
-  bottom: var(--space-3);
+  left: var(--space-16);
+  bottom: var(--space-16);
   z-index: 4;
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-8);
 }
 
 .secondary-tile {
   width: 6.5rem;
   padding: 0;
-  border: 1px solid rgb(255 255 255 / 12%);
+  border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
   overflow: hidden;
   cursor: pointer;
-  background: #000;
+  background: var(--black);
   position: relative;
 }
 
 .secondary-tile:hover {
-  border-color: var(--accent);
+  border-color: var(--color-info);
 }
 
 .secondary-tile vision-player {
@@ -453,9 +453,9 @@
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 0.15rem 0.35rem;
-  background: rgb(0 0 0 / 65%);
-  color: #fff;
+  padding: var(--space-2) var(--space-4);
+  background: var(--scrim-strong);
+  color: var(--white);
   font-size: 0.62rem;
   text-align: left;
   white-space: nowrap;
@@ -468,8 +468,8 @@
    computed, offset (this cockpit's own long-standing convention: see `.main-diagnostics`'s twin). */
 .main-preflight {
   position: absolute;
-  left: var(--space-3);
-  bottom: calc(var(--space-3) + 4.4rem);
+  left: var(--space-16);
+  bottom: calc(var(--space-16) + var(--space-64));
   z-index: 3;
 }
 
@@ -477,8 +477,8 @@
    now that the old bottom-right detections toggle moved into its own tool-rail drawer. */
 .main-diagnostics {
   position: absolute;
-  right: var(--space-3);
-  bottom: var(--space-3);
+  right: var(--space-16);
+  bottom: var(--space-16);
   z-index: 3;
 }
 
@@ -491,7 +491,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
+  gap: var(--space-4);
 }
 
 .start-hint {
@@ -504,7 +504,7 @@
 }
 
 .btn.big {
-  padding: 0.7rem 1.6rem;
+  padding: var(--space-8) var(--space-24);
   font-size: 1rem;
   border-radius: var(--radius);
 }
@@ -518,7 +518,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(0 0 0 / 45%);
+  background: var(--scrim);
 }
 
 .hud-confirm .card {
@@ -530,12 +530,12 @@
 }
 
 .inline-confirm-card {
-  background: var(--danger-soft);
-  border-color: #6b2530;
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-line);
 }
 
 .inline-confirm-card p {
-  margin: 0 0 0.6rem;
+  margin: 0 0 var(--space-8);
   font-size: 0.85rem;
   color: var(--text-muted);
 }
@@ -548,7 +548,7 @@
 dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.35rem 0.75rem;
+  gap: var(--space-4) var(--space-16);
   margin: 0;
   font-size: 0.85rem;
 }
@@ -556,7 +556,7 @@ dl {
 /* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): the second `<dl>` — mouse-only, icon-only
    cockpit controls — gets its own small heading rather than blending into the keyboard list above. */
 .shortcuts-subhead {
-  margin: 0.75rem 0 0;
+  margin: var(--space-16) 0 0;
   font-size: 0.78rem;
   color: var(--text-muted);
 }

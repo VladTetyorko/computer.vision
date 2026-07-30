@@ -89,12 +89,12 @@ export type IconButtonVariant = 'ghost' | 'hud' | 'danger';
        labeled .btn.danger text buttons, poka-yoke rule 4 — see this class's own doc comment) — e.g.
        a small "remove" affordance inside a list row. */
     .icon-btn.danger {
-      color: var(--danger);
+      color: var(--color-danger);
     }
 
     .icon-btn.danger:hover:not(:disabled),
     .icon-btn.danger.active {
-      background: var(--danger-soft);
+      background: var(--color-danger-soft);
     }
   `,
 })

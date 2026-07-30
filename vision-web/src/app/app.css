@@ -17,9 +17,9 @@
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: 1.25rem;
+    gap: var(--space-24);
     height: var(--header-height);
-    padding: 0 1.25rem;
+    padding: 0 var(--space-24);
     background: var(--bg);
     border-bottom: 1px solid var(--border);
 }
@@ -27,7 +27,7 @@
 .brand {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: var(--space-8);
     color: var(--text);
     font-weight: 600;
     letter-spacing: -0.01em;
@@ -38,7 +38,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    border: 2px solid var(--accent);
+    border: 2px solid var(--color-info);
     position: relative;
 }
 
@@ -47,7 +47,7 @@
     position: absolute;
     inset: 3px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--color-info);
 }
 
 /* ---- Hub-and-spoke mode nav (docs/UI-REDESIGN-PLAN.md Wave 1) --------------------------------
@@ -66,7 +66,7 @@
 }
 
 .modes-wide {
-    gap: var(--space-1);
+    gap: var(--space-4);
 }
 
 .mode {
@@ -79,9 +79,9 @@
 .mode-link {
     display: flex;
     align-items: center;
-    gap: var(--space-1);
+    gap: var(--space-4);
     height: 100%;
-    padding: 0 var(--space-2) 0 var(--space-3);
+    padding: 0 var(--space-8) 0 var(--space-16);
     color: var(--text-muted);
     font-size: 0.78rem;
     font-weight: 600;
@@ -97,7 +97,7 @@
 
 .mode.active .mode-link {
     color: var(--text);
-    border-bottom-color: var(--accent);
+    border-bottom-color: var(--color-info);
 }
 
 .mode-more {
@@ -111,7 +111,7 @@
     display: flex;
     align-items: center;
     height: 100%;
-    padding: 0 var(--space-2);
+    padding: 0 var(--space-8);
     color: var(--text-muted);
     cursor: pointer;
     list-style: none;
@@ -131,12 +131,12 @@
     position: absolute;
     top: 100%;
     left: 0;
-    margin-top: 0.4rem;
+    margin-top: var(--space-8);
     min-width: 14rem;
-    padding: var(--space-2);
+    padding: var(--space-8);
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--space-2);
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -147,8 +147,8 @@
 .mode-more-menu a {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-2);
+    gap: var(--space-8);
+    padding: var(--space-8) var(--space-8);
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     font-size: 0.85rem;
@@ -180,7 +180,7 @@
 .modes-narrow > summary {
     display: flex;
     align-items: center;
-    gap: var(--space-1);
+    gap: var(--space-4);
     cursor: pointer;
     list-style: none;
 }
@@ -191,21 +191,21 @@
 
 .modes-narrow.active > summary {
     color: var(--text);
-    border-bottom-color: var(--accent);
+    border-bottom-color: var(--color-info);
 }
 
 .modes-narrow-menu {
     position: absolute;
     top: 100%;
     left: 0;
-    margin-top: 0.4rem;
+    margin-top: var(--space-8);
     min-width: 15rem;
-    max-height: calc(100vh - var(--header-height) - var(--space-4));
+    max-height: calc(100vh - var(--header-height) - var(--space-16));
     overflow-y: auto;
-    padding: var(--space-2);
+    padding: var(--space-8);
     display: flex;
     flex-direction: column;
-    gap: var(--space-3);
+    gap: var(--space-16);
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -216,19 +216,19 @@
 .modes-narrow-group {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--space-2);
 }
 
 .modes-narrow-group + .modes-narrow-group {
-    padding-top: var(--space-3);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
 .modes-narrow-mode {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2);
+    gap: var(--space-8);
+    padding: var(--space-8);
     color: var(--text);
     font-size: 0.78rem;
     font-weight: 600;
@@ -245,8 +245,8 @@
 .modes-narrow-entry {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-6);
+    gap: var(--space-8);
+    padding: var(--space-8) var(--space-8) var(--space-8) var(--space-32);
     color: var(--text-muted);
     font-size: 0.85rem;
     border-radius: var(--radius-sm);
@@ -262,21 +262,24 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-8);
 }
 
 .offline-banner {
-    background: var(--warn-soft);
-    border-bottom: 1px solid #5a4413;
-    color: #ffd479;
-    padding: 0.5rem 1.25rem;
+    background: var(--color-warn-soft);
+    border-bottom: 1px solid var(--color-warn-line);
+    color: var(--color-warn-text);
+    padding: var(--space-8) var(--space-24);
     font-size: 0.82rem;
 }
 
 .offline-banner code {
     font-family: var(--mono);
+    /* Bespoke low-opacity black wash for an inline code chip, not a video/map scrim — 25% is
+       intentionally lighter than either --scrim step (55%/70%) so the chip stays legible against
+       --color-warn-soft; documented bespoke exception per docs/STYLE-TOKENS-PLAN.md's scrim row. */
     background: rgb(0 0 0 / 25%);
-    padding: 0.05rem 0.3rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: 4px;
 }
 
@@ -284,8 +287,8 @@
    the three wide mode triggers hide in favor of the single combined "Menu" disclosure above. */
 @media (max-width: 640px) {
     .app-header {
-        gap: 0.75rem;
-        padding: 0 0.75rem;
+        gap: var(--space-16);
+        padding: 0 var(--space-16);
     }
 
     .brand-name {

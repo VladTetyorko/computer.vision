@@ -45,78 +45,138 @@
 :root {
     color-scheme: dark;
 
+    /* ======================================================================
+       TIER 1 — PRIMITIVE RAMP (docs/STYLE-TOKENS-PLAN.md §Colour).
+       The ONLY place raw hex is allowed in this app. Named by hue + numeric
+       lightness step. Components must never reference these directly — they
+       consume the TIER 2 semantic aliases below. Add a new step here (not a
+       hex literal in a component) when a genuinely new shade is needed.
+       ====================================================================== */
+
+    /* Neutrals — the surface/border/text staircase, dark → light. */
+    --gray-950: #0b0e13;
+    --gray-900: #141922;
+    --gray-850: #1a212c;
+    --gray-800: #1e2632;
+    --gray-700: #232b36;
+    --gray-600: #323d4c;
+    --gray-400: #788496;
+    --gray-300: #8d99ab;
+    --gray-100: #e7ecf3;
+    --white: #ffffff;
+    --black: #000000;
+
+    /* Blue — info / primary action / selection / focus. */
+    --blue-500: #4f8cff;
+    --blue-900: #16264a;
+    --blue-100: #a9c8ff;
+    --blue-ink: #04101f;
+
+    /* Green — success / healthy (the -800/-200 pair is the notice/toast line + text). */
+    --green-500: #37c977;
+    --green-900: #10301f;
+    --green-800: #1e5c3a;
+    --green-200: #8ce7b4;
+
+    /* Amber — warn / attention (the -800/-200 pair is the notice-banner line + text). */
+    --amber-500: #ffb340;
+    --amber-900: #33260c;
+    --amber-800: #5a4413;
+    --amber-200: #ffd479;
+
+    /* Red — danger / failure (the -800/-100 pair is the notice-banner line + text; -ink is text
+       painted ON a saturated red fill). */
+    --red-500: #ff5d5d;
+    --red-900: #331419;
+    --red-800: #6b2530;
+    --red-200: #ff9a9a;
+    --red-100: #ffb3bd;
+    --red-ink: #1a0009;
+
+    /* Rose — "live" / happening-right-now (deliberately off --red-500's hue, ~340° vs 0°, so a
+       temporal "streaming now" state never reads as the "something failed" red). */
+    --rose-500: #ff3d78;
+
+    /* ======================================================================
+       TIER 2 — SEMANTIC ALIASES. What every component references. Re-point a
+       role at a different ramp step here and the whole app follows.
+       ====================================================================== */
+
     /* Surfaces, back to front — a 3-step elevation staircase (docs/UX-REWORK-PLAN.md §U-b item 1):
        L0 `--bg` is the page canvas; L1 `--panel` is a bordered panel/card sitting on it; L2
        `--panel-raised` is a surface nested *inside* an L1 panel (a form control, a popover/menu, a
        skeleton block) — each step is background-lightness only, no elevation ever comes from a
-       shadow (see `.card`/the Panels note below). `--panel-hover` is deliberately *not* a fourth
-       elevation step: audited every call site (vision-web/MODULE.md's own U-b entry has the count)
-       and every single one pairs it with a `:hover` selector — it is the interaction-feedback tint
-       a panel/row tints to on hover, at any elevation, not a place a page ever sits at rest. */
-    --bg: #0b0e13;
-    --panel: #141922;
-    --panel-raised: #1a212c;
-    --panel-hover: #1e2632;
-    --border: #232b36;
-    --border-strong: #323d4c;
+       shadow. `--panel-hover` is not a fourth elevation step: it is the interaction-feedback tint a
+       panel/row tints to on `:hover`, at any elevation, not a place a page ever sits at rest. */
+    --bg: var(--gray-950);
+    --panel: var(--gray-900);
+    --panel-raised: var(--gray-850);
+    --panel-hover: var(--gray-800);
+    --border: var(--gray-700);
+    --border-strong: var(--gray-600);
 
-    /* Text — three-tier hierarchy: full-contrast body text, a muted secondary tier, and a faint
-       tertiary tier for captions/timestamps/disabled reasons. `--text-faint` was bumped from
-       `#5f6b7c` (docs/UX-REWORK-PLAN.md §U-b item 7, contrast audit): its WCAG contrast ratio — an
-       accessible proxy for the APCA check this item asked for — measured ~3.3:1 against `--panel`
-       and ~3.6:1 against `--bg`, below the ~4.5:1 a small caption should clear; `#788496` measures
-       ~4.3:1 / ~4.7:1 against the same two surfaces while staying visibly the dimmest tier below
-       `--text-muted` (~6:1 against both, unchanged, already solid). */
-    --text: #e7ecf3;
-    --text-muted: #8d99ab;
-    --text-faint: #788496;
+    /* Text — three-tier hierarchy: full-contrast body, a muted secondary tier, and a faint tertiary
+       tier for captions/timestamps/disabled reasons (contrast-audited, docs/UX-REWORK-PLAN.md
+       §U-b item 7). */
+    --text: var(--gray-100);
+    --text-muted: var(--gray-300);
+    --text-faint: var(--gray-400);
 
-    /* Intent — audited for exactly one saturated accent (docs/UX-REWORK-PLAN.md §U-b item 2):
-       `--accent` is the only hue used for primary action/selection/focus anywhere in this app (no
-       stray second blue/violet found in a full sweep of every component stylesheet); `--ok`/
-       `--warn`/`--danger` sit at mutually-distinct hues (green/amber/red) and away from the
-       accent's blue. `--live` was moved off `--danger`'s exact hue: both used to read as "the same
-       red" (`#ff4d6a` vs `#ff5d5d`, ~10° apart) even though they mean different things — `--live`
-       is a *temporal* "this is happening right now" state (a streaming tally dot, a still-open
-       detection event), `--danger` means "something failed". Convention keeps both in the warm/red
-       family on purpose (a green/amber "live" light would be a stranger convention than a red one
-       for a camera system), so the fix is a bigger hue separation within that family — `--live` now
-       sits at a rose/magenta ~340°, `--danger` stays at coral-red 0° — rather than a hue swap out
-       of the red family entirely. Neither is ever the *only* carrier of its meaning: every
-       live/open-vs-closed dot this app renders is already paired with a text label (QF-3's
-       legibility pass — "Streaming" chip, `OPEN`/`CLOSED` state chip), so this is a visual
-       distinctness pass, not the accessibility fix itself. */
-    --accent: #4f8cff;
-    --accent-soft: #16264a;
-    --accent-text: #04101f;
-    --ok: #37c977;
-    --ok-soft: #10301f;
-    --warn: #ffb340;
-    --warn-soft: #33260c;
-    --danger: #ff5d5d;
-    --danger-soft: #331419;
-    --live: #ff3d78;
+    /* Intent — exactly one saturated accent hue (blue) for action/selection/focus; success/warn/
+       danger at mutually-distinct hues; live off danger's hue (see --rose-500). Each role carries a
+       base, a `-soft` fill, and (where used) a light `-text`/`-line` for banners and an `-on-*` ink
+       for text painted on the saturated fill. */
+    --color-info: var(--blue-500);
+    --color-info-soft: var(--blue-900);
+    --color-info-text: var(--blue-100);
+    --color-on-info: var(--blue-ink);
+    --color-success: var(--green-500);
+    --color-success-soft: var(--green-900);
+    --color-success-line: var(--green-800);
+    --color-success-text: var(--green-200);
+    --color-warn: var(--amber-500);
+    --color-warn-soft: var(--amber-900);
+    --color-warn-line: var(--amber-800);
+    --color-warn-text: var(--amber-200);
+    --color-danger: var(--red-500);
+    --color-danger-soft: var(--red-900);
+    --color-danger-line: var(--red-800);
+    --color-danger-text: var(--red-200);
+    --color-on-danger: var(--red-ink);
+    --color-live: var(--rose-500);
 
-    /* Geometry — `--radius` dropped from 10px (docs/UX-REWORK-PLAN.md §U-b item 1: "10px reads
-       generic-SaaS"); `--radius-sm` scaled down with it, same ~0.6 ratio as before. Pills
-       (`--radius-pill`, status chips/badges) are a deliberately different geometry, not part of
-       this audit — a pill shape isn't the "rounded card" tell the plan flags. */
+    /* Geometry — not part of the 8px spacing rule (radius/hairlines are geometry, not gaps). Stay
+       in px. `--radius` at 5px (docs/UX-REWORK-PLAN.md §U-b item 1); pills are a deliberately
+       different shape. */
     --radius: 5px;
     --radius-sm: 3px;
     --radius-pill: 999px;
 
-    /* Type — `--mono` now leads with B612 Mono (see the `@font-face` pair above), the existing
-       stack demoted to its fallback. Every existing `.mono`-classed/`var(--mono)` consumer (ids,
-       timestamps, the OSD, the player's latency badge, Fly's cockpit HUD) picks this up with no
-       template changes. */
+    /* Type — 2 families only (docs/STYLE-TOKENS-PLAN.md rule 2). `--font` for UI/display text,
+       `--mono` (B612 Mono, avionics numerals) for telemetry/ids/timestamps. Every `font-family` in
+       the app resolves to one of these two — do not add a third. */
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: "B612 Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, monospace;
 
-    /* Depth — `--shadow` is reserved for true overlays only (menus, dialogs, toasts): kebab/tab-more
-       menus, `flight-plan-dialog`, the toast host, the map inset's fullscreen `.expanded` state, and
-       Fly's `hud-confirm`/`hud-shortcuts` modals (docs/UX-REWORK-PLAN.md §U-b item 1). `.card` and
-       every panel/tile stylesheet in this app were audited and carry no box-shadow. */
+    /* Depth — `--shadow` is reserved for true overlays only (menus, dialogs, toasts). `.card` and
+       every panel/tile in this app carry no box-shadow. */
     --shadow: 0 6px 24px rgb(0 0 0 / 45%);
+
+    /* ======================================================================
+       SPACING — strict 8px grid, in rem (root = 16px, so 0.5rem = 8px).
+       Token name = the pixel value. All gaps/paddings/margins use these; 2px
+       and 4px are the only sub-8 exceptions (docs/STYLE-TOKENS-PLAN.md rule 4).
+       ====================================================================== */
+    --space-2: 0.125rem;  /* 2px  — tight exception (icon nudge, hairline inset) */
+    --space-4: 0.25rem;   /* 4px  — tight exception (chip inner, dot gap) */
+    --space-8: 0.5rem;    /* 8px */
+    --space-16: 1rem;     /* 16px */
+    --space-24: 1.5rem;   /* 24px */
+    --space-32: 2rem;     /* 32px */
+    --space-40: 2.5rem;   /* 40px */
+    --space-48: 3rem;     /* 48px */
+    --space-64: 4rem;     /* 64px */
+
     --header-height: 52px;
 }
 
@@ -165,12 +225,12 @@ h3 {
 }
 
 a {
-    color: var(--accent);
+    color: var(--color-info);
     text-decoration: none;
 }
 
 :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--color-info);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
 }
@@ -180,20 +240,20 @@ a {
 .page {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 1.5rem 1.25rem 4rem;
+    padding: var(--space-24) var(--space-24) var(--space-64);
 }
 
 .page-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1.25rem;
+    gap: var(--space-16);
+    margin-bottom: var(--space-24);
     flex-wrap: wrap;
 }
 
 .page-head p {
-    margin: 0.2rem 0 0;
+    margin: var(--space-4) 0 0;
     color: var(--text-muted);
     font-size: 0.85rem;
     max-width: 62ch;
@@ -203,29 +263,29 @@ a {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 1rem 1.15rem;
-    margin-bottom: 1rem;
+    padding: var(--space-16);
+    margin-bottom: var(--space-16);
 }
 
 .card > header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.85rem;
+    gap: var(--space-16);
+    margin-bottom: var(--space-16);
 }
 
 .row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-8);
 }
 
 .spread {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-16);
 }
 
 /* ---- Text helpers ------------------------------------------------------- */
@@ -259,7 +319,7 @@ a {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-muted);
-    margin-bottom: 0.3rem;
+    margin-bottom: var(--space-4);
 }
 
 /* ---- Controls ----------------------------------------------------------- */
@@ -285,22 +345,22 @@ textarea {
     color: var(--text);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    padding: 0.45rem 0.55rem;
+    padding: var(--space-8);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 input:hover,
 select:hover,
 textarea:hover {
-    border-color: var(--accent);
+    border-color: var(--color-info);
 }
 
 input:focus,
 select:focus,
 textarea:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-soft);
+    border-color: var(--color-info);
+    box-shadow: 0 0 0 2px var(--color-info-soft);
 }
 
 input:disabled,
@@ -331,24 +391,24 @@ input[type="range"] {
     padding: 0;
     background: none;
     border: none;
-    accent-color: var(--accent);
+    accent-color: var(--color-info);
 }
 
 input[type="checkbox"] {
     width: auto;
-    accent-color: var(--accent);
+    accent-color: var(--color-info);
 }
 
 .btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     cursor: pointer;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    padding: 0.45rem 0.85rem;
-    background: var(--accent);
-    color: var(--accent-text);
+    padding: var(--space-8) var(--space-16);
+    background: var(--color-info);
+    color: var(--color-on-info);
     font-weight: 600;
     font-size: 0.85rem;
     white-space: nowrap;
@@ -372,17 +432,17 @@ input[type="checkbox"] {
 
 .btn.danger {
     background: transparent;
-    border-color: var(--danger);
-    color: var(--danger);
+    border-color: var(--color-danger);
+    color: var(--color-danger);
     font-weight: 500;
 }
 
 .btn.danger:hover:not(:disabled) {
-    background: var(--danger-soft);
+    background: var(--color-danger-soft);
 }
 
 .btn.small {
-    padding: 0.3rem 0.6rem;
+    padding: var(--space-4) var(--space-8);
     font-size: 0.78rem;
 }
 
@@ -433,9 +493,9 @@ input[type="checkbox"] {
 }
 
 .segmented > .btn.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-text);
+    background: var(--color-info);
+    border-color: var(--color-info);
+    color: var(--color-on-info);
 }
 
 /* ---- Kebab (⋯) menus ------------------------------------------------------ */
@@ -494,12 +554,12 @@ input[type="checkbox"] {
     position: absolute;
     top: 100%;
     right: 0;
-    margin-top: 0.3rem;
+    margin-top: var(--space-4);
     min-width: 11rem;
-    padding: 0.35rem;
+    padding: var(--space-8);
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--space-2);
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -513,7 +573,7 @@ input[type="checkbox"] {
     text-align: left;
     background: none;
     border: none;
-    padding: 0.4rem 0.6rem;
+    padding: var(--space-8);
     border-radius: var(--radius-sm);
     color: var(--text);
     font-size: 0.82rem;
@@ -537,7 +597,7 @@ input[type="checkbox"] {
 
 .kebab-divider {
     height: 1px;
-    margin: 0.3rem 0.2rem;
+    margin: var(--space-4);
     background: var(--border);
 }
 
@@ -545,7 +605,7 @@ input[type="checkbox"] {
    scoped for a kebab row specifically since a menu item is narrower than a page-level control. */
 .kebab-reason {
     display: block;
-    padding: 0 0.6rem 0.3rem;
+    padding: 0 var(--space-8) var(--space-4);
     font-size: 0.7rem;
     color: var(--text-faint);
 }
@@ -564,7 +624,7 @@ input[type="checkbox"] {
 .kebab-menu button.danger-action,
 .btn.danger-action,
 button.danger-action {
-    color: var(--danger);
+    color: var(--color-danger);
 }
 
 .danger-action svg,
@@ -574,7 +634,7 @@ button.danger-action {
 
 .danger-action:hover:not(:disabled),
 .kebab-menu .danger-action:hover:not(:disabled) {
-    background: var(--danger-soft);
+    background: var(--color-danger-soft);
 }
 
 /* Poka-yoke (docs/UX-REWORK-PLAN.md U-a2 rule 1: prevention over confirmation) — the one-line
@@ -583,7 +643,7 @@ button.danger-action {
    (or a `<span>`) right after the control it explains. */
 .disabled-reason {
     display: block;
-    margin-top: 0.3rem;
+    margin-top: var(--space-4);
     font-size: 0.72rem;
     color: var(--text-faint);
 }
@@ -593,8 +653,8 @@ button.danger-action {
 .chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.1rem 0.5rem;
+    gap: var(--space-4);
+    padding: var(--space-2) var(--space-8);
     border-radius: var(--radius-pill);
     background: var(--panel-raised);
     border: 1px solid var(--border);
@@ -610,53 +670,89 @@ button.danger-action {
 }
 
 .chip.accent {
-    background: var(--accent-soft);
+    background: var(--color-info-soft);
     border-color: transparent;
-    color: #a9c8ff;
+    color: var(--color-info-text);
 }
 
 .chip.ok {
-    background: var(--ok-soft);
+    background: var(--color-success-soft);
     border-color: transparent;
-    color: #8ce7b4;
+    color: var(--color-success-text);
 }
 
 .chip.warn {
-    background: var(--warn-soft);
+    background: var(--color-warn-soft);
     border-color: transparent;
-    color: var(--warn);
+    color: var(--color-warn);
 }
 
 .chip.danger {
-    background: var(--danger-soft);
+    background: var(--color-danger-soft);
     border-color: transparent;
-    color: #ff9a9a;
+    color: var(--color-danger-text);
 }
 
 .dot {
-    width: 7px;
-    height: 7px;
+    width: var(--space-8);
+    height: var(--space-8);
     border-radius: 50%;
     background: var(--text-faint);
     flex: none;
 }
 
 .dot.live {
-    background: var(--live);
+    background: var(--color-live);
     animation: pulse 2s ease-in-out infinite;
 }
 
 .dot.ok {
-    background: var(--ok);
+    background: var(--color-success);
 }
 
 .dot.danger {
-    background: var(--danger);
+    background: var(--color-danger);
 }
 
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
+}
+
+/* ---- Notice banners ----------------------------------------------------- */
+/* The attention-banner pattern (light warm/red text on a matching dark line) that was copy-pasted
+   across app.css, wall.css, command.css, fly.css, live.css, onboarding.css, toast-host.ts and
+   player.ts (docs/STYLE-TOKENS-PLAN.md §Shared primitives). Base `.notice` is neutral; add
+   `.warn`/`.danger` for the intent. Consumers drop `<div class="notice warn">…</div>` — no
+   per-feature color literals. */
+.notice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    padding: var(--space-8) var(--space-16);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.notice.warn {
+    border-color: var(--color-warn-line);
+    color: var(--color-warn-text);
+    background: var(--color-warn-soft);
+}
+
+.notice.danger {
+    border-color: var(--color-danger-line);
+    color: var(--color-danger-text);
+    background: var(--color-danger-soft);
+}
+
+.notice.ok {
+    border-color: var(--color-success-line);
+    color: var(--color-success-text);
+    background: var(--color-success-soft);
 }
 
 /* ---- Tables ------------------------------------------------------------- */
@@ -669,7 +765,7 @@ table {
 
 th {
     text-align: left;
-    padding: 0.4rem 0.5rem;
+    padding: var(--space-8);
     color: var(--text-muted);
     font-weight: 500;
     font-size: 0.7rem;
@@ -679,7 +775,7 @@ th {
 }
 
 td {
-    padding: 0.55rem 0.5rem;
+    padding: var(--space-8);
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
 }
@@ -692,17 +788,17 @@ tbody tr:last-child td {
 
 .empty {
     text-align: center;
-    padding: 2.5rem 1rem;
+    padding: var(--space-40) var(--space-16);
     color: var(--text-muted);
 }
 
 .empty h3 {
     color: var(--text);
-    margin-bottom: 0.35rem;
+    margin-bottom: var(--space-8);
 }
 
 .empty p {
-    margin: 0 auto 1rem;
+    margin: 0 auto var(--space-16);
     max-width: 46ch;
     font-size: 0.85rem;
 }
@@ -722,13 +818,17 @@ tbody tr:last-child td {
    (U-a2 audit finding). Theme the popup box itself to match the app. */
 .leaflet-popup-content-wrapper,
 .leaflet-popup-tip {
-  background: gray;
-  color: white;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+  background: var(--panel-raised);
+  color: var(--text);
+  box-shadow: var(--shadow);
 }
 
 .leaflet-popup-close-button {
-  color: blue;
+  color: var(--text-muted);
+}
+
+.leaflet-popup-close-button:hover {
+  color: var(--text);
 }
 
 /* ==========================================================================
@@ -741,17 +841,6 @@ tbody tr:last-child td {
    ========================================================================== */
 
 :root {
-  /* Spacing scale — 4px base, replacing this app's ad-hoc rem values one component at a time as
-     later waves touch them (this wave migrates none of the existing ad-hoc rem values itself). */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-  --space-8: 64px;
-
   /* Breakpoints — one reconciled set (was: shell 640 / asset 900 / cockpit 760,1280, per
      docs/UI-REDESIGN-PLAN.md's own "Current state" audit). Documented as custom properties for
      reference only — @media cannot read var(), so every stylesheet that needs one of these
@@ -774,6 +863,15 @@ tbody tr:last-child td {
   --hud-border: 1px solid rgb(255 255 255 / 9%);
   --hud-blur: 6px;
   --hud-blur-strong: 10px;
+
+  /* Scrims — black compositing washes over live video/map (gradient legends, label backings,
+     dimmers). Alpha-over-black is a compositing value, not a palette colour: prefer these two
+     canonical steps; a bespoke `rgb(0 0 0 / N%)` is acceptable only where a unique opacity is
+     genuinely needed (documented exception, docs/STYLE-TOKENS-PLAN.md §Geometry note). */
+  --scrim: rgb(0 0 0 / 55%);
+  --scrim-strong: rgb(0 0 0 / 70%);
+  /* Hairline tint — the faint white 1px edge used on surfaces floating over video/map. */
+  --hairline: rgb(255 255 255 / 12%);
 }
 
 /* Frosted-pill utilities (frozen names) — a HUD pill/button (`.surface-hud`) and a denser
@@ -797,7 +895,7 @@ tbody tr:last-child td {
 .grid12 {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-16);
 }
 
 .col-1 { grid-column: span 1; }

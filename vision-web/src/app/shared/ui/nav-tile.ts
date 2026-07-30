@@ -54,8 +54,8 @@ import type { IconName } from './icon-registry';
       display: flex;
       flex-direction: column;
       align-items: flex-start;
-      gap: var(--space-2);
-      padding: var(--space-4);
+      gap: var(--space-8);
+      padding: var(--space-16);
       background: var(--panel);
       /* Colour lives in the BORDER, not a fill: a subtly hue-tinted 1px frame with a bold pure-hue
          left bar. Card surface stays neutral so text contrast is untouched. */

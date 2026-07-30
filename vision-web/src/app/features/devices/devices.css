@@ -5,26 +5,26 @@
 .source {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     max-width: 26rem;
 }
 
 td.actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-8);
     justify-content: flex-end;
 }
 
 .hint {
     font-size: 0.8rem;
-    margin: 0 0 0.75rem;
+    margin: 0 0 var(--space-16);
 }
 
 .hint code {
     font-family: var(--mono);
     background: var(--bg);
-    padding: 0.05rem 0.3rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: 4px;
 }
 
@@ -34,8 +34,8 @@ td.actions {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--space-3);
-    margin-bottom: var(--space-3);
+    gap: var(--space-16);
+    margin-bottom: var(--space-16);
 }
 
 .device-search {
@@ -50,7 +50,7 @@ td.actions {
 /* ---- Warehouse (docs/CYCLES-PLAN.md §8) ---------------------------------- */
 
 .toggle {
-    gap: 0.4rem;
+    gap: var(--space-8);
     cursor: pointer;
 }
 
@@ -76,7 +76,7 @@ tr.archived,
 .inline-confirm {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-8);
     flex-wrap: wrap;
 }
 
@@ -109,14 +109,14 @@ tr.archived,
 .device-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
-    gap: var(--space-4);
+    gap: var(--space-16);
 }
 
 .device-card {
     display: flex;
     flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-4);
+    gap: var(--space-8);
+    padding: var(--space-16) var(--space-16);
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -131,7 +131,7 @@ tr.archived,
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: var(--space-2);
+    gap: var(--space-8);
 }
 
 .device-card-name {
@@ -141,7 +141,7 @@ tr.archived,
 .device-card-source {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     min-width: 0;
 }
 
@@ -149,7 +149,7 @@ tr.archived,
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-8);
 }
 
 .device-card-meta {
@@ -160,18 +160,18 @@ tr.archived,
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     margin-top: auto;
-    padding-top: var(--space-1);
+    padding-top: var(--space-4);
 }
 
 /* ---- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) - */
 
 .create-asset-panel .hint {
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-16);
 }
 
 .create-asset-panel .field {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-16);
     max-width: 24rem;
 }

@@ -9,6 +9,8 @@ import { describeHttpError } from '../../core/api-error';
 import { buildSyntheticRegisterRequest } from '../../core/fleet/simulation-logic';
 import { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 import { RESTORE_TARGET_STATE, operatorAssetActions, type ActionAvailability } from '../../core/fleet/warehouse-logic';
+import { KebabMenu } from '../../shared/ui/kebab-menu';
+import { EmptyState } from '../../shared/ui/empty-state';
 import type { AssetDetails } from '../../core/api/models';
 import {
   buildAssetListRows,
@@ -34,7 +36,7 @@ import {
  */
 @Component({
   selector: 'vision-assets',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, KebabMenu, EmptyState],
   templateUrl: './assets.html',
   styleUrl: './assets.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

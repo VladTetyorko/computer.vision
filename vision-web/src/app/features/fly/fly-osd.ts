@@ -190,7 +190,7 @@ import type { Transport } from '../../shared/player/player';
       flex-wrap: wrap;
       align-items: center;
       justify-content: center;
-      gap: var(--space-2) var(--space-3);
+      gap: var(--space-8) var(--space-16);
       pointer-events: none;
     }
 
@@ -198,8 +198,8 @@ import type { Transport } from '../../shared/player/player';
       pointer-events: auto;
       display: flex;
       flex-direction: column;
-      gap: 0.2rem;
-      padding: 0.3rem 0.6rem;
+      gap: var(--space-4);
+      padding: var(--space-4) var(--space-8);
       border-radius: var(--radius-sm);
       min-width: 5.25rem;
     }
@@ -209,22 +209,22 @@ import type { Transport } from '../../shared/player/player';
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.07em;
-      color: rgb(231 236 243 / 58%);
+      color: color-mix(in srgb, var(--text) 58%, transparent);
     }
 
     .osd-group-body {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 0.25rem 0.6rem;
+      gap: var(--space-4) var(--space-8);
     }
 
     .osd-metric {
       display: inline-flex;
       align-items: center;
-      gap: 0.28rem;
+      gap: var(--space-4);
       font-size: 0.78rem;
-      color: #e7ecf3;
+      color: var(--text);
       white-space: nowrap;
     }
 
@@ -235,32 +235,32 @@ import type { Transport } from '../../shared/player/player';
     }
 
     .osd-metric.dim {
-      color: rgb(231 236 243 / 78%);
+      color: color-mix(in srgb, var(--text) 78%, transparent);
     }
 
     .osd-metric.batt-low .v,
     .osd-metric.age-amber .v {
-      color: var(--warn);
+      color: var(--color-warn);
     }
 
     .osd-metric.batt-critical .v,
     .osd-metric.age-red .v {
-      color: #ff9a9a;
+      color: var(--color-danger-text);
     }
 
     .osd-metric.gps-warn .v {
-      color: var(--warn);
+      color: var(--color-warn);
     }
 
     .osd-metric.gps-critical .v {
-      color: #ff9a9a;
+      color: var(--color-danger-text);
     }
 
     /* Armed/disarmed are both routine states, not a severity tier (a mild green-ish tint, not the
        saturated --ok fill, so it doesn't compete with --live/--danger for attention) — disarmed is
        dimmed rather than colored at all, a grounded drone being the normal, safe state. */
     .osd-metric.armed .v {
-      color: #8ce7b4;
+      color: var(--color-success-text);
     }
 
     .osd-metric.disarmed {
@@ -278,19 +278,19 @@ import type { Transport } from '../../shared/player/player';
       align-self: center;
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
-      padding: 0.3rem 0.55rem;
+      gap: var(--space-4);
+      padding: var(--space-4) var(--space-8);
       border-radius: var(--radius-pill);
       background: none;
       border: var(--hud-border);
-      color: rgb(231 236 243 / 70%);
+      color: color-mix(in srgb, var(--text) 70%, transparent);
       font-size: 0.7rem;
       cursor: pointer;
     }
 
     .osd-group-toggle:hover {
       background: var(--hud-bg);
-      color: #e7ecf3;
+      color: var(--text);
     }
   `,
 })

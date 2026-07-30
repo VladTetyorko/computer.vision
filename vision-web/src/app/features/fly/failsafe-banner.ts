@@ -44,8 +44,8 @@ import { Icon } from '../../shared/ui/icon';
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      padding: 0.5rem 1rem;
+      gap: var(--space-8);
+      padding: var(--space-8) var(--space-16);
       text-align: center;
       font-family: var(--mono);
       font-weight: 700;
@@ -59,18 +59,18 @@ import { Icon } from '../../shared/ui/icon';
        advisory amber on the --danger family, but as a muted, low-saturation tinted bar (identical
        pairing to styles.css's own .chip.danger) rather than a solid alarming fill. */
     .banner-failsafe {
-      background: var(--danger-soft);
-      color: #ff9a9a;
-      border-left-color: var(--danger);
+      background: var(--color-danger-soft);
+      color: var(--color-danger-text);
+      border-left-color: var(--color-danger);
     }
 
     /* Advisory, not an emergency — this app's ordinary caution family (identical pairing to
        styles.css's own .chip.warn), same tinted-bar-plus-accent treatment as failsafe above. */
     .banner-rth,
     .banner-landing {
-      background: var(--warn-soft);
-      color: var(--warn);
-      border-left-color: var(--warn);
+      background: var(--color-warn-soft);
+      color: var(--color-warn);
+      border-left-color: var(--color-warn);
     }
   `,
 })

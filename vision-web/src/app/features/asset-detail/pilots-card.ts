@@ -7,6 +7,7 @@ import { ToastService } from '../../core/toast.service';
 import { AuthStore } from '../../core/auth/auth-store';
 import { canManageOrg } from '../../core/org/org-logic';
 import { SectionHeader } from '../../shared/ui/section-header';
+import { EmptyState } from '../../shared/ui/empty-state';
 import type { AssignedPilot, UserSummary } from '../../core/api/models';
 
 /** Stable per-file console tag, mirroring `[auth]`/`[fleet]`/`[org]`. */
@@ -35,7 +36,7 @@ const LOG_PREFIX = '[pilots]';
  */
 @Component({
   selector: 'vision-pilots-card',
-  imports: [FormsModule, SectionHeader],
+  imports: [FormsModule, SectionHeader, EmptyState],
   templateUrl: './pilots-card.html',
   styleUrl: './pilots-card.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -8,10 +8,12 @@ import { resolveEventTarget, resolveReplayDeepLink } from '../../core/events/eve
 import type { DetectionEvent } from '../../core/api/models';
 import { WallTile } from './wall-tile';
 import { EventsRail } from '../../shared/ui/events-rail';
+import { Notice } from '../../shared/ui/notice';
+import { EmptyState } from '../../shared/ui/empty-state';
 
 @Component({
   selector: 'vision-wall',
-  imports: [WallTile, RouterLink, EventsRail],
+  imports: [WallTile, RouterLink, EventsRail, Notice, EmptyState],
   templateUrl: './wall.html',
   styleUrl: './wall.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

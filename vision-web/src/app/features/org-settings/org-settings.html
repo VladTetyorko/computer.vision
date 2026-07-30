@@ -137,10 +137,7 @@
       @if (!org.loaded() && org.loading()) {
         <p class="muted">Loading…</p>
       } @else if (org.users().length === 0) {
-        <div class="empty">
-          <h3>No users yet</h3>
-          <p>Invite your first teammate with the form above.</p>
-        </div>
+        <vision-empty title="No users yet" message="Invite your first teammate with the form above." />
       } @else {
         <ul class="org-list">
           @for (user of org.users(); track user.userId) {
@@ -227,10 +224,7 @@
       @if (!org.loaded() && org.loading()) {
         <p class="muted">Loading…</p>
       } @else if (org.groups().length === 0) {
-        <div class="empty">
-          <h3>No groups yet</h3>
-          <p>Create your first group with the form above.</p>
-        </div>
+        <vision-empty title="No groups yet" message="Create your first group with the form above." />
       } @else {
         <ul class="org-tree">
           @for (node of flatGroups(); track node.group.id) {

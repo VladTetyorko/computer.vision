@@ -10,16 +10,14 @@
     @if (loading()) {
       <p class="muted">Loading…</p>
     } @else if (error(); as error) {
-      <div class="empty">
-        <h3>Couldn't load your activity</h3>
-        <p>{{ error }}</p>
+      <vision-empty title="Couldn't load your activity" [message]="error">
         <button type="button" class="btn secondary" (click)="load()">Try again</button>
-      </div>
+      </vision-empty>
     } @else if (rows().length === 0) {
-      <div class="empty">
-        <h3>Nothing here yet</h3>
-        <p>Your actions — creating an asset, renaming a device, archiving — will show up here.</p>
-      </div>
+      <vision-empty
+        title="Nothing here yet"
+        message="Your actions — creating an asset, renaming a device, archiving — will show up here."
+      />
     } @else {
       <ul class="activity-list">
         @for (row of rows(); track row.id) {

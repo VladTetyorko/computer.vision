@@ -8,10 +8,8 @@
   height: 100%;
   min-height: 420px;
   border-radius: var(--radius, 8px);
-  overflow: hidden;
-  /* Swapped harsh #0b0f14 for a softer, natural slate dark gray */
-  background: var(--bg-surface, #1e293b);
-  border: 1px solid var(--border, #334155);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
 }
 
 .map-host {
@@ -21,17 +19,17 @@
 
 .controls {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: var(--space-8);
+  right: var(--space-8);
   z-index: 1000; /* above Leaflet's own panes */
   display: flex;
-  gap: 0.35rem;
+  gap: var(--space-8);
 }
 
 /* The layer switcher sits opposite Recenter (docs/CYCLES-PLAN.md §9, CU-b item 6) — left rather
    than right, matching where CD (§11) plans to add this map's device-list/layer-control chrome. */
 .controls.layers {
-  left: 0.5rem;
+  left: var(--space-8);
   right: auto;
   flex-wrap: wrap;
   max-width: calc(100% - 1rem);
@@ -44,21 +42,20 @@
 }
 
 .controls .btn.active {
-  background: var(--accent, #3b82f6); /* Clean blue fallback */
-  color: var(--accent-text, #ffffff); /* Pure white text */
-  border-color: var(--accent, #3b82f6);
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
 }
 
 .badge {
   position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
+  left: var(--space-8);
+  bottom: var(--space-8);
   z-index: 1000;
-  padding: 0.2rem 0.55rem;
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill, 9999px);
-  /* Replaced harsh pure black with a softer, readable glass effect */
-  background: var(--panel-raised, rgb(30 41 59 / 85%));
-  color: var(--warn, #eab308); /* Natural yellow/orange warning */
+  background: var(--panel-raised);
+  color: var(--color-warn);
   font-size: 0.72rem;
   backdrop-filter: blur(4px);
 }
@@ -70,12 +67,12 @@
    which (unlike this component's scoped stylesheet) already applies everywhere unconditionally. */
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: var(--panel-raised, rgb(30 41 59 / 75%));
-  color: var(--text-faint, #94a3b8);
+  background: var(--panel-raised);
+  color: var(--text-faint);
 }
 
 :host ::ng-deep .leaflet-control-attribution a {
-  color: var(--text-muted, #cbd5e1);
+  color: var(--text-muted);
 }
 
 :host ::ng-deep .fleet-drone-marker .drone-arrow {
@@ -83,18 +80,17 @@
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-bottom: 15px solid var(--accent, #3b82f6);
+  border-bottom: 15px solid var(--color-info);
   transform-origin: 50% 60%;
-  /* Softened the drop shadow to look less stark against the map */
-  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 40%));
+  filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
 :host ::ng-deep .fleet-offline-marker .offline-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--text-faint, #94a3b8);
-  border: 2px solid var(--panel-raised, #1e293b);
+  background: var(--text-faint);
+  border: 2px solid var(--panel-raised);
   opacity: 0.85;
 }
 
@@ -102,32 +98,32 @@
   min-width: 160px;
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: var(--space-4);
   font-size: 0.8rem;
 }
 
 :host ::ng-deep .fleet-popup .popup-title {
   font-weight: 600;
-  color: var(--text, #f8fafc); /* Crisp off-white */
+  color: var(--text);
 }
 
 :host ::ng-deep .fleet-popup .popup-meta {
-  color: var(--text-muted, #cbd5e1); /* Light gray */
+  color: var(--text-muted);
   font-size: 0.72rem;
 }
 
 :host ::ng-deep .fleet-popup .popup-row {
   font-size: 0.78rem;
-  color: var(--text, #e2e8f0);
+  color: var(--text);
 }
 
 :host ::ng-deep .fleet-popup .popup-row.faint {
-  color: var(--text-faint, #94a3b8); /* Medium gray */
+  color: var(--text-faint);
 }
 
 :host ::ng-deep .fleet-popup .watch-btn,
 :host ::ng-deep .fleet-popup .preview-btn {
-  margin-top: 0.15rem;
+  margin-top: var(--space-2);
   width: 100%;
   justify-content: center;
 }
@@ -138,14 +134,13 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--warn, #f59e0b);
-  border: 2px solid var(--panel-raised, #1e293b);
-  /* Synced the glow ring with the amber warning color */
+  background: var(--color-warn);
+  border: 2px solid var(--panel-raised);
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
 }
 
 :host ::ng-deep .event-marker-open .event-marker-dot {
-  background: var(--live, #ef4444); /* Red pulse for active alerts */
+  background: var(--color-live);
   animation: event-marker-pulse 2s ease-in-out infinite;
 }
 
@@ -155,7 +150,7 @@
 }
 
 :host ::ng-deep .event-popup .event-asset-btn {
-  margin-top: 0.15rem;
+  margin-top: var(--space-2);
   width: 100%;
   justify-content: center;
 }
@@ -163,11 +158,11 @@
 /* ---- Geofence zones (docs/OPS-CORE-PLAN.md §G-c) — the permanent center label naming each zone --- */
 
 :host ::ng-deep .zone-label {
-  background: var(--panel-raised, rgb(30 41 59 / 85%));
-  border: 1px solid var(--border, #334155);
-  color: var(--text, #e2e8f0);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
   font-size: 0.7rem;
-  padding: 0.1rem 0.4rem;
+  padding: var(--space-2) var(--space-8);
   box-shadow: none;
 }
 

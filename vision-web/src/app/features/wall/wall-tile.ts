@@ -112,12 +112,12 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
       align-items: center;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 0.3rem 0.5rem;
-      padding: 0.45rem 0.6rem;
+      gap: var(--space-4) var(--space-8);
+      padding: var(--space-8);
     }
 
     .chips {
-      gap: 0.3rem;
+      gap: var(--space-4);
     }
 
     .name {
@@ -135,8 +135,8 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
     }
 
     .telemetry-chip.stale {
-      color: var(--danger);
-      border-color: var(--danger);
+      color: var(--color-danger);
+      border-color: var(--color-danger);
     }
 
     .mode-chip {
@@ -149,15 +149,15 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
     /* --live red is reserved for exactly this — a genuine failsafe (see styles.css's own token
        doc comment) — never the generic .telemetry-chip.stale's --danger. */
     .mode-chip.failsafe {
-      color: var(--live);
-      border-color: var(--live);
+      color: var(--color-live);
+      border-color: var(--color-live);
     }
 
     /* Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
        own default to fit alongside the telemetry chip and boxes toggle at wall-tile scale. */
     .watch-link {
       font-size: 0.72rem;
-      padding: 0.2rem 0.5rem;
+      padding: var(--space-4) var(--space-8);
     }
 
     .boxes-btn {
@@ -168,7 +168,7 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
       color: var(--text-faint);
       font-size: 0.7rem;
       line-height: 1;
-      padding: 0.15rem 0.35rem;
+      padding: var(--space-2) var(--space-8);
     }
 
     .boxes-btn:hover {

@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { formatActivity } from '../../core/org/org-logic';
+import { EmptyState } from '../../shared/ui/empty-state';
 import type { AuditEntry } from '../../core/api/models';
 
 /** How many recent entries to request — the backend caps at 500; 100 is plenty for a "recent activity" read. */
@@ -21,6 +22,7 @@ const ACTIVITY_LIMIT = 100;
  */
 @Component({
   selector: 'vision-activity',
+  imports: [EmptyState],
   templateUrl: './activity.html',
   styleUrl: './activity.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

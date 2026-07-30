@@ -9,8 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  background: rgb(4 6 10 / 72%);
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
   backdrop-filter: blur(2px);
 }
 
@@ -22,21 +22,21 @@
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 1.15rem 1.25rem;
+  padding: var(--space-16) var(--space-24);
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--space-16);
 }
 
 .dialog-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-16);
 }
 
 .dialog-head h2 {
-  margin: 0 0 0.2rem;
+  margin: 0 0 var(--space-4);
   font-size: 1.05rem;
 }
 
@@ -47,7 +47,7 @@
 .dialog-body {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 1rem;
+  gap: var(--space-16);
 }
 
 @media (max-width: 760px) {
@@ -62,7 +62,7 @@
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: 1px solid var(--border);
-  background: #0b0f14;
+  background: var(--bg);
 }
 
 .map-host {
@@ -73,32 +73,32 @@
 
 .tiles-warning {
   position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
+  left: var(--space-8);
+  bottom: var(--space-8);
   z-index: 1000;
-  padding: 0.2rem 0.55rem;
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: rgb(0 0 0 / 60%);
-  color: var(--warn);
+  background: color-mix(in srgb, var(--black) 60%, transparent);
+  color: var(--color-warn);
   font-size: 0.7rem;
   backdrop-filter: blur(4px);
 }
 
 .controls.layers {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  left: 0.5rem;
+  top: var(--space-8);
+  right: var(--space-8);
+  left: var(--space-8);
   z-index: 1000; /* above Leaflet's own panes */
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: var(--space-8);
 }
 
 .controls .btn.active {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
 }
 
 .plan-pane {
@@ -108,11 +108,11 @@
 }
 
 .plan-pane .field {
-  margin-bottom: 0.7rem;
+  margin-bottom: var(--space-8);
 }
 
 .plan-pane h3 {
-  margin: 0.2rem 0 0.5rem;
+  margin: var(--space-4) 0 var(--space-8);
   font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -121,11 +121,11 @@
 
 .waypoint-list {
   list-style: none;
-  margin: 0 0 0.5rem;
+  margin: 0 0 var(--space-8);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-8);
   max-height: 14rem;
   overflow-y: auto;
 }
@@ -134,8 +134,8 @@
   display: grid;
   grid-template-columns: 1.4rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.3rem 0.4rem;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel-raised);
@@ -148,8 +148,8 @@
   width: 1.4rem;
   height: 1.4rem;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--color-info-soft);
+  color: var(--color-info);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -160,19 +160,19 @@
 }
 
 .advisory {
-  margin: 0.6rem 0 0;
-  padding: 0.45rem 0.6rem;
+  margin: var(--space-8) 0 0;
+  padding: var(--space-8);
   border-radius: var(--radius-sm);
-  background: var(--warn-soft);
-  color: var(--warn);
+  background: var(--color-warn-soft);
+  color: var(--color-warn);
   font-size: 0.8rem;
 }
 
 .dialog-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 0.6rem;
-  padding-top: 0.6rem;
+  gap: var(--space-8);
+  padding-top: var(--space-8);
   border-top: 1px solid var(--border);
 }
 
@@ -185,17 +185,17 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--color-info);
+  color: var(--color-on-info);
   font-size: 0.72rem;
   font-weight: 700;
-  border: 2px solid rgb(0 0 0 / 55%);
-  box-shadow: 0 0 0 2px rgb(255 255 255 / 15%);
+  border: 2px solid var(--scrim);
+  box-shadow: 0 0 0 2px var(--hairline);
   cursor: grab;
 }
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: rgb(0 0 0 / 55%);
+  background: var(--scrim);
   color: var(--text-faint);
 }
 

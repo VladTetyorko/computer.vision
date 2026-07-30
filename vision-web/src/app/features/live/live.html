@@ -38,10 +38,10 @@
         />
 
         @if (live() && !stream()?.viewUrl) {
-          <div class="notice">
+          <vision-notice variant="warn">
             The stream is running but the publisher returned no view URL. Start mediamtx
             (<code>docker compose up -d mediamtx</code>) and restart the stream.
-          </div>
+          </vision-notice>
         }
       </div>
 
@@ -208,13 +208,14 @@
       }
     </div>
   } @else {
-    <div class="card empty">
-      <h3>Unknown device</h3>
-      <p>
-        No device with id <span class="mono">{{ deviceId() }}</span> is registered. It may have
-        been removed, or the backend may be unreachable.
-      </p>
-      <a class="btn" routerLink="/devices">Back to Devices</a>
+    <div class="card">
+      <vision-empty title="Unknown device">
+        <p>
+          No device with id <span class="mono">{{ deviceId() }}</span> is registered. It may have
+          been removed, or the backend may be unreachable.
+        </p>
+        <a class="btn" routerLink="/devices">Back to Devices</a>
+      </vision-empty>
     </div>
   }
 </div>

@@ -38,7 +38,7 @@
     </label>
 
     @if (error(); as error) {
-      <p class="login-error" role="alert">{{ error }}</p>
+      <vision-notice variant="danger">{{ error }}</vision-notice>
     }
 
     <button type="submit" class="btn login-submit" [disabled]="!canSubmit()">

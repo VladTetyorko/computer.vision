@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { FlightPlanDialog } from '../../shared/map/fleet-plan-dialog/flight-plan-dialog';
+import { Notice } from '../../shared/ui/notice';
 import { OnboardingStore } from './onboarding-store';
 import { WIZARD_STEPS, type ConnectMethod, type WizardStep } from './onboarding-logic';
 import { isClaimedVehicle, vehicleDetailChips, type VehicleDetailChip } from './drone-scan-logic';
@@ -52,7 +53,7 @@ const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
  */
 @Component({
   selector: 'vision-onboarding',
-  imports: [FormsModule, RouterLink, FlightPlanDialog],
+  imports: [FormsModule, RouterLink, FlightPlanDialog, Notice],
   templateUrl: './onboarding.html',
   styleUrl: './onboarding.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

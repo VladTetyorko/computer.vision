@@ -24,7 +24,7 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (rows().length > 0) {
-      <div class="diagnostics">
+      <div class="diagnostics surface-hud-strong">
         <button
           type="button"
           class="diag-head"
@@ -50,11 +50,8 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
   styles: `
     .diagnostics {
       pointer-events: auto;
-      background: rgb(6 9 14 / 78%);
-      backdrop-filter: blur(6px);
-      border: 1px solid rgb(255 255 255 / 9%);
       border-radius: var(--radius);
-      padding: 0.6rem 0.75rem;
+      padding: var(--space-8) var(--space-16);
       width: 15rem;
     }
 
@@ -66,7 +63,7 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
       background: none;
       border: none;
       padding: 0;
-      margin: 0 0 0.4rem;
+      margin: 0 0 var(--space-8);
       cursor: pointer;
       color: inherit;
     }
@@ -76,11 +73,11 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
       font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      color: rgb(231 236 243 / 65%);
+      color: color-mix(in srgb, var(--text) 65%, transparent);
     }
 
     .chevron {
-      color: rgb(231 236 243 / 55%);
+      color: color-mix(in srgb, var(--text) 55%, transparent);
       transition: transform 0.15s ease;
       transform: rotate(-90deg);
     }
@@ -95,20 +92,20 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
       padding: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.3rem;
+      gap: var(--space-4);
     }
 
     li {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: 0.5rem;
+      gap: var(--space-8);
       font-size: 0.78rem;
-      color: #e7ecf3;
+      color: var(--text);
     }
 
     .label {
-      color: rgb(231 236 243 / 65%);
+      color: color-mix(in srgb, var(--text) 65%, transparent);
     }
 
     .value {
@@ -121,11 +118,11 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
        --warn amber for 'warn', --danger red for 'bad' — never --live, which this app reserves for a
        genuine failsafe (see FailsafeBanner's own doc comment). */
     .row-warn .value {
-      color: var(--warn);
+      color: var(--color-warn);
     }
 
     .row-bad .value {
-      color: var(--danger);
+      color: var(--color-danger);
     }
   `,
 })

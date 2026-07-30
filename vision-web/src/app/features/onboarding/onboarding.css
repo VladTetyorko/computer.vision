@@ -3,17 +3,17 @@
 .stepper {
     display: flex;
     list-style: none;
-    margin: 0 0 1rem;
+    margin: 0 0 var(--space-16);
     padding: 0;
-    gap: 0.5rem;
+    gap: var(--space-8);
 }
 
 .stepper-item {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     flex: 1;
-    padding: 0.5rem 0.7rem;
+    padding: var(--space-8) var(--space-8);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--panel);
@@ -27,8 +27,8 @@
 
 .stepper-item.active {
     color: var(--text);
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    border-color: var(--color-info);
+    background: var(--color-info-soft);
 }
 
 .stepper-index {
@@ -45,9 +45,9 @@
 }
 
 .stepper-item.active .stepper-index {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-text);
+    background: var(--color-info);
+    border-color: var(--color-info);
+    color: var(--color-on-info);
 }
 
 .stepper-label {
@@ -56,6 +56,8 @@
 }
 
 @media (max-width: 700px) {
+    /* bespoke breakpoint, narrower than --bp-sm (640px) — the stepper's numbered index alone still
+       fits comfortably below --bp-sm, so the text label is dropped only in this tighter band. */
     .stepper-label {
         display: none;
     }
@@ -64,31 +66,31 @@
 /* ---- Wizard card ---------------------------------------------------------------------------- */
 
 .wizard-card h2 {
-    margin-bottom: 0.3rem;
+    margin-bottom: var(--space-4);
 }
 
 .hint {
     font-size: 0.8rem;
-    margin: 0 0 0.75rem;
+    margin: 0 0 var(--space-16);
 }
 
 .hint code {
     font-family: var(--mono);
     background: var(--bg);
-    padding: 0.05rem 0.3rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: 4px;
 }
 
 .wizard-nav {
-    margin-top: 1.25rem;
-    padding-top: 1rem;
+    margin-top: var(--space-24);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
 /* ---- Form fields (this component's own copy — no page imports another's stylesheet) --------- */
 
 .field {
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-16);
 }
 
 .field.wide {
@@ -98,7 +100,7 @@
 .checkbox-field {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     flex-direction: row;
 }
 
@@ -110,7 +112,7 @@
 
 .photo-row {
     align-items: flex-start;
-    gap: 1rem;
+    gap: var(--space-16);
 }
 
 .photo-preview {
@@ -135,9 +137,11 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.4rem;
+    gap: var(--space-8);
 }
 
+/* The classic sr-only/visually-hidden clip-box hack: -1px/1px are exact geometry that cancels the
+   clip rect, not a design "spacing" choice — kept literal like a border-width, never snapped. */
 .visually-hidden {
     position: absolute;
     width: 1px;
@@ -155,33 +159,37 @@
 .method-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-16);
 }
 
 .method-tile {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.5rem;
+    gap: var(--space-8);
     text-align: left;
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 0.9rem 1rem;
+    padding: var(--space-16) var(--space-16);
     cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .method-tile:hover {
-    border-color: var(--accent);
+    border-color: var(--color-info);
     background: var(--panel-hover);
 }
 
+/* The `.method-glyph` family below draws small hand-tuned ring/dot icons inside a fixed 22px circle
+   via `::before`/`::after` `inset`. These pixel offsets are icon geometry (same bucket as the
+   circle's own border-width/border-radius, both kept literal), not layout spacing between elements
+   — snapping them to the 8px grid would visibly redraw each glyph's proportions, so they stay px. */
 .method-glyph {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    border: 2px solid var(--accent);
+    border: 2px solid var(--color-info);
     position: relative;
     flex: none;
 }
@@ -191,7 +199,7 @@
     position: absolute;
     inset: 6px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--color-info);
 }
 
 .glyph-discover {
@@ -203,7 +211,7 @@
     position: absolute;
     inset: 4px;
     border-radius: 50%;
-    border: 1px solid var(--accent);
+    border: 1px solid var(--color-info);
 }
 
 .glyph-simulate::after {
@@ -211,7 +219,7 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    border: 2px solid var(--accent);
+    border: 2px solid var(--color-info);
     transform: scale(0.55) rotate(45deg);
 }
 
@@ -223,7 +231,7 @@
     position: absolute;
     inset: 5px;
     border-radius: 50%;
-    border: 1px solid var(--accent);
+    border: 1px solid var(--color-info);
 }
 
 .glyph-listen::before {
@@ -231,7 +239,7 @@
     position: absolute;
     inset: 9px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--color-info);
 }
 
 /* "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — a quadcopter-arm cross, distinct from every
@@ -248,7 +256,7 @@
     position: absolute;
     inset: 3px 9px;
     border-radius: 2px;
-    background: var(--accent);
+    background: var(--color-info);
 }
 
 .glyph-drone::before {
@@ -271,19 +279,19 @@
 }
 
 .method-chosen-row {
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-16);
 }
 
 .back-btn {
-    padding: 0.3rem 0.55rem;
+    padding: var(--space-4) var(--space-8);
 }
 
 .register-form {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-    gap: 0.6rem;
+    gap: var(--space-8);
     align-items: end;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-8);
 }
 
 .register-form .field {
@@ -294,15 +302,15 @@
     grid-column: span 2;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px) { /* --bp-md */
     .register-form {
         grid-template-columns: 1fr 1fr;
     }
 }
 
 .advanced {
-    margin-top: 1rem;
-    padding-top: 0.85rem;
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
@@ -316,12 +324,12 @@
 .option-row {
     display: grid;
     grid-template-columns: 1fr 1fr auto;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: var(--space-8);
+    margin-bottom: var(--space-8);
 }
 
 .scan-row {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-16);
 }
 
 .scan-timeout select {
@@ -335,18 +343,8 @@
 td.actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-8);
     justify-content: flex-end;
-}
-
-.failed {
-    background: var(--danger-soft);
-    border: 1px solid #6b2530;
-    color: #ffb3bd;
-    border-radius: var(--radius-sm);
-    padding: 0.5rem 0.7rem;
-    font-size: 0.82rem;
-    margin-bottom: 0.75rem;
 }
 
 /* "Listen for drones" results (docs/DRONE-INFRA-PLAN.md I-b) — one row per heard vehicle, not the
@@ -358,15 +356,15 @@ td.actions {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-8);
 }
 
 .vehicle-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.6rem 0.75rem;
+    gap: var(--space-16);
+    padding: var(--space-8) var(--space-16);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--panel-raised);
@@ -381,7 +379,7 @@ td.actions {
 .vehicle-main {
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: var(--space-4);
     min-width: 0;
 }
 
@@ -393,14 +391,14 @@ td.actions {
 .vehicle-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: var(--space-4);
 }
 
 .vehicle-actions {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 0.2rem;
+    gap: var(--space-4);
 }
 
 .vehicle-actions .disabled-reason {
@@ -413,21 +411,21 @@ td.actions {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.35rem;
-    margin: 0.5rem 0 0.85rem;
+    gap: var(--space-4);
+    margin: var(--space-8) 0 var(--space-16);
 }
 
 .config-block {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--panel-raised);
-    padding: 0.75rem 0.9rem;
-    margin-bottom: 0.75rem;
+    padding: var(--space-16) var(--space-16);
+    margin-bottom: var(--space-16);
 }
 
 .config-body {
-    margin: 0.6rem 0 0;
-    padding: 0.6rem 0.7rem;
+    margin: var(--space-8) 0 0;
+    padding: var(--space-8) var(--space-8);
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -446,7 +444,7 @@ td.actions {
 .home-point-fallback {
     font-size: 0.82rem;
     color: var(--text-muted);
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-16);
 }
 
 .home-point-fallback summary {
@@ -454,13 +452,13 @@ td.actions {
 }
 
 .home-point-fallback .row {
-    margin-top: 0.6rem;
+    margin-top: var(--space-8);
 }
 
 /* ---- Step 3: Test (UX-DESIGN §5.1 "test-before-save") --------------------------------------- */
 
 .test-result {
-    margin-top: 0.75rem;
+    margin-top: var(--space-16);
 }
 
 .test-frame {
@@ -470,13 +468,13 @@ td.actions {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--bg);
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-16);
 }
 
 .warnings {
-    margin: 0.5rem 0 0;
-    padding-left: 1.1rem;
-    color: var(--warn);
+    margin: var(--space-8) 0 0;
+    padding-left: var(--space-16);
+    color: var(--color-warn);
     font-size: 0.82rem;
 }
 
@@ -486,8 +484,8 @@ td.actions {
 .facts {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem 1rem;
-    margin: 0 0 0.75rem;
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-16);
 }
 
 .fact dt {
@@ -498,7 +496,7 @@ td.actions {
 }
 
 .fact dd {
-    margin: 0.1rem 0 0;
+    margin: var(--space-2) 0 0;
     font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
 }
@@ -508,5 +506,5 @@ td.actions {
 .wizard-card .photo-preview {
     width: 8rem;
     height: 8rem;
-    margin-bottom: 0.85rem;
+    margin-bottom: var(--space-16);
 }

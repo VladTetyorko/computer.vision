@@ -41,7 +41,7 @@ import { RouterLink } from '@angular/router';
   styles: `
     .eyebrow {
       display: block;
-      margin-bottom: var(--space-2);
+      margin-bottom: var(--space-8);
     }
   `,
 })

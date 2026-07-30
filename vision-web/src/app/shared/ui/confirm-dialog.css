@@ -9,8 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  background: rgb(4 6 10 / 72%);
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
   backdrop-filter: blur(2px);
 }
 
@@ -20,7 +20,7 @@
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: var(--space-16);
 }
 
 .dialog p {

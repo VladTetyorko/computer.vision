@@ -44,17 +44,17 @@
 
 .bell-badge {
   position: absolute;
-  top: 0.05rem;
-  right: 0.05rem;
+  top: var(--space-2);
+  right: var(--space-2);
   min-width: 1rem;
   height: 1rem;
-  padding: 0 0.2rem;
+  padding: 0 var(--space-4);
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-pill);
-  background: var(--live);
-  color: #1a0410;
+  background: var(--color-live);
+  color: var(--color-on-danger);
   font-size: 0.62rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -70,7 +70,7 @@
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 0.4rem;
+  margin-top: var(--space-8);
   width: 22rem;
   max-width: calc(100vw - 2rem);
   max-height: 26rem;

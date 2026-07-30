@@ -7,7 +7,7 @@
   height: 220px;
   border-radius: var(--radius-sm);
   overflow: hidden;
-  background: #0b0f14;
+  background: var(--bg);
   border: 1px solid var(--border);
 }
 
@@ -15,7 +15,7 @@
    `invalidateSize()` in the component (see the `expanded` effect). */
 .map-shell.expanded {
   position: fixed;
-  inset: 4.5rem 1rem 1rem 1rem;
+  inset: var(--space-64) var(--space-16) var(--space-16) var(--space-16);
   height: auto;
   z-index: 40;
   box-shadow: var(--shadow);
@@ -28,18 +28,18 @@
 
 .controls {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: var(--space-8);
+  right: var(--space-8);
   z-index: 1000; /* above Leaflet's own panes */
   display: flex;
-  gap: 0.35rem;
+  gap: var(--space-8);
 }
 
 /* The layer switcher sits opposite the follow/expand controls (docs/CYCLES-PLAN.md §9, CU-b
    item 6) — left rather than right, matching the left-side layer control CD (§11) already plans
    to add device-list chrome next to. */
 .controls.layers {
-  left: 0.5rem;
+  left: var(--space-8);
   right: auto;
   flex-wrap: wrap;
   max-width: calc(100% - 1rem);
@@ -50,20 +50,20 @@
 }
 
 .controls .btn.active {
-  background: var(--accent);
-  color: var(--accent-text);
-  border-color: var(--accent);
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
 }
 
 .badge {
   position: absolute;
-  left: 0.5rem;
-  bottom: 0.5rem;
+  left: var(--space-8);
+  bottom: var(--space-8);
   z-index: 1000;
-  padding: 0.2rem 0.55rem;
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: rgb(0 0 0 / 60%);
-  color: var(--warn);
+  background: color-mix(in srgb, var(--black) 60%, transparent);
+  color: var(--color-warn);
   font-size: 0.72rem;
   backdrop-filter: blur(4px);
 }
@@ -73,7 +73,7 @@
    encapsulation never matches it without `::ng-deep` — see LiveMap's class doc. */
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: rgb(0 0 0 / 55%);
+  background: var(--scrim);
   color: var(--text-faint);
 }
 
@@ -86,25 +86,25 @@
   height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-bottom: 18px solid var(--accent);
+  border-bottom: 18px solid var(--color-info);
   transform-origin: 50% 60%;
-  filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
+  filter: drop-shadow(0 0 2px var(--scrim-strong));
 }
 
 :host ::ng-deep .flag-glyph {
   font-size: 16px;
   line-height: 1;
-  filter: drop-shadow(0 0 2px rgb(0 0 0 / 70%));
+  filter: drop-shadow(0 0 2px var(--scrim-strong));
 }
 
 /* ---- Geofence zones (docs/OPS-CORE-PLAN.md §G-c), read-only — mirrors fleet-map.css's own rule -- */
 
 :host ::ng-deep .zone-label {
-  background: rgb(0 0 0 / 65%);
+  background: color-mix(in srgb, var(--black) 65%, transparent);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 0.68rem;
-  padding: 0.1rem 0.35rem;
+  padding: var(--space-2) var(--space-8);
   box-shadow: none;
 }
 

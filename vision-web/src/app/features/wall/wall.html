@@ -18,22 +18,22 @@
   </div>
 
   @if (unwatchable() > 0) {
-    <div class="notice">
+    <vision-notice variant="warn">
       {{ unwatchable() }} stream(s) are running without a publisher URL — nothing to watch until
       mediamtx is reachable and <code>vision.publish.enabled</code> is true.
-    </div>
+    </vision-notice>
   }
 
   <div class="wall-layout">
     <div class="wall-main">
       @if (tiles().length === 0) {
-        <div class="card empty">
-          <h3>Nothing is streaming</h3>
-          <p>
-            Start a stream from the Devices tab and it appears here. With no hardware to hand, the
-            simulated source works end to end.
-          </p>
-          <a class="btn" routerLink="/devices">Go to Devices</a>
+        <div class="card">
+          <vision-empty
+            title="Nothing is streaming"
+            message="Start a stream from the Devices tab and it appears here. With no hardware to hand, the simulated source works end to end."
+          >
+            <a class="btn" routerLink="/devices">Go to Devices</a>
+          </vision-empty>
         </div>
       } @else {
         <div class="grid" [style.--columns]="settings.wallDensity()">

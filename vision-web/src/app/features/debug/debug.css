@@ -1,9 +1,9 @@
 .console-form {
     display: grid;
     grid-template-columns: 1.4fr 0.6fr 2fr;
-    gap: 0.6rem;
+    gap: var(--space-8);
     align-items: end;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-16);
 }
 
 .field.method select {
@@ -16,25 +16,25 @@
 }
 
 .response {
-    margin-top: 1rem;
-    padding-top: 0.85rem;
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
 .response-status {
-    margin-bottom: 0.6rem;
+    margin-bottom: var(--space-8);
 }
 
 .headers {
     flex-wrap: wrap;
-    margin-bottom: 0.6rem;
+    margin-bottom: var(--space-8);
 }
 
 .response-body {
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 0.7rem 0.85rem;
+    padding: var(--space-16);
     max-height: 24rem;
     overflow: auto;
     white-space: pre-wrap;
@@ -42,8 +42,8 @@
 }
 
 .history {
-    margin-top: 1rem;
-    padding-top: 0.85rem;
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
@@ -52,7 +52,7 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-size: 0.72rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-8);
 }
 
 .history-row {
@@ -65,17 +65,17 @@
 
 .health-list {
     list-style: none;
-    margin: 0 0 0.85rem;
+    margin: 0 0 var(--space-16);
     padding: 0;
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-8);
 }
 
 .health-list li {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.4rem 0.6rem;
+    padding: var(--space-8);
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -83,7 +83,7 @@
 }
 
 details {
-    margin-top: 0.5rem;
+    margin-top: var(--space-8);
 }
 
 summary {
@@ -93,17 +93,18 @@ summary {
 
 .hint {
     font-size: 0.8rem;
-    margin: 0 0 0.75rem;
+    margin: 0 0 var(--space-16);
 }
 
 .hint code {
     font-family: var(--mono);
     background: var(--bg);
-    padding: 0.05rem 0.3rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: 4px;
 }
 
 @media (max-width: 900px) {
+    /* --bp-md */
     .console-form {
         grid-template-columns: 1fr;
     }

@@ -62,7 +62,7 @@ interface WarehouseTile {
     h1 {
       display: flex;
       align-items: center;
-      gap: var(--space-2);
+      gap: var(--space-8);
     }
   `,
 })

@@ -22,20 +22,20 @@ import { ToastService, type ToastAction } from '../../core/toast.service';
   styles: `
     .toast-area {
       position: fixed;
-      bottom: 1rem;
-      right: 1rem;
+      bottom: var(--space-16);
+      right: var(--space-16);
       z-index: 100;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: var(--space-8);
       max-width: min(420px, calc(100vw - 2rem));
     }
 
     .toast {
       display: flex;
       align-items: flex-start;
-      gap: 0.6rem;
-      padding: 0.6rem 0.75rem;
+      gap: var(--space-8);
+      padding: var(--space-8) var(--space-16);
       border-radius: var(--radius-sm);
       border: 1px solid var(--border);
       background: var(--panel-raised);
@@ -45,15 +45,20 @@ import { ToastService, type ToastAction } from '../../core/toast.service';
     }
 
     .toast.error {
-      background: var(--danger-soft);
-      border-color: #6b2530;
-      color: #ffb3bd;
+      background: var(--color-danger-soft);
+      border-color: var(--color-danger-line);
+      color: var(--color-danger-text);
     }
 
+    /* No --color-success-line token exists in the frozen contract (success only has base/-soft/-text,
+       unlike warn/danger's base/-soft/-line/-text) — flagged in the STYLE-TOKENS-PLAN migration report
+       rather than inventing one here. The color property maps to the existing --color-success-text slot
+       (accepted drift-consolidation, same as the table's other near-duplicate-hex rows); border-color
+       stays a literal pending that token being added. */
     .toast.ok {
-      background: var(--ok-soft);
-      border-color: #1e5c3a;
-      color: #a8f0c6;
+      background: var(--color-success-soft);
+      border-color: var(--color-success-line);
+      color: var(--color-success-text);
     }
 
     /* docs/UX-REWORK-PLAN.md §U-c's own header-bell notification toasts (ToastService.notify) —
@@ -61,18 +66,18 @@ import { ToastService, type ToastAction } from '../../core/toast.service';
        accent" rule): this is neither a confirmation (.ok) nor a failure (.error), just "look at
        this", so it borrows the same accent every primary action/selection already uses. */
     .toast.notification {
-      background: var(--accent-soft);
-      border-color: var(--accent);
-      color: #a9c8ff;
+      background: var(--color-info-soft);
+      border-color: var(--color-info);
+      color: var(--color-info-text);
     }
 
     /* docs/DRONE-INFRA-PLAN.md I-e Stage 1's "Bring home" NO_ACK toast — sent, not acknowledged: a
        genuine amber (the app's existing --warn hue, same as .chip.warn), never .error's red (the
        command did go out) and never .ok's green (nothing was actually confirmed). */
     .toast.warning {
-      background: var(--warn-soft);
-      border-color: #6b4a12;
-      color: #ffd699;
+      background: var(--color-warn-soft);
+      border-color: var(--color-warn-line);
+      color: var(--color-warn-text);
     }
 
     button {

@@ -65,16 +65,16 @@
     </header>
 
     @if (warehouseRows().length === 0) {
-      <div class="empty">
-        @if (hasAnyDevices()) {
-          <h3>No devices match</h3>
-          <p>Nothing currently matches this search.</p>
+      @if (hasAnyDevices()) {
+        <vision-empty title="No devices match" message="Nothing currently matches this search.">
           <button type="button" class="btn secondary" (click)="clearSearch()">Clear search</button>
-        } @else {
-          <h3>No devices yet</h3>
-          <p>Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.</p>
-        }
-      </div>
+        </vision-empty>
+      } @else {
+        <vision-empty
+          title="No devices yet"
+          message='Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.'
+        />
+      }
     } @else if (viewMode() === 'list') {
       <table>
         <thead>
@@ -163,50 +163,47 @@
                 <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): rename/lifecycle/assign
                      actions, labeled verb+object, reasoned (§U-a2 item 3a) — destructive (Archive)
                      lives at the bottom, behind a divider, in danger-action. -->
-                <details class="kebab" #deviceKebab>
-                  <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + row.device.name">⋯</summary>
-                  <div class="kebab-menu" (click)="deviceKebab.open = false">
-                    @if (!row.archived && !row.owner) {
-                      <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+                <vision-kebab-menu [label]="'More actions for ' + row.device.name">
+                  @if (!row.archived && !row.owner) {
+                    <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+                  }
+                  @for (entry of deviceActionsFor(row); track entry.action) {
+                    @if (entry.action !== 'archive') {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                          [title]="entry.reason ?? ''"
+                          (click)="onDeviceAction(row, entry.action)"
+                        >
+                          {{ deviceActionLabel(entry.action) }}
+                        </button>
+                        @if (!entry.available && entry.reason) {
+                          <span class="kebab-reason">{{ entry.reason }}</span>
+                        }
+                      </div>
                     }
-                    @for (entry of deviceActionsFor(row); track entry.action) {
-                      @if (entry.action !== 'archive') {
-                        <div class="kebab-item">
-                          <button
-                            type="button"
-                            [disabled]="!entry.available || busyDeviceId() === row.device.id"
-                            [title]="entry.reason ?? ''"
-                            (click)="onDeviceAction(row, entry.action)"
-                          >
-                            {{ deviceActionLabel(entry.action) }}
-                          </button>
-                          @if (!entry.available && entry.reason) {
-                            <span class="kebab-reason">{{ entry.reason }}</span>
-                          }
-                        </div>
-                      }
+                  }
+                  <div class="kebab-divider" role="separator"></div>
+                  @for (entry of deviceActionsFor(row); track entry.action) {
+                    @if (entry.action === 'archive') {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          class="danger-action"
+                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                          [title]="entry.reason ?? ''"
+                          (click)="onDeviceAction(row, entry.action)"
+                        >
+                          {{ deviceActionLabel(entry.action) }}
+                        </button>
+                        @if (!entry.available && entry.reason) {
+                          <span class="kebab-reason">{{ entry.reason }}</span>
+                        }
+                      </div>
                     }
-                    <div class="kebab-divider" role="separator"></div>
-                    @for (entry of deviceActionsFor(row); track entry.action) {
-                      @if (entry.action === 'archive') {
-                        <div class="kebab-item">
-                          <button
-                            type="button"
-                            class="danger-action"
-                            [disabled]="!entry.available || busyDeviceId() === row.device.id"
-                            [title]="entry.reason ?? ''"
-                            (click)="onDeviceAction(row, entry.action)"
-                          >
-                            {{ deviceActionLabel(entry.action) }}
-                          </button>
-                          @if (!entry.available && entry.reason) {
-                            <span class="kebab-reason">{{ entry.reason }}</span>
-                          }
-                        </div>
-                      }
-                    }
-                  </div>
-                </details>
+                  }
+                </vision-kebab-menu>
               </td>
             </tr>
             @if (rowActionMode(row.device.id); as mode) {
@@ -273,50 +270,47 @@
                 <div class="name truncate" [title]="row.device.name">{{ row.device.name }}</div>
                 <div class="mono faint truncate">{{ row.device.id }}</div>
               </div>
-              <details class="kebab" #deviceGridKebab>
-                <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + row.device.name">⋯</summary>
-                <div class="kebab-menu" (click)="deviceGridKebab.open = false">
-                  @if (!row.archived && !row.owner) {
-                    <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+              <vision-kebab-menu [label]="'More actions for ' + row.device.name">
+                @if (!row.archived && !row.owner) {
+                  <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+                }
+                @for (entry of deviceActionsFor(row); track entry.action) {
+                  @if (entry.action !== 'archive') {
+                    <div class="kebab-item">
+                      <button
+                        type="button"
+                        [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                        [title]="entry.reason ?? ''"
+                        (click)="onDeviceAction(row, entry.action)"
+                      >
+                        {{ deviceActionLabel(entry.action) }}
+                      </button>
+                      @if (!entry.available && entry.reason) {
+                        <span class="kebab-reason">{{ entry.reason }}</span>
+                      }
+                    </div>
                   }
-                  @for (entry of deviceActionsFor(row); track entry.action) {
-                    @if (entry.action !== 'archive') {
-                      <div class="kebab-item">
-                        <button
-                          type="button"
-                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
-                          [title]="entry.reason ?? ''"
-                          (click)="onDeviceAction(row, entry.action)"
-                        >
-                          {{ deviceActionLabel(entry.action) }}
-                        </button>
-                        @if (!entry.available && entry.reason) {
-                          <span class="kebab-reason">{{ entry.reason }}</span>
-                        }
-                      </div>
-                    }
+                }
+                <div class="kebab-divider" role="separator"></div>
+                @for (entry of deviceActionsFor(row); track entry.action) {
+                  @if (entry.action === 'archive') {
+                    <div class="kebab-item">
+                      <button
+                        type="button"
+                        class="danger-action"
+                        [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                        [title]="entry.reason ?? ''"
+                        (click)="onDeviceAction(row, entry.action)"
+                      >
+                        {{ deviceActionLabel(entry.action) }}
+                      </button>
+                      @if (!entry.available && entry.reason) {
+                        <span class="kebab-reason">{{ entry.reason }}</span>
+                      }
+                    </div>
                   }
-                  <div class="kebab-divider" role="separator"></div>
-                  @for (entry of deviceActionsFor(row); track entry.action) {
-                    @if (entry.action === 'archive') {
-                      <div class="kebab-item">
-                        <button
-                          type="button"
-                          class="danger-action"
-                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
-                          [title]="entry.reason ?? ''"
-                          (click)="onDeviceAction(row, entry.action)"
-                        >
-                          {{ deviceActionLabel(entry.action) }}
-                        </button>
-                        @if (!entry.available && entry.reason) {
-                          <span class="kebab-reason">{{ entry.reason }}</span>
-                        }
-                      </div>
-                    }
-                  }
-                </div>
-              </details>
+                }
+              </vision-kebab-menu>
             </header>
 
             <div class="device-card-source">

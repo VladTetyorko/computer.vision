@@ -7,8 +7,8 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.85rem;
+  gap: var(--space-16);
+  padding: var(--space-16);
   overflow-y: auto;
 }
 
@@ -16,13 +16,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: var(--space-8);
 }
 
 .panel-title {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
+  gap: var(--space-8);
   min-width: 0;
 }
 
@@ -46,8 +46,8 @@
 .facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem 1rem;
-  margin: 0 0 0.5rem;
+  gap: var(--space-8) var(--space-16);
+  margin: 0 0 var(--space-8);
 }
 
 .fact dt {
@@ -58,35 +58,35 @@
 }
 
 .fact dd {
-  margin: 0.1rem 0 0;
+  margin: var(--space-2) 0 0;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
 }
 
 .stale-text {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 /* GPS fix severity (docs/FC-INTEGRATIONS-PLAN.md F-d) — kept distinct from `.stale-text` above:
    one primary signal color per severity, amber for a degraded-but-present fix, red only for
    no-fix/no-GPS (never for the plain '—' unknown state — see `asset-panel.html`'s own guard). */
 .gps-warn-text {
-  color: var(--warn);
+  color: var(--color-warn);
 }
 
 .gps-critical-text {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 /* Diagnostics rows (docs/FC-INTEGRATIONS-PLAN.md F-e) — same one-color-per-severity idiom as the
    GPS facts above, kept as its own pair rather than reusing `.gps-warn-text`/`.gps-critical-text`
    verbatim so a non-GPS row's class name doesn't read as GPS-specific. */
 .diag-warn-text {
-  color: var(--warn);
+  color: var(--color-warn);
 }
 
 .diag-bad-text {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .hint {
@@ -97,12 +97,12 @@
 .why-block {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-8);
 }
 
 .why-row {
   align-items: baseline;
-  gap: 0.5rem;
+  gap: var(--space-8);
 }
 
 .severity-chip {
@@ -130,6 +130,6 @@
    encapsulation to stretch three buttons uniformly. */
 .panel-actions {
   flex: none;
-  padding-top: 0.5rem;
+  padding-top: var(--space-8);
   border-top: 1px solid var(--border);
 }

@@ -46,12 +46,12 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      gap: var(--space-4);
-      margin-bottom: var(--space-4);
+      gap: var(--space-16);
+      margin-bottom: var(--space-16);
     }
 
     .section-head .label {
-      margin-bottom: var(--space-1);
+      margin-bottom: var(--space-4);
     }
 
     .section-head h2 {
@@ -59,7 +59,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
     }
 
     .section-head p {
-      margin: var(--space-1) 0 0;
+      margin: var(--space-4) 0 0;
       font-size: 0.85rem;
       max-width: 62ch;
     }
@@ -67,7 +67,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
     .section-head-actions {
       display: flex;
       align-items: center;
-      gap: var(--space-2);
+      gap: var(--space-8);
       flex-wrap: wrap;
       flex: none;
     }

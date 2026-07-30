@@ -31,7 +31,7 @@
   }
 
   @if (summaryError() && summary() === undefined) {
-    <div class="topbar-notice">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</div>
+    <vision-notice variant="warn">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</vision-notice>
   }
 
   <div class="command-body" [style.grid-template-columns]="gridColumns()">

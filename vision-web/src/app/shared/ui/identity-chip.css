@@ -13,10 +13,10 @@
 .identity-trigger {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--space-8);
   cursor: pointer;
   list-style: none;
-  padding: 0.15rem 0.5rem 0.15rem 0.15rem;
+  padding: var(--space-2) var(--space-8) var(--space-2) var(--space-2);
   border-radius: var(--radius-pill);
   min-height: 2rem;
 }
@@ -37,8 +37,8 @@
   height: 1.65rem;
   flex: none;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: #a9c8ff;
+  background: var(--color-info-soft);
+  color: var(--color-info-text);
   font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -59,12 +59,12 @@
   position: absolute;
   top: 100%;
   right: 0;
-  margin-top: 0.4rem;
+  margin-top: var(--space-8);
   min-width: 11rem;
-  padding: 0.6rem 0.7rem;
+  padding: var(--space-8) var(--space-16);
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-8);
   background: var(--panel-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -88,32 +88,32 @@
 .identity-links {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  margin: 0.35rem 0 0.15rem;
-  padding: 0.35rem 0;
+  gap: var(--space-2);
+  margin: var(--space-8) 0 var(--space-2);
+  padding: var(--space-8) 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 
 .identity-links a {
-  padding: 0.3rem 0.1rem;
+  padding: var(--space-4) var(--space-2);
   color: var(--text);
   font-size: 0.82rem;
   border-radius: var(--radius-sm);
 }
 
 .identity-links a:hover {
-  color: var(--accent);
+  color: var(--color-info);
 }
 
 .identity-logout {
   align-self: flex-start;
-  margin-top: 0.2rem;
+  margin-top: var(--space-4);
   min-height: 2rem;
-  padding: 0 0.1rem;
+  padding: 0 var(--space-2);
   background: none;
   border: none;
-  color: var(--danger);
+  color: var(--color-danger);
   font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
@@ -129,6 +129,7 @@
    breakpoint `app.css` already uses for the header's own responsive pass (`.brand-name` hides
    there too at this width). */
 @media (max-width: 640px) {
+  /* --bp-sm */
   .identity-name,
   .identity-role {
     display: none;

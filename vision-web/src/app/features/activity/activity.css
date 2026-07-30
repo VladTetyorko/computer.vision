@@ -8,11 +8,11 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: var(--space-8);
 }
 
 .activity-row {
-  padding: 0.65rem 0.8rem;
+  padding: var(--space-8) var(--space-16);
   background: var(--panel-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -21,7 +21,7 @@
 .activity-row-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-8);
   flex-wrap: wrap;
 }
 
@@ -46,9 +46,9 @@
 .activity-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem 0.9rem;
-  margin-top: 0.4rem;
-  padding-top: 0.4rem;
+  gap: var(--space-4) var(--space-16);
+  margin-top: var(--space-8);
+  padding-top: var(--space-8);
   border-top: 1px solid var(--border);
 }
 

@@ -325,7 +325,7 @@ interface DrawnBox {
   styles: `
     .frame {
       position: relative;
-      background: #000;
+      background: var(--black);
       border-radius: var(--radius-sm);
       overflow: hidden;
       aspect-ratio: 16 / 9;
@@ -353,11 +353,13 @@ interface DrawnBox {
     .box-tooltip {
       position: absolute;
       transform: translate(-50%, -100%);
-      background: rgb(0 0 0 / 80%);
-      color: #fff;
+      /* Nearest of the two canonical scrim steps (55%/70%) to the original 80% — a tooltip needs to
+         read clearly over any frame content, slightly denser than --scrim-strong's own 70%. */
+      background: var(--scrim-strong);
+      color: var(--white);
       font-size: 0.7rem;
       font-family: var(--mono);
-      padding: 0.15rem 0.4rem;
+      padding: var(--space-2) var(--space-8);
       border-radius: 4px;
       pointer-events: none;
       white-space: nowrap;
@@ -371,20 +373,23 @@ interface DrawnBox {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      padding: 1rem;
+      gap: var(--space-8);
+      padding: var(--space-16);
       text-align: center;
       font-size: 0.85rem;
       color: var(--text-muted);
-      background: linear-gradient(180deg, #0d1117 0%, #05070a 100%);
+      /* Neither gradient stop has its own crosswalk entry; both sit within a few rgb units of an
+         existing ramp step (#0d1117 ~= --bg's #0b0e13, #05070a is darker still, past even
+         --gray-950) so this consolidates onto --bg/--black rather than adding a new ramp shade. */
+      background: linear-gradient(180deg, var(--bg) 0%, var(--black) 100%);
     }
 
     .overlay-status.error {
-      color: #ffb3bd;
+      color: var(--color-danger-text);
     }
 
     .err-title {
-      color: var(--danger);
+      color: var(--color-danger);
       font-weight: 600;
     }
 
@@ -398,19 +403,19 @@ interface DrawnBox {
       /* Bottom-anchored: hosts (the Fly cockpit) overlay their own chrome along the frame's top
          edge, and a top-left badge bleeds through transparent gaps in that chrome. */
       position: absolute;
-      bottom: 0.5rem;
-      left: 0.5rem;
+      bottom: var(--space-8);
+      left: var(--space-8);
       display: flex;
       align-items: center;
-      gap: 0.35rem;
-      padding: 0.15rem 0.5rem;
+      gap: var(--space-8);
+      padding: var(--space-2) var(--space-8);
       border-radius: var(--radius-pill);
-      background: rgb(0 0 0 / 55%);
+      background: var(--scrim);
       backdrop-filter: blur(4px);
       font-size: 0.72rem;
       font-family: var(--mono);
       font-variant-numeric: tabular-nums;
-      color: #dfe6f0;
+      color: var(--text);
     }
 
     /* docs/OPS-CORE-PLAN.md §Q3b: only rendered once >=2 distinct models mix in the same frame — see
@@ -419,26 +424,26 @@ interface DrawnBox {
        overlay to dodge, so a fixed top corner is safe here). */
     .model-legend {
       position: absolute;
-      top: 0.5rem;
-      right: 0.5rem;
+      top: var(--space-8);
+      right: var(--space-8);
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 0.2rem;
+      gap: var(--space-4);
       pointer-events: none;
     }
 
     .legend-chip {
       display: flex;
       align-items: center;
-      gap: 0.3rem;
-      padding: 0.1rem 0.4rem;
+      gap: var(--space-4);
+      padding: var(--space-2) var(--space-8);
       border-radius: var(--radius-pill);
-      background: rgb(0 0 0 / 55%);
+      background: var(--scrim);
       backdrop-filter: blur(4px);
       font-size: 0.68rem;
       font-family: var(--mono);
-      color: #dfe6f0;
+      color: var(--text);
       white-space: nowrap;
     }
 
@@ -454,7 +459,7 @@ interface DrawnBox {
       height: 18px;
       border-radius: 50%;
       border: 2px solid var(--border-strong);
-      border-top-color: var(--accent);
+      border-top-color: var(--color-info);
       animation: spin 0.8s linear infinite;
     }
 

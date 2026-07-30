@@ -32,22 +32,27 @@ import { UndoToastService, type UndoToastState } from './undo-toast.service';
   styles: `
     .undo-toast-area {
       position: fixed;
-      bottom: 1rem;
-      left: 1rem;
+      bottom: var(--space-16);
+      left: var(--space-16);
       z-index: 100;
       max-width: min(420px, calc(100vw - 2rem));
     }
 
+    /* No --color-success-line token exists in the frozen contract (success only has base/-soft/-text,
+       unlike warn/danger's base/-soft/-line/-text) — flagged in the STYLE-TOKENS-PLAN migration report
+       rather than inventing one here. The color property maps to the existing --color-success-text slot
+       (accepted drift-consolidation, mirrors shared/ui/toast-host.ts's identical .toast.ok); the border
+       stays a literal pending that token being added. */
     .undo-toast {
       position: relative;
       display: flex;
       align-items: center;
-      gap: 0.6rem;
-      padding: 0.6rem 0.75rem;
+      gap: var(--space-8);
+      padding: var(--space-8) var(--space-16);
       border-radius: var(--radius-sm);
-      border: 1px solid #1e5c3a;
-      background: var(--ok-soft);
-      color: #a8f0c6;
+      border: 1px solid var(--color-success-line);
+      background: var(--color-success-soft);
+      color: var(--color-success-text);
       box-shadow: var(--shadow);
       font-size: 0.85rem;
       overflow: hidden;
@@ -87,7 +92,7 @@ import { UndoToastService, type UndoToastState } from './undo-toast.service';
       bottom: 0;
       height: 2px;
       width: 100%;
-      background: var(--ok);
+      background: var(--color-success);
       transform-origin: left;
       animation-name: shrink;
       animation-timing-function: linear;

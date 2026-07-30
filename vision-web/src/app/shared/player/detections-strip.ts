@@ -43,8 +43,8 @@ import { DetectionsStore } from '../../core/detections/detections-store';
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 0.4rem;
-      padding: 0.5rem 0.85rem;
+      gap: var(--space-8);
+      padding: var(--space-8) var(--space-16);
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
@@ -59,7 +59,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
     }
 
     .cv-dot.on {
-      background: var(--ok);
+      background: var(--color-success);
     }
   `,
 })

@@ -60,8 +60,8 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 1.1rem;
-      padding: 0.55rem 0.85rem;
+      gap: var(--space-16);
+      padding: var(--space-8) var(--space-16);
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
@@ -69,13 +69,13 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
     }
 
     .osd.stale {
-      border-color: var(--danger);
+      border-color: var(--color-danger);
     }
 
     .item {
       display: flex;
       flex-direction: column;
-      gap: 0.15rem;
+      gap: var(--space-2);
       min-width: 0;
     }
 
@@ -96,13 +96,13 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
     }
 
     .stale-text {
-      color: var(--danger);
+      color: var(--color-danger);
     }
 
     .compass-item {
       flex-direction: row;
       align-items: center;
-      gap: 0.5rem;
+      gap: var(--space-8);
     }
 
     .compass {
@@ -111,6 +111,11 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
       height: 34px;
       border-radius: 50%;
       border: 1px solid var(--border-strong);
+      /* Bespoke 25% black wash for the dial face — much lighter than either --scrim (55%) or
+         --scrim-strong (70%), and not a video/map compositing overlay, so neither canonical
+         scrim step reproduces this look without visibly darkening the dial
+         (docs/STYLE-TOKENS-PLAN.md §Geometry note's "bespoke opacity... genuinely needed"
+         exception). Left literal; flagged. */
       background: rgb(0 0 0 / 25%);
       flex: none;
     }
@@ -162,14 +167,14 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
       height: 0;
       border-left: 4px solid transparent;
       border-right: 4px solid transparent;
-      border-bottom: 11px solid var(--accent);
+      border-bottom: 11px solid var(--color-info);
       transform: translateX(-50%);
     }
 
     .battery-item {
       flex-direction: row;
       align-items: center;
-      gap: 0.5rem;
+      gap: var(--space-8);
       min-width: 130px;
     }
 
@@ -177,7 +182,7 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
       width: 60px;
       height: 10px;
       border-radius: 4px;
-      background: rgb(255 255 255 / 12%);
+      background: var(--hairline);
       overflow: hidden;
       flex: none;
     }
@@ -188,15 +193,15 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
     }
 
     .battery-fill.ok {
-      background: var(--ok);
+      background: var(--color-success);
     }
 
     .battery-fill.low {
-      background: var(--warn);
+      background: var(--color-warn);
     }
 
     .battery-fill.critical {
-      background: var(--danger);
+      background: var(--color-danger);
     }
 
     .battery-fill.unknown {

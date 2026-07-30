@@ -45,7 +45,7 @@
 /* ---- Registration/tail number inline edit (docs/UX-REWORK-PLAN.md §U-d item 3) --------------- */
 
 .registration-row {
-    gap: 0.5rem;
+    gap: var(--space-8);
 }
 
 .registration-edit input {
@@ -55,8 +55,8 @@
 /* ---- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3 — advanced mode) ------------------ */
 
 .attributes-editor {
-    margin-top: 0.85rem;
-    padding-top: 0.75rem;
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
     border-top: 1px solid var(--border);
 }
 
@@ -70,8 +70,8 @@
 .attributes-editor .option-row {
     display: grid;
     grid-template-columns: 1fr 1fr auto;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: var(--space-8);
+    margin-bottom: var(--space-8);
 }
 
 /* ---- Overview grid (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) — the frozen `.grid12`/`.col-N`
@@ -95,12 +95,12 @@
 .icon-heading {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-2);
+    gap: var(--space-8);
 }
 
 .icon-heading vision-icon {
     flex: none;
-    margin-top: 0.2rem;
+    margin-top: var(--space-4);
     color: var(--text-muted);
 }
 
@@ -120,12 +120,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: var(--space-16);
     flex-wrap: wrap;
 }
 
 .cockpit-status {
-    gap: 0.6rem;
+    gap: var(--space-8);
     flex-wrap: wrap;
 }
 
@@ -145,18 +145,18 @@
 .drill-in-row {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-3);
+    gap: var(--space-16);
 }
 
 /* ---- Full-width drill-in sub-views (Usage history / Hardware & devices) — a plain `.card` since
    both are wide tables that wouldn't fit the 24rem `vision-side-panel` drawer width. ------------- */
 
 .subview {
-    margin-top: var(--space-4);
+    margin-top: var(--space-16);
 }
 
 .back-btn {
-    margin-bottom: var(--space-3);
+    margin-bottom: var(--space-16);
 }
 
 /* ---- Freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3) — the Position card's compact
@@ -164,45 +164,18 @@
    per-device panels use. -------------------------------------------------------------------------- */
 
 .freshest-facts {
-    margin-top: var(--space-3);
+    margin-top: var(--space-16);
 }
 
-/* ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — `dataviz`'s stat-tile
-   contract: label (muted, uppercase caption) over value (semibold, proportional figures — never
-   `tabular-nums` on a large standalone number, see the skill's own `marks-and-anatomy.md`). ------ */
+/* ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — the individual tiles are now
+   the shared `<vision-stat>` component (docs/STYLE-TOKENS-PLAN.md §Shared primitives), which owns the
+   `dataviz` stat-tile contract (semibold proportional value over a muted uppercase caption). Only the
+   responsive grid that lays them out stays local. ------ */
 
 .kpi-tiles {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
-    gap: 0.75rem;
-}
-
-.kpi-tile {
-    background: var(--panel-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 0.7rem 0.85rem;
-}
-
-.kpi-label {
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-}
-
-.kpi-value {
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    margin-top: 0.2rem;
-    font-size: 1.4rem;
-    font-weight: 600;
-}
-
-.kpi-sub {
-    margin-top: 0.15rem;
-    font-size: 0.72rem;
+    gap: var(--space-16);
 }
 
 /* ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) — one bar per
@@ -215,9 +188,9 @@
 .util-chart {
     display: flex;
     align-items: flex-end;
-    gap: 2px;
+    gap: var(--space-2);
     height: 4.5rem;
-    padding-top: 0.5rem;
+    padding-top: var(--space-8);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
 }
@@ -234,7 +207,7 @@
 .util-bar {
     width: 16px;
     min-height: 3px;
-    background: var(--accent);
+    background: var(--color-info);
     border-radius: 4px 4px 0 0;
     cursor: default;
     transition: filter 0.15s ease;
@@ -248,13 +221,13 @@
 }
 
 .util-bar-pip {
-    margin-bottom: 0.25rem;
+    margin-bottom: var(--space-4);
 }
 
 .util-chart-axis {
     display: flex;
     justify-content: space-between;
-    margin-top: 0.35rem;
+    margin-top: var(--space-4);
     font-size: 0.7rem;
     color: var(--text-faint);
 }
@@ -265,8 +238,8 @@
 .facts {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem 1rem;
-    margin: 0 0 0.5rem;
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-8);
 }
 
 .fact dt {
@@ -277,7 +250,7 @@
 }
 
 .fact dd {
-    margin: 0.1rem 0 0;
+    margin: var(--space-2) 0 0;
     font-size: 0.85rem;
     /* docs/UX-REWORK-PLAN.md §U-b item 3 — mirrors `shared/player/stream-info-panel.ts`'s own
        identical rule: tabular-nums only (not the mono font), since this grid mixes numeric
@@ -286,7 +259,7 @@
 }
 
 .stale-text {
-    color: var(--danger);
+    color: var(--color-danger);
 }
 
 /* ---- Telemetry panels (docs/CYCLES-PLAN.md §11 item 3 — one per source device) ------------- */
@@ -294,23 +267,23 @@
 .telemetry-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-16);
 }
 
 .telemetry-panel {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--panel-raised);
-    padding: 0.7rem 0.85rem;
+    padding: var(--space-8) var(--space-16);
 }
 
 .telemetry-panel.stale {
-    border-color: var(--danger);
+    border-color: var(--color-danger);
 }
 
 .panel-name {
     font-weight: 600;
-    margin-bottom: 0.4rem;
+    margin-bottom: var(--space-8);
 }
 
 .hint {
@@ -322,7 +295,7 @@
 td.actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-8);
     justify-content: flex-end;
 }
 
@@ -333,7 +306,7 @@ td.actions {
 .source {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-8);
     max-width: 22rem;
 }
 
@@ -345,7 +318,7 @@ td.actions {
 .inline-confirm {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-8);
     flex-wrap: wrap;
 }
 
@@ -367,8 +340,8 @@ td.actions {
 }
 
 .assign-form {
-    margin-bottom: 0.75rem;
-    padding-bottom: 0.75rem;
+    margin-bottom: var(--space-16);
+    padding-bottom: var(--space-16);
     border-bottom: 1px solid var(--border);
 }
 
@@ -388,21 +361,21 @@ td.actions {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: var(--space-8);
 }
 
 .event-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-8);
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 0.45rem 0.6rem;
+    padding: var(--space-8) var(--space-8);
 }
 
 .event-row.open {
-    border-color: var(--live);
+    border-color: var(--color-live);
 }
 
 /* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's dot alone used to be the only
@@ -419,7 +392,7 @@ td.actions {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--space-2);
 }
 
 .event-label {

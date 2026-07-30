@@ -19,10 +19,7 @@
   @if (loading() && assigned().length === 0) {
     <p class="muted">Loading…</p>
   } @else if (assigned().length === 0) {
-    <div class="empty">
-      <h3>No pilots assigned</h3>
-      <p>Add a pilot above so they can fly this asset from their cockpit.</p>
-    </div>
+    <vision-empty title="No pilots assigned" message="Add a pilot above so they can fly this asset from their cockpit." />
   } @else {
     <ul class="pilots-list">
       @for (pilot of assigned(); track pilot.userId) {
