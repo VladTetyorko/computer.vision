@@ -900,3 +900,96 @@ export interface MeResponse {
   readonly topRole: Role;
   readonly authEnabled: boolean;
 }
+
+// --- Org settings: users, groups, pilot assignment, activity ------------------------------------
+// docs/U-SCOPE-PLAN.md, U-e slice 2's frozen wire contract (waves 1–2, backend done). `core/org/`
+// (users/groups), `features/asset-detail/pilots-card.ts` (assignment), and `features/activity/`
+// (activity) are the only callers of the `VisionApi` methods these types back — same "no page talks
+// to a URL directly" rule as everywhere else here.
+
+/**
+ * Mirrors `dto.UserResponse.MembershipView` — a user's role within one group as returned by the
+ * `/api/users` admin surface. Deliberately **not** `Membership` above: that one (from `MeResponse`)
+ * carries `groupName` for the identity chip's benefit; this admin-list row carries only the raw
+ * `groupId`, matching the backend DTO exactly (the org-settings UI resolves a name against the
+ * groups list it already loads, rather than the backend denormalizing it onto every membership).
+ */
+export interface UserMembership {
+  readonly groupId: string;
+  readonly role: Role;
+}
+
+/**
+ * Mirrors `dto.UserResponse` — one row of `GET /api/users` / the body of `POST /api/users` and
+ * `POST /api/users/{id}/enabled`. `topRole` is **optional** here (unlike `MeResponse#topRole`): a
+ * user with no memberships has no top role at all, and the backend returns `null` for that case
+ * (`User.topRole()` is an `Optional`), so a reader must treat its absence as "no role yet", never a
+ * crash. Every other field is always present.
+ */
+export interface UserSummary {
+  readonly userId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly email: string;
+  readonly enabled: boolean;
+  readonly memberships: readonly UserMembership[];
+  readonly topRole?: Role;
+}
+
+/**
+ * Mirrors `dto.CreateUserRequest` — the invite/create body for `POST /api/users`. `memberships`
+ * and `enabled` are optional (the backend defaults an omitted `enabled` to `true` and an omitted
+ * `memberships` to an empty list); the scope rule — an inviter may only grant a role at or below
+ * their own — is enforced server-side (docs/U-SCOPE-PLAN.md), surfaced to this UI as a `403`.
+ */
+export interface CreateUserRequest {
+  readonly username: string;
+  readonly displayName: string;
+  readonly email: string;
+  readonly password: string;
+  readonly memberships?: readonly UserMembership[];
+  readonly enabled?: boolean;
+}
+
+/** Mirrors `dto.GroupResponse` — one row of `GET /api/groups`. `parentGroupId` absent = a root group (`core/org/org-logic.ts#buildGroupTree` treats absent/unknown/self as a root). */
+export interface GroupSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly parentGroupId?: string;
+}
+
+/** Mirrors `dto.CreateGroupRequest` — the body of `POST /api/groups`. `parentGroupId` omitted creates a root group. */
+export interface CreateGroupRequest {
+  readonly name: string;
+  readonly parentGroupId?: string;
+}
+
+/** Mirrors `dto.PilotResponse` — one row of `GET /api/assets/{id}/pilots`. A record (not a bare id) so the shape can grow (a display name, an assigned-at time) without a wire break, exactly as the backend DTO's own doc comment notes. */
+export interface AssignedPilot {
+  readonly userId: string;
+}
+
+/** Mirrors `dto.AssignmentResponse` — one row of `GET /api/me/assignments`, an asset the acting pilot may fly. Same room-to-grow shape as `AssignedPilot`. */
+export interface Assignment {
+  readonly assetId: string;
+}
+
+/**
+ * Mirrors `dto.AuditEntryResponse` — one entry of `GET /api/me/activity` (docs/U-SCOPE-PLAN.md
+ * feature 7), the acting user's own recent actions. `summary` is written to read on its own (no id
+ * reconstruction needed); `details` carries before→after specifics. `action` is one of
+ * `CREATED`/`UPDATED`/`DEACTIVATED`/`ACTIVATED`/`DELETED`/`RESTORED`, `targetType` one of
+ * `ASSET`/`DEVICE` — both left as plain strings here (the UI renders them via
+ * `core/org/org-logic.ts#formatActivity`, which tolerates an unrecognized value rather than a
+ * closed union that a new backend action would break).
+ */
+export interface AuditEntry {
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly targetType: string;
+  readonly targetId: string;
+  readonly summary: string;
+  readonly details: Readonly<Record<string, string>>;
+}

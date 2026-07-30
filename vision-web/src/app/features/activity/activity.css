@@ -1,0 +1,58 @@
+/* Reuses `.page`/`.card`/`.chip`/`.empty`/`.mono` from `src/styles.css` — this stylesheet only owns
+   the row layout, built to wrap rather than overflow on a narrow viewport. No new colors. */
+:host {
+  display: block;
+}
+
+.activity-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.activity-row {
+  padding: 0.65rem 0.8rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.activity-row-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.activity-target {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.activity-summary {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.activity-time {
+  flex: none;
+  font-size: 0.78rem;
+}
+
+.activity-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.activity-detail {
+  font-size: 0.8rem;
+  color: var(--text);
+}

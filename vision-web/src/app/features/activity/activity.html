@@ -1,0 +1,47 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>My activity</h1>
+      <p>The changes you've made recently, newest first.</p>
+    </div>
+  </div>
+
+  <section class="card">
+    @if (loading()) {
+      <p class="muted">Loading…</p>
+    } @else if (error(); as error) {
+      <div class="empty">
+        <h3>Couldn't load your activity</h3>
+        <p>{{ error }}</p>
+        <button type="button" class="btn secondary" (click)="load()">Try again</button>
+      </div>
+    } @else if (rows().length === 0) {
+      <div class="empty">
+        <h3>Nothing here yet</h3>
+        <p>Your actions — creating an asset, renaming a device, archiving — will show up here.</p>
+      </div>
+    } @else {
+      <ul class="activity-list">
+        @for (row of rows(); track row.id) {
+          <li class="activity-row">
+            <div class="activity-row-head">
+              <span class="chip accent">{{ row.actionLabel }}</span>
+              @if (row.targetLabel) {
+                <span class="muted activity-target">{{ row.targetLabel }}</span>
+              }
+              <span class="activity-summary truncate">{{ row.summary }}</span>
+              <span class="faint mono activity-time">{{ row.relativeTime }}</span>
+            </div>
+            @if (row.details.length > 0) {
+              <div class="activity-details">
+                @for (detail of row.details; track detail.key) {
+                  <span class="activity-detail"><span class="muted">{{ detail.key }}:</span> {{ detail.value }}</span>
+                }
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+</div>

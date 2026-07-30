@@ -1,0 +1,154 @@
+/* Reuses this app's management-page tokens wholesale (`.page`/`.card`/`.btn`/`.chip`/`.segmented`/
+   `.empty`/`.label` from `src/styles.css`) — this stylesheet only owns the two form grids and the
+   two list/tree layouts, all built to wrap rather than overflow on a narrow viewport. No new
+   colors (docs/UX-REWORK-PLAN.md §U-b item 2 — one accent, `--ok`/`--danger` for status only). */
+:host {
+  display: block;
+}
+
+/* ---- Forms ---------------------------------------------------------------- */
+
+.org-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+/* Auto-fit columns: three-ish on desktop, collapsing to one on a phone without a media query. */
+.org-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem 0.9rem;
+}
+
+.org-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.org-field input,
+.org-field select {
+  min-height: 40px;
+}
+
+.org-field .label {
+  margin-bottom: 0;
+}
+
+.org-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.org-form-actions .btn {
+  min-height: 40px;
+}
+
+.org-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.org-check input {
+  width: auto;
+  min-height: 0;
+}
+
+/* ---- Users list ----------------------------------------------------------- */
+
+.org-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.org-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.8rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.org-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+
+.org-row-name {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.org-row-sub {
+  font-size: 0.78rem;
+}
+
+.org-row-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+}
+
+.org-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* ---- Groups tree ---------------------------------------------------------- */
+
+.org-tree {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.org-tree-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.2rem;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.org-tree-row:hover {
+  background: var(--panel-hover);
+}
+
+.org-tree-branch {
+  color: var(--text-faint);
+  flex: none;
+}
+
+.org-tree-name {
+  font-weight: 500;
+  color: var(--text);
+  min-width: 0;
+}
+
+.org-tree-count {
+  font-size: 0.75rem;
+  flex: none;
+}

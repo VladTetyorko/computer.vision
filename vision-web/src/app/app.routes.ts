@@ -10,6 +10,8 @@ import { REPLAY_ROUTES } from './features/replay/replay.routes';
 import { LIVE_ROUTES } from './features/live/live.routes';
 import { SETTINGS_ROUTES } from './features/settings/settings.routes';
 import { DEBUG_ROUTES } from './features/debug/debug.routes';
+import { ORG_ROUTES } from './features/org-settings/org-settings.routes';
+import { ACTIVITY_ROUTES } from './features/activity/activity.routes';
 import { LOGIN_ROUTES } from './features/auth/login/login.routes';
 import { authGuard } from './core/auth/auth-guard';
 
@@ -51,6 +53,8 @@ export const routes: Routes = [
       ...REPLAY_ROUTES,
       ...LIVE_ROUTES,
       ...SETTINGS_ROUTES,
+      ...ORG_ROUTES,
+      ...ACTIVITY_ROUTES,
       ...DEBUG_ROUTES,
     ],
   },

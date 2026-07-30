@@ -1,0 +1,251 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Organization</h1>
+      <p>Manage the people and groups in your organization. Grants are limited to your own scope.</p>
+    </div>
+    <div class="segmented" role="tablist" aria-label="Organization sections">
+      <button
+        type="button"
+        class="btn secondary small"
+        role="tab"
+        [class.active]="tab() === 'users'"
+        [attr.aria-selected]="tab() === 'users'"
+        (click)="tab.set('users')"
+      >
+        Users
+      </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        role="tab"
+        [class.active]="tab() === 'groups'"
+        [attr.aria-selected]="tab() === 'groups'"
+        (click)="tab.set('groups')"
+      >
+        Groups
+      </button>
+    </div>
+  </div>
+
+  @if (tab() === 'users') {
+    <section class="card">
+      <header><h2>Invite a user</h2></header>
+      <form class="org-form" (ngSubmit)="submitUser()">
+        <div class="org-form-grid">
+          <label class="org-field">
+            <span class="label">Username</span>
+            <input
+              type="text"
+              name="username"
+              autocapitalize="none"
+              autocomplete="off"
+              [ngModel]="newUsername()"
+              (ngModelChange)="newUsername.set($event)"
+              [disabled]="creatingUser()"
+              required
+            />
+          </label>
+          <label class="org-field">
+            <span class="label">Display name</span>
+            <input
+              type="text"
+              name="displayName"
+              autocomplete="off"
+              [ngModel]="newDisplayName()"
+              (ngModelChange)="newDisplayName.set($event)"
+              [disabled]="creatingUser()"
+              required
+            />
+          </label>
+          <label class="org-field">
+            <span class="label">Email</span>
+            <input
+              type="email"
+              name="email"
+              autocapitalize="none"
+              autocomplete="off"
+              [ngModel]="newEmail()"
+              (ngModelChange)="newEmail.set($event)"
+              [disabled]="creatingUser()"
+              required
+            />
+          </label>
+          <label class="org-field">
+            <span class="label">Temporary password</span>
+            <input
+              type="password"
+              name="password"
+              autocomplete="new-password"
+              [ngModel]="newPassword()"
+              (ngModelChange)="newPassword.set($event)"
+              [disabled]="creatingUser()"
+              required
+            />
+          </label>
+          <label class="org-field">
+            <span class="label">Group</span>
+            <select
+              name="group"
+              [ngModel]="newGroupId()"
+              (ngModelChange)="newGroupId.set($event)"
+              [disabled]="creatingUser()"
+            >
+              <option value="">No group</option>
+              @for (node of flatGroups(); track node.group.id) {
+                <option [value]="node.group.id">{{ node.group.name }}</option>
+              }
+            </select>
+          </label>
+          <label class="org-field">
+            <span class="label">Role in group</span>
+            <select
+              name="role"
+              [ngModel]="newRole()"
+              (ngModelChange)="newRole.set($event)"
+              [disabled]="creatingUser() || !newGroupId()"
+            >
+              @for (option of roleOptions; track option.value) {
+                <option [value]="option.value">{{ option.label }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        <div class="org-form-actions">
+          <label class="org-check">
+            <input
+              type="checkbox"
+              name="enabled"
+              [ngModel]="newEnabled()"
+              (ngModelChange)="newEnabled.set($event)"
+              [disabled]="creatingUser()"
+            />
+            <span>Can sign in immediately</span>
+          </label>
+          <button type="submit" class="btn" [disabled]="!canSubmitUser()">
+            {{ creatingUser() ? 'Creating…' : 'Create user' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Users</h2>
+        <span class="muted">{{ org.users().length }} total</span>
+      </header>
+      @if (!org.loaded() && org.loading()) {
+        <p class="muted">Loading…</p>
+      } @else if (org.users().length === 0) {
+        <div class="empty">
+          <h3>No users yet</h3>
+          <p>Invite your first teammate with the form above.</p>
+        </div>
+      } @else {
+        <ul class="org-list">
+          @for (user of org.users(); track user.userId) {
+            <li class="org-row">
+              <div class="org-row-main">
+                <span class="org-row-name truncate">{{ user.displayName }}</span>
+                <span class="muted org-row-sub truncate">{{ user.username }} · {{ user.email }}</span>
+                @if (user.memberships.length > 0) {
+                  <span class="org-row-groups">
+                    @for (m of user.memberships; track m.groupId) {
+                      <span class="chip">{{ groupName(m.groupId) }} · {{ roleLabel(m.role) }}</span>
+                    }
+                  </span>
+                }
+              </div>
+              <div class="org-row-actions">
+                @if (user.topRole) {
+                  <span class="chip accent">{{ roleLabel(user.topRole) }}</span>
+                } @else {
+                  <span class="chip">No role</span>
+                }
+                @if (user.enabled) {
+                  <span class="chip ok">Enabled</span>
+                  <button type="button" class="btn secondary small" (click)="toggleEnabled(user.userId, false)">
+                    Disable
+                  </button>
+                } @else {
+                  <span class="chip danger">Disabled</span>
+                  <button type="button" class="btn secondary small" (click)="toggleEnabled(user.userId, true)">
+                    Enable
+                  </button>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      }
+    </section>
+  } @else {
+    <section class="card">
+      <header><h2>Create a group</h2></header>
+      <form class="org-form" (ngSubmit)="submitGroup()">
+        <div class="org-form-grid">
+          <label class="org-field">
+            <span class="label">Group name</span>
+            <input
+              type="text"
+              name="groupName"
+              autocomplete="off"
+              [ngModel]="newGroupName()"
+              (ngModelChange)="newGroupName.set($event)"
+              [disabled]="creatingGroup()"
+              required
+            />
+          </label>
+          <label class="org-field">
+            <span class="label">Parent group</span>
+            <select
+              name="parent"
+              [ngModel]="newParentId()"
+              (ngModelChange)="newParentId.set($event)"
+              [disabled]="creatingGroup()"
+            >
+              <option value="">No parent (top level)</option>
+              @for (node of flatGroups(); track node.group.id) {
+                <option [value]="node.group.id">{{ node.group.name }}</option>
+              }
+            </select>
+          </label>
+        </div>
+        <div class="org-form-actions">
+          <button type="submit" class="btn" [disabled]="!canSubmitGroup()">
+            {{ creatingGroup() ? 'Creating…' : 'Create group' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <header>
+        <h2>Groups</h2>
+        <span class="muted">{{ org.groups().length }} total</span>
+      </header>
+      @if (!org.loaded() && org.loading()) {
+        <p class="muted">Loading…</p>
+      } @else if (org.groups().length === 0) {
+        <div class="empty">
+          <h3>No groups yet</h3>
+          <p>Create your first group with the form above.</p>
+        </div>
+      } @else {
+        <ul class="org-tree">
+          @for (node of flatGroups(); track node.group.id) {
+            <li class="org-tree-row" [style.padding-left.rem]="0.2 + node.depth * 1.25">
+              @if (node.depth > 0) {
+                <span class="org-tree-branch" aria-hidden="true">└</span>
+              }
+              <span class="org-tree-name truncate">{{ node.group.name }}</span>
+              @if (node.children.length > 0) {
+                <span class="muted org-tree-count">{{ node.children.length }} sub-group{{ node.children.length === 1 ? '' : 's' }}</span>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </section>
+  }
+</div>

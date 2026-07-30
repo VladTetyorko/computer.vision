@@ -9,6 +9,14 @@
     <div class="identity-menu" (click)="menu.open = false">
       <div class="identity-menu-name">{{ user.displayName }}</div>
       <div class="identity-menu-role muted">{{ roleLabel(user) }}</div>
+
+      <nav class="identity-links">
+        <a routerLink="/activity">My activity</a>
+        @if (canManageOrg()) {
+          <a routerLink="/org">Organization</a>
+        }
+      </nav>
+
       @if (auth.authEnabled()) {
         <button type="button" class="identity-logout" (click)="logout()">Log out</button>
       }

@@ -32,6 +32,7 @@ import {
   type KpiTile,
 } from '../../core/fleet/asset-stats-logic';
 import { LiveMap } from '../../shared/map/live-map/live-map';
+import { PilotsCard } from './pilots-card';
 import {
   attributeRowsToRecord,
   attributesToRows,
@@ -93,7 +94,7 @@ const STREAM_EVENTS_LIMIT = 50;
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, LiveMap],
+  imports: [RouterLink, LiveMap, PilotsCard],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

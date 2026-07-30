@@ -1,0 +1,56 @@
+/* Reuses `.card`/`.btn`/`.empty` from `src/styles.css`. This stylesheet only owns the add-row and
+   the pilot list, both wrapping on a narrow viewport. `:host{display:contents}` makes the inner
+   `.card` the real grid child of `asset-detail.css#.detail-grid`; that file's own `.span-2`/
+   `.detail-grid .card` rules are view-encapsulated to the asset-detail component and can't reach
+   this component's DOM, so the full-width span + gap-not-margin spacing are set here instead. */
+:host {
+  display: contents;
+}
+
+.card {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.pilots-add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+
+.pilots-add select {
+  flex: 1 1 12rem;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.pilots-add .btn {
+  min-height: 40px;
+  flex: none;
+}
+
+.pilots-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.pilots-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pilots-name {
+  min-width: 0;
+  font-weight: 500;
+  color: var(--text);
+}

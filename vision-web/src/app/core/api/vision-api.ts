@@ -8,7 +8,12 @@ import type {
   AssetEdit,
   AssetStats,
   AssetSummary,
+  AssignedPilot,
+  Assignment,
+  AuditEntry,
   CreateAssetRequest,
+  CreateGroupRequest,
+  CreateUserRequest,
   DetectionEvent,
   DetectionResult,
   Device,
@@ -16,6 +21,7 @@ import type {
   FleetSummary,
   GeofenceZone,
   GeofenceZoneRequest,
+  GroupSummary,
   LiveSubscription,
   MeResponse,
   ProbeDeviceRequest,
@@ -34,6 +40,7 @@ import type {
   UpdateLiveTopicsRequest,
   UsageRecording,
   UsageTimeline,
+  UserSummary,
 } from './models';
 
 /**
@@ -479,5 +486,79 @@ export class VisionApi {
   /** `204` on success. `core/auth/auth-store.ts#logout` clears its local session regardless of whether this call itself succeeds — there is no state left to reconcile either way. */
   authLogout(): Promise<void> {
     return firstValueFrom(this.http.post<void>('/api/auth/logout', {}));
+  }
+
+  // --- Org settings: users, groups (docs/U-SCOPE-PLAN.md, U-e slice 2's frozen contract) --------
+  // ADMIN/MANAGER-only surfaces server-side; the UI additionally role-gates the route + nav link so
+  // a pilot never reaches them (`core/org/org-guard.ts`). `core/org/org-store.ts` is the only caller.
+
+  listUsers(): Promise<UserSummary[]> {
+    return firstValueFrom(this.http.get<UserSummary[]>('/api/users'));
+  }
+
+  /** Invite/create a user. A `403` (grant above the inviter's own scope) or `409` (username taken) rejects — `core/org/org-store.ts` turns each into one explained toast. */
+  createUser(request: CreateUserRequest): Promise<UserSummary> {
+    return firstValueFrom(this.http.post<UserSummary>('/api/users', request));
+  }
+
+  /** Enable/disable a user (a disabled user can't log in). Returns the updated user. */
+  setUserEnabled(id: string, enabled: boolean): Promise<UserSummary> {
+    return firstValueFrom(
+      this.http.post<UserSummary>(`/api/users/${encodeURIComponent(id)}/enabled`, { enabled }),
+    );
+  }
+
+  listGroups(): Promise<GroupSummary[]> {
+    return firstValueFrom(this.http.get<GroupSummary[]>('/api/groups'));
+  }
+
+  createGroup(request: CreateGroupRequest): Promise<GroupSummary> {
+    return firstValueFrom(this.http.post<GroupSummary>('/api/groups', request));
+  }
+
+  // --- Pilot assignment (docs/U-SCOPE-PLAN.md feature 2) ----------------------------------------
+  // `PUT`/`DELETE` are idempotent and answer `204`; a `403` means the asset is outside the acting
+  // manager's scope, a `404` an unknown asset. `features/asset-detail/pilots-card.ts` handles both.
+
+  /** The pilots assigned to an asset. `404`s (rejects) for an unknown or out-of-scope asset — existence isn't revealed, the same rule the scoped asset read follows. */
+  listAssetPilots(assetId: string): Promise<AssignedPilot[]> {
+    return firstValueFrom(
+      this.http.get<AssignedPilot[]>(`/api/assets/${encodeURIComponent(assetId)}/pilots`),
+    );
+  }
+
+  /** Assign a pilot to an asset (idempotent, `204`). `403` = the asset is outside the caller's scope. */
+  assignPilot(assetId: string, userId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.put<void>(
+        `/api/assets/${encodeURIComponent(assetId)}/pilots/${encodeURIComponent(userId)}`,
+        {},
+      ),
+    );
+  }
+
+  /** Unassign a pilot from an asset (idempotent, `204`). */
+  unassignPilot(assetId: string, userId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>(
+        `/api/assets/${encodeURIComponent(assetId)}/pilots/${encodeURIComponent(userId)}`,
+      ),
+    );
+  }
+
+  /** The acting user's own asset assignments — the assets they may fly (`GET /api/me/assignments`). The "who" is the session, never a path param, so a user only ever reads their own. */
+  myAssignments(): Promise<Assignment[]> {
+    return firstValueFrom(this.http.get<Assignment[]>('/api/me/assignments'));
+  }
+
+  /**
+   * The acting user's own recent activity, newest first (`GET /api/me/activity`, docs/U-SCOPE-PLAN.md
+   * feature 7). `limit` is only added to the query string when given (the backend defaults to 50,
+   * caps at 500, floors at 1) — `features/activity/activity.ts` is the only caller.
+   */
+  myActivity(limit?: number): Promise<AuditEntry[]> {
+    return firstValueFrom(
+      this.http.get<AuditEntry[]>('/api/me/activity', limit === undefined ? {} : { params: { limit } }),
+    );
   }
 }

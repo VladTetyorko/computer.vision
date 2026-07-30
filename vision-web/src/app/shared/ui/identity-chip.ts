@@ -1,6 +1,8 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth-store';
 import { initialsFor, topRoleLabel } from '../../core/auth/auth-logic';
+import { canManageOrg } from '../../core/org/org-logic';
 
 /**
  * The header identity chip (docs/U-AUTH-PLAN.md wave 4) — displayName + a role badge + a logout
@@ -32,6 +34,7 @@ import { initialsFor, topRoleLabel } from '../../core/auth/auth-logic';
  */
 @Component({
   selector: 'vision-identity-chip',
+  imports: [RouterLink],
   templateUrl: './identity-chip.html',
   styleUrl: './identity-chip.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -41,6 +44,14 @@ export class IdentityChip {
 
   protected readonly initials = initialsFor;
   protected readonly roleLabel = topRoleLabel;
+
+  /**
+   * Whether to show the **Organization** link (docs/U-SCOPE-PLAN.md, U-e slice 2) — ADMIN/MANAGER
+   * only, the same gate `core/org/org-guard.ts` enforces on the route itself, so a pilot never sees
+   * the door, not just a bounced click. **My activity** below it has no such gate (every user reads
+   * their own).
+   */
+  protected readonly canManageOrg = computed(() => canManageOrg(this.auth.user()?.topRole));
 
   protected async logout(): Promise<void> {
     await this.auth.logout();

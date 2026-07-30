@@ -1,0 +1,43 @@
+@if (canManage()) {
+  <section class="card span-2">
+    <header>
+      <h2>Pilots</h2>
+      <span class="muted">Who may fly this asset</span>
+    </header>
+
+    <div class="pilots-add">
+      <select
+        aria-label="Add a pilot"
+        [ngModel]="pickUserId()"
+        (ngModelChange)="pickUserId.set($event)"
+        [disabled]="busy() || assignable().length === 0"
+      >
+        <option value="">{{ assignable().length === 0 ? 'No more users to add' : 'Choose a user…' }}</option>
+        @for (user of assignable(); track user.userId) {
+          <option [value]="user.userId">{{ user.displayName }} ({{ user.username }})</option>
+        }
+      </select>
+      <button type="button" class="btn" (click)="add()" [disabled]="busy() || !pickUserId()">Add pilot</button>
+    </div>
+
+    @if (loading() && assigned().length === 0) {
+      <p class="muted">Loading…</p>
+    } @else if (assigned().length === 0) {
+      <div class="empty">
+        <h3>No pilots assigned</h3>
+        <p>Add a pilot above so they can fly this asset from their cockpit.</p>
+      </div>
+    } @else {
+      <ul class="pilots-list">
+        @for (pilot of assigned(); track pilot.userId) {
+          <li class="pilots-row">
+            <span class="pilots-name truncate">{{ pilot.displayName }}</span>
+            <button type="button" class="btn danger small" (click)="remove(pilot.userId)" [disabled]="busy()">
+              Remove
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </section>
+}

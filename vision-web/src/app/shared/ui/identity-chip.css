@@ -82,6 +82,30 @@
   font-size: 0.75rem;
 }
 
+/* Navigation links inside the menu (docs/U-SCOPE-PLAN.md, U-e slice 2) — My activity, and
+   Organization when the viewer can manage it. Set off from the name/role above and Log out below by
+   thin dividers so the menu reads as three bands (identity · links · session action). */
+.identity-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0.35rem 0 0.15rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.identity-links a {
+  padding: 0.3rem 0.1rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+}
+
+.identity-links a:hover {
+  color: var(--accent);
+}
+
 .identity-logout {
   align-self: flex-start;
   margin-top: 0.2rem;

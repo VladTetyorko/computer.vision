@@ -99,6 +99,11 @@
         </div>
       </section>
 
+      <!-- ---- Pilots (docs/U-SCOPE-PLAN.md, U-e slice 2 feature 2) — who may fly this asset. The
+           card role-gates itself (renders nothing for a non-manager), so it's mounted
+           unconditionally here; a pilot viewing an asset never manages its roster. -->
+      <vision-pilots-card [assetId]="assetId()" />
+
       <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
            flight-utilization aggregates from `VisionApi.assetStats`; every tile reads a real value
            or "—", never a fabricated number (see `core/fleet/asset-stats-logic.ts#kpiTiles`). -->
