@@ -331,6 +331,27 @@ export interface AssetDetails extends AssetSummary {
 }
 
 /**
+ * Mirrors `dto.AssetStatsResponse` (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen wire
+ * contract) — `GET /api/assets/{assetId}/stats`, the manager page's KPI tile row
+ * (`core/fleet/asset-stats-logic.ts#kpiTiles`). `totalFlightSeconds`/`flightCount` are always
+ * present (0 for an asset with no usages fetched); `firstFlownAt`/`lastFlownAt`/
+ * `avgFlightSeconds`/`lastKnownBatteryPercent` are absent — never a fabricated zero/null literal
+ * on the wire, `@JsonInclude(NON_NULL)` server-side — exactly when the underlying value is
+ * honestly unavailable (no flights, no closed flights, or no telemetry ever reported,
+ * respectively). `avgFlightSeconds` is over *closed* flights only; an asset with only an open
+ * flight has no average yet even though `flightCount` is 1.
+ */
+export interface AssetStats {
+  readonly totalFlightSeconds: number;
+  readonly flightCount: number;
+  readonly firstFlownAt?: string;
+  readonly lastFlownAt?: string;
+  readonly avgFlightSeconds?: number;
+  readonly lastKnownBatteryPercent?: number;
+  readonly flightInProgress: boolean;
+}
+
+/**
  * Mirrors `dto.CreateAssetRequest.DeviceSpec` (docs/UX-QUICKWINS-PLAN.md QF-2 — the "Create asset
  * from this device" quick action) — one device to register **alongside** the new asset. This is
  * always a **new** device registration (`name`/`protocol`/`uri`), never a reference to an existing

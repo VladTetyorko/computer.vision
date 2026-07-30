@@ -7,7 +7,6 @@ import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/fleet/device-logic';
@@ -25,8 +24,13 @@ import {
 } from '../../core/fleet/warehouse-logic';
 import { formatDuration } from '../../core/stream-info-logic';
 import { registrationNumberOf, withRegistrationNumber, withoutRegistrationNumber } from '../../core/fleet/asset-attributes';
-import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
-import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
+import {
+  flightBars as buildFlightBars,
+  kpiTiles as buildKpiTiles,
+  usageDurationSeconds,
+  type FlightBar,
+  type KpiTile,
+} from '../../core/fleet/asset-stats-logic';
 import { LiveMap } from '../../shared/map/live-map/live-map';
 import {
   attributeRowsToRecord,
@@ -38,6 +42,7 @@ import {
 } from './asset-detail-logic';
 import type {
   AssetDetails,
+  AssetStats,
   AssetUsage,
   DetectionEvent,
   Device,
@@ -58,30 +63,41 @@ const STREAM_EVENTS_POLL_INTERVAL_MS = 5_000;
 const STREAM_EVENTS_LIMIT = 50;
 
 /**
- * The asset detail page (`/assets/:id`, docs/CYCLES-PLAN.md §11, CD-b item 2) — the "Open" target
- * from the Devices page's asset-first list. One entity, everything about it: characteristics, live
- * video when streaming, a map with position + trail, telemetry grouped per source device (item 3),
- * usage history, and a "Hardware" section carrying the full warehouse actions the list-level view
- * demoted (item 1).
+ * The asset **manager** page (`/assets/:id`, docs/CYCLES-PLAN.md §11, CD-b item 2 — reworked from a
+ * hybrid manager/cockpit page into a pure manager view by docs/ASSET-MANAGER-PAGE-PLAN.md Wave B).
+ * The "Open" target from the Devices page's asset-first list: everything about one entity except
+ * piloting — characteristics, KPI utilization tiles, a "Recent flights" chart, a map with position +
+ * trail, telemetry grouped per source device (item 3), usage history, and a "Hardware" section
+ * carrying the full warehouse actions the list-level view demoted (item 1).
  *
- * Reuses rather than rebuilds: `<vision-player>` (self-recovering, shared with Wall/Live/the map
- * dock), `<vision-stream-info>` (docs/MVP2-PLAN.md §U-info's user-meaning-first info panel),
- * `<vision-live-map>` (moved to `shared/map/` for exactly this reuse — see its doc comment), and
- * `TelemetryStore`/`DetectionsStore` (page-provided, same DI-sharing idiom as `LivePage`).
+ * **No video, ever, on this page** (Wave B's own guardrail) — piloting and live video are the
+ * cockpit's job (`/fly`) and the lightweight `/live/:deviceId` watch page, both one click away via
+ * the cockpit-link band (`openCockpit`/`watch` below), never embedded here. This page used to mount
+ * `<vision-player>`/`<vision-stream-info>` directly (a `DetectionsStore`-fed overlay and inline
+ * Start/Stop stream controls); all of that piloting surface was deleted in Wave B, not hidden —
+ * `live()`/`stream()` survive only because the Events card still shows the live per-stream feed
+ * while someone *else* is streaming this asset, which is read-only observation, not piloting.
+ *
+ * Reuses rather than rebuilds: `<vision-live-map>` (moved to `shared/map/` for exactly this reuse
+ * — see its doc comment) and `TelemetryStore` (page-provided, same DI-sharing idiom as `LivePage`).
  * `TelemetryStore.track()` is started against *any* device on this asset (not necessarily a
  * TELEMETRY-capable one specifically) — it resolves the *owning asset*'s open usage regardless of
  * which of the asset's devices it's given, so `latest()`/`trail()` already aggregate every source
  * device's samples for the map exactly like item 3 asks ("the map marker uses the freshest
  * source"); this page's own `groupTelemetryByDevice` (`asset-detail-logic.ts`) reruns that same
  * poll's raw `samples()` through per-device grouping for the labeled per-source panels.
+ *
+ * The KPI row + chart (Wave B items 3–4) read `AssetStats` (`VisionApi.assetStats`) and
+ * `AssetDetails#recentUsages` through `core/fleet/asset-stats-logic.ts` — see `loadStats`'s own doc
+ * comment for how that fetch degrades independently of the rest of the page.
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, Player, StreamInfoPanel, LiveMap],
+  imports: [RouterLink, LiveMap],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [TelemetryStore, DetectionsStore],
+  providers: [TelemetryStore],
 })
 export class AssetDetailPage {
   /** Bound from the route by `withComponentInputBinding()`. */
@@ -95,7 +111,6 @@ export class AssetDetailPage {
   protected readonly fleet = inject(FleetStore);
   protected readonly settings = inject(SettingsStore);
   protected readonly telemetry = inject(TelemetryStore);
-  protected readonly detections = inject(DetectionsStore);
   protected readonly events = inject(EventsStore);
 
   protected readonly asset = signal<AssetDetails | undefined>(undefined);
@@ -110,32 +125,14 @@ export class AssetDetailPage {
     const device = this.videoDevice();
     return device ? this.fleet.streamFor(device.id) : undefined;
   });
+  /** Read-only: whether *someone* is currently streaming this asset — the cockpit-link band's status chip and the Events card's live/global feed switch. Piloting (starting/stopping) is the cockpit's job; this page never does it. */
   protected readonly live = computed(() => this.stream() !== undefined);
-
-  // --- Deliberately-stopped state (docs/MVP2-PLAN.md §S, S-b) — mirrors `LivePage`'s own pair
-  // exactly (see its doc comment for the full reasoning): this page's own Stop action, plus
-  // "this page watched it go live, then it disappeared from the streams list" (someone else's
-  // stop, or this page's own — both read the same way once it's gone).
-  private readonly explicitlyStopped = signal(false);
-  private readonly hasBeenLive = signal(false);
-  protected readonly stopped = computed(() => this.explicitlyStopped() || (this.hasBeenLive() && !this.live()));
-
-  /**
-   * The idle video panel's state line (docs/UX-QUICKWINS-PLAN.md QF-4 item 3) — the same two honest
-   * words `<vision-player>` itself shows for these exact phases (`player.ts`'s own template: `'Not
-   * streaming'` / `'Stream stopped'`), read off this page's own `stopped()`/`live()` rather than the
-   * player's internal phase, since the player isn't mounted at all while `!live()` (see the video
-   * card's template — no new state, just projecting what's already computed here into words).
-   */
-  protected readonly videoStateLine = computed(() =>
-    this.stopped() ? 'Stream stopped' : 'Not streaming',
-  );
 
   // --- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
   // Per the plan's own scoping: the per-stream feed while this asset is actively streaming (a
-  // dedicated small poll below, mirroring `DetectionsStore`'s own per-stream cadence), else recent
-  // events matched by `assetId` from the shared global feed — never both, since a per-stream feed
-  // is strictly more precise than filtering the global one once a `streamId` is known.
+  // dedicated small poll below), else recent events matched by `assetId` from the shared global
+  // feed — never both, since a per-stream feed is strictly more precise than filtering the global
+  // one once a `streamId` is known.
 
   private readonly streamEventsSignal = signal<readonly DetectionEvent[]>([]);
 
@@ -171,11 +168,17 @@ export class AssetDetailPage {
     operatorAssetActions(this.lifecycle()).find((entry) => entry.available),
   );
 
-  protected readonly latencySeconds = signal<number | null>(null);
-  /** The player's own live transport (docs/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
-  protected readonly transport = signal<Transport>('hls');
-  /** Per-tile "boxes: overlay/burned/off" toggle (docs/CYCLES-PLAN.md §11 item 6) — defaults to overlay. */
-  protected readonly boxesMode = signal<BoxesMode>('overlay');
+  // --- KPI tile row + "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4) -
+  // `stats` is fetched independently of `asset` (see `loadStats`'s own doc comment below) — the KPI
+  // row degrades to an all-"—" row on failure, it never blocks the rest of the page.
+
+  protected readonly stats = signal<AssetStats | undefined>(undefined);
+
+  protected readonly kpiTiles = computed<readonly KpiTile[]>(() => buildKpiTiles(this.stats(), this.nowSignal()));
+
+  protected readonly flightBars = computed<readonly FlightBar[]>(() =>
+    buildFlightBars(this.asset()?.recentUsages ?? [], this.nowSignal()),
+  );
 
   // --- Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3 — GET image URL as img src, graceful 404) -
   // `hasImage` is optional on `AssetSummary`/`AssetDetails` (a backend predating the image endpoint
@@ -309,34 +312,27 @@ export class AssetDetailPage {
   protected readonly assignDraft = signal('');
   protected readonly loadingAssignable = signal(false);
 
-  // --- Telemetry/detections re-entry guards (docs/REALTIME-PLAN.md Phase R-a item 2, R-c
-  // follow-up) — mirrors `FlyPage`'s own identical pair exactly (see its doc comment): the last
-  // deviceId/streamId the corresponding constructor effect below actually acted on, compared by
-  // value (`core/telemetry/telemetry-logic.ts#trackingIdChanged`), never by the enclosing `asset()`/
-  // `stream()` object's own identity, which is a fresh reference every ~5s poll tick regardless of
-  // whether the tracked id changed. Without this, re-entering `telemetry.track()`/`detections.track()`
-  // with an unchanged id every tick was worse than a wasted re-fetch: `TelemetryStore`/`DetectionsStore`'s
-  // own `track()` tears down and rebuilds its `LiveStore` subscription on every call, and doing that
-  // from inside an already-executing effect let a write deep inside that teardown (the store's own
-  // internal `currentAssetIdSignal`) get attributed back to *this* effect — re-notifying it with
-  // `asset()`/`assetTelemetryDevices()` unchanged, and re-entering `track()` again, in a tight loop
-  // paced only by how fast the store's own async lookups resolved (confirmed live: ~50-90 track/untrack
-  // cycles/sec against a real backend, not the 5s poll cadence at all).
+  // --- Telemetry re-entry guard (docs/REALTIME-PLAN.md Phase R-a item 2, R-c follow-up) — mirrors
+  // `FlyPage`'s own identical field exactly (see its doc comment): the last deviceId the
+  // corresponding constructor effect below actually acted on, compared by value
+  // (`core/telemetry/telemetry-logic.ts#trackingIdChanged`), never by the enclosing `asset()`
+  // object's own identity, which is a fresh reference every ~5s poll tick regardless of whether the
+  // tracked id changed. Without this, re-entering `telemetry.track()` with an unchanged id every
+  // tick was worse than a wasted re-fetch: `TelemetryStore`'s own `track()` tears down and rebuilds
+  // its `LiveStore` subscription on every call, and doing that from inside an already-executing
+  // effect let a write deep inside that teardown (the store's own internal `currentAssetIdSignal`)
+  // get attributed back to *this* effect — re-notifying it with `asset()`/`assetTelemetryDevices()`
+  // unchanged, and re-entering `track()` again, in a tight loop paced only by how fast the store's
+  // own async lookups resolved (confirmed live: ~50-90 track/untrack cycles/sec against a real
+  // backend, not the 5s poll cadence at all).
   private lastTelemetryDeviceId: string | undefined = undefined;
-  private lastDetectionsStreamId: string | undefined = undefined;
 
   constructor() {
     effect(() => {
       const id = this.assetId();
       this.imageLoadFailed.set(false); // a fresh navigation deserves a fresh attempt at the photo
       void this.load(id);
-    });
-
-    // Latches once `live()` is ever observed true — see `stopped`'s own doc comment above.
-    effect(() => {
-      if (this.live()) {
-        this.hasBeenLive.set(true);
-      }
+      void this.loadStats(id);
     });
 
     // Any device on the asset resolves the same owning-asset/open-usage pair — see class doc.
@@ -358,23 +354,6 @@ export class AssetDetailPage {
         this.telemetry.track(deviceId, this.assetId());
       } else {
         this.telemetry.reset();
-      }
-    });
-
-    // Detections only make sense while this asset is actively streaming. Guarded on the derived
-    // streamId primitive for the identical reason as telemetry above.
-    effect(() => {
-      const streamId = this.stream()?.streamId;
-      if (!trackingIdChanged(streamId, this.lastDetectionsStreamId)) {
-        return;
-      }
-      this.lastDetectionsStreamId = streamId;
-      if (streamId) {
-        // Already has the route's own `assetId` (docs/REALTIME-PLAN.md §4, Phase R-c) — lets
-        // `DetectionsStore` subscribe to live `detections:<assetId>` instead of only polling.
-        this.detections.track(streamId, this.assetId());
-      } else {
-        this.detections.reset();
       }
     });
 
@@ -438,57 +417,46 @@ export class AssetDetailPage {
     }
   }
 
+  /**
+   * The KPI row's own fetch (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3), independent of
+   * `load` above by design: a `/stats` failure/404 must never flip `notFound` or block the rest of
+   * the page (the plan's own "same resilience as the existing enrichment reads" wording) — it only
+   * ever affects `stats`, which `kpiTiles` (`core/fleet/asset-stats-logic.ts`) renders as an
+   * all-`'—'` row when `undefined`. On failure this deliberately leaves `stats` at whatever it
+   * already was (the initial `undefined`, or the last successful fetch) rather than resetting it —
+   * the same "silent-degrade, keep the last-known value" convention `pollStreamEvents` above uses.
+   */
+  private async loadStats(assetId: string): Promise<void> {
+    try {
+      this.stats.set(await this.api.assetStats(assetId));
+    } catch {
+      // Silent-degrade — see this method's own doc comment.
+    }
+  }
+
   private refresh(): Promise<void> {
-    return this.load(this.assetId());
+    return Promise.all([this.load(this.assetId()), this.loadStats(this.assetId())]).then(() => undefined);
   }
 
   protected back(): Promise<boolean> {
     return this.router.navigate(['/devices']);
   }
 
+  /** The cockpit-link band's secondary CTA (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — the lightweight single-device watch page, read-only, no start/stop control here. */
   protected watch(): Promise<boolean> | undefined {
     const device = this.videoDevice();
     return device ? this.router.navigate(['/live', device.id]) : undefined;
   }
 
-  protected onLatency(seconds: number | null): void {
-    this.latencySeconds.set(seconds);
-  }
-
-  protected onTransport(transport: Transport): void {
-    this.transport.set(transport);
-  }
-
-  protected setBoxesMode(mode: BoxesMode): void {
-    this.boxesMode.set(mode);
-  }
-
-  protected async start(): Promise<void> {
-    const device = this.videoDevice();
-    if (!device) {
-      return;
-    }
-    this.busy.set(true);
-    try {
-      await this.fleet.start(device.id, this.settings.effective());
-      this.explicitlyStopped.set(false); // a fresh attach — see `stopped`'s own doc comment
-    } finally {
-      this.busy.set(false);
-    }
-  }
-
-  protected async stop(): Promise<void> {
-    const stream = this.stream();
-    if (!stream) {
-      return;
-    }
-    this.busy.set(true);
-    try {
-      await this.fleet.stop(stream.streamId);
-      this.explicitlyStopped.set(true);
-    } finally {
-      this.busy.set(false);
-    }
+  /**
+   * The cockpit-link band's primary CTA (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — remembers
+   * this asset as Fly's active pick (`SettingsStore.flyAssetId`, the same field `FlyPage#selectAsset`
+   * itself writes) so `/fly` lands directly in the cockpit for it, then navigates. Works whether or
+   * not the asset is currently streaming — the cockpit owns start/stop, this page never does.
+   */
+  protected openCockpit(): void {
+    this.settings.flyAssetId.set(this.assetId());
+    void this.router.navigate(['/fly']);
   }
 
   // --- Per-device telemetry panels (called from the template — signals tracked on read, same
@@ -508,8 +476,14 @@ export class AssetDetailPage {
   }
 
   protected usageDuration(usage: AssetUsage): string {
-    const endMs = usage.endedAt ? Date.parse(usage.endedAt) : this.nowSignal();
-    return formatDuration((endMs - Date.parse(usage.startedAt)) / 1000);
+    return formatDuration(usageDurationSeconds(usage, this.nowSignal()));
+  }
+
+  /** The "Recent flights" chart's per-bar hover/focus label — mouse `title` and screen-reader `aria-label` alike. */
+  protected barLabel(bar: FlightBar): string {
+    const when = new Date(bar.startedAt).toLocaleString();
+    const duration = formatDuration(bar.durationSeconds);
+    return bar.open ? `${when} · ${duration} so far · in progress` : `${when} · ${duration}`;
   }
 
   protected detailPairs(attributes: Record<string, string>): { key: string; value: string }[] {

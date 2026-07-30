@@ -55,16 +55,6 @@
       </div>
       <div class="row">
         <a class="btn secondary" routerLink="/devices">All devices</a>
-        @if (videoDevice(); as vd) {
-          @if (live()) {
-            <button type="button" class="btn secondary" (click)="watch()" title="Watch this stream on its own page">Watch live</button>
-            <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop stream</button>
-          } @else {
-            <button type="button" class="btn" (click)="start()" [disabled]="busy()">
-              {{ busy() ? 'Starting…' : 'Start stream' }}
-            </button>
-          }
-        }
         <!-- Lifecycle simplification (docs/UX-REWORK-PLAN.md §U-a2 item 2): operator-facing
              surfaces show only Archive/Restore — activate/deactivate no longer render here at all.
              Archive fires immediately (item 3b, "Undo over confirm") — no confirm dialog. -->
@@ -86,56 +76,86 @@
     </div>
 
     <div class="detail-grid">
-      <!-- ---- Live video ------------------------------------------------------------------ -->
+      <!-- ---- Cockpit link band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the
+           old Video/Stream cards. This page never mounts a player or starts/stops a stream —
+           piloting and live video live in the cockpit (`/fly`) and the lightweight
+           `/live/:deviceId` watch page, both one click away. Offline is fine: "Open cockpit" still
+           navigates, since the cockpit owns start/stop. -->
+      <section class="card span-2 cockpit-band">
+        <div class="row cockpit-status">
+          <span class="chip" [class.ok]="live()">
+            @if (live()) {
+              <span class="dot live"></span>
+            }
+            {{ live() ? 'Streaming' : 'Offline' }}
+          </span>
+          <span class="muted cockpit-hint">Piloting and live video are in the cockpit — this page is for managing the asset.</span>
+        </div>
+        <div class="row cockpit-actions">
+          <button type="button" class="btn" (click)="openCockpit()">Open cockpit</button>
+          @if (videoDevice(); as vd) {
+            <button type="button" class="btn secondary" (click)="watch()" title="Watch this stream on its own page">Watch live</button>
+          }
+        </div>
+      </section>
+
+      <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
+           flight-utilization aggregates from `VisionApi.assetStats`; every tile reads a real value
+           or "—", never a fabricated number (see `core/fleet/asset-stats-logic.ts#kpiTiles`). -->
+      <section class="card span-2">
+        <header><h2>Utilization</h2></header>
+        <div class="kpi-tiles">
+          @for (tile of kpiTiles(); track tile.label) {
+            <div class="kpi-tile">
+              <div class="kpi-label">{{ tile.label }}</div>
+              <div class="kpi-value">
+                {{ tile.value }}
+                @if (tile.live) {
+                  <span class="dot live" title="Currently in progress"></span>
+                }
+              </div>
+              @if (tile.sub) {
+                <div class="kpi-sub muted">{{ tile.sub }}</div>
+              }
+            </div>
+          }
+        </div>
+      </section>
+
+      <!-- ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) — honestly
+           labeled as the capped recent list (`AssetDetails#recentUsages`), distinct from the KPI
+           row's lifetime totals above. Every value here is also reachable, without hovering, in
+           the Usage history table below (this chart's table-view twin). -->
       <section class="card span-2">
         <header>
-          <h2>Video</h2>
-          @if (live()) {
-            <div class="row segmented" role="group" aria-label="Detection boxes">
-              <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'overlay'" (click)="setBoxesMode('overlay')">Overlay</button>
-              <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'burned'" (click)="setBoxesMode('burned')">Burned</button>
-              <button type="button" class="btn secondary small" [class.active]="boxesMode() === 'off'" (click)="setBoxesMode('off')">Off</button>
-            </div>
-          }
+          <h2>Recent flights</h2>
+          <span class="muted">durations, oldest to newest — lifetime totals are in Utilization above</span>
         </header>
-        @if (videoDevice()) {
-          @if (live()) {
-            <vision-player
-              [src]="stream()?.viewUrl ?? null"
-              [whepUrl]="stream()?.whepUrl ?? null"
-              [stopped]="stopped()"
-              [detections]="detections.results()"
-              [boxesMode]="boxesMode()"
-              (latencyChanged)="onLatency($event)"
-              (transportChanged)="onTransport($event)"
-            />
-          } @else {
-            <!-- Collapsed idle placeholder (docs/UX-QUICKWINS-PLAN.md QF-4 item 3) — no
-                 <vision-player> mounted at all while nothing is streaming, so this card doesn't
-                 reserve the ~630px a 16:9 frame would; it expands back to the full player the
-                 instant `live()` flips true (a fresh Start, here or on another tab watching the
-                 same asset). -->
-            <div class="empty">
-              <p>{{ videoStateLine() }}</p>
-              <button type="button" class="btn" (click)="start()" [disabled]="busy()">
-                {{ busy() ? 'Starting…' : 'Start stream' }}
-              </button>
-            </div>
-          }
+        @if (flightBars().length === 0) {
+          <p class="muted hint">No recorded flights yet.</p>
         } @else {
-          <div class="empty">
-            <p class="faint">This asset has no video-capable device.</p>
+          <div class="util-chart">
+            @for (bar of flightBars(); track bar.usageId) {
+              <div class="util-bar-col">
+                @if (bar.open) {
+                  <span class="dot live util-bar-pip" title="In progress"></span>
+                }
+                <div
+                  class="util-bar"
+                  tabindex="0"
+                  [style.height.%]="bar.heightPercent"
+                  [title]="barLabel(bar)"
+                  [attr.aria-label]="barLabel(bar)"
+                ></div>
+              </div>
+            }
+          </div>
+          <div class="util-chart-axis">
+            <span>Oldest</span>
+            <span>Most recent</span>
           </div>
         }
       </section>
-
-      <!-- ---- Stream info (docs/MVP2-PLAN.md §U-info) -------------------------------------- -->
-      @if (videoDevice(); as vd) {
-        <section class="card">
-          <header><h2>Stream</h2></header>
-          <vision-stream-info [deviceId]="vd.id" [latencySeconds]="latencySeconds()" [transport]="transport()" />
-        </section>
-      }
 
       <!-- ---- Map (docs/CYCLES-PLAN.md §11 item 2–3) --------------------------------------- -->
       @if (assetTelemetryDevices().length > 0) {

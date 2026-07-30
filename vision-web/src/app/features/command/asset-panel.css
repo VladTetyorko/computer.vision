@@ -117,13 +117,19 @@
   color: var(--text-muted);
 }
 
+/* Button-alignment audit (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 6): this row used to stretch
+   its own two plain `.btn` children to equal width (`flex: 1; justify-content: center`) — but the
+   third, conditional member (`<vision-return-home-button>`) renders its actual `<button>` inside
+   its *own* template, so Angular's emulated view encapsulation means that inner button never
+   carries this component's `_ngcontent` attribute and this selector can never reach it. The result
+   was two equal-width buttons plus one natural-width button in the same row whenever "Bring home"
+   was available — a real, visible inconsistency, not just a style nit. Fixed by dropping the
+   equal-fill treatment entirely: every button here (including the encapsulated one) now renders at
+   its own natural, consistently-`small`-sized width, left-aligned with the row's own gap — the same
+   plain pattern `.row`/`.hud-controls` already use elsewhere in this app, rather than fighting
+   encapsulation to stretch three buttons uniformly. */
 .panel-actions {
   flex: none;
   padding-top: 0.5rem;
   border-top: 1px solid var(--border);
-}
-
-.panel-actions .btn {
-  flex: 1;
-  justify-content: center;
 }

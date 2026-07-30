@@ -97,10 +97,123 @@
     }
 }
 
-/* The "boxes: Overlay/Burned/Off" toggle group used to carry its own local `.boxes-toggle`
-   active-state CSS here (mirrored verbatim in `features/live/live.css`); both were removed in favor
-   of the shared global `.segmented` (docs/UX-REWORK-PLAN.md §U-b item 5, `src/styles.css`) once the
-   template's wrapper class changed from `boxes-toggle` to `segmented`. */
+/* ---- Cockpit link band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the old
+   Video/Stream cards; a compact status strip, never a player. Button-alignment audit (Wave B item
+   6): primary CTA first, secondary second, both default-sized (no mixed `small`/default in this
+   row), consistent gap/vertical-centering via the shared global `.row`. ------------------------- */
+
+.cockpit-band {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.cockpit-status {
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.cockpit-hint {
+    font-size: 0.8rem;
+}
+
+.cockpit-actions {
+    flex-wrap: wrap;
+}
+
+/* ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — `dataviz`'s stat-tile
+   contract: label (muted, uppercase caption) over value (semibold, proportional figures — never
+   `tabular-nums` on a large standalone number, see the skill's own `marks-and-anatomy.md`). ------ */
+
+.kpi-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: 0.75rem;
+}
+
+.kpi-tile {
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.7rem 0.85rem;
+}
+
+.kpi-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.kpi-value {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+    font-size: 1.4rem;
+    font-weight: 600;
+}
+
+.kpi-sub {
+    margin-top: 0.15rem;
+    font-size: 0.72rem;
+}
+
+/* ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) — one bar per
+   `AssetDetails#recentUsages` entry (`core/fleet/asset-stats-logic.ts#flightBars`), oldest to
+   newest. `dataviz` mark spec: bars ≤24px thick, 4px rounded data-end, square baseline, a single
+   accent hue (one series → no legend, the card title already names it). Fixed-width columns +
+   `overflow-x: auto` rather than shrinking bars on narrow viewports (the "collapses cleanly"
+   ask) — a horizontal scroll on a capped ~20-bar row reads better than slivers too thin to hover. */
+
+.util-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 4.5rem;
+    padding-top: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+}
+
+.util-bar-col {
+    flex: 0 0 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    height: 100%;
+}
+
+.util-bar {
+    width: 16px;
+    min-height: 3px;
+    background: var(--accent);
+    border-radius: 4px 4px 0 0;
+    cursor: default;
+    transition: filter 0.15s ease;
+}
+
+/* The hovered/focused mark lifts (dataviz's own interaction rule) — same `brightness` idiom
+   `.btn:hover` already uses elsewhere in this stylesheet's shared parent, `src/styles.css`. */
+.util-bar:hover,
+.util-bar:focus-visible {
+    filter: brightness(1.25);
+}
+
+.util-bar-pip {
+    margin-bottom: 0.25rem;
+}
+
+.util-chart-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.35rem;
+    font-size: 0.7rem;
+    color: var(--text-faint);
+}
 
 /* ---- Facts grid (mirrors shared/player/stream-info-panel.ts's own — CSS encapsulation means this needs
    its own copy; used here for Characteristics and per-device telemetry panels) --------------- */

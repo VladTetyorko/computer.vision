@@ -6,6 +6,7 @@ import type {
   AssetDeletionResponse,
   AssetDetails,
   AssetEdit,
+  AssetStats,
   AssetSummary,
   CreateAssetRequest,
   DetectionEvent,
@@ -148,6 +149,17 @@ export class VisionApi {
 
   getAsset(assetId: string): Promise<AssetDetails> {
     return firstValueFrom(this.http.get<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}`));
+  }
+
+  /**
+   * The manager page's KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
+   * flight-utilization aggregates, distinct from {@link getAsset}'s `recentUsages` (a capped
+   * recent list). 404 for an unknown asset, same as {@link getAsset}; the caller degrades its own
+   * KPI row to "—" rather than blocking the page on failure (this page's existing enrichment-read
+   * resilience — see `AssetDetailPage#loadStats`).
+   */
+  assetStats(assetId: string): Promise<AssetStats> {
+    return firstValueFrom(this.http.get<AssetStats>(`/api/assets/${encodeURIComponent(assetId)}/stats`));
   }
 
   /**
