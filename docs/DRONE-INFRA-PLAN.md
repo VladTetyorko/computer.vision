@@ -249,7 +249,17 @@ decode off the backend entirely (the same push-vs-pull lever as CV-SCALE-PLAN §
 in-app ingest (this wave) is the incremental step; mediamtx-native ingest is the scale step,
 sequenced when backend ingest decode becomes the measured ceiling.
 
-### I-e Stage 2 — arm/disarm + mode select (APPROVED, frozen 2026-07-30)
+### I-e Stage 2 — arm/disarm + mode select — DONE (2026-07-30, SITL-verified)
+
+All three waves green. Wave A domain+adapter (FlightCommandPort setMode/arm/disarm/capabilities
++ MavlinkFlightCommander + FlightModes.selectableModes; domain 221, adapter-mavlink 123; SITL
+setMode("Loiter") accepted on a flying aircraft) · Wave B application+api (gated+audited service
++ 4 endpoints, 403/409/400/404 split; application+api+app 318/139) · Wave C UI (Fly command
+panel: two-stage arm-confirm reserving failsafe-red, disarm crash warning, capability-gated;
+vision-web 1119). Auth-off = unbounded = commands allowed = today's behavior. Stage 3
+(missions/fence upload) stays parked. Original spec below.
+
+### I-e Stage 2 spec — arm/disarm + mode select (APPROVED, frozen 2026-07-30)
 
 Extends Stage 1 (RTL, done + SITL-verified) with the two next command classes, now that U-e
 gives real command authority (Stage 1's `returnToHome` already takes a `VisibilityScope`;
