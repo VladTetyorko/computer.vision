@@ -1,6 +1,14 @@
 # ASSET-MANAGER-PAGE-PLAN — separate the manager asset page from the pilot cockpit
 
-Status: approved spec (2026-07-30). The asset detail page today is a hybrid — it embeds a
+Status: DONE (2026-07-30, both waves green). Wave A backend: `GET /api/assets/{id}/stats`
+flight-time/count/avg/battery aggregate (vision-application 434, vision-api 287, vision-app
+127). Wave B frontend: asset page stripped of the embedded player + stream controls, cockpit
+link band, 5 KPI stat-tiles + a recent-flights bar chart, button-alignment audit (found+fixed
+a real `.panel-actions` equal-fill bug in Command's asset-panel where an equal-width rule
+couldn't reach a view-encapsulated child button); vision-web 1082 tests, tsc clean, prod build
+clean. Original spec below.
+
+Approved spec (2026-07-30). The asset detail page today is a hybrid — it embeds a
 live `<vision-player>` and stream start/stop controls *and* the management info (telemetry,
 usage history, hardware). The user's direction: **the asset page is for the manager, not for
 piloting** — no embedded video, a link to the cockpit instead, plus utilization dashboards
