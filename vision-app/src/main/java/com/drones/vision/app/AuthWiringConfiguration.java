@@ -2,12 +2,21 @@ package com.drones.vision.app;
 
 import com.drones.vision.api.PrincipalResolver;
 import com.drones.vision.api.SessionAuthenticator;
+import com.drones.vision.application.ActivityService;
+import com.drones.vision.application.AssignmentService;
 import com.drones.vision.application.AuthService;
+import com.drones.vision.application.DefaultActivityService;
+import com.drones.vision.application.DefaultAssignmentService;
 import com.drones.vision.application.DefaultAuthService;
 import com.drones.vision.application.DefaultGroupService;
+import com.drones.vision.application.DefaultScopeResolver;
 import com.drones.vision.application.DefaultUserService;
 import com.drones.vision.application.GroupService;
+import com.drones.vision.application.ScopeResolver;
 import com.drones.vision.application.UserService;
+import com.drones.vision.domain.port.out.AssetRepositoryPort;
+import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
+import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.GroupRepositoryPort;
 import com.drones.vision.domain.port.out.PasswordHasherPort;
 import com.drones.vision.domain.port.out.UserRepositoryPort;
@@ -64,6 +73,32 @@ public class AuthWiringConfiguration {
         return new DefaultGroupService(groupRepositoryPort);
     }
 
+    /**
+     * Visibility-scope resolution (docs/U-SCOPE-PLAN.md, U-e slice 2) — turns the acting user's
+     * memberships + the group tree + their pilot assignments into a {@link
+     * com.drones.vision.application.VisibilityScope}. Wired unconditionally (auth on or off): {@link
+     * SecurityContextPrincipalResolver} uses it when auth is on; the {@code DevPrincipalResolver}
+     * short-circuits to unbounded without touching it when auth is off.
+     */
+    @Bean
+    public ScopeResolver scopeResolver(GroupRepositoryPort groupRepositoryPort,
+                                       AssignmentRepositoryPort assignmentRepositoryPort) {
+        return new DefaultScopeResolver(groupRepositoryPort, assignmentRepositoryPort);
+    }
+
+    /** Pilot→asset assignment roster (docs/U-SCOPE-PLAN.md, feature 2) — behind the assignment endpoints. */
+    @Bean
+    public AssignmentService assignmentService(AssignmentRepositoryPort assignmentRepositoryPort,
+                                               AssetRepositoryPort assetRepositoryPort) {
+        return new DefaultAssignmentService(assignmentRepositoryPort, assetRepositoryPort);
+    }
+
+    /** A user's own activity feed (docs/U-SCOPE-PLAN.md, feature 7) — behind {@code GET /api/me/activity}. */
+    @Bean
+    public ActivityService activityService(AuditTrailPort auditTrailPort) {
+        return new DefaultActivityService(auditTrailPort);
+    }
+
     /** First-boot seed of a root group + dev users; a no-op once any user exists (see the class). */
     @Bean
     public ApplicationRunner authSeedRunner(UserService userService, GroupService groupService) {
@@ -77,11 +112,11 @@ public class AuthWiringConfiguration {
         return new DevPrincipalResolver();
     }
 
-    /** Reads the authenticated session's principal when auth is on. */
+    /** Reads the authenticated session's principal when auth is on, resolving its scope via {@link ScopeResolver}. */
     @Bean
     @ConditionalOnProperty(prefix = "vision.auth", name = "enabled", havingValue = "true")
-    public PrincipalResolver securityContextPrincipalResolver() {
-        return new SecurityContextPrincipalResolver();
+    public PrincipalResolver securityContextPrincipalResolver(ScopeResolver scopeResolver) {
+        return new SecurityContextPrincipalResolver(scopeResolver);
     }
 
     /** No-op session seam when auth is off — the controller never calls it in that mode. */

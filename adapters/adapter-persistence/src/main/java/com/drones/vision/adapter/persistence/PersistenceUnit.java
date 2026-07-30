@@ -3,6 +3,7 @@ package com.drones.vision.adapter.persistence;
 import com.drones.vision.adapter.persistence.entity.AssetEntity;
 import com.drones.vision.adapter.persistence.entity.AssetImageEntity;
 import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
+import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
@@ -70,6 +71,7 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(GeofenceZoneEntity.class);
         configuration.addAnnotatedClass(UserEntity.class);
         configuration.addAnnotatedClass(GroupEntity.class);
+        configuration.addAnnotatedClass(AssignmentEntity.class);
         return configuration.buildSessionFactory();
     }
 }

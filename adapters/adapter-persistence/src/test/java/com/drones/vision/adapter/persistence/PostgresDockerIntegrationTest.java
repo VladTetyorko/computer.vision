@@ -34,6 +34,7 @@ import com.drones.vision.domain.model.ZoneKind;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
+import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
@@ -889,6 +890,63 @@ class PostgresDockerIntegrationTest {
         }
     }
 
+    @Nested
+    class AssignmentRepositoryTests {
+
+        private final AssignmentRepositoryPort repository = new JpaAssignmentRepository(entityManagerFactory);
+
+        @Test
+        void assignIsIdempotentUpsertQueryableBothDirections() {
+            UserId pilot = UserId.random();
+            AssetId asset = AssetId.random();
+
+            repository.assign(pilot, asset);
+            repository.assign(pilot, asset); // idempotent upsert — no duplicate row, no error
+
+            assertTrue(repository.isAssigned(pilot, asset));
+            assertEquals(Set.of(asset), repository.assetsForPilot(pilot));
+            assertEquals(Set.of(pilot), repository.pilotsForAsset(asset));
+        }
+
+        @Test
+        void unassignIsIdempotentDelete() {
+            UserId pilot = UserId.random();
+            AssetId asset = AssetId.random();
+            repository.assign(pilot, asset);
+
+            repository.unassign(pilot, asset);
+            repository.unassign(pilot, asset); // idempotent — deleting a missing link is a no-op
+
+            assertFalse(repository.isAssigned(pilot, asset));
+            assertTrue(repository.assetsForPilot(pilot).isEmpty());
+            assertTrue(repository.pilotsForAsset(asset).isEmpty());
+        }
+
+        @Test
+        void tracksMultiplePilotsAndAssetsIndependently() {
+            UserId alice = UserId.random();
+            UserId bob = UserId.random();
+            AssetId droneOne = AssetId.random();
+            AssetId droneTwo = AssetId.random();
+
+            repository.assign(alice, droneOne);
+            repository.assign(alice, droneTwo);
+            repository.assign(bob, droneOne);
+
+            assertEquals(Set.of(droneOne, droneTwo), repository.assetsForPilot(alice));
+            assertEquals(Set.of(droneOne), repository.assetsForPilot(bob));
+            assertEquals(Set.of(alice, bob), repository.pilotsForAsset(droneOne));
+            assertEquals(Set.of(alice), repository.pilotsForAsset(droneTwo));
+        }
+
+        @Test
+        void unknownPilotOrAssetYieldsEmptySets() {
+            assertTrue(repository.assetsForPilot(UserId.random()).isEmpty());
+            assertTrue(repository.pilotsForAsset(AssetId.random()).isEmpty());
+            assertFalse(repository.isAssigned(UserId.random(), AssetId.random()));
+        }
+    }
+
     /**
      * docs/MVP2-PLAN.md P-b's retention guard, in test form: uses the small-cap constructor
      * overload (rather than the production {@value JpaTelemetryRepository#DEFAULT_RETENTION_LIMIT_PER_USAGE}
@@ -1099,6 +1157,42 @@ class PostgresDockerIntegrationTest {
                     .getSingleResult();
             assertEquals("YES", parentIdColumn[0], "groups.parent_id must be nullable (root groups)");
             assertEquals("uuid", parentIdColumn[1]);
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/U-SCOPE-PLAN.md slice 2 — same schema-shape proof as the V4/V6/V7/V8 tests: the
+     * brand-new {@code pilot_assignments} table exists on top of V1-V8 with a composite
+     * ({@code pilot_user_id}, {@code asset_id}) primary key (both required {@code uuid} columns).
+     */
+    @Test
+    void v9MigrationCreatesThePilotAssignmentsTableOnTopOfV1ThroughV8() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] pilotColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'pilot_assignments' and column_name = 'pilot_user_id'")
+                    .getSingleResult();
+            assertEquals("NO", pilotColumn[0], "pilot_assignments.pilot_user_id is part of the PK, required");
+            assertEquals("uuid", pilotColumn[1]);
+
+            Object[] assetColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'pilot_assignments' and column_name = 'asset_id'")
+                    .getSingleResult();
+            assertEquals("NO", assetColumn[0], "pilot_assignments.asset_id is part of the PK, required");
+            assertEquals("uuid", assetColumn[1]);
+
+            long pkColumns = ((Number) em.createNativeQuery(
+                            "select count(*) from information_schema.table_constraints tc "
+                                    + "join information_schema.key_column_usage kcu "
+                                    + "on tc.constraint_name = kcu.constraint_name "
+                                    + "where tc.table_name = 'pilot_assignments' "
+                                    + "and tc.constraint_type = 'PRIMARY KEY'")
+                    .getSingleResult()).longValue();
+            assertEquals(2, pkColumns, "the primary key must be the composite (pilot_user_id, asset_id)");
         } finally {
             em.close();
         }

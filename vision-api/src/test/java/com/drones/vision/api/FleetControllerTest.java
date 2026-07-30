@@ -4,10 +4,14 @@ import com.drones.vision.application.AssetAttention;
 import com.drones.vision.application.CategoryCounts;
 import com.drones.vision.application.FleetSummary;
 import com.drones.vision.application.FleetSummaryService;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -16,7 +20,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.util.List;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,7 +45,8 @@ class FleetControllerTest {
     @BeforeEach
     void setUp() {
         fleetSummaryService = mock(FleetSummaryService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new FleetController(fleetSummaryService))
+        CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
+        mockMvc = MockMvcBuilders.standaloneSetup(new FleetController(fleetSummaryService, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -51,7 +58,7 @@ class FleetControllerTest {
         StreamId streamId = StreamId.random();
         AssetAttention row = new AssetAttention(assetId, "Drone A", new CategoryId("drone"), "Drone",
                 LifecycleState.ACTIVE, true, streamId, 87.5, 1500L, 2, "RTL", true, true);
-        when(fleetSummaryService.summary(false)).thenReturn(new FleetSummary(List.of(drone), List.of(row), 2));
+        when(fleetSummaryService.summary(any(VisibilityScope.class), eq(false))).thenReturn(new FleetSummary(List.of(drone), List.of(row), 2));
 
         mockMvc.perform(get("/api/fleet/summary"))
                 .andExpect(status().isOk())
@@ -84,7 +91,7 @@ class FleetControllerTest {
     void summaryOmitsAbsentOptionalFieldsOnAnAssetRow() throws Exception {
         AssetAttention row = new AssetAttention(AssetId.random(), "Drone B", new CategoryId("drone"), "Drone",
                 LifecycleState.ACTIVE, false, null, null, null, 0, null, null, null);
-        when(fleetSummaryService.summary(false)).thenReturn(new FleetSummary(List.of(), List.of(row), 1));
+        when(fleetSummaryService.summary(any(VisibilityScope.class), eq(false))).thenReturn(new FleetSummary(List.of(), List.of(row), 1));
 
         mockMvc.perform(get("/api/fleet/summary"))
                 .andExpect(status().isOk())
@@ -99,20 +106,20 @@ class FleetControllerTest {
 
     @Test
     void summaryDefaultsIncludeArchivedToFalse() throws Exception {
-        when(fleetSummaryService.summary(anyBoolean())).thenReturn(new FleetSummary(List.of(), List.of(), 0));
+        when(fleetSummaryService.summary(any(VisibilityScope.class), anyBoolean())).thenReturn(new FleetSummary(List.of(), List.of(), 0));
 
         mockMvc.perform(get("/api/fleet/summary")).andExpect(status().isOk());
 
-        verify(fleetSummaryService).summary(false);
+        verify(fleetSummaryService).summary(any(VisibilityScope.class), eq(false));
     }
 
     @Test
     void summaryPassesIncludeArchivedTrueThrough() throws Exception {
-        when(fleetSummaryService.summary(anyBoolean())).thenReturn(new FleetSummary(List.of(), List.of(), 0));
+        when(fleetSummaryService.summary(any(VisibilityScope.class), anyBoolean())).thenReturn(new FleetSummary(List.of(), List.of(), 0));
 
         mockMvc.perform(get("/api/fleet/summary").param("includeArchived", "true")).andExpect(status().isOk());
 
-        verify(fleetSummaryService).summary(true);
+        verify(fleetSummaryService).summary(any(VisibilityScope.class), eq(true));
     }
 
     @Test
@@ -123,7 +130,7 @@ class FleetControllerTest {
 
     @Test
     void summaryHandlesAnEmptyFleet() throws Exception {
-        when(fleetSummaryService.summary(false)).thenReturn(new FleetSummary(List.of(), List.of(), 0));
+        when(fleetSummaryService.summary(any(VisibilityScope.class), eq(false))).thenReturn(new FleetSummary(List.of(), List.of(), 0));
 
         mockMvc.perform(get("/api/fleet/summary"))
                 .andExpect(status().isOk())

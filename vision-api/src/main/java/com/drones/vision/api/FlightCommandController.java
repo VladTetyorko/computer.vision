@@ -28,9 +28,11 @@ import java.util.Objects;
  * sent command; {@code 404} for an unknown asset ({@link java.util.NoSuchElementException}, the
  * same mapping every other asset-scoped endpoint uses); {@code 409} with the failure message for
  * "not commandable" or "the aircraft refused" ({@link IllegalStateException} — see {@link
- * FlightCommandService} for why both outcomes surface as this one exception type). No new mapping
- * is added to {@link ApiExceptionHandler}: its existing, unmodified {@code
- * IllegalStateException}→409 rule already covers this endpoint.
+ * FlightCommandService} for why both outcomes surface as this one exception type); {@code 403}
+ * when the asset exists but is outside the caller's {@link CurrentUser#scope()}
+ * ({@link com.drones.vision.application.AccessDeniedException}, mapped by {@link
+ * ApiExceptionHandler} — docs/U-SCOPE-PLAN.md, feature 3). With auth off the scope is unbounded, so
+ * this endpoint behaves exactly as before scoping.
  */
 @RestController
 public class FlightCommandController {
@@ -55,7 +57,8 @@ public class FlightCommandController {
     @PostMapping("/api/assets/{id}/return-home")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse returnHome(@PathVariable String id) {
-        CommandResult result = flightCommandService.returnToHome(AssetId.of(id), currentUser.userId());
+        CommandResult result = flightCommandService.returnToHome(AssetId.of(id), currentUser.userId(),
+                currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
 }

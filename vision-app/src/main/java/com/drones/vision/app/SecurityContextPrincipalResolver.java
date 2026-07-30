@@ -1,10 +1,14 @@
 package com.drones.vision.app;
 
 import com.drones.vision.api.PrincipalResolver;
+import com.drones.vision.application.ScopeResolver;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.Objects;
 
 /**
  * The {@link PrincipalResolver} wired when {@code vision.auth.enabled=true} — reads the
@@ -16,8 +20,23 @@ import org.springframework.security.core.context.SecurityContextHolder;
  * chain's {@code authenticated()} rule, so there is always a {@link VisionUserDetails} here in
  * practice; the {@link IllegalStateException} guard is purely defensive (a controller reachable
  * unauthenticated must never silently act as some default user).
+ *
+ * <p><strong>Scope (docs/U-SCOPE-PLAN.md, U-e slice 2).</strong> {@link #scope()} delegates to
+ * {@link ScopeResolver}, computing the acting user's {@link VisibilityScope} from their memberships,
+ * the group tree, and their assignments. It is recomputed per call rather than cached per request —
+ * acceptable for now (a controller reads {@code scope()} at most a handful of times per request, and
+ * the resolver's ports are cheap in-memory/indexed lookups); a per-request cache is a small
+ * follow-up if a hot path ever reads it repeatedly. The {@code User} is taken straight from the
+ * session principal ({@link VisionUserDetails#user()}), so resolving a scope needs no extra
+ * repository hit beyond the group/assignment reads {@code ScopeResolver} itself does.
  */
 final class SecurityContextPrincipalResolver implements PrincipalResolver {
+
+    private final ScopeResolver scopeResolver;
+
+    SecurityContextPrincipalResolver(ScopeResolver scopeResolver) {
+        this.scopeResolver = Objects.requireNonNull(scopeResolver, "scopeResolver must not be null");
+    }
 
     @Override
     public UserId userId() {
@@ -27,6 +46,11 @@ final class SecurityContextPrincipalResolver implements PrincipalResolver {
     @Override
     public Ownership ownership() {
         return principal().ownership();
+    }
+
+    @Override
+    public VisibilityScope scope() {
+        return scopeResolver.scopeFor(principal().user());
     }
 
     private VisionUserDetails principal() {

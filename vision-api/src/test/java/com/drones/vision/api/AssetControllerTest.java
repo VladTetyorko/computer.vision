@@ -7,6 +7,7 @@ import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssetSpec;
 import com.drones.vision.application.AssetStatus;
 import com.drones.vision.application.AssetSummary;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.application.DeviceRegistration;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
@@ -108,7 +109,7 @@ class AssetControllerTest {
                 AssetStatus.OFFLINE, null, null);
         AssetDetails details =
                 new AssetDetails(summary, List.of(devices), List.of());
-        when(assetService.details(asset.id())).thenReturn(details);
+        when(assetService.details(any(VisibilityScope.class), eq(asset.id()))).thenReturn(details);
     }
 
     // ---- POST /api/assets ----
@@ -123,7 +124,7 @@ class AssetControllerTest {
                 AssetStatus.OFFLINE, null, null);
         AssetDetails details =
                 new AssetDetails(summary, List.of(device), List.of());
-        when(assetService.details(created.id())).thenReturn(details);
+        when(assetService.details(any(VisibilityScope.class), eq(created.id()))).thenReturn(details);
 
         String body = """
                 {"displayName":"my drone","category":"drone","attributes":{"weightKg":"1.2"},
@@ -319,7 +320,7 @@ class AssetControllerTest {
         AssetSummary usedSummary = new AssetSummary(used, "Drone",
                 AssetStatus.STREAMING, lastUsedAt, position);
 
-        when(assetService.assets(false)).thenReturn(List.of(neverUsedSummary, usedSummary));
+        when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(neverUsedSummary, usedSummary));
 
         mockMvc.perform(get("/api/assets"))
                 .andExpect(status().isOk())
@@ -343,7 +344,7 @@ class AssetControllerTest {
         Asset withoutImage = asset(videoDevice());
         AssetSummary withoutImageSummary = new AssetSummary(withoutImage, "Drone", AssetStatus.OFFLINE, null, null);
 
-        when(assetService.assets(false)).thenReturn(List.of(withImageSummary, withoutImageSummary));
+        when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(withImageSummary, withoutImageSummary));
         when(assetImageRepositoryPort.existsByAssetId(withImage.id())).thenReturn(true);
         when(assetImageRepositoryPort.existsByAssetId(withoutImage.id())).thenReturn(false);
 
@@ -355,7 +356,7 @@ class AssetControllerTest {
 
     @Test
     void listReturns200WithEmptyListWhenNoAssets() throws Exception {
-        when(assetService.assets(false)).thenReturn(List.of());
+        when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of());
 
         mockMvc.perform(get("/api/assets"))
                 .andExpect(status().isOk())
@@ -366,13 +367,13 @@ class AssetControllerTest {
     void listExposesLifecycleAlongsideStatusAndPassesIncludeDeletedThrough() throws Exception {
         Asset deleted = asset(videoDevice()).withState(LifecycleState.DELETED);
         AssetSummary summary = new AssetSummary(deleted, "Drone", AssetStatus.OFFLINE, null, null);
-        when(assetService.assets(true)).thenReturn(List.of(summary));
+        when(assetService.assets(any(VisibilityScope.class), eq(true))).thenReturn(List.of(summary));
 
         mockMvc.perform(get("/api/assets").param("includeDeleted", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].lifecycle").value("DELETED"));
 
-        verify(assetService).assets(true);
+        verify(assetService).assets(any(VisibilityScope.class), eq(true));
     }
 
     // ---- PATCH /api/assets/{id} ----
@@ -664,7 +665,7 @@ class AssetControllerTest {
 
         AssetDetails details = new AssetDetails(summary,
                 List.of(device), List.of(openUsage, closedUsage));
-        when(assetService.details(asset.id())).thenReturn(details);
+        when(assetService.details(any(VisibilityScope.class), eq(asset.id()))).thenReturn(details);
 
         mockMvc.perform(get("/api/assets/{id}", asset.id().value()))
                 .andExpect(status().isOk())
@@ -688,7 +689,7 @@ class AssetControllerTest {
         Device device = videoDevice();
         Asset asset = asset(device);
         AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
-        when(assetService.details(asset.id())).thenReturn(new AssetDetails(summary, List.of(device), List.of()));
+        when(assetService.details(any(VisibilityScope.class), eq(asset.id()))).thenReturn(new AssetDetails(summary, List.of(device), List.of()));
         when(assetImageRepositoryPort.existsByAssetId(asset.id())).thenReturn(true);
 
         mockMvc.perform(get("/api/assets/{id}", asset.id().value()))
@@ -699,7 +700,7 @@ class AssetControllerTest {
     @Test
     void detailsReturns404ForUnknownAsset() throws Exception {
         AssetId unknown = AssetId.random();
-        when(assetService.details(unknown))
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
                 .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         mockMvc.perform(get("/api/assets/{id}", unknown.value()))

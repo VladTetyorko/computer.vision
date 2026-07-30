@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
 
@@ -35,12 +36,24 @@ public interface PrincipalResolver {
     Ownership ownership();
 
     /**
+     * What the current request may see — the acting user's resolved {@link VisibilityScope}
+     * (docs/U-SCOPE-PLAN.md, U-e slice 2). Controllers thread this into the scoped read/command
+     * methods; when auth is disabled the dev principal resolves to {@link
+     * VisibilityScope#unbounded()}, so nothing downstream changes.
+     *
+     * @return the acting user's visibility scope; never {@code null}
+     */
+    VisibilityScope scope();
+
+    /**
      * A resolver that always answers with one fixed {@link Ownership} (and its {@code ownerId} as
-     * the acting user) — the shape {@link CurrentUser}'s pre-auth behavior had, kept for tests and
-     * for {@code vision-app}'s dev-principal wiring when {@code vision.auth.enabled=false}.
+     * the acting user), and an {@link VisibilityScope#unbounded()} scope — the shape {@link
+     * CurrentUser}'s pre-auth behavior had, kept for tests and for {@code vision-app}'s
+     * dev-principal wiring when {@code vision.auth.enabled=false}. An unbounded scope is the
+     * slice-2 guardrail: a scoped read given it returns exactly the unscoped result.
      *
      * @param ownership the fixed ownership to answer with; must not be {@code null}
-     * @return a resolver returning {@code ownership} and {@code ownership.ownerId()}
+     * @return a resolver returning {@code ownership}, {@code ownership.ownerId()}, and an unbounded scope
      */
     static PrincipalResolver fixed(Ownership ownership) {
         Objects.requireNonNull(ownership, "ownership must not be null");
@@ -53,6 +66,11 @@ public interface PrincipalResolver {
             @Override
             public Ownership ownership() {
                 return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return VisibilityScope.unbounded();
             }
         };
     }

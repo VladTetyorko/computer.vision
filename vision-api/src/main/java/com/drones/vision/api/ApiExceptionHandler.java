@@ -1,6 +1,7 @@
 package com.drones.vision.api;
 
 import com.drones.vision.api.dto.ErrorResponse;
+import com.drones.vision.application.AccessDeniedException;
 import com.drones.vision.application.ProbeFailedException;
 import com.drones.vision.application.UnsupportedProtocolException;
 import org.springframework.http.HttpStatus;
@@ -63,6 +64,18 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ErrorResponse> handleNotFound(NoSuchElementException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new ErrorResponse("NOT_FOUND", ex.getMessage()));
+    }
+
+    /**
+     * A scoped <em>command/grant</em> against an asset the caller cannot see maps to {@code 403}
+     * (docs/U-SCOPE-PLAN.md, U-e slice 2) — deliberately distinct from the {@code 404} a scoped
+     * <em>read</em> gives ({@link NoSuchElementException}, which hides existence) and the {@code
+     * 409} an ordinary {@link IllegalStateException} gives. For a command the honest answer is "you
+     * may not do this," not "it isn't there."
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(new ErrorResponse("FORBIDDEN", ex.getMessage()));
     }
 
     @ExceptionHandler(IllegalStateException.class)

@@ -1,6 +1,8 @@
 package com.drones.vision.api;
 
+import com.drones.vision.application.AccessDeniedException;
 import com.drones.vision.application.FlightCommandService;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.CommandResult;
 import com.drones.vision.domain.model.GroupId;
@@ -13,6 +15,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.NoSuchElementException;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -43,19 +46,19 @@ class FlightCommandControllerTest {
     @Test
     void returnHomeReturns202WithAcceptedOnSuccess() throws Exception {
         AssetId assetId = AssetId.random();
-        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId))).thenReturn(CommandResult.ACCEPTED);
+        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class))).thenReturn(CommandResult.ACCEPTED);
 
         mockMvc.perform(post("/api/assets/{id}/return-home", assetId.value()))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.result").value("ACCEPTED"));
 
-        verify(flightCommandService).returnToHome(assetId, ownerId);
+        verify(flightCommandService).returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class));
     }
 
     @Test
     void returnHomeReturns202WithNoAckWhenTheAircraftNeverAcknowledged() throws Exception {
         AssetId assetId = AssetId.random();
-        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId))).thenReturn(CommandResult.NO_ACK);
+        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class))).thenReturn(CommandResult.NO_ACK);
 
         mockMvc.perform(post("/api/assets/{id}/return-home", assetId.value()))
                 .andExpect(status().isAccepted())
@@ -65,7 +68,7 @@ class FlightCommandControllerTest {
     @Test
     void returnHomeReturns404ForAnUnknownAsset() throws Exception {
         AssetId assetId = AssetId.random();
-        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId)))
+        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class)))
                 .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
         mockMvc.perform(post("/api/assets/{id}/return-home", assetId.value()))
@@ -83,7 +86,7 @@ class FlightCommandControllerTest {
     @Test
     void returnHomeReturns409WhenTheAssetHasNoCommandableDevice() throws Exception {
         AssetId assetId = AssetId.random();
-        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId)))
+        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class)))
                 .thenThrow(new IllegalStateException("Asset " + assetId.value() + " has no active MAVLink "
                         + "telemetry device to command"));
 
@@ -95,9 +98,20 @@ class FlightCommandControllerTest {
     }
 
     @Test
+    void returnHomeReturns403WhenTheAssetIsOutOfScope() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new AccessDeniedException("Asset " + assetId.value() + " is outside your scope"));
+
+        mockMvc.perform(post("/api/assets/{id}/return-home", assetId.value()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
     void returnHomeReturns409WhenTheAircraftRefusesTheCommand() throws Exception {
         AssetId assetId = AssetId.random();
-        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId)))
+        when(flightCommandService.returnToHome(eq(assetId), eq(ownerId), any(VisibilityScope.class)))
                 .thenThrow(new IllegalStateException("Vehicle sysid 1 refused return-to-home: MAV_RESULT_DENIED"));
 
         mockMvc.perform(post("/api/assets/{id}/return-home", assetId.value()))

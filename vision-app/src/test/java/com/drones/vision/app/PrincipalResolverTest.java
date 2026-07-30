@@ -2,6 +2,9 @@ package com.drones.vision.app;
 
 import com.drones.vision.api.PrincipalResolver;
 import com.drones.vision.app.devsupport.DevPrincipal;
+import com.drones.vision.application.ScopeResolver;
+import com.drones.vision.application.VisibilityScope;
+import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Membership;
 import com.drones.vision.domain.model.Role;
@@ -14,16 +17,38 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Both {@link PrincipalResolver} implementations (docs/U-AUTH-PLAN.md, wave 3): the dev resolver
- * (auth disabled) returns {@link DevPrincipal}; the security resolver (auth enabled) returns the
- * authenticated user's id/ownership from the {@link SecurityContextHolder}.
+ * Both {@link PrincipalResolver} implementations (docs/U-AUTH-PLAN.md, wave 3; scope added
+ * docs/U-SCOPE-PLAN.md, slice 2): the dev resolver (auth disabled) returns {@link DevPrincipal} and
+ * an unbounded scope; the security resolver (auth enabled) returns the authenticated user's
+ * id/ownership from the {@link SecurityContextHolder} and delegates scope to {@link ScopeResolver}.
  */
 class PrincipalResolverTest {
+
+    /** A scope resolver that records the user it was asked about and returns a fixed marker scope. */
+    private static final class RecordingScopeResolver implements ScopeResolver {
+        private User asked;
+        private final VisibilityScope answer;
+
+        RecordingScopeResolver(VisibilityScope answer) {
+            this.answer = answer;
+        }
+
+        @Override
+        public VisibilityScope scopeFor(User user) {
+            this.asked = user;
+            return answer;
+        }
+    }
+
+    private static final ScopeResolver UNBOUNDED_RESOLVER = user -> VisibilityScope.unbounded();
 
     @AfterEach
     void clearContext() {
@@ -38,16 +63,36 @@ class PrincipalResolverTest {
     }
 
     @Test
+    void devResolverScopeIsUnbounded() {
+        assertTrue(new DevPrincipalResolver().scope().isUnbounded(),
+                "auth-off dev principal must resolve to an unbounded scope — the slice-2 guardrail");
+    }
+
+    @Test
     void securityResolverReturnsTheAuthenticatedUsersIdAndOwnership() {
         GroupId group = GroupId.random();
         User user = new User(UserId.random(), "op", "Operator", "op@vision.local", "hash", true,
                 List.of(new Membership(group, Role.MANAGER)));
         authenticate(new VisionUserDetails(user));
 
-        PrincipalResolver resolver = new SecurityContextPrincipalResolver();
+        PrincipalResolver resolver = new SecurityContextPrincipalResolver(UNBOUNDED_RESOLVER);
         assertEquals(user.id(), resolver.userId());
         assertEquals(user.id(), resolver.ownership().ownerId());
         assertEquals(group, resolver.ownership().groupId());
+    }
+
+    @Test
+    void securityResolverDelegatesScopeToTheScopeResolverForTheSessionUser() {
+        User user = new User(UserId.random(), "pilot", "Pilot", "pilot@vision.local", "hash", true,
+                List.of(new Membership(GroupId.random(), Role.PILOT)));
+        authenticate(new VisionUserDetails(user));
+        VisibilityScope marker = VisibilityScope.assignedAssets(Set.of(AssetId.random()));
+        RecordingScopeResolver scopeResolver = new RecordingScopeResolver(marker);
+
+        PrincipalResolver resolver = new SecurityContextPrincipalResolver(scopeResolver);
+
+        assertSame(marker, resolver.scope());
+        assertEquals(user, scopeResolver.asked, "the session's own User must be handed to the ScopeResolver");
     }
 
     @Test
@@ -55,14 +100,14 @@ class PrincipalResolverTest {
         User user = new User(UserId.random(), "loner", "Loner", "loner@vision.local", "hash", true, List.of());
         authenticate(new VisionUserDetails(user));
 
-        PrincipalResolver resolver = new SecurityContextPrincipalResolver();
+        PrincipalResolver resolver = new SecurityContextPrincipalResolver(UNBOUNDED_RESOLVER);
         // personal group == the user's own id (documented fallback rule)
         assertEquals(user.id().value(), resolver.ownership().groupId().value());
     }
 
     @Test
     void securityResolverThrowsWhenNoAuthenticatedPrincipal() {
-        PrincipalResolver resolver = new SecurityContextPrincipalResolver();
+        PrincipalResolver resolver = new SecurityContextPrincipalResolver(UNBOUNDED_RESOLVER);
         assertThrows(IllegalStateException.class, resolver::userId);
     }
 

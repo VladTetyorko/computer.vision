@@ -5,15 +5,22 @@ import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
+import com.drones.vision.api.ActivityController;
 import com.drones.vision.api.AssetImageController;
 import com.drones.vision.api.AssetStatsController;
+import com.drones.vision.api.AssignmentController;
 import com.drones.vision.api.DeviceProbeController;
 import com.drones.vision.api.EventController;
 import com.drones.vision.api.FleetController;
 import com.drones.vision.api.FlightCommandController;
 import com.drones.vision.api.GeofenceController;
+import com.drones.vision.api.GroupAdminController;
 import com.drones.vision.api.SimulationController;
+import com.drones.vision.api.UserAdminController;
+import com.drones.vision.application.ActivityService;
 import com.drones.vision.application.AssetService;
+import com.drones.vision.application.AssignmentService;
+import com.drones.vision.application.ScopeResolver;
 import com.drones.vision.application.AssetStatsService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
@@ -30,6 +37,7 @@ import com.drones.vision.domain.model.FeedSpec;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
+import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
@@ -240,6 +248,38 @@ class AssetWiringTest {
     @Autowired
     private AssetStatsController assetStatsController;
 
+    /** docs/U-SCOPE-PLAN.md slice 2 feature 1: visibility-scope resolution (unconditional bean). */
+    @Autowired
+    private ScopeResolver scopeResolver;
+
+    /** docs/U-SCOPE-PLAN.md slice 2 feature 2: the pilot→asset assignment service. */
+    @Autowired
+    private AssignmentService assignmentService;
+
+    /** docs/U-SCOPE-PLAN.md slice 2 feature 2: the assignment join store (in-memory by default). */
+    @Autowired
+    private AssignmentRepositoryPort assignmentRepositoryPort;
+
+    /** docs/U-SCOPE-PLAN.md slice 2 feature 7: a user's own activity feed service. */
+    @Autowired
+    private ActivityService activityService;
+
+    /** docs/U-SCOPE-PLAN.md slice 2: {@code PUT/DELETE /api/assets/{id}/pilots/*}, {@code GET /api/me/assignments}. */
+    @Autowired
+    private AssignmentController assignmentController;
+
+    /** docs/U-SCOPE-PLAN.md slice 2: {@code GET /api/me/activity}. */
+    @Autowired
+    private ActivityController activityController;
+
+    /** docs/U-SCOPE-PLAN.md slice 2: {@code GET/POST /api/users}, {@code POST /api/users/{id}/enabled}. */
+    @Autowired
+    private UserAdminController userAdminController;
+
+    /** docs/U-SCOPE-PLAN.md slice 2: {@code GET/POST /api/groups}. */
+    @Autowired
+    private GroupAdminController groupAdminController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -271,6 +311,14 @@ class AssetWiringTest {
         assertNotNull(flightCommandController, "FlightCommandController must resolve its constructor dependency (docs/DRONE-INFRA-PLAN.md I-e Stage 1)");
         assertNotNull(assetStatsService, "AssetStatsService bean must be registered (docs/ASSET-MANAGER-PAGE-PLAN.md Wave A)");
         assertNotNull(assetStatsController, "AssetStatsController must resolve its constructor dependencies (docs/ASSET-MANAGER-PAGE-PLAN.md Wave A)");
+        assertNotNull(scopeResolver, "ScopeResolver bean must be registered (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(assignmentService, "AssignmentService bean must be registered (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(assignmentRepositoryPort, "AssignmentRepositoryPort bean must be registered (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(activityService, "ActivityService bean must be registered (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(assignmentController, "AssignmentController must resolve its constructor dependencies (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(activityController, "ActivityController must resolve its constructor dependencies (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(userAdminController, "UserAdminController must resolve its constructor dependency (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(groupAdminController, "GroupAdminController must resolve its constructor dependency (docs/U-SCOPE-PLAN.md slice 2)");
     }
 
     /**

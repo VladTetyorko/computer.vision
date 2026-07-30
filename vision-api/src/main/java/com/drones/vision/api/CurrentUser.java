@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,9 +39,11 @@ public class CurrentUser {
     }
 
     /**
-     * Convenience constructor answering with one fixed {@link Ownership} — the pre-auth shape this
-     * class had ({@code userId()} was the ownership's {@code ownerId}). Kept so existing controller
-     * unit tests can construct a {@code CurrentUser} from a plain {@link Ownership} unchanged.
+     * Convenience constructor answering with one fixed {@link Ownership} and an {@link
+     * VisibilityScope#unbounded()} scope — the pre-auth shape this class had ({@code userId()} was
+     * the ownership's {@code ownerId}). Kept so existing controller unit tests can construct a
+     * {@code CurrentUser} from a plain {@link Ownership} unchanged and keep behaving as if scoping
+     * were off (every scoped read sees everything).
      *
      * @param fixed the fixed ownership to answer with; must not be {@code null}
      */
@@ -64,5 +67,17 @@ public class CurrentUser {
      */
     public Ownership ownership() {
         return resolver.ownership();
+    }
+
+    /**
+     * What this request may see — the acting user's resolved {@link VisibilityScope}
+     * (docs/U-SCOPE-PLAN.md, U-e slice 2). Controllers pass this to the scoped read/command
+     * methods; when auth is disabled it is {@link VisibilityScope#unbounded()}, so those methods
+     * behave exactly as their unscoped counterparts.
+     *
+     * @return the acting user's visibility scope; never {@code null}
+     */
+    public VisibilityScope scope() {
+        return resolver.scope();
     }
 }

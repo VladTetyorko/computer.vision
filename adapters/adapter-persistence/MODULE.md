@@ -3,13 +3,15 @@
 JPA/Postgres persistence adapter for every repository port the platform has: the fleet-side ports
 — categories, devices, assets (docs/MVP2-PLAN.md P-a) — the history ports — asset usages,
 telemetry samples, detection results (docs/MVP2-PLAN.md P-b) — geofence zones
-(docs/OPS-CORE-PLAN.md §G, G-b) — and identity: users + groups (docs/U-AUTH-PLAN.md wave 3).
+(docs/OPS-CORE-PLAN.md §G, G-b) — identity: users + groups (docs/U-AUTH-PLAN.md wave 3) — and
+pilot→asset assignments (docs/U-SCOPE-PLAN.md slice 2).
 
 **Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.postgresql:postgresql`,
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration`, opt-in via `vision.persistence.enabled`)
-**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 56 tests (up from 49, docs/OPS-CORE-PLAN.md
+**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 71 tests (up from 66, docs/U-SCOPE-PLAN.md
+slice 2 — new `AssignmentEntity`/`AssignmentId`/`JpaAssignmentRepository`, +4 round-trip tests +1 schema test; up from 56, docs/OPS-CORE-PLAN.md
 G-b — new `GeofenceZoneEntity`/`JpaGeofenceRepository`, +6 round-trip tests +1 schema test; up from 46, docs/FC-INTEGRATIONS-PLAN.md
 F-b — `TelemetrySampleEntity` gained `flight_state`, +2 round-trip tests +1 schema test; up from 42, docs/UX-REWORK-PLAN.md
 §U-d item 3 — new `AssetImageEntity`/`JpaAssetImageRepository`, +4 tests; up from 39, docs/MVP2-PLAN.md R-a2 —
@@ -38,15 +40,17 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `final class JpaGeofenceRepository implements GeofenceRepositoryPort` — constructor `(EntityManagerFactory)`. docs/OPS-CORE-PLAN.md §G, G-b — geofence zones; `save` is merge-by-id (upsert), `deleteById` a real hard delete (zones have no soft-delete concept — a disabled zone is just `enabled=false`, not a lifecycle state).
 - `final class JpaUserRepository implements UserRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-AUTH-PLAN.md wave 3 — the identity aggregate; `save` is merge-by-id (upsert). `findByUsername` lower-cases its lookup key (`Locale.ROOT`) then exact-matches `users.username` (the domain already stores it lower-cased, so this *is* the case-insensitive lookup; a `NoResultException` from the single-result query maps to empty `Optional`). Memberships ride on the row as jsonb (see `UserEntity`).
 - `final class JpaGroupRepository implements GroupRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-AUTH-PLAN.md wave 3 — org-chart nodes; `save` is merge-by-id (upsert); `parentGroupId` maps straight through as a nullable `UUID`.
+- `final class JpaAssignmentRepository implements AssignmentRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-SCOPE-PLAN.md slice 2 — the pilot→asset join; `assign` is an idempotent upsert via `merge` on the composite (pilot, asset) key (no duplicate row, no error), `unassign` a delete-if-present (idempotent); `assetsForPilot`/`pilotsForAsset` are indexed JPQL queries returning `UUID`s mapped to `AssetId`/`UserId`, `isAssigned` a composite-PK `find`. Matches `InMemoryAssignmentRepository`'s set-semantics exactly.
 - package-private `final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas).
 
 ### `com.drones.vision.adapter.persistence.entity`
-- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
+- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity`, `AssignmentEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
 - `TelemetrySampleEntity`/`DetectionResultEntity` have a synthetic UUID `id` the adapter invents at save time (`UUID.randomUUID()` in each repository's `toEntity`) — `Telemetry`/`DetectionResult` themselves carry no identity of their own (append-only samples/results, not aggregates), so there is nothing domain-side to derive a primary key from; the id never surfaces back through the ports.
 - `TelemetrySampleEntity#flightState` (docs/FC-INTEGRATIONS-PLAN.md F-b, `V6__telemetry_flight_state.sql`) is a nullable `FlightState` field, `@JdbcTypeCode(SqlTypes.JSON)`/`columnDefinition = "jsonb"` — the domain record stored **directly**, exactly the `DetectionResultEntity#detections` precedent noted in Conventions below (a plain immutable record tree, no persistence-local wrapper type needed). `null` covers both "sample pre-dates this column" and "device reported no flight-controller state at all"; both round-trip as `Telemetry#flightState() == null`, the same nullable-9th-component contract the domain record itself defines — there is no way to tell the two cases apart from this column alone, and nothing needs to.
 - `AssetUsageEntity#streamId` (docs/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
 - `AssetImageEntity` (docs/UX-REWORK-PLAN.md §U-d item 3, `V5__asset_images.sql`) is keyed by `assetId` itself, **not** a synthetic id like `TelemetrySampleEntity`/`DetectionResultEntity` above — there is at most one image per asset and `save` is always an upsert, so the primary key doubles as the "one row per asset" constraint with no separate unique index needed. `data` is a plain `byte[]` field (Hibernate's default mapping to Postgres `bytea`, no `@Lob`/converter needed) — the first non-jsonb, non-text binary column in this module's schema.
 - `GeofenceZoneEntity` (docs/OPS-CORE-PLAN.md §G, G-b, `V7__geofence_zones.sql`) mirrors `GeofenceZone` field-for-field: `id` is the domain's own `ZoneId` (not synthetic — a zone has real identity, unlike `Telemetry`/`DetectionResult`), `kind` reuses the domain `ZoneKind` enum directly in an `@Enumerated(EnumType.STRING)` field (same "domain enums reused directly" convention `Capability`/`LifecycleState` already follow), `polygon` stores the whole `List<GeoPosition>` as one jsonb column (same mechanism/rationale as `DetectionResultEntity#detections` — a plain immutable record list Jackson serializes natively, only ever read back whole), `maxAltitudeMeters` a nullable `Double`, `enabled` a plain `boolean`. No FK to any other table — zones are global reference data with no relationship to assets/devices.
+- `AssignmentEntity` (docs/U-SCOPE-PLAN.md slice 2, `V9__pilot_assignments.sql`) is a plain join row — a pilot→asset link with **no synthetic id**: its primary key is the composite (`pilot_user_id`, `asset_id`) via `@IdClass(AssignmentId.class)`. `AssignmentId` is a plain mutable class with a public no-arg ctor + matching field names (JPA's `@IdClass` contract — a record cannot satisfy it). The composite PK doubles as the uniqueness constraint that makes `assign` an idempotent upsert with no duplicate rows. The table also has an unmapped `assigned_at` bookkeeping column (Hibernate `validate` tolerates DB columns the entity does not map). No FK to `users`/`assets`, same convention as every other table here.
 - `UserEntity`/`GroupEntity` (docs/U-AUTH-PLAN.md wave 3, `V8__users_groups.sql`) mirror `User`/`Group` field-for-field. `UserEntity#id` is the domain's own `UserId` (not synthetic — a user has real identity); `username` carries a `UNIQUE` constraint and is stored already-lower-cased (the domain `User` normalizes it), so `findByUsername` is an exact match on the stored value after lower-casing the lookup key. **`UserEntity#memberships` stores the whole `List<Membership>` as one jsonb column** (`@JdbcTypeCode(SqlTypes.JSON)`) — same mechanism/rationale as `GeofenceZoneEntity#polygon`/`DetectionResultEntity#detections`: `Membership` (with its nested `GroupId`/`Role`) is a plain immutable record Jackson 3 serializes natively, and memberships are only ever read back whole with the aggregate, so no normalized join table (docs/U-AUTH-PLAN.md picked jsonb over a join table for exactly this "saved whole with the User" reason). `GroupEntity#parentId` is a nullable `UUID` (null = root group). No FK on either table (not `groups.parent_id`, not any user→group link) — same "no cross-entity foreign keys" convention as every other table here, keeping parity with the in-memory reference repos that do no referential checks.
 
 ## Schema (`src/main/resources/db/migration`)
@@ -59,6 +63,7 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `V6__telemetry_flight_state.sql` (docs/FC-INTEGRATIONS-PLAN.md F-b) — `ALTER TABLE telemetry_samples ADD COLUMN flight_state JSONB` (nullable, no FK, no backfill — purely additive on top of V1-V5, same shape as V4's `stream_id` addition). Pre-existing rows simply read back `null`.
 - `V7__geofence_zones.sql` (docs/OPS-CORE-PLAN.md §G, G-b) — `geofence_zones` (`id` UUID PK — the zone's own `ZoneId`, not synthetic; `name` varchar; `kind` varchar; `polygon` jsonb — the whole `List<GeoPosition>`, ≥3 vertices enforced application-side by `GeofenceZone`/`GeofenceZoneSpec`, not a database `CHECK`; `max_altitude_meters` nullable double precision; `enabled` boolean). New table, no changes to any existing one — no FK, same convention as every other table here.
 - `V8__users_groups.sql` (docs/U-AUTH-PLAN.md wave 3) — `groups` (`id` UUID PK; `name` varchar; `parent_id` UUID nullable — null = root, no self-FK) and `users` (`id` UUID PK; `username` varchar `NOT NULL UNIQUE` — stored lower-cased by the domain, so plain UNIQUE gives the case-insensitive uniqueness `findByUsername` relies on; `display_name`/`email`/`password_hash` varchar; `enabled` boolean; `memberships` jsonb `NOT NULL` — the whole `List<Membership>`). Two new tables, purely additive over V1-V7, no FK (not `groups.parent_id`, no user→group link) — same convention as every other table here.
+- `V9__pilot_assignments.sql` (docs/U-SCOPE-PLAN.md slice 2) — `pilot_assignments` (`pilot_user_id` UUID, `asset_id` UUID, `assigned_at` timestamptz default `now()`; **composite `PRIMARY KEY (pilot_user_id, asset_id)`** — the pair is the identity, and doubles as the uniqueness constraint making `assign` an idempotent upsert) plus a secondary index `idx_pilot_assignments_asset` on `asset_id` (the PK's leading column serves `assetsForPilot`; this index serves the `pilotsForAsset` direction). New table, purely additive over V1-V8, no FK — same convention as every other table here.
 
 ## Bootstrap (no Spring, no connection pool)
 
@@ -162,9 +167,17 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   as the V4/V6/V7 schema tests: asserts `users.memberships` is a required (`NOT NULL`) `jsonb` column
   and `groups.parent_id` is a nullable `uuid`, proving `V8__users_groups.sql` applied cleanly on top
   of V1-V7.
+- `@Nested AssignmentRepositoryTests` (4, docs/U-SCOPE-PLAN.md slice 2) — idempotent-upsert `assign`
+  queryable both directions, idempotent-delete `unassign`, multiple pilots/assets tracked
+  independently, unknown pilot/asset → empty sets / `isAssigned` false.
+- `v9MigrationCreatesThePilotAssignmentsTableOnTopOfV1ThroughV8` (docs/U-SCOPE-PLAN.md slice 2) —
+  same shape as the V8 schema test: asserts `pilot_user_id`/`asset_id` are both required (`NOT NULL`)
+  `uuid` columns and that the primary key is the **composite** of exactly those two columns
+  (`information_schema` PK column count = 2), proving `V9__pilot_assignments.sql` applied on top of
+  V1-V8.
 
-66 tests total, all green in this environment (`docker info` reachable) — up from 56 (docs/U-AUTH-PLAN.md
-wave 3: new `UserRepositoryTests` (5) + `GroupRepositoryTests` (4) + the V8 schema test).
+71 tests total, all green in this environment (`docker info` reachable) — up from 66
+(docs/U-SCOPE-PLAN.md slice 2: new `AssignmentRepositoryTests` (4) + the V9 schema test).
 
 ## Gotchas
 
@@ -221,6 +234,28 @@ vision-app/vision-api's own MODULE.mds for the in-memory fallbacks, the wiring
 (`PersistenceWiringConfiguration#userRepositoryPort`/`#groupRepositoryPort`, gated by
 `vision.persistence.enabled` exactly like the other nine port beans), the application services,
 Spring Security, and the `/api/auth/*` surface.
+
+**Deviations from the brief**: none.
+
+## docs/U-SCOPE-PLAN.md slice 2 done (pilot→asset assignments, persistence half)
+
+A new twelfth repository port: `AssignmentEntity`/`AssignmentId`/`JpaAssignmentRepository`
+(`AssignmentRepositoryPort`), plus `V9__pilot_assignments.sql` (purely additive — one new join
+table, nothing else changed). The primary key is the **composite** (`pilot_user_id`, `asset_id`)
+via `@IdClass` — a plain join row with no synthetic id, the pair *being* the identity; the composite
+PK doubles as the uniqueness constraint that makes `assign` an idempotent `merge` upsert with no
+duplicate rows. A secondary index on `asset_id` serves the `pilotsForAsset` direction (the PK's
+leading column already serves `assetsForPilot`). No FK to `users`/`assets` — same "no cross-entity
+foreign keys / stay parity-compatible with the in-memory reference repo" convention as every other
+table here (`InMemoryAssignmentRepository`, vision-app devsupport, is the disabled-branch fallback).
+
+`./mvnw -B -pl adapters/adapter-persistence test`: **71/71 green** (was 66), run against a real
+`postgres:16` Testcontainers instance (not skipped) — new `AssignmentRepositoryTests` (4) +
+`v9MigrationCreatesThePilotAssignmentsTableOnTopOfV1ThroughV8`. See vision-app/vision-api's own
+MODULE.mds for the in-memory fallback, the wiring
+(`PersistenceWiringConfiguration#assignmentRepositoryPort`, gated by `vision.persistence.enabled`
+exactly like the other eleven port beans), the `AssignmentService`/`ScopeResolver`, and the REST
+surface (`AssignmentController`).
 
 **Deviations from the brief**: none.
 

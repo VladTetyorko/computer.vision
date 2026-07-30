@@ -11,17 +11,20 @@ import java.util.Objects;
 /**
  * Driving REST adapter for the manager dashboard's aggregated fleet read (docs/MVP3-PLAN.md C-a).
  *
- * <p>Constructor-injected with {@link FleetSummaryService} only — a single, focused use-case
- * dependency, the same one-collaborator shape {@link EventController}/{@link
- * UsageTimelineController} already establish for a controller with exactly one job.
+ * <p>Constructor-injected with {@link FleetSummaryService} and {@link CurrentUser} — the summary is
+ * scoped to what the acting user may see (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1), so the
+ * per-category counts and attention list a manager sees cover only their own group subtree. With
+ * auth off the scope is unbounded, so this returns the whole fleet exactly as before scoping.
  */
 @RestController
 public class FleetController {
 
     private final FleetSummaryService fleetSummaryService;
+    private final CurrentUser currentUser;
 
-    public FleetController(FleetSummaryService fleetSummaryService) {
+    public FleetController(FleetSummaryService fleetSummaryService, CurrentUser currentUser) {
         this.fleetSummaryService = Objects.requireNonNull(fleetSummaryService, "fleetSummaryService must not be null");
+        this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
     /**
@@ -36,6 +39,6 @@ public class FleetController {
      */
     @GetMapping("/api/fleet/summary")
     public FleetSummaryResponse summary(@RequestParam(defaultValue = "false") boolean includeArchived) {
-        return FleetSummaryResponse.from(fleetSummaryService.summary(includeArchived));
+        return FleetSummaryResponse.from(fleetSummaryService.summary(currentUser.scope(), includeArchived));
     }
 }

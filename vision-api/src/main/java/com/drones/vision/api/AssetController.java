@@ -60,6 +60,17 @@ import java.util.Objects;
  * The acting user comes from {@link CurrentUser} and is passed to every mutating call, so the
  * audit trail records a principal without any service knowing how it was authenticated.
  *
+ * <h2>Visibility scoping (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
+ * Every read is scoped to {@link CurrentUser#scope()}: {@link #list} filters to the assets the
+ * caller may see, and {@link #details} (and every post-mutation detail render) 404s an asset
+ * outside the caller's scope exactly as it 404s an unknown id — existence is never revealed. Each
+ * mutation ({@link #update}/{@link #setState}/{@link #delete}/{@link #assignDevice}/{@link
+ * #unassignDevice}/{@link #startStream}) first re-reads through the scope, so an out-of-scope asset
+ * 404s before the mutation runs; wave 1 scoped only asset reads + command + assign, so this
+ * cheap "read-scope guards the write" is the deliberate write-path posture until the asset services
+ * take a scope on writes directly. With auth off the scope is unbounded, so all of this is a no-op
+ * and behavior is identical to before scoping.
+ *
  * <h2>Status codes</h2>
  * An unknown asset id surfaces as {@link java.util.NoSuchElementException} from {@link
  * AssetService} and maps to 404 through {@link ApiExceptionHandler}; a malformed UUID fails
@@ -117,8 +128,11 @@ public class AssetController {
     public AssetDetailsResponse update(@PathVariable String id,
                                         @RequestBody(required = false) UpdateAssetRequest request) {
         AssetId assetId = AssetId.of(id);
-        assetService.update(assetId, (request == null ? UpdateAssetRequest.EMPTY : request).toEdit(),
-                currentUser.userId());
+        // Parse/validate the body (a malformed edit is a 400) before the scope guard's 404, so a
+        // bad request never depends on the caller's scope.
+        var edit = (request == null ? UpdateAssetRequest.EMPTY : request).toEdit();
+        requireInScope(assetId);
+        assetService.update(assetId, edit, currentUser.userId());
         return detailsResponse(assetId);
     }
 
@@ -138,7 +152,9 @@ public class AssetController {
     @PostMapping("/api/assets/{id}/state")
     public AssetDetailsResponse setState(@PathVariable String id, @RequestBody SetLifecycleStateRequest request) {
         AssetId assetId = AssetId.of(id);
-        assetService.setState(assetId, request.toLifecycleState(), currentUser.userId());
+        var state = request.toLifecycleState(); // an unrecognized state is a 400, before the scope 404
+        requireInScope(assetId);
+        assetService.setState(assetId, state, currentUser.userId());
         return detailsResponse(assetId);
     }
 
@@ -155,7 +171,9 @@ public class AssetController {
      */
     @DeleteMapping("/api/assets/{id}")
     public AssetDeletionResponse delete(@PathVariable String id) {
-        return AssetDeletionResponse.from(assetService.delete(AssetId.of(id), currentUser.userId()));
+        AssetId assetId = AssetId.of(id);
+        requireInScope(assetId);
+        return AssetDeletionResponse.from(assetService.delete(assetId, currentUser.userId()));
     }
 
     /**
@@ -167,7 +185,7 @@ public class AssetController {
      */
     @GetMapping("/api/assets")
     public List<AssetSummaryResponse> list(@RequestParam(defaultValue = "false") boolean includeDeleted) {
-        return assetService.assets(includeDeleted).stream()
+        return assetService.assets(currentUser.scope(), includeDeleted).stream()
                 .map(summary -> AssetSummaryResponse.from(summary,
                         assetImageRepositoryPort.existsByAssetId(summary.asset().id())))
                 .toList();
@@ -200,8 +218,9 @@ public class AssetController {
                                             @RequestBody(required = false) StartAssetStreamRequest request) {
         AssetId assetId = AssetId.of(id);
         StartAssetStreamRequest effective = request == null ? StartAssetStreamRequest.EMPTY : request;
-        DeviceId device = effective.deviceIdOrNull();
+        DeviceId device = effective.deviceIdOrNull(); // malformed device id / config is a 400, before the scope 404
         PipelineConfig config = effective.mergeOntoDefaults();
+        requireInScope(assetId);
 
         StreamId streamId = assetService.startStream(assetId, device, config);
         return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
@@ -232,7 +251,9 @@ public class AssetController {
     @PostMapping("/api/assets/{id}/devices")
     public AssetDetailsResponse assignDevice(@PathVariable String id, @RequestBody AssignDeviceRequest request) {
         AssetId assetId = AssetId.of(id);
-        assetService.assignDevice(assetId, request.toDeviceId(), currentUser.userId());
+        var deviceId = request.toDeviceId(); // a blank device id is a 400, before the scope 404
+        requireInScope(assetId);
+        assetService.assignDevice(assetId, deviceId, currentUser.userId());
         return detailsResponse(assetId);
     }
 
@@ -247,7 +268,9 @@ public class AssetController {
     @DeleteMapping("/api/assets/{id}/devices/{deviceId}")
     public AssetDetailsResponse unassignDevice(@PathVariable String id, @PathVariable String deviceId) {
         AssetId assetId = AssetId.of(id);
-        assetService.unassignDevice(assetId, DeviceId.of(deviceId), currentUser.userId());
+        DeviceId device = DeviceId.of(deviceId); // a malformed device UUID is a 400, before the scope 404
+        requireInScope(assetId);
+        assetService.unassignDevice(assetId, device, currentUser.userId());
         return detailsResponse(assetId);
     }
 
@@ -275,9 +298,23 @@ public class AssetController {
                 .toList();
     }
 
-    /** Fetches {@code id}'s detail view plus its {@code hasImage} flag in one call. */
+    /**
+     * Fetches {@code id}'s detail view plus its {@code hasImage} flag in one call, scoped to the
+     * caller — an asset outside {@link CurrentUser#scope()} 404s exactly as an unknown id does.
+     */
     private AssetDetailsResponse detailsResponse(AssetId id) {
-        return AssetDetailsResponse.from(assetService.details(id), assetImageRepositoryPort.existsByAssetId(id));
+        return AssetDetailsResponse.from(assetService.details(currentUser.scope(), id),
+                assetImageRepositoryPort.existsByAssetId(id));
+    }
+
+    /**
+     * Guards a mutation: re-reads {@code id} through the caller's scope so an out-of-scope (or
+     * unknown) asset 404s ({@link java.util.NoSuchElementException}) before the mutation runs. Cheap
+     * — the same scoped read the detail endpoint does — and the deliberate write-path posture until
+     * the asset services take a {@code VisibilityScope} on writes directly (see the class javadoc).
+     */
+    private void requireInScope(AssetId id) {
+        assetService.details(currentUser.scope(), id);
     }
 
     private String viewUrl(StreamId streamId) {
