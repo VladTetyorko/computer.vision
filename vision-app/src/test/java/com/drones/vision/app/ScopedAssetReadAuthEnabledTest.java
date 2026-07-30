@@ -88,7 +88,7 @@ class ScopedAssetReadAuthEnabledTest {
                 .build();
 
         Group root = groupOf("Root");
-        Group other = groupService.create(new GroupSpec("Other Division", null));
+        Group other = groupService.create(new GroupSpec("Other Division", null), VisibilityScope.unbounded());
 
         // One asset owned by each group; ownerId is immaterial to group-scope, only groupId matters.
         rootAsset = assetService.create(assetSpec("Root Drone"),
@@ -130,14 +130,14 @@ class ScopedAssetReadAuthEnabledTest {
     }
 
     private Group groupOf(String name) {
-        return groupService.list().stream()
+        return groupService.list(VisibilityScope.unbounded()).stream()
                 .filter(g -> g.name().equals(name))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("seeded group not found: " + name));
     }
 
     private UserId pilotId() {
-        return userService.list().stream()
+        return userService.list(VisibilityScope.unbounded()).stream()
                 .filter((User u) -> u.username().equals("pilot"))
                 .map(User::id)
                 .findFirst()

@@ -20,44 +20,38 @@ import java.util.Objects;
  * Driving REST adapter for user management (docs/U-SCOPE-PLAN.md, U-e slice 2) — the org-settings
  * surface wave 3's UI needs: list users, create/invite a user, enable/disable one.
  *
- * <p>Constructor-injected with {@link UserService} only — the wave-1 CRUD it delegates to
- * (`create`/`list`/`setEnabled`). No richer method exists yet, so nothing more is exposed here.
- *
- * <h2>Deliberate gaps (documented, not faked)</h2>
- * <ul>
- *   <li><strong>No role gate.</strong> The plan calls these ADMIN/MANAGER-only. Role is not on
- *       {@link CurrentUser} (only {@code userId}/{@code ownership}/{@code scope}), and adding it —
- *       or a Spring-Security method gate — is outside this wave's file scope; with auth off every
- *       caller is the dev admin regardless. Enforcing the role gate is a follow-up.</li>
- *   <li><strong>No &le;-own-scope grant rule.</strong> {@code UserService.create} is unscoped in
- *       wave 1 (documented there as deferred to this slice), and this wave's scope does not extend
- *       into {@code vision-application} to add it. {@code list()} likewise returns all users, not
- *       just those in the caller's visible groups. Both are follow-ups needing application-layer
- *       support.</li>
- * </ul>
- * With auth off (default) the dev admin can do all of this, so the default-off build is unchanged.
+ * <p>Constructor-injected with {@link UserService} and {@link CurrentUser}: every operation passes
+ * {@code currentUser.scope()} into the service, which derives management authority from it (kind
+ * maps 1:1 to role — unbounded = ADMIN, groups = MANAGER, else PILOT/empty) and enforces the
+ * ADMIN/MANAGER management gate plus the ≤-own-scope grant rule. A PILOT/empty scope is refused with
+ * {@link com.drones.vision.application.AccessDeniedException} (403 via {@link ApiExceptionHandler});
+ * {@code list} is scope-filtered to the caller's own subtree. With auth off (default) the dev
+ * principal's scope is unbounded, so every operation is permitted and unfiltered — the default-off
+ * build is unchanged.
  */
 @RestController
 public class UserAdminController {
 
     private final UserService userService;
+    private final CurrentUser currentUser;
 
-    public UserAdminController(UserService userService) {
+    public UserAdminController(UserService userService, CurrentUser currentUser) {
         this.userService = Objects.requireNonNull(userService, "userService must not be null");
+        this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
     /**
-     * Lists all users.
+     * Lists the users visible to the caller's scope.
      *
-     * @return every user
+     * @return the visible users
      */
     @GetMapping("/api/users")
     public List<UserResponse> list() {
-        return userService.list().stream().map(UserResponse::from).toList();
+        return userService.list(currentUser.scope()).stream().map(UserResponse::from).toList();
     }
 
     /**
-     * Creates (invites) a user.
+     * Creates (invites) a user, within the caller's scope.
      *
      * @param request the new user's shape
      * @return the created user
@@ -65,11 +59,11 @@ public class UserAdminController {
     @PostMapping("/api/users")
     @ResponseStatus(HttpStatus.CREATED)
     public UserResponse create(@RequestBody CreateUserRequest request) {
-        return UserResponse.from(userService.create(request.toSpec()));
+        return UserResponse.from(userService.create(request.toSpec(), currentUser.scope()));
     }
 
     /**
-     * Enables or disables a user's ability to authenticate. Idempotent.
+     * Enables or disables a user's ability to authenticate, within the caller's scope. Idempotent.
      *
      * @param id      the user, as a canonical UUID string
      * @param request the new enabled state
@@ -77,6 +71,6 @@ public class UserAdminController {
      */
     @PostMapping("/api/users/{id}/enabled")
     public UserResponse setEnabled(@PathVariable String id, @RequestBody SetUserEnabledRequest request) {
-        return UserResponse.from(userService.setEnabled(UserId.of(id), request.enabled()));
+        return UserResponse.from(userService.setEnabled(UserId.of(id), request.enabled(), currentUser.scope()));
     }
 }

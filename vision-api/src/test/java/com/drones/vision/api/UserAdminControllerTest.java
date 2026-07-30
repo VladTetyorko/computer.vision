@@ -4,6 +4,7 @@ import com.drones.vision.application.UserService;
 import com.drones.vision.application.UserSpec;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Membership;
+import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.Role;
 import com.drones.vision.domain.model.User;
 import com.drones.vision.domain.model.UserId;
@@ -16,6 +17,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -33,9 +35,13 @@ class UserAdminControllerTest {
 
     private final UserService userService = mock(UserService.class);
     private final GroupId groupId = GroupId.random();
+    // A CurrentUser built from a plain Ownership resolves to an unbounded scope, so these
+    // wiring/status tests are unaffected by the management gate; scope filtering itself is proven
+    // in the application-layer and auth-on tests.
+    private final CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), groupId));
 
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new UserAdminController(userService))
+            .standaloneSetup(new UserAdminController(userService, currentUser))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
 
@@ -46,7 +52,7 @@ class UserAdminControllerTest {
 
     @Test
     void listMapsUsersToResponses() throws Exception {
-        when(userService.list()).thenReturn(List.of(user("manager", Role.MANAGER)));
+        when(userService.list(any())).thenReturn(List.of(user("manager", Role.MANAGER)));
 
         mockMvc.perform(get("/api/users"))
                 .andExpect(status().isOk())
@@ -58,7 +64,7 @@ class UserAdminControllerTest {
     @Test
     void createBuildsSpecFromRequestAndReturns201() throws Exception {
         User created = user("newpilot", Role.PILOT);
-        when(userService.create(org.mockito.ArgumentMatchers.any())).thenReturn(created);
+        when(userService.create(any(), any())).thenReturn(created);
 
         String body = "{\"username\":\"newpilot\",\"displayName\":\"New Pilot\",\"email\":\"np@vision.local\","
                 + "\"password\":\"secret\",\"enabled\":false,"
@@ -69,7 +75,7 @@ class UserAdminControllerTest {
                 .andExpect(jsonPath("$.username").value("newpilot"));
 
         ArgumentCaptor<UserSpec> spec = ArgumentCaptor.forClass(UserSpec.class);
-        org.mockito.Mockito.verify(userService).create(spec.capture());
+        org.mockito.Mockito.verify(userService).create(spec.capture(), any());
         assertEquals("newpilot", spec.getValue().username());
         assertFalse(spec.getValue().enabled());
         assertEquals(Role.PILOT, spec.getValue().memberships().get(0).role());
@@ -88,7 +94,7 @@ class UserAdminControllerTest {
     @Test
     void setEnabledMapsThrough() throws Exception {
         User u = user("pilot", Role.PILOT);
-        when(userService.setEnabled(eq(u.id()), eq(false))).thenReturn(u);
+        when(userService.setEnabled(eq(u.id()), eq(false), any())).thenReturn(u);
 
         mockMvc.perform(post("/api/users/{id}/enabled", u.id().value())
                         .contentType("application/json").content("{\"enabled\":false}"))

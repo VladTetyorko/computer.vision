@@ -6,6 +6,7 @@ import com.drones.vision.application.DefaultGroupService;
 import com.drones.vision.application.DefaultUserService;
 import com.drones.vision.application.GroupService;
 import com.drones.vision.application.UserService;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Role;
 import com.drones.vision.domain.model.User;
 import com.drones.vision.domain.port.out.PasswordHasherPort;
@@ -27,12 +28,14 @@ class AuthSeedRunnerTest {
     private final GroupService groupService = new DefaultGroupService(groupRepository);
     private final AuthSeedRunner runner = new AuthSeedRunner(userService, groupService);
 
+    private static final VisibilityScope ADMIN = VisibilityScope.unbounded();
+
     @Test
     void seedsRootGroupAndThreeRoleUsersOnFirstRun() {
         runner.run(null);
 
-        assertEquals(1, groupService.list().size());
-        List<User> users = userService.list();
+        assertEquals(1, groupService.list(ADMIN).size());
+        List<User> users = userService.list(ADMIN);
         assertEquals(3, users.size());
         assertEquals(Optional.of(Role.ADMIN), userByName("admin").topRole());
         assertEquals(Optional.of(Role.MANAGER), userByName("manager").topRole());
@@ -46,8 +49,8 @@ class AuthSeedRunnerTest {
         runner.run(null);
         runner.run(null);
 
-        assertEquals(3, userService.list().size());
-        assertEquals(1, groupService.list().size());
+        assertEquals(3, userService.list(ADMIN).size());
+        assertEquals(1, groupService.list(ADMIN).size());
     }
 
     private User userByName(String username) {

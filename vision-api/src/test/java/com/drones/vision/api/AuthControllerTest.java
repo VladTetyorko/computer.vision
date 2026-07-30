@@ -78,7 +78,7 @@ class AuthControllerTest {
     @Test
     void meResolvesTheAuthenticatedUserWhenAuthEnabled() throws Exception {
         when(authService.find(userId)).thenReturn(Optional.of(seededUser()));
-        when(groupService.list()).thenReturn(List.of(new Group(groupId, "Root", null)));
+        when(groupService.list(any())).thenReturn(List.of(new Group(groupId, "Root", null)));
 
         mockMvc(true).perform(get("/api/auth/me"))
                 .andExpect(status().isOk())
@@ -93,7 +93,7 @@ class AuthControllerTest {
     void loginSuccessReturnsMeResponseWhenAuthEnabled() throws Exception {
         when(sessionAuthenticator.login(eq("manager"), eq("secret"), any(), any()))
                 .thenReturn(Optional.of(seededUser()));
-        when(groupService.list()).thenReturn(List.of(new Group(groupId, "Root", null)));
+        when(groupService.list(any())).thenReturn(List.of(new Group(groupId, "Root", null)));
 
         mockMvc(true).perform(post("/api/auth/login")
                         .contentType("application/json")

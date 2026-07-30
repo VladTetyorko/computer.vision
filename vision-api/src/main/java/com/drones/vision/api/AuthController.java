@@ -4,6 +4,7 @@ import com.drones.vision.api.dto.LoginRequest;
 import com.drones.vision.api.dto.MeResponse;
 import com.drones.vision.application.AuthService;
 import com.drones.vision.application.GroupService;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.User;
 import jakarta.servlet.http.HttpServletRequest;
@@ -123,7 +124,9 @@ public class AuthController {
     }
 
     private Function<String, String> groupNameLookup() {
-        Map<String, String> byId = groupService.list().stream()
+        // Resolve names for the current user's own memberships — a system read that must see every
+        // group regardless of the caller's scope, so it is deliberately unbounded.
+        Map<String, String> byId = groupService.list(VisibilityScope.unbounded()).stream()
                 .collect(Collectors.toMap(g -> g.id().value().toString(), Group::name, (a, b) -> a));
         return byId::get;
     }

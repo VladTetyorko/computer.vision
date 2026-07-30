@@ -6,9 +6,16 @@ core (domain 217, application 468) · wave 2 api/security/persistence (adapter-p
 vision-api 306, vision-app 135; real Postgres assignment tests; auth-on scoped-read verified:
 manager=subtree, pilot=assigned-only) · wave 3 UI (org-settings users/groups, assigned-pilots
 card, my-activity view, role-gated + responsive; vision-web 1099). `vision.auth.enabled=false`
-→ unbounded ADMIN → zero behavior change (verified). **Deferred slice-2 cleanup** (documented,
-not faked): the ADMIN/MANAGER role gate on the user/group *management* endpoints themselves, and
-the invite ≤-own-scope grant rule — both small application-layer additions. Features 4/5/6/8/9
+→ unbounded ADMIN → zero behavior change (verified). **Deferred slice-2 cleanup — DONE
+(2026-07-30):** the ADMIN/MANAGER management gate on user/group create/list/setEnabled and the
+invite ≤-own-scope grant rule, both derived from the acting `VisibilityScope` (new
+`canManageOrg()`/`includesGroup(GroupId)`/`maxGrantableRole()` methods — kind maps 1:1 to role, no
+new Role plumbing on `CurrentUser`) and enforced in `UserService`/`GroupService` (→
+`AccessDeniedException`/403). An unbounded scope (ADMIN / auth-off) passes every gate — byte-identical
+default-off behavior. `AuthSeedRunner` seeds with `VisibilityScope.unbounded()`. Tests: application
+484 (+16), vision-api 306 (unchanged), vision-app 139 (+4 auth-on gate test); all green. Empty-
+memberships rule: a no-membership user may be created only by an unbounded (ADMIN) scope — a manager
+must place a new user in a group they manage. Features 4/5/6/8/9
 from the catalog below remain unbuilt (selectable next). Original catalog + design below.
 
 Draft for selection (2026-07-30). Slice 1 (U-AUTH-PLAN) gave real logins + roles but

@@ -4,6 +4,7 @@ import com.drones.vision.application.GroupService;
 import com.drones.vision.application.GroupSpec;
 import com.drones.vision.application.UserService;
 import com.drones.vision.application.UserSpec;
+import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.Membership;
 import com.drones.vision.domain.model.Role;
@@ -45,16 +46,20 @@ final class AuthSeedRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        if (!userService.list().isEmpty()) {
+        // Seeding runs as the system, not as any logged-in user, so it acts with an unbounded scope
+        // — it must pass the ADMIN/MANAGER management gate and the ≤-own-scope grant rule
+        // unconditionally (a blocked seeder would mean no login users at all).
+        VisibilityScope system = VisibilityScope.unbounded();
+        if (!userService.list(system).isEmpty()) {
             return;
         }
-        Group root = groupService.create(new GroupSpec("Root", null));
+        Group root = groupService.create(new GroupSpec("Root", null), system);
         userService.create(new UserSpec("admin", "Administrator", "admin@vision.local", "admin",
-                List.of(new Membership(root.id(), Role.ADMIN))));
+                List.of(new Membership(root.id(), Role.ADMIN))), system);
         userService.create(new UserSpec("manager", "Manager", "manager@vision.local", "manager",
-                List.of(new Membership(root.id(), Role.MANAGER))));
+                List.of(new Membership(root.id(), Role.MANAGER))), system);
         userService.create(new UserSpec("pilot", "Pilot", "pilot@vision.local", "pilot",
-                List.of(new Membership(root.id(), Role.PILOT))));
+                List.of(new Membership(root.id(), Role.PILOT))), system);
         log.warn("Seeded dev users admin/manager/pilot with DEV-ONLY passwords equal to their usernames "
                 + "in group '{}' — change or remove before any real deployment.", root.name());
     }

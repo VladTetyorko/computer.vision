@@ -3,8 +3,10 @@ package com.drones.vision.application;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.Role;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -104,6 +106,56 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
             case UNBOUNDED -> true;
             case GROUPS -> groups.contains(asset.ownership().groupId());
             case ASSIGNED_ASSETS -> assignedAssets.contains(asset.id());
+        };
+    }
+
+    /**
+     * Whether the acting user may manage the organization (create/enable users, create groups,
+     * and see the management lists at all). Derives management authority directly from the scope's
+     * kind, which maps 1:1 to role in this codebase: {@link Kind#UNBOUNDED} is ADMIN and
+     * {@link Kind#GROUPS} is MANAGER — both may manage; {@link Kind#ASSIGNED_ASSETS} (a PILOT, or a
+     * user with no membership at all) may not (docs/U-SCOPE-PLAN.md, U-e slice 2 — deferred
+     * slice-2 cleanup).
+     *
+     * @return {@code true} iff {@link #kind()} is {@link Kind#UNBOUNDED} or {@link Kind#GROUPS}
+     */
+    public boolean canManageOrg() {
+        return kind == Kind.UNBOUNDED || kind == Kind.GROUPS;
+    }
+
+    /**
+     * Whether this scope includes the given group — the group half of {@link #includes(Asset)},
+     * used by the management gates to check that a grant/parent stays within the acting user's
+     * subtree.
+     *
+     * @param groupId the group to test
+     * @return {@code true} for an {@link Kind#UNBOUNDED} scope; for a {@link Kind#GROUPS} scope iff
+     *         the id is in {@link #groups()}; always {@code false} for {@link Kind#ASSIGNED_ASSETS}
+     */
+    public boolean includesGroup(GroupId groupId) {
+        Objects.requireNonNull(groupId, "groupId must not be null");
+        return switch (kind) {
+            case UNBOUNDED -> true;
+            case GROUPS -> groups.contains(groupId);
+            case ASSIGNED_ASSETS -> false;
+        };
+    }
+
+    /**
+     * The highest {@link Role} the acting user may grant to someone else — the ≤-own-scope grant
+     * ceiling. An {@link Kind#UNBOUNDED} scope (ADMIN) may grant {@link Role#ADMIN}; a
+     * {@link Kind#GROUPS} scope (MANAGER) may grant at most {@link Role#MANAGER}; a
+     * {@link Kind#ASSIGNED_ASSETS} scope may grant nothing.
+     *
+     * <p>Compared against a candidate role by {@link Role}'s ordinal ordering (ADMIN highest).
+     *
+     * @return the maximum grantable role, or {@link Optional#empty()} if this scope may grant none
+     */
+    public Optional<Role> maxGrantableRole() {
+        return switch (kind) {
+            case UNBOUNDED -> Optional.of(Role.ADMIN);
+            case GROUPS -> Optional.of(Role.MANAGER);
+            case ASSIGNED_ASSETS -> Optional.empty();
         };
     }
 }

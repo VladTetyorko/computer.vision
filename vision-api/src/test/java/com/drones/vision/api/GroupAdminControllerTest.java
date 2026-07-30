@@ -4,6 +4,8 @@ import com.drones.vision.application.GroupService;
 import com.drones.vision.application.GroupSpec;
 import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.UserId;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.MockMvc;
@@ -13,6 +15,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,9 +32,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class GroupAdminControllerTest {
 
     private final GroupService groupService = mock(GroupService.class);
+    // Unbounded scope from a plain Ownership — these tests assert wiring/status, not scope filtering.
+    private final CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
 
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new GroupAdminController(groupService))
+            .standaloneSetup(new GroupAdminController(groupService, currentUser))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
 
@@ -39,7 +44,7 @@ class GroupAdminControllerTest {
     void listMapsGroupsToResponses() throws Exception {
         Group root = new Group(GroupId.random(), "Root", null);
         Group child = new Group(GroupId.random(), "Child", root.id());
-        when(groupService.list()).thenReturn(List.of(root, child));
+        when(groupService.list(any())).thenReturn(List.of(root, child));
 
         mockMvc.perform(get("/api/groups"))
                 .andExpect(status().isOk())
@@ -50,14 +55,14 @@ class GroupAdminControllerTest {
     @Test
     void createRootGroupReturns201AndPassesNullParent() throws Exception {
         Group created = new Group(GroupId.random(), "New", null);
-        when(groupService.create(org.mockito.ArgumentMatchers.any())).thenReturn(created);
+        when(groupService.create(any(), any())).thenReturn(created);
 
         mockMvc.perform(post("/api/groups").contentType("application/json").content("{\"name\":\"New\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("New"));
 
         ArgumentCaptor<GroupSpec> spec = ArgumentCaptor.forClass(GroupSpec.class);
-        verify(groupService).create(spec.capture());
+        verify(groupService).create(spec.capture(), any());
         assertEquals("New", spec.getValue().name());
         assertNull(spec.getValue().parentGroupId());
     }
@@ -66,14 +71,14 @@ class GroupAdminControllerTest {
     void createChildGroupParsesParentId() throws Exception {
         GroupId parent = GroupId.random();
         Group created = new Group(GroupId.random(), "Child", parent);
-        when(groupService.create(org.mockito.ArgumentMatchers.any())).thenReturn(created);
+        when(groupService.create(any(), any())).thenReturn(created);
 
         mockMvc.perform(post("/api/groups").contentType("application/json")
                         .content("{\"name\":\"Child\",\"parentGroupId\":\"" + parent.value() + "\"}"))
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<GroupSpec> spec = ArgumentCaptor.forClass(GroupSpec.class);
-        verify(groupService).create(spec.capture());
+        verify(groupService).create(spec.capture(), any());
         assertEquals(parent, spec.getValue().parentGroupId());
     }
 }

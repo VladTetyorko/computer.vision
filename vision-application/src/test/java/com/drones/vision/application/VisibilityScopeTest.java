@@ -6,13 +6,16 @@ import com.drones.vision.domain.model.CategoryId;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.Role;
 import com.drones.vision.domain.model.UserId;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -88,5 +91,37 @@ class VisibilityScopeTest {
 
         assertTrue(scope.includes(asset));
         assertThrows(UnsupportedOperationException.class, () -> scope.assignedAssets().add(AssetId.random()));
+    }
+
+    // --- management-authority derivation (docs/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
+
+    @Test
+    void canManageOrgAcrossKinds() {
+        assertTrue(VisibilityScope.unbounded().canManageOrg());
+        assertTrue(VisibilityScope.groups(Set.of(GroupId.random())).canManageOrg());
+        assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).canManageOrg());
+        // an empty groups scope is still a manager (GROUPS kind), so it can manage
+        assertTrue(VisibilityScope.groups(Set.of()).canManageOrg());
+    }
+
+    @Test
+    void includesGroupAcrossKinds() {
+        GroupId inScope = GroupId.random();
+        GroupId outOfScope = GroupId.random();
+
+        assertTrue(VisibilityScope.unbounded().includesGroup(outOfScope));
+
+        VisibilityScope groups = VisibilityScope.groups(Set.of(inScope));
+        assertTrue(groups.includesGroup(inScope));
+        assertFalse(groups.includesGroup(outOfScope));
+
+        assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).includesGroup(inScope));
+    }
+
+    @Test
+    void maxGrantableRoleAcrossKinds() {
+        assertEquals(Optional.of(Role.ADMIN), VisibilityScope.unbounded().maxGrantableRole());
+        assertEquals(Optional.of(Role.MANAGER), VisibilityScope.groups(Set.of(GroupId.random())).maxGrantableRole());
+        assertEquals(Optional.empty(), VisibilityScope.assignedAssets(Set.of(AssetId.random())).maxGrantableRole());
     }
 }
