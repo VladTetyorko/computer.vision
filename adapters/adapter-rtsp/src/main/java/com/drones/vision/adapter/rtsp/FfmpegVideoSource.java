@@ -25,19 +25,32 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * {@link VideoSourcePort} implementation backed by JavaCV/FFmpeg — the
- * platform's FFmpeg ingest adapter. Covers two protocols:
+ * platform's FFmpeg ingest adapter. Covers four protocols:
  * <ul>
  *   <li>{@code rtsp} — real RTSP/RTP camera streams (IP cameras, drone
- *       companions)</li>
+ *       companions); dials out (the app connects to the camera).</li>
  *   <li>{@code file} — a local video file played back as a simulated live
  *       source (drone simulation with zero hardware): looped on request and
- *       paced to its own native frame rate rather than decoded flat out</li>
+ *       paced to its own native frame rate rather than decoded flat out.</li>
+ *   <li>{@code srt} — SRT (Secure Reliable Transport), docs/DRONE-INFRA-PLAN.md
+ *       I-h: the de-facto low-latency transport for drone video over lossy
+ *       cellular/long-range links (DJI transmission, Herelink, cheap SRT
+ *       encoders, OBS). Either dials out ({@code mode=caller}, the app
+ *       connects to the encoder) or binds/listens ({@code mode=listener},
+ *       the natural choice for {@code srt://0.0.0.0:port} — the encoder
+ *       dials in).</li>
+ *   <li>{@code udp} — raw UDP/MPEG-TS, docs/DRONE-INFRA-PLAN.md I-h: the
+ *       classic ground-station/encoder output ({@code ffmpeg … -f mpegts
+ *       udp://…}, analog-to-digital boxes). Always binds/listens — UDP is
+ *       connectionless, so opening a {@code udp://host:port} URL for
+ *       reading means "receive datagrams sent to this host:port", not
+ *       "connect to a remote peer".</li>
  * </ul>
  *
  * <p>Supports {@link StreamDescriptor#protocol()} {@code "rtsp"} (any URI)
- * and {@code "file"} (the {@link StreamDescriptor#uri()} scheme must itself
- * be {@code file}). Recognized {@link StreamDescriptor#options()} keys (all
- * optional):
+ * and {@code "file"}/{@code "srt"}/{@code "udp"} (the {@link
+ * StreamDescriptor#uri()} scheme must itself match the protocol string).
+ * Recognized {@link StreamDescriptor#options()} keys (all optional):
  * <ul>
  *   <li>{@code rtsp_transport} — FFmpeg's {@code rtsp_transport} AVOption
  *       (e.g. {@code tcp}, {@code udp}); default {@value #DEFAULT_RTSP_TRANSPORT}.
@@ -53,7 +66,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *       publisher, so a finite file loops indefinitely until {@link
  *       #close(StreamId)} is called; the frame {@link VideoFrame#sequence()}
  *       keeps increasing monotonically across loop restarts, it never
- *       resets.</li>
+ *       resets. <b>Only meaningful for {@code file}</b> — a live {@code
+ *       rtsp}/{@code srt}/{@code udp} source has no bounded content to
+ *       restart from, so setting {@code loop=true} for one of those has no
+ *       useful effect (a live source's {@code grabImage()} returning {@code
+ *       null} means the connection/stream genuinely ended, not "reached the
+ *       end of a file to replay").</li>
  *   <li>{@code probesize}, {@code analyzeduration}, {@code
  *       reorder_queue_size}, {@code max_delay} — docs/MVP2-PLAN.md V-c
  *       low-latency RTSP demuxer tuning; see {@link #OPTION_PROBESIZE_BYTES}/
@@ -61,8 +79,25 @@ import java.util.concurrent.atomic.AtomicLong;
  *       #OPTION_REORDER_QUEUE_SIZE}/{@link #OPTION_MAX_DELAY_MICROS}'s own
  *       javadoc for each option's verified FFmpeg default, this class's
  *       tightened default, and the rationale. Only applied when the URI
- *       scheme is {@code rtsp} — never {@code file} (paced local-file
- *       playback is not the live-network case this tuning targets).</li>
+ *       scheme is {@code rtsp} — never {@code file}/{@code srt}/{@code udp}
+ *       (paced local-file playback and the SRT/UDP protocols below have
+ *       their own, separately-tuned option sets).</li>
+ *   <li>{@code latency}, {@code mode}, {@code streamid}, {@code passphrase}
+ *       — SRT connection tuning, docs/DRONE-INFRA-PLAN.md I-h; see {@link
+ *       #OPTION_SRT_LATENCY_MILLIS}/{@link #OPTION_SRT_MODE}/{@link
+ *       #OPTION_SRT_STREAMID}/{@link #OPTION_SRT_PASSPHRASE}'s own javadoc.
+ *       Only applied when the URI scheme is {@code srt}.</li>
+ *   <li>{@code fifo_size}, {@code overrun_nonfatal}, {@code buffer_size} —
+ *       UDP/MPEG-TS receive tuning, docs/DRONE-INFRA-PLAN.md I-h; see {@link
+ *       #OPTION_UDP_FIFO_SIZE}/{@link #OPTION_UDP_OVERRUN_NONFATAL}/{@link
+ *       #OPTION_UDP_BUFFER_SIZE}'s own javadoc. Only applied when the URI
+ *       scheme is {@code udp}, which also always forces the demuxer format
+ *       to {@code mpegts} (see {@link #configureUdpOptions} for why) and
+ *       always applies an internal, non-overridable read timeout (see
+ *       {@link #DEFAULT_UDP_TIMEOUT_MICROS}'s javadoc for why this exists
+ *       — a real production robustness finding, not a test-only detail:
+ *       without it, a udp source nobody ever sends a packet to can hold a
+ *       process-wide native lock forever).</li>
  * </ul>
  *
  * <p><b>Real-time pacing:</b> decoding a local file is disk-bound, not
@@ -74,8 +109,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * the wall-clock time actually spent since the previous frame, clamped to
  * zero (never a negative sleep, and no drift compensation beyond this one
  * monotonic baseline). The baseline resets on every loop restart, so the
- * first frame of each pass through the file is never delayed. {@code rtsp}
- * URIs are never paced — the network already paces a live camera.
+ * first frame of each pass through the file is never delayed. {@code rtsp}/
+ * {@code srt}/{@code udp} URIs are never paced — the network already paces
+ * a live source.
  *
  * <p>Each {@link #open(StreamId, StreamDescriptor)} call starts one
  * dedicated platform thread (decoding is CPU-bound; virtual threads buy
@@ -99,6 +135,8 @@ public final class FfmpegVideoSource implements VideoSourcePort {
 
     private static final String PROTOCOL_RTSP = "rtsp";
     private static final String PROTOCOL_FILE = "file";
+    private static final String PROTOCOL_SRT = "srt";
+    private static final String PROTOCOL_UDP = "udp";
 
     static final String OPTION_RTSP_TRANSPORT = "rtsp_transport";
     static final String DEFAULT_RTSP_TRANSPORT = "tcp";
@@ -215,6 +253,188 @@ public final class FfmpegVideoSource implements VideoSourcePort {
     static final String OPTION_MAX_DELAY_MICROS = "max_delay";
     static final String DEFAULT_MAX_DELAY_MICROS = "100000"; // 100ms; pins rtsp.c's own DEFAULT_REORDERING_DELAY
 
+    // -- docs/DRONE-INFRA-PLAN.md I-h: SRT (srt scheme only) --
+    // Every FFmpeg AVOption name/default below was verified against this module's
+    // actual pinned ffmpeg-platform-gpl 6.1.1-1.5.10 native binary (libavformat.so.60
+    // built with --enable-libsrt, confirmed present by extracting the jar and grepping
+    // its strings for SRTO_LATENCY/SRTO_PASSPHRASE/SRTO_MODE-family symbols and the
+    // libsrt.c help text), not assumed from FFmpeg's own docs/wiki -- same discipline
+    // as the RTSP V-c block above.
+
+    /**
+     * {@link StreamDescriptor#options()} key for SRT receive latency, in
+     * <b>milliseconds</b> -- this is the platform's own contract unit
+     * (docs/DRONE-INFRA-PLAN.md I-h: "{@code latency} (ms, SRT's core
+     * knob)"). <b>FFmpeg's own {@code latency} AVOption (libavformat's
+     * {@code libsrt.c}, confirmed present in this build's binary via the
+     * {@code "receive latency (in microseconds)"}/{@code "peer latency (in
+     * microseconds)"} help strings on its sibling {@code rcvlatency}/{@code
+     * peerlatency} options) is in <b>microseconds</b>, not milliseconds</b>
+     * -- {@link #configureSrtOptions} converts (×1000) before calling {@code
+     * setOption}. Getting this conversion wrong silently changes the
+     * requested latency budget by a factor of 1000, so it is called out
+     * here and at the call site, not just implied by the constant name.
+     */
+    static final String OPTION_SRT_LATENCY_MILLIS = "latency";
+    static final String DEFAULT_SRT_LATENCY_MILLIS = "120"; // 120ms -- matches libsrt's own built-in default exactly
+
+    /**
+     * {@link StreamDescriptor#options()} key mapping directly to FFmpeg's
+     * {@code mode} AVOption (verified present in this build's binary: the
+     * {@code caller}/{@code listener}/{@code rendezvous} AVOption constant
+     * names appear verbatim in {@code libavformat.so.60}'s strings). Only
+     * {@code caller} (the app dials the encoder) and {@code listener} (the
+     * app binds; encoder dials in) are exposed per docs/DRONE-INFRA-PLAN.md
+     * I-h's frozen contract -- {@code rendezvous} exists in FFmpeg but is
+     * out of scope here. When absent, {@link #defaultSrtMode(URI)} infers
+     * {@code listener} for an any-address host ({@code 0.0.0.0}/{@code ::}/
+     * unset -- the natural reading of {@code srt://0.0.0.0:port}: the app
+     * binds and waits) and {@code caller} otherwise (a real host means the
+     * app dials out to it).
+     */
+    static final String OPTION_SRT_MODE = "mode";
+    static final String SRT_MODE_CALLER = "caller";
+    static final String SRT_MODE_LISTENER = "listener";
+
+    /**
+     * {@link StreamDescriptor#options()} key mapping directly to FFmpeg's
+     * {@code streamid} AVOption (verified present: {@code SRTO_STREAMID}/
+     * {@code srt_streamid} appear in this build's binary strings) -- an
+     * arbitrary string an SRT caller passes to a listener to identify
+     * itself/select a resource, used by e.g. SRT relay/gateway services.
+     * Pure passthrough, no default: absent means "don't set one".
+     */
+    static final String OPTION_SRT_STREAMID = "streamid";
+
+    /**
+     * {@link StreamDescriptor#options()} key mapping directly to FFmpeg's
+     * {@code passphrase} AVOption (verified present in this build's binary
+     * strings) -- enables SRT's built-in AES encryption. Pure passthrough,
+     * no default: absent means "no encryption". When present, {@link
+     * #configureSrtOptions} also sets FFmpeg's {@code pbkeylen} AVOption
+     * (verified present: {@code SRTO_PBKEYLEN}/{@code "Crypto key len in
+     * bytes {16,24,32} Default: 16 (128-bit)"} appear in this build's
+     * binary strings) to {@value #DEFAULT_SRT_PBKEYLEN} -- FFmpeg/libsrt
+     * already default an unset {@code pbkeylen} to 16 bytes (128-bit)
+     * internally when a passphrase is set, so this is not strictly required
+     * for encryption to work, but pinning it explicitly documents the
+     * chosen key length rather than relying on an unstated library default
+     * (same "living documentation" idiom as the RTSP V-c block's {@code
+     * reorder_queue_size}/{@code max_delay} pins above).
+     */
+    static final String OPTION_SRT_PASSPHRASE = "passphrase";
+    private static final String FFMPEG_OPTION_SRT_PBKEYLEN = "pbkeylen";
+    private static final String DEFAULT_SRT_PBKEYLEN = "16";
+
+    // -- docs/DRONE-INFRA-PLAN.md I-h: UDP/MPEG-TS (udp scheme only) --
+
+    /**
+     * {@link StreamDescriptor#options()} key mapping directly to FFmpeg's
+     * {@code fifo_size} AVOption on the {@code udp} protocol (verified
+     * present in this build's binary strings: {@code "set the UDP receiving
+     * circular buffer size, expressed as a number of packets with size of
+     * 188 bytes"}) -- the demuxer-side receive ring buffer, in 188-byte
+     * MPEG-TS packets. FFmpeg's own unset default is {@code 7*4096} = 28,672
+     * packets (~5.4MB, confirmed via the same option table) -- generous
+     * loss tolerance at the cost of several seconds of possible buffering
+     * latency on a live drone feed. {@value #DEFAULT_UDP_FIFO_SIZE_PACKETS}
+     * packets (~96KB) trades most of that tolerance away for materially
+     * lower latency, matching this module's low-latency-by-default posture
+     * for live sources (same intent as the RTSP V-c block's {@code
+     * probesize}/{@code analyzeduration} tightening above).
+     */
+    static final String OPTION_UDP_FIFO_SIZE = "fifo_size";
+    static final String DEFAULT_UDP_FIFO_SIZE_PACKETS = "512"; // ~96KB, vs. FFmpeg's own ~5.4MB (28,672 packet) default
+
+    /**
+     * {@link StreamDescriptor#options()} key mapping directly to FFmpeg's
+     * {@code overrun_nonfatal} AVOption on the {@code udp} protocol
+     * (verified present: {@code "survive in case of UDP receiving circular
+     * buffer overrun"} / {@code "Circular buffer overrun. Surviving due to
+     * overrun_nonfatal option"} appear in this build's binary strings).
+     * FFmpeg's own default is {@code false} -- a full receive ring buffer
+     * (more likely here given the tightened {@link #OPTION_UDP_FIFO_SIZE}
+     * default above) aborts the stream entirely. Defaulted to {@code true}
+     * here: a live drone feed dropping a burst of packets under transient
+     * jitter/loss should keep decoding what it can, the same "stay up
+     * through jitter" posture as the RTSP {@code reorder_queue_size}/{@code
+     * max_delay} tuning above, not hard-fail the whole stream.
+     */
+    static final String OPTION_UDP_OVERRUN_NONFATAL = "overrun_nonfatal";
+    static final String DEFAULT_UDP_OVERRUN_NONFATAL = "1"; // true; survive fifo overruns rather than aborting
+
+    /**
+     * {@link StreamDescriptor#options()} key mapping directly to FFmpeg's
+     * {@code buffer_size} AVOption on the {@code udp} protocol -- the
+     * underlying OS socket receive buffer size in bytes ({@code SO_RCVBUF}).
+     * Pure passthrough, no forced default: FFmpeg's own unset value ({@code
+     * -1}) means "leave the OS default alone", which this module does not
+     * override on principle -- unlike {@link #OPTION_UDP_FIFO_SIZE} (an
+     * application-level ring buffer this module actively wants small for
+     * latency), the OS socket buffer is a system-level knob a specific
+     * deployment may need to size up for a lossy/bursty link; this module
+     * has no basis to pick a better default than "unset" for that case.
+     */
+    static final String OPTION_UDP_BUFFER_SIZE = "buffer_size";
+
+    /**
+     * FFmpeg's {@code udp} protocol {@code timeout} AVOption (verified
+     * present in this build's binary strings: {@code "set raise error
+     * timeout, in microseconds (only in read mode)"}) -- bounds how long a
+     * udp read blocks with zero incoming packets before failing with an
+     * error, instead of FFmpeg's own unset default of {@code 0} (no
+     * timeout: block forever).
+     * <p><b>Not exposed as a {@link StreamDescriptor#options()} key</b> --
+     * unlike the three options above, this is an internal safety default
+     * only, always applied and not currently overridable. It was added
+     * after a serious finding while writing this class's own tests:
+     * JavaCV's {@code FFmpegFrameGrabber}/{@code
+     * FFmpegFrameRecorder#start()} both synchronize on a shared, static,
+     * process-wide lock (verified via a real thread dump: both block on
+     * the same {@code org.bytedeco.ffmpeg.global.avcodec} class monitor)
+     * for the *entire duration* of their native {@code
+     * avformat_open_input} call -- so a {@code udp} source that nobody is
+     * ever sending a packet to would, without this bound, hold that lock
+     * <i>forever</i>, silently blocking every <i>other</i> video source's
+     * own open/reconnect attempts in the same JVM (the application's
+     * stream supervisor retries a failed {@link #open} indefinitely with
+     * its own 1s-30s backoff -- each retry would re-enter the same stuck
+     * lock). This is not hypothetical: it was reproduced directly while
+     * developing this module's own udp loopback test (a receiver whose
+     * native probe never resolved wedged an unrelated, later test in the
+     * same JVM for 10+ minutes) -- see this module's MODULE.md Gotchas for
+     * the full investigation. {@value #DEFAULT_UDP_TIMEOUT_MICROS}
+     * microseconds (5s) is a deliberately generous "is this source dead"
+     * bound, not a latency knob -- it exists purely so one open attempt
+     * fails cleanly (letting the caller/supervisor retry) instead of
+     * hanging the whole process.
+     */
+    private static final String OPTION_UDP_TIMEOUT_MICROS = "timeout";
+    private static final String DEFAULT_UDP_TIMEOUT_MICROS = "5000000"; // 5s; dead-source bound, not exposed as an option
+
+    /**
+     * FFmpeg format name forced on every {@code udp} scheme open via {@link
+     * FFmpegFrameGrabber#setFormat(String)} -- a raw {@code udp://} URL
+     * carries no container-level self-description the way {@code rtsp://}'s
+     * SDP {@code DESCRIBE} response does, so without an explicit format
+     * hint {@code avformat_open_input}'s format probe must guess from
+     * whatever datagrams it happens to receive during probing.
+     * docs/DRONE-INFRA-PLAN.md I-h's frozen contract already assumes
+     * MPEG-TS for {@code udp} ("MPEG-TS assumed"), so forcing it here is
+     * not a guess -- it names the one container this protocol is
+     * contracted to carry, and removes format auto-detection as a failure
+     * mode entirely rather than trusting it to keep guessing right.
+     * <b>Honesty note</b>: an ad hoc local A/B check while writing this
+     * class found format auto-probing succeeded just as reliably as an
+     * explicit {@code setFormat} on this quiet loopback (5/5 either way) --
+     * this module does not have measured evidence that a real, lossier/
+     * jitterier drone link would probe as reliably, so {@code setFormat} is
+     * kept on contract-correctness grounds (it names the guaranteed
+     * container instead of relying on inference) rather than a proven
+     * reliability delta.
+     */
+    private static final String FORMAT_MPEGTS = "mpegts";
+
     private static final int PUBLISHER_BUFFER_CAPACITY = 4;
     private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
 
@@ -293,11 +513,14 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         }
         String protocol = descriptor.protocol();
         if (PROTOCOL_RTSP.equals(protocol)) {
-            return true;
+            return true; // any URI accepted -- rtsp:// is the only realistic scheme in practice
         }
-        if (PROTOCOL_FILE.equals(protocol)) {
+        // file/srt/udp all require the URI's own scheme to match the protocol string
+        // exactly (unlike rtsp above) -- each protocol string doubles as the required
+        // scheme name here, so one branch covers all three.
+        if (PROTOCOL_FILE.equals(protocol) || PROTOCOL_SRT.equals(protocol) || PROTOCOL_UDP.equals(protocol)) {
             URI uri = descriptor.uri();
-            return uri != null && PROTOCOL_FILE.equalsIgnoreCase(uri.getScheme());
+            return uri != null && protocol.equalsIgnoreCase(uri.getScheme());
         }
         return false;
     }
@@ -402,6 +625,94 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         } catch (NumberFormatException e) {
             return Integer.parseInt(defaultValue); // malformed device override: keep the (well-formed) default
         }
+    }
+
+    /**
+     * Applies this class's SRT-only grabber options — docs/DRONE-INFRA-PLAN.md
+     * I-h. Package-private test seam, same idiom as {@link
+     * #configureRtspOptions}: constructing an {@link FFmpegFrameGrabber} and
+     * calling {@code setOption} only assigns fields, no network I/O, so a
+     * test can assert exactly what a real grabber would be started with
+     * against any {@code srt://} URI, live SRT peer or not.
+     *
+     * <p><b>Applied via {@code setOption}, not the {@code srt://} URL's
+     * query string</b> — both are documented FFmpeg mechanisms for SRT
+     * protocol options, and both were actually tried (not assumed) while
+     * writing this class: a standalone probe using {@code setOption("mode",
+     * "listener")} measurably steered {@code FFmpegFrameGrabber#start()}
+     * into the SRT listener accept-wait native code path rather than the
+     * caller-connect path, proving {@code setOption} genuinely reaches the
+     * SRT protocol's own private AVOptions in this exact JavaCV/FFmpeg
+     * build — the identical {@code srt://…?mode=listener} URL-query-string
+     * form was also tried and reached the same code path, no better or
+     * worse. {@code setOption} was kept: one idiom across rtsp/srt/udp,
+     * and no hand-building/escaping a query string on top of a
+     * caller-supplied URI that may already carry its own. See this
+     * module's MODULE.md Gotchas ("verified finding: a JVM-hosted SRT
+     * connection via JavaCV does not complete in this development
+     * environment") for the full investigation, including why {@code
+     * FfmpegVideoSourceTest}'s own SRT loopback test degrades to a skip
+     * rather than asserting success here — that is a separate, downstream
+     * native-connectivity finding, not evidence against this method's own
+     * option-application correctness (which the unit tests below do cover).
+     *
+     * <p>Called only from the {@code uri.getScheme().equals("srt")} branch
+     * of {@link StreamRuntime#newGrabber()}.
+     */
+    static void configureSrtOptions(FFmpegFrameGrabber grabber, URI uri, Map<String, String> options) {
+        int latencyMillis = intOption(options, OPTION_SRT_LATENCY_MILLIS, DEFAULT_SRT_LATENCY_MILLIS);
+        // ms -> us: FFmpeg's own "latency" AVOption is in microseconds, see OPTION_SRT_LATENCY_MILLIS javadoc.
+        grabber.setOption(OPTION_SRT_LATENCY_MILLIS, String.valueOf(latencyMillis * 1000L));
+        grabber.setOption(OPTION_SRT_MODE, options.getOrDefault(OPTION_SRT_MODE, defaultSrtMode(uri)));
+        String streamId = options.get(OPTION_SRT_STREAMID);
+        if (streamId != null && !streamId.isBlank()) {
+            grabber.setOption(OPTION_SRT_STREAMID, streamId);
+        }
+        String passphrase = options.get(OPTION_SRT_PASSPHRASE);
+        if (passphrase != null && !passphrase.isBlank()) {
+            grabber.setOption(OPTION_SRT_PASSPHRASE, passphrase);
+            grabber.setOption(FFMPEG_OPTION_SRT_PBKEYLEN, DEFAULT_SRT_PBKEYLEN);
+        }
+    }
+
+    /**
+     * Infers the SRT connection mode when the {@link #OPTION_SRT_MODE}
+     * device option is absent — see {@link #OPTION_SRT_MODE}'s javadoc for
+     * the full rationale: an any-address host reads as "bind and wait"
+     * ({@code listener}), any real host reads as "dial out" ({@code
+     * caller}).
+     */
+    private static String defaultSrtMode(URI uri) {
+        String host = uri.getHost();
+        boolean anyAddress = host == null || host.isBlank() || "0.0.0.0".equals(host) || "::".equals(host);
+        return anyAddress ? SRT_MODE_LISTENER : SRT_MODE_CALLER;
+    }
+
+    /**
+     * Applies this class's UDP/MPEG-TS-only grabber options —
+     * docs/DRONE-INFRA-PLAN.md I-h. Package-private test seam, same idiom as
+     * {@link #configureRtspOptions}/{@link #configureSrtOptions}.
+     *
+     * <p>Always forces the demuxer format to {@code mpegts} via {@link
+     * FFmpegFrameGrabber#setFormat(String)} — see {@link #FORMAT_MPEGTS}'s
+     * javadoc for why a raw {@code udp://} source needs the hint. Called
+     * only from the {@code uri.getScheme().equals("udp")} branch of {@link
+     * StreamRuntime#newGrabber()}.
+     */
+    static void configureUdpOptions(FFmpegFrameGrabber grabber, Map<String, String> options) {
+        grabber.setFormat(FORMAT_MPEGTS);
+        grabber.setOption(OPTION_UDP_FIFO_SIZE,
+                options.getOrDefault(OPTION_UDP_FIFO_SIZE, DEFAULT_UDP_FIFO_SIZE_PACKETS));
+        grabber.setOption(OPTION_UDP_OVERRUN_NONFATAL,
+                options.getOrDefault(OPTION_UDP_OVERRUN_NONFATAL, DEFAULT_UDP_OVERRUN_NONFATAL));
+        String bufferSize = options.get(OPTION_UDP_BUFFER_SIZE);
+        if (bufferSize != null && !bufferSize.isBlank()) {
+            grabber.setOption(OPTION_UDP_BUFFER_SIZE, bufferSize);
+        }
+        // Not overridable, not part of the frozen options contract -- see DEFAULT_UDP_TIMEOUT_MICROS's
+        // javadoc for why this internal safety bound exists (a stuck native open() call holds a
+        // process-wide JavaCV lock forever otherwise, verified via a real thread dump).
+        grabber.setOption(OPTION_UDP_TIMEOUT_MICROS, DEFAULT_UDP_TIMEOUT_MICROS);
     }
 
     /** Per-open runtime: a dedicated grab thread feeding a {@link SubmissionPublisher}. */
@@ -519,8 +830,13 @@ public final class FfmpegVideoSource implements VideoSourcePort {
         private FFmpegFrameGrabber newGrabber() {
             FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(resolveFilename(uri));
             grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
-            if (PROTOCOL_RTSP.equalsIgnoreCase(uri.getScheme())) {
+            String scheme = uri.getScheme();
+            if (PROTOCOL_RTSP.equalsIgnoreCase(scheme)) {
                 configureRtspOptions(grabber, options);
+            } else if (PROTOCOL_SRT.equalsIgnoreCase(scheme)) {
+                configureSrtOptions(grabber, uri, options);
+            } else if (PROTOCOL_UDP.equalsIgnoreCase(scheme)) {
+                configureUdpOptions(grabber, options);
             }
             return grabber;
         }
