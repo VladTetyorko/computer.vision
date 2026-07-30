@@ -399,8 +399,8 @@
    map inset hides"). */
 .main-map {
   position: absolute;
-  top: var(--space-16);
-  right: var(--space-16);
+  left: var(--space-16);
+  bottom: var(--space-32);
   width: min(22rem, 32vw);
   /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
      (400+) from escaping to the root and painting over this page's own header overlay above. */

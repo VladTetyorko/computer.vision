@@ -106,19 +106,6 @@
           </div>
         </section>
 
-        <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) --------------- -->
-        <section class="card col-8">
-          <div class="icon-heading">
-            <vision-icon name="gauge" [size]="18" />
-            <vision-section-header title="Utilization" />
-          </div>
-          <div class="kpi-tiles">
-            @for (tile of kpiTiles(); track tile.label) {
-              <vision-stat [label]="tile.label" [value]="tile.value" [sub]="tile.sub" [live]="tile.live ?? false" />
-            }
-          </div>
-        </section>
-
         <!-- ---- Position + freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) —
              the single freshest sample across every source device, not the old landing page's full
              per-device dump (that lives in the "Full telemetry" drawer now). -->
@@ -146,8 +133,21 @@
           </section>
         }
 
-        <!-- ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) ------ -->
+        <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) --------------- -->
         <section class="card col-8">
+          <div class="icon-heading">
+            <vision-icon name="gauge" [size]="18" />
+            <vision-section-header title="Utilization" />
+          </div>
+          <div class="kpi-tiles">
+            @for (tile of kpiTiles(); track tile.label) {
+              <vision-stat [label]="tile.label" [value]="tile.value" [sub]="tile.sub" [live]="tile.live ?? false" />
+            }
+          </div>
+        </section>
+
+        <!-- ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) ------ -->
+        <section class="card col-6">
           <div class="icon-heading">
             <vision-icon name="history" [size]="18" />
             <vision-section-header title="Recent flights" subtitle="durations, oldest to newest — lifetime totals are in Utilization above">
@@ -186,7 +186,7 @@
         <!-- ---- Drill-in launcher — every heavier area is one click away, never dumped onto the
              landing (docs/UI-REDESIGN-PLAN.md Wave 3, D-F). Pilots is the one manager-only entry
              (`canManagePilots`) — hidden outright for anyone else, not just an empty drawer. ---- -->
-        <section class="card col-12 drill-in-launcher">
+        <section class="card col-6 drill-in-launcher">
           <div class="icon-heading">
             <vision-icon name="list" [size]="18" />
             <vision-section-header

@@ -470,6 +470,7 @@ input[type="checkbox"] {
 .segmented > .btn {
     border-radius: 0;
     margin-left: -1px;
+    background-color: var(--text-muted);
 }
 
 .segmented > .btn:first-child {

@@ -284,25 +284,6 @@
       <vision-fly-osd [latencySeconds]="latencySeconds()" [transport]="transport()" [windLimitMps]="windLimitMps()" />
     </div>
 
-    <!-- ---- Events ticker ------------------------------------------------------------------ -->
-    @if (tickerEvents().length > 0) {
-      <div class="grid-ticker">
-        @for (event of tickerEvents(); track event.id) {
-          <div class="ticker-row" [class.open]="event.state === 'OPEN'">
-            <!-- Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3, extended to fly per the
-                 coordinator): the dot alone used to be the only carrier of OPEN vs. CLOSED — the
-                 word itself (event.state, the DetectionEventState API term) now always renders
-                 beside it too, same `chip`/`dot` idiom `shared/ui/events-rail.css`'s `.event-state`
-                 and `features/command/command.css`'s `.severity-chip` already use (mirrored here,
-                 not imported — this file only reaches into its own `fly.css`). -->
-            <span class="chip event-state-chip" [class.ok]="event.state === 'OPEN'">
-              <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
-            </span>
-            {{ tickerLabel(event) }}
-          </div>
-        }
-      </div>
-    }
 
     <!-- ---- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) — frozen ids/order: flight · cv ·
          detections · layers · help. One open at a time via `panels`; each button is gated exactly
