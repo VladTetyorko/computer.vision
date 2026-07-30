@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CommandResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.FlightCapability;
 import com.drones.vision.domain.model.StreamDescriptor;
 
 import io.dronefleet.mavlink.MavlinkConnection;
@@ -247,6 +248,409 @@ class MavlinkFlightCommanderTest {
         }
     }
 
+    // ---- Stage 2: setMode ----------------------------------------------------------------
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void setModeSendsDoSetModeWithTheResolvedCustomModeAndReturnsAccepted() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 94, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_DO_SET_MODE,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.setMode(device, "Loiter");
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong, "expected the vehicle to receive a COMMAND_LONG");
+            assertEquals(94, commandLong.targetSystem());
+            assertEquals(MavCmd.MAV_CMD_DO_SET_MODE, commandLong.command().entry());
+            assertEquals(1.0f, commandLong.param1(), "param1 must be MAV_MODE_FLAG_CUSTOM_MODE_ENABLED");
+            assertEquals(5.0f, commandLong.param2(), "param2 must be the ArduPilot copter Loiter custom_mode (5)");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void setModeThrowsIllegalStateExceptionWhenTheVehicleDeniesIt() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 95, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_DO_SET_MODE,
+                    MavResult.MAV_RESULT_DENIED, new AtomicReference<>(), vehicleError);
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, () -> commander.setMode(device, "Loiter"));
+            assertTrue(ex.getMessage().contains("MAV_RESULT_DENIED"),
+                    "expected the ack's result name in the message, got: " + ex.getMessage());
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void setModeReturnsNoAckWhenTheVehicleNeverReplies() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 96, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    vehicle.awaitCommandLong(Duration.ofSeconds(10)); // drain but never reply
+                } catch (Exception ignored) {
+                    // best-effort drain only
+                }
+            }, "fake-vehicle-96");
+            vehicleThread.start();
+
+            assertEquals(CommandResult.NO_ACK, commander.setMode(device, "Loiter"));
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void setModeThrowsForAnUnknownModeName() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 97, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            IllegalArgumentException ex =
+                    assertThrows(IllegalArgumentException.class, () -> commander.setMode(device, "NotAMode"));
+            assertTrue(ex.getMessage().contains("NotAMode"), "expected the mode name in the message, got: " + ex.getMessage());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void setModeRejectsABetaflightVehicle() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 98, MavAutopilot.MAV_AUTOPILOT_GENERIC, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "generic", Duration.ofSeconds(10));
+
+            IllegalArgumentException ex =
+                    assertThrows(IllegalArgumentException.class, () -> commander.setMode(device, "Loiter"));
+            assertTrue(ex.getMessage().contains("Betaflight"), "expected Betaflight in the message, got: " + ex.getMessage());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    // ---- Stage 2: arm / disarm -----------------------------------------------------------
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void armSendsComponentArmDisarmWithForceMagicAndReturnsAccepted() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 101, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.arm(device, true);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong, "expected the vehicle to receive a COMMAND_LONG");
+            assertEquals(101, commandLong.targetSystem());
+            assertEquals(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, commandLong.command().entry());
+            assertEquals(1.0f, commandLong.param1(), "param1 must be 1.0 (arm)");
+            assertEquals(21196.0f, commandLong.param2(), "param2 must be the 21196 force magic value");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void armWithoutForceSendsZeroForParam2() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 102, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            commander.arm(device, false);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong);
+            assertEquals(1.0f, commandLong.param1(), "param1 must be 1.0 (arm)");
+            assertEquals(0.0f, commandLong.param2(), "param2 must be 0.0 when force is not requested");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void disarmSendsComponentArmDisarmWithParam1Zero() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 103, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> received = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                    MavResult.MAV_RESULT_ACCEPTED, received, vehicleError);
+
+            CommandResult result = commander.disarm(device, false);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            CommandLong commandLong = received.get();
+            assertNotNull(commandLong);
+            assertEquals(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, commandLong.command().entry());
+            assertEquals(0.0f, commandLong.param1(), "param1 must be 0.0 (disarm)");
+            assertEquals(0.0f, commandLong.param2(), "param2 must be 0.0 when force is not requested");
+            assertEquals(CommandResult.ACCEPTED, result);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void armThrowsIllegalStateExceptionWhenTheVehicleDeniesIt() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 104, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = vehicleReplies(vehicle, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
+                    MavResult.MAV_RESULT_DENIED, new AtomicReference<>(), vehicleError);
+
+            IllegalStateException ex = assertThrows(IllegalStateException.class, () -> commander.arm(device, false));
+            assertTrue(ex.getMessage().contains("MAV_RESULT_DENIED"),
+                    "expected the ack's result name in the message, got: " + ex.getMessage());
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void armReturnsNoAckWhenTheVehicleNeverReplies() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 105, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    vehicle.awaitCommandLong(Duration.ofSeconds(10)); // drain but never reply
+                } catch (Exception ignored) {
+                    // best-effort drain only
+                }
+            }, "fake-vehicle-105");
+            vehicleThread.start();
+
+            assertEquals(CommandResult.NO_ACK, commander.arm(device, false));
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    // ---- Stage 2: capabilities -----------------------------------------------------------
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void capabilitiesForAnArdupilotVehicleReportsCommandableWithModes() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 111, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            FlightCapability caps = commander.capabilities(device);
+            assertTrue(caps.commandable(), "ArduPilot must be commandable");
+            assertTrue(caps.armSupported(), "ArduPilot must support arm");
+            assertTrue(caps.modeSelectSupported(), "ArduPilot must support mode select");
+            assertTrue(caps.selectableModes().contains("RTL") && caps.selectableModes().contains("Loiter"),
+                    "expected the copter family modes, got: " + caps.selectableModes());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void capabilitiesForABetaflightVehicleReportsNotCommandable() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 112, MavAutopilot.MAV_AUTOPILOT_GENERIC, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "generic", Duration.ofSeconds(10));
+
+            FlightCapability caps = commander.capabilities(device);
+            assertFalse(caps.commandable());
+            assertFalse(caps.armSupported());
+            assertFalse(caps.modeSelectSupported());
+            assertTrue(caps.selectableModes().isEmpty(), "expected no selectable modes, got: " + caps.selectableModes());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 15, unit = TimeUnit.SECONDS)
+    void capabilitiesForANeverHeardVehicleReportsNotCommandable() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of("sysid", "81")); // pinned to a sysid nothing transmits
+
+        try {
+            telemetrySource.open(device);
+            Thread.sleep(300); // hub is up, but nothing ever arrives on sysid 81
+
+            FlightCapability caps = commander.capabilities(device);
+            assertFalse(caps.commandable());
+            assertFalse(caps.armSupported());
+            assertFalse(caps.modeSelectSupported());
+            assertTrue(caps.selectableModes().isEmpty());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    private static Thread vehicleReplies(FakeVehicle vehicle, MavCmd ackCommand, MavResult result,
+                                          AtomicReference<CommandLong> received, AtomicReference<Exception> error) {
+        Thread thread = new Thread(() -> {
+            try {
+                CommandLong commandLong = vehicle.awaitCommandLong(Duration.ofSeconds(10));
+                received.set(commandLong);
+                vehicle.replyAck(ackCommand, result);
+            } catch (Exception e) {
+                error.set(e);
+            }
+        }, "fake-vehicle-reply");
+        thread.start();
+        return thread;
+    }
+
     private static Device device(int port, DeviceId id, Map<String, String> options) {
         return new Device(id, "flight-commander-test-device", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:" + port), options));
@@ -359,8 +763,13 @@ class MavlinkFlightCommanderTest {
 
         /** Guarded by {@link #writeLock} against the concurrently-running heartbeat thread's own writes. */
         void replyAck(MavResult result) throws IOException {
+            replyAck(MavCmd.MAV_CMD_DO_SET_MODE, result);
+        }
+
+        /** Acknowledges a specific command (DO_SET_MODE vs COMPONENT_ARM_DISARM). */
+        void replyAck(MavCmd command, MavResult result) throws IOException {
             CommandAck ack = CommandAck.builder()
-                    .command(MavCmd.MAV_CMD_DO_SET_MODE)
+                    .command(command)
                     .result(result)
                     .build();
             synchronized (writeLock) {

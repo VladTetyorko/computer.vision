@@ -2,8 +2,11 @@ package com.drones.vision.adapter.mavlink;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlightModesTest {
 
@@ -115,5 +118,40 @@ class FlightModesTest {
     void customModeForReturnsNullWhenNoTableIsSelected() {
         assertNull(FlightModes.customModeFor(AUTOPILOT_PX4, MAV_TYPE_QUADROTOR, "RTL"));
         assertNull(FlightModes.customModeFor(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GCS, "RTL"));
+    }
+
+    @Test
+    void selectableModesListsEveryArdupilotCopterModeSortedAndDistinct() {
+        List<String> modes = FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_QUADROTOR);
+
+        assertEquals(modes.stream().sorted().distinct().toList(), modes, "expected sorted, distinct");
+        assertTrue(modes.contains("Stabilize") && modes.contains("RTL") && modes.contains("Loiter")
+                && modes.contains("Land"), "expected the copter family modes, got: " + modes);
+        // ArduPilot copter table has 26 distinct named entries.
+        assertEquals(26, modes.size(), "expected every copter mode, got: " + modes);
+    }
+
+    @Test
+    void selectableModesSelectsThePlaneAndRoverFamiliesByMavType() {
+        List<String> plane = FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_FIXED_WING);
+        assertTrue(plane.contains("FBWA") && plane.contains("QLoiter") && plane.contains("RTL"),
+                "expected plane-family modes, got: " + plane);
+
+        List<String> rover = FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER);
+        assertTrue(rover.contains("Steering") && rover.contains("Hold") && rover.contains("RTL"),
+                "expected rover-family modes, got: " + rover);
+        assertEquals(rover.stream().sorted().toList(), rover, "expected sorted");
+    }
+
+    @Test
+    void selectableModesIsEmptyForBetaflightEvenThoughItHasAModeTable() {
+        assertEquals(List.of(), FlightModes.selectableModes(AUTOPILOT_GENERIC, MAV_TYPE_QUADROTOR));
+    }
+
+    @Test
+    void selectableModesIsEmptyForPx4UnknownAutopilotsAndAnUnknownArdupilotFamily() {
+        assertEquals(List.of(), FlightModes.selectableModes(AUTOPILOT_PX4, MAV_TYPE_QUADROTOR));
+        assertEquals(List.of(), FlightModes.selectableModes(99, MAV_TYPE_QUADROTOR));
+        assertEquals(List.of(), FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GCS));
     }
 }

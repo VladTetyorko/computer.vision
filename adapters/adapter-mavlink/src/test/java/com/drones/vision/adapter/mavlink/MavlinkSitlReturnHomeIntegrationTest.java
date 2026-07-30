@@ -111,6 +111,70 @@ class MavlinkSitlReturnHomeIntegrationTest {
         }
     }
 
+    /**
+     * docs/DRONE-INFRA-PLAN.md I-e Stage 2: the general mode-select path against a genuinely flying
+     * aircraft — {@code setMode(device, "Loiter")} accepted mid-flight, confirmed by the aircraft's
+     * own telemetry reporting {@code mode=Loiter}. Deliberately does <b>not</b> arm/disarm SITL:
+     * arming mid-test is race-prone (the autofly circuit arms/disarms on its own schedule), so
+     * arm/disarm wire correctness is owned entirely by the loopback tests, exactly as the Stage-1
+     * SITL test already documented. Same docker-and-image gating and retry-until-ready posture as
+     * {@link #aFlyingArduPilotSitlAircraftAcceptsReturnToHomeAndSwitchesToRtl()}.
+     */
+    @Test
+    @Timeout(value = 330, unit = TimeUnit.SECONDS)
+    void aFlyingArduPilotSitlAircraftAcceptsAModeChangeToLoiter() throws Exception {
+        assumeTrue(MavlinkSitlSmokeIntegrationTest.dockerAvailable(),
+                "docker is not available in this environment -- skipping");
+        assumeTrue(sitlImagePresent(), SITL_IMAGE + " is not built locally -- run infra/sitl/up.sh once; skipping");
+
+        String containerName = "vision-sitl-mode-" + UUID.randomUUID();
+        int port = freePort();
+        MavlinkTelemetrySource source = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(source);
+        DeviceId deviceId = DeviceId.random();
+        boolean containerStarted = false;
+        try {
+            startContainer(containerName, port);
+            containerStarted = true;
+
+            Device device = new Device(deviceId, "sitl-mode-test", Set.of(Capability.TELEMETRY),
+                    new StreamDescriptor("mavlink", URI.create("udp://0.0.0.0:" + port), Map.of()));
+            LatestSampleCollector collector = LatestSampleCollector.subscribeTo(source.open(device));
+
+            collector.awaitFlightState(Duration.ofSeconds(150),
+                    fs -> Boolean.TRUE.equals(fs.armed()),
+                    "an armed FlightState from the autofly circuit");
+
+            long commandDeadline = System.nanoTime() + Duration.ofSeconds(90).toNanos();
+            CommandResult result = null;
+            String lastRefusal = null;
+            while (System.nanoTime() < commandDeadline) {
+                try {
+                    result = commander.setMode(device, "Loiter");
+                    if (result == CommandResult.ACCEPTED) {
+                        break;
+                    }
+                    lastRefusal = "NO_ACK (datagram or ack lost)";
+                } catch (IllegalStateException refused) {
+                    lastRefusal = refused.getMessage();
+                }
+                Thread.sleep(3_000);
+            }
+            if (result != CommandResult.ACCEPTED) {
+                fail("SITL never ACCEPTED the Loiter mode change within the retry window; last refusal: " + lastRefusal);
+            }
+
+            collector.awaitFlightState(Duration.ofSeconds(45),
+                    fs -> "Loiter".equals(fs.mode()),
+                    "telemetry reporting mode=Loiter after an ACCEPTED command");
+        } finally {
+            source.close(deviceId);
+            if (containerStarted) {
+                removeContainerQuietly(containerName);
+            }
+        }
+    }
+
     private static boolean sitlImagePresent() {
         try {
             return run(Duration.ofSeconds(10), "docker", "image", "inspect", SITL_IMAGE).exitCode() == 0;

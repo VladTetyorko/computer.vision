@@ -1,5 +1,6 @@
 package com.drones.vision.adapter.mavlink;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -142,6 +143,31 @@ final class FlightModes {
             }
         }
         return null;
+    }
+
+    /**
+     * The distinct mode names a caller may pass to {@code MavlinkFlightCommander.setMode} for the
+     * vehicle-family table selected by {@code autopilot}/{@code mavType} (docs/DRONE-INFRA-PLAN.md
+     * I-e Stage 2 — the {@code selectableModes} half of a {@code FlightCapability} snapshot).
+     *
+     * <p>Deliberately <b>ArduPilot-only</b>: only an ArduPilot copter/plane/rover table yields a
+     * non-empty list. Betaflight ({@code autopilot} GENERIC) returns an empty list even though it
+     * has a mode table, because Betaflight's RC link does not process {@code MAV_CMD_DO_SET_MODE}
+     * at all — offering its mode names as "selectable" would be dishonest (see {@code
+     * MavlinkFlightCommander}'s own commandability rules). PX4/unknown autopilots and an ArduPilot
+     * {@code mavType} outside every family also return empty. Names are returned <b>sorted
+     * alphabetically</b> for a stable, testable order (the underlying {@link Map#ofEntries} tables
+     * have no meaningful iteration order of their own).
+     */
+    static List<String> selectableModes(int autopilot, int mavType) {
+        if (autopilot != AUTOPILOT_ARDUPILOTMEGA) {
+            return List.of();
+        }
+        Map<Integer, String> table = tableFor(autopilot, mavType);
+        if (table == null) {
+            return List.of();
+        }
+        return table.values().stream().distinct().sorted().toList();
     }
 
     private static Map<Integer, String> tableFor(int autopilot, int mavType) {
