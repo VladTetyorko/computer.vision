@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, afterNextRender, computed, inject }
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
+import { IdentityChip } from './shared/ui/identity-chip';
 import { NotificationBell } from './shared/ui/notification-bell';
 import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
@@ -23,7 +24,7 @@ interface Tab {
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, NotificationBell, ToastHost, UndoToast],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, IdentityChip, NotificationBell, ToastHost, UndoToast],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

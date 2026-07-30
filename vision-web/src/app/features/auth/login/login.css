@@ -1,0 +1,87 @@
+/* Single-column centered card at every width (docs/U-AUTH-PLAN.md wave 4's own "responsive from
+   the start" ask) — no layout branch between phone and desktop, only the card's own `min()`-clamped
+   width changes. `100dvh` (not `100vh`) accounts for a mobile browser's own chrome without a jump
+   as it shows/hides. */
+:host {
+  display: block;
+}
+
+.login-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100dvh - var(--header-height));
+  padding: 1.5rem 1rem;
+}
+
+.login-card {
+  width: min(24rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: -0.01em;
+}
+
+/* The same aperture mark as the header's own `.brand-mark` (`app.css`) — one visual identity, not
+   a second logo invented for this one page. */
+.login-brand-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  position: relative;
+  flex: none;
+}
+
+.login-brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.login-card h1 {
+  margin-bottom: 0.2rem;
+}
+
+.login-card .muted {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* A comfortable touch target on every field, not just the submit button below — the plan's own
+   "large touch targets (min 44px)" ask, phone through desktop. */
+.login-field input {
+  min-height: 44px;
+}
+
+.login-error {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: #ff9a9a;
+  font-size: 0.82rem;
+}
+
+.login-submit {
+  min-height: 44px;
+  justify-content: center;
+  font-size: 0.92rem;
+}

@@ -1,0 +1,17 @@
+@if (auth.user(); as user) {
+  <details class="identity-chip" #menu>
+    <summary class="identity-trigger" [title]="user.displayName + ' · ' + roleLabel(user)">
+      <span class="identity-avatar" aria-hidden="true">{{ initials(user.displayName) }}</span>
+      <span class="identity-name truncate">{{ user.displayName }}</span>
+      <span class="chip accent identity-role">{{ roleLabel(user) }}</span>
+    </summary>
+
+    <div class="identity-menu" (click)="menu.open = false">
+      <div class="identity-menu-name">{{ user.displayName }}</div>
+      <div class="identity-menu-role muted">{{ roleLabel(user) }}</div>
+      @if (auth.authEnabled()) {
+        <button type="button" class="identity-logout" (click)="logout()">Log out</button>
+      }
+    </div>
+  </details>
+}

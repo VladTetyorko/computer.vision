@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import type {
   ActiveStream,
@@ -16,6 +16,7 @@ import type {
   GeofenceZone,
   GeofenceZoneRequest,
   LiveSubscription,
+  MeResponse,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   RegisterDeviceRequest,
@@ -428,5 +429,43 @@ export class VisionApi {
    */
   systemNetwork(): Promise<SystemNetworkResponse> {
     return firstValueFrom(this.http.get<SystemNetworkResponse>('/api/system/network'));
+  }
+
+  // --- Auth (docs/U-AUTH-PLAN.md wave 3's frozen contract) --------------------------------------
+  // Same-origin session cookie, not a bearer token — no `withCredentials` needed on any of the
+  // three calls below (or anywhere else in this class): this app is always served same-origin with
+  // vision-api, either the built SPA served off vision-app's own classpath in production, or
+  // `ng serve`'s dev proxy (`proxy.conf.json`) forwarding `/api` to `:8080` in dev — the browser
+  // sends/receives the session cookie automatically either way, exactly like every other `HttpClient`
+  // call in this file. `withCredentials` only matters for genuinely cross-origin requests.
+
+  /**
+   * The current session, or `null` when auth is enabled and there is no session (a clean `401`) —
+   * folded into data here rather than left to reject, since "not logged in" is an expected,
+   * first-class outcome for this one call, unlike every other 401 in this app (`describeHttpError`'s
+   * generic "credentials rejected" sentence is about a *device's* auth, e.g. a bad RTSP password —
+   * unrelated to this app's own session). Any other failure (network down, 5xx) still rejects the
+   * returned promise; `core/auth/auth-store.ts#loadMe` is the only caller and degrades that case to
+   * `'anon'` without ever claiming to know whether auth is even enabled.
+   */
+  async authMe(): Promise<MeResponse | null> {
+    try {
+      return await firstValueFrom(this.http.get<MeResponse>('/api/auth/me'));
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && error.status === 401) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /** `401` (bad credentials) rejects the promise — `core/auth/auth-store.ts#login` turns that into an inline form error, never a toast (a login failure is squarely the login form's own business). */
+  authLogin(username: string, password: string): Promise<MeResponse> {
+    return firstValueFrom(this.http.post<MeResponse>('/api/auth/login', { username, password }));
+  }
+
+  /** `204` on success. `core/auth/auth-store.ts#logout` clears its local session regardless of whether this call itself succeeds — there is no state left to reconcile either way. */
+  authLogout(): Promise<void> {
+    return firstValueFrom(this.http.post<void>('/api/auth/logout', {}));
   }
 }

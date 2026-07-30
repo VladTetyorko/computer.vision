@@ -837,3 +837,45 @@ export interface SystemNetworkResponse {
   readonly addresses: readonly NetworkAddress[];
   readonly mavlinkPort: number;
 }
+
+// --- Auth (docs/U-AUTH-PLAN.md wave 3's frozen contract; wave 4 is this app's own UI) -----------
+// `core/auth/auth-store.ts` is the only caller of the three `VisionApi` methods these types back —
+// no page/component talks to `/api/auth/**` directly, mirroring every other store in this app.
+
+/**
+ * Mirrors `domain.model.Role` — ordered least→most privileged, though this app never compares
+ * roles by ordinal (only ever renders a label — `core/auth/auth-logic.ts#roleLabel`); the ordering
+ * is the domain's own concern (`User.topRole()`), not re-derived here.
+ */
+export type Role = 'PILOT' | 'MANAGER' | 'ADMIN';
+
+/** Mirrors `dto.MembershipResponse`, one row of `MeResponse#memberships` — a user's role within one group. */
+export interface Membership {
+  readonly groupId: string;
+  readonly groupName: string;
+  readonly role: Role;
+}
+
+/**
+ * Mirrors `dto.MeResponse` — the frozen shape of `GET /api/auth/me` and `POST /api/auth/login`
+ * (docs/U-AUTH-PLAN.md wave 3). `authEnabled` is what lets the SPA decide whether a login screen
+ * makes sense at all: while `vision.auth.enabled=false` (the default), every one of these
+ * endpoints is a no-op that reports this same shape for a fixed dev admin, `authEnabled: false` —
+ * `core/auth/auth-store.ts` treats that response as already-logged-in (dev parity: the app works
+ * with zero auth exactly as it did before this slice, never showing a login screen). `topRole` is
+ * the highest `Role` across `memberships` (the domain's own `User.topRole()`, mirrored — a real
+ * account always carries at least one membership, per that method's own contract).
+ *
+ * **No visibility scoping rides on this type** — every logged-in user still sees the whole fleet
+ * (docs/U-AUTH-PLAN.md's own "identity becomes real; nothing is visibility-scoped yet" framing);
+ * `memberships`/`topRole` back the identity chip's role badge only, in this slice.
+ */
+export interface MeResponse {
+  readonly userId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly email: string;
+  readonly memberships: readonly Membership[];
+  readonly topRole: Role;
+  readonly authEnabled: boolean;
+}

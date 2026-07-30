@@ -19,6 +19,7 @@
   </nav>
 
   <div class="status">
+    <vision-identity-chip />
     <vision-notification-bell />
     <span class="row" [title]="offline() ? 'Backend unreachable' : 'Backend reachable'">
       @if (liveCount() > 0) {

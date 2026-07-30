@@ -10,6 +10,8 @@ import { REPLAY_ROUTES } from './features/replay/replay.routes';
 import { LIVE_ROUTES } from './features/live/live.routes';
 import { SETTINGS_ROUTES } from './features/settings/settings.routes';
 import { DEBUG_ROUTES } from './features/debug/debug.routes';
+import { LOGIN_ROUTES } from './features/auth/login/login.routes';
+import { authGuard } from './core/auth/auth-guard';
 
 /**
  * One lazy chunk per page.
@@ -22,23 +24,36 @@ import { DEBUG_ROUTES } from './features/debug/debug.routes';
  * feature under `features/` owns its own `<name>.routes.ts` (one line to import it here); this
  * file only composes them plus the two shell-level entries that don't belong to any one feature —
  * the `/` redirect and the `**` not-found catch-all.
+ *
+ * **`authGuard` (docs/U-AUTH-PLAN.md wave 4)** wraps every real page in one path-less, component-less
+ * parent route — the standard Angular way to apply one `canActivate` to a whole group without
+ * touching each feature's own `<name>.routes.ts` file or changing any URL (an empty path segment
+ * contributes nothing to a child's own path, so `/fly`, `/command`, etc. are unchanged). `/login`
+ * itself sits **outside** that group — the one route that must stay reachable with no session.
  */
 export const routes: Routes = [
   // docs/MVP3-PLAN.md §C-b: the operator cockpit is now the default landing page — an operator
   // opens the app and is flying-aware in one click (or zero, once a drone is remembered). `/wall`
   // keeps working unchanged for anyone who still wants the many-tiles overview.
   { path: '', pathMatch: 'full', redirectTo: 'fly' },
-  ...FLY_ROUTES,
-  ...COMMAND_ROUTES,
-  ...WALL_ROUTES,
-  ...MAP_ROUTES,
-  ...DEVICES_ROUTES,
-  ...ONBOARDING_ROUTES,
-  ...ASSET_DETAIL_ROUTES,
-  ...REPLAY_ROUTES,
-  ...LIVE_ROUTES,
-  ...SETTINGS_ROUTES,
-  ...DEBUG_ROUTES,
+  ...LOGIN_ROUTES,
+  {
+    path: '',
+    canActivate: [authGuard],
+    children: [
+      ...FLY_ROUTES,
+      ...COMMAND_ROUTES,
+      ...WALL_ROUTES,
+      ...MAP_ROUTES,
+      ...DEVICES_ROUTES,
+      ...ONBOARDING_ROUTES,
+      ...ASSET_DETAIL_ROUTES,
+      ...REPLAY_ROUTES,
+      ...LIVE_ROUTES,
+      ...SETTINGS_ROUTES,
+      ...DEBUG_ROUTES,
+    ],
+  },
   {
     path: '**',
     title: 'Not found · Vision',

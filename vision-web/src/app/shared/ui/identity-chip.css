@@ -1,0 +1,112 @@
+/* Mirrors `app.css`'s own `.tab-more`/`.tab-more-menu` and `notification-bell.css`'s `.bell`/
+   `.bell-dropdown` — a native `<details>` popover, this app's standing idiom, not a new component. */
+:host {
+  display: block;
+}
+
+.identity-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.identity-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.15rem 0.5rem 0.15rem 0.15rem;
+  border-radius: var(--radius-pill);
+  min-height: 2rem;
+}
+
+.identity-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.identity-trigger:hover {
+  background: var(--panel-hover);
+}
+
+.identity-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: #a9c8ff;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.identity-name {
+  max-width: 9rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.identity-role {
+  font-size: 0.66rem;
+}
+
+.identity-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.4rem;
+  min-width: 11rem;
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 30;
+}
+
+.identity-menu-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.identity-menu-role {
+  font-size: 0.75rem;
+}
+
+.identity-logout {
+  align-self: flex-start;
+  margin-top: 0.2rem;
+  min-height: 2rem;
+  padding: 0 0.1rem;
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.identity-logout:hover {
+  text-decoration: underline;
+}
+
+/* Collapse to the avatar alone on narrow viewports (docs/U-AUTH-PLAN.md wave 4's own "collapses to
+   an avatar/menu on narrow viewports" ask) — the dropdown itself is untouched by this breakpoint, so
+   opening it still surfaces name/role/logout, nothing is lost, only relocated behind one tap. Same
+   breakpoint `app.css` already uses for the header's own responsive pass (`.brand-name` hides
+   there too at this width). */
+@media (max-width: 640px) {
+  .identity-name,
+  .identity-role {
+    display: none;
+  }
+}
