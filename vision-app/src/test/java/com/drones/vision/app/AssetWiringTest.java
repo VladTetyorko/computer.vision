@@ -6,6 +6,7 @@ import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.api.AssetImageController;
+import com.drones.vision.api.AssetStatsController;
 import com.drones.vision.api.DeviceProbeController;
 import com.drones.vision.api.EventController;
 import com.drones.vision.api.FleetController;
@@ -13,6 +14,7 @@ import com.drones.vision.api.FlightCommandController;
 import com.drones.vision.api.GeofenceController;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.application.AssetService;
+import com.drones.vision.application.AssetStatsService;
 import com.drones.vision.application.CategoryService;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.application.FeedTransmitterRegistry;
@@ -106,6 +108,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * focused, asset-model-adjacent bean" reasoning as {@link ReplayService} above, and {@link
  * GeofenceController} is asserted to resolve its constructor dependency, mirroring {@link
  * FleetController}'s own assertion.
+ *
+ * <p>Further extended for docs/ASSET-MANAGER-PAGE-PLAN.md Wave A: {@link AssetStatsService} is
+ * asserted here too, for the same "small, focused, asset-model-adjacent bean" reasoning as {@link
+ * ReplayService} above, and {@link AssetStatsController} is asserted to resolve its constructor
+ * dependencies, mirroring {@link FleetController}'s own assertion.
  */
 @SpringBootTest(properties = "vision.publish.enabled=false")
 class AssetWiringTest {
@@ -225,6 +232,14 @@ class AssetWiringTest {
     @Autowired
     private FlightCommandController flightCommandController;
 
+    /** docs/ASSET-MANAGER-PAGE-PLAN.md Wave A: the manager page's per-asset flight-stats aggregate. */
+    @Autowired
+    private AssetStatsService assetStatsService;
+
+    /** docs/ASSET-MANAGER-PAGE-PLAN.md Wave A: {@code GET /api/assets/{id}/stats}. */
+    @Autowired
+    private AssetStatsController assetStatsController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -254,6 +269,8 @@ class AssetWiringTest {
         assertNotNull(geofenceController, "GeofenceController must resolve its constructor dependency (docs/OPS-CORE-PLAN.md §G)");
         assertNotNull(flightCommandService, "FlightCommandService bean must be registered (docs/DRONE-INFRA-PLAN.md I-e Stage 1)");
         assertNotNull(flightCommandController, "FlightCommandController must resolve its constructor dependency (docs/DRONE-INFRA-PLAN.md I-e Stage 1)");
+        assertNotNull(assetStatsService, "AssetStatsService bean must be registered (docs/ASSET-MANAGER-PAGE-PLAN.md Wave A)");
+        assertNotNull(assetStatsController, "AssetStatsController must resolve its constructor dependencies (docs/ASSET-MANAGER-PAGE-PLAN.md Wave A)");
     }
 
     /**

@@ -22,7 +22,9 @@ import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
 import com.drones.vision.app.devsupport.NoopStreamPublisher;
 import com.drones.vision.application.AssetService;
+import com.drones.vision.application.AssetStatsService;
 import com.drones.vision.application.DefaultAssetService;
+import com.drones.vision.application.DefaultAssetStatsService;
 import com.drones.vision.application.DefaultCategoryService;
 import com.drones.vision.application.DefaultDeviceService;
 import com.drones.vision.application.DefaultFleetSummaryService;
@@ -537,6 +539,18 @@ public class WiringConfiguration {
                                                      DetectionEventRepositoryPort detectionEventRepositoryPort) {
         return new DefaultFleetSummaryService(assetService, streamService, usageTracker,
                 detectionEventRepositoryPort);
+    }
+
+    /**
+     * One asset's flight-utilization stats (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A): the read
+     * side behind {@code AssetStatsController}'s {@code GET /api/assets/{id}/stats} (vision-api,
+     * component-scanned) — a one-line assembly over two already-wired collaborators, mirroring
+     * {@link #replayService}'s shape.
+     */
+    @Bean
+    public AssetStatsService assetStatsService(AssetUsageRepositoryPort assetUsageRepositoryPort,
+                                                UsageTracker usageTracker) {
+        return new DefaultAssetStatsService(assetUsageRepositoryPort, usageTracker);
     }
 
     /**
