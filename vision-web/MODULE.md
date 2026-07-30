@@ -2893,3 +2893,137 @@ noise-level — asset-detail is lazy, uninvolved in the initial chunk). Whole-`d
 uses native `title`/`aria-label` per bar rather than a custom hover/crosshair tooltip layer
 (`dataviz`'s fuller interaction spec) — justified above by the plan's own "keep it small" instruction
 and the Usage history table already carrying every value as this chart's table-view twin.
+
+## I-e Stage 2, Wave C — Arm/Disarm/Mode select UI (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract)
+
+Extends Stage 1's "Bring home" (previous section) with the two next command classes, now
+capability-gated per vehicle: **Mode** select, **Arm**, **Disarm** — all in the Fly cockpit, right
+beside `<vision-return-home-button>`. Wave A (domain: `FlightCommandPort#setMode`/`arm`/`disarm`,
+`FlightCapability`) and wave B (application + `vision-api`: the REST trio + `GET .../flight-
+capabilities`) landed in parallel, outside this module's own scope — this wave was coded **only**
+against the plan's own frozen wire contract (`GET /api/assets/{id}/flight-capabilities` →
+`{commandable, armSupported, modeSelectSupported, selectableModes}`; `POST .../mode {mode}` /
+`.../arm {force?}` / `.../disarm {force?}` → `202 {result}`; `404`/`409 {message}`/`400`/`403`), no
+backend files read or waited on, mirroring Stage 1's own wave-3 precedent exactly.
+
+**New**: `core/api/models.ts` (`FlightCommandResult`/`FlightCommandResponse`/`FlightCapability`),
+`core/api/vision-api.ts`(+`.spec.ts` — `flightCapabilities(assetId)`/`setMode(assetId, mode)`/
+`arm(assetId, force?)`/`disarm(assetId, force?)`), `features/fly/flight-command-panel-logic.ts`
+(+`.spec.ts`), `features/fly/flight-command-panel.ts`/`.html`/`.css`,
+`features/fly/arm-confirm-dialog.ts`/`.html`/`.css`. **Reshaped**: `features/fly/fly.ts`/`.html`/`.css`.
+
+- **`features/fly/flight-command-panel-logic.ts`** (new, pure, unit-tested) — `canShowCommandPanel(capabilities,
+  firmware, ageSeconds)` = `capabilities !== undefined && capabilities.commandable &&`
+  `flight-state-logic.ts#canCommandReturnHome(firmware, ageSeconds)` — the identical firmware+
+  freshness bar "Bring home" already clears, extended with the new capability read; `capabilities`
+  `undefined` (not yet loaded, or the fetch failed) alone hides the whole panel, no separate loading
+  state. `modeConfirmMessage`/`armWarningMessage`/`armFinalConfirmLabel`/`disarmConfirmMessage` are
+  the confirm-copy builders (see the components below for how each is used); `commandOutcomeToast(result,
+  action)` mirrors `shared/ui/return-home-button-logic.ts#returnHomeToastFor`'s exact shape, one
+  `ACCEPTED`/`NO_ACK` pair of sentences per action (`'Mode set'`/`'Armed'`/`'Disarmed'` vs. each
+  action's own "… sent — no acknowledgement from aircraft"). **Lives beside its one component under
+  `features/fly/`, not `core/telemetry/` or `shared/ui/`** — this wave's UI is Fly-only per the plan's
+  own frozen scope (Command's `AssetPanel` is not part of it), so this follows the codebase's own
+  "second consumer moves it to a shared home" precedent rather than promoting it early.
+- **`features/fly/flight-command-panel.ts`** (`<vision-flight-command-panel>`, new) — same shape as
+  `shared/ui/return-home-button.ts`: owns its own HTTP calls + toasts directly (`VisionApi`/
+  `ToastService` both `providedIn: 'root'`), gating is the host's job (`canCommand` input, hidden
+  entirely when `false`), no optimistic UI (a confirm only ever sends the command and reports
+  `ACCEPTED`/`NO_ACK`/an error — the aircraft's actual armed state/mode arrives later over ordinary
+  telemetry, which the OSD chips/`flightBanner` already render on their own). Renders a single
+  frosted-pill `.command-cluster` (mirrors `fly.css#.switcher-control`'s own chrome) rather than
+  three loose buttons: a Mode `<select>` + "Set" (only when `capabilities.modeSelectSupported` and
+  `selectableModes` is non-empty; per-`<option>` `[selected]`, not a bound `[value]` on the `<select>`
+  itself — the same QF-1 `<select>`/`@for`-ordering-race avoidance `fly.html`'s own drone switcher
+  established) and Arm/Disarm buttons (only when `capabilities.armSupported`) — each opens its own
+  confirm, `<vision-confirm-dialog>` for Mode/Disarm, the new `<vision-arm-confirm-dialog>` for Arm.
+  **One combined `anyBusy` guard disables every trigger button**, not just each one's own — these
+  three commands all target the same physical vehicle, so this rules out firing two at once (e.g.
+  Arm while a mode-change is still in flight) entirely, a deliberately stricter rule than Stage 1's
+  single-button `busy` (which only ever had one control to guard).
+- **`features/fly/arm-confirm-dialog.ts`** (`<vision-arm-confirm-dialog>`, new) — the plan's own
+  safety framing ("arming spins propellers — the highest-danger action in the app… materially
+  higher-friction than RTL's") realized as **a separate component from `shared/ui/confirm-dialog.ts`**,
+  not a variant/flag on it, two ways: (1) **a second explicit stage**, not one click — opens on
+  `'warn'` (the warning text + a plain neutral "Continue" button, not yet the dangerous action) and
+  only advances to `'final'` (the real `armFinalConfirmLabel` button) on that click, so a reflexive
+  double-click on open lands on "Continue", never "Arm"; (2) **reserves the app's full, undiluted
+  `--live` red** — the exact hue `features/fly/failsafe-banner.ts`'s genuine-failsafe strip uses,
+  and nothing else in this app's button chrome does — for the dialog's border/header and the one
+  filled (not outline) danger button in the whole app, `.btn.arm-final`. Every other danger-adjacent
+  control in this cluster (`.btn.danger` — Arm/Disarm's own trigger buttons, Mode/Disarm's plain
+  `<vision-confirm-dialog>`) stays the calmer transparent `--danger` outline, per the plan's own
+  "reserve the full `--live` red for the arm modal" instruction — `--live` is now this app's other
+  full-strength surface, by design, not a repaint of `--danger`.
+- **Disarm's crash-warning derivation** (`disarmConfirmMessage`) — the plan asks for an airborne
+  check "if cleanly derivable from what flight-state-logic exposes." It isn't: `FlightState` carries
+  no `inAir`/`landed` flag anywhere in the wire contract, and `TelemetrySample.altitudeMeters` alone
+  is not a safe stand-in (absolute-vs-relative and home-point-dependent by firmware — a grounded
+  vehicle can still report a nonzero reading), so inventing a threshold here would be exactly the
+  fabricated-confidence read `flight-state-logic.ts`'s own poka-yoke rule refuses elsewhere. Per the
+  plan's own documented fallback, this warns on `flightState.armed === true` alone, worded honestly
+  ("if it's currently flying…") rather than asserting airborne state it doesn't actually have.
+- **`fly.ts`**: `capabilities` signal (`FlightCapability | undefined`) + `canShowCommands` computed
+  (mirrors `canBringHome`'s own "re-derive whenever the tracked sample changes" convention) feed the
+  new panel. A new constructor effect fetches capabilities once per asset selection **and** again
+  the first time this vehicle's own firmware becomes known (an unheard vehicle reports
+  `commandable=false` until its first heartbeat — refetching once firmware resolves is what flips a
+  just-connected vehicle's panel from hidden to shown without a manual refresh) — guarded on a
+  composite `${assetId} ${firmware}` key via the existing `trackingIdChanged` (mirrors
+  `core/live/live-fallback-logic.ts#trackSessionKey`'s own composite-key idiom), the same
+  `Object.is`-poll-tick-churn guard this file's telemetry/detections effects already use
+  (docs/REALTIME-PLAN.md Phase R-a item 2) — without it, every ~5s `refreshPoll` tick would re-fetch
+  capabilities with an unchanged firmware value forever. `loadCapabilities` silent-degrades to
+  `undefined` on any failure (404/403/network) — no toast, mirrors `TelemetryStore`/`DetectionsStore`'s
+  own "best-effort background read" convention, not `loadAsset`'s user-facing error (the plan's own
+  "degrade to hidden if the capabilities call fails" instruction).
+- **`fly.html`**: `<vision-flight-command-panel>` placed immediately after `<vision-return-home-button>`
+  in `.hud-header`, fed `capabilities()`/`canShowCommands()`/`telemetry.latest()?.flightState?.armed`.
+  **`fly.css#.hud-header` gained `flex-wrap: wrap`** — this row now carries a fourth pill-shaped
+  control group alongside the switcher/"Bring home"/"?", past what the row's original `nowrap` layout
+  was tuned for; wrapping (not clipping off-screen) is the safe default now.
+- **Command's `AssetPanel` is untouched** — the plan's own frozen "UI — Wave C" scope names only the
+  Fly cockpit for this wave; `shared/ui/return-home-button.ts` (Stage 1) still reuses across both,
+  unaffected.
+- **403/409 surfacing needed no new code**: `core/api-error.ts#describeHttpError`'s existing switch
+  already renders a `403` as "You do not have access to that." and a `409`'s `message` verbatim (the
+  identical cases Stage 1's `returnHome` already exercises) — every one of the three new confirm
+  handlers' `catch` blocks calls it unchanged, same as `ReturnHomeButton`'s own.
+- **Deliberately not extracted as reducers**: each of the three busy guards (`modeBusy`/`armBusy`/
+  `disarmBusy`) plus `ArmConfirmDialog`'s own two-stage `stage` signal are plain signals, not a state
+  machine file — mirrors Stage 1's own "a single one-shot request has nothing for a reducer to model"
+  reasoning, extended to a two-stage-but-still-linear flow.
+
+### Tests
+
+**1099/1099 → 1119/1119** (+20, all pure-logic; no new component-level specs for
+`FlightCommandPanel`/`ArmConfirmDialog`, matching this codebase's own standing precedent for dumb
+HUD/panel pieces — `ReturnHomeButton`/`ConfirmDialog`/`FailsafeBanner` all have none either):
+`features/fly/flight-command-panel-logic.spec.ts` (+14, new file — `canShowCommandPanel`: commandable+
+fresh true, no-capabilities false, not-commandable false, wrong firmware false, no firmware false,
+stale false, no-sample false; confirm-copy builders for mode/arm-warning/arm-final-label/disarm-plain/
+disarm-crash-warning; `commandOutcomeToast`'s six action×result combinations), `core/api/vision-api.spec.ts`
+(+6 — `flightCapabilities` GET, `setMode` POST body, `arm` with/without `force`, `disarm`, id-escaping
+across all three mutating paths). `npm run test:ci` green; `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production`: **350.01 kB raw / 99.43 kB transfer initial** — up only
++0.39 kB raw / +0.03 kB transfer from the prior recorded 349.62/99.40 (measured fresh at this task's
+own starting commit before any change, not carried from an older cycle's own note) — the same small,
+unavoidable tax every past command-TX cycle's new eager `VisionApi` methods pay (`flightCapabilities`/
+`setMode`/`arm`/`disarm`'s own URL-building code; `FlightCommandPanel`/`ArmConfirmDialog`/
+`flight-command-panel-logic.ts` all stay lazy). Same two pre-existing budget warnings carried
+unchanged (300 kB initial, 6 kB `onboarding.css`), neither newly triggered. **`fly` lazy chunk**:
+38.56 kB → 49.73 kB raw / 9.70 kB → 11.75 kB transfer (+11.17 kB / +2.05 kB — this wave's entire real
+weight: the two new components + their logic/spec-adjacent copy). Grep-verified against the built
+`dist/`: `"propellers will spin"`/`"Stand clear of the propellers"`/`"Yes, arm"`/every
+`commandOutcomeToast` sentence appear in exactly the `fly` lazy chunk, absent from every initial
+chunk; `"/mode"`/`"/arm"`/`"/disarm"`/`"flight-capabilities"` (the four URL path fragments, from
+`VisionApi`'s own eager method bodies) are the only strings from this wave found in an initial chunk
+— the identical verification method and outcome as Stage 1's own wave 3.
+
+**Nothing incomplete against the task's own ask.** One scope note: Command's `AssetPanel` does not
+gain Mode/Arm/Disarm — not an oversight, the plan's own frozen "UI — Wave C" section names only the
+Fly cockpit for this wave (unlike Stage 1, which named both call sites from the start).

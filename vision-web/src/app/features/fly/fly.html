@@ -130,6 +130,20 @@
         [compact]="true"
       />
 
+      <!-- ---- Arm / Disarm / Mode (docs/DRONE-INFRA-PLAN.md I-e Stage 2) --------------------
+           Right beside "Bring home" — the same command family, gated by its own capability read
+           (`canShowCommands()`/`capabilities()`) rather than the RTL-only firmware check above.
+           `<vision-flight-command-panel>` hides itself entirely unless `canCommand()`; no optimistic
+           UI here either — the aircraft's actual armed state/mode arrives later over ordinary
+           telemetry, exactly like "Bring home" above. -->
+      <vision-flight-command-panel
+        [assetId]="a.assetId"
+        [assetDisplayName]="a.displayName"
+        [capabilities]="capabilities()"
+        [canCommand]="canShowCommands()"
+        [armed]="telemetry.latest()?.flightState?.armed"
+      />
+
       <button type="button" class="icon-btn shortcuts-btn" (click)="shortcutsOpen.set(true)" title="Keyboard shortcuts (?)">
         ?
       </button>

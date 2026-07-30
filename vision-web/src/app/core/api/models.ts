@@ -834,6 +834,41 @@ export interface ReturnHomeResponse {
   readonly result: ReturnHomeResult;
 }
 
+// --- Guarded command TX — arm/disarm/mode select (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+// contract, extends Stage 1 above) ----------------------------------------------------------------
+
+/**
+ * Mirrors the `202` body of `POST /api/assets/{id}/mode`/`arm`/`disarm` (docs/DRONE-INFRA-PLAN.md
+ * I-e Stage 2's frozen contract) — the identical two-value shape as Stage 1's
+ * {@link ReturnHomeResult} (a command was sent either way; this only says whether the vehicle
+ * acknowledged it), kept as its own type rather than reusing `ReturnHomeResult` so a future
+ * divergence between "bring home" and this trio doesn't silently couple them.
+ */
+export type FlightCommandResult = 'ACCEPTED' | 'NO_ACK';
+
+/** The response body shared by `mode`/`arm`/`disarm` — all three return this identical shape. */
+export interface FlightCommandResponse {
+  readonly result: FlightCommandResult;
+}
+
+/**
+ * Mirrors the `200` body of `GET /api/assets/{id}/flight-capabilities` (docs/DRONE-INFRA-PLAN.md
+ * I-e Stage 2's frozen contract) — what `features/fly/flight-command-panel.ts` may show for the
+ * asset's currently-tracked vehicle. `commandable` gates the whole panel (`false` for a Betaflight/
+ * never-heard vehicle, per the plan's own capability matrix — the same cases Stage 1's `returnHome`
+ * already refuses with a `409`, surfaced here ahead of time as data instead of waiting for a
+ * rejected command); `armSupported`/`modeSelectSupported` independently gate the Arm/Disarm buttons
+ * and the Mode picker; `selectableModes` is the vehicle-family mode-name list, empty whenever
+ * `modeSelectSupported` is `false`. No `NON_NULL`-style optionality — every field is always present
+ * on a `200`.
+ */
+export interface FlightCapability {
+  readonly commandable: boolean;
+  readonly armSupported: boolean;
+  readonly modeSelectSupported: boolean;
+  readonly selectableModes: readonly string[];
+}
+
 // --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) --------------
 
 /** One site-local IPv4 address this platform's host is reachable on. Mirrors `dto.NetworkAddressResponse`. */

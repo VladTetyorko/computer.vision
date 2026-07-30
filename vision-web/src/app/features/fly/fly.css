@@ -182,6 +182,13 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  /* docs/DRONE-INFRA-PLAN.md I-e Stage 2: the command cluster (Mode/Arm/Disarm) added a fourth
+     pill-shaped control to this row alongside the switcher/"Bring home"/"?" — wrapping (rather than
+     `overflow: hidden`/clipping off-screen) is the safe default now that this row has more content
+     than the single-pill header it was tuned for; a wrapped second line still reads fine over the
+     video, unlike a silently-clipped control nobody can click. */
+  flex-wrap: wrap;
+  row-gap: 0.4rem;
 }
 
 .icon-btn {

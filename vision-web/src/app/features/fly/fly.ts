@@ -35,6 +35,8 @@ import { FailsafeBanner } from './failsafe-banner';
 import { PreflightChecklist } from './preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
+import { FlightCommandPanel } from './flight-command-panel';
+import { canShowCommandPanel } from './flight-command-panel-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -50,7 +52,7 @@ import {
   streamStateLabel,
   trackingIdChanged,
 } from './fly-logic';
-import type { AssetDetails, AssetSummary, DetectionEvent } from '../../core/api/models';
+import type { AssetDetails, AssetSummary, DetectionEvent, FlightCapability } from '../../core/api/models';
 
 /** Asset characteristics/usages + the picker's own asset list are re-read at this cadence. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
@@ -101,6 +103,7 @@ const LOG_PREFIX = '[fly]';
     PreflightChecklist,
     DiagnosticsCard,
     ReturnHomeButton,
+    FlightCommandPanel,
   ],
   templateUrl: './fly.html',
   styleUrl: './fly.css',
@@ -155,6 +158,8 @@ export class FlyPage {
   // `stream()` object's own identity, which changes every ~5s poll tick regardless.
   private lastTelemetryDeviceId: string | undefined = undefined;
   private lastDetectionsStreamId: string | undefined = undefined;
+  /** `${assetId} ${firmware}` — see the capabilities-tracking effect below (constructor). */
+  private lastCapabilitiesKey: string | undefined = undefined;
 
   // --- Cockpit: video device selection ------------------------------------------------------
   protected readonly videoDevicesList = computed(() => videoDevices(this.asset()?.devices ?? []));
@@ -238,6 +243,23 @@ export class FlyPage {
   protected readonly canBringHome = computed(() => {
     const sample = this.telemetry.latest();
     return canCommandReturnHome(sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
+  });
+
+  /**
+   * docs/DRONE-INFRA-PLAN.md I-e Stage 2 — the vehicle's own capability matrix, fetched once per
+   * asset selection and re-fetched the first time this vehicle's firmware becomes known (see the
+   * capabilities-tracking effect below for why). `undefined` while in flight or on any failure —
+   * `<vision-flight-command-panel>` renders nothing at all in that case, the plan's own "degrade to
+   * hidden if the capabilities call fails" rule.
+   */
+  protected readonly capabilities = signal<FlightCapability | undefined>(undefined);
+
+  /** Gates `<vision-flight-command-panel>` (below, `fly.html`'s `.hud-header`) — `capabilities`
+   * itself must have loaded *and* say `commandable`, on top of the identical firmware+freshness bar
+   * `canBringHome` already clears (`flight-command-panel-logic.ts#canShowCommandPanel`). */
+  protected readonly canShowCommands = computed(() => {
+    const sample = this.telemetry.latest();
+    return canShowCommandPanel(this.capabilities(), sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
   });
 
   // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) --------------------------------------
@@ -368,6 +390,33 @@ export class FlyPage {
       }
     });
 
+    // docs/DRONE-INFRA-PLAN.md I-e Stage 2 — flight-command panel capabilities. Fetched once per
+    // asset selection, and again the first time this vehicle's own firmware becomes known (an
+    // unheard vehicle reports `commandable=false` until its first heartbeat arrives, per the plan's
+    // own capability matrix — a fresh fetch once firmware resolves is what flips a just-connected
+    // vehicle's panel from hidden to shown without needing a manual refresh).
+    //
+    // **Guarded on a composite `(assetId, firmware)` key** (mirrors `trackSessionKey`,
+    // `core/live/live-fallback-logic.ts`), not `assetId` alone: `telemetry.latest()` is a fresh
+    // object most poll ticks (signals compare with `Object.is`), so without the firmware half of the
+    // key this effect would re-fetch every ~poll tick with an unchanged firmware value — the exact
+    // O(N)-re-entry class of bug `trackingIdChanged`'s other call sites in this file already guard
+    // against (docs/REALTIME-PLAN.md Phase R-a item 2).
+    effect(() => {
+      const assetId = this.activeAssetId();
+      const firmware = this.telemetry.latest()?.flightState?.firmware;
+      const key = assetId ? `${assetId} ${firmware ?? ''}` : undefined;
+      if (!trackingIdChanged(key, this.lastCapabilitiesKey)) {
+        return;
+      }
+      this.lastCapabilitiesKey = key;
+      if (assetId) {
+        void this.loadCapabilities(assetId);
+      } else {
+        this.capabilities.set(undefined);
+      }
+    });
+
     // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — one more of the handful of
     // pages that keeps the shared global events poll alive while mounted.
     this.events.activate();
@@ -442,6 +491,25 @@ export class FlyPage {
     }
   }
 
+  /**
+   * docs/DRONE-INFRA-PLAN.md I-e Stage 2 — background capability read, not a user-initiated action:
+   * silent-degrade on any failure (404 unknown asset, 403 out of scope, network) straight to
+   * `undefined`, no toast — the flight-command panel just stays hidden, mirroring
+   * `TelemetryStore`/`DetectionsStore`'s own "best-effort context" silent-failure convention rather
+   * than `loadAsset`'s own user-facing error toast (that one guards the entire cockpit's own load).
+   */
+  private async loadCapabilities(assetId: string): Promise<void> {
+    try {
+      const caps = await this.api.flightCapabilities(assetId);
+      this.capabilities.set(caps);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not load flight capabilities for ${assetId} — command panel stays hidden`, {
+        error,
+      });
+      this.capabilities.set(undefined);
+    }
+  }
+
   /** Picking from the picker grid, the header switcher, or a resolved `?asset=`/remembered id — one path. */
   protected selectAsset(assetId: string): void {
     if (assetId === this.activeAssetId()) {
@@ -454,6 +522,7 @@ export class FlyPage {
     this.primaryDeviceIdOverride.set(undefined);
     this.explicitlyStopped.set(false);
     this.hasBeenLive.set(false);
+    this.capabilities.set(undefined);
     void this.loadAsset(assetId);
   }
 

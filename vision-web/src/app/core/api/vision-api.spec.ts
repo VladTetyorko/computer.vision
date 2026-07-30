@@ -396,6 +396,67 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual({ result: 'NO_ACK' });
   });
 
+  // --- Guarded command TX — arm/disarm/mode select (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+  // contract) -------------------------------------------------------------------------------------
+
+  it('fetches the flight-capabilities matrix', async () => {
+    const promise = api.flightCapabilities('a-1');
+    const request = http.expectOne({ method: 'GET', url: '/api/assets/a-1/flight-capabilities' });
+    request.flush({ commandable: true, armSupported: true, modeSelectSupported: true, selectableModes: ['Loiter', 'RTL'] });
+    await expect(promise).resolves.toEqual({
+      commandable: true,
+      armSupported: true,
+      modeSelectSupported: true,
+      selectableModes: ['Loiter', 'RTL'],
+    });
+  });
+
+  it('sets a flight mode', async () => {
+    const promise = api.setMode('a-1', 'Loiter');
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a-1/mode' });
+    expect(request.request.body).toEqual({ mode: 'Loiter' });
+    request.flush({ result: 'ACCEPTED' });
+    await expect(promise).resolves.toEqual({ result: 'ACCEPTED' });
+  });
+
+  it('arms with an empty body when force is omitted', async () => {
+    const promise = api.arm('a-1');
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a-1/arm' });
+    expect(request.request.body).toEqual({});
+    request.flush({ result: 'ACCEPTED' });
+    await expect(promise).resolves.toEqual({ result: 'ACCEPTED' });
+  });
+
+  it('arms with a force flag when given', async () => {
+    const promise = api.arm('a-1', true);
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a-1/arm' });
+    expect(request.request.body).toEqual({ force: true });
+    request.flush({ result: 'NO_ACK' });
+    await expect(promise).resolves.toEqual({ result: 'NO_ACK' });
+  });
+
+  it('disarms with an empty body when force is omitted', async () => {
+    const promise = api.disarm('a-1');
+    const request = http.expectOne({ method: 'POST', url: '/api/assets/a-1/disarm' });
+    expect(request.request.body).toEqual({});
+    request.flush({ result: 'ACCEPTED' });
+    await expect(promise).resolves.toEqual({ result: 'ACCEPTED' });
+  });
+
+  it('escapes the asset id in the mode/arm/disarm paths', async () => {
+    const modePromise = api.setMode('a/1 x', 'Loiter');
+    http.expectOne({ method: 'POST', url: '/api/assets/a%2F1%20x/mode' }).flush({ result: 'ACCEPTED' });
+    await modePromise;
+
+    const armPromise = api.arm('a/1 x');
+    http.expectOne({ method: 'POST', url: '/api/assets/a%2F1%20x/arm' }).flush({ result: 'ACCEPTED' });
+    await armPromise;
+
+    const disarmPromise = api.disarm('a/1 x');
+    http.expectOne({ method: 'POST', url: '/api/assets/a%2F1%20x/disarm' }).flush({ result: 'ACCEPTED' });
+    await disarmPromise;
+  });
+
   // --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -------------
 
   it('fetches this platform\'s own reachable addresses + mavlink port', async () => {

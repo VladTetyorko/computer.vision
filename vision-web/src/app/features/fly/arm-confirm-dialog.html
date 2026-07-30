@@ -1,0 +1,28 @@
+<div class="backdrop">
+  <div class="dialog card arm-dialog" role="alertdialog" aria-modal="true" aria-label="Arm aircraft — confirm">
+    <div class="arm-header">
+      <span class="dot live"></span>
+      <span>Arm aircraft</span>
+    </div>
+
+    <p class="arm-warning">{{ warningMessage() }}</p>
+
+    @if (stage() === 'warn') {
+      <p class="arm-hint">Stand clear of the propellers before continuing.</p>
+      <div class="row dialog-actions">
+        <button type="button" class="btn secondary" (click)="continueToFinalStage()" [disabled]="busy()">
+          Continue
+        </button>
+        <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">Cancel</button>
+      </div>
+    } @else {
+      <p class="arm-hint">Last step — this cannot be recalled once sent.</p>
+      <div class="row dialog-actions">
+        <button type="button" class="btn arm-final" (click)="confirmed.emit()" [disabled]="busy()">
+          {{ busy() ? 'Arming…' : finalLabel() }}
+        </button>
+        <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">Cancel</button>
+      </div>
+    }
+  </div>
+</div>

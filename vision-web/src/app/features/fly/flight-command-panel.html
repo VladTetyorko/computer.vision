@@ -1,0 +1,77 @@
+@if (canCommand()) {
+  @if (capabilities(); as caps) {
+    <div class="command-cluster">
+      @if (caps.modeSelectSupported && caps.selectableModes.length > 0) {
+        <label class="mode-picker" title="Set this aircraft's flight mode">
+          <span class="mode-picker-label">Mode</span>
+          <select class="mode-select" aria-label="Flight mode" (change)="onModeChange($any($event.target).value)">
+            @for (mode of caps.selectableModes; track mode) {
+              <option [value]="mode" [selected]="mode === selectedMode()">{{ mode }}</option>
+            }
+          </select>
+        </label>
+        <button
+          type="button"
+          class="btn secondary small"
+          (click)="requestSetMode()"
+          [disabled]="anyBusy()"
+          title="Set the selected flight mode"
+        >
+          {{ modeBusy() ? 'Setting…' : 'Set' }}
+        </button>
+      }
+
+      @if (caps.armSupported) {
+        <button
+          type="button"
+          class="btn danger small arm-btn"
+          (click)="requestArm()"
+          [disabled]="anyBusy()"
+          title="Arm — the propellers will spin"
+        >
+          Arm
+        </button>
+        <button
+          type="button"
+          class="btn danger small"
+          (click)="requestDisarm()"
+          [disabled]="anyBusy()"
+          title="Disarm"
+        >
+          Disarm
+        </button>
+      }
+    </div>
+  }
+
+  @if (modeConfirmOpen()) {
+    <vision-confirm-dialog
+      [message]="modeMessage()"
+      confirmLabel="Set mode"
+      cancelLabel="Cancel"
+      [busy]="modeBusy()"
+      (confirmed)="confirmMode()"
+      (cancelled)="cancelMode()"
+    />
+  }
+
+  @if (disarmConfirmOpen()) {
+    <vision-confirm-dialog
+      [message]="disarmMessage()"
+      confirmLabel="Disarm"
+      cancelLabel="Cancel"
+      [busy]="disarmBusy()"
+      (confirmed)="confirmDisarm()"
+      (cancelled)="cancelDisarm()"
+    />
+  }
+
+  @if (armConfirmOpen()) {
+    <vision-arm-confirm-dialog
+      [assetDisplayName]="assetDisplayName()"
+      [busy]="armBusy()"
+      (confirmed)="confirmArm()"
+      (cancelled)="cancelArm()"
+    />
+  }
+}

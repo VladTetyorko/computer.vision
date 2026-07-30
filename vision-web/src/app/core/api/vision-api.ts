@@ -19,6 +19,8 @@ import type {
   Device,
   DeviceEdit,
   FleetSummary,
+  FlightCapability,
+  FlightCommandResponse,
   GeofenceZone,
   GeofenceZoneRequest,
   GroupSummary,
@@ -433,6 +435,68 @@ export class VisionApi {
   returnHome(assetId: string): Promise<ReturnHomeResponse> {
     return firstValueFrom(
       this.http.post<ReturnHomeResponse>(`/api/assets/${encodeURIComponent(assetId)}/return-home`, {}),
+    );
+  }
+
+  // --- Guarded command TX — arm/disarm/mode select (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+  // contract, extends Stage 1 above) -------------------------------------------------------------
+
+  /**
+   * The vehicle's own capability matrix (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) —
+   * drives what `features/fly/flight-command-panel.ts` renders for this asset: `commandable=false`
+   * for a Betaflight/never-heard vehicle hides the whole panel, the identical refusal cases Stage
+   * 1's `returnHome` already surfaces as a `409`, just told ahead of time here as data instead of
+   * waiting for a rejected command. `404` unknown asset, `403` out of scope — both reject the
+   * returned promise as an `HttpErrorResponse`; the caller (`FlyPage`) degrades to "panel stays
+   * hidden" on either, no toast — a background capability read, not a user-initiated action.
+   */
+  flightCapabilities(assetId: string): Promise<FlightCapability> {
+    return firstValueFrom(
+      this.http.get<FlightCapability>(`/api/assets/${encodeURIComponent(assetId)}/flight-capabilities`),
+    );
+  }
+
+  /**
+   * Sets the asset's active mavlink device's flight mode (`202 {result}` either way it was sent —
+   * `FlightCommandResponse`'s own doc comment, the identical shape `arm`/`disarm` below share).
+   * `404` unknown asset, `409 {message}` not commandable, `400` unknown/unsupported mode, `403` out
+   * of scope — all reject the returned promise, decoded by the caller via `describeHttpError`
+   * (`core/api-error.ts`'s existing switch already surfaces a `400`/`409`'s `message` verbatim and a
+   * `403` as an access sentence — no new error decoding needed for this trio). No client-side
+   * precondition check — the caller's own confirm dialog (`features/fly/flight-command-panel.ts`)
+   * is what makes this safe to call directly.
+   */
+  setMode(assetId: string, mode: string): Promise<FlightCommandResponse> {
+    return firstValueFrom(
+      this.http.post<FlightCommandResponse>(`/api/assets/${encodeURIComponent(assetId)}/mode`, { mode }),
+    );
+  }
+
+  /**
+   * Arms the asset's active mavlink device — the app's single highest-danger action (see
+   * `features/fly/arm-confirm-dialog.ts`'s own doc comment for the deliberately higher-friction
+   * confirm this sits behind). `force` (omitted by default, the server treats an absent value as
+   * `false`) mirrors the domain's own `MAV_CMD_COMPONENT_ARM_DISARM` force-arm param; no control in
+   * this app sends `force: true` today — the confirm modal is the safety gate, not a force override
+   * — but the parameter is wired through for the frozen contract's own completeness. Same error
+   * shape as `setMode`.
+   */
+  arm(assetId: string, force?: boolean): Promise<FlightCommandResponse> {
+    return firstValueFrom(
+      this.http.post<FlightCommandResponse>(
+        `/api/assets/${encodeURIComponent(assetId)}/arm`,
+        force ? { force } : {},
+      ),
+    );
+  }
+
+  /** Disarms — same shape, same error handling, same `force` convention as {@link arm}. */
+  disarm(assetId: string, force?: boolean): Promise<FlightCommandResponse> {
+    return firstValueFrom(
+      this.http.post<FlightCommandResponse>(
+        `/api/assets/${encodeURIComponent(assetId)}/disarm`,
+        force ? { force } : {},
+      ),
     );
   }
 
