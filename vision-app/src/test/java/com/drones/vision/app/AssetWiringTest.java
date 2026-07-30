@@ -23,8 +23,8 @@ import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
+import com.drones.vision.api.CurrentUser;
 import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
@@ -169,9 +169,9 @@ class AssetWiringTest {
     @Autowired
     private AuditTrailPort auditTrailPort;
 
-    /** The principal control-plane changes are attributed to until authentication lands. */
+    /** docs/U-AUTH-PLAN.md wave 3: the request-identity seam CurrentUser now delegates to (dev principal when auth disabled). */
     @Autowired
-    private Ownership actingOwnership;
+    private CurrentUser currentUser;
 
     /** Simulated-feed resume-on-boot (vision-application/MODULE.md's own design sketch) — always registered, resolves to a no-op with default (persistence-disabled) properties. */
     @Autowired
@@ -238,7 +238,7 @@ class AssetWiringTest {
         assertNotNull(assetUsageRepositoryPort, "AssetUsageRepositoryPort bean must be registered");
         assertNotNull(telemetryRepositoryPort, "TelemetryRepositoryPort bean must be registered");
         assertNotNull(auditTrailPort, "AuditTrailPort bean must be registered");
-        assertNotNull(actingOwnership, "Ownership bean must be registered for CurrentUser to fall back to");
+        assertNotNull(currentUser, "CurrentUser must resolve its PrincipalResolver seam (docs/U-AUTH-PLAN.md wave 3)");
         assertNotNull(detectionEventRepositoryPort, "DetectionEventRepositoryPort bean must be registered (docs/MVP2-PLAN.md E-a)");
         assertNotNull(eventController, "EventController must resolve its constructor dependency (docs/MVP2-PLAN.md E-a)");
         assertNotNull(fleetSummaryService, "FleetSummaryService bean must be registered (docs/MVP3-PLAN.md C-a)");

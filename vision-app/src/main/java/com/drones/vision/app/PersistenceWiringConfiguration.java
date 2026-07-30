@@ -7,7 +7,9 @@ import com.drones.vision.adapter.persistence.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.JpaGeofenceRepository;
+import com.drones.vision.adapter.persistence.JpaGroupRepository;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
+import com.drones.vision.adapter.persistence.JpaUserRepository;
 import com.drones.vision.adapter.persistence.PersistenceUnit;
 import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
@@ -16,7 +18,9 @@ import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
 import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
+import com.drones.vision.app.devsupport.InMemoryGroupRepository;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.app.devsupport.InMemoryUserRepository;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
@@ -24,7 +28,9 @@ import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.domain.port.out.GroupRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.domain.port.out.UserRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 
@@ -142,5 +148,25 @@ public class PersistenceWiringConfiguration {
             return new JpaGeofenceRepository(entityManagerFactory.getObject());
         }
         return new InMemoryGeofenceRepository();
+    }
+
+    /** docs/U-AUTH-PLAN.md wave 3 — users (identity aggregate), same toggle idiom as the eight above. */
+    @Bean
+    public UserRepositoryPort userRepositoryPort(VisionPersistenceProperties properties,
+                                                  ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaUserRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryUserRepository();
+    }
+
+    /** docs/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes), same toggle idiom as the nine above. */
+    @Bean
+    public GroupRepositoryPort groupRepositoryPort(VisionPersistenceProperties properties,
+                                                    ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaGroupRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryGroupRepository();
     }
 }

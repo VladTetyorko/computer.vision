@@ -16,14 +16,18 @@ import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.FlightState;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GeofenceZone;
+import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.Membership;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.Role;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.domain.model.User;
 import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.model.ZoneId;
 import com.drones.vision.domain.model.ZoneKind;
@@ -34,7 +38,9 @@ import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.domain.port.out.GroupRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.domain.port.out.UserRepositoryPort;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
@@ -770,6 +776,119 @@ class PostgresDockerIntegrationTest {
         }
     }
 
+    /** docs/U-AUTH-PLAN.md wave 3 — users, incl. jsonb memberships + case-insensitive findByUsername. */
+    @Nested
+    class UserRepositoryTests {
+
+        private final UserRepositoryPort repository = new JpaUserRepository(entityManagerFactory);
+        private final GroupId groupA = GroupId.random();
+
+        @Test
+        void unknownIdAndUsernameReturnEmptyOptional() {
+            assertTrue(repository.findById(UserId.random()).isEmpty());
+            assertTrue(repository.findByUsername("nobody").isEmpty());
+        }
+
+        @Test
+        void savedUserWithMembershipsRoundTrips() {
+            User user = new User(UserId.random(), "Round.Trip.User", "Round Trip", "rt@vision.local",
+                    "hash-value", true, List.of(new Membership(groupA, Role.MANAGER)));
+
+            repository.save(user);
+
+            Optional<User> found = repository.findById(user.id());
+            assertTrue(found.isPresent());
+            // username is stored lower-cased by the domain, so equality is on the normalized value
+            assertEquals("round.trip.user", found.get().username());
+            assertEquals(List.of(new Membership(groupA, Role.MANAGER)), found.get().memberships());
+            assertEquals("hash-value", found.get().passwordHash());
+            assertTrue(found.get().enabled());
+        }
+
+        @Test
+        void findByUsernameIsCaseInsensitive() {
+            User user = new User(UserId.random(), "casetest", "Case", "case@vision.local", "h", true, List.of());
+            repository.save(user);
+
+            assertTrue(repository.findByUsername("CaseTest").isPresent());
+            assertTrue(repository.findByUsername("CASETEST").isPresent());
+            assertEquals(user.id(), repository.findByUsername("casetest").orElseThrow().id());
+        }
+
+        @Test
+        void saveUpsertsById() {
+            UserId id = UserId.random();
+            repository.save(new User(id, "upsertuser", "First", "u@vision.local", "h1", true, List.of()));
+            repository.save(new User(id, "upsertuser", "Second", "u@vision.local", "h2", false,
+                    List.of(new Membership(groupA, Role.PILOT))));
+
+            Optional<User> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals("Second", found.get().displayName());
+            assertEquals("h2", found.get().passwordHash());
+            assertFalse(found.get().enabled());
+            assertEquals(List.of(new Membership(groupA, Role.PILOT)), found.get().memberships());
+        }
+
+        @Test
+        void findAllReturnsEverySavedUser() {
+            User first = new User(UserId.random(), "findall-a", "A", "a@vision.local", "h", true, List.of());
+            User second = new User(UserId.random(), "findall-b", "B", "b@vision.local", "h", true, List.of());
+            repository.save(first);
+            repository.save(second);
+
+            List<User> all = repository.findAll();
+            assertTrue(all.stream().anyMatch(u -> u.id().equals(first.id())));
+            assertTrue(all.stream().anyMatch(u -> u.id().equals(second.id())));
+        }
+    }
+
+    /** docs/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes). */
+    @Nested
+    class GroupRepositoryTests {
+
+        private final GroupRepositoryPort repository = new JpaGroupRepository(entityManagerFactory);
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(GroupId.random()).isEmpty());
+        }
+
+        @Test
+        void savedRootAndChildGroupsRoundTrip() {
+            Group root = new Group(GroupId.random(), "Root", null);
+            Group child = new Group(GroupId.random(), "Child", root.id());
+            repository.save(root);
+            repository.save(child);
+
+            assertEquals(root, repository.findById(root.id()).orElseThrow());
+            Optional<Group> foundChild = repository.findById(child.id());
+            assertTrue(foundChild.isPresent());
+            assertEquals(root.id(), foundChild.get().parentGroupId());
+        }
+
+        @Test
+        void saveUpsertsById() {
+            GroupId id = GroupId.random();
+            repository.save(new Group(id, "Original", null));
+            repository.save(new Group(id, "Renamed", null));
+
+            assertEquals("Renamed", repository.findById(id).orElseThrow().name());
+        }
+
+        @Test
+        void findAllReturnsEverySavedGroup() {
+            Group first = new Group(GroupId.random(), "Group One", null);
+            Group second = new Group(GroupId.random(), "Group Two", null);
+            repository.save(first);
+            repository.save(second);
+
+            List<Group> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+    }
+
     /**
      * docs/MVP2-PLAN.md P-b's retention guard, in test form: uses the small-cap constructor
      * overload (rather than the production {@value JpaTelemetryRepository#DEFAULT_RETENTION_LIMIT_PER_USAGE}
@@ -953,6 +1072,33 @@ class PostgresDockerIntegrationTest {
                                     + "and column_name = 'max_altitude_meters'")
                     .getSingleResult();
             assertEquals("YES", maxAltitudeNullable, "max_altitude_meters must be nullable (no ceiling)");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/U-AUTH-PLAN.md wave 3 — proves {@code V8__users_groups.sql} applied on top of V1-V7:
+     * {@code users.memberships} is a required {@code jsonb} column and {@code groups.parent_id} is a
+     * nullable {@code uuid} (root groups have none), same shape of check as the V7 test above.
+     */
+    @Test
+    void v8MigrationCreatesUsersAndGroupsOnTopOfV1ThroughV7() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] membershipsColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'users' and column_name = 'memberships'")
+                    .getSingleResult();
+            assertEquals("NO", membershipsColumn[0], "users.memberships is required");
+            assertEquals("jsonb", membershipsColumn[1]);
+
+            Object[] parentIdColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'groups' and column_name = 'parent_id'")
+                    .getSingleResult();
+            assertEquals("YES", parentIdColumn[0], "groups.parent_id must be nullable (root groups)");
+            assertEquals("uuid", parentIdColumn[1]);
         } finally {
             em.close();
         }

@@ -15,7 +15,6 @@ import com.drones.vision.adapter.simulation.SimulatedVideoSource;
 import com.drones.vision.adapter.v4l2.V4l2VideoSource;
 import com.drones.vision.api.HlsProxyController;
 import com.drones.vision.api.live.LiveUpdateRegistry;
-import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.app.devsupport.InMemoryAuditTrail;
 import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
@@ -46,7 +45,6 @@ import com.drones.vision.application.SimulationService;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.UsageTracker;
 import com.drones.vision.application.VideoSourceRegistry;
-import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
@@ -348,17 +346,6 @@ public class WiringConfiguration {
                                         AuditTrailPort auditTrailPort,
                                         EventPublisherPort eventPublisherPort) {
         return new DefaultDeviceService(deviceRepositoryPort, streamService, auditTrailPort, eventPublisherPort);
-    }
-
-    /**
-     * The principal every control-plane change is attributed to until authentication lands
-     * (ARCHITECTURE.md §6). Supplied as a bean so {@code vision-api}'s {@code CurrentUser} has
-     * exactly one thing to replace when it starts reading the identity from a JWT — the acting
-     * user is never a constructor dependency of a service.
-     */
-    @Bean
-    public Ownership actingOwnership() {
-        return DevPrincipal.OWNERSHIP;
     }
 
     /**

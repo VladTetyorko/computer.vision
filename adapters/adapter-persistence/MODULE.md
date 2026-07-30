@@ -2,8 +2,8 @@
 
 JPA/Postgres persistence adapter for every repository port the platform has: the fleet-side ports
 — categories, devices, assets (docs/MVP2-PLAN.md P-a) — the history ports — asset usages,
-telemetry samples, detection results (docs/MVP2-PLAN.md P-b) — and geofence zones
-(docs/OPS-CORE-PLAN.md §G, G-b).
+telemetry samples, detection results (docs/MVP2-PLAN.md P-b) — geofence zones
+(docs/OPS-CORE-PLAN.md §G, G-b) — and identity: users + groups (docs/U-AUTH-PLAN.md wave 3).
 
 **Depends on:** vision-domain, `org.hibernate.orm:hibernate-core`, `org.postgresql:postgresql`,
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
@@ -36,15 +36,18 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `final class JpaDetectionRepository implements DetectionRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaTelemetryRepository`. docs/MVP2-PLAN.md P-b.
 - `final class JpaAssetImageRepository implements AssetImageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/UX-REWORK-PLAN.md §U-d item 3 — the asset image store (CONTRACT 2).
 - `final class JpaGeofenceRepository implements GeofenceRepositoryPort` — constructor `(EntityManagerFactory)`. docs/OPS-CORE-PLAN.md §G, G-b — geofence zones; `save` is merge-by-id (upsert), `deleteById` a real hard delete (zones have no soft-delete concept — a disabled zone is just `enabled=false`, not a lifecycle state).
+- `final class JpaUserRepository implements UserRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-AUTH-PLAN.md wave 3 — the identity aggregate; `save` is merge-by-id (upsert). `findByUsername` lower-cases its lookup key (`Locale.ROOT`) then exact-matches `users.username` (the domain already stores it lower-cased, so this *is* the case-insensitive lookup; a `NoResultException` from the single-result query maps to empty `Optional`). Memberships ride on the row as jsonb (see `UserEntity`).
+- `final class JpaGroupRepository implements GroupRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-AUTH-PLAN.md wave 3 — org-chart nodes; `save` is merge-by-id (upsert); `parentGroupId` maps straight through as a nullable `UUID`.
 - package-private `final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas).
 
 ### `com.drones.vision.adapter.persistence.entity`
-- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
+- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
 - `TelemetrySampleEntity`/`DetectionResultEntity` have a synthetic UUID `id` the adapter invents at save time (`UUID.randomUUID()` in each repository's `toEntity`) — `Telemetry`/`DetectionResult` themselves carry no identity of their own (append-only samples/results, not aggregates), so there is nothing domain-side to derive a primary key from; the id never surfaces back through the ports.
 - `TelemetrySampleEntity#flightState` (docs/FC-INTEGRATIONS-PLAN.md F-b, `V6__telemetry_flight_state.sql`) is a nullable `FlightState` field, `@JdbcTypeCode(SqlTypes.JSON)`/`columnDefinition = "jsonb"` — the domain record stored **directly**, exactly the `DetectionResultEntity#detections` precedent noted in Conventions below (a plain immutable record tree, no persistence-local wrapper type needed). `null` covers both "sample pre-dates this column" and "device reported no flight-controller state at all"; both round-trip as `Telemetry#flightState() == null`, the same nullable-9th-component contract the domain record itself defines — there is no way to tell the two cases apart from this column alone, and nothing needs to.
 - `AssetUsageEntity#streamId` (docs/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
 - `AssetImageEntity` (docs/UX-REWORK-PLAN.md §U-d item 3, `V5__asset_images.sql`) is keyed by `assetId` itself, **not** a synthetic id like `TelemetrySampleEntity`/`DetectionResultEntity` above — there is at most one image per asset and `save` is always an upsert, so the primary key doubles as the "one row per asset" constraint with no separate unique index needed. `data` is a plain `byte[]` field (Hibernate's default mapping to Postgres `bytea`, no `@Lob`/converter needed) — the first non-jsonb, non-text binary column in this module's schema.
 - `GeofenceZoneEntity` (docs/OPS-CORE-PLAN.md §G, G-b, `V7__geofence_zones.sql`) mirrors `GeofenceZone` field-for-field: `id` is the domain's own `ZoneId` (not synthetic — a zone has real identity, unlike `Telemetry`/`DetectionResult`), `kind` reuses the domain `ZoneKind` enum directly in an `@Enumerated(EnumType.STRING)` field (same "domain enums reused directly" convention `Capability`/`LifecycleState` already follow), `polygon` stores the whole `List<GeoPosition>` as one jsonb column (same mechanism/rationale as `DetectionResultEntity#detections` — a plain immutable record list Jackson serializes natively, only ever read back whole), `maxAltitudeMeters` a nullable `Double`, `enabled` a plain `boolean`. No FK to any other table — zones are global reference data with no relationship to assets/devices.
+- `UserEntity`/`GroupEntity` (docs/U-AUTH-PLAN.md wave 3, `V8__users_groups.sql`) mirror `User`/`Group` field-for-field. `UserEntity#id` is the domain's own `UserId` (not synthetic — a user has real identity); `username` carries a `UNIQUE` constraint and is stored already-lower-cased (the domain `User` normalizes it), so `findByUsername` is an exact match on the stored value after lower-casing the lookup key. **`UserEntity#memberships` stores the whole `List<Membership>` as one jsonb column** (`@JdbcTypeCode(SqlTypes.JSON)`) — same mechanism/rationale as `GeofenceZoneEntity#polygon`/`DetectionResultEntity#detections`: `Membership` (with its nested `GroupId`/`Role`) is a plain immutable record Jackson 3 serializes natively, and memberships are only ever read back whole with the aggregate, so no normalized join table (docs/U-AUTH-PLAN.md picked jsonb over a join table for exactly this "saved whole with the User" reason). `GroupEntity#parentId` is a nullable `UUID` (null = root group). No FK on either table (not `groups.parent_id`, not any user→group link) — same "no cross-entity foreign keys" convention as every other table here, keeping parity with the in-memory reference repos that do no referential checks.
 
 ## Schema (`src/main/resources/db/migration`)
 
@@ -55,6 +58,7 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `V5__asset_images.sql` (docs/UX-REWORK-PLAN.md §U-d item 3) — `asset_images` (`asset_id` UUID PK — no FK, same convention as every other table; `content_type` varchar; `data` bytea; `updated_at` timestamptz default `now()`). New table, no changes to any existing one.
 - `V6__telemetry_flight_state.sql` (docs/FC-INTEGRATIONS-PLAN.md F-b) — `ALTER TABLE telemetry_samples ADD COLUMN flight_state JSONB` (nullable, no FK, no backfill — purely additive on top of V1-V5, same shape as V4's `stream_id` addition). Pre-existing rows simply read back `null`.
 - `V7__geofence_zones.sql` (docs/OPS-CORE-PLAN.md §G, G-b) — `geofence_zones` (`id` UUID PK — the zone's own `ZoneId`, not synthetic; `name` varchar; `kind` varchar; `polygon` jsonb — the whole `List<GeoPosition>`, ≥3 vertices enforced application-side by `GeofenceZone`/`GeofenceZoneSpec`, not a database `CHECK`; `max_altitude_meters` nullable double precision; `enabled` boolean). New table, no changes to any existing one — no FK, same convention as every other table here.
+- `V8__users_groups.sql` (docs/U-AUTH-PLAN.md wave 3) — `groups` (`id` UUID PK; `name` varchar; `parent_id` UUID nullable — null = root, no self-FK) and `users` (`id` UUID PK; `username` varchar `NOT NULL UNIQUE` — stored lower-cased by the domain, so plain UNIQUE gives the case-insensitive uniqueness `findByUsername` relies on; `display_name`/`email`/`password_hash` varchar; `enabled` boolean; `memberships` jsonb `NOT NULL` — the whole `List<Membership>`). Two new tables, purely additive over V1-V7, no FK (not `groups.parent_id`, no user→group link) — same convention as every other table here.
 
 ## Bootstrap (no Spring, no connection pool)
 
@@ -68,7 +72,7 @@ No connection pool: Hibernate's default `DriverManagerConnectionProvider` (one p
 
 ## Conventions
 
-- **jsonb via Hibernate's native JSON support, not a hand-rolled converter.** `attribute_hints`/`stream_options`/`attributes`/`extra`/`detections`/`flight_state` are `@JdbcTypeCode(SqlTypes.JSON)` fields with `columnDefinition = "jsonb"` — Hibernate 7.4 auto-detects a Jackson `ObjectMapper` on the classpath via its `FormatMapper` SPI and ships `org.hibernate.type.format.jackson.Jackson3JsonFormatMapper` specifically for Jackson 3 (`tools.jackson.*`, this house's Jackson generation under Spring Boot 4) — confirmed present in the `hibernate-core-7.4.1.Final` jar. No `AttributeConverter`, no `PGobject` juggling, no `stringtype=unspecified` JDBC-URL trick.
+- **jsonb via Hibernate's native JSON support, not a hand-rolled converter.** `attribute_hints`/`stream_options`/`attributes`/`extra`/`detections`/`flight_state`/`polygon`/`memberships` are `@JdbcTypeCode(SqlTypes.JSON)` fields with `columnDefinition = "jsonb"` — Hibernate 7.4 auto-detects a Jackson `ObjectMapper` on the classpath via its `FormatMapper` SPI and ships `org.hibernate.type.format.jackson.Jackson3JsonFormatMapper` specifically for Jackson 3 (`tools.jackson.*`, this house's Jackson generation under Spring Boot 4) — confirmed present in the `hibernate-core-7.4.1.Final` jar. No `AttributeConverter`, no `PGobject` juggling, no `stringtype=unspecified` JDBC-URL trick.
 - **`DetectionResultEntity#detections`/`TelemetrySampleEntity#flightState` store the domain `Detection`/`FlightState` record trees directly** (`List<Detection>` with nested `BoundingBox`/`ModelRef`; a single nullable `FlightState` with its own `List<String> armingBlockers`, docs/FC-INTEGRATIONS-PLAN.md F-b) rather than a parallel adapter-local DTO shape — Jackson 3 serializes/deserializes Java records natively (canonical-constructor + component-name introspection, no annotations needed), proven by this module's own round-trip tests. Referencing a plain, framework-annotation-free domain record from an entity field is the same kind of "adapter depends on domain types" the enum reuse below already establishes; it's storage-format coupling to the domain's shape, not a framework leaking into the domain.
 - **No cross-entity foreign keys beyond the join tables' own PKs**, deliberately: `categories.parent_id` is the one exception (self-referencing, satisfiable because `V2__seed_categories.sql` controls insert order), but `assets.category_id` has **no** FK to `categories.id`, `asset_devices.device_id` has **no** FK to `devices.id`, and none of `asset_usages`/`telemetry_samples`/`detection_results` (V3) has any FK at all. The in-memory reference repositories this adapter must stay behavior-compatible with (`InMemory*Repository`, vision-app devsupport) perform zero referential checks — a real constraint here would reject operations (e.g. saving an `Asset` whose category was never separately saved) that the in-memory port happily allows, breaking parity for exactly the "round-trip every port method the same way the in-memory impl does" contract this module is judged against.
 - **`save()` is upsert-by-id** (`EntityManager#merge`) on the three P-a ports and `JpaAssetUsageRepository`, matching each in-memory repository's `Map#put` exactly. **`JpaTelemetryRepository#save`/`JpaDetectionRepository#save` always `persist` a brand-new row** instead (never `merge`) — samples/results are immutable historical records per their ports' contracts, and neither `Telemetry` nor `DetectionResult` carries an id to merge by. **`deleteById()` is a real hard delete, idempotent** (missing id ⇒ no-op) on `Device`/`Asset`, matching `Map#remove` exactly — soft-delete (`LifecycleState.DELETED`) is just a column value round-tripped like any other field; nothing in this module treats it specially, the same as the in-memory fallbacks.
@@ -125,6 +129,8 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   ordering + limit.
 - `@Nested AssetImageRepositoryTests` (4, docs/UX-REWORK-PLAN.md §U-d item 3) — unknown asset id → empty `Optional` + `existsByAssetId` false, round trip of bytes + content type + `existsByAssetId` true, upsert-replaces (a second `save` for the same asset id fully replaces the first — different bytes, different content type), idempotent delete (also verifying `existsByAssetId` flips back to false, and a second delete call doesn't throw).
 - `@Nested GeofenceRepositoryTests` (6, docs/OPS-CORE-PLAN.md §G, G-b) — unknown id → empty `Optional`, a `KEEP_OUT` zone with an altitude ceiling round trips exactly, a `KEEP_IN` zone with no ceiling round trips `maxAltitudeMeters()==null`/`enabled()==false`, `save` upserts by id (rename/re-kind/re-altitude/re-enable in place, same id), `findAll` returns every saved zone, `deleteById` is idempotent (a second call on an already-deleted id doesn't throw).
+- `@Nested UserRepositoryTests` (5, docs/U-AUTH-PLAN.md wave 3) — unknown id/username → empty `Optional`, a user with jsonb memberships round trips (asserting the username reads back lower-cased and the `List<Membership>` survives), `findByUsername` is case-insensitive (`CaseTest`/`CASETEST`/`casetest` all resolve the same user), `save` upserts by id (display name/hash/enabled/memberships all replaced in place), `findAll` returns every saved user.
+- `@Nested GroupRepositoryTests` (4, docs/U-AUTH-PLAN.md wave 3) — unknown id → empty `Optional`, a root + child group round trip (child's `parentGroupId` preserved), `save` upserts by id, `findAll` returns every saved group.
 - `telemetryRetentionPrunesOldestSamplesOnceCapExceeded`/`detectionRetentionPrunesOldestResultsOnceCapExceeded`
   — use each repository's small-cap constructor overload (cap 3) to insert 5 rows and assert exactly
   the 3 newest survive.
@@ -152,7 +158,13 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   is a required (`NOT NULL`) `jsonb` column and `max_altitude_meters` stays nullable, proving
   `V7__geofence_zones.sql` applied cleanly on top of V1-V6.
 
-56 tests total, all green in this environment (`docker info` reachable).
+- `v8MigrationCreatesUsersAndGroupsOnTopOfV1ThroughV7` (docs/U-AUTH-PLAN.md wave 3) — same shape
+  as the V4/V6/V7 schema tests: asserts `users.memberships` is a required (`NOT NULL`) `jsonb` column
+  and `groups.parent_id` is a nullable `uuid`, proving `V8__users_groups.sql` applied cleanly on top
+  of V1-V7.
+
+66 tests total, all green in this environment (`docker info` reachable) — up from 56 (docs/U-AUTH-PLAN.md
+wave 3: new `UserRepositoryTests` (5) + `GroupRepositoryTests` (4) + the V8 schema test).
 
 ## Gotchas
 
@@ -186,6 +198,29 @@ docs/UX-REWORK-PLAN.md **§U-d item 3 done** (asset image, persistence half — 
 A new seventh-plus-one repository port: `GeofenceZoneEntity`/`JpaGeofenceRepository` (`V7__geofence_zones.sql`, purely additive — a new table, nothing else changed). `id` is the domain's own `ZoneId` rather than a synthetic one (a zone has real identity, unlike `Telemetry`/`DetectionResult`); `kind` reuses the domain `ZoneKind` enum directly (`@Enumerated(EnumType.STRING)`, same convention as `Capability`/`LifecycleState`); `polygon` stores the whole `List<GeoPosition>` as jsonb, same mechanism as `DetectionResultEntity#detections`. `save` is merge-by-id (upsert); `deleteById` is a real hard delete, idempotent — zones have no soft-delete concept of their own (a disabled zone is just a row with `enabled=false`).
 
 `./mvnw -B -pl adapters/adapter-persistence test`: **56/56 green** (was 49), run against a real `postgres:16` Testcontainers instance (not skipped) — new `GeofenceRepositoryTests` (6, see Tests above), one new top-level schema test (`v7MigrationCreatesTheGeofenceZonesTableOnTopOfV1ThroughV6`). See vision-domain/vision-application/vision-api/vision-app's own MODULE.mds for the domain type/port, the `GeofenceMonitor`/`GeofenceService`, the `GeofenceController` REST surface, and the wiring (`PersistenceWiringConfiguration#geofenceRepositoryPort`, gated by `vision.persistence.enabled` exactly like the other seven port beans; `InMemoryGeofenceRepository`, vision-app devsupport, is the disabled-branch fallback).
+
+**Deviations from the brief**: none.
+
+## docs/U-AUTH-PLAN.md slice 1 wave 3 done (identity persistence: users + groups)
+
+Two new repository ports: `UserEntity`/`JpaUserRepository` (`UserRepositoryPort`) and
+`GroupEntity`/`JpaGroupRepository` (`GroupRepositoryPort`), plus `V8__users_groups.sql` (purely
+additive — two new tables, nothing else changed). **Memberships are jsonb on the user row**, not a
+join table (the plan offered either; jsonb matches the `flight_state`/`detections`/`polygon`
+precedent and the "saved whole with the User aggregate" port contract — a user's memberships are
+never queried into individually in slice 1). `findByUsername` lower-cases its key then exact-matches
+the already-lower-cased stored `username` (the domain `User` normalizes it), so a plain `UNIQUE`
+constraint gives the case-insensitive uniqueness. No FK on either table (not `groups.parent_id`, no
+user→group link) — same "no cross-entity foreign keys / stay parity-compatible with the in-memory
+reference repos" convention as every other table here.
+
+`./mvnw -B -pl adapters/adapter-persistence test`: **66/66 green** (was 56), run against a real
+`postgres:16` Testcontainers instance (not skipped) — new `UserRepositoryTests` (5) +
+`GroupRepositoryTests` (4) + `v8MigrationCreatesUsersAndGroupsOnTopOfV1ThroughV7`. See
+vision-app/vision-api's own MODULE.mds for the in-memory fallbacks, the wiring
+(`PersistenceWiringConfiguration#userRepositoryPort`/`#groupRepositoryPort`, gated by
+`vision.persistence.enabled` exactly like the other nine port beans), the application services,
+Spring Security, and the `/api/auth/*` surface.
 
 **Deviations from the brief**: none.
 
