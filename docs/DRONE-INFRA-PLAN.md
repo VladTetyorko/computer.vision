@@ -97,7 +97,8 @@ The RX-only doctrine ends only here, on purpose, with stages:
 1. **Stage 1 — "Bring home"**: a single command, `MAV_CMD_DO_SET_MODE → RTL`, big red-adjacent
    button in Fly/Command, confirm dialog, audit-logged. ArduPilot + INAV (Betaflight: hidden —
    its RX handles no such command; capability matrix per firmware drives button visibility).
-2. Stage 2 — arm/disarm + mode select (capability-gated).
+2. Stage 2 — arm/disarm + mode select (capability-gated). **APPROVED + frozen 2026-07-30 — see
+   the Stage 2 spec below.**
 3. Stage 3 — mission upload (ArduPilot), fence upload (ties to FEATURE-MATRIX geofencing's
    "autopilot-side enforcement" future line).
 Needs: `FlightCommandPort` (domain), TX path on the gateway socket (it's already bidirectional
@@ -247,6 +248,66 @@ ports — a drone could push straight to mediamtx and the app consume that path,
 decode off the backend entirely (the same push-vs-pull lever as CV-SCALE-PLAN §S5). Direct
 in-app ingest (this wave) is the incremental step; mediamtx-native ingest is the scale step,
 sequenced when backend ingest decode becomes the measured ceiling.
+
+### I-e Stage 2 — arm/disarm + mode select (APPROVED, frozen 2026-07-30)
+
+Extends Stage 1 (RTL, done + SITL-verified) with the two next command classes, now that U-e
+gives real command authority (Stage 1's `returnToHome` already takes a `VisibilityScope`;
+Stage 2's commands gate the same way). Same doctrine: capability-gated per firmware, confirm
+dialogs **scaled to danger**, everything audited, honest `NO_ACK` on lossy UDP.
+
+**Safety framing (non-negotiable):** arming spins propellers — it is the highest-danger action
+in the app. Its confirmation must be materially higher-friction than RTL's (a distinct,
+explicit "propellers will spin" modal; no keyboard shortcut, never auto-triggered). Disarm
+carries a crash warning when the aircraft is armed+airborne (from telemetry `flightState`).
+
+**Capability matrix (drives what the UI shows — honest, from firmware):**
+- ArduPilot (autopilot=3): commandable; arm + mode-select supported; modes = the vehicle-family
+  table (copter/plane/rover) from `FlightModes`.
+- INAV (masquerades as ArduPilot, autopilot=3, indistinguishable on the wire): capabilities
+  report commandable=true; commands are *attempted* and honestly `NO_ACK` if the INAV RX ignores
+  them (its MAVLink is telemetry-only) — same known limitation as Stage-1 RTL, documented not hidden.
+- Betaflight (autopilot=0): not commandable — `commandable=false`, controls hidden (Stage-1 rule).
+- Never-heard vehicle: not commandable (no firmware/mavType/source-address known yet).
+
+**Domain (`FlightCommandPort` extension) — Wave A:**
+- `CommandResult setMode(Device, String modeName)` — `COMMAND_LONG` `DO_SET_MODE`, custom_mode
+  resolved via existing `FlightModes.customModeFor(autopilot, mavType, modeName)`; `returnToHome`
+  becomes the `"RTL"` case (keep the method for Stage-1 compatibility). `IllegalArgumentException`
+  unknown/unsupported mode/firmware, `IllegalStateException` on `MAV_RESULT` denial, `NO_ACK` on timeout.
+- `CommandResult arm(Device, boolean force)` / `disarm(Device, boolean force)` —
+  `MAV_CMD_COMPONENT_ARM_DISARM` (400), param1 1/0, param2 = 21196 when `force` else 0.
+- `FlightCapability capabilities(Device)` — a new domain value record
+  `FlightCapability(boolean commandable, boolean armSupported, boolean modeSelectSupported,
+  List<String> selectableModes)`, computed from the tracked firmware/mavType (Betaflight/unheard →
+  `commandable=false`, empty modes). `FlightModes` gains `List<String> selectableModes(autopilot, mavType)`.
+
+**Application + API — Wave B (frozen wire contract):**
+- `FlightCommandService`: `setMode(AssetId, String mode, UserId, VisibilityScope)`,
+  `arm(AssetId, boolean force, UserId, VisibilityScope)`, `disarm(...)`,
+  `FlightCapability capabilities(AssetId, VisibilityScope)` — all scope-gated (`AccessDeniedException`
+  →403 out of scope, like `returnToHome`) and audited (attempt + result, success and denial).
+- `POST /api/assets/{id}/mode {mode}` → 202 `{result:"ACCEPTED"|"NO_ACK"}`;
+  `POST /api/assets/{id}/arm {force?:boolean}` → 202 `{result}`; `POST /api/assets/{id}/disarm {force?}`
+  → 202 `{result}`; `GET /api/assets/{id}/flight-capabilities` → 200
+  `{commandable, armSupported, modeSelectSupported, selectableModes:[...]}`. 404 unknown asset,
+  409 not-commandable (unknown/Betaflight/unheard), 400 unknown mode, 403 out of scope.
+
+**UI — Wave C (`web-ui` agent, against the frozen contract):**
+- A flight-command panel in the Fly cockpit (near the return-home button), driven by
+  `GET /flight-capabilities` — renders only what the vehicle supports: **Arm**/**Disarm** buttons
+  + a **Mode** picker. Danger-scaled confirms: Arm = the strongest, distinct "propellers will spin"
+  modal; Disarm = confirm + airborne crash-warning; Mode = standard confirm. Role/scope-gated
+  (reuse `canCommandReturnHome`'s firmware+freshness gate + capabilities); Betaflight/unsupported →
+  panel hidden. Outcome toasts (ACCEPTED / NO_ACK "sent, no acknowledgement" / 409 verbatim / 403).
+  Responsive. The aircraft's actual state change (armed, mode) arrives via telemetry as usual — no
+  optimistic UI.
+
+**Waves & sequencing:** A (domain port + adapter, atomic — general-purpose) → B (application +
+api + wiring — after A) ‖ C (UI — parallel with A/B against the frozen contract). Stage 3
+(missions/fence upload) stays parked. Loopback tests own arm/disarm/mode wire correctness; the
+SITL test covers mode-set on an already-flying vehicle (arming SITL mid-test is race-prone — the
+Stage-1 SITL test already documented this).
 
 ### I-f — fleet ops infra (future, mostly needs TX or U-e)
 Log/blackbox ingest (dataflash via MAVFTP, BF blackbox upload), parameter drift audit
