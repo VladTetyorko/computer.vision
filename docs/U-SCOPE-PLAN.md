@@ -1,6 +1,17 @@
 # U-SCOPE-PLAN — U-e slice 2: visibility scoping + the user-scoped feature catalog
 
-Status: draft for selection (2026-07-30). Slice 1 (U-AUTH-PLAN) gave real logins + roles but
+Status: CORE DONE (2026-07-30) — features 1 (group-subtree visibility), 2 (pilot assignment),
+3 (role-gated command), 7 (my-activity) shipped across 3 waves, all green. Wave 1 application
+core (domain 217, application 468) · wave 2 api/security/persistence (adapter-persistence 71,
+vision-api 306, vision-app 135; real Postgres assignment tests; auth-on scoped-read verified:
+manager=subtree, pilot=assigned-only) · wave 3 UI (org-settings users/groups, assigned-pilots
+card, my-activity view, role-gated + responsive; vision-web 1099). `vision.auth.enabled=false`
+→ unbounded ADMIN → zero behavior change (verified). **Deferred slice-2 cleanup** (documented,
+not faked): the ADMIN/MANAGER role gate on the user/group *management* endpoints themselves, and
+the invite ≤-own-scope grant rule — both small application-layer additions. Features 4/5/6/8/9
+from the catalog below remain unbuilt (selectable next). Original catalog + design below.
+
+Draft for selection (2026-07-30). Slice 1 (U-AUTH-PLAN) gave real logins + roles but
 scoped nothing — every logged-in user still sees everything. This slice makes identity *matter*:
 what you see and may do is bounded by who you are. It also catalogs the broader user-scoped
 feature set and maps each to the backend work it needs, so we can pick a build order.
