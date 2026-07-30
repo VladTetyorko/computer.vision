@@ -1,12 +1,18 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.dto.FlightCapabilitiesResponse;
+import com.drones.vision.api.dto.ForceCommandRequest;
 import com.drones.vision.api.dto.ReturnHomeResponse;
+import com.drones.vision.api.dto.SetModeRequest;
 import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.CommandResult;
+import com.drones.vision.domain.model.FlightCapability;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -24,15 +30,22 @@ import java.util.Objects;
  * and {@code vision-application} — never on an adapter.
  *
  * <h2>Status codes (frozen wire contract)</h2>
+ * The command endpoints ({@code return-home}, {@code mode}, {@code arm}, {@code disarm}) answer
  * {@code 202} with {@link ReturnHomeResponse#result()} {@code "ACCEPTED"}/{@code "NO_ACK"} on a
- * sent command; {@code 404} for an unknown asset ({@link java.util.NoSuchElementException}, the
- * same mapping every other asset-scoped endpoint uses); {@code 409} with the failure message for
- * "not commandable" or "the aircraft refused" ({@link IllegalStateException} — see {@link
- * FlightCommandService} for why both outcomes surface as this one exception type); {@code 403}
- * when the asset exists but is outside the caller's {@link CurrentUser#scope()}
+ * sent command; {@code 404} for an unknown asset ({@link java.util.NoSuchElementException}); {@code
+ * 409} with the failure message for "not commandable" or "the aircraft refused" ({@link
+ * IllegalStateException} — see {@link FlightCommandService} for why both outcomes surface as this
+ * one exception type); {@code 400} for an unknown/blank flight mode ({@link
+ * IllegalArgumentException}, validated against the vehicle's capabilities before dispatch —
+ * deliberately distinct from the not-commandable 409, see {@code DefaultFlightCommandService}); and
+ * {@code 403} when the asset exists but is outside the caller's {@link CurrentUser#scope()}
  * ({@link com.drones.vision.application.AccessDeniedException}, mapped by {@link
- * ApiExceptionHandler} — docs/U-SCOPE-PLAN.md, feature 3). With auth off the scope is unbounded, so
- * this endpoint behaves exactly as before scoping.
+ * ApiExceptionHandler} — docs/U-SCOPE-PLAN.md, feature 3).
+ *
+ * <p>{@code GET /api/assets/{id}/flight-capabilities} is instead a <em>read</em>: {@code 200} with
+ * the capability snapshot, and {@code 404} for an unknown <em>or</em> out-of-scope asset (hiding
+ * existence, per the scoped-read convention — not the 403 the commands give). With auth off the
+ * scope is unbounded, so every endpoint here behaves exactly as before scoping.
  */
 @RestController
 public class FlightCommandController {
@@ -60,5 +73,71 @@ public class FlightCommandController {
         CommandResult result = flightCommandService.returnToHome(AssetId.of(id), currentUser.userId(),
                 currentUser.scope());
         return ReturnHomeResponse.from(result);
+    }
+
+    /**
+     * Commands an asset's aircraft into a named flight mode.
+     *
+     * @param id      the asset to command, as a canonical UUID string
+     * @param request the target mode; {@code mode} is required and non-blank (400 otherwise)
+     * @return the command outcome ({@code ACCEPTED}/{@code NO_ACK})
+     */
+    @PostMapping("/api/assets/{id}/mode")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ReturnHomeResponse setMode(@PathVariable String id, @RequestBody SetModeRequest request) {
+        CommandResult result = flightCommandService.setMode(AssetId.of(id), request.requireMode(),
+                currentUser.userId(), currentUser.scope());
+        return ReturnHomeResponse.from(result);
+    }
+
+    /**
+     * Commands an asset's aircraft to arm (spin up its motors). The highest-danger command here.
+     *
+     * @param id      the asset to command, as a canonical UUID string
+     * @param request the optional {@code force} flag; the whole body may be absent ({@code force}
+     *                defaults to {@code false})
+     * @return the command outcome ({@code ACCEPTED}/{@code NO_ACK})
+     */
+    @PostMapping("/api/assets/{id}/arm")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ReturnHomeResponse arm(@PathVariable String id,
+                                  @RequestBody(required = false) ForceCommandRequest request) {
+        ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
+        CommandResult result = flightCommandService.arm(AssetId.of(id), body.forceOrDefault(),
+                currentUser.userId(), currentUser.scope());
+        return ReturnHomeResponse.from(result);
+    }
+
+    /**
+     * Commands an asset's aircraft to disarm (stop its motors).
+     *
+     * @param id      the asset to command, as a canonical UUID string
+     * @param request the optional {@code force} flag; the whole body may be absent ({@code force}
+     *                defaults to {@code false})
+     * @return the command outcome ({@code ACCEPTED}/{@code NO_ACK})
+     */
+    @PostMapping("/api/assets/{id}/disarm")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ReturnHomeResponse disarm(@PathVariable String id,
+                                     @RequestBody(required = false) ForceCommandRequest request) {
+        ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
+        CommandResult result = flightCommandService.disarm(AssetId.of(id), body.forceOrDefault(),
+                currentUser.userId(), currentUser.scope());
+        return ReturnHomeResponse.from(result);
+    }
+
+    /**
+     * A best-effort snapshot of what commands the asset's aircraft currently accepts, for a UI to
+     * decide which controls to show. A <em>read</em>: an unknown or out-of-scope asset 404s (hiding
+     * existence); an in-scope asset with no commandable device reports everything {@code false}.
+     *
+     * @param id the asset to describe, as a canonical UUID string
+     * @return the capability snapshot
+     */
+    @GetMapping("/api/assets/{id}/flight-capabilities")
+    public FlightCapabilitiesResponse flightCapabilities(@PathVariable String id) {
+        FlightCapability capability =
+                flightCommandService.capabilities(AssetId.of(id), currentUser.scope());
+        return FlightCapabilitiesResponse.from(capability);
     }
 }
