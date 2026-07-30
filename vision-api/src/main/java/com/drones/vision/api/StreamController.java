@@ -4,7 +4,10 @@ import com.drones.vision.api.dto.ActiveStreamResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
+import com.drones.vision.api.dto.UpdateStreamConfigRequest;
+import com.drones.vision.api.dto.UpdateStreamConfigResponse;
 import com.drones.vision.application.StreamService;
+import com.drones.vision.application.UpdateOutcome;
 import com.drones.vision.domain.model.DetectionQuery;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DeviceId;
@@ -19,6 +22,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -45,7 +49,8 @@ import java.util.Objects;
  *
  * <p>No acting user is threaded through here: a stream is transient plumbing rather than a
  * change to the fleet, so nothing on this path is audited against a principal. Asset-level
- * streaming, which is, lives on {@link AssetController}.
+ * streaming, which is, lives on {@link AssetController}. {@link #updateConfig} (docs/CV-CONTROL-PLAN.md
+ * §3) follows the same stance — a live config tweak is not an audited fleet change either.
  *
  * <p>Also exposes recent detections read-only over {@link DetectionRepositoryPort} (docs/MVP1-PLAN.md
  * §C8 bullet 3) — the same precedent {@link AssetController} already sets for {@link
@@ -124,6 +129,31 @@ public class StreamController {
     public void stop(@PathVariable String streamId) {
         streamService.stop(StreamId.of(streamId));
         LOG.log(System.Logger.Level.INFO, () -> "Stopped stream " + streamId);
+    }
+
+    /**
+     * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md §3's frozen wire
+     * contract) — a partial patch: only fields present in the body change, everything else is left
+     * as-is. Confidence threshold, inference fps, label filter, and detection on/off apply instantly
+     * with no video interruption; a present {@code model} that differs from the stream's currently
+     * running one briefly re-arms detection instead (video stays untouched either way) — the caller
+     * learns this happened via {@link UpdateStreamConfigResponse#modelReArmed()}.
+     *
+     * @param streamId the running stream to update, as a canonical UUID string
+     * @param request  the knobs to change; the whole body may be absent (a no-op patch)
+     * @return the updated stream's id and whether the model was re-armed
+     * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
+     *                                            instance (→404)
+     * @throws IllegalArgumentException          if the merged config fails {@link PipelineConfig}'s
+     *                                            own validation, e.g. confidence outside [0,1] (→400)
+     */
+    @PatchMapping("/api/streams/{streamId}/config")
+    public UpdateStreamConfigResponse updateConfig(@PathVariable String streamId,
+                                                     @RequestBody(required = false) UpdateStreamConfigRequest request) {
+        UpdateStreamConfigRequest body = request != null ? request : UpdateStreamConfigRequest.EMPTY;
+        StreamId id = StreamId.of(streamId);
+        UpdateOutcome outcome = streamService.updateConfig(id, body.toPatch());
+        return new UpdateStreamConfigResponse(id.value().toString(), outcome.modelReArmed());
     }
 
     /**

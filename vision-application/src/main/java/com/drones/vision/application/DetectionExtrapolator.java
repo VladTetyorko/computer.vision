@@ -64,6 +64,17 @@ final class DetectionExtrapolator {
     }
 
     /**
+     * Clears both remembered results (docs/CV-CONTROL-PLAN.md &sect;A) — called by {@link
+     * StreamPipeline#updateConfig} on a model-id change, since a box matched/extrapolated across a
+     * model swap would blend two different models' outputs. After this call, {@link #at} behaves
+     * exactly as it does before any result has ever been {@linkplain #accept accepted}.
+     */
+    synchronized void reset() {
+        previous = null;
+        latest = null;
+    }
+
+    /**
      * @param t the timestamp to extrapolate boxes to, typically the
      *          currently-publishing frame's {@code capturedAt}
      * @return no result accepted yet: an empty list. Only one result

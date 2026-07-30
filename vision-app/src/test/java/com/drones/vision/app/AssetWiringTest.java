@@ -9,6 +9,7 @@ import com.drones.vision.api.ActivityController;
 import com.drones.vision.api.AssetImageController;
 import com.drones.vision.api.AssetStatsController;
 import com.drones.vision.api.AssignmentController;
+import com.drones.vision.api.CvModelsController;
 import com.drones.vision.api.DeviceProbeController;
 import com.drones.vision.api.EventController;
 import com.drones.vision.api.FleetController;
@@ -29,6 +30,7 @@ import com.drones.vision.application.FleetSummaryService;
 import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
+import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
@@ -280,6 +282,14 @@ class AssetWiringTest {
     @Autowired
     private GroupAdminController groupAdminController;
 
+    /** docs/CV-CONTROL-PLAN.md §4: the static, config-backed detection-model roster bean. */
+    @Autowired
+    private List<CvModelResponse> cvModelRoster;
+
+    /** docs/CV-CONTROL-PLAN.md §4: {@code GET /api/cv/models}. */
+    @Autowired
+    private CvModelsController cvModelsController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -319,6 +329,10 @@ class AssetWiringTest {
         assertNotNull(activityController, "ActivityController must resolve its constructor dependencies (docs/U-SCOPE-PLAN.md slice 2)");
         assertNotNull(userAdminController, "UserAdminController must resolve its constructor dependency (docs/U-SCOPE-PLAN.md slice 2)");
         assertNotNull(groupAdminController, "GroupAdminController must resolve its constructor dependency (docs/U-SCOPE-PLAN.md slice 2)");
+        assertNotNull(cvModelRoster, "cvModelRoster bean must be registered (docs/CV-CONTROL-PLAN.md §4)");
+        assertTrue(cvModelRoster.stream().anyMatch(m -> "yolo26n.pt".equals(m.id())),
+                "cvModelRoster must include the default yolo26n.pt model (docs/CV-CONTROL-PLAN.md §4)");
+        assertNotNull(cvModelsController, "CvModelsController must resolve its constructor dependency (docs/CV-CONTROL-PLAN.md §4)");
     }
 
     /**

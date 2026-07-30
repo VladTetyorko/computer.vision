@@ -1,8 +1,10 @@
 package com.drones.vision.api;
 
 import com.drones.vision.application.ActiveStream;
+import com.drones.vision.application.PipelineConfigPatch;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.UnsupportedProtocolException;
+import com.drones.vision.application.UpdateOutcome;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionQuery;
@@ -33,11 +35,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -45,6 +50,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -290,6 +296,74 @@ class StreamControllerTest {
         assertEquals(PipelineConfig.defaults().model(), captor.getValue().model());
     }
 
+    // ---- docs/CV-CONTROL-PLAN.md §2: labelFilter/detectionEnabled start overrides ----
+
+    @Test
+    void startMergesLabelFilterOverrideOntoDefaults() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"labelFilter":["person","car"]}
+                """;
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        assertEquals(Set.of("person", "car"), captor.getValue().labelFilter());
+    }
+
+    @Test
+    void startWithoutLabelFilterKeepsTheDefaultEmptySet() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        assertEquals(PipelineConfig.defaults().labelFilter(), captor.getValue().labelFilter());
+    }
+
+    @Test
+    void startMergesDetectionEnabledFalseOverrideOntoDefaults() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        String body = """
+                {"detectionEnabled":false}
+                """;
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        assertFalse(captor.getValue().detectionEnabled());
+    }
+
+    @Test
+    void startWithoutDetectionEnabledKeepsTheDefaultTrue() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(streamService).start(eq(deviceId), captor.capture());
+        assertTrue(captor.getValue().detectionEnabled());
+    }
+
     @Test
     void startReturns404WhenDeviceIsUnknown() throws Exception {
         when(streamService.start(any(), any()))
@@ -494,6 +568,116 @@ class StreamControllerTest {
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    // ---- docs/CV-CONTROL-PLAN.md §3: PATCH /api/streams/{streamId}/config ----
+
+    @Test
+    void updateConfigReturnsStreamIdAndModelReArmedFalseForHotKnobs() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"confidenceThreshold":0.5,"inferenceFps":5}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.modelReArmed").value(false));
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals(0.5, patch.confidenceThreshold());
+        assertEquals(5, patch.inferenceFps());
+        assertNull(patch.labelFilter());
+        assertNull(patch.detectionEnabled());
+        assertNull(patch.modelId());
+    }
+
+    @Test
+    void updateConfigReturnsModelReArmedTrueWhenTheModelChanged() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(true));
+
+        String body = """
+                {"model":"yoloe-26s-seg-pf.pt"}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.modelReArmed").value(true));
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        assertEquals("yoloe-26s-seg-pf.pt", captor.getValue().modelId());
+    }
+
+    @Test
+    void updateConfigThreadsLabelFilterAndDetectionEnabledThroughToThePatch() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"labelFilter":["person","building"],"detectionEnabled":false}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals(Set.of("person", "building"), patch.labelFilter());
+        assertFalse(patch.detectionEnabled());
+    }
+
+    @Test
+    void updateConfigReturns404ForAnUnknownOrNotRunningStream() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any()))
+                .thenThrow(new NoSuchElementException("Unknown or not-running stream: " + streamId.value()));
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void updateConfigReturns400ForAnInvalidValue() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any()))
+                .thenThrow(new IllegalArgumentException(
+                        "PipelineConfig confidenceThreshold must be within [0,1]: 2.0"));
+
+        String body = """
+                {"confidenceThreshold":2.0}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void updateConfigAcceptsAnAbsentBodyAsANoOpPatch() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.modelReArmed").value(false));
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        assertEquals(PipelineConfigPatch.NOTHING, captor.getValue());
     }
 
     // ---- docs/MVP3-PLAN.md C-a: GET /api/streams/{streamId}/snapshot ----

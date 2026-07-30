@@ -60,6 +60,24 @@ def test_discover_roster_finds_pt_files_and_openvino_dirs(tmp_path: Path):
     assert len(roster) == 3
 
 
+def test_discover_roster_picks_up_yoloe_seg_pf_checkpoint(tmp_path: Path):
+    """A prompt-free open-vocabulary YOLOE checkpoint (`yoloe-*-seg-pf.pt`)
+    is just another `*.pt` file, so it is auto-routable through the existing
+    registry with ZERO code change -- `discover_roster` globs it exactly like
+    `yolo26n.pt`/`orion12l.pt`. This test uses a tiny empty placeholder file
+    (NOT real 31MB weights -- unit tests never download) to prove the glob
+    includes it as a routable `model_id`."""
+    (tmp_path / "yolo26n.pt").write_bytes(b"fake-weights")
+    (tmp_path / "yoloe-26s-seg-pf.pt").write_bytes(b"fake-seg-pf-weights")
+
+    roster = discover_roster(tmp_path, default_model="yolo26n.pt")
+
+    # the YOLOE seg-pf model is discovered under its exact wire model_id, so a
+    # client sending model_id="yoloe-26s-seg-pf.pt" routes straight to it.
+    assert roster["yoloe-26s-seg-pf.pt"] == str(tmp_path / "yoloe-26s-seg-pf.pt")
+    assert "yolo26n.pt" in roster  # default stays the fast general model
+
+
 def test_discover_roster_always_includes_default_even_if_not_found(tmp_path: Path):
     roster = discover_roster(tmp_path, default_model="yolo11n.pt")
 
@@ -89,6 +107,13 @@ def test_discover_roster_ignores_openvino_dir_that_is_actually_a_file(tmp_path: 
         ("yolo11n.pt", "yolo11n"),
         ("orion12l.pt", "orion12l"),
         ("yolo11n_openvino_model", "yolo11n"),
+        # YOLOE prompt-free seg checkpoint: only the trailing `.pt` is stripped
+        # (the `-seg-pf` is part of the model's own name, not a known export
+        # suffix), so it yields a sensible, distinct composite-label prefix.
+        # This is correct, not a bug: the prefix only ever labels detections in
+        # composite mode (e.g. "yoloe-26s-seg-pf:building"), where keeping the
+        # full name disambiguates it from any other yoloe variant.
+        ("yoloe-26s-seg-pf.pt", "yoloe-26s-seg-pf"),
         ("yolo", "yolo"),  # bare alias, no known suffix -- passes through
     ],
 )

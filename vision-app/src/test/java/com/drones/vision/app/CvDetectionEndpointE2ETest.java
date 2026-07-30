@@ -122,7 +122,9 @@ class CvDetectionEndpointE2ETest {
 
             assertEquals(streamId.value().toString(), JsonPath.read(responseJson, "$[0].streamId"));
             assertEquals("person", JsonPath.read(responseJson, "$[0].detections[0].label"));
-            assertEquals("yolo", JsonPath.read(responseJson, "$[0].detections[0].modelId"));
+            // docs/CV-CONTROL-PLAN.md Wave B: PipelineConfig.defaults()'s model id is now the real
+            // "yolo26n.pt" checkpoint (was the dead "yolo" id that matched no real checkpoint).
+            assertEquals("yolo26n.pt", JsonPath.read(responseJson, "$[0].detections[0].modelId"));
             assertEquals("latest", JsonPath.read(responseJson, "$[0].detections[0].modelVersion"));
             Number confidence = JsonPath.read(responseJson, "$[0].detections[0].confidence");
             assertEquals(0.87, confidence.doubleValue(), 0.001);

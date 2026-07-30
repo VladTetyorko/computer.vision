@@ -5,6 +5,7 @@ import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
+import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
@@ -337,6 +338,48 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? Optional.empty() : active.pipeline().latestFrame();
+    }
+
+    /**
+     * Resolves the running stream, merges {@code patch} onto its {@link
+     * StreamPipeline#config() current config}, and swaps it in (docs/CV-CONTROL-PLAN.md &sect;5).
+     * The merge — and therefore the merged {@link PipelineConfig}'s own compact-ctor validation —
+     * runs <b>before</b> {@link StreamPipeline#updateConfig} is ever called, so an invalid patch
+     * value never touches the running pipeline at all.
+     */
+    @Override
+    public UpdateOutcome updateConfig(StreamId streamId, PipelineConfigPatch patch) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        Objects.requireNonNull(patch, "patch must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        if (active == null) {
+            throw new NoSuchElementException("Unknown or not-running stream: " + streamId.value());
+        }
+        PipelineConfig current = active.pipeline().config();
+        boolean modelReArmed = patch.modelId() != null && !patch.modelId().equals(current.model().id());
+        active.pipeline().updateConfig(mergeConfig(current, patch));
+        return new UpdateOutcome(modelReArmed);
+    }
+
+    /**
+     * Folds {@code patch}'s present fields onto {@code current}, leaving every absent field (and
+     * every non-PATCH-able field — {@code maxInFlightInferences}, {@code overlayTelemetry}, {@code
+     * eventRule}, {@code overlayBurnIn}, and the model's own {@code version}, frozen contract
+     * &sect;3) exactly as {@code current} has it.
+     */
+    private static PipelineConfig mergeConfig(PipelineConfig current, PipelineConfigPatch patch) {
+        ModelRef model = patch.modelId() == null
+                ? current.model()
+                : new ModelRef(patch.modelId(), current.model().version());
+        double confidenceThreshold =
+                patch.confidenceThreshold() == null ? current.confidenceThreshold() : patch.confidenceThreshold();
+        int inferenceFps = patch.inferenceFps() == null ? current.inferenceFps() : patch.inferenceFps();
+        Set<String> labelFilter = patch.labelFilter() == null ? current.labelFilter() : patch.labelFilter();
+        boolean detectionEnabled =
+                patch.detectionEnabled() == null ? current.detectionEnabled() : patch.detectionEnabled();
+        return new PipelineConfig(model, confidenceThreshold, inferenceFps, current.maxInFlightInferences(),
+                current.overlayTelemetry(), labelFilter, current.eventRule(), current.overlayBurnIn(),
+                detectionEnabled);
     }
 
     /** What this service holds per running stream; distinct from the {@link ActiveStream} read model. */

@@ -8,6 +8,7 @@ import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
+import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
@@ -488,5 +489,143 @@ class DefaultStreamServiceTest {
         // nullable-collaborator contract as usageTrackerIsNeverTouchedWhenNoneIsConfigured.
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
         assertDoesNotThrow(() -> service.stop(streamId));
+    }
+
+    // --- docs/CV-CONTROL-PLAN.md Wave C: StreamService.updateConfig ---
+
+    /**
+     * A {@link Flow.Publisher} whose frames are pushed explicitly by the test via {@link #push},
+     * rather than in response to {@code request()} — lets a test call {@link
+     * StreamService#updateConfig} between two frames of the same running stream and observe which
+     * config a later frame's {@code detect()} call carried.
+     */
+    private static final class ControllableFramePublisher implements Flow.Publisher<VideoFrame> {
+        private volatile Flow.Subscriber<? super VideoFrame> subscriber;
+
+        @Override
+        public void subscribe(Flow.Subscriber<? super VideoFrame> subscriber) {
+            this.subscriber = subscriber;
+            subscriber.onSubscribe(new Flow.Subscription() {
+                @Override
+                public void request(long n) {
+                    // frames are pushed explicitly via push(), not in response to request()
+                }
+
+                @Override
+                public void cancel() {
+                    // no-op
+                }
+            });
+        }
+
+        void push(VideoFrame frame) {
+            subscriber.onNext(frame);
+        }
+    }
+
+    private static VideoFrame frameOn(StreamId streamId, long sequence) {
+        return new VideoFrame(streamId, sequence, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+    }
+
+    private static DetectionResult emptyResultOn(StreamId streamId) {
+        return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO);
+    }
+
+    @Test
+    void updateConfigThrowsForAnUnknownStream() {
+        assertThrows(NoSuchElementException.class,
+                () -> service.updateConfig(StreamId.random(), PipelineConfigPatch.NOTHING));
+    }
+
+    @Test
+    void updateConfigThrowsForAStoppedStream() {
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+        service.stop(streamId);
+
+        assertThrows(NoSuchElementException.class, () -> service.updateConfig(streamId, PipelineConfigPatch.NOTHING));
+    }
+
+    @Test
+    void updateConfigThrowsIllegalArgumentForAnInvalidMergedValue() {
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.updateConfig(streamId, new PipelineConfigPatch(1.5, null, null, null, null)));
+    }
+
+    @Test
+    void updateConfigAppliesAHotKnobToTheRunningPipelineAndReportsNoReArm() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of());
+        StreamId streamId = service.start(device.id(), started);
+
+        UpdateOutcome outcome = service.updateConfig(streamId, new PipelineConfigPatch(0.75, null, null, null, null));
+
+        assertFalse(outcome.modelReArmed());
+        publisher.push(frameOn(streamId, 0));
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(detectionPort).detect(any(), captor.capture());
+        assertEquals(0.75, captor.getValue().confidenceThreshold());
+        assertEquals("yolo", captor.getValue().model().id());
+    }
+
+    @Test
+    void updateConfigReportsNoReArmWhenThePatchNeverMentionsTheModel() {
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        UpdateOutcome outcome = service.updateConfig(streamId, new PipelineConfigPatch(0.6, null, null, null, null));
+
+        assertFalse(outcome.modelReArmed());
+    }
+
+    @Test
+    void updateConfigChangingTheModelIdReportsReArmedAndAppliesTheNewModelKeepingItsVersion() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 1000, 5, true, Set.of());
+        StreamId streamId = service.start(device.id(), started);
+
+        UpdateOutcome outcome =
+                service.updateConfig(streamId, new PipelineConfigPatch(null, null, null, null, "orion12l.pt"));
+
+        assertTrue(outcome.modelReArmed());
+        publisher.push(frameOn(streamId, 0));
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(detectionPort).detect(any(), captor.capture());
+        assertEquals("orion12l.pt", captor.getValue().model().id());
+        assertEquals("latest", captor.getValue().model().version(), "model version is not PATCH-able");
+    }
+
+    @Test
+    void updateConfigMergesOnlyThePresentFieldLeavingEveryOtherFieldExactlyAsItWas() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        PipelineConfig started = new PipelineConfig(new ModelRef("yolo", "v1"), 0.4, 1000, 3, true, Set.of("person"));
+        StreamId streamId = service.start(device.id(), started);
+
+        service.updateConfig(streamId, new PipelineConfigPatch(null, null, Set.of("car"), null, null));
+        publisher.push(frameOn(streamId, 0));
+
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(detectionPort).detect(any(), captor.capture());
+        PipelineConfig merged = captor.getValue();
+        assertEquals(Set.of("car"), merged.labelFilter());
+        assertEquals(0.4, merged.confidenceThreshold());
+        assertEquals(1000, merged.inferenceFps());
+        assertEquals(3, merged.maxInFlightInferences());
+        assertTrue(merged.overlayTelemetry());
+        assertEquals("yolo", merged.model().id());
+        assertEquals("v1", merged.model().version());
+        assertTrue(merged.detectionEnabled());
     }
 }

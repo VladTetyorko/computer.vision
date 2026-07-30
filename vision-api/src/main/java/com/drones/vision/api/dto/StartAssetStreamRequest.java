@@ -3,6 +3,8 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 
+import java.util.List;
+
 /**
  * Optional request body for {@code POST /api/assets/{id}/stream}.
  *
@@ -10,8 +12,8 @@ import com.drones.vision.domain.model.PipelineConfig;
  * the asset's devices to stream from; if absent, {@code AssetService}
  * resolves the asset's single {@code VIDEO}-capable device, throwing
  * {@link IllegalArgumentException} (surfaced as 400) if that
- * is ambiguous. {@code confidenceThreshold}/{@code inferenceFps} override the
- * corresponding {@link PipelineConfig#defaults()} values, delegating to
+ * is ambiguous. The rest of the fields override the corresponding
+ * {@link PipelineConfig#defaults()} values, delegating to
  * {@link StartStreamRequest#mergeOntoDefaults()} for that merge so the two
  * start-stream request shapes share one implementation.
  *
@@ -22,12 +24,17 @@ import com.drones.vision.domain.model.PipelineConfig;
  * @param model               overrides {@link PipelineConfig#model()}'s {@code id} if present/non-blank — see
  *                             {@link StartStreamRequest#model()}'s own javadoc for the full contract (raw,
  *                             never split; version comes from the default)
+ * @param labelFilter         overrides {@link PipelineConfig#labelFilter()} if present — see {@link
+ *                             StartStreamRequest#labelFilter()}'s own javadoc (docs/CV-CONTROL-PLAN.md §2)
+ * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present (docs/CV-CONTROL-PLAN.md §2)
  */
 public record StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
-                                       Boolean overlayBurnIn, String model) {
+                                       Boolean overlayBurnIn, String model, List<String> labelFilter,
+                                       Boolean detectionEnabled) {
 
     /** No body: no explicit device, use every default from {@link PipelineConfig#defaults()}. */
-    public static final StartAssetStreamRequest EMPTY = new StartAssetStreamRequest(null, null, null, null, null);
+    public static final StartAssetStreamRequest EMPTY =
+            new StartAssetStreamRequest(null, null, null, null, null, null, null);
 
     /**
      * Parses {@link #deviceId()}, if present.
@@ -41,11 +48,12 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
 
     /**
      * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()}/{@link
-     * #model()} onto {@link PipelineConfig#defaults()}.
+     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()} onto {@link PipelineConfig#defaults()}.
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
-        return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn, model).mergeOntoDefaults();
+        return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter,
+                detectionEnabled).mergeOntoDefaults();
     }
 }

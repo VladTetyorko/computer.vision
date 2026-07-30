@@ -6,6 +6,7 @@ import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
 
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -64,4 +65,22 @@ public interface StreamService {
      *         this instance, or it is but hasn't published a frame yet
      */
     Optional<VideoFrame> latestFrame(StreamId streamId);
+
+    /**
+     * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md &sect;5) — a
+     * partial patch folded onto the stream's current {@link PipelineConfig}. Confidence threshold,
+     * inference fps, label filter and detection on/off apply instantly with no video interruption;
+     * a changed model id briefly re-arms detection instead (see {@link
+     * UpdateOutcome#modelReArmed()} and {@code StreamPipeline#updateConfig}'s own javadoc for what
+     * that means concretely).
+     *
+     * @param streamId the running stream to update
+     * @param patch    the knobs to change; a {@code null} field on {@code patch} keeps that knob at
+     *                 its current value
+     * @return whether the patch changed the running model
+     * @throws NoSuchElementException  if {@code streamId} is unknown or not running on this instance
+     * @throws IllegalArgumentException if the merged config fails {@link PipelineConfig}'s own
+     *                                   validation (e.g. confidence outside [0,1])
+     */
+    UpdateOutcome updateConfig(StreamId streamId, PipelineConfigPatch patch);
 }

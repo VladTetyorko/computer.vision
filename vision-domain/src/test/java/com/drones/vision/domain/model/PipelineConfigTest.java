@@ -17,7 +17,10 @@ class PipelineConfigTest {
     void defaultsMatchSpec() {
         PipelineConfig defaults = PipelineConfig.defaults();
 
-        assertEquals(new ModelRef("yolo", "latest"), defaults.model());
+        // docs/CV-CONTROL-PLAN.md §1/§B: fixes the previously-dead "yolo" model id (matched no
+        // real checkpoint, silently relied on cv-service's own fallback) to the real checkpoint
+        // id cv-service already defaults to.
+        assertEquals(new ModelRef("yolo26n.pt", "latest"), defaults.model());
         assertEquals(0.4, defaults.confidenceThreshold());
         assertEquals(10, defaults.inferenceFps());
         assertEquals(2, defaults.maxInFlightInferences());
@@ -25,28 +28,31 @@ class PipelineConfigTest {
         assertTrue(defaults.labelFilter().isEmpty(), "empty labelFilter means all labels");
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
         assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
+        assertTrue(defaults.detectionEnabled(), "detection defaults on, unchanged behavior");
     }
 
     @Test
-    void sixArgConvenienceConstructorDefaultsEventRuleAndOverlayBurnIn() {
+    void sixArgConvenienceConstructorDefaultsEventRuleOverlayBurnInAndDetectionEnabled() {
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of());
 
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
         assertTrue(config.overlayBurnIn());
+        assertTrue(config.detectionEnabled(), "old 6-arg ctor chain still defaults detectionEnabled=true");
     }
 
     @Test
-    void sevenArgConstructorAcceptsAnExplicitEventRuleAndDefaultsOverlayBurnIn() {
+    void sevenArgConstructorAcceptsAnExplicitEventRuleAndDefaultsOverlayBurnInAndDetectionEnabled() {
         EventRuleConfig customRule = new EventRuleConfig(Set.of("dog"), 0.7, 5, Duration.ofSeconds(10));
 
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule);
 
         assertEquals(customRule, config.eventRule());
         assertTrue(config.overlayBurnIn());
+        assertTrue(config.detectionEnabled(), "old 7-arg ctor chain still defaults detectionEnabled=true");
     }
 
     @Test
-    void eightArgConstructorAcceptsAnExplicitOverlayBurnIn() {
+    void eightArgConstructorAcceptsAnExplicitOverlayBurnInAndDefaultsDetectionEnabled() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
 
         PipelineConfig config =
@@ -54,6 +60,20 @@ class PipelineConfigTest {
 
         assertEquals(customRule, config.eventRule());
         assertFalse(config.overlayBurnIn());
+        assertTrue(config.detectionEnabled(),
+                "old 8-arg canonical ctor (pre-Wave-B) still defaults detectionEnabled=true");
+    }
+
+    @Test
+    void nineArgCanonicalConstructorRoundTripsAnExplicitDetectionEnabled() {
+        EventRuleConfig customRule = EventRuleConfig.defaults();
+
+        PipelineConfig config =
+                new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule, false, false);
+
+        assertEquals(customRule, config.eventRule());
+        assertFalse(config.overlayBurnIn());
+        assertFalse(config.detectionEnabled());
     }
 
     @Test
@@ -61,7 +81,7 @@ class PipelineConfigTest {
         ModelRef model = new ModelRef("yolo", "1");
 
         assertThrows(IllegalArgumentException.class,
-                () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null, true));
+                () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null, true, true));
     }
 
     @Test

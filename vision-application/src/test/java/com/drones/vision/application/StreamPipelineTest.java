@@ -47,9 +47,11 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -932,6 +934,190 @@ class StreamPipelineTest {
         // velocity 0.4 units/s, capped at 800ms past L -> center x + 0.32 -> box x = 0.46.
         assertEquals(1, forF2.detections().size());
         assertEquals(0.46, forF2.detections().get(0).box().x(), 1e-9);
+    }
+
+    // --- docs/CV-CONTROL-PLAN.md Wave C: live config update, skip-detect, label-filter enforcement ---
+
+    private DetectionResult resultWithLabels(long sequence, String... labels) {
+        List<Detection> detections = new ArrayList<>();
+        for (String label : labels) {
+            detections.add(new Detection(label, 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
+                    new ModelRef("yolo", "latest")));
+        }
+        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5));
+    }
+
+    @Test
+    void configReturnsTheCurrentlyActivePipelineConfigAndReflectsAnUpdate() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertEquals(30, pipeline.config().inferenceFps());
+
+        PipelineConfig next = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 15, 2, true, Set.of());
+        pipeline.updateConfig(next);
+
+        assertEquals(15, pipeline.config().inferenceFps());
+    }
+
+    @Test
+    void updateConfigRejectsNull() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertThrows(NullPointerException.class, () -> pipeline.updateConfig(null));
+    }
+
+    @Test
+    void updateConfigAppliesHotKnobsToTheNextSampledFrameWithoutClearingAnyModelBoundState() {
+        DetectionResult firstResult = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(firstResult));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+        assertEquals(firstResult.detections(), pipeline.latestDetections());
+
+        // Same model id ("yolo"): a hot-knob-only patch must never behave like a re-arm.
+        PipelineConfig hotter = new PipelineConfig(new ModelRef("yolo", "latest"), 0.75, 1000, 5, true, Set.of());
+        pipeline.updateConfig(hotter);
+
+        assertEquals(firstResult.detections(), pipeline.latestDetections(),
+                "a non-model config swap must not clear latestDetections the way a model re-arm does");
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(1)));
+        pipeline.onNext(frame(1));
+
+        ArgumentCaptor<PipelineConfig> configCaptor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(detectionPort, times(2)).detect(any(), configCaptor.capture());
+        assertEquals(0.4, configCaptor.getAllValues().get(0).confidenceThreshold());
+        assertEquals(0.75, configCaptor.getAllValues().get(1).confidenceThreshold(),
+                "the very next sampled frame must already carry the swapped-in confidence threshold");
+    }
+
+    @Test
+    void detectionEnabledFalseSkipsDetectEntirelyWhileVideoKeepsPublishing() {
+        List<VideoFrame> frames = List.of(frame(0), frame(1), frame(2));
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(frames);
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of(),
+                EventRuleConfig.defaults(), true, false);
+        StreamPipeline pipeline = pipeline(publisher, detectionOff);
+
+        pipeline.start();
+
+        verify(detectionPort, never()).detect(any(), any());
+        for (VideoFrame f : frames) {
+            verify(streamPublisherPort).publish(streamId, f);
+        }
+        assertEquals(Optional.of(frames.get(frames.size() - 1)), pipeline.latestFrame(),
+                "video must keep flowing/advancing latestFrame while detection is off");
+    }
+
+    @Test
+    void detectionResumesOnTheNextSampledFrameAfterReEnabling() {
+        PipelineConfig detectionOff = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, false);
+        StreamPipeline pipeline = manualPipeline(detectionOff, () -> 0L);
+
+        pipeline.onNext(frame(0));
+        pipeline.onNext(frame(1));
+        verify(detectionPort, never()).detect(any(), any());
+        verify(streamPublisherPort, times(2)).publish(eq(streamId), any());
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(2)));
+        PipelineConfig detectionOn = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, true);
+        pipeline.updateConfig(detectionOn);
+        pipeline.onNext(frame(2));
+
+        verify(detectionPort, times(1)).detect(any(), any());
+    }
+
+    @Test
+    void emptyLabelFilterKeepsEveryDetection() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = resultWithLabels(0, "person", "car");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2)); // config(...) helper's labelFilter is Set.of()
+        pipeline.start();
+
+        assertEquals(List.of("person", "car"),
+                pipeline.latestDetections().stream().map(Detection::label).toList());
+    }
+
+    @Test
+    void labelFilterDropsNonMatchingDetectionsUniformlyAcrossEveryDownstreamConsumer() {
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = resultWithLabels(0, "person", "car");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
+        AssetId assetId = AssetId.random();
+        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of("person"),
+                EventRuleConfig.defaults(), true, true);
+
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, null, eventEngine, assetId,
+                liveUpdatePublisherPort);
+        pipeline.start();
+
+        assertEquals(List.of("person"), pipeline.latestDetections().stream().map(Detection::label).toList());
+
+        ArgumentCaptor<DetectionResult> savedCaptor = ArgumentCaptor.forClass(DetectionResult.class);
+        verify(detectionRepositoryPort).save(savedCaptor.capture());
+        assertEquals(List.of("person"), savedCaptor.getValue().detections().stream().map(Detection::label).toList());
+
+        ArgumentCaptor<DetectionResult> engineCaptor = ArgumentCaptor.forClass(DetectionResult.class);
+        verify(eventEngine).accept(engineCaptor.capture());
+        assertEquals(List.of("person"), engineCaptor.getValue().detections().stream().map(Detection::label).toList());
+
+        ArgumentCaptor<DetectionResult> liveCaptor = ArgumentCaptor.forClass(DetectionResult.class);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), liveCaptor.capture());
+        assertEquals(List.of("person"), liveCaptor.getValue().detections().stream().map(Detection::label).toList());
+    }
+
+    @Test
+    void labelFilterAppliesToTheExtrapolatedOverlayViewToo() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        DetectionResult result = resultWithLabels(0, "person", "car");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        when(overlayPort.render(any())).thenReturn(frame(99));
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of("person"),
+                EventRuleConfig.defaults(), true, true);
+
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, config, publisher, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort);
+        pipeline.start();
+
+        ArgumentCaptor<AnnotatedFrame> captor = ArgumentCaptor.forClass(AnnotatedFrame.class);
+        verify(overlayPort).render(captor.capture());
+        assertEquals(List.of("person"), captor.getValue().detections().stream().map(Detection::label).toList());
+    }
+
+    @Test
+    void updateConfigWithADifferentModelIdClearsStaleModelBoundDetectionStateAndAppliesTheNewModelOnTheNextSample() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestDetections().isEmpty());
+
+        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, true, Set.of());
+        pipeline.updateConfig(newModel);
+
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "a model-id change must clear stale detections bound to the old model");
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(1)));
+        pipeline.onNext(frame(1));
+
+        ArgumentCaptor<PipelineConfig> configCaptor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(detectionPort, times(2)).detect(any(), configCaptor.capture());
+        assertEquals("orion12l", configCaptor.getAllValues().get(1).model().id(),
+                "the very next sampled frame must already carry the new model");
     }
 
     /**

@@ -21,6 +21,7 @@ import com.drones.vision.domain.port.out.StreamPublisherPort;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -188,7 +189,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     private final StreamId streamId;
     private final Device device;
-    private final PipelineConfig config;
+
+    /**
+     * Live-swappable per docs/CV-CONTROL-PLAN.md &sect;A — every per-frame read below (sampling's
+     * {@code inferenceFps}, {@link #maybeDetect}'s {@code maxInFlightInferences}/{@code
+     * detectionEnabled}, {@link #overlayIfNeeded}'s overlay flags, and the {@code config} passed
+     * into {@link #detectionPort}{@code .detect}) re-reads this field directly, so a write from
+     * {@link #updateConfig} is visible to the very next frame with no lock and no restart. See
+     * {@link #updateConfig}'s own javadoc for the model-id re-arm case.
+     */
+    private volatile PipelineConfig config;
     private final Flow.Publisher<VideoFrame> source;
     private final DetectionPort detectionPort;
     private final StreamPublisherPort streamPublisherPort;
@@ -377,6 +387,63 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     public void start() {
         streamPublisherPort.streamStarted(streamId, device);
         source.subscribe(this);
+    }
+
+    /**
+     * @return this pipeline's currently active {@link PipelineConfig} (a volatile read) — the merge
+     *         base {@link DefaultStreamService#updateConfig} folds a {@link PipelineConfigPatch}
+     *         onto, so a caller never needs to track a running stream's config anywhere but here.
+     */
+    public PipelineConfig config() {
+        return config;
+    }
+
+    /**
+     * Live-swaps this pipeline's {@link PipelineConfig} (docs/CV-CONTROL-PLAN.md &sect;5, &sect;A).
+     * Hot knobs — confidence threshold, inference fps, label filter, detection on/off — take effect
+     * on the very next sampled/published frame with no lock and no stream/usage-session/SSE
+     * disruption, since every per-frame read of {@link #config} already re-reads this volatile
+     * field (see that field's own javadoc).
+     *
+     * <p><b>Model-id re-arm.</b> When {@code next.model().id()} differs from the model this
+     * pipeline is currently running, this call also clears this pipeline's own model-bound
+     * bookkeeping — {@link #extrapolator} (via {@link DetectionExtrapolator#reset()}) and {@link
+     * #latestDetections} — so no stale detection produced by the old model lingers (extrapolated
+     * against, persisted, or shown) past the swap; {@link #latestDetections()} reads empty again
+     * until the new model's first result completes. The very next sampled frame's {@link
+     * #detectionPort}{@code .detect} call already carries {@code next} — including the new model —
+     * since {@link DetectionPort}'s own contract runs inference "using the model ... in config" on
+     * every call.
+     *
+     * <p><b>Limitation, honestly documented</b> (docs/CV-CONTROL-PLAN.md &sect;A's own escape
+     * hatch): {@link DetectionPort} (vision-domain) exposes only {@code detect(frame, config)} — no
+     * per-stream session lifecycle method a generic caller can invoke, deliberately, per that
+     * port's own javadoc ("batching, streaming, and connection reuse are adapter concerns"). This
+     * pipeline therefore cannot force whatever adapter-side session a concrete {@code
+     * DetectionPort} implementation keeps (e.g. {@code GrpcDetectionPort}'s per-{@link StreamId}
+     * bidi call, adapter-cv-grpc/MODULE.md's {@code streamEnded(StreamId)}) to actually close and
+     * reopen — that capability exists only on the concrete adapter class, never on the port
+     * interface this class (and {@link DefaultStreamService}) are wired against, and this class
+     * must not depend on adapter-cv-grpc to reach it. Clearing this pipeline's own state plus
+     * passing the new model on every subsequent call is the cleanest re-arm expressible from
+     * {@code vision-application} alone; whether a given adapter implementation actually swaps its
+     * loaded model on the very next call versus keeping one cached against the stream's first-seen
+     * model is that adapter's own concern, verified (at the time of writing) for cv-service, whose
+     * {@code ModelRegistry.resolve(request.model_id)} already resolves per-request, not per-session.
+     * Should a future adapter ever need an explicit close+reopen signal, that needs a lifecycle
+     * method added to {@link DetectionPort} itself — a {@code vision-domain} change, out of this
+     * class's file scope.
+     *
+     * @param next the config to switch to
+     */
+    public void updateConfig(PipelineConfig next) {
+        Objects.requireNonNull(next, "next must not be null");
+        boolean modelChanged = !config.model().id().equals(next.model().id());
+        config = next;
+        if (modelChanged) {
+            extrapolator.reset();
+            latestDetections = List.of();
+        }
     }
 
     /**
@@ -569,7 +636,17 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         PROBE
     }
 
+    /**
+     * Gated first — before the outage/in-flight logic below — on {@link
+     * PipelineConfig#detectionEnabled()} (docs/CV-CONTROL-PLAN.md &sect;1, &sect;A): {@code false}
+     * returns immediately, so a disabled stream spends zero CPU on inference <i>and</i> stops
+     * probing during an outage too — nothing below this check ever runs. Re-enabling resumes on the
+     * next sampled frame, exactly where the (frozen, untouched) outage/backoff state left off.
+     */
     private void maybeDetect(VideoFrame frame) {
+        if (!config.detectionEnabled()) {
+            return;
+        }
         switch (outageDecision()) {
             case SKIP -> {
                 // still backing off, or a probe is already in flight: never counted as in-flight
@@ -688,20 +765,50 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         onDetectionResult(result);
     }
 
+    /**
+     * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()} exactly
+     * once, centrally, here (docs/CV-CONTROL-PLAN.md &sect;A, the dormant-field fix) — to every
+     * downstream consumer: {@link #latestDetections()}, {@link #extrapolator} (and therefore
+     * overlay burn-in), {@link #eventEngine}, {@link #liveUpdatePublisherPort}, and persistence/the
+     * {@code DETECTION} event. Filtering once here, before any of those, is what makes every
+     * consumer see the same filtered set uniformly instead of each having to know about {@code
+     * labelFilter} itself.
+     */
     private void onDetectionResult(DetectionResult result) {
-        latestDetections = result.detections();
-        extrapolator.accept(result);
+        DetectionResult filtered = applyLabelFilter(result);
+        latestDetections = filtered.detections();
+        extrapolator.accept(filtered);
         if (eventEngine != null) {
-            eventEngine.accept(result);
+            eventEngine.accept(filtered);
         }
         if (liveUpdatePublisherPort != null && assetId != null) {
-            liveUpdatePublisherPort.publishDetections(assetId, result);
+            liveUpdatePublisherPort.publishDetections(assetId, filtered);
         }
-        if (!result.detections().isEmpty()) {
-            detectionRepositoryPort.save(result);
+        if (!filtered.detections().isEmpty()) {
+            detectionRepositoryPort.save(filtered);
             eventPublisher.publish(Event.of(streamId, EventType.DETECTION,
-                    "Detected " + result.detections().size() + " object(s) on frame " + result.frameSequence()));
+                    "Detected " + filtered.detections().size() + " object(s) on frame " + filtered.frameSequence()));
         }
+    }
+
+    /**
+     * Drops every detection whose label is not in {@link PipelineConfig#labelFilter()} — an empty
+     * filter keeps everything, the same semantics an empty filter already has on {@link
+     * PipelineConfig} itself. Returns {@code result} unchanged (same instance) when nothing was
+     * actually dropped, so the common case (no filter configured, or every detection already
+     * matches) allocates nothing new.
+     */
+    private DetectionResult applyLabelFilter(DetectionResult result) {
+        Set<String> labelFilter = config.labelFilter();
+        if (labelFilter.isEmpty()) {
+            return result;
+        }
+        List<Detection> kept = result.detections().stream().filter(d -> labelFilter.contains(d.label())).toList();
+        if (kept.size() == result.detections().size()) {
+            return result;
+        }
+        return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
+                result.inferenceLatency());
     }
 
     @Override

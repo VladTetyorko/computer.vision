@@ -31,6 +31,14 @@ import java.util.Set;
  * encode path — see {@code StreamPipeline}'s javadoc for exactly what the
  * skip saves.
  *
+ * <p>{@code detectionEnabled} (docs/CV-CONTROL-PLAN.md §1, Wave B) is the
+ * per-stream detection on/off switch: {@code false} means the pipeline skips
+ * {@code detect()} entirely — no {@code DetectionPort} calls are made, so
+ * detection costs zero CPU — while video keeps flowing at full rate,
+ * untouched. Re-enabling resumes detection on the next sampled frame. The
+ * skip itself is enforced by the application layer's {@code StreamPipeline}
+ * (Wave C); this record only carries the flag.
+ *
  * @param model                  model to run
  * @param confidenceThreshold    minimum confidence to keep a detection, range [0,1]
  * @param inferenceFps           target inference sample rate; must be positive
@@ -39,13 +47,18 @@ import java.util.Set;
  * @param labelFilter            labels to keep; empty means all labels; defensively copied
  * @param eventRule              debounce settings for {@link DetectionEvent} tracking
  * @param overlayBurnIn          whether to render overlays onto published video at all
+ * @param detectionEnabled       whether the pipeline runs detection at all; {@code false} skips
+ *                               {@code detect()} entirely while video keeps flowing
  */
 public record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps,
                               int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter,
-                              EventRuleConfig eventRule, boolean overlayBurnIn) {
+                              EventRuleConfig eventRule, boolean overlayBurnIn, boolean detectionEnabled) {
 
     /** Default for {@link #overlayBurnIn()} on every N-1-arg convenience constructor — unchanged behavior. */
     public static final boolean DEFAULT_OVERLAY_BURN_IN = true;
+
+    /** Default for {@link #detectionEnabled()} on every N-1-arg convenience constructor — unchanged behavior. */
+    public static final boolean DEFAULT_DETECTION_ENABLED = true;
 
     public PipelineConfig {
         if (model == null) {
@@ -72,10 +85,25 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     }
 
     /**
+     * Convenience constructor for callers that don't care about {@link #detectionEnabled()} —
+     * defaults it to {@link #DEFAULT_DETECTION_ENABLED} (unchanged behavior), the same "N-1-arg
+     * convenience ctor" idiom used elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s
+     * 7-arg ctor, this record's own 6-/7-arg ctors below). This was the canonical constructor
+     * before docs/CV-CONTROL-PLAN.md Wave B added {@link #detectionEnabled()}; every pre-existing
+     * 8-arg call site compiles unchanged.
+     */
+    public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
+                           boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule,
+                           boolean overlayBurnIn) {
+        this(model, confidenceThreshold, inferenceFps, maxInFlightInferences, overlayTelemetry, labelFilter,
+                eventRule, overlayBurnIn, DEFAULT_DETECTION_ENABLED);
+    }
+
+    /**
      * Convenience constructor for callers that don't care about {@link #overlayBurnIn()} — defaults
-     * it to {@link #DEFAULT_OVERLAY_BURN_IN} (unchanged behavior), the same "N-1-arg convenience
-     * ctor" idiom used elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s 7-arg ctor, this
-     * record's own 6-arg ctor below).
+     * it to {@link #DEFAULT_OVERLAY_BURN_IN} (unchanged behavior), chaining onto the 8-arg
+     * convenience ctor above (so {@link #detectionEnabled()} also defaults to
+     * {@link #DEFAULT_DETECTION_ENABLED}).
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule) {
@@ -95,16 +123,19 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     }
 
     /**
-     * Reasonable defaults for a new stream: the latest {@code "yolo"} model,
-     * a 0.4 confidence threshold, 10 FPS inference sampling, at most 2
-     * in-flight inference calls, telemetry overlay on, no label
-     * filtering (all labels kept), {@link EventRuleConfig#defaults()}, and
-     * overlay burn-in on.
+     * Reasonable defaults for a new stream: the {@code "yolo26n.pt"} model
+     * (docs/CV-CONTROL-PLAN.md §1, Wave B — the real checkpoint id cv-service
+     * already falls back to; the previous {@code "yolo"} id matched no actual
+     * checkpoint and relied on that silent fallback), a 0.4 confidence
+     * threshold, 10 FPS inference sampling, at most 2 in-flight inference
+     * calls, telemetry overlay on, no label filtering (all labels kept),
+     * {@link EventRuleConfig#defaults()}, overlay burn-in on, and detection
+     * enabled.
      *
      * @return a default {@code PipelineConfig}
      */
     public static PipelineConfig defaults() {
-        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 10, 2, true, Set.of(),
-                EventRuleConfig.defaults(), DEFAULT_OVERLAY_BURN_IN);
+        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
+                EventRuleConfig.defaults(), DEFAULT_OVERLAY_BURN_IN, DEFAULT_DETECTION_ENABLED);
     }
 }

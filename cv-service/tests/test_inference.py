@@ -147,6 +147,32 @@ def test_map_detections_no_boxes_attribute_returns_empty_list():
     assert map_detections(result, frame_width=100, frame_height=100) == []
 
 
+def test_map_detections_ignores_masks_on_segmentation_results():
+    """A prompt-free YOLOE (`yoloe-*-seg-pf.pt`) is an instance-segmentation
+    model, so its Ultralytics `Results` carry a non-None `.masks` attribute in
+    addition to the usual `.boxes`. `map_detections` must remain
+    mask-agnostic: it reads only `.boxes.xyxy`/`.conf`/`.cls` + `.names` and
+    never touches `.masks`, so the same box-mapping path serves detection and
+    segmentation checkpoints identically. Verified end-to-end against a real
+    `yoloe-26s-seg-pf.pt` result in `test_real_model.py`; this fake double
+    proves it without needing ultralytics/torch."""
+    boxes = FakeBoxes(xyxy=[[10.0, 20.0, 50.0, 80.0]], conf=[0.9], cls=[0])
+    # A seg-style Results also exposes a (here non-None) `.masks` attribute --
+    # an object map_detections must never require or read.
+    seg_result = types.SimpleNamespace(
+        boxes=boxes,
+        names={0: "building"},
+        masks=object(),  # non-None; would blow up if map_detections touched it wrongly
+    )
+
+    detections = map_detections(seg_result, frame_width=100, frame_height=200)
+
+    assert len(detections) == 1
+    assert detections[0].label == "building"
+    assert detections[0].x == pytest.approx(0.10)
+    assert detections[0].width == pytest.approx(0.40)
+
+
 def test_map_detections_clamps_out_of_frame_boxes():
     # A box that overshoots the frame on every edge (rounding, edge object).
     boxes = FakeBoxes(xyxy=[[-5.0, -5.0, 150.0, 250.0]], conf=[0.3], cls=[0])

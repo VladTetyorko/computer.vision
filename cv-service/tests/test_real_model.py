@@ -126,6 +126,47 @@ def test_local_model_smoke_detects_on_tiny_frame(filename):
     )
 
 
+def test_yoloe_seg_pf_real_weights_smoke_boxes_work_masks_ignored():
+    """Real-weights smoke test for the prompt-free open-vocabulary YOLOE
+    checkpoint `yoloe-26s-seg-pf.pt` (docs/CV-MODELS-PLAN.md follow-up: an
+    OPT-IN "everything incl. buildings" model, NOT the default).
+
+    Skip-if-absent, same contract as `_load_local_detector` above: this file
+    is gitignored (`*.pt`) and, unlike orion12l.pt, is NOT a user-provided
+    checkpoint but an official Ultralytics asset that `YOLO(name)` auto-
+    downloads to the cwd on first use. We do NOT trigger that download here --
+    the test skips cleanly if the weights aren't already present locally (run
+    the one-time acquisition command in MODULE.md to fetch them).
+
+    Two things this proves that the fakes in test_inference.py/test_registry.py
+    can't: (1) the seg-pf checkpoint loads via the plain `ultralytics.YOLO`
+    path `YoloDetector` already uses -- no `YOLOE` class, no `set_classes()`;
+    (2) its segmentation `Results` (which carry a non-None `.masks`) flow
+    through `YoloDetector.detect()` -> `map_detections` and yield well-formed
+    boxes with the masks silently ignored -- exactly like a detection model."""
+    from cv_service.inference import ENCODING_BGR24
+
+    detector = _load_local_detector("yoloe-26s-seg-pf.pt")
+
+    width, height = 64, 48
+    frame = _tiny_frame(width, height)
+
+    start = time.monotonic()
+    detections, inference_millis = detector.detect(
+        width=width, height=height, encoding=ENCODING_BGR24, data=frame.tobytes()
+    )
+    wall_millis = (time.monotonic() - start) * 1000
+
+    assert isinstance(detections, list)
+    assert inference_millis >= 0
+    _assert_well_formed_detections(detections)
+    print(
+        f"\n[smoke] yoloe-26s-seg-pf.pt: inference_millis={inference_millis} "
+        f"wall_millis={wall_millis:.1f} imgsz={detector.imgsz} "
+        f"detections={len(detections)}"
+    )
+
+
 def test_registry_composite_real_weights_merges_and_prefixes_labels():
     """End-to-end: real `discover_roster` + `ModelRegistry` + `detect_composite`
     over the two local checkpoints together -- the actual composite mode a

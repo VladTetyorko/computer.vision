@@ -14,6 +14,7 @@ import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.SimulatedVideoSource;
 import com.drones.vision.adapter.v4l2.V4l2VideoSource;
 import com.drones.vision.api.HlsProxyController;
+import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.devsupport.InMemoryAuditTrail;
 import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
@@ -314,6 +315,44 @@ public class WiringConfiguration {
     @Bean
     public URI hlsProxyUpstreamBase(VisionPublishProperties properties) {
         return properties.mediamtx().hlsBase();
+    }
+
+    /**
+     * The detection-model roster {@code CvModelsController} (component-scanned from {@code
+     * vision-api}) serves at {@code GET /api/cv/models} (docs/CV-CONTROL-PLAN.md §4's frozen wire
+     * contract) — the Fly cockpit's model picker builds its dropdown from exactly this list.
+     *
+     * <p>Supplied as a plain {@code List<CvModelResponse>} bean (rather than {@code
+     * CvModelsController} itself being constructed here), the same "raw collaborator, not a domain
+     * port" pattern {@link #hlsProxyUpstreamBase} already uses — the controller stays a plain
+     * component-scanned bean like every other REST controller, with only its collaborator wired
+     * from this module's configuration.
+     *
+     * <p><strong>Deliberately a static, in-source constant, not the dormant {@code
+     * ModelRegistryPort}</strong> (docs/CV-CONTROL-PLAN.md §D): that port models versioned
+     * promote/rollback (a Phase-3 training-studio concern) and has no implementation — wiring it now
+     * for a picker that only needs a display list would be over-building. This roster changes at
+     * deploy time (edit this method, rebuild), not at runtime; a future real source, if one is ever
+     * needed, is either that port or a small {@code cv-service} roster RPC (its own {@code
+     * ModelRegistry} already knows the local checkpoint set) — a documented seam, not built now.
+     *
+     * <p>{@code yolo26n.pt} is listed first and is the default ({@link
+     * com.drones.vision.domain.model.PipelineConfig#defaults()}) — the fast, closed-set,
+     * people+vehicles model. {@code yoloe-26s-seg-pf.pt} is the opt-in open-vocabulary model
+     * (materially slower on CPU); its {@code defaultLabelFilter} is deliberately <strong>empty</strong>
+     * rather than a curated preset — Wave A's real measurement found the model's 4585-class vocabulary
+     * spells "building" a dozen different image-dependent ways ({@code building}/{@code
+     * skyscraper}/{@code downtown}/{@code Prague Castle}/...), so a fixed exact-match preset would
+     * silently drop most buildings; the UI seeds its class chips from labels actually observed in the
+     * live detection stream instead (docs/CV-CONTROL-PLAN.md §E).
+     */
+    @Bean
+    public List<CvModelResponse> cvModelRoster() {
+        return List.of(
+                new CvModelResponse("yolo26n.pt", "General (people & vehicles, fast)", "general", false, List.of()),
+                new CvModelResponse("orion12l.pt", "Military vehicles", "specialized", false, List.of()),
+                new CvModelResponse("yoloe-26s-seg-pf.pt", "Everything (incl. buildings, slower)", "open-vocab",
+                        true, List.of()));
     }
 
     /**
