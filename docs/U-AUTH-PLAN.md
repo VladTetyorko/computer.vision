@@ -1,6 +1,16 @@
 # U-AUTH-PLAN — U-e slice 1: real identity + auth foundation
 
-Status: approved spec (2026-07-30, user chose "auth foundation first"). The first shippable
+Status: DONE (2026-07-30, all four waves green). Wave 1 domain (User/Role/Group/Membership +
+ports, 217 tests) · wave 2 application (Auth/User/GroupService + PasswordHasherPort seam, 427)
+· wave 3 security/api/persistence (Spring Security session, CurrentUser resolver seam,
+AuthController, JPA+in-memory user/group repos, admin/manager/pilot seeding — default-off
+suites unchanged: adapter-persistence 66, vision-api 283, vision-app 127; auth-on flow
+401→login→me→logout→me(401) verified; real Postgres user/group tests passed) · wave 4 UI
+(responsive login + identity chip + auth store/guard, 1064 tests). Auth is opt-in via
+`vision.auth.enabled` (default false = zero behavior change). **Visibility scoping is slice 2**
+(see the deferred list at the bottom). Original spec below.
+
+Approved spec (2026-07-30, user chose "auth foundation first"). The first shippable
 slice of UX-REWORK-PLAN §U-e. Turns the hardcoded `DevPrincipal` UUID into real logins with
 `User`/`Role`/`Group`, wires `CurrentUser` to the authenticated session, and ships a login
 screen — **identity becomes real; nothing is visibility-scoped yet** (that's slice 2). Also
