@@ -14,6 +14,7 @@ import type {
   CreateAssetRequest,
   CreateGroupRequest,
   CreateUserRequest,
+  CvModelsResponse,
   DetectionEvent,
   DetectionResult,
   Device,
@@ -26,6 +27,7 @@ import type {
   GroupSummary,
   LiveSubscription,
   MeResponse,
+  PatchStreamConfigResponse,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   RegisterDeviceRequest,
@@ -40,6 +42,7 @@ import type {
   SystemNetworkResponse,
   TelemetrySample,
   UpdateLiveTopicsRequest,
+  UpdateStreamConfigRequest,
   UsageRecording,
   UsageTimeline,
   UserSummary,
@@ -124,6 +127,37 @@ export class VisionApi {
         params: { limit },
       }),
     );
+  }
+
+  // --- Live per-stream CV control (docs/CV-CONTROL-PLAN.md §3-4's frozen contract) -----------
+  // `features/fly/cv-control-panel.ts` is the one UI caller (via `FleetStore`'s thin wrappers,
+  // mirroring every other mutation in this class); no page talks to either URL directly.
+
+  /**
+   * Live-patches a *running* stream's detection config (`200 {streamId, modelReArmed}` — see that
+   * response type's own doc comment for what `modelReArmed` means and when it's `true`). `404`
+   * unknown/not-running stream, `400` a value fails `PipelineConfig`'s own validation, `409`
+   * reserved for a not-yet-named "cannot apply" state — all three reject the returned promise,
+   * decoded by the caller via `describeHttpError`. No client-side precondition check — every field
+   * the CV panel sends is already clamped to a valid range by its own slider/control bounds.
+   */
+  patchStreamConfig(streamId: string, patch: UpdateStreamConfigRequest): Promise<PatchStreamConfigResponse> {
+    return firstValueFrom(
+      this.http.patch<PatchStreamConfigResponse>(
+        `/api/streams/${encodeURIComponent(streamId)}/config`,
+        patch,
+      ),
+    );
+  }
+
+  /**
+   * The detection-model picker's roster (`200 {models}`, never errors server-side — see
+   * `CvModelsResponse`'s own doc comment). Replaces the old hardcoded `DETECTION_MODEL_OPTIONS`
+   * array; `FleetStore.models` fetches this once and caches it, degrading to an empty list on any
+   * transport failure rather than blocking whichever page asked.
+   */
+  getCvModels(): Promise<CvModelsResponse> {
+    return firstValueFrom(this.http.get<CvModelsResponse>('/api/cv/models'));
   }
 
   // --- Discovery -----------------------------------------------------------

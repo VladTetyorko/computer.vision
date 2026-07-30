@@ -28,6 +28,25 @@ td.actions {
     border-radius: 4px;
 }
 
+/* ---- Toolbar: search + list/grid toggle (new this cycle) ------------------------------------ */
+
+.toolbar-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.device-search {
+    flex: 1 1 16rem;
+    min-width: 12rem;
+}
+
+.segmented vision-icon {
+    color: currentColor;
+}
+
 /* ---- Warehouse (docs/CYCLES-PLAN.md §8) ---------------------------------- */
 
 .toggle {
@@ -39,9 +58,9 @@ td.actions {
     width: auto;
 }
 
-/* An archived device/asset stays legible but visually recedes from the active fleet. */
+/* An archived device stays legible but visually recedes from the active fleet. */
 tr.archived,
-.asset-card.archived {
+.device-card.archived {
     opacity: 0.6;
 }
 
@@ -79,103 +98,71 @@ tr.archived,
     color: var(--text-muted);
 }
 
-/* ---- Assets: the primary asset-first list (docs/CYCLES-PLAN.md §11, CD-b item 1, item 4) --- */
+/* Per-row kebab (⋯) menu — `.kebab`/`.kebab-trigger`/`.kebab-menu`/`.kebab-item`/`.kebab-divider`/
+   `.kebab-reason`/`.danger-action` are a shared global primitive in `src/styles.css` (the concurrent
+   map/command/shell agent promoted this page's own in-flight markup shape into one, having found no
+   CSS backing it yet — see that stylesheet's own doc comment for the expected `<details>`/`<summary>`
+   shape). */
 
-.asset-list-head {
+/* ---- Grid: device cards (new this cycle) ------------------------------------------------------ */
+
+.device-card-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.2fr) auto;
-    gap: 0.75rem;
-    padding: 0 0.6rem 0.4rem;
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+    gap: var(--space-4);
 }
 
-/* CDK virtual scroll needs a fixed-height, self-scrolling viewport — see devices.ts's own doc
-   comment on why the list *rendering* stays O(visible) even for thousands of assets while the
-   fetch behind it currently does not. */
-/* Known, deliberate limitation: `cdk-virtual-scroll-viewport`'s own `overflow-y: auto` clips any
-   descendant that visually extends past it, including the absolutely-positioned `.kebab-menu`
-   below — a row's kebab opened within roughly the last ~150px of this viewport can render its menu
-   partly clipped. Fixing this properly needs viewport-aware positioning (CDK Overlay or JS-measured
-   `position: fixed` coordinates), which this task's own "simple popover, not a new shared component"
-   scope deliberately doesn't take on; scrolling the row up a little works around it today. */
-.asset-viewport {
-    height: min(64vh, 26rem);
+.device-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--panel-raised);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.asset-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.2fr) auto;
-    align-items: center;
-    gap: 0.75rem;
-    height: 60px;
-    padding: 0 0.6rem;
-    border-bottom: 1px solid var(--border);
-    transition: background 0.15s ease;
-}
-
-.asset-row:hover {
+.device-card:hover {
     background: var(--panel-hover);
 }
 
-.asset-row.archived {
-    opacity: 0.6;
+.device-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-2);
 }
 
-.asset-row-main {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+.device-card-name {
     min-width: 0;
 }
 
-.asset-row-status {
+.device-card-source {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    flex-wrap: wrap;
+    min-width: 0;
 }
 
-.device-count {
+.device-card-chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.device-card-meta {
     font-size: 0.78rem;
 }
 
-.asset-row-actions {
+.device-card-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.4rem;
-    justify-content: flex-end;
-}
-
-/* Per-row kebab (⋯) menu (docs/UX-REWORK-PLAN.md §U-a item 7): `.kebab`/`.kebab-trigger`/
-   `.kebab-menu`/`.kebab-item`/`.kebab-divider`/`.kebab-reason`/`.danger-action` are now a shared
-   global primitive in `src/styles.css` (the concurrent map/command/shell agent promoted this
-   page's own in-flight markup shape into one, having found no CSS backing it yet — see that
-   stylesheet's own doc comment for the expected `<details>`/`<summary>` shape). This page used to
-   carry its own local copy of the same rules before that global version existed; removed once it
-   did, rather than left as a shadowing duplicate. */
-
-/* ---- Advanced: raw devices, collapsed by default --------------------------------------------- */
-
-.advanced-toggle {
-    margin-bottom: 0.5rem;
-}
-
-.advanced-devices {
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--border);
-}
-
-/* ---- Category filter banner (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — /devices?category=) ------ */
-
-.category-filter-banner {
-    margin-bottom: 0.75rem;
-    align-items: center;
-    flex-wrap: wrap;
+    margin-top: auto;
+    padding-top: var(--space-1);
 }
 
 /* ---- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) - */

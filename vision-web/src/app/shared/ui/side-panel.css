@@ -1,0 +1,99 @@
+:host {
+  display: contents;
+}
+
+/* Fixed right column, docked under the app header — z-index 120 sits above the toast host (100,
+   `shared/ui/toast-host.ts`) so a notification firing while a drawer is open never renders behind
+   it, and below a true modal dialog (150, `shared/ui/confirm-dialog.ts`/
+   `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`) so a confirm prompt opened from inside a
+   drawer (e.g. Arm/Disarm from the flight drawer, Wave 2) still wins. */
+.side-panel {
+  position: fixed;
+  top: var(--header-height);
+  right: 0;
+  bottom: 0;
+  width: min(24rem, 92vw);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+  animation: slide-in-right 0.18s ease-out;
+}
+
+.side-panel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+  outline: none;
+}
+
+.side-panel-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.side-panel-title .sub {
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.side-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+.side-panel-foot {
+  flex: none;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.side-panel-foot:empty {
+  display: none;
+  padding: 0;
+  border-top: none;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(1rem);
+    opacity: 0;
+  }
+}
+
+/* Bottom-sheet collapse (F1's `--bp-sm`, hardcoded here per that token's own doc comment in
+   `src/styles.css`): full width, docked to the bottom, capped at 70vh, slides up instead of in from
+   the side. */
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .side-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    animation: slide-in-up 0.18s ease-out;
+  }
+
+  @keyframes slide-in-up {
+    from {
+      transform: translateY(1rem);
+      opacity: 0;
+    }
+  }
+}

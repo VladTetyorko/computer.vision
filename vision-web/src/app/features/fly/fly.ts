@@ -19,7 +19,7 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
-import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
+import { PanelState, readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
@@ -30,6 +30,9 @@ import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
 import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
+import { Icon } from '../../shared/ui/icon';
+import { IconButton } from '../../shared/ui/icon-button';
+import { SidePanel } from '../../shared/ui/side-panel';
 import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
 import { PreflightChecklist } from './preflight-checklist';
@@ -37,6 +40,7 @@ import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';
 import { canShowCommandPanel } from './flight-command-panel-logic';
+import { CvControlPanel } from './cv-control-panel';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -46,22 +50,34 @@ import {
   isWatchMode,
   lastSeenLabel,
   latestFinishedUsage,
+  nextCollapseAction,
   positionLabel,
   resolveActiveAssetId,
   sortAssetsForPicker,
   streamStateLabel,
   trackingIdChanged,
+  type ToolRailPanelId,
 } from './fly-logic';
 import type { AssetDetails, AssetSummary, DetectionEvent, FlightCapability } from '../../core/api/models';
 
 /** Asset characteristics/usages + the picker's own asset list are re-read at this cadence. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
-/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
- * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
- * for why this isn't routed through `SettingsStore`. */
+/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the map inset toggle predates
+ * `PanelState` and stays exactly as it was (docs/UI-REDESIGN-PLAN.md D-D: the map inset is a
+ * glanceable, separately-persisted toggle, not a tool-rail drawer). See `core/panel-state.ts`'s own
+ * doc comment for why this isn't routed through `SettingsStore`. */
 const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
-const DETECTIONS_STRIP_OPEN_KEY = 'vision.fly.detectionsStripOpen';
+
+/** `PanelState`'s own storage key for this page's tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) —
+ * one key for all five drawers (`flight`/`cv`/`detections`/`layers`/`help`), replacing the three
+ * split flags this page and `cv-control-panel.ts` used to persist separately
+ * (`vision.fly.detectionsStripOpen`, `cv-control-panel.ts`'s own `vision.fly.cvPanelOpen`) and the
+ * un-persisted `shortcutsOpen` signal. Per docs/UI-REDESIGN-PLAN.md D-H's own documented fallback,
+ * this is a **fresh** key, not a migration of the old ones — every drawer starts closed the first
+ * time a browser loads this build, rather than attempting to reconcile three old boolean keys into
+ * one new string id. */
+const ACTIVE_PANEL_KEY = 'vision.fly.activePanel';
 
 /**
  * Console prefix for this page's diagnostic logging (the "Fly shows only the asset name and an
@@ -98,12 +114,16 @@ const LOG_PREFIX = '[fly]';
     Player,
     LiveMap,
     DetectionsStrip,
+    Icon,
+    IconButton,
+    SidePanel,
     FlyOsd,
     FailsafeBanner,
     PreflightChecklist,
     DiagnosticsCard,
     ReturnHomeButton,
     FlightCommandPanel,
+    CvControlPanel,
   ],
   templateUrl: './fly.html',
   styleUrl: './fly.css',
@@ -279,8 +299,18 @@ export class FlyPage {
   protected readonly boxesMode = signal<BoxesMode>('overlay');
 
   protected readonly mapVisible = signal(readPersistedFlag(MAP_VISIBLE_KEY, true));
-  protected readonly detectionsStripOpen = signal(readPersistedFlag(DETECTIONS_STRIP_OPEN_KEY, false));
-  protected readonly shortcutsOpen = signal(false);
+
+  /**
+   * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/UI-REDESIGN-PLAN.md
+   * Wave 2, D-D/F3) — a plain field, not DI (`PanelState`'s own doc comment: "provided per host" in
+   * the sense that matters is a host-owned instance, never a shared singleton). Replaces this page's
+   * former `detectionsStripOpen`/`shortcutsOpen` signals and `cv-control-panel.ts`'s own
+   * self-persisted `cvPanelOpen` flag with the frozen rail ids (`ToolRailPanelId`): `flight` (the
+   * migrated `<vision-flight-command-panel>` body), `cv` (the migrated `<vision-cv-control-panel>`
+   * body), `detections`, `layers`, `help`.
+   */
+  protected readonly panels = new PanelState(ACTIVE_PANEL_KEY);
+
   protected readonly stopConfirmOpen = signal(false);
   protected readonly busy = signal(false);
 
@@ -303,12 +333,12 @@ export class FlyPage {
   constructor() {
     void this.initPicker();
 
-    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
-    // actually changes (the `M` shortcut, the detections-strip button, or `collapseOverlays`'s
-    // `Esc` handling all just flip the same signals); the initial `signal()` value above already
-    // restored whatever was last saved.
+    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever the map toggle
+    // actually changes (the `M` shortcut, or `collapseOverlays`'s `Esc` handling); the initial
+    // `signal()` value above already restored whatever was last saved. The tool-rail's own five
+    // drawers persist through `this.panels` itself (`PanelState`'s own `storageKey` round-trip),
+    // no separate effect needed here.
     effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
-    effect(() => writePersistedFlag(DETECTIONS_STRIP_OPEN_KEY, this.detectionsStripOpen()));
 
     // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherStore.track`
     // itself no-ops instantly unless the 10-minute cache is actually stale (docs/OPS-CORE-PLAN.md §W).
@@ -671,7 +701,7 @@ export class FlyPage {
         this.collapseOverlays();
         break;
       case '?':
-        this.shortcutsOpen.update((open) => !open);
+        this.panels.toggle('help');
         break;
       default:
         return;
@@ -679,23 +709,39 @@ export class FlyPage {
     event.preventDefault();
   }
 
-  /** Closest-thing-open-first: the shortcuts help, then the stop confirm, then the strip, then the map. */
+  /** Closest-thing-open-first (docs/UI-REDESIGN-PLAN.md D-D) — any open tool-rail drawer, then the
+   * Stop-stream confirm, then the map inset; see `fly-logic.ts#nextCollapseAction`'s own doc comment
+   * for the cascade order this delegates to. */
   protected collapseOverlays(): void {
-    if (this.shortcutsOpen()) {
-      this.shortcutsOpen.set(false);
-      return;
+    const action = nextCollapseAction({
+      panelOpen: this.panels.active() !== null,
+      stopConfirmOpen: this.stopConfirmOpen(),
+      mapVisible: this.mapVisible(),
+    });
+    switch (action) {
+      case 'panel':
+        this.panels.close();
+        break;
+      case 'stop-confirm':
+        this.stopConfirmOpen.set(false);
+        break;
+      case 'map':
+        this.mapVisible.set(false);
+        break;
     }
-    if (this.stopConfirmOpen()) {
-      this.stopConfirmOpen.set(false);
-      return;
-    }
-    if (this.detectionsStripOpen()) {
-      this.detectionsStripOpen.set(false);
-      return;
-    }
-    if (this.mapVisible()) {
-      this.mapVisible.set(false);
-    }
+  }
+
+  // --- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) --------------------------------------
+  // Thin wrappers around `this.panels` typed to the frozen `ToolRailPanelId` set (`fly-logic.ts`) so
+  // `fly.html`'s rail buttons/drawers can't typo an id past the compiler — `PanelState` itself stays
+  // a generic `string` id (see that class's own doc comment).
+
+  protected togglePanel(id: ToolRailPanelId): void {
+    this.panels.toggle(id);
+  }
+
+  protected isPanelOpen(id: ToolRailPanelId): boolean {
+    return this.panels.isOpen(id);
   }
 
   protected async toggleFullscreen(): Promise<void> {

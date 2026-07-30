@@ -12,15 +12,18 @@ import type {
   AssetDetails,
   AssetEdit,
   AssetSummary,
+  CvModel,
   Device,
   DeviceEdit,
   DevicesSnapshot,
+  PatchStreamConfigResponse,
   RegisterDeviceRequest,
   SettableLifecycleState,
   SimulationResponse,
   StartSimulationRequest,
   StartStreamRequest,
   StartStreamResult,
+  UpdateStreamConfigRequest,
 } from '../api/models';
 
 /** How often devices + streams are re-read while the tab is visible. */
@@ -69,9 +72,24 @@ export class FleetStore {
   private readonly loadingSignal = signal(false);
   private readonly reachableSignal = signal<boolean | null>(null);
 
+  /**
+   * The detection-model picker's roster (docs/CV-CONTROL-PLAN.md §4) — fetched once, here, rather
+   * than per-page: every consumer (`features/fly/cv-control-panel.ts`, `features/live/live.ts`,
+   * `features/settings/settings.ts`) reads the identical list, same "one source, no page-to-page
+   * disagreement" reasoning as `devices`/`streams`. Unlike those two, this is **not** re-polled —
+   * the roster is config-backed at the server (docs/CV-CONTROL-PLAN.md §D: "changes at deploy time,
+   * not runtime") — a one-shot fetch at construction is enough for the app's lifetime.
+   */
+  private readonly modelsSignal = signal<readonly CvModel[]>([]);
+
   readonly devices = this.devicesSignal.asReadonly();
   readonly streams = this.streamsSignal.asReadonly();
   readonly loading = this.loadingSignal.asReadonly();
+  /** Empty until the one-shot fetch resolves, and permanently empty on failure — see class doc.
+   * `getCvModels()` never errors server-side, so an empty list here means either "still loading" or
+   * "the request itself failed" (network down); every reader degrades to "no extra model facts"
+   * rather than blocking on either (`cv-control-panel-logic.ts#findModel`). */
+  readonly models = this.modelsSignal.asReadonly();
 
   /** `null` until the first request settles, so the header shows no verdict prematurely. */
   readonly reachable = this.reachableSignal.asReadonly();
@@ -86,6 +104,7 @@ export class FleetStore {
 
   constructor() {
     void this.refresh(); // one-time initial fetch, regardless of live — see class doc.
+    void this.loadModels(); // one-time, unrelated to the devices/streams poll — see `models`' own doc comment.
     // Poll-while-visible now runs off the app's one shared timer (docs/CYCLES-PLAN.md §9, CU-b
     // item 3 — `PollScheduler`) rather than this store's own `setInterval`. Started unconditionally
     // here so today's (pre-live, or live-unavailable) behavior is unchanged byte-for-byte; the
@@ -194,6 +213,21 @@ export class FleetStore {
     }
   }
 
+  /**
+   * One-shot fetch of the CV model roster — silent-degrade, no toast: this is background
+   * enrichment for a picker, not a user-initiated action, mirroring `fly.ts#loadCapabilities`'s
+   * identical "stays hidden/empty on failure" posture rather than `refresh()`'s own user-facing
+   * error toast (that one guards the entire fleet view's own data).
+   */
+  private async loadModels(): Promise<void> {
+    try {
+      const response = await this.api.getCvModels();
+      this.modelsSignal.set(response.models);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not load the CV model roster`, { error });
+    }
+  }
+
   async register(request: RegisterDeviceRequest): Promise<Device | null> {
     return this.run(async () => {
       const device = await this.api.registerDevice(request);
@@ -268,6 +302,24 @@ export class FleetStore {
       }
       return result;
     });
+  }
+
+  /**
+   * Live-patches a *running* stream's detection config (docs/CV-CONTROL-PLAN.md §3) —
+   * `features/fly/cv-control-panel.ts`'s one write path, both for debounced hot-knob edits and a
+   * deliberate model change. `run()`-wrapped like every other mutation here, so a failure (an
+   * unknown/torn-down stream, an out-of-range value that somehow slipped past the panel's own
+   * slider bounds) surfaces as exactly one toast rather than a silently-dropped PATCH — errors are
+   * expected to be rare here (the panel debounces + clamps client-side), unlike `devices`/`streams`'
+   * own 5s poll, so a toast per genuine failure is not the spam it would be on a poll cadence.
+   * `null` on failure, mirroring `updateDevice`/`assignDevice`'s own contract; the caller checks the
+   * response's own `modelReArmed` on success.
+   */
+  async patchStreamConfig(
+    streamId: string,
+    patch: UpdateStreamConfigRequest,
+  ): Promise<PatchStreamConfigResponse | null> {
+    return this.run(() => this.api.patchStreamConfig(streamId, patch));
   }
 
   async stop(streamId: string): Promise<boolean> {

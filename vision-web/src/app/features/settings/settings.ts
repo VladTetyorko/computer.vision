@@ -1,23 +1,15 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import {
-  BUILT_IN_PROFILES,
-  DETECTION_MODEL_OPTIONS,
-  SettingsStore,
-  type DetectionModelId,
-} from '../../core/settings/settings-store';
+import { BUILT_IN_PROFILES, SettingsStore } from '../../core/settings/settings-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { ToastService } from '../../core/toast.service';
 
 /**
- * docs/CV-MODELS-PLAN.md item 4 — the model picker persists a choice (`SettingsStore`, same
- * profile/draft/custom semantics as confidence/fps) that now reaches a running stream end to end:
- * `StartStreamRequest` (`core/api/models.ts`) declares the `model` field mirroring vision-api's own
- * DTO (`StartStreamRequest.java`/`StartAssetStreamRequest.java`, whose `mergeOntoDefaults()` builds
- * a `ModelRef` from it — landed concurrently with this UI, same field name, same "raw
- * possibly-composite string, verbatim" contract), and `fleet.start()` posts `settings.effective()`
- * straight through with no destructuring in between, so the value was already riding in the JSON
- * body even before the DTO declared it. No further frontend wiring needed for this to take effect
- * on the next stream start.
+ * docs/CV-CONTROL-PLAN.md §4 (extending docs/CV-MODELS-PLAN.md item 4) — the model picker persists
+ * a choice (`SettingsStore`, same profile/draft/custom semantics as confidence/fps) that reaches a
+ * running stream end to end: `StartStreamRequest` (`core/api/models.ts`) declares the `model` field
+ * mirroring vision-api's own DTO, and `fleet.start()` posts `settings.effective()` straight through
+ * with no destructuring in between. The roster itself is now data-driven (`GET /api/cv/models`,
+ * cached by `FleetStore.models`) rather than the old hardcoded `DETECTION_MODEL_OPTIONS` array.
  */
 @Component({
   selector: 'vision-settings',
@@ -32,7 +24,7 @@ export class SettingsPage {
 
   protected readonly newProfileName = signal('');
 
-  protected readonly modelOptions = DETECTION_MODEL_OPTIONS;
+  protected readonly modelOptions = computed(() => this.fleet.models());
 
   /**
    * The browser's own grant, read once per render rather than tracked as a signal — this app has
@@ -65,9 +57,11 @@ export class SettingsPage {
     return changes;
   });
 
-  /** Also used by the template to show a profile's model in its compact values line. */
-  protected modelLabel(id: DetectionModelId): string {
-    return this.modelOptions.find((option) => option.id === id)?.label ?? id;
+  /** Also used by the template to show a profile's model in its compact values line — degrades to
+   * the bare id when the roster hasn't loaded yet (or no longer lists it), never a blank/fabricated
+   * label (docs/CV-CONTROL-PLAN.md Wave E — the roster replaced the old closed `DetectionModelId` set). */
+  protected modelLabel(id: string): string {
+    return this.modelOptions().find((option) => option.id === id)?.displayName ?? id;
   }
 
   protected readonly customProfiles = computed(() => this.settings.customProfiles());
@@ -84,7 +78,7 @@ export class SettingsPage {
     this.settings.adjust({ inferenceFps: Number(value) });
   }
 
-  protected onModel(model: DetectionModelId): void {
+  protected onModel(model: string): void {
     this.settings.adjust({ model });
   }
 

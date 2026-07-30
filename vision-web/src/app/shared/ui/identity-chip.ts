@@ -17,6 +17,13 @@ import { canManageOrg } from '../../core/org/org-logic';
  * `AuthStore` directly (root-provided, one instance app-wide) rather than taking inputs — there is
  * exactly one session in this app, nothing for a host page to parameterize.
  *
+ * **Account settings** (docs/UI-REDESIGN-PLAN.md Wave 1, F4's "(shell) → `/settings` via profile
+ * menu") sits in the menu right alongside **My activity** — no role gate, same as My activity,
+ * since every signed-in user (pilot included) owns their own detection/notification defaults. This
+ * is the same `/settings` route the Operate hub's own "Flight & detection settings" tile links to
+ * (`features/hubs/nav-entries.ts`) — one destination, reachable from two places, not a duplicate
+ * page.
+ *
  * **Shown even with auth disabled** (dev parity, docs/U-AUTH-PLAN.md's own explicit call: "show the
  * dev admin's name too, so the surface is consistent") — the one thing suppressed in that mode is
  * the **Log out** action itself (`@if (auth.authEnabled())`), since logging out of a session that

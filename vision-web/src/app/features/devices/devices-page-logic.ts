@@ -1,39 +1,29 @@
-import type {
-  AssetDetails,
-  AssetSummary,
-  CreateAssetRequest,
-  Device,
-  LifecycleState,
-} from '../../core/api/models';
-import { findVideoDevice } from '../../core/fleet/device-logic';
+import type { AssetDetails, CreateAssetRequest, Device, LifecycleState } from '../../core/api/models';
 
 /**
- * Pure logic behind the Devices page's warehouse view (docs/CYCLES-PLAN.md §8, §11): the
- * device+asset → view-model builders this page's table/list rendering needs. Split out so it is
- * unit-testable without HTTP or the router — mirrors `features/devices/simulate-logic.ts` and
+ * Pure logic behind the Devices page's raw-devices table/grid (docs/CYCLES-PLAN.md §8, §11; the
+ * asset-first list this file used to also back moved wholesale to `features/assets/assets-logic.ts`
+ * once Assets and Devices became separate pages — see that file's own doc comment). Split out so it
+ * is unit-testable without HTTP or the router — mirrors `features/devices/simulate-logic.ts` and
  * `core/telemetry/telemetry-logic.ts`.
  *
  * The generic lifecycle-action-menu state machine and edit-request builders
- * (`availableDeviceActions`/`availableAssetActions`/`buildDeviceRenameEdit`/`buildAssetEdit`/
- * `RESTORE_TARGET_STATE`) moved to `core/fleet/warehouse-logic.ts` in docs/CYCLES-PLAN.md §11 (CD-b) —
- * the new asset detail page needs them too, and this codebase has no precedent for one page
- * importing another page's module (see `core/fleet/device-logic.ts`'s doc comment). Re-exported here so
- * every import site this page already had keeps working verbatim.
+ * (`availableDeviceActions`/`buildDeviceRenameEdit`/`RESTORE_TARGET_STATE`) moved to
+ * `core/fleet/warehouse-logic.ts` in docs/CYCLES-PLAN.md §11 (CD-b) — the asset detail page needs
+ * them too, and this codebase has no precedent for one page importing another page's module (see
+ * `core/fleet/device-logic.ts`'s doc comment). Re-exported here so every import site this page
+ * already had keeps working verbatim; the asset-level exports (`ASSET_ACTION_LABELS`/
+ * `buildAssetEdit`/`operatorAssetActions`/`reasonedAssetActions`/`availableAssetActions`/
+ * `AssetLifecycleAction`) are **not** re-exported any more — this page no longer renders assets at
+ * all, `features/assets/assets.ts` imports those directly from `core/fleet/warehouse-logic.ts`.
  */
 export {
-  ASSET_ACTION_LABELS,
   DEVICE_ACTION_LABELS,
   RESTORE_TARGET_STATE,
-  availableAssetActions,
   availableDeviceActions,
-  buildAssetEdit,
   buildDeviceRenameEdit,
-  operatorAssetActions,
-  reasonedAssetActions,
   reasonedDeviceActions,
   type ActionAvailability,
-  type AssetEditForm,
-  type AssetLifecycleAction,
   type DeviceLifecycleAction,
 } from '../../core/fleet/warehouse-logic';
 
@@ -121,89 +111,28 @@ export function filterRowsByArchived(
   return showArchived ? rows : rows.filter((row) => !row.archived);
 }
 
-/** One card in the (pre-CD-b) asset section: an asset plus its resolved (possibly absent) lifecycle. */
-export interface AssetRow {
-  readonly asset: AssetSummary;
-  readonly lifecycle: LifecycleState;
-  readonly archived: boolean;
-}
-
 /**
- * Asset summaries → asset rows, defaulting a missing `lifecycle` (a backend that hasn't shipped
- * CW-a yet) to `'ACTIVE'` — the same fallback every other reader of `AssetSummary#lifecycle`
- * uses, so an asset never appears archived just because the field is absent.
+ * The Devices page's search box (this cycle's Assets/Devices/Warehouse inventory restructure — no
+ * dedicated `docs/*-PLAN.md`, see `vision-web/MODULE.md`'s own changelog entry): case-insensitive
+ * substring match on device name, protocol, URI, or (when owned) the owning asset's name — a
+ * device row carries no single "name" field a user would search by; matching all four is what
+ * makes "search for a camera by its IP" or "search by owning asset" both actually work.
  */
-export function buildAssetRows(assets: readonly AssetSummary[]): readonly AssetRow[] {
-  return assets.map((asset) => {
-    const lifecycle = asset.lifecycle ?? 'ACTIVE';
-    return { asset, lifecycle, archived: lifecycle === 'DELETED' };
-  });
-}
-
-/** Hides archived asset cards unless the "show archived" toggle is on. */
-export function filterAssetRowsByArchived(
-  rows: readonly AssetRow[],
-  showArchived: boolean,
-): readonly AssetRow[] {
-  return showArchived ? rows : rows.filter((row) => !row.archived);
-}
-
-/**
- * One row of the Devices page's *primary* asset list (docs/CYCLES-PLAN.md §11, CD-b item 1): an
- * asset plus exactly what the list-level "Watch · Open · Archive" actions need — `watchDeviceId`
- * is the device `Watch` navigates to (`undefined` when the asset has no VIDEO-capable device at
- * all, in which case the list hides the Watch button), `deviceCount`/`streaming` are the row's
- * status decoration. Built from `AssetDetails` (not just `AssetSummary`) because `deviceCount`
- * needs the resolved device list — the page already fetches `AssetDetails` for every asset for the
- * Advanced table's "owned by" column, so this reuses that same fetch rather than a second one.
- */
-export interface AssetListRow {
-  readonly asset: AssetSummary;
-  readonly lifecycle: LifecycleState;
-  readonly archived: boolean;
-  readonly deviceCount: number;
-  readonly streaming: boolean;
-  readonly watchDeviceId?: string;
-}
-
-export function buildAssetListRows(
-  assets: readonly AssetDetails[],
-  liveDeviceIds: ReadonlySet<string>,
-): readonly AssetListRow[] {
-  return assets.map((asset) => {
-    const lifecycle = asset.lifecycle ?? 'ACTIVE';
-    return {
-      asset,
-      lifecycle,
-      archived: lifecycle === 'DELETED',
-      deviceCount: asset.devices.length,
-      streaming: asset.devices.some((device) => liveDeviceIds.has(device.id)),
-      watchDeviceId: findVideoDevice(asset.devices)?.id,
-    };
-  });
-}
-
-/** Hides archived asset rows unless the "show archived" toggle is on — mirrors `filterAssetRowsByArchived`. */
-export function filterAssetListRowsByArchived(
-  rows: readonly AssetListRow[],
-  showArchived: boolean,
-): readonly AssetListRow[] {
-  return showArchived ? rows : rows.filter((row) => !row.archived);
-}
-
-/**
- * `/devices?category=<slug>` pre-filter (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3) — the drill-down
- * target for the Command dashboard's readiness tiles ("this category's assets", not the whole
- * fleet). Blank/absent leaves every row; an unknown slug legitimately narrows to zero rows rather
- * than falling back to "show everything", since a tile linking here already knows the category
- * exists.
- */
-export function filterAssetListRowsByCategory(
-  rows: readonly AssetListRow[],
-  category: string | undefined,
-): readonly AssetListRow[] {
-  const slug = category?.trim();
-  return slug ? rows.filter((row) => row.asset.category === slug) : rows;
+export function searchWarehouseRowsByQuery(
+  rows: readonly WarehouseRow[],
+  query: string,
+): readonly WarehouseRow[] {
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return rows;
+  }
+  return rows.filter(
+    (row) =>
+      row.device.name.toLowerCase().includes(q) ||
+      row.device.protocol.toLowerCase().includes(q) ||
+      row.device.uri.toLowerCase().includes(q) ||
+      (row.owner?.assetName.toLowerCase().includes(q) ?? false),
+  );
 }
 
 /**

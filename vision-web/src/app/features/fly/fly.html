@@ -68,95 +68,225 @@
     }
   </div>
 } @else if (asset(); as a) {
-  <div class="cockpit" #stage [class.banner-active]="failsafeBanner() !== null">
-    <div class="stage-video">
-      <vision-player
-        [src]="stream()?.viewUrl ?? null"
-        [whepUrl]="stream()?.whepUrl ?? null"
-        [stopped]="stopped()"
-        [compact]="true"
-        [detections]="detections.results()"
-        [boxesMode]="boxesMode()"
-        (latencyChanged)="onLatency($event)"
-        (transportChanged)="onTransport($event)"
-      />
-
-      @if (!primaryDevice()) {
-        <div class="notice stage-notice">This drone has no camera device to watch.</div>
-      } @else if (live() && !stream()?.viewUrl) {
-        <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
-      }
-    </div>
-
-    <!-- ---- Failsafe / RTH / landing banner (docs/FC-INTEGRATIONS-PLAN.md F-d) — above the video,
-         below the two modal overlays; shifts the header/OSD/ticker/map rows down while showing
-         (`.cockpit.banner-active`, fly.css) rather than overlapping them. -->
+  <!-- ---- Cockpit grid (docs/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user
+       request — see fly.css's own grid comment for the full reasoning) ------------------------
+       Named CSS-grid areas (fly.css): `banner` is a real grid row that reflows the rest of the grid
+       while showing (no manual shift math), `main` is the full-width video hero, `rail` is the
+       tool-rail column (spans every row below `banner`), `telemetry`/`ticker`/`controls` are real
+       rows *below* `main` now — not a left column beside it — so the video fills and centers in the
+       cockpit instead of sharing width with a stacked instrument column. The map inset and whichever
+       tool-rail drawer is open both overlay `main` itself (absolute within `.grid-main`, never
+       within `.cockpit`) — see fly.css's own comment on `.grid-main`. -->
+  <div class="cockpit" #stage>
     @if (failsafeBanner(); as banner) {
-      <div class="hud hud-banner">
+      <div class="grid-banner">
         <vision-failsafe-banner [banner]="banner" />
       </div>
     }
 
-    <!-- ---- Header: exit, drone switcher, help ------------------------------------------- -->
-    <div class="hud hud-header">
-      <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">‹</a>
-      <!-- U-a bullet 4: the old standalone "All drones" button and this switcher did the same job
-           two ways (a full-picker button vs. an inline pick) — folded into one control: pick any
-           listed drone directly, or the trailing "All drones…" entry to open the full picker. -->
-      <label class="switcher-control" title="Switch drone, or pick 'All drones…' for the full picker">
-        <span class="switcher-label">Drone</span>
-        <select class="switcher" aria-label="Switch drone" (change)="onSwitcherChange($any($event.target).value)">
-          @for (candidate of orderedPickerAssets(); track candidate.assetId) {
-            <option [value]="candidate.assetId" [selected]="switcherOptionSelected(candidate.assetId)">
-              {{ candidate.displayName }}
-            </option>
+    <div class="grid-main">
+      <div class="stage-video">
+        <vision-player
+          [src]="stream()?.viewUrl ?? null"
+          [whepUrl]="stream()?.whepUrl ?? null"
+          [stopped]="stopped()"
+          [compact]="true"
+          [detections]="detections.results()"
+          [boxesMode]="boxesMode()"
+          (latencyChanged)="onLatency($event)"
+          (transportChanged)="onTransport($event)"
+        />
+
+        @if (!primaryDevice()) {
+          <div class="notice stage-notice">This drone has no camera device to watch.</div>
+        } @else if (live() && !stream()?.viewUrl) {
+          <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
+        }
+      </div>
+
+      <!-- ---- Main header overlay: exit, drone switcher, "Bring home" -------------------------
+           Overlays `main` (top edge), not a separate grid row — the tool-rail's own `help` drawer
+           now carries the keyboard-shortcuts content the old inline `?` button used to open. -->
+      <div class="main-header">
+        <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">
+          <vision-icon name="chevron-left" />
+        </a>
+        <!-- U-a bullet 4: the old standalone "All drones" button and this switcher did the same job
+             two ways (a full-picker button vs. an inline pick) — folded into one control: pick any
+             listed drone directly, or the trailing "All drones…" entry to open the full picker. -->
+        <label class="switcher-control" title="Switch drone, or pick 'All drones…' for the full picker">
+          <span class="switcher-label">Drone</span>
+          <select class="switcher" aria-label="Switch drone" (change)="onSwitcherChange($any($event.target).value)">
+            @for (candidate of orderedPickerAssets(); track candidate.assetId) {
+              <option [value]="candidate.assetId" [selected]="switcherOptionSelected(candidate.assetId)">
+                {{ candidate.displayName }}
+              </option>
+            }
+            <option [value]="ALL_DRONES_OPTION">All drones…</option>
+          </select>
+        </label>
+
+        <!-- ---- "Bring home" (docs/DRONE-INFRA-PLAN.md I-e Stage 1) — not a tool-rail drawer, a
+             deliberate one-shot command shown right in the header, same as before. `<vision-return-
+             home-button>` hides itself entirely unless `canBringHome()`. No optimistic UI here: a
+             successful send only shows a toast — the aircraft's actual mode change arrives later
+             over ordinary telemetry (`flightState.mode` → an RTL-family value), which
+             `flightBanner`/`<vision-failsafe-banner>` above already turns into "Return to home
+             active" on its own, with no wiring needed from this button. -->
+        <vision-return-home-button
+          [assetId]="a.assetId"
+          [assetDisplayName]="a.displayName"
+          [canCommand]="canBringHome()"
+          [compact]="true"
+        />
+      </div>
+
+      <!-- ---- Map inset (M) — a separate persisted toggle, not a drawer (docs/UI-REDESIGN-PLAN.md
+           D-D: "glanceable, not a modal drawer"); overlays `main`, hidden entirely below `--bp-md`
+           (900px, fly.css) regardless of this toggle's own state. -->
+      @if (mapVisible() && hasTelemetryDevice()) {
+        <div class="main-map">
+          <vision-live-map [zones]="geofence.zones()" />
+        </div>
+      }
+
+      <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
+      @if (secondaryDevices().length > 0) {
+        <div class="main-secondary">
+          @for (device of secondaryDevices(); track device.id) {
+            <button
+              type="button"
+              class="secondary-tile"
+              (click)="setPrimaryDevice(device.id)"
+              [title]="'Switch to ' + device.name"
+            >
+              <vision-player
+                [src]="fleet.streamFor(device.id)?.viewUrl ?? null"
+                [whepUrl]="fleet.streamFor(device.id)?.whepUrl ?? null"
+                [compact]="true"
+              />
+              <span class="tile-label">{{ device.name }}</span>
+            </button>
           }
-          <option [value]="ALL_DRONES_OPTION">All drones…</option>
-        </select>
-      </label>
+        </div>
+      }
 
-      <!-- ---- "Bring home" (docs/DRONE-INFRA-PLAN.md I-e Stage 1) ---------------------------
-           Near the failsafe banner (flush above this row when it's showing) rather than folded
-           into `.hud-controls`' Start/Stop/Replay row below — a deliberate command, not a stream
-           control. `<vision-return-home-button>` hides itself entirely unless `canBringHome()`.
-           No optimistic UI here: a successful send only shows a toast — the aircraft's actual mode
-           change arrives later over ordinary telemetry (`flightState.mode` → an RTL-family value),
-           which `flightBanner`/`<vision-failsafe-banner>` above already turns into "Return to home
-           active" on its own, with no wiring needed from this button. -->
-      <vision-return-home-button
-        [assetId]="a.assetId"
-        [assetDisplayName]="a.displayName"
-        [canCommand]="canBringHome()"
-        [compact]="true"
-      />
+      <!-- ---- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
+           in watch mode, and once the FC itself confirms armed. -->
+      @if (showPreflightChecklist()) {
+        <div class="main-preflight">
+          <vision-preflight-checklist [items]="preflightItems()" />
+        </div>
+      }
 
-      <!-- ---- Arm / Disarm / Mode (docs/DRONE-INFRA-PLAN.md I-e Stage 2) --------------------
-           Right beside "Bring home" — the same command family, gated by its own capability read
-           (`canShowCommands()`/`capabilities()`) rather than the RTL-only firmware check above.
-           `<vision-flight-command-panel>` hides itself entirely unless `canCommand()`; no optimistic
-           UI here either — the aircraft's actual armed state/mode arrives later over ordinary
-           telemetry, exactly like "Bring home" above. -->
+      <!-- ---- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
+           vibration/EKF/rangefinder/mission progress); hidden entirely with no diagnostic keys. -->
+      @if (diagnosticsRows().length > 0) {
+        <div class="main-diagnostics">
+          <vision-diagnostics-card [rows]="diagnosticsRows()" />
+        </div>
+      }
+
+      <!-- ---- Tool-rail drawers (docs/UI-REDESIGN-PLAN.md Wave 2, D-D/D-E) ----------------------
+           One open at a time via `panels`; each overlays `main` (its own `<vision-side-panel>` is
+           `position: fixed`, so where it mounts in the DOM doesn't matter for layout — mounting it
+           here just keeps it beside the rest of `main`'s own overlays). -->
+
+      <!-- Flight (Mode/Arm/Disarm) — migrated into the shared drawer shell (D-E); the host still
+           gates the whole component on `canShowCommands()`, unchanged. -->
       <vision-flight-command-panel
         [assetId]="a.assetId"
         [assetDisplayName]="a.displayName"
         [capabilities]="capabilities()"
         [canCommand]="canShowCommands()"
         [armed]="telemetry.latest()?.flightState?.armed"
+        [open]="isPanelOpen('flight')"
+        (close)="panels.close()"
       />
 
-      <button type="button" class="icon-btn shortcuts-btn" (click)="shortcutsOpen.set(true)" title="Keyboard shortcuts (?)">
-        ?
-      </button>
+      <!-- Detection (CV) console — migrated into the shared drawer shell (D-E); hidden entirely in
+           watch mode, same "viewer, not controller" gate as Start/Stop below. -->
+      @if (!watchMode()) {
+        <vision-cv-control-panel
+          [streamId]="stream()?.streamId"
+          [detectionResults]="detections.results()"
+          [open]="isPanelOpen('cv')"
+          (close)="panels.close()"
+        />
+      }
+
+      <!-- Detections strip — previously an always-visible bottom-right toggle+strip, now the
+           `detections` drawer (docs/UI-REDESIGN-PLAN.md Wave 2 item 5); same `live()` gate as before. -->
+      @if (live() && isPanelOpen('detections')) {
+        <vision-side-panel title="Detections" icon="eye" (close)="panels.close()">
+          <vision-detections-strip />
+        </vision-side-panel>
+      }
+
+      <!-- Layers — a UI for the detection-boxes overlay mode (docs/UI-REDESIGN-PLAN.md Wave 2 item
+           5's "map controls… become… layers": the boxes-rendering layer over the video is the
+           Fly-specific "layer" control this cockpit actually has; the geographic map's own layer
+           picker lives inside `<vision-live-map>` itself, unchanged). Gives the `B` shortcut a
+           discoverable UI for the first time — `B` itself still cycles the same three states. -->
+      @if (isPanelOpen('layers')) {
+        <vision-side-panel title="Layers" icon="layers" subtitle="Detection box rendering" (close)="panels.close()">
+          <span class="label">Boxes (shortcut: B)</span>
+          <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
+            <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesMode.set('overlay')">
+              Overlay
+            </button>
+            <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesMode.set('burned')">
+              Burned in
+            </button>
+            <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesMode.set('off')">
+              Off
+            </button>
+          </div>
+          <p class="muted hint">
+            Overlay draws boxes on top of the video; burned-in draws them into the picture itself;
+            off hides them entirely. Detection still runs the same either way.
+          </p>
+        </vision-side-panel>
+      }
+
+      <!-- Help — the old `.hud-shortcuts` modal's content, unchanged copy, now a drawer. -->
+      @if (isPanelOpen('help')) {
+        <vision-side-panel title="Keyboard shortcuts" icon="help" (close)="panels.close()">
+          <dl>
+            <dt>M</dt>
+            <dd>Toggle the map inset</dd>
+            <dt>B</dt>
+            <dd>Cycle detection boxes — overlay / burned / off</dd>
+            <dt>F</dt>
+            <dd>Fullscreen</dd>
+            <dt>Esc</dt>
+            <dd>Collapse the topmost overlay</dd>
+            <dt>?</dt>
+            <dd>This help</dd>
+          </dl>
+          <!-- Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): every icon-only control in the
+               cockpit gets a title tooltip *and* a line here, so a new operator can find out what
+               every glyph-only button does from one place, not by hovering each in turn. -->
+          <h3 class="shortcuts-subhead">Cockpit controls</h3>
+          <dl>
+            <dt>‹</dt>
+            <dd>Exit to the Wall</dd>
+            <dt>DRONE</dt>
+            <dd>Switch drone, or pick "All drones…" for the full picker</dd>
+          </dl>
+        </vision-side-panel>
+      }
     </div>
 
-    <!-- ---- OSD chip bar ------------------------------------------------------------------ -->
-    <div class="hud hud-osd">
+    <!-- ---- Bottom OSD strip (docs/UI-REDESIGN-PLAN.md Wave 2 — Power/Nav/Link/Env clusters,
+         relaid out as a bottom row per direct user request; see fly.css's own grid comment). ---- -->
+    <div class="grid-telemetry">
       <vision-fly-osd [latencySeconds]="latencySeconds()" [transport]="transport()" [windLimitMps]="windLimitMps()" />
     </div>
 
     <!-- ---- Events ticker ------------------------------------------------------------------ -->
     @if (tickerEvents().length > 0) {
-      <div class="hud hud-ticker">
+      <div class="grid-ticker">
         @for (event of tickerEvents(); track event.id) {
           <div class="ticker-row" [class.open]="event.state === 'OPEN'">
             <!-- Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3, extended to fly per the
@@ -174,69 +304,62 @@
       </div>
     }
 
-    <!-- ---- Map inset (M) ------------------------------------------------------------------- -->
-    @if (mapVisible() && hasTelemetryDevice()) {
-      <div class="hud hud-map">
-        <vision-live-map [zones]="geofence.zones()" />
-      </div>
-    }
-
-    <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
-    @if (secondaryDevices().length > 0) {
-      <div class="hud hud-secondary">
-        @for (device of secondaryDevices(); track device.id) {
-          <button
-            type="button"
-            class="secondary-tile"
-            (click)="setPrimaryDevice(device.id)"
-            [title]="'Switch to ' + device.name"
-          >
-            <vision-player
-              [src]="fleet.streamFor(device.id)?.viewUrl ?? null"
-              [whepUrl]="fleet.streamFor(device.id)?.whepUrl ?? null"
-              [compact]="true"
-            />
-            <span class="tile-label">{{ device.name }}</span>
-          </button>
-        }
-      </div>
-    }
-
-    <!-- ---- Detections strip (B cycles boxes overlay/burned/off) --------------------------- -->
-    @if (live()) {
-      <div class="hud hud-detections">
-        <button
-          type="button"
-          class="icon-btn"
-          (click)="detectionsStripOpen.set(!detectionsStripOpen())"
-        >
-          {{ detectionsStripOpen() ? 'Hide detections' : 'Detections' }}
-        </button>
-        @if (detectionsStripOpen()) {
-          <vision-detections-strip />
-        }
-      </div>
-    }
-
-    <!-- ---- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden in
-         watch mode, and once the FC itself confirms armed. -->
-    @if (showPreflightChecklist()) {
-      <div class="hud hud-preflight">
-        <vision-preflight-checklist [items]="preflightItems()" />
-      </div>
-    }
-
-    <!-- ---- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
-         vibration/EKF/rangefinder/mission progress); hidden entirely with no diagnostic keys. -->
-    @if (diagnosticsRows().length > 0) {
-      <div class="hud hud-diagnostics">
-        <vision-diagnostics-card [rows]="diagnosticsRows()" />
-      </div>
-    }
+    <!-- ---- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) — frozen ids/order: flight · cv ·
+         detections · layers · help. One open at a time via `panels`; each button is gated exactly
+         like its old inline control was (flight: `canShowCommands()`; cv: `!watchMode()`;
+         detections: `live()`; layers/help: always). -->
+    <div class="grid-rail">
+      @if (canShowCommands()) {
+        <vision-icon-button
+          icon="drone"
+          label="Flight controls"
+          variant="hud"
+          [active]="isPanelOpen('flight')"
+          (activated)="togglePanel('flight')"
+        />
+      }
+      @if (!watchMode()) {
+        <span class="rail-item">
+          <vision-icon-button
+            icon="scan"
+            label="Detection controls"
+            variant="hud"
+            [active]="isPanelOpen('cv')"
+            (activated)="togglePanel('cv')"
+          />
+          @if (settings.effective().detectionEnabled === false) {
+            <span class="rail-dot" title="Detection is off"></span>
+          }
+        </span>
+      }
+      @if (live()) {
+        <vision-icon-button
+          icon="eye"
+          label="Detections"
+          variant="hud"
+          [active]="isPanelOpen('detections')"
+          (activated)="togglePanel('detections')"
+        />
+      }
+      <vision-icon-button
+        icon="layers"
+        label="Layers"
+        variant="hud"
+        [active]="isPanelOpen('layers')"
+        (activated)="togglePanel('layers')"
+      />
+      <vision-icon-button
+        icon="help"
+        label="Keyboard shortcuts"
+        variant="hud"
+        [active]="isPanelOpen('help')"
+        (activated)="togglePanel('help')"
+      />
+    </div>
 
     <!-- ---- Controls: Start/Stop, Replay ------------------------------------------------------ -->
     @if (!watchMode()) {
-      <div class="hud hud-controls">
+      <div class="grid-controls">
         @if (latestFinishedUsageEntry(); as finished) {
           <a class="btn secondary" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
             Replay last flight
@@ -262,7 +385,7 @@
     }
 
     @if (stopConfirmOpen()) {
-      <div class="hud hud-confirm">
+      <div class="hud-confirm">
         <div class="card inline-confirm-card">
           <!-- Poka-yoke rule 2 (docs/UX-REWORK-PLAN.md §U-a2 §2): high-consequence, mid-flight —
                keeps its confirm, but states the consequence, not just the question. -->
@@ -273,41 +396,6 @@
             </button>
             <button type="button" class="btn secondary small" (click)="cancelStop()">Cancel</button>
           </div>
-        </div>
-      </div>
-    }
-
-    @if (shortcutsOpen()) {
-      <div class="hud hud-shortcuts">
-        <div class="card">
-          <header>
-            <h3>Keyboard shortcuts</h3>
-            <button type="button" class="icon-btn" (click)="shortcutsOpen.set(false)" title="Close this dialog">×</button>
-          </header>
-          <dl>
-            <dt>M</dt>
-            <dd>Toggle the map inset</dd>
-            <dt>B</dt>
-            <dd>Cycle detection boxes — overlay / burned / off</dd>
-            <dt>F</dt>
-            <dd>Fullscreen</dd>
-            <dt>Esc</dt>
-            <dd>Collapse the topmost overlay</dd>
-            <dt>?</dt>
-            <dd>This help</dd>
-          </dl>
-          <!-- Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): every icon-only control in the
-               cockpit gets a title tooltip *and* a line here, so a new operator can find out what
-               every glyph-only button does from one place, not by hovering each in turn. -->
-          <h3 class="shortcuts-subhead">Cockpit controls</h3>
-          <dl>
-            <dt>‹</dt>
-            <dd>Exit to the Wall</dd>
-            <dt>DRONE</dt>
-            <dd>Switch drone, or pick "All drones…" for the full picker</dd>
-            <dt>×</dt>
-            <dd>Close this dialog</dd>
-          </dl>
         </div>
       </div>
     }

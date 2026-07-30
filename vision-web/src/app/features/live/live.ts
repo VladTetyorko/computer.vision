@@ -12,11 +12,7 @@ import { Router, RouterLink } from '@angular/router';
 import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
 import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import {
-  DETECTION_MODEL_OPTIONS,
-  SettingsStore,
-  type DetectionModelId,
-} from '../../core/settings/settings-store';
+import { SettingsStore } from '../../core/settings/settings-store';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
@@ -102,16 +98,9 @@ export class LivePage {
     Object.entries(this.device()?.options ?? {}).map(([key, value]) => ({ key, value })),
   );
 
-  /** docs/CV-MODELS-PLAN.md item 4 — see `features/settings/settings.ts`'s file-level comment for
-   * the gap between this picker and what actually reaches a running stream today. */
-  protected readonly modelOptions = DETECTION_MODEL_OPTIONS;
-
-  /** The hint for whichever model is currently selected — shown under the segmented control,
-   * same "one static line under the control" shape as the confidence/fps hints below it. */
-  protected readonly currentModelHint = computed(
-    () =>
-      this.modelOptions.find((option) => option.id === this.settings.effective().model)?.hint ?? '',
-  );
+  /** docs/CV-CONTROL-PLAN.md §4 — the roster is now data-driven (`GET /api/cv/models`, cached by
+   * `FleetStore.models`), replacing the old hardcoded `DETECTION_MODEL_OPTIONS` array. */
+  protected readonly modelOptions = computed(() => this.fleet.models());
 
   constructor() {
     // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
@@ -232,7 +221,7 @@ export class LivePage {
     this.settings.adjust({ inferenceFps: Number(value) });
   }
 
-  protected onModel(model: DetectionModelId): void {
+  protected onModel(model: string): void {
     this.settings.adjust({ model });
   }
 }

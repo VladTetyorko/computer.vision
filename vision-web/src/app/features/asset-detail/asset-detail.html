@@ -75,188 +75,170 @@
       </div>
     </div>
 
-    <div class="detail-grid">
-      <!-- ---- Cockpit link band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the
-           old Video/Stream cards. This page never mounts a player or starts/stops a stream —
-           piloting and live video live in the cockpit (`/fly`) and the lightweight
-           `/live/:deviceId` watch page, both one click away. Offline is fine: "Open cockpit" still
-           navigates, since the cockpit owns start/stop. -->
-      <section class="card span-2 cockpit-band">
-        <div class="row cockpit-status">
-          <span class="chip" [class.ok]="live()">
-            @if (live()) {
-              <span class="dot live"></span>
+    <!-- ==== Overview — a compact glanceable landing (docs/UI-REDESIGN-PLAN.md Wave 3, D-F). Only
+         the identity band above, the cockpit band, KPI tiles, the recent-flights chart, and a
+         position map + freshest-telemetry summary live here; everything heavier is one of the six
+         drill-ins below (three side-panel drawers, two full-width sub-views, one drawer gated to
+         managers). ==================================================================== -->
+    @if (subView() === 'overview') {
+      <div class="grid12 overview-grid">
+        <!-- ---- Cockpit band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — this page never
+             mounts a player or starts/stops a stream; piloting and live video are the cockpit's
+             job (`/fly`) and the lightweight `/live/:deviceId` watch page, one click away. Offline
+             is fine — "Open cockpit" still navigates, since the cockpit owns start/stop. -->
+        <section class="card col-12 cockpit-band">
+          <div class="row cockpit-status">
+            <vision-icon name="cockpit" [size]="18" />
+            <span class="chip" [class.ok]="live()">
+              @if (live()) {
+                <span class="dot live"></span>
+              }
+              {{ live() ? 'Streaming' : 'Offline' }}
+            </span>
+            <span class="muted cockpit-hint">Piloting and live video are in the cockpit — this page is for managing the asset.</span>
+          </div>
+          <div class="row cockpit-actions">
+            <button type="button" class="btn" (click)="openCockpit()">Open cockpit</button>
+            @if (videoDevice(); as vd) {
+              <button type="button" class="btn secondary" (click)="watch()" title="Watch this stream on its own page">Watch live</button>
             }
-            {{ live() ? 'Streaming' : 'Offline' }}
-          </span>
-          <span class="muted cockpit-hint">Piloting and live video are in the cockpit — this page is for managing the asset.</span>
-        </div>
-        <div class="row cockpit-actions">
-          <button type="button" class="btn" (click)="openCockpit()">Open cockpit</button>
-          @if (videoDevice(); as vd) {
-            <button type="button" class="btn secondary" (click)="watch()" title="Watch this stream on its own page">Watch live</button>
-          }
-        </div>
-      </section>
+          </div>
+        </section>
 
-      <!-- ---- Pilots (docs/U-SCOPE-PLAN.md, U-e slice 2 feature 2) — who may fly this asset. The
-           card role-gates itself (renders nothing for a non-manager), so it's mounted
-           unconditionally here; a pilot viewing an asset never manages its roster. -->
-      <vision-pilots-card [assetId]="assetId()" />
-
-      <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
-           flight-utilization aggregates from `VisionApi.assetStats`; every tile reads a real value
-           or "—", never a fabricated number (see `core/fleet/asset-stats-logic.ts#kpiTiles`). -->
-      <section class="card span-2">
-        <header><h2>Utilization</h2></header>
-        <div class="kpi-tiles">
-          @for (tile of kpiTiles(); track tile.label) {
-            <div class="kpi-tile">
-              <div class="kpi-label">{{ tile.label }}</div>
-              <div class="kpi-value">
-                {{ tile.value }}
-                @if (tile.live) {
-                  <span class="dot live" title="Currently in progress"></span>
+        <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) --------------- -->
+        <section class="card col-8">
+          <div class="icon-heading">
+            <vision-icon name="gauge" [size]="18" />
+            <vision-section-header title="Utilization" />
+          </div>
+          <div class="kpi-tiles">
+            @for (tile of kpiTiles(); track tile.label) {
+              <div class="kpi-tile">
+                <div class="kpi-label">{{ tile.label }}</div>
+                <div class="kpi-value">
+                  {{ tile.value }}
+                  @if (tile.live) {
+                    <span class="dot live" title="Currently in progress"></span>
+                  }
+                </div>
+                @if (tile.sub) {
+                  <div class="kpi-sub muted">{{ tile.sub }}</div>
                 }
               </div>
-              @if (tile.sub) {
-                <div class="kpi-sub muted">{{ tile.sub }}</div>
+            }
+          </div>
+        </section>
+
+        <!-- ---- Position + freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) —
+             the single freshest sample across every source device, not the old landing page's full
+             per-device dump (that lives in the "Full telemetry" drawer now). -->
+        @if (assetTelemetryDevices().length > 0) {
+          <section class="card col-4">
+            <div class="icon-heading">
+              <vision-icon name="map-pin" [size]="18" />
+              <vision-section-header title="Position" [subtitle]="freshestSourceName() ? 'source: ' + freshestSourceName() : undefined">
+                <button type="button" actions class="btn secondary small" (click)="panels.open('telemetry')">
+                  Full telemetry
+                  <vision-icon name="chevron-right" [size]="14" />
+                </button>
+              </vision-section-header>
+            </div>
+            <vision-live-map />
+            <dl class="facts freshest-facts">
+              @for (row of freshestFacts(); track row.label) {
+                <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+              }
+              <div class="fact">
+                <dt>Sample</dt>
+                <dd [class.stale-text]="freshestStale()">{{ freshestAgeSeconds()?.toFixed(0) ?? '—' }}s ago</dd>
+              </div>
+            </dl>
+          </section>
+        }
+
+        <!-- ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) ------ -->
+        <section class="card col-8">
+          <div class="icon-heading">
+            <vision-icon name="history" [size]="18" />
+            <vision-section-header title="Recent flights" subtitle="durations, oldest to newest — lifetime totals are in Utilization above">
+              <button type="button" actions class="btn secondary small" (click)="openDrillIn('usage')">
+                Usage history
+                <vision-icon name="chevron-right" [size]="14" />
+              </button>
+            </vision-section-header>
+          </div>
+          @if (flightBars().length === 0) {
+            <p class="muted hint">No recorded flights yet.</p>
+          } @else {
+            <div class="util-chart">
+              @for (bar of flightBars(); track bar.usageId) {
+                <div class="util-bar-col">
+                  @if (bar.open) {
+                    <span class="dot live util-bar-pip" title="In progress"></span>
+                  }
+                  <div
+                    class="util-bar"
+                    tabindex="0"
+                    [style.height.%]="bar.heightPercent"
+                    [title]="barLabel(bar)"
+                    [attr.aria-label]="barLabel(bar)"
+                  ></div>
+                </div>
               }
             </div>
+            <div class="util-chart-axis">
+              <span>Oldest</span>
+              <span>Most recent</span>
+            </div>
           }
+        </section>
+
+        <!-- ---- Drill-in launcher — every heavier area is one click away, never dumped onto the
+             landing (docs/UI-REDESIGN-PLAN.md Wave 3, D-F). Pilots is the one manager-only entry
+             (`canManagePilots`) — hidden outright for anyone else, not just an empty drawer. ---- -->
+        <section class="card col-12 drill-in-launcher">
+          <div class="icon-heading">
+            <vision-icon name="list" [size]="18" />
+            <vision-section-header
+              eyebrow="Drill-in"
+              title="More on this asset"
+              subtitle="Full telemetry, events, usage history, hardware, and characteristics — plus pilots, for managers."
+            />
+          </div>
+          <div class="drill-in-row">
+            <button type="button" class="btn secondary" (click)="panels.open('telemetry')">
+              <vision-icon name="signal" [size]="16" />Full telemetry<vision-icon name="chevron-right" [size]="14" />
+            </button>
+            <button type="button" class="btn secondary" (click)="panels.open('events')">
+              <vision-icon name="scan" [size]="16" />Events<vision-icon name="chevron-right" [size]="14" />
+            </button>
+            <button type="button" class="btn secondary" (click)="openDrillIn('usage')">
+              <vision-icon name="history" [size]="16" />Usage history<vision-icon name="chevron-right" [size]="14" />
+            </button>
+            <button type="button" class="btn secondary" (click)="openDrillIn('hardware')">
+              <vision-icon name="chip" [size]="16" />Hardware &amp; devices<vision-icon name="chevron-right" [size]="14" />
+            </button>
+            <button type="button" class="btn secondary" (click)="panels.open('attributes')">
+              <vision-icon name="list" [size]="16" />Characteristics<vision-icon name="chevron-right" [size]="14" />
+            </button>
+            @if (canManagePilots()) {
+              <button type="button" class="btn secondary" (click)="panels.open('pilots')">
+                <vision-icon name="pilot" [size]="16" />Pilots<vision-icon name="chevron-right" [size]="14" />
+              </button>
+            }
+          </div>
+        </section>
+      </div>
+    } @else if (subView() === 'usage') {
+      <!-- ==== Usage history — a wide table, so it's a full-width sub-view rather than a drawer. -->
+      <section class="card subview">
+        <button type="button" class="btn secondary small back-btn" (click)="closeDrillIn()">
+          <vision-icon name="chevron-left" [size]="14" />Back to overview
+        </button>
+        <div class="icon-heading">
+          <vision-icon name="history" [size]="18" />
+          <vision-section-header eyebrow="Drill-in" title="Usage history" [subtitle]="a.recentUsages.length + ' usage(s)'" />
         </div>
-      </section>
-
-      <!-- ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) — honestly
-           labeled as the capped recent list (`AssetDetails#recentUsages`), distinct from the KPI
-           row's lifetime totals above. Every value here is also reachable, without hovering, in
-           the Usage history table below (this chart's table-view twin). -->
-      <section class="card span-2">
-        <header>
-          <h2>Recent flights</h2>
-          <span class="muted">durations, oldest to newest — lifetime totals are in Utilization above</span>
-        </header>
-        @if (flightBars().length === 0) {
-          <p class="muted hint">No recorded flights yet.</p>
-        } @else {
-          <div class="util-chart">
-            @for (bar of flightBars(); track bar.usageId) {
-              <div class="util-bar-col">
-                @if (bar.open) {
-                  <span class="dot live util-bar-pip" title="In progress"></span>
-                }
-                <div
-                  class="util-bar"
-                  tabindex="0"
-                  [style.height.%]="bar.heightPercent"
-                  [title]="barLabel(bar)"
-                  [attr.aria-label]="barLabel(bar)"
-                ></div>
-              </div>
-            }
-          </div>
-          <div class="util-chart-axis">
-            <span>Oldest</span>
-            <span>Most recent</span>
-          </div>
-        }
-      </section>
-
-      <!-- ---- Map (docs/CYCLES-PLAN.md §11 item 2–3) --------------------------------------- -->
-      @if (assetTelemetryDevices().length > 0) {
-        <section class="card span-2">
-          <header>
-            <h2>Position</h2>
-            @if (freshestSourceName(); as source) {
-              <span class="muted">source: {{ source }}</span>
-            }
-          </header>
-          <vision-live-map />
-        </section>
-      }
-
-      <!-- ---- Telemetry per source device (docs/CYCLES-PLAN.md §11 item 3) ----------------- -->
-      @if (assetTelemetryDevices().length > 0) {
-        <section class="card span-2">
-          <header><h2>Telemetry</h2></header>
-          <div class="telemetry-grid">
-            @for (device of assetTelemetryDevices(); track device.id) {
-              <div class="telemetry-panel" [class.stale]="deviceStale(device.id)">
-                <div class="panel-name truncate">{{ device.name }}</div>
-                @if (latestSampleFor(device.id); as sample) {
-                  <dl class="facts">
-                    <div class="fact">
-                      <dt>Position</dt>
-                      <dd class="mono">
-                        @if (sample.latitude !== undefined && sample.longitude !== undefined) {
-                          {{ sample.latitude.toFixed(5) }}, {{ sample.longitude.toFixed(5) }}
-                        } @else { — }
-                      </dd>
-                    </div>
-                    <div class="fact">
-                      <dt>Altitude</dt>
-                      <dd>{{ sample.altitudeMeters !== undefined ? sample.altitudeMeters.toFixed(0) + ' m' : '—' }}</dd>
-                    </div>
-                    <div class="fact">
-                      <dt>Heading</dt>
-                      <dd>{{ sample.headingDegrees !== undefined ? sample.headingDegrees.toFixed(0) + '°' : '—' }}</dd>
-                    </div>
-                    <div class="fact">
-                      <dt>Battery</dt>
-                      <dd>{{ sample.batteryPercent !== undefined ? sample.batteryPercent.toFixed(0) + '%' : '—' }}</dd>
-                    </div>
-                    <div class="fact">
-                      <dt>Sample</dt>
-                      <dd [class.stale-text]="deviceStale(device.id)">
-                        {{ deviceSampleAgeSeconds(device.id)?.toFixed(0) ?? '—' }}s ago
-                      </dd>
-                    </div>
-                  </dl>
-                } @else {
-                  <p class="muted hint">No telemetry yet from this device.</p>
-                }
-              </div>
-            }
-          </div>
-        </section>
-      }
-
-      <!-- ---- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ----------------------------------- -->
-      <section class="card span-2">
-        <header>
-          <h2>Events</h2>
-          <span class="muted">
-            {{ live() ? 'live stream feed' : 'recent, from the global feed' }}
-          </span>
-        </header>
-        @if (displayedEvents().length === 0) {
-          <p class="muted hint">
-            No detection events recorded {{ live() ? 'for this stream yet' : 'for this asset yet' }}.
-          </p>
-        } @else {
-          <ul class="event-list">
-            @for (event of displayedEvents(); track event.id) {
-              <li class="event-row" [class.open]="event.state === 'OPEN'">
-                <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
-                  <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
-                </span>
-                <span class="event-main">
-                  <span class="event-label">{{ event.label }}</span>
-                  <span class="event-meta muted">{{ (event.peakConfidence * 100).toFixed(0) }}% confidence</span>
-                </span>
-                <span class="event-time faint">{{ relativeTime(event) }}</span>
-              </li>
-            }
-          </ul>
-        }
-      </section>
-
-      <!-- ---- Usage history ----------------------------------------------------------------- -->
-      <section class="card span-2">
-        <header>
-          <h2>Usage history</h2>
-          <span class="muted">{{ a.recentUsages.length }} usage(s)</span>
-        </header>
         @if (a.recentUsages.length === 0) {
           <p class="muted hint">No recorded usage yet — starts once this asset first streams.</p>
         } @else {
@@ -300,117 +282,18 @@
           </table>
         }
       </section>
-
-      <!-- ---- Characteristics ----------------------------------------------------------------- -->
-      <section class="card">
-        <header><h2>Characteristics</h2></header>
-        <dl class="facts">
-          <div class="fact"><dt>Owner</dt><dd class="mono">{{ a.owner }}</dd></div>
-          <div class="fact"><dt>Category</dt><dd>{{ a.categoryName }}</dd></div>
-          @if (a.lastUsedAt) {
-            <div class="fact"><dt>Last used</dt><dd class="mono">{{ a.lastUsedAt }}</dd></div>
-          }
-          <!-- Registration/tail number (docs/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
-               attributes-key convention, display + inline edit. -->
-          <div class="fact">
-            <dt>Registration</dt>
-            <dd>
-              @if (editingRegistrationNumber()) {
-                <span class="inline-form registration-edit">
-                  <input
-                    [value]="registrationNumberDraft()"
-                    (input)="registrationNumberDraft.set($any($event.target).value)"
-                    placeholder="N12345"
-                    aria-label="Registration / tail number"
-                  />
-                  <button type="button" class="btn small" (click)="confirmEditRegistrationNumber()" [disabled]="busy()">
-                    Save
-                  </button>
-                  <button type="button" class="btn secondary small" (click)="cancelEditRegistrationNumber()">
-                    Cancel
-                  </button>
-                </span>
-              } @else {
-                <span class="row registration-row">
-                  <span>{{ registrationNumber() ?? '—' }}</span>
-                  <button type="button" class="btn secondary small" (click)="openEditRegistrationNumber()">
-                    Edit
-                  </button>
-                </span>
-              }
-            </dd>
-          </div>
-        </dl>
-        @if (detailPairs(a.attributes).length > 0) {
-          <dl class="facts">
-            @for (pair of detailPairs(a.attributes); track pair.key) {
-              <div class="fact"><dt>{{ pair.key }}</dt><dd>{{ pair.value }}</dd></div>
-            }
-          </dl>
-        } @else {
-          <p class="muted hint">No extra attributes recorded.</p>
-        }
-
-        <!-- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
-             key/value surgery, including the registrationNumber key the inline edit above already
-             covers more conveniently for the common case. -->
-        @if (settings.advancedMode()) {
-          <div class="attributes-editor">
-            @if (!attributesEditorOpen()) {
-              <button type="button" class="btn secondary small" (click)="openAttributesEditor()">
-                Edit attributes…
-              </button>
-            } @else {
-              <div class="spread">
-                <h3>Edit attributes</h3>
-                <button type="button" class="btn secondary small" (click)="addAttributeRow()">Add attribute</button>
-              </div>
-              @for (row of attributeRows(); track $index) {
-                <div class="option-row">
-                  <input
-                    [value]="row.key"
-                    (input)="updateAttributeKey($index, $any($event.target).value)"
-                    placeholder="key"
-                    [attr.aria-label]="'Attribute ' + ($index + 1) + ' key'"
-                  />
-                  <input
-                    [value]="row.value"
-                    (input)="updateAttributeValue($index, $any($event.target).value)"
-                    placeholder="value"
-                    [attr.aria-label]="'Attribute ' + ($index + 1) + ' value'"
-                  />
-                  <button
-                    type="button"
-                    class="btn secondary small"
-                    (click)="removeAttributeRow($index)"
-                    aria-label="Remove attribute"
-                  >
-                    ×
-                  </button>
-                </div>
-              }
-              <div class="row">
-                <button
-                  type="button"
-                  class="btn small"
-                  (click)="confirmAttributesEditor()"
-                  [disabled]="attributesSubmitting()"
-                >
-                  {{ attributesSubmitting() ? 'Saving…' : 'Save attributes' }}
-                </button>
-                <button type="button" class="btn secondary small" (click)="cancelAttributesEditor()">Cancel</button>
-              </div>
-            }
-          </div>
-        }
-      </section>
-
-      <!-- ---- Hardware (docs/CYCLES-PLAN.md §11 item 2 — full warehouse actions) -------------- -->
-      <section class="card span-2">
-        <header>
-          <h2>Hardware</h2>
-          <button type="button" class="btn secondary small" (click)="openAssign()">Attach a device</button>
-        </header>
+    } @else if (subView() === 'hardware') {
+      <!-- ==== Hardware & devices — full lifecycle table + attach-a-device, also full-width. --- -->
+      <section class="card subview">
+        <button type="button" class="btn secondary small back-btn" (click)="closeDrillIn()">
+          <vision-icon name="chevron-left" [size]="14" />Back to overview
+        </button>
+        <div class="icon-heading">
+          <vision-icon name="chip" [size]="18" />
+          <vision-section-header eyebrow="Drill-in" title="Hardware &amp; devices">
+            <button type="button" actions class="btn secondary small" (click)="openAssign()">Attach a device</button>
+          </vision-section-header>
+        </div>
 
         @if (assignOpen()) {
           <div class="inline-form assign-form">
@@ -531,6 +414,183 @@
           </tbody>
         </table>
       </section>
-    </div>
+    }
+
+    <!-- ==== Drawers (docs/UI-REDESIGN-PLAN.md Wave 3) — `panels` (one open at a time) mounts
+         these; they float above whichever overview/sub-view content is on screen and stay open
+         across an overview/sub-view switch. ================================================= -->
+
+    @if (panels.isOpen('telemetry')) {
+      <vision-side-panel title="Full telemetry" subtitle="Per source device" icon="signal" (close)="panels.close()">
+        @if (assetTelemetryDevices().length === 0) {
+          <p class="muted hint">No telemetry-capable devices on this asset.</p>
+        } @else {
+          <div class="telemetry-grid">
+            @for (device of assetTelemetryDevices(); track device.id) {
+              <div class="telemetry-panel" [class.stale]="deviceStale(device.id)">
+                <div class="panel-name truncate">{{ device.name }}</div>
+                @if (latestSampleFor(device.id); as sample) {
+                  <dl class="facts">
+                    @for (row of deviceFacts(device.id); track row.label) {
+                      <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+                    }
+                    <div class="fact">
+                      <dt>Sample</dt>
+                      <dd [class.stale-text]="deviceStale(device.id)">
+                        {{ deviceSampleAgeSeconds(device.id)?.toFixed(0) ?? '—' }}s ago
+                      </dd>
+                    </div>
+                  </dl>
+                } @else {
+                  <p class="muted hint">No telemetry yet from this device.</p>
+                }
+              </div>
+            }
+          </div>
+        }
+      </vision-side-panel>
+    }
+
+    @if (panels.isOpen('events')) {
+      <vision-side-panel
+        title="Events"
+        [subtitle]="live() ? 'Live stream feed' : 'Recent, from the global feed'"
+        icon="scan"
+        (close)="panels.close()"
+      >
+        @if (displayedEvents().length === 0) {
+          <p class="muted hint">
+            No detection events recorded {{ live() ? 'for this stream yet' : 'for this asset yet' }}.
+          </p>
+        } @else {
+          <ul class="event-list">
+            @for (event of displayedEvents(); track event.id) {
+              <li class="event-row" [class.open]="event.state === 'OPEN'">
+                <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
+                  <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
+                </span>
+                <span class="event-main">
+                  <span class="event-label">{{ event.label }}</span>
+                  <span class="event-meta muted">{{ (event.peakConfidence * 100).toFixed(0) }}% confidence</span>
+                </span>
+                <span class="event-time faint">{{ relativeTime(event) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </vision-side-panel>
+    }
+
+    @if (panels.isOpen('attributes')) {
+      <!-- Characteristics + registration/attribute editors — both still behind their own explicit
+           "Edit…" disclosure (docs/UI-REDESIGN-PLAN.md Wave 3 guardrail 3), unchanged. -->
+      <vision-side-panel title="Characteristics" icon="list" (close)="panels.close()">
+        <dl class="facts">
+          <div class="fact"><dt>Owner</dt><dd class="mono">{{ a.owner }}</dd></div>
+          <div class="fact"><dt>Category</dt><dd>{{ a.categoryName }}</dd></div>
+          @if (a.lastUsedAt) {
+            <div class="fact"><dt>Last used</dt><dd class="mono">{{ a.lastUsedAt }}</dd></div>
+          }
+          <!-- Registration/tail number (docs/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
+               attributes-key convention, display + inline edit. -->
+          <div class="fact">
+            <dt>Registration</dt>
+            <dd>
+              @if (editingRegistrationNumber()) {
+                <span class="inline-form registration-edit">
+                  <input
+                    [value]="registrationNumberDraft()"
+                    (input)="registrationNumberDraft.set($any($event.target).value)"
+                    placeholder="N12345"
+                    aria-label="Registration / tail number"
+                  />
+                  <button type="button" class="btn small" (click)="confirmEditRegistrationNumber()" [disabled]="busy()">
+                    Save
+                  </button>
+                  <button type="button" class="btn secondary small" (click)="cancelEditRegistrationNumber()">
+                    Cancel
+                  </button>
+                </span>
+              } @else {
+                <span class="row registration-row">
+                  <span>{{ registrationNumber() ?? '—' }}</span>
+                  <button type="button" class="btn secondary small" (click)="openEditRegistrationNumber()">
+                    Edit
+                  </button>
+                </span>
+              }
+            </dd>
+          </div>
+        </dl>
+        @if (detailPairs(a.attributes).length > 0) {
+          <dl class="facts">
+            @for (pair of detailPairs(a.attributes); track pair.key) {
+              <div class="fact"><dt>{{ pair.key }}</dt><dd>{{ pair.value }}</dd></div>
+            }
+          </dl>
+        } @else {
+          <p class="muted hint">No extra attributes recorded.</p>
+        }
+
+        <!-- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
+             key/value surgery, including the registrationNumber key the inline edit above already
+             covers more conveniently for the common case. -->
+        @if (settings.advancedMode()) {
+          <div class="attributes-editor">
+            @if (!attributesEditorOpen()) {
+              <button type="button" class="btn secondary small" (click)="openAttributesEditor()">
+                Edit attributes…
+              </button>
+            } @else {
+              <div class="spread">
+                <h3>Edit attributes</h3>
+                <button type="button" class="btn secondary small" (click)="addAttributeRow()">Add attribute</button>
+              </div>
+              @for (row of attributeRows(); track $index) {
+                <div class="option-row">
+                  <input
+                    [value]="row.key"
+                    (input)="updateAttributeKey($index, $any($event.target).value)"
+                    placeholder="key"
+                    [attr.aria-label]="'Attribute ' + ($index + 1) + ' key'"
+                  />
+                  <input
+                    [value]="row.value"
+                    (input)="updateAttributeValue($index, $any($event.target).value)"
+                    placeholder="value"
+                    [attr.aria-label]="'Attribute ' + ($index + 1) + ' value'"
+                  />
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    (click)="removeAttributeRow($index)"
+                    aria-label="Remove attribute"
+                  >
+                    ×
+                  </button>
+                </div>
+              }
+              <div class="row">
+                <button
+                  type="button"
+                  class="btn small"
+                  (click)="confirmAttributesEditor()"
+                  [disabled]="attributesSubmitting()"
+                >
+                  {{ attributesSubmitting() ? 'Saving…' : 'Save attributes' }}
+                </button>
+                <button type="button" class="btn secondary small" (click)="cancelAttributesEditor()">Cancel</button>
+              </div>
+            }
+          </div>
+        }
+      </vision-side-panel>
+    }
+
+    @if (panels.isOpen('pilots') && canManagePilots()) {
+      <vision-side-panel title="Pilots" icon="pilot" (close)="panels.close()">
+        <vision-pilots-card [assetId]="assetId()" />
+      </vision-side-panel>
+    }
   }
 </div>

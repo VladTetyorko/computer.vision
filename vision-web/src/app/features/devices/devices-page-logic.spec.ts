@@ -1,24 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetDetails, AssetSummary, Device } from '../../core/api/models';
+import type { AssetDetails, Device } from '../../core/api/models';
 import {
-  buildAssetListRows,
-  buildAssetRows,
   buildCreateAssetRequestForDevice,
   buildWarehouseRows,
-  filterAssetListRowsByArchived,
-  filterAssetListRowsByCategory,
-  filterAssetRowsByArchived,
   filterRowsByArchived,
   mapDeviceOwners,
+  searchWarehouseRowsByQuery,
 } from './devices-page-logic';
 
 /**
- * The lifecycle-action-menu/edit-builder tests (`availableDeviceActions`, `availableAssetActions`,
- * `buildDeviceRenameEdit`, `buildAssetEdit`, `RESTORE_TARGET_STATE`) moved to
- * `core/fleet/warehouse-logic.spec.ts` alongside the functions themselves (docs/CYCLES-PLAN.md §11,
- * CD-b); the category-picker tests (`deriveCategoryOptions`, `DEFAULT_CATEGORY_OPTIONS`) moved to
- * `core/fleet/category-logic.spec.ts` the same way (docs/UX-REWORK-PLAN.md §U-d) — this file keeps
- * only the Devices-page-specific view-model builders.
+ * The lifecycle-action-menu/edit-builder tests (`availableDeviceActions`, `buildDeviceRenameEdit`,
+ * `RESTORE_TARGET_STATE`) live in `core/fleet/warehouse-logic.spec.ts` alongside the functions
+ * themselves (docs/CYCLES-PLAN.md §11, CD-b); the category-picker tests
+ * (`deriveCategoryOptions`/`DEFAULT_CATEGORY_OPTIONS`) live in `core/fleet/category-logic.spec.ts`
+ * the same way (docs/UX-REWORK-PLAN.md §U-d). The asset-first list's own tests
+ * (`buildAssetListRows`/`filterAssetListRowsByArchived`/`filterAssetListRowsByCategory` and friends)
+ * moved to `features/assets/assets-logic.spec.ts` once the Assets page split out of this one — this
+ * file keeps only the Devices-page-specific (raw device table) view-model builders.
  */
 
 function device(partial: Partial<Device> = {}): Device {
@@ -34,7 +32,7 @@ function device(partial: Partial<Device> = {}): Device {
   };
 }
 
-function assetSummary(partial: Partial<AssetSummary> = {}): AssetSummary {
+function assetDetails(partial: Partial<AssetDetails> = {}): AssetDetails {
   return {
     assetId: 'a-0',
     displayName: 'asset',
@@ -43,13 +41,6 @@ function assetSummary(partial: Partial<AssetSummary> = {}): AssetSummary {
     owner: 'owner-0',
     status: 'OFFLINE',
     attributes: {},
-    ...partial,
-  };
-}
-
-function assetDetails(partial: Partial<AssetDetails> = {}): AssetDetails {
-  return {
-    ...assetSummary(),
     devices: [],
     recentUsages: [],
     ...partial,
@@ -148,138 +139,41 @@ describe('filterRowsByArchived', () => {
   });
 });
 
-describe('buildAssetRows', () => {
-  it('defaults a missing lifecycle to ACTIVE', () => {
-    const rows = buildAssetRows([assetSummary({ lifecycle: undefined })]);
-    expect(rows[0].lifecycle).toBe('ACTIVE');
-    expect(rows[0].archived).toBe(false);
-  });
-
-  it('carries an explicit lifecycle through', () => {
-    const rows = buildAssetRows([assetSummary({ lifecycle: 'DEACTIVATED' })]);
-    expect(rows[0].lifecycle).toBe('DEACTIVATED');
-  });
-
-  it('marks a DELETED asset archived', () => {
-    const rows = buildAssetRows([assetSummary({ lifecycle: 'DELETED' })]);
-    expect(rows[0].archived).toBe(true);
-  });
-});
-
-describe('filterAssetRowsByArchived', () => {
-  const rows = buildAssetRows([
-    assetSummary({ assetId: 'active', lifecycle: 'ACTIVE' }),
-    assetSummary({ assetId: 'archived', lifecycle: 'DELETED' }),
+describe('searchWarehouseRowsByQuery', () => {
+  const owners = mapDeviceOwners([
+    assetDetails({ assetId: 'a-1', displayName: 'Front Gate', devices: [device({ id: 'dev-1' })] }),
   ]);
-
-  it('hides archived cards when showArchived is false', () => {
-    expect(filterAssetRowsByArchived(rows, false).map((r) => r.asset.assetId)).toEqual(['active']);
-  });
-
-  it('keeps archived cards when showArchived is true', () => {
-    expect(filterAssetRowsByArchived(rows, true).map((r) => r.asset.assetId)).toEqual([
-      'active',
-      'archived',
-    ]);
-  });
-});
-
-describe('buildAssetListRows (docs/CYCLES-PLAN.md §11, CD-b item 1 — the asset-first primary list)', () => {
-  it('derives deviceCount from the resolved device list', () => {
-    const asset = assetDetails({ devices: [device({ id: 'd1' }), device({ id: 'd2' })] });
-    const rows = buildAssetListRows([asset], new Set());
-    expect(rows[0].deviceCount).toBe(2);
-  });
-
-  it('marks streaming true when any of the asset devices is live', () => {
-    const asset = assetDetails({ devices: [device({ id: 'd1' }), device({ id: 'd2' })] });
-    const rows = buildAssetListRows([asset], new Set(['d2']));
-    expect(rows[0].streaming).toBe(true);
-  });
-
-  it('marks streaming false when none of the asset devices is live', () => {
-    const asset = assetDetails({ devices: [device({ id: 'd1' })] });
-    const rows = buildAssetListRows([asset], new Set(['other-device']));
-    expect(rows[0].streaming).toBe(false);
-  });
-
-  it('resolves watchDeviceId to the first VIDEO-capable device', () => {
-    const telemetryOnly = device({ id: 'd1', capabilities: ['TELEMETRY'] });
-    const video = device({ id: 'd2', capabilities: ['VIDEO'] });
-    const rows = buildAssetListRows([assetDetails({ devices: [telemetryOnly, video] })], new Set());
-    expect(rows[0].watchDeviceId).toBe('d2');
-  });
-
-  it('leaves watchDeviceId undefined when the asset has no VIDEO-capable device', () => {
-    const rows = buildAssetListRows(
-      [assetDetails({ devices: [device({ id: 'd1', capabilities: ['TELEMETRY'] })] })],
-      new Set(),
-    );
-    expect(rows[0].watchDeviceId).toBeUndefined();
-  });
-
-  it('defaults a missing lifecycle to ACTIVE, same as buildAssetRows', () => {
-    const rows = buildAssetListRows([assetDetails({ lifecycle: undefined })], new Set());
-    expect(rows[0].lifecycle).toBe('ACTIVE');
-    expect(rows[0].archived).toBe(false);
-  });
-
-  it('marks a DELETED asset archived', () => {
-    const rows = buildAssetListRows([assetDetails({ lifecycle: 'DELETED' })], new Set());
-    expect(rows[0].archived).toBe(true);
-  });
-});
-
-describe('filterAssetListRowsByArchived', () => {
-  const rows = buildAssetListRows(
+  const rows = buildWarehouseRows(
     [
-      assetDetails({ assetId: 'active', lifecycle: 'ACTIVE' }),
-      assetDetails({ assetId: 'archived', lifecycle: 'DELETED' }),
+      device({ id: 'dev-1', name: 'Gate camera', protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' }),
+      device({ id: 'dev-2', name: 'Back yard', protocol: 'mjpeg', uri: 'http://192.168.1.60:8080' }),
     ],
+    owners,
     new Set(),
   );
 
-  it('hides archived rows when showArchived is false', () => {
-    expect(filterAssetListRowsByArchived(rows, false).map((r) => r.asset.assetId)).toEqual(['active']);
+  it('leaves every row for a blank query', () => {
+    expect(searchWarehouseRowsByQuery(rows, '   ').map((r) => r.device.id)).toEqual(['dev-1', 'dev-2']);
   });
 
-  it('keeps archived rows when showArchived is true', () => {
-    expect(filterAssetListRowsByArchived(rows, true).map((r) => r.asset.assetId)).toEqual([
-      'active',
-      'archived',
-    ]);
-  });
-});
-
-describe('filterAssetListRowsByCategory (docs/UX-QUICKWINS-PLAN.md QF-2 — /devices?category= support)', () => {
-  const rows = buildAssetListRows(
-    [
-      assetDetails({ assetId: 'drone-1', category: 'drone' }),
-      assetDetails({ assetId: 'cam-1', category: 'ip-camera' }),
-    ],
-    new Set(),
-  );
-
-  it('leaves every row when category is undefined', () => {
-    expect(filterAssetListRowsByCategory(rows, undefined).map((r) => r.asset.assetId)).toEqual([
-      'drone-1',
-      'cam-1',
-    ]);
+  it('matches case-insensitively on the device name', () => {
+    expect(searchWarehouseRowsByQuery(rows, 'GATE camera').map((r) => r.device.id)).toEqual(['dev-1']);
   });
 
-  it('leaves every row when category is blank', () => {
-    expect(filterAssetListRowsByCategory(rows, '   ').map((r) => r.asset.assetId)).toEqual([
-      'drone-1',
-      'cam-1',
-    ]);
+  it('matches on protocol', () => {
+    expect(searchWarehouseRowsByQuery(rows, 'mjpeg').map((r) => r.device.id)).toEqual(['dev-2']);
   });
 
-  it('narrows to rows matching the given category slug', () => {
-    expect(filterAssetListRowsByCategory(rows, 'drone').map((r) => r.asset.assetId)).toEqual(['drone-1']);
+  it('matches on the URI, e.g. searching by IP address', () => {
+    expect(searchWarehouseRowsByQuery(rows, '192.168.1.50').map((r) => r.device.id)).toEqual(['dev-1']);
   });
 
-  it('narrows to zero rows for a category with no current assets, rather than showing everything', () => {
-    expect(filterAssetListRowsByCategory(rows, 'robot')).toEqual([]);
+  it("matches on the owning asset's name", () => {
+    expect(searchWarehouseRowsByQuery(rows, 'front gate').map((r) => r.device.id)).toEqual(['dev-1']);
+  });
+
+  it('narrows to zero rows for a query matching nothing', () => {
+    expect(searchWarehouseRowsByQuery(rows, 'nope')).toEqual([]);
   });
 });
 

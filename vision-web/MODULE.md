@@ -11,6 +11,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 ### `src/app/core/api/` — typed REST client (WEB-PLAN §0.5: mirrors Java DTOs exactly, no component calls `fetch` directly)
 
 - `models.ts` — wire types 1:1 with `com.drones.vision.api.dto`: `Device` (mirrors `DeviceResponse`: id, name, capabilities, protocol, uri, options, state), `RegisterDeviceRequest`, `ActiveStream`, `StartStreamRequest`, `StartStreamResult`, `DiscoveredDevice` (mirrors `DiscoveredDeviceResponse`; `suggestedCategory?: string` is a category slug), `ScanRequest`, `ScanResult`, `ApiErrorBody`. `Capability = 'VIDEO'|'TELEMETRY'|'PTZ'|'AUDIO'`. **No `DeviceType`/`type` field anywhere** — removed server-side; categories are asset-level data.
+  - **Live per-stream CV control (docs/CV-CONTROL-PLAN.md §2-4's frozen contract, superseding the old hardcoded model list — see the dedicated changelog section at the end of this file)**: `StartStreamRequest` gains optional `labelFilter?: readonly string[]`/`detectionEnabled?: boolean`; new `UpdateStreamConfigRequest` (every field optional — the body of `PATCH /api/streams/{id}/config`, a **partial** patch, not a replace), `PatchStreamConfigResponse {streamId, modelReArmed}`, `CvModel {id, displayName, kind, openVocab, defaultLabelFilter}` (one row of the model-picker roster — `displayName` now carries the old `DetectionModelOption.hint` inline, there is no separate hint field), `CvModelsResponse {models}` (the body of `GET /api/cv/models`, never errors server-side).
   - **Asset-side DTOs** (docs/CYCLES-PLAN.md §2 — landed the mirroring this file previously deferred): `AssetSummary` (mirrors `AssetSummaryResponse`), `AssetDetails` (extends `AssetSummary` with `devices`/`recentUsages`, mirrors `AssetDetailsResponse`), `AssetUsage` (mirrors `AssetUsageResponse`; `endedAt` absent = open usage), `TelemetrySample` (mirrors `TelemetrySampleResponse`; every field but `at` is optional), `GeoPosition` (mirrors `GeoPositionResponse`), `Category` (mirrors `CategoryResponse`), plus `AssetStatus` union. Same `@JsonInclude(NON_NULL)` convention as everything else here: absent, not `null`, typed `?:`.
   - **`AssetStats`** (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen wire contract — mirrors `dto.AssetStatsResponse`, `GET /api/assets/{id}/stats`): `{totalFlightSeconds, flightCount}` always present (0 for an asset with no usages fetched); `firstFlownAt?/lastFlownAt?/avgFlightSeconds?/lastKnownBatteryPercent?` each independently absent (never a fabricated `0`/`null`) exactly when honestly unavailable (no flights, no *closed* flights, or no telemetry ever reported, respectively); `flightInProgress: boolean` always present. Backs the asset manager page's KPI tile row — see `core/fleet/asset-stats-logic.ts` below and the rewritten `features/asset-detail/**` section.
   - **Simulation DTOs** (docs/CYCLES-PLAN.md §4, §9): `StartSimulationRequest` (mirrors `dto.StartSimulationRequest`; `transport?: 'direct' | 'rtsp'`, fixed lowercase — the backend matches case-insensitively but this app only ever sends these two) and `SimulationResponse` (mirrors `dto.SimulationResponse`; `streamId`/`viewUrl` absent when not auto-started). **`videoPath` is now optional** (docs/CYCLES-PLAN.md §9, CU-a/CU-b): omitting it entirely is what registers a fully synthetic, moving VIDEO+TELEMETRY test drone with no video file at all — see `core/fleet/simulation-logic.ts#buildTestDroneRequest`.
@@ -28,12 +29,12 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
   - **`UsageRecording`** (docs/OPS-CORE-PLAN.md §R's frozen wire contract — `GET /api/usages/{usageId}/recording`) — mirrors `dto.UsageRecordingResponse`: `{available, url?, start?, durationSeconds?}`, the latter three omitted (not `null`) whenever `available` is `false`. `url` is mediamtx's own playback `/get` URL for `[start, start+durationSeconds)` — never proxied, same absolute-origin rule as `whepUrl`. Backs `features/replay/**`'s video pane/clip export — see that section below.
   - **`Role`/`Membership`/`MeResponse`** (docs/U-AUTH-PLAN.md wave 3's frozen contract, this app's own wave 4) — `Role = 'PILOT'|'MANAGER'|'ADMIN'`; `Membership {groupId, groupName, role}`; `MeResponse {userId, username, displayName, email, memberships: Membership[], topRole: Role, authEnabled: boolean}`, the body of `GET /api/auth/me`/`POST /api/auth/login`. `authEnabled` is what lets the SPA know whether a login screen makes sense at all — see the dedicated `core/auth/**` section below for how `AuthStore` uses it. No `NON_NULL`-style optionality here — every field is always present on a 200.
   - **Org-scope types** (docs/U-SCOPE-PLAN.md, U-e slice 2's frozen contract; waves 1–2 backend done) — `UserMembership {groupId, role}` (mirrors `UserResponse.MembershipView` — deliberately **not** `Membership` above: the admin-list row carries no `groupName`, the org UI resolves it against the groups list it already loads); `UserSummary {userId, username, displayName, email, enabled, memberships: UserMembership[], topRole?}` (`topRole` **optional** — a membership-less user has none, backend returns `null`); `CreateUserRequest {username, displayName, email, password, memberships?, enabled?}`; `GroupSummary {id, name, parentGroupId?}` (absent parent = root); `CreateGroupRequest {name, parentGroupId?}`; `AssignedPilot {userId}` (mirrors `PilotResponse`); `Assignment {assetId}` (mirrors `AssignmentResponse`); `AuditEntry {id, occurredAt, actor, action, targetType, targetId, summary, details}` (mirrors `AuditEntryResponse` — `action`/`targetType` left as plain strings, `core/org/org-logic.ts#formatActivity` tolerates an unrecognized value rather than a closed union a new backend action would break). Back `core/org/**` (users/groups), `features/asset-detail/pilots-card.ts` (assignment), `features/activity/**` (activity) — see the dedicated section below.
-- `vision-api.ts` — `VisionApi` (`@Injectable providedIn: 'root'`): `listDevices(includeDeleted = false)`, `registerDevice(req)`, `listStreams()`, `startStream(deviceId, req?)`, `stopStream(streamId)`, `scan(req?)`, `listAssets(includeDeleted = false)`, `getAsset(assetId)`, **`assetStats(assetId)`** (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3 — `GET /api/assets/{id}/stats` → `AssetStats`; 404 for an unknown asset, same as `getAsset`; the asset manager page's own `loadStats` degrades its KPI row to "—" on any failure rather than propagating it), `usageTelemetry(usageId, limit = 200)`, **`usageTimeline(usageId, {fromMs?, toMs?, maxPoints?} = {})`** (docs/MVP2-PLAN.md §R, R-b — each option only added to the query string when given; `features/replay/replay.ts`'s only call site always passes `maxPoints: 2000`, the server's own clamp ceiling, once up front), `streamDetections(streamId, limit = 50)` (docs/MVP1-PLAN.md §C8 bullet 4), `startSimulation(req)`, `stopSimulation(assetId)` (docs/CYCLES-PLAN.md §4), plus the docs/CYCLES-PLAN.md §8 warehouse set: `updateDevice(id, edit)` (PATCH), `setDeviceState(id, state)` (POST `.../state`), `deleteDevice(id)` (DELETE, archive), `updateAsset(id, edit)`, `setAssetState(id, state)`, `deleteAsset(id)` → `AssetDeletionResponse`, `assignDevice(assetId, deviceId)` (POST `.../devices`), `unassignDevice(assetId, deviceId)` (DELETE `.../devices/{deviceId}`), plus (docs/MVP3-PLAN.md C-a/C-c) **`fleetSummary(includeArchived = false)`** (`includeArchived` — deliberately not `includeDeleted`, see vision-api/MODULE.md's Conventions — only added to the query string when `true`, same convention as `includeDeleted` elsewhere) and **`snapshotUrl(streamId): string`** — the one method here that does **not** return a `Promise`: it just builds `/api/streams/{streamId}/snapshot`'s path for `features/command/live-strip-tile.ts` to bind straight to an `<img src>` (the browser does the actual fetching), kept in this class anyway so it stays "the only place the frontend knows REST URLs" even for a path never passed through `HttpClient`. `includeDeleted`/`includeArchived` are each only added to the query string when `true` (today's default behavior is otherwise unchanged). Every other method is promise-returning (`firstValueFrom`) so components hold signals, not subscriptions. **`updateLiveTopics(connectionId, {add, remove})`** (docs/REALTIME-PLAN.md §4, Phase R-c) — the one `PATCH /api/live/{connectionId}/topics` call; `GET /api/live` itself is **not** here (`core/live/live-store.ts` opens it directly as an `EventSource`, which `HttpClient` cannot stream — see that class's own doc comment and the "Live updates" DTO paragraph above for why this is the one documented exception to "the only place the frontend knows REST URLs"). **`probeDevice(request)`** (docs/UX-REWORK-PLAN.md §U-d — `POST /api/devices/probe`, the onboarding wizard's Test step) and **`assetImageUrl(assetId)`/`uploadAssetImage(assetId, blob)`/`deleteAssetImage(assetId)`** (the `GET`/`PUT`/`DELETE /api/assets/{id}/image` trio — `assetImageUrl` is a plain URL builder like `snapshotUrl`, not promise-returning; `uploadAssetImage` sends an already-downscaled `Blob` as a raw body, no JSON) are this cycle's own additions — coded against the plan's own pinned contract ahead of/alongside the backend half landing; see this file's own U-d section below for the full live-verification list. **`listGeofences()`/`createGeofence(request)`/`updateGeofence(id, request)`/`deleteGeofence(id)`** (docs/OPS-CORE-PLAN.md §G's frozen wire contract) back `core/geofence/geofence-store.ts`. **`usageRecording(usageId)`** (docs/OPS-CORE-PLAN.md §R's frozen wire contract, `GET /api/usages/{usageId}/recording`) backs `features/replay/**`'s video pane — see the dedicated `core/geofence/**`/`core/weather/**` sections and the Replay section below for how each is actually used. **`authMe()`/`authLogin(username, password)`/`authLogout()`** (docs/U-AUTH-PLAN.md wave 3's frozen contract) — `authMe()` folds a clean `401` into `null` rather than rejecting (the one deliberate exception to every other method here treating a non-2xx as a thrown `HttpErrorResponse`; see that method's own doc comment for why "not logged in" is data, not an exception, for this one call). No `withCredentials` on any of the three — this app is always same-origin with vision-api (the built SPA served off vision-app's own classpath in prod, `ng serve`'s dev proxy in dev), so the session cookie rides along automatically like every other request here. `core/auth/auth-store.ts` is the only caller of all three — see the dedicated `core/auth/**` section below. **Org-settings set** (docs/U-SCOPE-PLAN.md, U-e slice 2): `listUsers()`/`createUser(req)`/`setUserEnabled(id, enabled)` (`POST /api/users/{id}/enabled`) / `listGroups()`/`createGroup(req)` back `core/org/org-store.ts`; `listAssetPilots(assetId)`/`assignPilot(assetId, userId)` (`PUT`)/`unassignPilot(assetId, userId)` (`DELETE`) — both idempotent `204`, `403`=out-of-scope, `404`=unknown asset — back `features/asset-detail/pilots-card.ts`; `myAssignments()` (`GET /api/me/assignments`) and `myActivity(limit?)` (`GET /api/me/activity`, `limit` only added to the query string when given) are the acting user's own reads (the session is the "who", never a path param). See the dedicated `core/org/**` section below.
+- `vision-api.ts` — `VisionApi` (`@Injectable providedIn: 'root'`): `listDevices(includeDeleted = false)`, `registerDevice(req)`, `listStreams()`, `startStream(deviceId, req?)`, `stopStream(streamId)`, `scan(req?)`, `listAssets(includeDeleted = false)`, `getAsset(assetId)`, **`assetStats(assetId)`** (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3 — `GET /api/assets/{id}/stats` → `AssetStats`; 404 for an unknown asset, same as `getAsset`; the asset manager page's own `loadStats` degrades its KPI row to "—" on any failure rather than propagating it), `usageTelemetry(usageId, limit = 200)`, **`usageTimeline(usageId, {fromMs?, toMs?, maxPoints?} = {})`** (docs/MVP2-PLAN.md §R, R-b — each option only added to the query string when given; `features/replay/replay.ts`'s only call site always passes `maxPoints: 2000`, the server's own clamp ceiling, once up front), `streamDetections(streamId, limit = 50)` (docs/MVP1-PLAN.md §C8 bullet 4), `startSimulation(req)`, `stopSimulation(assetId)` (docs/CYCLES-PLAN.md §4), plus the docs/CYCLES-PLAN.md §8 warehouse set: `updateDevice(id, edit)` (PATCH), `setDeviceState(id, state)` (POST `.../state`), `deleteDevice(id)` (DELETE, archive), `updateAsset(id, edit)`, `setAssetState(id, state)`, `deleteAsset(id)` → `AssetDeletionResponse`, `assignDevice(assetId, deviceId)` (POST `.../devices`), `unassignDevice(assetId, deviceId)` (DELETE `.../devices/{deviceId}`), plus (docs/MVP3-PLAN.md C-a/C-c) **`fleetSummary(includeArchived = false)`** (`includeArchived` — deliberately not `includeDeleted`, see vision-api/MODULE.md's Conventions — only added to the query string when `true`, same convention as `includeDeleted` elsewhere) and **`snapshotUrl(streamId): string`** — the one method here that does **not** return a `Promise`: it just builds `/api/streams/{streamId}/snapshot`'s path for `features/command/live-strip-tile.ts` to bind straight to an `<img src>` (the browser does the actual fetching), kept in this class anyway so it stays "the only place the frontend knows REST URLs" even for a path never passed through `HttpClient`. `includeDeleted`/`includeArchived` are each only added to the query string when `true` (today's default behavior is otherwise unchanged). Every other method is promise-returning (`firstValueFrom`) so components hold signals, not subscriptions. **`updateLiveTopics(connectionId, {add, remove})`** (docs/REALTIME-PLAN.md §4, Phase R-c) — the one `PATCH /api/live/{connectionId}/topics` call; `GET /api/live` itself is **not** here (`core/live/live-store.ts` opens it directly as an `EventSource`, which `HttpClient` cannot stream — see that class's own doc comment and the "Live updates" DTO paragraph above for why this is the one documented exception to "the only place the frontend knows REST URLs"). **`probeDevice(request)`** (docs/UX-REWORK-PLAN.md §U-d — `POST /api/devices/probe`, the onboarding wizard's Test step) and **`assetImageUrl(assetId)`/`uploadAssetImage(assetId, blob)`/`deleteAssetImage(assetId)`** (the `GET`/`PUT`/`DELETE /api/assets/{id}/image` trio — `assetImageUrl` is a plain URL builder like `snapshotUrl`, not promise-returning; `uploadAssetImage` sends an already-downscaled `Blob` as a raw body, no JSON) are this cycle's own additions — coded against the plan's own pinned contract ahead of/alongside the backend half landing; see this file's own U-d section below for the full live-verification list. **`listGeofences()`/`createGeofence(request)`/`updateGeofence(id, request)`/`deleteGeofence(id)`** (docs/OPS-CORE-PLAN.md §G's frozen wire contract) back `core/geofence/geofence-store.ts`. **`usageRecording(usageId)`** (docs/OPS-CORE-PLAN.md §R's frozen wire contract, `GET /api/usages/{usageId}/recording`) backs `features/replay/**`'s video pane — see the dedicated `core/geofence/**`/`core/weather/**` sections and the Replay section below for how each is actually used. **`patchStreamConfig(streamId, patch)`/`getCvModels()`** (docs/CV-CONTROL-PLAN.md §3-4's frozen contract) — `PATCH /api/streams/{id}/config` → `PatchStreamConfigResponse`, `GET /api/cv/models` → `CvModelsResponse`; both wrapped by `FleetStore` (see below), the CV control panel's only two write/read paths. **`authMe()`/`authLogin(username, password)`/`authLogout()`** (docs/U-AUTH-PLAN.md wave 3's frozen contract) — `authMe()` folds a clean `401` into `null` rather than rejecting (the one deliberate exception to every other method here treating a non-2xx as a thrown `HttpErrorResponse`; see that method's own doc comment for why "not logged in" is data, not an exception, for this one call). No `withCredentials` on any of the three — this app is always same-origin with vision-api (the built SPA served off vision-app's own classpath in prod, `ng serve`'s dev proxy in dev), so the session cookie rides along automatically like every other request here. `core/auth/auth-store.ts` is the only caller of all three — see the dedicated `core/auth/**` section below. **Org-settings set** (docs/U-SCOPE-PLAN.md, U-e slice 2): `listUsers()`/`createUser(req)`/`setUserEnabled(id, enabled)` (`POST /api/users/{id}/enabled`) / `listGroups()`/`createGroup(req)` back `core/org/org-store.ts`; `listAssetPilots(assetId)`/`assignPilot(assetId, userId)` (`PUT`)/`unassignPilot(assetId, userId)` (`DELETE`) — both idempotent `204`, `403`=out-of-scope, `404`=unknown asset — back `features/asset-detail/pilots-card.ts`; `myAssignments()` (`GET /api/me/assignments`) and `myActivity(limit?)` (`GET /api/me/activity`, `limit` only added to the query string when given) are the acting user's own reads (the session is the "who", never a path param). See the dedicated `core/org/**` section below.
 - `../api-error.ts` — `describeHttpError(error: unknown): string`, pure and unit-tested; maps status codes to specific sentences, prefers the backend's `ErrorResponse.message` when present.
 - `../poll-scheduler.ts` — `PollScheduler` (`@Injectable providedIn: 'root'`) and `shouldPoll(documentHidden)` (docs/CYCLES-PLAN.md §9, CU-b item 3 — see "Poll scheduler consolidation" in Status below for the full merge writeup). One shared `setInterval` (`TICK_MS = 1_000`) drives every "poll while the tab is visible" consumer in the app: `schedule(periodMs, callback, options?)` registers a task and returns an unsubscribe function; the underlying timer starts lazily on the first registration and stops when the last one unsubscribes. A hidden tab is a no-op tick for every task (due times are left untouched, so nothing fires a catch-up burst on return) — the exact "pause, don't drop" contract every poller already had individually. `telemetry-logic.ts` re-exports `shouldPoll` from here so its existing import path keeps working. **`options.ignoreHidden`** (docs/MVP2-PLAN.md §E, E-b, new): opts a single task out of the pause-on-hidden contract above, defaulting to `false` for every pre-existing caller. `core/events/events-store.ts` is the one deliberate user — see that file's own doc comment (and its "Events" section below) for why a poll whose job is noticing something *while the tab is backgrounded* cannot itself pause when backgrounded. **In-flight guard** (docs/MVP2-PLAN.md §S, S-b, new): `callback` may return a `Promise`; `schedule` then skips a due tick while the previous call hasn't settled yet, rather than piling another overlapping HTTP request onto a slow/hung backend — see the S-b Status entry below for the incident that motivated it. Every poller in this app already returns its poll's own promise (not `void`-discarded) from its `schedule()` registration, so this applies everywhere a real network call is involved; a plain clock-tick registration (`() => this.nowSignal.set(Date.now())`) returns `void` and is unaffected.
 - `../events/events-logic.ts` / `../events/events-store.ts` — detection events (docs/MVP2-PLAN.md §E, E-b — see the dedicated "Detection events" section below for the full feature writeup: the Wall rail, the asset detail Events section, the fleet map's event markers, and the Settings notification toggle).
 - `../leaflet-warmup.ts` — `LeafletWarmup` (`@Injectable providedIn: 'root'`, `schedule()` idempotent): warms the Leaflet chunk (`import('leaflet')`) on `requestIdleCallback` (docs/CYCLES-PLAN.md §9, CU-b item 2), called once from `App`'s constructor via `afterNextRender`. A plain dynamic import — same as every host component's own `initMap()` — so this only moves *when* the chunk is fetched (idle, after first paint), never *whether*; Leaflet still never touches the initial bundle. Deliberately not folded into `IdlePreload` below: that class only knows how to preload router chunks, and Leaflet isn't a route, it straddles two of them (`live`, `map`).
-- `../fleet/fleet-store.ts` — `FleetStore`: the app's single poller (5s, via `PollScheduler`, paused when tab hidden) and single source of truth for `devices`/`streams` signals, `liveDeviceIds`, `reachable`; `register/start/stop/simulate/stopSimulation` funnel through `run()` so a failure produces exactly one toast. `simulate`/`stopSimulation` (docs/CYCLES-PLAN.md §4) both refresh devices/streams on success and return `null`/`false` on failure — same shape as `register`/`stop` — but deliberately push no success toast themselves: the caller (`DevicesPage`) knows whether a `streamId` came back and wants a **Watch** action, which only it can construct (needs the `Router`).
+- `../fleet/fleet-store.ts` — `FleetStore`: the app's single poller (5s, via `PollScheduler`, paused when tab hidden) and single source of truth for `devices`/`streams` signals, `liveDeviceIds`, `reachable`; `register/start/stop/simulate/stopSimulation` funnel through `run()` so a failure produces exactly one toast. **`models` signal** (docs/CV-CONTROL-PLAN.md §4, new) — the CV model-picker roster (`GET /api/cv/models`), fetched **once** at construction (unlike `devices`/`streams`, not re-polled — the roster is config-backed at the server, deploy-time not runtime), empty until it resolves and permanently empty (silent-degrade, no toast) on failure; consumed by `features/fly/cv-control-panel.ts`, `features/live/live.ts`, `features/settings/settings.ts`. **`patchStreamConfig(streamId, patch)`** (new) — `run()`-wrapped wrapper over `VisionApi.patchStreamConfig`, returns `PatchStreamConfigResponse | null`; the CV control panel's one write path for both debounced hot-knob edits and a model change. `simulate`/`stopSimulation` (docs/CYCLES-PLAN.md §4) both refresh devices/streams on success and return `null`/`false` on failure — same shape as `register`/`stop` — but deliberately push no success toast themselves: the caller (`DevicesPage`) knows whether a `streamId` came back and wants a **Watch** action, which only it can construct (needs the `Router`).
   - **Warehouse mutations** (docs/CYCLES-PLAN.md §8 — CW-b's seam choice): every device/asset lifecycle mutation is a thin `run()`-wrapped `FleetStore` method, mirroring how C4 added `simulate()`/`stopSimulation()`, rather than a new page-scoped store — `devicesSignal` already lives here, and every mutation changes what it should read afterward (deleting an asset also archives its devices, per `AssetDeletion#devicesDeleted`, so it belongs next to the refresh it triggers). `updateDevice`/`setDeviceState`/`deleteDevice` and `updateAsset`/`setAssetState`/`deleteAsset` all refresh devices/streams on success and toast a plain confirmation (`deleteAsset`'s names what survived: devices archived / usages retained / streams stopped, from `AssetDeletionResponse`). `listDevicesIncludingArchived()`/`listAssetsIncludingArchived()` are read-only `run()`-wrapped proxies to `includeDeleted=true` that deliberately **never** write `devicesSignal` — they only back the Devices page's "show archived" toggle, so Wall/Live keep seeing only non-archived devices regardless of that toggle. `assignDevice`/`unassignDevice` bypass `run()` for their own try/catch so a `409` gets a specific sentence instead of `describeHttpError`'s generic conflict message (device-already-owned / the ≥1-device-per-asset rule) — still exactly one toast either way. CW-a (the backend half) is not live while this lands: every one of these degrades a 404 to that same one toast, never a broken page.
 - **`../live/live-store.ts`/`live/live-fallback-logic.ts`** (docs/REALTIME-PLAN.md §4, Phase R-c — frontend half; full writeup in the dedicated R-c Status entry below) — `LiveStore` (`providedIn: 'root'`, one instance app-wide): owns the app's **one** `GET /api/live` `EventSource`, exposing `connectionState` (`'connecting'|'open'|'closed'`), an always-on `fleet` (`AssetSummary[]`) and `liveEvents` (`LiveEvent[]`, **not** `DetectionEvent` — see Gotchas) signal, plus ref-counted per-asset opt-in: `trackTelemetry`/`untrackTelemetry`/`trackDetections`/`untrackDetections(assetId)` (issuing `PATCH /api/live/{connectionId}/topics`, only on the first-subscriber-in/last-unsubscriber-out transition) and `telemetryFor`/`detectionsFor(assetId)` returning that asset's own signal. Reconnects (native, on a transient drop, or its own manual retry every `SSE_RETRY_INTERVAL_MS`=60s after the browser gives up on a non-2xx/wrong-content-type response — e.g. `vision.live.enabled=false`, or a pre-R-c backend) always rebuild the `topics` query param from current ref-counts, so a consumer never needs to notice a reconnect itself. **Not unit-tested at the component level** — jsdom has no `EventSource` at all (confirmed by grepping the installed package); feature-detected (`typeof EventSource === 'undefined'`) and degrades straight to `'closed'`, which is also exactly what happens under jsdom, so this needs no test-side stubbing for it to stay inert. `live-fallback-logic.ts` is the pure, unit-tested logic behind it and the two projections below: `LiveConnectionState`/`isLiveAvailable`, `resolveAssetScopedTransport(connectionState, assetId?)` (live only with **both** an open connection **and** an asset id — the per-asset topics are asset-scoped only), `incrementTopicRef`/`decrementTopicRef` (ref-counting), `telemetryTopic`/`detectionsTopic`/`buildTopicsParam`, and `mergeTelemetrySamples` (dedupes a coalesced/resumed batch by `(deviceId, at)`, re-sorts chronologically, caps at `LIVE_TELEMETRY_MAX_SAMPLES`=500).
 - `../telemetry/telemetry-logic.ts` / `../telemetry/telemetry-store.ts` — live telemetry for `/live/:deviceId` and wall tile chips (docs/CYCLES-PLAN.md §2). `telemetry-logic.ts` is pure and unit-tested: `findOwningAsset`, `selectOpenUsage` (the `recentUsages` entry with no `endedAt`), `deriveTrail` (chronological lat/lon points, skipping samples with no position), `ageSeconds`/`isStale` (>5s), **`batterySeverity`/`telemetryAgeSeverity`** (docs/MVP3-PLAN.md §C-b — `batterySeverity` lifted from a private `telemetry-osd.ts` computed once `features/fly/fly-osd.ts` needed the identical `'ok'|'low'|'critical'|'unknown'` tiers too, same behavior, unchanged thresholds; `telemetryAgeSeverity` is new, a third `'fresh'|'amber'|'red'` tier past the existing binary `isStale` — `amber` deliberately reuses `STALE_AFTER_SECONDS` rather than a second, redundant constant, so the OSD's medium tier lines up with what "stale" already means everywhere else in this app), **`groupTelemetryByDevice`/`telemetryDevices`** (docs/MVP2-PLAN.md §R, R-b — moved here from `features/asset-detail/asset-detail-logic.ts` when the replay cockpit needed the identical per-device grouping; that page re-exports both so its own import site keeps working verbatim — see `features/replay/**` below), plus a re-export of `shouldPoll` from `poll-scheduler.ts` (see above) for backward-compat import paths. `TelemetryStore` (`@Injectable()`, **not** `providedIn: 'root'` — see Gotchas) orchestrates: **`track(deviceId, assetId?)`** (docs/REALTIME-PLAN.md Phase R-a item 3, `assetId` new) resolves the device's owning asset and its open usage, then polls `GET /api/usages/{usageId}/telemetry?limit=200` every 2s (and ticks a 1s clock for `sampleAgeSeconds`) via `PollScheduler`; `reset()` stops and clears. Passing `assetId` (every caller that already has one should — `FlyPage`/`AssetDetailPage` do) resolves the open usage with **one `GET /api/assets/{assetId}`**; omitting it (`LivePage`/`WallTile`, which only ever have a bare `deviceId`) falls back to the original `listAssets()` + `getAsset()`-per-asset scan (a device belongs to ≤1 asset) — see Gotchas for the O(N) amplification this shortcut closes. Exposes `samples`, `hasTelemetry`, `latest`, `trail`, `sampleAgeSeconds`, `stale`. All lookups/polls silently degrade on error (no toast — telemetry is best-effort context, not a user-initiated action); callers render a "no telemetry" state instead. `map-store.ts` (docs/CYCLES-PLAN.md §6) reuses `selectOpenUsage` and `deriveTrail` (via its own `map-logic.ts`) directly rather than this class, since it starts from an already-known asset id, not a device id — see `features/map/**` below. **R-c (docs/REALTIME-PLAN.md §4)**: `track()` now always does exactly **one** backfill `usageTelemetry` GET (never a repeating poll by itself) and, when `assetId` is given, subscribes to `LiveStore`'s `telemetry:<assetId>` topic for the whole session; `samples` reads live (merged with the backfill via `mergeTelemetrySamples`) or the 2s poll fallback, toggling purely with `LiveStore.connectionState()` — the live *subscription* itself is not torn down/recreated on a transient connection blip, only the *read* toggles (see the class's own doc comment's "Subscription lifecycle vs. transport, kept separate"). `assetId` omitted still always polls, unchanged.
@@ -45,7 +46,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 - `../stream-info-logic.ts` (docs/MVP2-PLAN.md §U-info, folded into CD-b) — pure derivations behind `shared/player/stream-info-panel.ts`: `describeSource(device)` → `{protocolLabel, description}`, a human-readable "MJPEG · 192.168.0.107:8080" / "File · flight.mp4 (looped)" / "Simulated · Pattern generator, no camera" line instead of a bare URI (credentials in an `rtsp://user:pass@…` URI are never surfaced in this primary description — `hostOf` parses `new URL(uri)` and reads only `hostname[:port]`; the raw URI, credentials included, stays reachable in the panel's "Technical details" disclosure). `sessionDurationSeconds`/`formatDuration` turn a raw `startedAt` timestamp into a live-ticking "12s" / "4m 07s" / "1h 03m" duration. `formatLatency(seconds)` renders `shared/player/player.ts`'s own measured `behindLive` (piped up via its `latencyChanged` output, never re-measured) as "~2.3s behind live" / "measuring…".
 - `../toast.service.ts` — `ToastService.ok/info/error/notify(text)`, auto-dismissing signal-backed toast list; rendered by `shared/ui/toast-host.ts`. `ok(text, action?)`/**`notify(text, action?)`** (docs/UX-REWORK-PLAN.md §U-c, new — `shared/ui/notification-bell.ts`'s own newly-arrived-detection-event toasts) both accept an optional `ToastAction { label, onClick }` (docs/CYCLES-PLAN.md §4's original "Watch" action precedent); `toast-host.ts` renders it as an inline button that runs `onClick` and dismisses the toast. `info`/`error` don't take one — only a toast the user's own action caused (or that invites a specific follow-up click) earns one. **`ToastKind` gained `'notification'`** (own `DISMISS_AFTER_MS` entry, 6s — between `ok`'s 4s and `error`'s 9s) and its own `.toast.notification` style in `toast-host.ts` (the app's one accent color, `var(--accent-soft)`/`var(--accent)` — docs/UX-REWORK-PLAN.md §U-b item 2's "one saturated accent" rule, no new hue). Unit-tested: `core/toast.service.spec.ts` (new file), fake-timers-based, covers every kind's own dismiss duration, action wiring, and `dismiss(id)`. **Deliberately left out of the CU-b poll-scheduler consolidation** (see Status below) — its `setTimeout` per toast is a one-shot auto-dismiss, not a recurring poll. **Superseded, for the archive/deactivate Undo case specifically, by `shared/ui/undo-toast.service.ts` (docs/OPS-CORE-PLAN.md §Q2, new — see that file's own bullet below)** — this service and `shared/ui/toast-host.ts` are otherwise completely unchanged and still carry every other toast in this app (`ok`/`info`/`error`/`notify`, including plain lifecycle confirmations like "X is now active").
 - **`shared/ui/undo-toast.service.ts`/`undo-toast.ts`** (docs/OPS-CORE-PLAN.md §Q2, new) — a *separate* one-at-a-time "Undo" toast primitive, not a mode of `ToastService` above: `UndoToastService.showUndo(message, undo, {timeoutMs? = 10_000, onCommit?})` shows a single toast (`toast: Signal<UndoToastState | null>`) with a 10s default window (the plan's own pinned duration — closes U-a2 item 3b's own documented gap of reusing `ToastService.ok`'s fixed 4s duration, no Undo-specific timing). **One toast at a time, commit-on-replace, undo-only-cancels**: a second `showUndo()` call while one is still open immediately *commits* the first (runs its own `onCommit` if given, then drops it — its mutation already happened optimistically before `showUndo` was ever called, so "commit" is normally a no-op) before showing the new one; the only way an action is ever reversed is clicking **that toast's own** `Undo` before it's replaced, dismissed, or times out. `undo()` (the toast's Undo button) cancels the timer and runs the stored `undo` callback, never `onCommit`; `dismiss()` (the `×` button, or `Escape` — keyboard-dismissable) resolves exactly like a natural timeout: commits, never undoes. `shared/ui/undo-toast.ts` (`<vision-undo-toast>`) renders it — mounted once at the app root (`app.html`, next to `<vision-toast-host>`) **bottom-left** (`ToastHost` already owns bottom-right; bottom-center is the Fly cockpit's own primary Start/Stop control, `features/fly/fly.css#.hud-controls`, at every viewport this app supports) — a shrinking progress bar (pure CSS animation timed off `timeoutMs`, no interval/rAF ticking) gives the countdown a visual; `@for (… track toast.id)` over a computed single-element array (mirrors `toast-host.ts`'s own `track`-by-id precedent) is what makes the bar actually restart on replace rather than reusing a stale, already-part-way-shrunk element. Wired into the two existing archive flows (`features/devices/devices.ts`/`features/asset-detail/asset-detail.ts`'s `archiveAssetNow`/`archiveDeviceNow`, previously `ToastService.ok(text, {label:'Undo', onClick})`) **and** into device `deactivate` (previously silent-immediacy — a plain `FleetStore.setDeviceState` confirmation toast with no way back short of re-opening the row's kebab; both pages now bypass `FleetStore` for `deactivate` too, same reasoning as `archive`'s own existing bypass, via new `deactivateDeviceNow` methods). `activate`/the explicit `restore` kebab entry are unchanged — re-activating isn't the "silent immediacy" this item is about. Unit-tested: `undo-toast.service.spec.ts` (11 cases — default/custom timeout, undo cancels the timer and never commits (plus a no-op-when-idle case), natural timeout commits and never undoes, dismiss commits (plus a no-op-when-idle case), both callbacks optional, replace commits the outgoing toast and only the new one's Undo applies afterward, a stale replaced-toast's timer never double-commits, increasing ids).
-- `../settings/settings-store.ts` — `SettingsStore`: built-in + custom `PipelineProfile`s, `effective()` (draft-over-profile), plus `mapLayer: WritableSignal<MapLayerId>` (docs/CYCLES-PLAN.md §9, CU-b item 6 — `'standard'|'night'|'relief'|'satellite'`, default `'night'`; set directly, e.g. `settings.mapLayer.set('satellite')`, same convention as `wallDensity`) — all persisted to `localStorage['vision.settings.v1']`; a corrupt/unknown persisted `mapLayer` is ignored (falls back to the default) rather than adopted. **`eventNotifications: WritableSignal<boolean>`** (docs/MVP2-PLAN.md §E, E-b, new, default `false`) — the user's own opt-in for browser detection-event notifications; `features/settings/settings.ts#toggleEventNotifications` is the only call site that ever sets it `true` (and the only place `Notification.requestPermission()` is called, from the direct user gesture most browsers require), a corrupt/non-boolean persisted value is ignored like every other field here. **`flyAssetId: WritableSignal<string | null>`** (docs/MVP3-PLAN.md §C-b, new, default `null`) — the operator's remembered drone for `/fly`; `null` means "show the picker", any other value is an asset id `FlyPage` still validates against the live fleet before trusting it (a stale id for an archived/deleted asset falls back to the picker, this store never checks). Both the picker's first pick and the cockpit's own header switcher write here — "switching drones" and "picking one for the first time" are the same write. A non-string persisted value is ignored like every other field here.
+- `../settings/settings-store.ts` — `SettingsStore`: built-in + custom `PipelineProfile`s, `effective()` (draft-over-profile). **`model` is now a plain `string`, not the old closed `DetectionModelId` union** (docs/CV-CONTROL-PLAN.md Wave E — `DETECTION_MODEL_OPTIONS`/`DetectionModelId` are gone; the roster is data-driven from `FleetStore.models`, see above). `PipelineProfile`/`PipelineSettings` both gained `labelFilter: readonly string[]` (empty = "all labels") and `detectionEnabled: boolean` (default `true`), same profile/draft/custom-save/revert semantics confidence/fps/model already had; migration-safe restore backfills all three independently (`withValidPipelineFields`, superseding the old `withValidModel`) — a persisted `model` string the current roster doesn't recognize is **accepted as-is** now (only a missing/non-string value falls back to `DEFAULT_DETECTION_MODEL`, now `'yolo26n.pt'` — mirrors `PipelineConfig.defaults()`'s own Wave-B bug-fix off the dead `"yolo"` id). See the dedicated CV-CONTROL-PLAN Wave E changelog section at the end of this file for the full write-up. Also: `mapLayer: WritableSignal<MapLayerId>` (docs/CYCLES-PLAN.md §9, CU-b item 6 — `'standard'|'night'|'relief'|'satellite'`, default `'night'`; set directly, e.g. `settings.mapLayer.set('satellite')`, same convention as `wallDensity`) — all persisted to `localStorage['vision.settings.v1']`; a corrupt/unknown persisted `mapLayer` is ignored (falls back to the default) rather than adopted. **`eventNotifications: WritableSignal<boolean>`** (docs/MVP2-PLAN.md §E, E-b, new, default `false`) — the user's own opt-in for browser detection-event notifications; `features/settings/settings.ts#toggleEventNotifications` is the only call site that ever sets it `true` (and the only place `Notification.requestPermission()` is called, from the direct user gesture most browsers require), a corrupt/non-boolean persisted value is ignored like every other field here. **`flyAssetId: WritableSignal<string | null>`** (docs/MVP3-PLAN.md §C-b, new, default `null`) — the operator's remembered drone for `/fly`; `null` means "show the picker", any other value is an asset id `FlyPage` still validates against the live fleet before trusting it (a stale id for an archived/deleted asset falls back to the picker, this store never checks). Both the picker's first pick and the cockpit's own header switcher write here — "switching drones" and "picking one for the first time" are the same write. A non-string persisted value is ignored like every other field here.
 - `../idle-preload.ts` — `IdlePreload` (`PreloadingStrategy`): preloads lazy route chunks on browser idle; opt out via route `data: { preload: false }`. As of docs/CYCLES-PLAN.md §9, CU-b item 2, **no route opts out any more** — every tab chunk (including `/map` and `/debug`, previously excluded) is idle-preloaded; see Status below for why that's safe against the initial-bundle budget.
 - **`shared/player/webrtc-certificate.ts`/`webrtc-certificate-logic.ts`/`webrtc-certificate-db.ts`** (docs/REALTIME-PLAN.md Phase R-b item 3, new; moved out of `core/` into `shared/player/` per vision-web/docs/UI-STRUCTURE-PLAN.md §3, D2 — Player-only WebRTC internals, not a store) — `WebrtcCertificateService` (`providedIn: 'root'`, one instance app-wide): `certificates(): Promise<readonly RTCCertificate[]>` lazily creates (`RTCPeerConnection.generateCertificate({name:'ECDSA', namedCurve:'P-256'})`), persists in IndexedDB, and hands back the browser's *one* stable ECDSA certificate — `shared/player/player.ts` passes it to every `RTCPeerConnection` via the `certificates` option, so every `<vision-player>` tile and every reconnect presents the identical DTLS fingerprint (server-side viewer correlation, no application-level session/cookie needed) and skips ECDSA keygen latency after the first attach. Memoized and **re-validated on every call**, not just once at startup — `isCertificateUsable`/`CERTIFICATE_EXPIRY_SAFETY_MARGIN_MS` (`webrtc-certificate-logic.ts`, pure, unit-tested, 9 cases) is the one place "is this cert still safe to hand out" is decided, so a certificate that expires mid-session (Safari caps a generated cert's own lifetime at roughly a week regardless of what's requested) regenerates transparently on the *next* call rather than silently going stale. `webrtc-certificate-db.ts` is the minimal IndexedDB glue (one object store, one record — mirrors `shared/map/tile-cache-db.ts`'s identical "thin, undocumented-by-spec, no dedicated test" precedent; jsdom has neither IndexedDB nor `generateCertificate` to test against regardless); both `getStoredCertificate`/`putStoredCertificate` degrade to `undefined`/a no-op rather than throwing, which is what makes the private-mode/IndexedDB-unavailable fallback "just generate a fresh in-memory certificate, per tab" fall out for free rather than needing its own special-cased branch. Logs the fingerprint (`getFingerprints()`, formatted by `formatFingerprints`) at `info` once per session — memoization means this only fires once regardless of how many `<vision-player>` tiles call `certificates()`.
 
@@ -55,7 +56,7 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 
 **`/login` + `core/auth/auth-guard.ts` (docs/U-AUTH-PLAN.md wave 4)**: `LOGIN_ROUTES` is spread at the top level, outside any guard. Every other feature route array below is instead spread inside one `{path: '', canActivate: [authGuard], children: [...]}` wrapper — the standard path-less, component-less Angular grouping route, applying one `canActivate` to a whole set without touching any individual feature's own `.routes.ts` file or changing a single URL (an empty path segment contributes nothing to a child's own path). See the dedicated `core/auth/**` section above for what the guard actually does.
 
-**`/fly` (default, docs/MVP3-PLAN.md §C-b)** · **`/command`** (docs/MVP3-PLAN.md §C-c) · `/wall` · `/map` · `/devices` · **`/assets/:assetId`** (docs/CYCLES-PLAN.md §11, CD-b — the Devices page's asset-first list "Open" target; param renamed from `:id` to `:assetId` in docs/MVP2-PLAN.md §V, V-b — see Gotchas) · `/assets/:assetId/replay/:usageId` (docs/MVP2-PLAN.md §R, R-b — the asset detail page's usage history "Replay" target for a finished usage; its own lazy chunk — see `features/replay/**` below) · `/live/:deviceId` · `/settings` · `/debug` · `**` → not-found (`data: { preload: false }` — an unknown path is never worth pre-fetching). Every real tab/route is idle-preloaded (docs/CYCLES-PLAN.md §9, CU-b item 2 — see `core/idle-preload.ts` above, including `/fly`, `/command`, `/assets/:assetId`/the replay route even though none of the latter two is a nav tab, only ever reached from Devices/Map/an asset's own usage history); Leaflet is additionally warmed on its own idle callback (`core/leaflet-warmup.ts`) since it isn't a route itself.
+**`/fly` (default, docs/MVP3-PLAN.md §C-b)** · **`/command`** (docs/MVP3-PLAN.md §C-c) · `/wall` · `/map` · **`/devices`** (the raw device table/grid — `features/devices/**`) · **`/assets`** (the asset-first grid — search/filter/cards, `features/assets/**`, new this cycle — a sibling of, not a conflict with, the param route directly below it) · **`/warehouse`** (the two-tile People/Assets launcher — `features/warehouse/**`, new this cycle; used to be a plain alias onto the combined Devices/Warehouse page, see this file's own Assets/Devices/Warehouse sections below for the full split writeup) · **`/assets/:assetId`** (docs/CYCLES-PLAN.md §11, CD-b — the Assets page's own "Open" target; param renamed from `:id` to `:assetId` in docs/MVP2-PLAN.md §V, V-b — see Gotchas) · `/assets/:assetId/replay/:usageId` (docs/MVP2-PLAN.md §R, R-b — the asset detail page's usage history "Replay" target for a finished usage; its own lazy chunk — see `features/replay/**` below) · `/live/:deviceId` · `/settings` · `/debug` · `**` → not-found (`data: { preload: false }` — an unknown path is never worth pre-fetching). Every real tab/route is idle-preloaded (docs/CYCLES-PLAN.md §9, CU-b item 2 — see `core/idle-preload.ts` above, including `/fly`, `/command`, `/assets/:assetId`/the replay route even though none of the latter two is a nav tab, only ever reached from Assets/Map/an asset's own usage history); Leaflet is additionally warmed on its own idle callback (`core/leaflet-warmup.ts`) since it isn't a route itself.
 
 **Nav IA (docs/MVP3-PLAN.md §C-c's original "Information architecture change"; docs/UX-REWORK-PLAN.md §U-c updated it again — see below):** `app.ts`'s `tabs` array (and the header nav it renders) is **Fly · Command · Assets · Settings** — job-oriented, one tab per persona's own page, `Assets` a label-only rename of the `Devices` tab (the route underneath is still `/devices`, unchanged — no call site needed touching). `Wall`/`Debug` are demoted into a header "More" overflow (`app.ts`'s `moreLinks`, rendered as a `<details>` dropdown in `app.html`, closed on link click via a template reference variable — `#more`/`more.open = false` — no new component state) — **not removed**: every route stays fully reachable, `routerLinkActive` still highlights the overflow trigger itself when one of its own links is active. **`Map` is gone from `moreLinks` (docs/UX-REWORK-PLAN.md §U-c)**: `/map` now `redirectTo: 'command'` (`features/map/map.routes.ts` — `MapPage`/`map.html`/`map.css` themselves are deleted, not just unrouted; see the Command section below and the §U-c Status entry for the full "components fold in" writeup) — a separate "Map" link would just be a second door to the screen Command now *is*. `/live/:deviceId` was never a nav tab either way (only ever reached by "Watch live" from another page). `/assets/:assetId` and the replay route remain deliberately not tabs (detail pages reached by "Details"/"Replay", not top-level sections). **Both `/assets/:assetId` and the replay route below now name their params to match their own component's input names exactly** (`assetId`/`usageId`) — `withComponentInputBinding()` binds a route param to a component input only when the names match (`RoutedComponentInputBinder` looks up `data[templateName]` by the input's own public name); every `router.navigate([...])` call site in this app already addresses `/assets/:assetId` positionally (`this.router.navigate(['/assets', assetId])`, `features/devices/devices.ts`), not by param name, so the rename needed no call-site changes.
 
@@ -77,18 +78,19 @@ The app's default landing page and the operator persona's one job: *flies ONE dr
   - **Multi-device asset**: `primaryDevice` is a `computed()` — whichever `VIDEO`-capable device `primaryDeviceIdOverride` names (an explicit user pick from a secondary tile), falling back to the asset's first one (`core/fleet/device-logic.ts#videoDevices`, new — mirrors `telemetryDevices`'s identical capability-filter shape). No `effect()`-based defaulting (a read-then-write of the same signal, which would double-execute) — the fallback is computed fresh every read instead. Every other `VIDEO` device on the asset renders as a small clickable tile (`setPrimaryDevice`); clicking swaps which one the big player shows and resets the deliberately-stopped pair below (a different device is, functionally, a fresh thing to watch) — it does **not** auto-start that device's stream, the big player just shows its own idle/Start-button state like any never-started device.
   - **Deliberately-stopped state**: `explicitlyStopped`/`hasBeenLive`/`stopped` — byte-for-byte the same pair and rule `LivePage`/`AssetDetailPage` already use (docs/MVP2-PLAN.md §S, S-b), scoped to the current primary device's own stream.
   - **Stop confirms** ("ends the stream for all viewers, not just you") via an inline confirm panel (`stopConfirmOpen`, `.inline-confirm-card`) — the same markup/CSS idiom `asset-detail.html`'s own archive-confirm and `devices.html`'s device-archive-confirm already established, not a new dialog component.
-  - **OSD chip bar** (`<vision-fly-osd>`, always rendered, overlaid top-left) — battery/telemetry-age/altitude/heading are hidden as a group (replaced by one muted "No telemetry" chip) when the asset has no TELEMETRY-capable device; transport+behind-live always shows, fed by the same `latencyChanged`/`transportChanged` outputs `StreamInfoPanel` already consumes.
+  - **Bottom OSD strip** (`<vision-fly-osd>`, always rendered, a full-width row along the bottom of the cockpit grid — `fly.css`'s `telemetry` grid area, relaid out from a top-left overlay column per direct user request: "player = full-screen centered hero, key telemetry moves to a bottom row") — battery/telemetry-age/altitude/heading are hidden as a group (replaced by one muted "No telemetry" chip) when the asset has no TELEMETRY-capable device; transport+behind-live always shows, fed by the same `latencyChanged`/`transportChanged` outputs `StreamInfoPanel` already consumes. Now also carries a **Position** chip (`lat, lon`, reusing `fly-logic.ts#positionLabel`) in the Nav cluster — see `fly-osd.ts`'s own doc comment.
   - **Events ticker** (`tickerEvents`, top `TICKER_MAX_EVENTS`=4) — `filterEvents(events.events(), {assetId})`, the exact derivation `AssetDetailPage`'s own offline-branch already uses; "auto-fading" is a pure CSS `@keyframes` per row (`fly.css#ticker-fade`, holds fully legible for 3.5s then eases to a dimmer resting opacity), not a JS timer — a freshly-`@for`-rendered row always restarts it.
   - **Map inset** — `<vision-live-map>` reused completely unmodified (DI-shares the same `TelemetryStore` instance), shown only when the asset has a telemetry device, toggled by `M` and a corner button.
   - **Detections strip** — `<vision-detections-strip>` reused unmodified, collapsed by default (`detectionsStripOpen`), shown only while live.
   - **Keyboard**: `M` map toggle (only when the asset has telemetry), `B` cycles `boxesMode`, `F` fullscreen (the cockpit's own `#stage` element, via `viewChild`, wrapped in a try/catch — a refusal from permissions-policy/an embedding iframe/an unsupported browser just means the shortcut has no visible effect, never an error), `Esc` collapses the topmost open overlay (priority: shortcuts help → stop confirm → detections strip → map), `?` toggles a shortcuts-help overlay. All ignored while a form field has focus or a modifier key is held, and only wired while the cockpit (not the picker) is showing — mirrors `LivePage`'s own `M`-only listener exactly, extended.
   - **Watch mode** (`?watch=1`, `isWatchMode`) hides the Start/Stop/Replay controls row — C-c's own drill-down target; no route-table change needed (query-param input binding, see Routes above).
-  - **"Fill the viewport"**: `<vision-player>`'s shared `.frame` normally keeps a fixed 16:9 box (right for a rail tile, wrong for a cockpit) — `fly.css` overrides it via a scoped `:host ::ng-deep .stage-video vision-player .frame` rule (`aspect-ratio: unset; height: 100%`), safe because the inner `<video>`'s own `object-fit: contain` still preserves the real picture's aspect ratio with letterboxing regardless of the frame's own shape — no distortion. Same reach-into-another-component's-DOM technique this app already uses for Leaflet-owned elements (`shared/map/live-map.css`), now applied to an Angular component's own DOM instead — see Gotchas.
+  - **"Fill the viewport"**: `<vision-player>`'s shared `.frame` normally keeps a fixed 16:9 box (right for a rail tile, wrong for a cockpit) — `fly.css` overrides it via a scoped `:host ::ng-deep .stage-video vision-player .frame` rule (`aspect-ratio: unset; height: 100%`), safe because the inner `<video>`'s own `object-fit: contain` still preserves the real picture's aspect ratio with letterboxing regardless of the frame's own shape — no distortion. Same reach-into-another-component's-DOM technique this app already uses for Leaflet-owned elements (`shared/map/live-map.css`), now applied to an Angular component's own DOM instead — see Gotchas. **The video is the full-screen, centered hero** (direct user request): `main` is now its own single `1fr` grid row spanning the *entire* cockpit width (minus the rail column) rather than sharing width with a left instrument column the way it used to — see `fly.css`'s own grid comment for the before/after. `object-fit: contain`'s default `object-position: 50% 50%` already centers the picture within whatever box results; letterboxing (when the stream's own aspect ratio doesn't match the viewport) is expected and symmetric, not an off-center bug.
   - **Honest gap, not fabricated**: no speed chip — see `features/fly/fly-osd.ts`'s own doc comment (`TelemetrySample` carries no ground-speed field anywhere in the current wire contract).
   - **Telemetry/detections tracking effects are guarded on the derived id primitive** (docs/REALTIME-PLAN.md Phase R-a item 2 — closes the measured O(N) amplification bug in §0 there): `this.asset()`/`this.stream()` are fresh objects every ~5s `refreshPoll` tick even when the tracked device/stream hasn't changed (signals compare with `Object.is`), so the two `effect()`s that call `telemetry.track()`/`detections.track()` used to re-enter on every one of those ticks with an *unchanged* id — `telemetry.track()`'s re-entry re-ran the full owning-asset lookup (`(N+2)` requests across the fleet before item 3 below), `detections.track()`'s cleared results immediately (a visible flicker) before repolling. Both effects now derive the tracked id (`deviceId`/`streamId`), compare it against the id the effect last actually acted on (`lastTelemetryDeviceId`/`lastDetectionsStreamId`, private fields) via `fly-logic.ts#trackingIdChanged`, and return early when unchanged — mirrors `core/map/map-store.ts#reconcileTrackers`'s reconcile-by-id idiom. **Also passes `activeAssetId()` to `telemetry.track()`** (item 3, see `core/telemetry/telemetry-store.ts`'s own entry above) so even the first entry resolves the open usage with one `getAsset()`, not a fleet scan.
   - **Secondary tiles don't tear down/rebuild on reorder/resize** (docs/REALTIME-PLAN.md Phase R-a item 4, verified not just assumed): `secondaryDevices()` returns a new array (and, every poll tick, new `Device` objects) regardless of whether anything changed, but `fly.html`'s `@for (device of secondaryDevices(); track device.id)` already keeps the same `<vision-player>` instance alive across that, and that instance's own `lastAttachKey` guard (`player-recovery.ts#attachKey`, e7cdc46) only reattaches when `src`/`whepUrl` actually change — a secondary tile binds neither `suspended` nor `stopped`, so its key reduces to exactly those two. See `player-recovery.spec.ts#attachKey` for the pure-logic test backing this guarantee.
   - **Geofence zones, read-only (docs/OPS-CORE-PLAN.md §G-c, new)** — `[zones]="geofence.zones()"` passed straight to the cockpit's own `<vision-live-map>` (`GeofenceStore` injected root-wide, no page-local fetch); same styles as Command's own zones layer, no click affordance — see `core/geofence/**`'s own section above.
   - **Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W, new)** — `<vision-weather-chip>` inside `<vision-fly-osd>`'s own chip bar (that component injects `WeatherStore` from `FlyPage`'s `providers` directly, same DI-sharing idiom as `TelemetryStore`), centered on the flown asset's own live-telemetry fix (falling back to `AssetDetails.lastKnownPosition` before one arrives) with `windLimitMps` read from `AssetDetails.attributes['windLimitMps']` — see `core/weather/**`'s own section above.
+  - **CV control panel (docs/CV-CONTROL-PLAN.md Wave E, new)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, detection on/off. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up.
 
 ### `src/app/features/command/**` — `/command`, the manager's map-first dashboard (docs/UX-REWORK-PLAN.md §U-c)
 
@@ -164,37 +166,43 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
 
 **Third host, docs/UX-REWORK-PLAN.md §U-c: `shared/ui/notification-bell.ts`'s dropdown** — `CommandPage` no longer renders `<vision-events-rail>` at all (`command.css`'s old `.events-rail-embed` class is gone with it); the header bell's own dropdown embeds it instead (`class="bell-dropdown"`, the same "host applies its own sizing class to this component's tag" convention, just a popover's worth of extra `position`/`box-shadow` on top). `WallPage` is the component's only *page* host left (`wall.css`'s `.events-rail`, unchanged). See `notification-bell.ts`'s own doc comment for why this component's behavior itself needed **zero changes** to move host — filters/cap/row content/click target are exactly as `WallPage` already had them, the bell just resolves navigation itself instead of forwarding to a page.
 
-### `src/app/features/devices/**` — asset-first inventory + the single "+ Add source" flow (docs/CYCLES-PLAN.md §4, §8, §9, §11)
+### `src/app/features/devices/**` — the raw device table/grid (docs/CYCLES-PLAN.md §4, §8, §9, §11; split from Assets — see this file's own Assets/Devices/Warehouse restructure Status entry near the end for the full rationale/history)
 
-- `devices-page-logic.ts` (renamed from `warehouse-logic.ts` per vision-web/docs/UI-STRUCTURE-PLAN.md §3, B1 — this page's own folder already holds `features/devices/simulate-logic.ts`, and the identical basename collided with the generic `core/fleet/warehouse-logic.ts` below) — pure, Angular-free logic behind the Devices page's own view models, unit-tested. The **generic** lifecycle-action-menu state machine and edit-request builders moved to `core/fleet/warehouse-logic.ts` in docs/CYCLES-PLAN.md §11 (CD-b — the asset detail page needs them too; re-exported here so this page's own imports keep working verbatim, see that file's entry above). What's left, specific to this page's rendering:
+`/devices` — search, lifecycle actions, the archived toggle, and the register/discover/simulate-adjacent "+ Add source"/"Promote to asset…" flows. **No longer renders assets at all** — the asset-first list this page used to also carry (CD-b's "Assets" surface) moved wholesale to `features/assets/**` below; this page is what's left, no longer collapsed behind an "Advanced" disclosure (there's nothing else on the page to demote it beneath any more — it *is* the page).
+
+- `devices-page-logic.ts` (renamed from `warehouse-logic.ts` per vision-web/docs/UI-STRUCTURE-PLAN.md §3, B1) — pure, Angular-free logic behind the Devices page's own view models, unit-tested. The **generic** lifecycle-action-menu state machine and edit-request builders live in `core/fleet/warehouse-logic.ts` (docs/CYCLES-PLAN.md §11, CD-b — the asset detail page needs them too), re-exported here for this page's own import sites. What's left, specific to this page's rendering:
   - `mapDeviceOwners(assets: AssetDetails[])` — deviceId → owning asset, generalizing `simulate-logic.ts#mapSimulatedDevices` from just the `simulated` category to every asset the page loads (ownership isn't on `Device` itself).
-  - `buildWarehouseRows(devices, owners, liveDeviceIds)` → `WarehouseRow[]` (device + lifecycle + owner? + streaming + archived) — the **Advanced/raw-devices table**'s view model (below), and `buildAssetRows(assets)` → `AssetRow[]` (defaults a missing `lifecycle` to `'ACTIVE'`) — a leftover type from CW-b's card-grid, kept only because `filterAssetRowsByArchived` still has spec coverage worth keeping green; the page itself no longer renders it (see "Asset-first list" below).
-  - **`buildAssetListRows(assets: AssetDetails[], liveDeviceIds)` → `AssetListRow[]`** (docs/CYCLES-PLAN.md §11, CD-b item 1) — the **primary** asset-first list's view model: `deviceCount` (`asset.devices.length`), `streaming` (any of the asset's devices in `liveDeviceIds`), `watchDeviceId` (`findVideoDevice(asset.devices)?.id`, `undefined` when the asset has no VIDEO-capable device — the list hides its Watch button in that case), plus the same `lifecycle`/`archived` defaulting as `buildAssetRows`. Needs `AssetDetails` (not just `AssetSummary`) for `deviceCount`/`watchDeviceId`, which is why `devices.ts`'s own `assets` signal now holds the full `AssetDetails[]` the page already fetches for the Advanced table's "owned by" column (see below) — one fetch, three consumers.
-  - `filterRowsByArchived`/`filterAssetRowsByArchived`/`filterAssetListRowsByArchived` — the client-side half of the "show archived" toggle, one per row-shape.
-- `simulate-logic.ts` — pure, Angular-free logic behind the Simulate step, unit-tested (mirrors `core/telemetry/telemetry-logic.ts`'s split of pure derivation from the injectable/component that drives it):
+  - `buildWarehouseRows(devices, owners, liveDeviceIds)` → `WarehouseRow[]` (device + lifecycle + owner? + streaming + archived) — the device table/grid's one shared view model (both view modes below read the exact same rows).
+  - `filterRowsByArchived` — the client-side half of the "show archived" toggle.
+  - **`searchWarehouseRowsByQuery(rows, query)`** (new) — the page's search box: case-insensitive substring match on device name, protocol, URI, *or* the owning asset's name (a device carries no single "name" field a user would search by — matching all four is what makes "search by IP" or "search by owning asset" both work).
+  - **`buildAssetRows`/`AssetRow`/`filterAssetRowsByArchived`/`buildAssetListRows`/`AssetListRow`/`filterAssetListRowsByArchived`/`filterAssetListRowsByCategory` moved to `features/assets/assets-logic.ts`** — the asset-first list's own view-model builders, unused here any more (this page renders devices only). See that file's own entry below.
+- `simulate-logic.ts` — pure, Angular-free logic behind the Simulate step, unit-tested (unchanged by this split):
   - `SimulateMode = 'direct' | 'rtsp' | 'synthetic' | 'testDrone'` and `FileSimulateForm` (the `direct`/`rtsp` form shape — no `mode: 'synthetic'`/`'testDrone'` possible, by type).
-  - `buildSimulationRequest(form: FileSimulateForm): StartSimulationRequest` — trims `videoPath`/`name`, maps `mode` straight onto `transport` (`'direct'`/`'rtsp'` are literally the same strings), omits `displayName`/`latitude`/`longitude` when blank/`null` rather than sending them as empty/`null` (the `@JsonInclude(NON_NULL)` convention every request DTO here follows).
-  - `buildSyntheticRegisterRequest(name: string): RegisterDeviceRequest` — the `synthetic` mode *is* the Devices page's pre-existing "Add the simulated source" quick-add (`protocol: 'sim'`, `uri: 'sim://demo'`), just reachable from the flow too; blank/whitespace name falls back to `'sim-demo'`. `DevicesPage.registerSimulator()` (the quick-add button in the empty state) now calls this same function with `''` — one implementation, two entry points, per the plan's "all zero-hardware entry points live in one place."
+  - `buildSimulationRequest(form: FileSimulateForm): StartSimulationRequest` — trims `videoPath`/`name`, maps `mode` straight onto `transport`, omits `displayName`/`latitude`/`longitude` when blank/`null`.
+  - `buildSyntheticRegisterRequest(name: string): RegisterDeviceRequest` — the `synthetic` mode's `protocol: 'sim'`/`uri: 'sim://demo'` register body; blank/whitespace name falls back to `'sim-demo'`. Now called from `AssetsPage.registerSimulator()` (moved with the empty-state quick-add — see `features/assets/**` below), not `DevicesPage`.
   - `SIMULATED_CATEGORY = 'simulated'` / `isSimulatedAsset(asset)` — narrows `listAssets()` results to ones the flow created.
-  - `mapSimulatedDevices(simulatedAssets: AssetDetails[]): ReadonlyMap<string, SimulatedDeviceInfo>` — deviceId → `{assetId, displayName}`, built from `AssetDetails` already fetched for *only* the simulated-category assets (see below) — not an N+1 `getAsset` per device in the table.
-  - The watch-target resolution (first `VIDEO`-capable device on an asset) used to live here as `findVideoDevice` but moved to `core/fleet/device-logic.ts` in docs/CYCLES-PLAN.md §6 — see that file's entry above. **`TestDroneForm`/`buildTestDroneRequest`** (docs/CYCLES-PLAN.md §9, CU-b item 7) similarly used to live here but moved to **`core/fleet/simulation-logic.ts`** (vision-web/docs/UI-STRUCTURE-PLAN.md §3, B1) once `features/map/map.ts` needed the same "moving test drone, no file" request builder its own Devices-page-local module used to hold exclusively — same cross-feature rule as `findVideoDevice`'s own move. See that file's own entry above (API surface, `../fleet/warehouse-logic.ts` bullet's sibling) for the full shape: `{name, latitude, longitude, autoStart}` in, a `StartSimulationRequest` with **`videoPath` omitted entirely** out (not even blank — omitting the field is what tells the backend to register a moving VIDEO+TELEMETRY device with no file), never a `transport`. Distinct from `synthetic`: that mode registers a still, telemetry-free `sim`-protocol device via the plain register endpoint; `testDrone` posts to `/api/simulations` and comes back moving.
-- **`devices.ts`/`.html`/`.css` — `DevicesPage`.** Two surfaces stack top to bottom (docs/CYCLES-PLAN.md §11, CD-b item 1): **Assets** (the tab's primary surface, asset-first) and a collapsed **Advanced** disclosure holding the pre-CD-b raw-devices table — nothing lost, the low-level view just stopped being the front door. The "+ Add source" progressive flow (docs/CYCLES-PLAN.md §9, CU-b item 1) is unchanged by this cycle: a page-head button opens a single card (`#add-source-card`); with no method chosen yet it shows a `.method-grid` of three `.method-tile` buttons (Register manually / Discover on network / Simulate — each with a small geometric glyph echoing the header's aperture brand mark, `app.css`), deliberately **not** numbered steps — alternative doors, not a sequence. `addSourceMethod: signal<'register'|'discover'|'simulate'|null>` narrows the card to one method's fields (a `‹` back button returns to the picker):
-  - **Register** — the exact `name`/`protocol`/`uri` form + the advanced-mode stream-options editor that used to be its own `#register-card`.
-  - **Discover** — the exact scan-timeout/Scan button/results table that used to be its own "Scan for devices" card; a result's **Use** button switches the flow to `register` with the fields pre-filled and the card highlighted (`useCandidate()`), same UX as before.
-  - **Simulate** — the mode `<select>` offers four options: `direct`/`rtsp` (file path required), `testDrone` (docs/CYCLES-PLAN.md §9, CU-b item 7 — home lat/lon optional, no file), `synthetic` (name only, no telemetry). `simNeedsVideoPath`/`simNeedsHomePoint` computeds gate which fields render per mode. **Submit** (`submitSimulate()`) branches on mode: `synthetic` calls `fleet.register(buildSyntheticRegisterRequest(...))`; `testDrone` calls `fleet.simulate(buildTestDroneRequest(...))`; `direct`/`rtsp` calls `fleet.simulate(buildSimulationRequest(...))` — the latter two share `startFileOrSyntheticSimulation()`'s watch-resolution/toast shape (a `null`/falsy result means `FleetStore.run()` already toasted the failure and the form stays open for a retry; on success, if `autoStart` produced no `streamId`, one toast ("created — start it from the device list when ready"); if it did, `resolveWatchTarget(assetId)` resolves the device id and the success toast carries a **Watch** action that navigates to `/live/:deviceId`). Any successful register/simulate submission closes the whole Add-source flow (`closeAddSource()`).
+  - `mapSimulatedDevices(simulatedAssets: AssetDetails[]): ReadonlyMap<string, SimulatedDeviceInfo>` — deviceId → `{assetId, displayName}`, built from `AssetDetails` already fetched for *only* the simulated-category assets — not an N+1 `getAsset` per device in the table.
+- **`devices.ts`/`.html`/`.css` — `DevicesPage`.** "+ Add source" navigates to the onboarding wizard (`/add-source`), unchanged. Two things are new this cycle, on top of the exact same device table:
+  - **Search** (`searchQuery` signal, `searchWarehouseRowsByQuery`) — a plain `<input type="search">` above the table/grid, narrowing `warehouseRows()` by name/protocol/URI/owner.
+  - **List/grid view toggle** (`viewMode: signal<'list'|'grid'>`, default `'list'`) — a `.segmented` control (`vision-icon` `list`/`grid`) reading the exact same `warehouseRows()`: **list** is the pre-existing table (unchanged markup); **grid** is a new `.device-card-grid` of `.device-card`s carrying the identical per-row data and the identical kebab menu/inline rename-assign forms, just laid out as cards (`repeat(auto-fill, minmax(17rem, 1fr))`, no breakpoints needed — inherently responsive).
+  - **Unchanged**: the "Show archived" toggle, every device kebab action (rename/activate/deactivate/archive/restore/assign/unassign, reasoned per `core/fleet/warehouse-logic.ts`), the Simulated chip + Stop simulation action, Start/Stop/Watch stream actions, and "Promote to asset…" (`createAssetFor` panel) for an orphaned device — all byte-for-byte the same logic as before the split, just without the Assets section stacked above them and without a collapse/disclosure wrapper around them.
+  - **Dropped**: CDK virtual scroll (`@angular/cdk/scrolling`) — that lived on the old Assets section only (never on this page's own device table), so it left with the split; this page's table/grid still uses a plain `@for`, unchanged from before.
 
-- **Assets — the asset-first primary list (docs/CYCLES-PLAN.md §11, CD-b item 1, item 4).** One row per **asset**, exactly `assetListRows()` (`buildAssetListRows` + `filterAssetListRowsByArchived`) drives it, rendered via **CDK virtual scroll** (`@angular/cdk/scrolling`'s `ScrollingModule`, `<cdk-virtual-scroll-viewport itemSize="60">` + `*cdkVirtualFor` — this app's first use of `@angular/cdk` beyond the `leaflet`-adjacent modules; a fixed-height, self-scrolling `.asset-viewport` is what CDK virtual scroll requires, so this one list breaks from the page's usual full-document scroll on purpose) toward the "thousands of assets" posture item 4 asks for — rendering cost stays `O(visible rows)` regardless of how many assets exist. Each row carries exactly **Watch · Open · Archive**:
-  - **Watch** (`watchAsset(row)`, hidden when `row.watchDeviceId` is `undefined`) navigates straight to `/live/:deviceId` for the asset's first VIDEO-capable device — no intermediate page.
-  - **Open** (`openAsset(row)`) navigates to `/assets/:assetId` — the new asset detail page (below).
-  - **Archive** (`archiveAssetNow`) fires immediately, no confirm panel (docs/UX-REWORK-PLAN.md §U-a2 item 3b — "Undo over confirm"; the older `archiveConfirmAssetId` inline panel this bullet used to describe is gone) — calls `VisionApi.deleteAsset` directly (not `fleet.deleteAsset`, whose own `run()`-wrapped toast has no Undo slot) and shows an `UndoToastService.showUndo` toast naming the `AssetDeletionResponse` counts (devices archived / usages retained / streams stopped), Undo calling `undoArchiveAsset` (restores the asset, then cascades to every device its own archive took down — see this file's own Status entry on the cascade). See the Q2/Q3 Status entry (bottom of this file) for the 10s Undo-toast primitive itself.
-  - Rename/category-edit/activate/deactivate/restore — CW-b's asset-card actions — moved to the asset detail page's own header (below); the list intentionally does not offer them (item 1: "exactly Watch · Open · Archive at list level").
-  - **Honest scalability ceiling, documented not solved (item 4):** list *rendering* is `O(visible)`, but the *fetch* behind it (`refreshWarehouseAssets()` below) is `O(total assets)` — one `getAsset()` per asset, needed for `deviceCount`/`watchDeviceId`/the Advanced table's "owned by" column alike. This cycle deliberately does **not** add a new automatic poll for this list (unlike `FleetStore`'s 5s device/stream poll) — an O(total) fetch firing every 5s regardless of tab activity would be a *worse* posture for "thousands of assets" than today's load-once/mutate/manual-Refresh cadence, given the backend's in-memory repositories (P-a/P-b, MVP2-PLAN) are the real ceiling here, not this cycle's job to raise.
+### `src/app/features/assets/**` — the asset-first grid: search, filter, cards (new this cycle — split out of the old combined Devices page)
 
-- **Advanced — raw devices, collapsed by default (docs/CYCLES-PLAN.md §11 item 1).** `advancedDevicesOpen` signal, default `false`, toggled by a small button; when open, renders the **exact** pre-CD-b warehouse table (docs/CYCLES-PLAN.md §8, CW-b), byte-for-byte the same markup/logic, just demoted:
-  - **"Show archived" toggle** (`showArchived` signal, page-head checkbox — shared by both the Assets list and this table) drives which device/asset list is shown. Off (default): the table reads `fleet.devices()` (FleetStore's own signal — unaffected, still archived-free, so Wall/Live never see an archived device regardless of this page's toggle). On: a page-local `allDevicesIncludingArchived` signal, populated by `fleet.listDevicesIncludingArchived()`, feeds the table instead.
-  - **Device row action menu** (`deviceActionsFor(row)` → `availableDeviceActions`, now imported from `core/fleet/warehouse-logic.ts` — see above); the flat button row this bullet originally described collapsed into a per-row kebab menu in the U-a2 pass (see that Status entry). `onDeviceAction(row, action)` dispatches: `activate`/`restore`/`unassign` fire immediately, busy-guarded by `busyDeviceId`, with a plain confirmation toast (`FleetStore`'s own); **`archive`/`deactivate`** (`archiveDeviceNow`/`deactivateDeviceNow`) also fire immediately but bypass `FleetStore` to show an `UndoToastService.showUndo` toast instead (Undo restores/reactivates — see the Q2/Q3 Status entry); `rename`/`assign` open **one inline extra `<tr>`** below the row (`rowAction`/`rowActionMode(deviceId)` — at most one open at a time) with a small form (rename) or an asset `<select>` (assign, options from `assignableAssets()` — every non-archived asset).
-  - **Simulated devices are recognizable and stoppable**: the State column adds a "Simulated" chip (`.chip.accent`, title shows the owning asset's name) and the actions column adds a **Stop simulation** button calling `fleet.stopSimulation(assetId)` — separate from the ordinary per-device Start/Stop (which only starts/stops the RX-visible stream): stopping *the simulation* also tears down an RTSP-transport asset's transmitted feed, which the ordinary stream-stop endpoint has no way to reach (`DefaultSimulationService` tracks the `FeedId` privately).
-  - **One shared asset fetch, now feeding three consumers**: `refreshWarehouseAssets()` does one `listAssets()`/`listAssetsIncludingArchived()` call, then one `getAsset()` per asset returned, and now stores the full `AssetDetails[]` in the page's own `assets` signal (previously just the lighter `AssetSummary[]`) — this feeds `deviceOwners` (`mapDeviceOwners`, the "owned by" column + unassign action), `simulatedDevices` (`mapSimulatedDevices`, filtered), **and** `assetListRows` (`buildAssetListRows`, the primary list above) from one round rather than a fourth, list-specific fetch. Same silent-degrade convention as before (enrichment, not a user-initiated action). Every lifecycle **mutation**, by contrast, funnels through a `FleetStore` method and refreshes the whole warehouse view afterward (`refreshWarehouse()`), so a 404 before CW-a ships still surfaces as exactly one toast (from `FleetStore`) and the page keeps working.
+`/assets` — one card per **asset**, search by name, filter by category/lifecycle/streaming, watch/open/archive. A sibling route of `features/asset-detail/**`'s `assets/:assetId` (distinct path-segment count, no ambiguity).
+
+- **`assets-logic.ts` + `.spec.ts`** (pure, Angular-free, moved from `features/devices/devices-page-logic.ts` — this is now the **only** consumer, so it stayed feature-local rather than moving to `core/`, mirroring that file's own precedent for a single-consumer split): `AssetListRow`/`buildAssetListRows(assets, liveDeviceIds)` (deviceCount/streaming/watchDeviceId, `lifecycle`/`archived` defaulting a missing `AssetSummary#lifecycle` to `'ACTIVE'`), `filterAssetListRowsByArchived`, `filterAssetListRowsByCategory` (the `?category=` deep-link filter, docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — unchanged behavior, now also the value the category `<select>` reads/writes), plus two **new** filters — `filterAssetListRowsByStatus(rows, 'all'|'active'|'deactivated')` (deliberately excludes `DELETED` either way; that's the separate "show archived" toggle's job) and `filterAssetListRowsByStreaming(rows, 'all'|'streaming'|'offline')` — and `searchAssetListRowsByName(rows, query)` (case-insensitive substring on `displayName`). The old CW-b-era `AssetRow`/`buildAssetRows`/`filterAssetRowsByArchived` (a dead leftover type the old file kept only for its own spec coverage — never rendered) were dropped outright during the move, not carried forward.
+- **`assets.ts`/`.html`/`.css` — `AssetsPage`.** Every asset action from the old combined page's "Assets" section carried over **byte-for-byte**: Watch (`watchAsset`, hidden when the asset has no VIDEO-capable device) → `/live/:deviceId`; Open (`openAsset`) → `/assets/:assetId`; Archive (`archiveAssetNow`, immediate + `UndoToastService` toast naming the `AssetDeletionResponse` counts, no confirm dialog — docs/UX-REWORK-PLAN.md §U-a2 item 3b) and its own `undoArchiveAsset` cascade-restore; Restore (`restoreAssetNow`) for an archived asset shown via "Show archived". The empty-state "Add the simulated source" quick-add (`registerSimulator`) moved here too — it belongs with "browse assets", not "browse devices". **New this cycle**:
+  - **Search** — `<input type="search">`, name-only substring match.
+  - **Filters** — three `<select>`s (Category — `deriveCategoryOptions`, always includes the current filter's slug even if zero currently-loaded assets match it, so a `?category=` deep link to an empty category never silently resets the control; Status — Active/Deactivated; Streaming — Streaming/Offline) plus the pre-existing "Show archived" toggle (unchanged — a separate axis from the Status filter, which deliberately never matches a `DELETED` row either way). A "Clear filters" button appears only while any filter/search is active.
+  - **Cards, not a table**: `.asset-card-grid` (`repeat(auto-fill, minmax(16rem, 1fr))`), one `.asset-card` per row with the same name/category chip/lifecycle chip/streaming chip/device-count/kebab as the old list row, just laid out as a card instead of a CSS-grid list row.
+  - **Dropped CDK virtual scroll** (deliberate trade-off, documented not silently lost): the old asset-first list used `@angular/cdk/scrolling` for `O(visible rows)` rendering toward a "thousands of assets" posture (docs/CYCLES-PLAN.md §11 item 4). A responsive multi-column card grid needs viewport-aware/autosize virtual scroll to do the same, which this cycle's scope (search/filter/grid split) didn't take on — `assetRows()` renders via a plain `@for` now, `O(total filtered rows)`. The underlying *fetch* (`refreshAssets()`, one `getAsset()` per asset) was already `O(total assets)` even before this cycle (the list's own documented ceiling), so this trade-off narrows an already-partial scalability guarantee rather than removing a whole-page one; revisiting virtualization for the grid is a named follow-up, not solved here.
+  - **`?category=<slug>`** (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's readiness-tile drill-down target, unchanged mechanism, moved from `/devices?category=` to `/assets?category=`) seeds the category filter reactively (an `effect`, so a second drill-down click while already on this page still re-narrows).
+
+### `src/app/features/warehouse/**` — the two-tile launcher (new this cycle)
+
+`/warehouse` — used to be a plain alias onto the combined Devices/Warehouse page (docs/UX-REWORK-PLAN.md §U-d's rename); now that Assets and Devices are separate pages, Warehouse earns its own identity as the door between them. `warehouse.ts` (`WarehousePage`, inline template, no separate `.html`/`.css` — small enough) renders exactly two `vision-nav-tile`s in a `vision-tile-grid` (mirrors `features/hubs/**`'s own "thin page over a small tile list" shape without being a fourth `NAV_MODES` hub): **People** (icon `pilot`) → `/manage/roster` (the existing `ComingSoon` scaffold — no dedicated roster page exists yet; deliberately the same target as the Manage hub's own "Pilots / roster" tile, mirroring `Map`/`Command dashboard` both resolving to `/command` in `nav-entries.ts`) and **Assets** (icon `drone`) → `/assets`. Tile accents reuse `features/hubs/tile-accent.ts`'s cool-arc palette (import only, not modified) for visual consistency with the three real hubs. `warehouse.spec.ts` mirrors `features/hubs/hub-pages.spec.ts`'s own "every tile has a real, non-`#` href" check.
 
 ### `src/app/features/onboarding/**` — the add-a-source wizard (docs/UX-REWORK-PLAN.md §U-d; drone onboarding docs/DRONE-INFRA-PLAN.md I-g; SRT/UDP ingest I-h)
 
@@ -207,7 +215,7 @@ The single flow for bringing any source into the app — a forward-only, back-na
 
 ### `src/app/features/asset-detail/**` — one asset's manager page (docs/CYCLES-PLAN.md §11, CD-b item 2–3; reworked from a hybrid manager/cockpit page docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B)
 
-`/assets/:assetId`, the Devices page's asset-first list "Open" target. **Management, not operation** — the plan's own explicit split, copying how Samsara/Geotab/DJI FlightHub 2/Auterion/Skydio separate asset detail from live control: **no video, ever, on this page**. Piloting and live video are the cockpit's job (`/fly`) and the lightweight `/live/:deviceId` watch page, one click away via a cockpit-link band; this page is glanceable KPIs, a utilization chart, health, and history — characteristics, a KPI tile row, a "Recent flights" chart, a map with position + trail, telemetry grouped per source device, usage history, and a "Hardware" section carrying the full warehouse actions the list demoted.
+`/assets/:assetId`, the Assets page's asset-first grid "Open" target (this cycle's inventory restructure moved the asset-first list from the old combined Devices page to its own `/assets` page — see `features/devices/**`/`features/assets/**`/`features/warehouse/**`'s own sections above). **Management, not operation** — the plan's own explicit split, copying how Samsara/Geotab/DJI FlightHub 2/Auterion/Skydio separate asset detail from live control: **no video, ever, on this page**. Piloting and live video are the cockpit's job (`/fly`) and the lightweight `/live/:deviceId` watch page, one click away via a cockpit-link band; this page is glanceable KPIs, a utilization chart, health, and history — characteristics, a KPI tile row, a "Recent flights" chart, a map with position + trail, telemetry grouped per source device, usage history, and a "Hardware" section carrying the full warehouse actions the list demoted.
 
 - `asset-detail-logic.ts` — pure, unit-tested, mirrors `core/telemetry/telemetry-logic.ts`'s split:
   - `groupTelemetryByDevice(samples: TelemetrySample[])` → `ReadonlyMap<deviceId, TelemetrySample[]>` — regroups one usage's mixed-source samples (CD-a's `deviceId` field is what makes this possible) back apart, preserving each device's own chronological order.
@@ -381,6 +389,19 @@ Deliberately outside the "no component calls `fetch` directly" rule: this page's
 - `debug-response.ts` — pure: `formatResponseBody(text)` pretty-prints JSON with a raw-text fallback (never throws) plus an explicit `(empty body)` case; `isSuccessStatus(status)` for the 2xx badge.
 - `debug-history.ts` — pure: `pushHistoryEntry(history, entry, limit = 20)`, newest-first, capped, non-mutating. Backs the last-~20-requests log; clicking a row re-fills the form (`DebugPage.replay()`) but does not re-send.
 - `debug.ts`/`.html`/`.css` — `DebugPage`, three cards: the console above; Health (`GET /actuator/health` parsed for `status`/`components[].status`, up/down chips, raw JSON in a `<details>`); Last scan (`POST /api/discovery/scan` with `{}`, raw `ScanResultResponse` including `failedMethods`). All three reuse `DebugApiService.send()`.
+
+### `src/app/shared/ui/` — icon system + hub/drawer primitives, `src/app/core/panel-state.ts` (`PanelState`) — Wave-0 shared foundation (docs/UI-REDESIGN-PLAN.md Wave 0)
+
+Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, `src/app/shared/ui/**`, `src/app/core/panel-state.ts` — no existing page/component wired onto any of it; Waves 1-4 are the real consumers). Full writeup — design/dataviz choices, the `PanelState` DI deviation, degrade/role-gate/dev-parity notes, tests, build — is in the dated Status entry near the bottom of this file; this section is the permanent reference.
+
+- **Tokens/utilities (`src/styles.css`, appended only — no existing token/class changed)**: spacing scale `--space-1..8` (4/8/12/16/24/32/48/64px); breakpoint reference tokens `--bp-sm/md/lg` (640/900/1200px, `@media` still hardcodes the px value and cites the token name in a comment, since `@media` can't read `var()`); the one canonical frosted-pill HUD surface `--hud-bg`/`--hud-bg-strong`/`--hud-border`/`--hud-blur`/`--hud-blur-strong` + `.surface-hud`/`.surface-hud-strong` utilities (replacing the ≥8 copy-pasted `rgb(6 9 14 / 62%)` recipes across `fly.css`/`cv-control-panel.css`/`flight-command-panel.css`/`fly-osd.ts`/`diagnostics-card.ts`/`preflight-checklist.ts` — none of those existing copies are touched by this wave, each migrates as a later wave next touches it); `.grid12`/`.col-1..12` (below `--bp-md` every `.col-*` collapses to span 12); `<main>` gets a max-width container (`main:not(:has(> .cockpit, > .command-shell))`, guarding out the two existing full-bleed shells so this is genuinely zero-visual-change on every current route — see the Status entry for why a class-based approach wasn't possible this wave).
+- **`shared/ui/icon-registry.ts`** — `IconName` (the frozen F2 union, 50 names: modes/nav, cockpit/telemetry clusters, monitor/manage) + `const ICONS: Record<IconName, string>`, inner SVG markup only (`<path>`/`<line>`/`<circle>`/`<rect>`/`<polyline>`/`<polygon>`, no `<svg>` wrapper), hand-authored Feather/Lucide-style (24x24 viewBox, `fill=none`/`stroke=currentColor`/`stroke-width=2`/round caps). `bell`'s markup is byte-identical to the pre-existing inline `<svg>` in `shared/ui/notification-bell.html` (that file is unchanged by this wave — a future wave can point it at `<vision-icon name="bell">` with zero visual change).
+- **`shared/ui/icon.ts`** — `<vision-icon>`: `name = input.required<IconName>()`, `size = input<number>(16)`, host `aria-hidden="true"` (decorative only — the labeled control around it owns the accessible name). Renders a 24x24-viewBox `<svg>` via `[innerHTML]` bound through `DomSanitizer.bypassSecurityTrustHtml` — safe because every value comes from the closed, compile-time `ICONS` map, never user input.
+- **`shared/ui/icon-button.ts`** — `<vision-icon-button>`: `icon`/`label` (both `input.required`, `label` drives both `title` and `aria-label` — the one enforced a11y rule), `active = input(false)` (→ `aria-pressed`), `variant: 'ghost'|'hud'|'danger' = 'ghost'`, `activated = output<void>()`. The `hud` variant's CSS reuses the exact `--hud-*` tokens `.surface-hud` is built from. Destructive text-labeled actions (Stop/Disarm/Archive) do **not** use this component — unchanged, per the plan's own poka-yoke rule.
+- **`shared/ui/section-header.ts`** — `<vision-section-header>`: `title` (required), `eyebrow`/`subtitle` (optional), projected `[actions]` slot. `<h2>` is the real section label; the host itself is not a landmark.
+- **`shared/ui/side-panel.ts`/`.html`/`.css`** — `<vision-side-panel>`, the shared drawer shell (generalizes `features/command/asset-panel.html`'s own panel-shell markup, which is unchanged by this wave): `title` (required), `subtitle`/`icon` (optional), `close = output<void>()`; default content slot is the body, `[footer]` is an optional action bar. `role="dialog"` + `aria-label={title}`, `surface-hud-strong`; fixed right column `width: min(24rem, 92vw)`, docked under the header, `z-index: 120` (above the toast host's 100, below a true modal dialog's 150); below `--bp-sm` becomes a full-width bottom sheet (`max-height: 70vh`, slides up). Moves focus to the head on open (`afterNextRender`, this codebase's established "run once the DOM exists" idiom); Esc (bound on the `<aside>` root) emits `close`. Mounting/persistence of "which drawer is open" and "return focus to the invoking tool-rail button" are the host's job (typically via `PanelState` below), not this component's.
+- **`shared/ui/nav-tile.ts` + `shared/ui/tile-grid.ts`** — hub launcher primitives (consumed by Wave 1's `features/hubs/**`, not built by this wave). `<vision-nav-tile>`: a real `<a [routerLink]>` (`icon`/`name`/`to` required, `description`/`badge` optional, `disabled` never actually used — a scaffold area routes to its own honest "coming soon" page instead, flagged via `badge` like `"soon"`) — the whole tile is one focusable link, description/badge are plain `<span>`s, never a second tab stop. `<vision-tile-grid>`: pure layout, `repeat(auto-fill, minmax(13rem,1fr))`, deliberately drops density (wider minimum tile width, then one column) below `--bp-lg`/`--bp-sm`.
+- **`core/panel-state.ts` additions**: `readPersistedString(key, fallback: string|null): string|null` / `writePersistedString(key, value: string|null)` — the string-valued sibling of the pre-existing `readPersistedFlag`/`writePersistedFlag` (untouched, same file); writing `null` removes the key outright rather than persisting the literal text `"null"`. **`PanelState`** — one-open-at-a-time drawer manager: `active: Signal<string|null>`, `isOpen(id)`, `open(id)` (closes any other), `close()`, `toggle(id)`; an optional constructor `storageKey` round-trips `active` through the two functions above. **Deliberately a plain class, not `@Injectable()`** — see the Status entry for why the frozen "constructed with an optional storageKey" contract doesn't fit Angular constructor-DI cleanly; a host owns one instance directly (`new PanelState('vision.fly.activePanel')`), which is "provided per host" in the sense that matters and fully unit-testable with no `TestBed`. Not consumed by any page yet — Wave 2 (Fly's tool-rail) and Wave 3 (asset-detail's drill-ins) are the intended first hosts.
 
 ## Conventions
 
@@ -1552,6 +1573,12 @@ above) — out of this task's scope to fix, flagged for the next agent who touch
 deleted, since `shared/map/**` was never in this task's own file scope.
 
 ## Detection model picker (docs/CV-MODELS-PLAN.md item 4)
+
+**Superseded by docs/CV-CONTROL-PLAN.md Wave E** (see the dedicated changelog section at the end of
+this file) — `DetectionModelId`/`DETECTION_MODEL_OPTIONS` described below no longer exist; the model
+roster is now data-driven from `GET /api/cv/models` (`FleetStore.models`). Left in place as the
+historical record of this task's own reasoning/tests at the time; read the Wave E section for the
+current shape.
 
 Scope: `core/settings/settings-store.ts` (+ its spec), `features/settings/**`, `features/live/**`;
 `features/asset-detail/**` was checked and excluded — it calls `fleet.start(device.id,
@@ -3027,3 +3054,721 @@ chunk; `"/mode"`/`"/arm"`/`"/disarm"`/`"flight-capabilities"` (the four URL path
 **Nothing incomplete against the task's own ask.** One scope note: Command's `AssetPanel` does not
 gain Mode/Arm/Disarm — not an oversight, the plan's own frozen "UI — Wave C" section names only the
 Fly cockpit for this wave (unlike Stage 1, which named both call sites from the start).
+
+## CV control panel — live per-stream detection config + data-driven model roster (docs/CV-CONTROL-PLAN.md Wave E)
+
+Scope: `vision-web/**` only, coded against docs/CV-CONTROL-PLAN.md §2-5's frozen wire contract while
+backend Waves A-D (cv-service YOLOE roster, `PipelineConfig.detectionEnabled`, `StreamPipeline`
+live-update + label enforcement, the `PATCH`/roster REST surface) land in parallel — not read, not
+needed to be: this wave's own tests are vitest/tsc/build against the frozen shapes, never a live
+server. Gives the Fly cockpit full live control of a *running* stream's detection pipeline (model,
+confidence, inference-fps, class filter, detection on/off) plus a data-driven model picker, replacing
+the old hardcoded `DETECTION_MODEL_OPTIONS`/`DetectionModelId` union.
+
+**Mid-task amendment, folded in before shipping**: cv-service's own Wave A measured the prompt-free
+YOLOE model's real vocabulary at ~4585 classes (not the frozen contract's provisional example list),
+and found building-detection labels genuinely vary by scene (`building`/`skyscraper`/`office
+building`/`house`/`apartment`/`roof`, alongside outright scene labels like `downtown` or a named
+landmark). A fixed preset filter would have silently dropped most real detections. This changed three
+things from the original brief, all reflected below: (1) an open-vocabulary model's picker seed is
+always `[]` ("show everything"), never a narrowed default; (2) the class-filter chips are a checklist
+built from labels actually observed in the live detection stream (unioned with the current filter),
+not a fixed a-priori list; (3) the "People + vehicles + buildings" set survives only as an opt-in,
+one-click preset button, never an enforced default.
+
+### Types (`core/api/models.ts`)
+
+`StartStreamRequest` gains optional `labelFilter?`/`detectionEnabled?`. New: `UpdateStreamConfigRequest`
+(every field optional — a **partial** patch, the body of `PATCH /api/streams/{id}/config`),
+`PatchStreamConfigResponse {streamId, modelReArmed}`, `CvModel {id, displayName, kind, openVocab,
+defaultLabelFilter}` (one roster row — `displayName` alone carries what `DetectionModelOption.hint`
+used to say separately), `CvModelsResponse {models}` (never errors server-side per the plan).
+
+### API client (`core/api/vision-api.ts`)
+
+`patchStreamConfig(streamId, patch): Promise<PatchStreamConfigResponse>` (`PATCH`) and
+`getCvModels(): Promise<CvModelsResponse>` (`GET /api/cv/models`) — both plain `firstValueFrom`
+wrappers, same shape as every other method in this class; no client-side precondition check on the
+patch body (every field the CV panel sends is already clamped by its own slider bounds).
+
+### `FleetStore` (`core/fleet/fleet-store.ts`)
+
+**`models` signal** — the roster, fetched **once** at construction (`loadModels()`, silent-degrade to
+`[]` on failure, no toast — a background enrichment read, mirrors `fly.ts#loadCapabilities`'s own
+posture) rather than polled like `devices`/`streams` — the roster is config-backed server-side,
+deploy-time not runtime (docs/CV-CONTROL-PLAN.md §D). **`patchStreamConfig(streamId, patch)`** —
+`run()`-wrapped (one toast on genuine failure — expected to be rare, since the panel clamps values
+client-side and debounces, unlike the 5s poll where a toast-per-failure would be spam), returns
+`PatchStreamConfigResponse | null` mirroring `updateDevice`/`assignDevice`'s own contract.
+
+### `SettingsStore` rework (`core/settings/settings-store.ts` + `.spec.ts`)
+
+Dropped: `DetectionModelId` (closed union), `DetectionModelOption`, `DETECTION_MODEL_OPTIONS` (the
+hardcoded three-entry array), `isDetectionModelId`/`DETECTION_MODEL_IDS`. `PipelineProfile.model` /
+`PipelineSettings.model` are now a plain, **unvalidated** `string` — the roster that would validate it
+is now server-driven and can grow without a frontend release, so this store no longer has (or needs)
+a closed set to check against; an id the roster doesn't recognize is accepted as-is; only a missing/
+non-string value backfills to `DEFAULT_DETECTION_MODEL` (kept as a name, value changed to
+`'yolo26n.pt'` — mirrors `PipelineConfig.defaults()`'s own Wave-B bug-fix off the dead `"yolo"` id, so
+"no override" and the domain default stay in lockstep exactly as before). `PipelineProfile`/
+`PipelineSettings` both gain `labelFilter: readonly string[]` (empty = "all labels", the existing
+wire semantics) and `detectionEnabled: boolean` (default `true`, mirrors
+`PipelineConfig.DEFAULT_DETECTION_ENABLED`) — same profile/draft/custom-save/revert/`effective()`
+plumbing confidence/fps/model already had, no new methods. **Migration-safe restore**:
+`withValidPipelineFields` (replacing `withValidModel`) backfills all three fields independently —
+model → `DEFAULT_DETECTION_MODEL` only if missing/non-string (not "unrecognized"), `labelFilter` → `[]`
+if not a string array, `detectionEnabled` → `true` if not a boolean — applied to both `customProfiles`
+and `draft` on restore, same "one bad/missing field never sinks the rest of the object" rule every
+other field here already follows. All three built-in profiles (Balanced/Low latency/High quality) set
+`labelFilter: []`/`detectionEnabled: true` — none of them target the open-vocab model.
+
+### Fly CV control panel (`features/fly/cv-control-panel.ts`/`.html`/`.css` + `cv-control-panel-logic.ts`+`.spec.ts`, all new)
+
+The main deliverable — a HUD toggle button ("CV", a small red dot when detection is off) + drawer in
+`fly.html`'s `.hud-header` (right of the flight-command cluster), hidden in watch mode alongside
+Start/Stop (same viewer-vs-controller gate). A **drawer**, not a frosted-pill cluster like
+`FlightCommandPanel` — this panel carries materially more controls than Mode/Arm/Disarm, so a
+dismissible drawer (`position: fixed`, escapes `.cockpit`'s own `overflow: hidden` reliably regardless
+of where the toggle button wraps to in the header row; collapses to a bottom sheet under 760px) is the
+honest fit. Own component styles throughout (Angular's emulated encapsulation means `fly.css`'s
+`.icon-btn`/`.hud-*` rules never reach this template) — only the truly global `src/styles.css` classes
+(`.btn`, `.chip`, `.label`, `.muted`, `.mono`, `.row`/`.spread`, native control styling) are relied on,
+mirroring `flight-command-panel.css`'s identical precedent.
+
+**Control list**: model picker (roster-driven radio list, `displayName` + a `kind` chip, disabled
+while a model-change PATCH is in flight); confidence slider (0.05-0.95) and inference-fps slider
+(1-30), identical ranges to `live.html`/`settings.html`'s existing controls; a class-filter chip
+checklist; a detection on/off toggle (copy explicitly distinguishes it from the client-side `boxesMode`
+overlay toggle — "Off stops inference entirely… separate from the boxes overlay (B), which only
+controls how detections already found are drawn").
+
+**Live vs. draft, one rule**: every edit always calls `SettingsStore.adjust()` first (the exact
+mechanism `live.ts`/`settings.ts` already use) — that draft is what `fly.ts#start()` already posts via
+`fleet.start(device.id, this.settings.effective())`. When the host passes a `streamId` (a stream is
+actually running), the same edit *additionally* PATCHes the live stream: hot knobs
+(confidence/fps/labelFilter/detectionEnabled) debounced 400ms via `FleetStore.patchStreamConfig`
+(`cv-control-panel-logic.ts#buildHotKnobPatch` — **never** includes `model`, so a slider drag can
+never accidentally trigger a re-arm), a model change immediately
+(`buildModelChangePatch`, cancels any pending hot-knob debounce first so the two families of change
+never coalesce). **No optimistic lies**: the "re-arming detection…" toast (`ToastService.info`) fires
+only off the server's own `modelReArmed` field (`reArmHint`), never assumed client-side, and never
+claims the video was interrupted (it isn't — only the detection branch briefly re-opens its session,
+docs/CV-CONTROL-PLAN.md §A).
+
+**Class-filter chips — a checklist built from real data** (the coordinator amendment, see above):
+`observedLabels(detectionResults)` collects distinct labels from `FlyPage`'s own
+`detections.results()` (passed in as an input, the same signal `<vision-player>`'s overlay already
+reads — no second `DetectionsStore`), unioned with the current filter (`chipCandidates`) so a
+chosen-but-not-currently-visible label never disappears from the list. `isLabelChecked`/
+`toggleLabelChip` implement the checklist semantics honestly: an empty filter reads every candidate as
+checked ("all"); unchecking one while "all" narrows to every *other* known candidate (the only way to
+express "all but this" on a wire where empty always means "all"); unchecking the last remaining
+explicit label reverts to `[]` again — an intentional, documented edge case, not hidden. A free-text
+add input (`addLabel`) covers a class not yet observed at all. `seedLabelFilterForModel` is where the
+amendment actually lands: an **open-vocabulary** model always seeds `[]` regardless of what the
+roster's own (possibly still-provisional) `defaultLabelFilter` says; a **closed-set** model's own
+`defaultLabelFilter` is honored as-is. `applyPreset`/`PEOPLE_VEHICLES_BUILDINGS_PRESET` is the
+one-click, clearly-opt-in "People, vehicles & buildings" fill button (narrows `[]`→the preset, or adds
+the preset into an existing concrete filter) — the sole named exception to "no hardcoded class strings
+in components," called out as such in both the code and this doc.
+
+**Honest perf-hint copy** (docs/CV-CONTROL-PLAN.md §F) — `perfHint(openVocabSelected)`: always shown
+near the fps/model controls, worded more urgently once the open-vocab model is actually selected
+("materially slower on a laptop CPU… video keeps streaming at full rate regardless"); never claims the
+class filter reduces CPU cost (it doesn't — the model infers every class every frame regardless of
+the filter, a Java-side drop after the fact per §A/§E).
+
+**No hardcoded class strings beyond the one named preset** — every class rendered (chips, model
+`kind`, `displayName`) comes from either the roster response or the live detection stream; this is
+deliberate so cv-service Wave A's later real-`model.names` reconciliation needs zero UI change.
+
+### Fallout: `features/live/live.ts`/`.html`, `features/settings/settings.ts`/`.html`
+
+Both pages imported the now-deleted `DETECTION_MODEL_OPTIONS`/`DetectionModelId` for their own
+existing model pickers — updated to read `FleetStore.models()` instead (a `computed()`, not a plain
+constant, since the roster now loads asynchronously): `live.html`'s segmented-button rail and
+`settings.html`'s profile-style picker both render `model.displayName` directly (no more separate
+hint line — `displayName` already carries it) and degrade to a plain `<span class="mono">` of the bare
+model id string when the roster is empty (still loading, or the fetch failed) rather than rendering
+nothing or a blocked control. `settings.ts#modelLabel(id: string)` degrades identically. Neither page
+gained the new PATCH-driven live-update behavior — that's Fly-cockpit-only, per the plan's own Wave E
+scope; both keep their existing "applied the next time a stream starts" semantics, with a one-line
+pointer added to `settings.html`'s hint text toward the Fly cockpit's own live controls.
+
+### Degrade / role-gate / dev-parity notes
+
+Every enrichment read here (the model roster, a hot-knob PATCH, a model-change PATCH) silent-degrades
+per this codebase's established rule: an empty/stale roster never blocks the picker (falls back to a
+bare id string), a failed PATCH surfaces exactly one toast via `FleetStore.run()` and leaves the
+operator's draft intact (their next Start still carries the intended values), a model-change re-arm
+hint only ever reflects what the server actually said. **No role-gating in this wave** — the CV
+control panel is a stream/detection knob, not a fleet-management or command action; it follows the
+same "hidden in watch mode, else visible" rule Start/Stop already has, unrelated to `MeResponse.topRole`
+(no surface here is ADMIN/MANAGER-only, matching `StreamController`'s own "no acting user threaded
+through stream mutations" convention the plan's Wave D notes for the backend side). **Dev-parity**:
+nothing here reads `vision.auth.enabled` or any role; behavior is identical whether auth is on or off.
+
+### Tests
+
+**1158/1158 pass, 57 spec files** (was 1123/56 before this task — +35 in one new file,
+`cv-control-panel-logic.spec.ts`): model-roster lookups (`findModel`, `seedLabelFilterForModel` — both
+the closed-set-honors-roster and open-vocab-always-empty-regardless-of-roster cases, plus the
+unresolved-model case), `observedLabels`/`chipCandidates` (dedup, union, sort), `isLabelChecked`/
+`toggleLabelChip` (the "all" narrowing case, ordinary toggle, and the honest "unchecking the last one
+reverts to all" edge case), `addLabel`/`removeLabel` (no-op-same-reference on blank/duplicate/absent,
+the `[]`-narrows-on-add case), `applyPreset` (narrows-from-all vs. adds-to-existing, no duplication,
+default-preset-argument), `buildHotKnobPatch`/`buildModelChangePatch` (confirms `model` never appears
+in a hot-knob patch), `reArmHint`/`perfHint` (copy-content assertions — never claims video
+interruption, never claims the filter reduces CPU), and `debounce` (fake-timers: coalesces to the
+last call's args, `cancel()` drops a pending call, two calls past the delay fire independently).
+`core/settings/settings-store.spec.ts` extended (all `effective()`/`saveDraftAs` assertions now
+include `labelFilter`/`detectionEnabled`; the old "ignores a corrupt persisted draft model" case split
+in two — a non-string model still falls back to the default, but a *string* the roster no longer
+recognizes is now accepted, not rejected, reflecting the union's removal; new cases for
+labelFilter/detectionEnabled adjust/save/migrate). `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production`, measured against a same-commit baseline built in an isolated
+`git worktree` (never `git stash` on this shared, multi-agent working tree again — see the incident
+note below) rather than assumed from an older cycle's own recorded numbers:
+
+- **Initial bundle**: 350.01 kB → 350.48 kB raw / 99.43 kB → 99.47 kB transfer (+0.47 kB raw / +0.04 kB
+  transfer — negligible; the CV panel is lazy, only the two now-slightly-larger `FleetStore.models`/
+  `patchStreamConfig` method bodies land eagerly). Same two pre-existing budget warnings (300 kB
+  initial, 6 kB `onboarding.css`) carried unchanged, neither newly triggered nor worsened by this task.
+- **`fly` lazy chunk** (this wave's real weight): 49.73 kB → 64.07 kB raw / 11.75 kB → 14.87 kB
+  transfer (+14.34 kB raw / +3.12 kB transfer) — the new panel component + its logic/template/styles.
+- **`live` lazy chunk**: 21.95 kB → 22.13 kB raw / 5.98 kB → 6.00 kB transfer (+0.18 kB / +0.02 kB).
+- **`settings` lazy chunk**: 12.27 kB → 12.78 kB raw / 3.63 kB → 3.77 kB transfer (+0.51 kB / +0.14 kB).
+- Every other chunk (`command`, `devices`, `asset-detail`, `replay`, `org-settings`, `debug`, `hls`,
+  `leaflet-src`, `onboarding`) byte-identical — untouched by this task.
+
+**Incident, self-corrected mid-task**: a bare `git stash` was run once to get a clean-checkout baseline
+for this comparison, forgetting this repository's working tree is shared live with other agents
+concurrently building other Wave A-D modules (`vision-domain`/`vision-application`/`cv-service`) —
+`git stash` operates repo-wide, not per-subdirectory, so it briefly stashed their uncommitted work too.
+Caught immediately (the resulting build errors referenced pre-Wave-E code, `git status`/`git stash
+list` confirmed nothing was lost) and reverted with `git stash pop` before any further action — every
+file, including the other agents', verified back to its pre-stash content. The baseline comparison
+above was instead redone safely via a disposable `git worktree add --detach <tmp-path> HEAD` (zero
+interaction with the shared working tree), removed after use.
+
+### Files touched
+
+New: `features/fly/cv-control-panel.ts`/`.html`/`.css`, `features/fly/cv-control-panel-logic.ts`+`.spec.ts`.
+Modified: `core/api/models.ts`, `core/api/vision-api.ts`, `core/fleet/fleet-store.ts`,
+`core/settings/settings-store.ts`+`.spec.ts`, `features/fly/fly.ts`/`.html`, `features/live/live.ts`/`.html`,
+`features/settings/settings.ts`/`.html`, this file (`vision-web/MODULE.md`).
+
+## UI-REDESIGN-PLAN Wave 0 — shared foundation: design tokens, icon system, drawer/hub primitives, `PanelState` (docs/UI-REDESIGN-PLAN.md Wave 0)
+
+Scope, exactly per the task: `src/styles.css`, `src/app/shared/ui/**`, `src/app/core/panel-state.ts`
+only — **purely additive**, no existing token/class/component edited, so every one of this app's
+existing 1158 vitest specs stays green byte-for-byte. This is the frozen-contract foundation
+(docs/UI-REDESIGN-PLAN.md's F1/F2/F3 sections) that Waves 1-4 build the hub-and-spoke nav, the
+cockpit grid rebuild, and the asset-page overview/drill-in against — nothing in this app actually
+*uses* any of it yet (grep-verified: zero imports of `shared/ui/icon`/`icon-button`/`section-header`/
+`side-panel`/`nav-tile`/`tile-grid`/`PanelState` outside this wave's own new files and specs).
+
+### Design/dataviz choices
+
+No chart/stat-tile/dashboard surface in this wave (that's Wave 3/4's territory) — the `frontend-design`
+skill's guidance was applied at the margin (consistent icon visual language, deliberate spacing/
+breakpoint naming) rather than a fresh brand pass, since this task's own instruction is explicit:
+"never invent colors… use existing design tokens." Every new component's CSS reads exclusively from
+this app's existing token set (`--panel`/`--panel-hover`/`--border`/`--text`/`--text-muted`/`--danger`/
+`--danger-soft`/`--radius`/`--radius-sm`/`--radius-pill`) plus this wave's own new `--space-*`/`--hud-*`
+tokens — no new hex literal anywhere in `shared/ui/**`. Icons are hand-authored rather than imported
+from Feather/Lucide (no new dependency, and the exact frozen `IconName` set needed no more/less than
+what's listed) but deliberately mimic that library's visual grammar (24x24 viewBox, `stroke=currentColor`,
+`stroke-width=2`, round caps/joins) — a consistent *family* of marks, not pixel-fidelity to any one
+named icon set, was the actual goal (see `icon-registry.ts`'s own doc comment). `bell`'s path data is
+byte-identical to the pre-existing inline `<svg>` in `notification-bell.html` on purpose, so a future
+wave can swap that file onto `<vision-icon name="bell">` with zero visual change.
+
+### Icon system (F2) — `shared/ui/icon-registry.ts`, `shared/ui/icon.ts`
+
+`IconName` — the frozen 50-name union verbatim: `home, cockpit, eye, scan, layers, list, help, close,
+plus, edit, archive, trash, kebab, chevron-left, chevron-right, chevron-down, chevron-up, grid, bell,
+user, settings, gear, operate, monitor, manage, logout, building-org, drone, battery, satellite,
+compass, gauge, signal, wind, thermometer, map-pin, ruler, power, alert, replay, history, wrench, chip,
+firmware, report, category, warehouse, source, pilot, map`. `settings` (a sliders/adjustment glyph) and
+`gear` (a cog) are deliberately two different marks — the frozen set names both, so they had to read as
+two different controls, not the same "cog" icon twice. `<vision-icon>` binds `ICONS[name()]` into an
+`<svg>`'s `[innerHTML]` via `DomSanitizer.bypassSecurityTrustHtml` — deliberately bypassing Angular's
+default sanitizer, safe here because the only strings that can ever reach it come from this module's
+own closed, compile-time `Record<IconName, string>`, never user input or a network response; bypassing
+also sidesteps Angular's default SVG-attribute allowlist silently dropping legitimate attributes
+(`stroke-linecap`, `transform`) a couple of these icons use (`satellite`'s rotated rect).
+
+### Shared components (F3) — `shared/ui/{section-header,side-panel,icon-button,nav-tile,tile-grid}.ts`
+
+Signatures match the frozen contract exactly (selectors, input/output names and types, render shape) —
+see the API-surface section above for the compact per-component summary; full render markup is in each
+component's own doc comment. One naming note: `IconButtonVariant = 'ghost' | 'hud' | 'danger'` is
+exported from `icon-button.ts` alongside the component (not just inlined in the `variant` input's
+type), since a later wave wiring the tool-rail will want to name it as a type, not repeat the literal
+union.
+
+### `PanelState` — one deliberate deviation from the frozen contract, documented
+
+The frozen contract's own pseudo-code reads as an `@Injectable()` service ("NOT `providedIn: 'root'` —
+it's provided per host"). Implemented instead as a **plain class**, not Angular-DI-managed at all:
+Angular's constructor-DI has no clean way to pass an ad-hoc string (`storageKey`) to a class instantiated
+via a host's own `providers: [...]` array without inventing an `InjectionToken` + a second per-host
+provider just to carry one string — real ceremony this codebase has a stated bias against (see
+`core/panel-state.ts`'s own pre-existing doc comment on `readPersistedFlag`/`writePersistedFlag`'s "no
+shared service/store class" reasoning, which predates this task). A host instead owns one instance as a
+plain field — `protected readonly panels = new PanelState('vision.fly.activePanel');` — which satisfies
+"provided per host" in the sense that actually matters (never a shared singleton) and is fully
+unit-testable with no `TestBed` at all (this wave's own `panel-state.spec.ts` tests it exactly that
+way). Every other part of the contract — the `active`/`isOpen`/`open`/`close`/`toggle` surface, the
+one-open-at-a-time rule, the storageKey-driven persistence — is implemented exactly as specified. If a
+future wave prefers Angular's injector instead, decorating this same class with `@Injectable()` and
+registering it via a factory provider remains a non-breaking addition, not a rewrite.
+
+The `<main>` max-width container (F1) is the other place this wave made a judgment call: the frozen
+text just says "`<main>` gets a max-width container," but `app.html` (which owns `<main>`) is out of
+this wave's file scope (Wave 1's), so there was no way to apply a container *class* — only a bare
+`main` tag-selector rule in `styles.css`. Constraining every route to 1400px would have visibly broken
+this app's two existing full-bleed shells (`features/fly`'s `.cockpit`, `features/command`'s
+`.command-shell` — neither wraps in `.page`, both currently rely on `<main>` being unconstrained), which
+would have violated this wave's own "purely additive, zero behavior change" guardrail on two major
+existing pages. Resolved with `main:not(:has(> .cockpit, > .command-shell))` — real, working container
+behavior for every `.page`/`.login-shell` route today (harmlessly redundant with `.page`'s own identical
+1400px cap), zero effect on the two shells. Documented in `styles.css`'s own comment to re-audit if
+either class is ever renamed.
+
+### Degrade / role-gate / dev-parity notes
+
+None of this wave's surfaces issue HTTP, read a role, or touch `vision.auth.enabled` — `<vision-icon>`
+resolves a compile-time map (an unknown `IconName` is a `tsc` error, not a runtime "—"), and every other
+component is presentational/pure state, so there is no enrichment read to degrade and no affordance to
+role-gate. `PanelState` reads/writes `localStorage` exactly like the pre-existing `readPersistedFlag`/
+`writePersistedFlag` (same failure posture: a private-browsing/quota-exceeded `localStorage` throw isn't
+caught here either, matching the existing functions this wave sits beside — unchanged behavior, not a
+new gap). Dev-parity is trivially true: nothing here can observe `vision.auth.enabled` either way.
+
+### Tests
+
+**1196/1196 pass, 63 spec files** (was 1158/57 before this task — +38 tests across 6 new spec files, 0
+existing spec touched): `icon.spec.ts` (registry has non-empty markup for exactly the frozen 50-name
+set, no `<svg>` wrapper in any entry; `<vision-icon>` renders a 24x24-viewBox svg sized by `size`
+(default 16), is `aria-hidden`, and renders real markup for every known name without throwing);
+`icon-button.spec.ts` (`label` drives both `title` and `aria-label`; default `ghost` variant + relevant
+`aria-pressed="false"`; `active=true` → `aria-pressed="true"` + `.active`; `hud`/`danger` variant classes;
+`activated` emits exactly once per click); `section-header.spec.ts` (title renders as `<h2>`; optional
+eyebrow/subtitle render only when provided; `[actions]` content projects into `.section-head-actions`,
+via a small host-harness component); `side-panel.spec.ts` (`role="dialog"` + `aria-label` = title; focus
+moves to the head on open — via `await fixture.whenStable()` to flush the `afterNextRender` callback;
+close emits on both the close icon-button and Esc-from-within-the-panel; optional subtitle/icon render
+only when set; an empty `[footer]` renders with no child elements); `nav-tile.spec.ts` (renders a real,
+keyboard-focusable `<a href>` — not a styled `<div>`/`<button>` — with `provideRouter([])`; name always
+renders, description/badge only when provided; description is a plain `<span>`, never a second tab
+stop); `tile-grid.spec.ts` (pure layout — projects arbitrary content into `.tile-grid`, via a host
+harness). `core/panel-state.spec.ts` extended in place (existing `readPersistedFlag`/`writePersistedFlag`
+cases untouched): `readPersistedString`/`writePersistedString` (fallback including `null`; round-trip;
+writing `null` removes the key rather than persisting the text `"null"`); `PanelState` (starts closed
+with no storage key; `open`/`isOpen`; opening a second panel closes the first; `close()`; `toggle()`
+both directions; no `localStorage` writes without a `storageKey`; with a `storageKey`, `open`/`close`
+round-trip through a **second** `PanelState` instance constructed against the same key — the real
+persistence contract, not just an internal-state assertion). `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+One incidental bug caught by the build (not vitest, which runs in jsdom without ever bundling
+`styles.css`): a CSS comment inside this wave's own `--bp-md`/`--bp-sm` doc text originally nested a
+second `/* --bp-sm */`-style comment *inside* an outer `/* … */` block — CSS comments don't nest, so the
+outer comment closed early and the remaining doc text became invalid dangling CSS, caught immediately as
+an esbuild `css-syntax-error` warning during `ng build`/`npm test`'s own bundling step. Fixed by rewording
+that one comment to avoid a nested `/* */` sequence; flagged here since it's an easy mistake to repeat if
+a future token's doc comment wants to show a `/* … */`-shaped example inline.
+
+### Build
+
+`ng build --configuration production`, measured against a same-commit-plus-pre-existing-uncommitted-work
+baseline built in an isolated `git worktree add --detach` (never `git stash` on this shared, multi-agent
+working tree — see the CV-control-panel Status entry above for the incident that rule exists to prevent).
+The working tree already carried the CV-control-panel task's own uncommitted changes when this task
+started (confirmed by this task's own first `npm test` run matching that entry's recorded 1158/57
+exactly) — the baseline worktree was built from `HEAD` **plus those same pre-existing files copied in**,
+so the delta below isolates exactly this wave's own contribution, not a mix of two agents' work:
+
+- **Initial bundle**: 350.48 kB → 351.74 kB raw / 99.55 kB → 99.79 kB transfer (+1.26 kB raw / +0.24 kB
+  transfer). The entire delta is `styles.css` itself (8.20 kB → 9.46 kB raw / 2.17 kB → 2.49 kB
+  transfer, +1.26 kB / +0.32 kB) — every other initial chunk (`main`, the two large vendor chunks, every
+  small chunk) is byte-identical, confirming none of this wave's new TS files are reachable from
+  anywhere yet (correctly tree-shaken out entirely — zero consumers, as expected for a Wave 0 foundation
+  task).
+- **Every lazy chunk byte-identical** (`fly`, `command`, `devices`, `asset-detail`, `live`, `settings`,
+  `replay`, `org-settings`, `debug`, `onboarding`, `hls`, `leaflet-src`, and all unnamed shared chunks) —
+  zero impact on any existing route, exactly as "purely additive" should measure.
+- Same two pre-existing budget warnings carried forward (300 kB initial — now 51.74 kB over instead of
+  50.48 kB, purely from the `styles.css` growth above; 6 kB `onboarding.css` — unchanged, unrelated to
+  this task), neither newly introduced.
+
+### Files touched
+
+New: `shared/ui/icon-registry.ts`, `shared/ui/icon.ts`+`.spec.ts`, `shared/ui/icon-button.ts`+`.spec.ts`,
+`shared/ui/section-header.ts`+`.spec.ts`, `shared/ui/side-panel.ts`/`.html`/`.css`+`.spec.ts`,
+`shared/ui/nav-tile.ts`+`.spec.ts`, `shared/ui/tile-grid.ts`+`.spec.ts`.
+Modified: `src/styles.css` (append-only), `core/panel-state.ts`+`.spec.ts` (append-only — existing
+`readPersistedFlag`/`writePersistedFlag` and their `live.ts`/`fly.ts`/`command.ts`/`cv-control-panel.ts`
+call sites untouched), this file (`vision-web/MODULE.md`).
+
+## UI-REDESIGN-PLAN Wave 1 — navigation + hubs (docs/UI-REDESIGN-PLAN.md Wave 1)
+
+Rebuilds the app shell from the old "Fly · Command · Warehouse · Settings + More ▾" tab bar into a
+hub-and-spoke nav (that earlier description is now historical). Scope: `app.ts`/`.html`/`.css`,
+`app.routes.ts`, new `features/hubs/**`, `shared/ui/identity-chip.*`. Consumed Wave 0 primitives
+(`vision-icon`, `vision-nav-tile`, `vision-tile-grid`) unedited.
+
+- **Single source of truth: `features/hubs/nav-entries.ts`.** `NAV_MODES` (`NavMode[]`, one per
+  `operate`/`monitor`/`manage`) is the only place the route→mode map is written — the shell dropdowns
+  and all three hub pages read the same array. Each `NavEntry` carries `icon`/`name`/`description`/`to`/
+  `badge?` (`badge:'soon'` = a `ComingSoon` scaffold row). `navModeById(id)` grabs one mode's entries.
+- **Canonical labels (guardrailed by `nav-entries.spec.ts`):** pilot cockpit is always **"Cockpit"**
+  (`/fly`); CV console is always **"Vision"** (also `/fly` — the CV panel lives inline on the cockpit).
+  `"Fly"`/`"Detection"` may never reappear as labels.
+- **App shell:** each of Operate/Monitor/Manage renders as two affordances in one `.mode` wrapper — a
+  plain `<a routerLink>` to the hub (`/operate`/`/monitor`/`/manage`) plus a `<details>` dropdown of
+  that mode's entries (reuses the pre-existing `.tab-more` disclosure idiom, no new component).
+  `routerLinkActive="active"` sits on the outer `.mode` div with no `routerLink` of its own, so it
+  lights up when the hub route or any dropdown entry is current. Below `--bp-sm` (640px) a single
+  "Menu" `<details>` replaces the three (CSS-only, no resize listener). Status chips, offline banner,
+  notification bell, identity chip, brand link all preserved unchanged.
+- **Profile menu** (`identity-chip.*`): adds **Account settings** (`/settings`, ungated like My
+  activity) — order My activity → Account settings → Organization (role-gated `canManageOrg`) → Log out.
+- **Three thin hub pages** (`{operate,monitor,manage}-hub.ts`): a `page-head` over a `vision-tile-grid`
+  mapped straight from `navModeById(...)`. **`ComingSoon`** (`coming-soon.ts`): one placeholder for
+  every scaffold route, parametrized via route `data` (bound by the existing `withComponentInputBinding`);
+  Flight-plans/missions and Firmware render with no next-step link (no honestly-adjacent feature).
+- **Routes:** all new routes in `features/hubs/hubs.routes.ts` (`HUBS_ROUTES`), spread first into
+  `app.routes.ts`'s `authGuard` children. Key non-obvious decisions: **Live view → `/wall`** (Wall is
+  already the device picker, not a new page); **Vision → `/fly`** (live tuning is on the cockpit);
+  **`/monitor/replay` → `/replay` redirect** (no cross-fleet library endpoint yet); Assets/Devices/
+  Warehouse are three tiles all resolving to `/devices` (one page, three honest doors); **Pilots/roster
+  and Inventory reports → `ComingSoon`** despite live backends — their frontend pages are Wave 4's job.
+  `app.routes.spec.ts` asserts every entry, hub, and preserved route resolves.
+- **`angular.json` initial-bundle budget raised: `maximumWarning` 300→390 kB, `maximumError` 360→440 kB.**
+  This wave is the first real eager consumer of Wave 0's icon registry (the always-rendered shell nav
+  imports `<vision-icon>`; a runtime-lookup `Record<IconName,string>` can't be tree-shaken), pushing the
+  initial bundle from 351.74→377.88 kB raw — past the old 360 kB hard cap. Bumping the budget (rather
+  than splitting a frozen Wave 0 primitive out of scope) mirrors the CD-b CDK-virtual-scroll precedent.
+
+## UI-REDESIGN-PLAN Wave 2 — pilot cockpit: CSS grid + tool-rail + drawers (docs/UI-REDESIGN-PLAN.md Wave 2)
+
+Rebuilds the cockpit from ten `position:absolute` `.hud-*` regions into a CSS grid + tool-rail (that
+description is now historical). Scope: `features/fly/**` only. Consumed Wave 0 primitives unedited.
+
+- **CSS grid** (`.cockpit` = `display:grid`, frozen `grid-template-areas` per D-C): `banner` is a real
+  grid row — the old `.banner-active` class + four hardcoded `top:` shifts are gone; the grid reflows
+  on its own. Named areas `banner`/`telemetry`/`main`/`rail`/`ticker`/`controls`. Overlays that used to
+  anchor to the whole cockpit (`main-header`/`main-map`/`main-secondary`/`main-preflight`/
+  `main-diagnostics`) now absolute-position within `.grid-main`; only the Stop-stream confirm scrim
+  stays a whole-cockpit overlay. Below `--bp-md` (900px) the left column collapses to full-width rows;
+  map inset hides via `display:none`.
+- **Right tool-rail** (D-D): five frozen `vision-icon-button` ids/order/gates driving one `PanelState`
+  (`new PanelState('vision.fly.activePanel')`): `flight` (drone, `canShowCommands`) · `cv` (scan,
+  `!watchMode`) · `detections` (eye, `live`) · `layers` (layers, always) · `help` (help, always).
+  `ToolRailPanelId` types the ids (typo = compile error). `Esc` cascades via `fly-logic.ts#nextCollapseAction`
+  (new, unit-tested: drawer → stop-confirm → map). Map stays a separate `M`/`vision.fly.mapVisible`
+  toggle, never a rail id. The three old open-flag keys are retired to the one `activePanel` key,
+  default-closed on first load (D-H, no migration).
+- **Two panel migrations into `vision-side-panel`:** `cv-control-panel` (chrome deleted — `.cv-toggle`/
+  `.cv-drawer`/self-persisted `open` gone; now `open` input + `close` output, `:host{display:contents}`)
+  and `flight-command-panel` (the frosted `.command-cluster` pill → full-width vertical drawer body;
+  two-tier capability gating and all busy/confirm logic preserved). **Safety-critical:** the three
+  confirm dialogs are template **siblings** of `<vision-side-panel>`, never projected inside — otherwise
+  a stray `Esc` would bubble through the panel's `<aside>` and tear down both drawer and dialog, defeating
+  the "no Escape dismissal" rule. See `flight-command-panel.ts`'s `armConfirmOpen` doc comment.
+- **`fly-osd` regrouping:** the ~11 flat chips become four `.surface-hud` clusters — **Power** (battery,
+  armed) · **Nav** (alt/heading/speed/mode/GPS) · **Link** (telemetry age/RSSI + transport/latency) ·
+  **Env** (wind + weather go/no-go, behind a collapse chevron, default open). Presentation-only, same
+  pure severity functions.
+- **Deviation (flagged):** the `layers` drawer's content is an interpretation call — "map controls" has
+  nothing Fly-specific left to relocate (map buttons live in `<vision-live-map>`, out of scope), so it
+  holds the detection-boxes overlay-mode control (`overlay`/`burned`/`off`, previously keyboard-only via
+  `B`) as a pure discoverability add. Confirm or redirect if "map controls" was meant literally.
+
+## UI-REDESIGN-PLAN Wave 3 — asset detail: overview + drill-in (docs/UI-REDESIGN-PLAN.md Wave 3)
+
+Rebuilds the asset page from ~9 stacked `span-2` sections into an Overview landing + drill-ins (the
+"9 hand-written headers / single-column" language in earlier Wave-B/U-a2 entries is now historical).
+Scope: `features/asset-detail/**` only. Consumed Wave 0 primitives unedited.
+
+- **Overview** (`.grid12` under `@if (subView()==='overview')`): identity band + cockpit band (`.col-12`)
+  + Utilization/KPI tiles (`.col-8`) + Position/freshest-telemetry summary (`.col-4`, new `freshestFacts`
+  strip fed by the same `freshestSample()`) + Recent-flights chart (`.col-8`) + a drill-in launcher
+  (`.col-12`, six labeled buttons). All unchanged content, recomposed.
+- **Drill-ins (six):** Full telemetry, Events, Characteristics, Pilots are `vision-side-panel` drawers
+  sharing one un-persisted `PanelState` (one-open-at-a-time — a drill-in is a "right now" look);
+  Usage-history and Hardware are full-width sub-views via a `subView` signal (`'overview'|'usage'|
+  'hardware'`) since their wide tables don't fit a drawer. Both reset on every `assetId` change (the
+  component instance is reused across same-route navigations). Pilots' drawer **trigger** is now also
+  manager-gated (`canManagePilots`), not just its internal `PilotsCard` gate.
+- **Section headers:** all 9 `<header><h2>` → `vision-section-header` (except the cockpit band — see
+  deviation). Since the frozen contract has no icon input, icon-accented headers wrap
+  `<div class="icon-heading"><vision-icon/><vision-section-header/></div>`. `[actions]` buttons carry a
+  bare `actions` attribute (Wave 0 harness pattern).
+- **New pure logic:** `asset-detail-logic.ts#telemetryFactRows(sample)` — Position/Altitude/Heading/
+  Battery formatting, extracted as a genuine second-consumer dedup (overview summary + per-device
+  drawer). Sample-age stays a per-caller template expression (different clocks). `pilots-card` moved
+  into a drawer.
+- **Four small deviations (each reasoned):** Events becomes a 6th drawer (not on the plan's overview or
+  heavy-area lists, but list-shaped); the cockpit band gets no `vision-section-header` (it's an action
+  strip, never had an `<h2>` — a leading `vision-icon` is the accent); Position is one card (prose over
+  the ASCII wireframe's two boxes); the drawer is titled **"Characteristics"** (the section's own name)
+  not the wireframe's "Attributes".
+
+## Status — UI redesign
+
+docs/UI-REDESIGN-PLAN.md Waves 0–3 are **done** (foundation → nav/hubs → cockpit grid → asset overview);
+Wave 4 additions (real Pilots-roster and fleet-wide Reports pages, currently `ComingSoon` scaffolds)
+are pending. The merged tree passes `tsc` (`tsconfig.app.json` + `.spec.json`) and `ng build
+--configuration production` green; initial-bundle budget now 390/440 kB (see Wave 1). Full suite last
+recorded 1247/1247, 70 spec files (per Wave 1's run, the latest to include all three waves' new specs).
+
+## Fly cockpit relayout — full-screen hero video + bottom OSD strip + a neutral failsafe banner (direct user request, not tied to a docs/*-PLAN.md item)
+
+Scope: `features/fly/**` only — `failsafe-banner.ts`, `fly-osd.ts`, `fly.css`, `fly.html` touched; no
+other feature, `shared/`, or route touched. Two independent asks from the same request.
+
+1. **Failsafe banner, retuned from a solid `--live` fill to a muted tinted bar.** `.banner-failsafe`
+   used to fill solid with `--live` (`#ff3d78`, the saturated rose/magenta this app otherwise reserves
+   for "a camera is recording/pushing right now" — Command's own `fs-chip`, the fleet-map marker/
+   `.mode-chip` failsafe treatments, all **unchanged, still `--live`, out of this task's scope**) —
+   legible, but louder than the all-caps mono text needed. Both banner tiers now reuse this app's own
+   established tinted-chip formula instead (`styles.css`'s `.chip.danger`/`.chip.warn` — a `*-soft`
+   background + the saturated token as text/left-accent, never a solid fill, no new hue invented):
+   `banner-failsafe` → `--danger-soft` background / `#ff9a9a` text / `--danger` left accent (4px);
+   `banner-rth`/`banner-landing` → `--warn-soft` / `--warn` / `--warn` (previously a solid `--warn`
+   fill with near-black text — softened too, for a consistent two-tier treatment). A small `alert`
+   icon now sits beside the text so "this needs attention" doesn't rely on color alone (the dataviz
+   convention this app already follows elsewhere: status is never color-alone). The severity
+   *hierarchy* is preserved — failsafe (a genuine emergency) stays one tier above rth/landing
+   (advisory) by staying on the `--danger` family while those two stay on `--warn` — only the loudness
+   changed. **Deliberate, scoped exception to the F-d changelog's own "`--live` red is used *only* for
+   a genuine failsafe" statement further up this file**: that statement stays true for every *other*
+   failsafe indicator in the app (Command's chip, the map marker/popup, the mode chip — none of them
+   touched here); Fly's own banner is now the one place that no longer follows it, by explicit,
+   scoped user request.
+2. **Cockpit grid: video becomes the full-width centered hero, `<vision-fly-osd>` becomes a bottom
+   row.** `fly.css`'s `grid-template-areas` dropped the old `minmax(0,20rem)` left column
+   (`telemetry`/`ticker` shared it, `main` spanned two rows beside it) for:
+   ```
+   "banner    banner"
+   "main      rail"
+   "telemetry rail"
+   "ticker    rail"
+   "controls  rail"
+   grid-template-columns: 1fr auto;
+   ```
+   `main` is now a single `1fr` row spanning the *entire* cockpit width minus the tool-rail column —
+   the video genuinely fills and centers (`object-fit: contain`'s default `object-position: 50% 50%`
+   already centers the picture; letterboxing when the stream's own aspect ratio doesn't match the
+   viewport is expected/symmetric, not an off-center bug) rather than sharing width with a stacked
+   instrument column. `<vision-fly-osd>`'s four Power/Nav/Link/Env clusters (docs/UI-REDESIGN-PLAN.md
+   Wave 2) now lay out left-to-right in a wrapping, centered flex row instead of top-to-bottom,
+   reading like an FPV/ground-station OSD strip; a new **Position** chip (`lat, lon`, reusing
+   `fly-logic.ts#positionLabel` rather than re-deriving the format) joins the Nav cluster, closing the
+   one gap in the requested "Signal / Position / Battery" headline trio (RSSI and Battery already
+   existed, in the Link and Power clusters respectively). The events ticker moved from sharing that
+   left column to its own full-width row directly below the OSD strip (`max-width: 34rem`, centered,
+   so its short-lived rows don't stretch edge-to-edge across the now much wider bottom area);
+   Start/Stop/Replay's own `controls` row sits last, directly below the ticker. Telemetry, ticker, and
+   controls are three real grid rows, not overlays — no z-index/overlap engineering needed, each gets
+   its own track, mirroring the same "a real grid row reflows on its own" reasoning Wave 2's own
+   `banner` row already established. The previous `--bp-md` (900px) media query that reshuffled the
+   left column into full-width rows below that breakpoint is deleted outright — that reshuffle is
+   simply the default at every width now, since there's no side column left to collapse; the map
+   inset still hides below 900px via its own unrelated `.main-map` query, and the tool-rail still
+   stays put beside the video at every width (`src/styles.css`'s own `--bp-lg` token note), both
+   unchanged.
+
+**Degrade / role-gate / dev-parity**: presentation-only — no new HTTP call, no new store, no role
+gate touched (`canShowCommands()`/`watchMode()`/`hasTelemetryDevice()` etc. all unchanged verbatim).
+The new Position chip degrades exactly like every other OSD chip already does: omitted (never a
+fabricated `—, —`) until both `latitude`/`longitude` exist on the latest sample. Dev-parity
+(`vision.auth.enabled=false`) unaffected — nothing touched here reads `MeResponse.topRole` or any
+auth state.
+
+**Tests**: `npx vitest run src/app/features/fly` — 81/81 pass (all 3 spec files reachable there:
+`fly-logic.spec.ts`, `flight-command-panel-logic.spec.ts`, `cv-control-panel-logic.spec.ts`). No new
+pure logic needed a new spec case — the Position chip reuses `fly-logic.ts#positionLabel` (already
+covered by that file's own existing cases) rather than re-deriving the format, and the banner/grid
+changes are CSS + template only, consistent with this page's own standing "no component-level spec
+for `FlyPage`/`FlyOsd`" precedent (recorded in C-b's own Status entry above). `npx tsc --noEmit`
+clean on both `tsconfig.app.json`/`tsconfig.spec.json` — grep-verified zero errors anywhere under
+`features/fly/**` on either config.
+
+**A concurrent, unrelated break blocked the full-suite/build commands mid-task, then resolved
+itself** — worth recording since it's exactly this file's own established pattern (see QF-1's own
+Status entry above: "concurrent-edit errors elsewhere in `features/devices/protocols.ts` are another
+agent's in-progress work, unrelated"). Partway through this task, `features/devices/devices.ts`/
+`.html` (a different concurrent agent's uncommitted, in-progress refactor — `git status` showed a
+large set of other in-flight, uncommitted changes across this shared tree, several other features and
+multiple backend modules, none of it touched here) briefly had 21 TS errors (missing exports from
+`devices-page-logic.ts`, template/DI errors) that blocked `npm test`/`ng build` for the whole app
+before any spec/bundle step could run — `npx tsc --noEmit` and `npx vitest run src/app/features/fly`
+stayed clean throughout (grep-verified zero errors under `features/fly/**` in every failing run), so
+this task's own files were never implicated. That work landed (still uncommitted, but internally
+consistent) before this task finished; final results below are the real, fully green run.
+
+**Final tests**: `npm test` (`ng test --watch=false`, the full suite) — **1262/1262 pass, 72 spec
+files**. `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+**Final build**: `ng build --configuration production` — green. **Bundle delta**, isolated by
+temporarily swapping just this task's 4 changed files back to their pre-task content, rebuilding, then
+restoring them (no `git stash` — a manual content swap using this task's own captured "before" text,
+safe on a shared tree since it never touched git state or any other file):
+- **`fly` lazy chunk: 67.08 kB raw / 15.59 kB transfer → 67.49 kB raw / 15.60 kB transfer (+0.41 kB
+  raw / +0.01 kB transfer)** — the Position chip's own computed signal + one new template branch,
+  offset by deleting the now-redundant `--bp-md` media query block.
+- **Initial bundle: unchanged (362.25 kB raw / 103.54–103.55 kB transfer both runs, the 0.01 kB
+  transfer wobble is hashing/estimation noise, not a real change)** — everything touched here is
+  reachable only through the lazy `fly` chunk, never the eager initial one.
+- **`anyComponentStyle` budget (6.00 kB warning / 10.00 kB error per component)**: `fly.css` was
+  *already* over the 6 kB warning threshold before this task (6.30 kB) and stayed a warning, not an
+  error, after it — at **6.13 kB, actually 170 bytes smaller than before** (deleting the `--bp-md`
+  override outweighed the new grid/telemetry-strip comments and rules after production minification
+  strips CSS comments). Not a regression introduced here; not hidden either — `onboarding.css`'s own
+  unrelated, pre-existing 6.27 kB warning is the same already-tolerated posture this codebase's own
+  Status entries have flagged before (see C-b's own bundle-size writeup above for the identical
+  "flagged, not hidden" convention).
+
+## Assets/Devices/Warehouse inventory restructure — Assets and Devices become separate pages, Warehouse becomes a two-tile launcher (direct task request, not tied to a docs/*-PLAN.md item)
+
+**This task is what the immediately-preceding "Fly cockpit relayout" Status entry above observed as
+a broken, mid-refactor `features/devices/devices.ts`/`.html`** (missing `devices-page-logic.ts`
+exports, a stray `UndoToastServiceToken` typo) — that was this task's own in-progress work, not a
+second concurrent break. It's since landed: full suite green, `tsc` clean on both configs, production
+build green (see Tests/Build below).
+
+Scope: `features/devices/**` (trimmed to device-only), two new features
+(`features/assets/**`, `features/warehouse/**`), `features/hubs/nav-entries.ts` (+ two stale
+`nearestTo`/description strings in the adjacent `features/hubs/hubs.routes.ts`, corrected for the
+same reason), `app.routes.ts`, `app.routes.spec.ts`. `features/fly/**` and every other feature
+untouched, per the task's own scope fence.
+
+### The split
+
+The old combined `DevicesPage` (`/devices`, alias `/warehouse`) served two different jobs from one
+page — an asset-first list (CD-b) stacked above a collapsed "Advanced" raw-device table (CW-b) — per
+the user's own framing: "Assets and Devices as SEPARATE pages (each with search + filter + grid/list
+view), and Warehouse as a two-way launcher."
+
+1. **`/assets`** (new, `features/assets/**`) — the asset-first grid: search by name; filter by
+   category (`<select>`, `deriveCategoryOptions`), lifecycle status (Active/Deactivated — deliberately
+   never matches an archived row; that's the separate "Show archived" toggle), and streaming
+   (Streaming/Offline); one `.asset-card` per asset, `repeat(auto-fill, minmax(16rem,1fr))`. Every
+   asset action (Watch/Open/Archive+Undo/Restore, the simulated-source empty-state quick-add) moved
+   here **byte-for-byte** from the old combined page's own Assets section — see this file's own
+   Assets section above for the full writeup, including the one deliberate, documented trade-off
+   (CDK virtual scroll dropped for the card grid — a plain `@for` now, `O(total filtered rows)`, not
+   `O(visible)`; see that section for why this narrows rather than removes the list's pre-existing
+   `O(total)`-fetch ceiling).
+2. **`/devices`** (trimmed, `features/devices/**`) — the raw device table/grid only, no longer
+   collapsed behind "Advanced" (nothing left above it to demote it beneath). **Added**: a search box
+   (`searchWarehouseRowsByQuery` — name/protocol/URI/owning-asset-name) and a list/grid view toggle
+   (`.segmented`, `vision-icon` `list`/`grid`) — list is the pre-existing table, grid is a new
+   `.device-card-grid`, both reading the exact same `warehouseRows()` and carrying the identical
+   kebab menu/inline rename-assign forms. Every existing device capability (lifecycle kebab, archived
+   toggle, Simulated chip/Stop simulation, Start/Stop/Watch stream, Promote-to-asset-from-orphan,
+   "+ Add source") is unchanged.
+3. **`/warehouse`** (new identity, `features/warehouse/**`) — used to be a plain alias onto the
+   combined page; now a genuine two-tile launcher (`vision-tile-grid` + `vision-nav-tile`, icons
+   `pilot`/`drone` per the task's own suggestion): **People** → `/manage/roster` (the existing
+   `ComingSoon` scaffold — no dedicated roster page exists yet, so this is the honest nearest
+   destination, never a dead link, and deliberately the same target as the Manage hub's own
+   "Pilots / roster" tile) and **Assets** → `/assets`.
+
+### Routing — no dead links, old deep links preserved
+
+`/devices` keeps resolving (now to the trimmed device-only page — every existing
+`routerLink="/devices"`/`router.navigate(['/devices', …])` call site across the app, e.g. Fly's own
+`?addSource=1` link, `asset-detail`'s "Back to Devices", `live`'s "All devices", stays reachable
+verbatim, just to a page that no longer shows assets). `/warehouse` keeps resolving too, now to the
+launcher instead of the alias. `/assets` (new) is a sibling of `features/asset-detail/**`'s
+`assets/:assetId` — distinct path-segment count, Angular's router treats them as non-conflicting; no
+`asset-detail` file was touched. The `?category=` deep-link filter (docs/UX-QUICKWINS-PLAN.md
+QF-2/QF-3, previously `/devices?category=`, never actually linked from anywhere with a real value —
+grep-verified) moved to `/assets?category=`, its logical new home.
+
+`features/hubs/nav-entries.ts`'s Manage-mode tiles, old → new target (label unchanged unless noted):
+`Assets` `/devices` → **`/assets`**; `Devices` `/devices` → `/devices` (unchanged — now resolves to
+the trimmed page); `Warehouse` `/devices`-via-`/warehouse`-alias → **`/warehouse`** (now the
+launcher, description reworded from "Every ingest source…" to "The inventory landing spot — jump to
+People or Assets"). The three tiles no longer share one destination (the file's own doc comment,
+previously explaining why they did, was rewritten to describe the new three-way split instead).
+Two `ComingSoon` scaffold entries in the adjacent `features/hubs/hubs.routes.ts`
+(`manage/categories`, `manage/roster`) had their own `nearestTo`/description strings pointing at
+`/devices`/"Warehouse" for capabilities ("browsing/filtering assets by category", "pilot assignment
+from each asset's own Pilots card") that live on `/assets` now — corrected to `/assets`/"Assets" so
+those scaffolds' "nearest real capability" links stay honest, not just non-dead.
+
+`app.routes.ts` gained two `import`/spread lines (`ASSETS_ROUTES`, `WAREHOUSE_ROUTES`, both inside
+the existing `authGuard`-wrapped children group — same as every other feature, no new role gate).
+`app.routes.spec.ts` gained two assertions: `/assets` resolves as a sibling of `/assets/probe-1`, and
+`/warehouse`/`/devices` both still resolve (now to the launcher/trimmed pages respectively).
+
+### Degrade / role-gate / dev-parity
+
+No role gate existed on the old combined page and none was added — `DevicesPage`/`AssetsPage`/
+`WarehousePage` are reachable by any authenticated user (PILOT/MANAGER/ADMIN alike), same as before;
+`vision.auth.enabled=false`'s dev admin is unaffected (unbounded, as always — nothing here reads
+`MeResponse.topRole`). Every failure path carried over unchanged: asset/device list fetches
+silent-degrade (enrichment, not user-initiated — a failed `getAsset` leaves the previous state rather
+than fabricating a row); lifecycle mutations funnel through `FleetStore.run()` or a bespoke
+try/catch, always exactly one toast, never a broken page. New honest empty states: "No assets match"/
+"No devices match" (search or filter narrowed to zero, distinct from "No assets/devices yet" —
+`hasAnyAssets`/`hasAnyDevices` computeds tell the two apart) with a "Clear filters"/"Clear search"
+button, never a fabricated row.
+
+### Deviation from the task brief, with reason
+
+The task's own "Preserve every existing capability… nothing removed" is honored for every *user*
+capability; the one internal implementation detail not carried forward 1:1 is the CDK virtual-scroll
+list on Assets (see "The split," item 1, above) — a deliberate, documented trade-off (a responsive
+card *grid* needs autosize/viewport-aware virtualization to match a fixed-row-height *list*'s
+`itemSize`-based one; out of this cycle's own search/filter/grid-toggle scope), not an oversight.
+
+### Tests
+
+New: `features/assets/assets-logic.spec.ts` (34 cases — `buildAssetListRows` and its filters, carried
+over from `devices-page-logic.spec.ts` plus new cases for `filterAssetListRowsByStatus`/
+`filterAssetListRowsByStreaming`/`searchAssetListRowsByName`), `features/warehouse/warehouse.spec.ts`
+(mirrors `features/hubs/hub-pages.spec.ts`'s "every tile is a real, non-dead `routerLink`" check).
+Extended: `features/devices/devices-page-logic.spec.ts` (trimmed of the moved asset-row tests, gained
+`searchWarehouseRowsByQuery` cases — name/protocol/URI/owner substring matches, blank-query passthrough,
+zero-match narrowing), `app.routes.spec.ts` (two new `it` blocks for `/assets` and the
+`/warehouse`-now-launcher/`/devices`-now-trimmed split). No component-level spec for `DevicesPage`/
+`AssetsPage` — this codebase's own standing precedent (pure-logic vitest over component specs, see
+this file's own Conventions section); `WarehousePage` gets one anyway, mirroring the existing
+`hub-pages.spec.ts` precedent for exactly this "thin tile-grid page" shape.
+
+**1262/1262 passing across 72 spec files** (`npm run test:ci` = `ng test --watch=false`). `npx tsc
+--noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, reported carefully — this shared
+tree had other agents' own uncommitted, unrelated changes in flight throughout this task (see the
+"Fly cockpit relayout" Status entry directly above, and this repo's own established precedent for
+this exact situation, e.g. QF-1's Status entry)**: a same-tree before/after diff would conflate this
+task's own change with theirs, so the **lazy chunks this task actually owns** are the honest
+comparison — `git worktree add --detach` at the last commit before any of this task's edits
+(`dc50198`) built to `devices` **53.89 kB raw / 13.32 kB transfer** (the old combined page, no
+`assets`/`warehouse` chunks existed). This task's own tree builds `devices` **28.55 kB / 6.15 kB** +
+`assets` **14.12 kB / 4.22 kB** (new) + `warehouse` **1.53 kB / 0.80 kB** (new) = **44.20 kB / 11.17
+kB combined — a net decrease of 9.69 kB raw / 2.15 kB transfer** despite adding two new routes/pages,
+mostly explained by dropping the Assets list's own CDK virtual-scroll usage (`@angular/cdk/scrolling`
+no longer imported by either page — see "The split," item 1). The **initial (eager) bundle** grew
+350.01 kB → 362.25 kB raw / 99.50 kB → 103.54 kB transfer in the same before/after builds, but this
+number is **not cleanly attributable to this task alone** — `nav-entries.ts` (this task's one eager
+edit) is a few bytes of string changes, while the same-tree "after" build also carries every other
+concurrent agent's own uncommitted eager-loaded edits (`app.ts`/`.html`/`.css`, `vision-api.ts`,
+`models.ts`, `fleet-store.ts`, `panel-state.ts`, `settings-store.ts`, and more — see `git status`);
+reported here for completeness, not claimed as this task's own cost. Still comfortably explained: this
+task's own lazy-chunk accounting above is negative.

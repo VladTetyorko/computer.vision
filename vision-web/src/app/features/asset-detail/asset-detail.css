@@ -74,33 +74,47 @@
     margin-bottom: 0.5rem;
 }
 
-/* ---- Detail grid ---------------------------------------------------------------------------- */
+/* ---- Overview grid (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) — the frozen `.grid12`/`.col-N`
+   utilities from `src/styles.css` replace this page's own `.detail-grid`/`.span-2`/900px-breakpoint
+   copy outright: every section below is placed with `.col-8`/`.col-4`/`.col-12` instead of a
+   uniform `span-2`, and the breakpoint collapse (single column below 900px, the `--bp-md` token —
+   see `src/styles.css`'s own doc comment for why `@media` hardcodes the px value) now comes free
+   from the shared utility rather than a local copy of the same rule. `.card` still needs its own
+   `margin-bottom` cancelled inside a grid (the gap already spaces siblings) — the one override this
+   page still owns locally, mirroring the old `.detail-grid .card` rule exactly. ------------------ */
 
-.detail-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-    align-items: start;
-}
-
-.detail-grid .card {
+.overview-grid .card {
     margin-bottom: 0;
 }
 
-.span-2 {
-    grid-column: 1 / -1;
+/* A section header preceded by a small accent icon (docs/UI-REDESIGN-PLAN.md Wave 3: "use
+   <vision-icon> to accent section titles where it aids scanning") — `vision-section-header` itself
+   has no icon input (Wave 0's frozen contract), so the icon sits as a plain sibling in a flex row;
+   `vision-section-header`'s own host renders `display:block` (its own component style), so it just
+   needs `flex:1` here to keep consuming the row's remaining width exactly as it did as a block child. */
+.icon-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
 }
 
-@media (max-width: 900px) {
-    .detail-grid {
-        grid-template-columns: 1fr;
-    }
+.icon-heading vision-icon {
+    flex: none;
+    margin-top: 0.2rem;
+    color: var(--text-muted);
 }
 
-/* ---- Cockpit link band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the old
+.icon-heading vision-section-header {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ---- Cockpit band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the old
    Video/Stream cards; a compact status strip, never a player. Button-alignment audit (Wave B item
    6): primary CTA first, secondary second, both default-sized (no mixed `small`/default in this
-   row), consistent gap/vertical-centering via the shared global `.row`. ------------------------- */
+   row), consistent gap/vertical-centering via the shared global `.row`. No `vision-section-header`
+   here on purpose (docs/UI-REDESIGN-PLAN.md Wave 3) — it's an action strip, not a titled section;
+   the leading `<vision-icon name="cockpit">` beside the status chip is the scanning accent instead. */
 
 .cockpit-band {
     display: flex;
@@ -121,6 +135,36 @@
 
 .cockpit-actions {
     flex-wrap: wrap;
+}
+
+/* ---- Drill-in launcher (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) — the overview's one exhaustive
+   index into every heavier area; individual overview cards (Position, Recent flights) also carry
+   their own single most-relevant shortcut in their own `[actions]` slot, so this row is the
+   complete menu, not the only way in. ------------------------------------------------------------ */
+
+.drill-in-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
+/* ---- Full-width drill-in sub-views (Usage history / Hardware & devices) — a plain `.card` since
+   both are wide tables that wouldn't fit the 24rem `vision-side-panel` drawer width. ------------- */
+
+.subview {
+    margin-top: var(--space-4);
+}
+
+.back-btn {
+    margin-bottom: var(--space-3);
+}
+
+/* ---- Freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3) — the Position card's compact
+   facts strip under the map, fed by the same `telemetryFactRows` the "Full telemetry" drawer's
+   per-device panels use. -------------------------------------------------------------------------- */
+
+.freshest-facts {
+    margin-top: var(--space-3);
 }
 
 /* ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — `dataviz`'s stat-tile

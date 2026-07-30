@@ -1,47 +1,53 @@
 @if (canCommand()) {
-  @if (capabilities(); as caps) {
-    <div class="command-cluster">
-      @if (caps.modeSelectSupported && caps.selectableModes.length > 0) {
-        <label class="mode-picker" title="Set this aircraft's flight mode">
-          <span class="mode-picker-label">Mode</span>
-          <select class="mode-select" aria-label="Flight mode" (change)="onModeChange($any($event.target).value)">
-            @for (mode of caps.selectableModes; track mode) {
-              <option [value]="mode" [selected]="mode === selectedMode()">{{ mode }}</option>
-            }
-          </select>
-        </label>
-        <button
-          type="button"
-          class="btn secondary small"
-          (click)="requestSetMode()"
-          [disabled]="anyBusy()"
-          title="Set the selected flight mode"
-        >
-          {{ modeBusy() ? 'Setting…' : 'Set' }}
-        </button>
-      }
+  @if (open() && capabilities(); as caps) {
+    <vision-side-panel title="Flight" icon="drone" subtitle="Mode · arm · disarm" (close)="close.emit()">
+      <div class="command-cluster">
+        @if (caps.modeSelectSupported && caps.selectableModes.length > 0) {
+          <div class="command-row">
+            <label class="mode-picker" title="Set this aircraft's flight mode">
+              <span class="label">Mode</span>
+              <select class="mode-select" aria-label="Flight mode" (change)="onModeChange($any($event.target).value)">
+                @for (mode of caps.selectableModes; track mode) {
+                  <option [value]="mode" [selected]="mode === selectedMode()">{{ mode }}</option>
+                }
+              </select>
+            </label>
+            <button
+              type="button"
+              class="btn secondary"
+              (click)="requestSetMode()"
+              [disabled]="anyBusy()"
+              title="Set the selected flight mode"
+            >
+              {{ modeBusy() ? 'Setting…' : 'Set' }}
+            </button>
+          </div>
+        }
 
-      @if (caps.armSupported) {
-        <button
-          type="button"
-          class="btn danger small arm-btn"
-          (click)="requestArm()"
-          [disabled]="anyBusy()"
-          title="Arm — the propellers will spin"
-        >
-          Arm
-        </button>
-        <button
-          type="button"
-          class="btn danger small"
-          (click)="requestDisarm()"
-          [disabled]="anyBusy()"
-          title="Disarm"
-        >
-          Disarm
-        </button>
-      }
-    </div>
+        @if (caps.armSupported) {
+          <div class="command-row command-row-danger">
+            <button
+              type="button"
+              class="btn danger arm-btn"
+              (click)="requestArm()"
+              [disabled]="anyBusy()"
+              title="Arm — the propellers will spin"
+            >
+              Arm
+            </button>
+            <button
+              type="button"
+              class="btn danger"
+              (click)="requestDisarm()"
+              [disabled]="anyBusy()"
+              title="Disarm"
+            >
+              Disarm
+            </button>
+          </div>
+        }
+      </div>
+    </vision-side-panel>
   }
 
   @if (modeConfirmOpen()) {

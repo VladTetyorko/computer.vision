@@ -6,8 +6,11 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../../core/poll-scheduler';
+import { PanelState } from '../../core/panel-state';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { EventsStore } from '../../core/events/events-store';
+import { AuthStore } from '../../core/auth/auth-store';
+import { canManageOrg } from '../../core/org/org-logic';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { ageSeconds, isStale, trackingIdChanged } from '../../core/telemetry/telemetry-logic';
@@ -32,6 +35,9 @@ import {
   type KpiTile,
 } from '../../core/fleet/asset-stats-logic';
 import { LiveMap } from '../../shared/map/live-map/live-map';
+import { SectionHeader } from '../../shared/ui/section-header';
+import { SidePanel } from '../../shared/ui/side-panel';
+import { Icon } from '../../shared/ui/icon';
 import { PilotsCard } from './pilots-card';
 import {
   attributeRowsToRecord,
@@ -39,7 +45,9 @@ import {
   freshestSample,
   groupTelemetryByDevice,
   telemetryDevices,
+  telemetryFactRows,
   type AttributeRow,
+  type TelemetryFactRow,
 } from './asset-detail-logic';
 import type {
   AssetDetails,
@@ -91,10 +99,26 @@ const STREAM_EVENTS_LIMIT = 50;
  * The KPI row + chart (Wave B items 3–4) read `AssetStats` (`VisionApi.assetStats`) and
  * `AssetDetails#recentUsages` through `core/fleet/asset-stats-logic.ts` — see `loadStats`'s own doc
  * comment for how that fetch degrades independently of the rest of the page.
+ *
+ * **Overview + drill-in (docs/UI-REDESIGN-PLAN.md Wave 3, D-F)**: the page used to stack all 8
+ * sections as `span-2` — effectively one long column. It's now a compact `.grid12` overview (the
+ * cockpit band, KPI tiles, recent-flights chart, and a position map + freshest-telemetry summary —
+ * see `freshestFacts` below) plus six drill-ins for everything heavier: `panels` (`PanelState`, one
+ * open at a time) drives three `vision-side-panel` drawers — Full telemetry, Events, Characteristics
+ * (registration + raw attributes, both still behind their own "Edit…" disclosure — unchanged) — plus
+ * a fourth, Pilots, gated by `canManagePilots` so a non-manager never sees the trigger (mirrors
+ * `PilotsCard`'s own internal gate — belt and suspenders, not a second source of truth: the card
+ * itself still renders nothing for a non-manager even if this gate were ever bypassed). `subView`
+ * (a plain signal, not `PanelState` — these two need full page width, not a 24rem drawer) swaps the
+ * whole overview grid for a focused Usage-history or Hardware-&-devices section instead. Both
+ * `panels`/`subView` reset to closed/`'overview'` on every `assetId` change (see the constructor's
+ * first `effect()`) — a fresh navigation to a *different* asset shouldn't stay parked in the
+ * previous one's drill-in, since Angular reuses this component instance across same-route
+ * navigations rather than recreating it.
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, LiveMap, PilotsCard],
+  imports: [RouterLink, LiveMap, PilotsCard, SectionHeader, SidePanel, Icon],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -108,11 +132,26 @@ export class AssetDetailPage {
   private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
+  private readonly auth = inject(AuthStore);
 
   protected readonly fleet = inject(FleetStore);
   protected readonly settings = inject(SettingsStore);
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly events = inject(EventsStore);
+
+  // --- Overview + drill-in (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) -----------------------------
+  // `panels` drives the three/four drawers (Full telemetry/Events/Characteristics/Pilots — plain
+  // string ids, not an enum, matching `PanelState`'s own frozen contract); `subView` swaps the
+  // whole overview grid for one of the two wide-table drill-ins that don't fit a 24rem drawer.
+  // Neither is persisted (no `storageKey`) — a drill-in is a "right now" look, not a per-user
+  // preference worth remembering across sessions the way `SettingsStore` fields are.
+
+  protected readonly panels = new PanelState();
+  protected readonly subView = signal<'overview' | 'usage' | 'hardware'>('overview');
+
+  /** Gates the Pilots drill-in trigger itself — a non-manager should never see the affordance, not
+   *  just find an empty drawer behind it (`PilotsCard`'s own internal gate stays as a second layer). */
+  protected readonly canManagePilots = computed(() => canManageOrg(this.auth.user()?.topRole));
 
   protected readonly asset = signal<AssetDetails | undefined>(undefined);
   protected readonly loading = signal(true);
@@ -155,6 +194,19 @@ export class AssetDetailPage {
     const device = this.assetTelemetryDevices().find((d) => d.id === freshest.deviceId);
     return device?.name ?? freshest.deviceId;
   });
+
+  /**
+   * The overview's compact "position map + freshest-telemetry summary" card (docs/UI-REDESIGN-PLAN.md
+   * Wave 3, D-F) — the *single* freshest sample across every source device, not the full per-device
+   * dump the old landing page showed inline (that per-device breakdown now lives in the "Full
+   * telemetry" drawer, fed by the identical `telemetryFactRows` on `latestSampleFor`/`deviceFacts`
+   * below). Reuses `freshestSample` (already computed above for the map caption) rather than
+   * re-deriving it a second time.
+   */
+  protected readonly freshestOverall = computed(() => freshestSample(this.telemetryByDevice()));
+  protected readonly freshestFacts = computed<readonly TelemetryFactRow[]>(() => telemetryFactRows(this.freshestOverall()));
+  protected readonly freshestAgeSeconds = computed(() => ageSeconds(this.freshestOverall()?.at, this.nowSignal()));
+  protected readonly freshestStale = computed(() => isStale(this.freshestAgeSeconds()));
 
   protected readonly lifecycle = computed(() => this.asset()?.lifecycle ?? 'ACTIVE');
   protected readonly archived = computed(() => this.lifecycle() === 'DELETED');
@@ -332,6 +384,11 @@ export class AssetDetailPage {
     effect(() => {
       const id = this.assetId();
       this.imageLoadFailed.set(false); // a fresh navigation deserves a fresh attempt at the photo
+      // A fresh navigation to a *different* asset shouldn't stay parked in the previous one's
+      // drill-in — Angular reuses this component instance across same-route navigations rather
+      // than recreating it, so nothing else resets this state automatically.
+      this.subView.set('overview');
+      this.panels.close();
       void this.load(id);
       void this.loadStats(id);
     });
@@ -460,12 +517,28 @@ export class AssetDetailPage {
     void this.router.navigate(['/fly']);
   }
 
+  // --- Drill-in navigation (docs/UI-REDESIGN-PLAN.md Wave 3) ---------------------------------
+
+  /** The two wide-table drill-ins — swaps the whole overview grid for a focused section. */
+  protected openDrillIn(view: 'usage' | 'hardware'): void {
+    this.subView.set(view);
+  }
+
+  protected closeDrillIn(): void {
+    this.subView.set('overview');
+  }
+
   // --- Per-device telemetry panels (called from the template — signals tracked on read, same
   //     idiom as `features/devices/devices.ts#simulatedInfo`) -----------------------------------
 
   protected latestSampleFor(deviceId: string): TelemetrySample | undefined {
     const samples = this.telemetryByDevice().get(deviceId);
     return samples && samples.length > 0 ? samples[samples.length - 1] : undefined;
+  }
+
+  /** The "Full telemetry" drawer's per-device facts rows — same shape as the overview's `freshestFacts`. */
+  protected deviceFacts(deviceId: string): readonly TelemetryFactRow[] {
+    return telemetryFactRows(this.latestSampleFor(deviceId));
   }
 
   protected deviceSampleAgeSeconds(deviceId: string): number | undefined {

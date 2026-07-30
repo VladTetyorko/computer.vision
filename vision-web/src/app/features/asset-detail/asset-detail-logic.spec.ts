@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TelemetrySample } from '../../core/api/models';
-import { attributeRowsToRecord, attributesToRows, freshestSample, groupTelemetryByDevice } from './asset-detail-logic';
+import {
+  attributeRowsToRecord,
+  attributesToRows,
+  freshestSample,
+  groupTelemetryByDevice,
+  telemetryFactRows,
+} from './asset-detail-logic';
 
 function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
   return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
@@ -68,5 +74,38 @@ describe('attributeRowsToRecord', () => {
   it('round-trips with attributesToRows for a well-formed map', () => {
     const attributes = { color: 'red', registrationNumber: 'N12345' };
     expect(attributeRowsToRecord(attributesToRows(attributes))).toEqual(attributes);
+  });
+});
+
+describe('telemetryFactRows', () => {
+  it('formats a fully-populated sample, marking Position as mono', () => {
+    const rows = telemetryFactRows(
+      sample({ latitude: 40.7128, longitude: -74.006, altitudeMeters: 121.4, headingDegrees: 87, batteryPercent: 62 }),
+    );
+    expect(rows).toEqual([
+      { label: 'Position', value: '40.71280, -74.00600', mono: true },
+      { label: 'Altitude', value: '121 m' },
+      { label: 'Heading', value: '87°' },
+      { label: 'Battery', value: '62%' },
+    ]);
+  });
+
+  it('degrades every field to "—" for an undefined sample — never a fabricated reading', () => {
+    expect(telemetryFactRows(undefined)).toEqual([
+      { label: 'Position', value: '—', mono: true },
+      { label: 'Altitude', value: '—' },
+      { label: 'Heading', value: '—' },
+      { label: 'Battery', value: '—' },
+    ]);
+  });
+
+  it('degrades only the missing fields on a partial sample', () => {
+    const rows = telemetryFactRows(sample({ altitudeMeters: 50 }));
+    expect(rows).toEqual([
+      { label: 'Position', value: '—', mono: true },
+      { label: 'Altitude', value: '50 m' },
+      { label: 'Heading', value: '—' },
+      { label: 'Battery', value: '—' },
+    ]);
   });
 });

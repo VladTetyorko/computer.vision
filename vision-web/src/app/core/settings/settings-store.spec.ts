@@ -17,6 +17,8 @@ describe('SettingsStore', () => {
       confidenceThreshold: 0.4,
       inferenceFps: 5,
       model: DEFAULT_DETECTION_MODEL,
+      labelFilter: [],
+      detectionEnabled: true,
     });
     expect(store.isCustom()).toBe(false);
   });
@@ -36,6 +38,8 @@ describe('SettingsStore', () => {
       confidenceThreshold: 0.8,
       inferenceFps: 3,
       model: DEFAULT_DETECTION_MODEL,
+      labelFilter: [],
+      detectionEnabled: true,
     });
     // The preset it is based on is still identifiable, which is what the badge shows.
     expect(store.activeProfile().id).toBe('low-latency');
@@ -66,6 +70,8 @@ describe('SettingsStore', () => {
       confidenceThreshold: 0.25,
       inferenceFps: 12,
       model: DEFAULT_DETECTION_MODEL,
+      labelFilter: [],
+      detectionEnabled: true,
     });
   });
 
@@ -141,11 +147,13 @@ describe('SettingsStore', () => {
     expect(reloaded.flyAssetId()).toBeNull();
   });
 
-  // ---- Detection model (docs/CV-MODELS-PLAN.md item 4) ------------------------------------
+  // ---- Detection model (docs/CV-CONTROL-PLAN.md Wave E, extending docs/CV-MODELS-PLAN.md item 4) --
 
-  it('defaults every built-in profile to the general model', () => {
+  it('defaults every built-in profile to the general model, all classes, detection on', () => {
     for (const profile of BUILT_IN_PROFILES) {
       expect(profile.model).toBe(DEFAULT_DETECTION_MODEL);
+      expect(profile.labelFilter).toEqual([]);
+      expect(profile.detectionEnabled).toBe(true);
     }
   });
 
@@ -158,6 +166,8 @@ describe('SettingsStore', () => {
       confidenceThreshold: 0.5,
       inferenceFps: 3,
       model: 'orion12l.pt',
+      labelFilter: [],
+      detectionEnabled: true,
     });
     // Confidence/fps stay exactly what the base preset had — only model moved.
     expect(store.activeProfile().id).toBe('low-latency');
@@ -165,6 +175,33 @@ describe('SettingsStore', () => {
     store.revertDraft();
     expect(store.isCustom()).toBe(false);
     expect(store.effective().model).toBe(DEFAULT_DETECTION_MODEL);
+  });
+
+  it('adjusting labelFilter/detectionEnabled turns the active profile into a revertible custom draft', () => {
+    store.adjust({ labelFilter: ['person', 'car'], detectionEnabled: false });
+
+    expect(store.isCustom()).toBe(true);
+    expect(store.effective().labelFilter).toEqual(['person', 'car']);
+    expect(store.effective().detectionEnabled).toBe(false);
+    // Everything else stays exactly what Balanced had.
+    expect(store.effective().model).toBe(DEFAULT_DETECTION_MODEL);
+    expect(store.effective().confidenceThreshold).toBe(0.4);
+
+    store.revertDraft();
+    expect(store.effective().labelFilter).toEqual([]);
+    expect(store.effective().detectionEnabled).toBe(true);
+  });
+
+  it('saves a draft labelFilter/detectionEnabled choice as a reusable profile', () => {
+    store.adjust({ labelFilter: ['person', 'building'], detectionEnabled: false });
+    store.saveDraftAs('Buildings only');
+
+    const saved = store.customProfiles();
+    expect(saved).toHaveLength(1);
+    expect(saved[0].labelFilter).toEqual(['person', 'building']);
+    expect(saved[0].detectionEnabled).toBe(false);
+    expect(store.effective().labelFilter).toEqual(['person', 'building']);
+    expect(store.effective().detectionEnabled).toBe(false);
   });
 
   it('saves a draft model choice as a reusable profile, including the composite id', () => {
@@ -193,10 +230,25 @@ describe('SettingsStore', () => {
     expect(reloaded.effective().model).toBe('orion12l.pt');
   });
 
-  it('ignores a corrupt persisted draft model rather than adopting it', () => {
+  it('accepts a persisted draft model id even one the current roster no longer recognizes (docs/CV-CONTROL-PLAN.md Wave E — model is no longer a closed set)', () => {
     localStorage.setItem(
       'vision.settings.v1',
-      JSON.stringify({ draft: { confidenceThreshold: 0.6, inferenceFps: 8, model: 'not-a-model' } }),
+      JSON.stringify({ draft: { confidenceThreshold: 0.6, inferenceFps: 8, model: 'a-future-model.pt' } }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    // Not rejected — the picker degrades an unrecognized id to a bare-id display, it never
+    // silently substitutes the default the way the old closed-union check used to.
+    expect(reloaded.effective().model).toBe('a-future-model.pt');
+    expect(reloaded.effective().confidenceThreshold).toBe(0.6);
+  });
+
+  it('ignores a non-string persisted draft model rather than adopting it', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({ draft: { confidenceThreshold: 0.6, inferenceFps: 8, model: 42 } }),
     );
     TestBed.resetTestingModule();
     TestBed.configureTestingModule({});
@@ -207,7 +259,23 @@ describe('SettingsStore', () => {
     expect(reloaded.effective().confidenceThreshold).toBe(0.6);
   });
 
-  it('migrates a custom profile saved before the model picker existed (no model field at all)', () => {
+  it('ignores a corrupt persisted draft labelFilter/detectionEnabled rather than adopting it', () => {
+    localStorage.setItem(
+      'vision.settings.v1',
+      JSON.stringify({
+        draft: { confidenceThreshold: 0.6, inferenceFps: 8, labelFilter: 'person', detectionEnabled: 'yes' },
+      }),
+    );
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.effective().labelFilter).toEqual([]);
+    expect(reloaded.effective().detectionEnabled).toBe(true);
+    expect(reloaded.effective().confidenceThreshold).toBe(0.6);
+  });
+
+  it('migrates a custom profile saved before the model picker existed (no model/labelFilter/detectionEnabled field at all)', () => {
     localStorage.setItem(
       'vision.settings.v1',
       JSON.stringify({
@@ -220,7 +288,8 @@ describe('SettingsStore', () => {
             builtIn: false,
             confidenceThreshold: 0.6,
             inferenceFps: 8,
-            // no `model` field — this is what every profile saved before this task looked like.
+            // no `model`/`labelFilter`/`detectionEnabled` field — this is what every profile saved
+            // before this task looked like.
           },
         ],
       }),
@@ -231,6 +300,8 @@ describe('SettingsStore', () => {
 
     expect(reloaded.customProfiles()).toHaveLength(1);
     expect(reloaded.customProfiles()[0].model).toBe(DEFAULT_DETECTION_MODEL);
+    expect(reloaded.customProfiles()[0].labelFilter).toEqual([]);
+    expect(reloaded.customProfiles()[0].detectionEnabled).toBe(true);
     expect(reloaded.activeProfile().id).toBe('custom-old-preset');
     expect(reloaded.effective().model).toBe(DEFAULT_DETECTION_MODEL);
     // Its own pre-existing fields are untouched by the migration.

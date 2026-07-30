@@ -1,0 +1,113 @@
+.name {
+    font-weight: 500;
+}
+
+/* ---- Toolbar: search + filters (docs UX-REWORK-PLAN §U-d inventory split) ------------------- */
+
+.asset-toolbar {
+    padding: var(--space-3) var(--space-4);
+}
+
+.toolbar-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
+.asset-search {
+    flex: 1 1 14rem;
+    min-width: 12rem;
+}
+
+.field-inline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.field-inline .label {
+    margin: 0;
+}
+
+.field-inline select {
+    min-width: 9rem;
+}
+
+.toggle {
+    gap: 0.4rem;
+    cursor: pointer;
+}
+
+.toggle input {
+    width: auto;
+}
+
+.chip.faded {
+    background: transparent;
+}
+
+/* ---- Assets: the card grid -------------------------------------------------------------------- */
+
+.asset-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--space-4);
+}
+
+.asset-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.asset-card:hover {
+    background: var(--panel-hover);
+}
+
+.asset-card.archived {
+    opacity: 0.6;
+}
+
+.asset-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    min-width: 0;
+}
+
+.asset-card-head .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-card-chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.asset-card-meta {
+    font-size: 0.78rem;
+}
+
+.asset-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: auto;
+    padding-top: var(--space-1);
+}
+
+/* Per-row kebab (⋯) menu — `.kebab`/`.kebab-trigger`/`.kebab-menu`/`.kebab-item`/`.kebab-divider`/
+   `.kebab-reason`/`.danger-action` are a shared global primitive (src/styles.css) — see
+   `features/devices/devices.css`'s identical note. */

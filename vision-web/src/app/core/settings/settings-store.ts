@@ -15,52 +15,37 @@ export interface PipelineProfile {
   readonly builtIn: boolean;
   readonly confidenceThreshold: number;
   readonly inferenceFps: number;
-  readonly model: DetectionModelId;
+  readonly model: string;
+  /** See `PipelineSettings#labelFilter`'s own doc comment — identical semantics, just persisted per profile. */
+  readonly labelFilter: readonly string[];
+  /** See `PipelineSettings#detectionEnabled`'s own doc comment. */
+  readonly detectionEnabled: boolean;
 }
 
 /**
- * cv-service's local model registry (docs/CV-MODELS-PLAN.md item 4). An id here is exactly the
- * checkpoint filename the registry loads by — not an id scheme of our own — so it is also exactly
- * what `core/api/models.ts#StartStreamRequest.model` forwards to vision-api's own DTO
- * (`StartStreamRequest.java`/`StartAssetStreamRequest.java`), which builds a `ModelRef` from it.
- * `'yolo11n.pt,orion12l.pt'` is the composite id: the registry runs *both* checkpoints on the same
- * frame and returns both classsets (`orion12l:`-prefixed labels), not a third model of its own —
- * comma-joined is the exact wire format the registry parses, so this string is never split/rejoined
- * on this side.
+ * `model` used to be a closed TS union (`DetectionModelId`) over a hardcoded three-entry array
+ * (`DETECTION_MODEL_OPTIONS`) — docs/CV-CONTROL-PLAN.md Wave E drops both: the roster now comes
+ * from `GET /api/cv/models` (`core/api/models.ts#CvModel`/`CvModelsResponse`, cached by
+ * `core/fleet/fleet-store.ts#FleetStore.models`), which can grow/change at deploy time without a
+ * frontend release. `model` is therefore a plain, unvalidated `string` here — exactly the
+ * checkpoint filename cv-service's registry routes on, forwarded verbatim to
+ * `core/api/models.ts#StartStreamRequest.model`/`UpdateStreamConfigRequest.model` — this store no
+ * longer has (or needs) a closed set to check it against; `features/fly/cv-control-panel.ts` (and
+ * `features/live/live.ts`/`features/settings/settings.ts`, which also render the picker) resolve a
+ * display name by looking the id up in `FleetStore.models()`, degrading to the bare id string when
+ * the roster hasn't loaded (or no longer lists it) rather than rejecting anything.
+ *
+ * A comma-composite id (`"yolo11n.pt,orion12l.pt"`) is still a legal value the registry parses —
+ * unaffected by this change, still never split/rejoined on this side.
  */
-export type DetectionModelId = 'yolo11n.pt' | 'orion12l.pt' | 'yolo11n.pt,orion12l.pt';
+export const DEFAULT_DETECTION_MODEL: string = 'yolo26n.pt';
 
-/** One choice in the Detection model picker (`features/settings`, `features/live`'s rail). */
-export interface DetectionModelOption {
-  readonly id: DetectionModelId;
-  readonly label: string;
-  /** One line: what it detects, plus — honestly — what it costs. Shown under the picker. */
-  readonly hint: string;
-}
-
-/** `yolo11n.pt` ("General") is what cv-service already serves when `model_id` is absent/unknown
- * (docs/CV-MODELS-PLAN.md item 1) — the one existing saved profiles/drafts migrate to. */
-export const DEFAULT_DETECTION_MODEL: DetectionModelId = 'yolo11n.pt';
-
-export const DETECTION_MODEL_OPTIONS: readonly DetectionModelOption[] = [
-  {
-    id: 'yolo11n.pt',
-    label: 'General',
-    hint: 'Everyday objects — people, vehicles, animals. The default, and the fastest of the three.',
-  },
-  {
-    id: 'orion12l.pt',
-    label: 'Military',
-    hint: 'Military vehicles and hardware, in place of everyday objects.',
-  },
-  {
-    id: 'yolo11n.pt,orion12l.pt',
-    label: 'Both',
-    hint: 'Runs both models on every frame — boxes update ~3×/s, far slower than either model alone (measured: ~346ms/frame vs. ~58ms for General alone).',
-  },
-];
-
-/** `balanced` mirrors `PipelineConfig.defaults()` exactly, so "no override" and it agree. */
+/** `balanced` mirrors `PipelineConfig.defaults()` exactly, so "no override" and it agree —
+ * including the fast NMS-free `yolo26n.pt` default (docs/CV-CONTROL-PLAN.md §1: the domain's own
+ * `defaults()` bug-fix, replacing the dead `"yolo"` id these profiles used to carry). `labelFilter:
+ * []` ("all classes") and `detectionEnabled: true` on every built-in mirror `PipelineConfig`'s own
+ * defaults too — none of the three built-ins target the open-vocabulary model, so none of them
+ * narrow the class set. */
 export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
   {
     id: 'balanced',
@@ -70,6 +55,8 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     confidenceThreshold: 0.4,
     inferenceFps: 5,
     model: DEFAULT_DETECTION_MODEL,
+    labelFilter: [],
+    detectionEnabled: true,
   },
   {
     id: 'low-latency',
@@ -79,6 +66,8 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     confidenceThreshold: 0.5,
     inferenceFps: 3,
     model: DEFAULT_DETECTION_MODEL,
+    labelFilter: [],
+    detectionEnabled: true,
   },
   {
     id: 'high-quality',
@@ -88,6 +77,8 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
     confidenceThreshold: 0.3,
     inferenceFps: 10,
     model: DEFAULT_DETECTION_MODEL,
+    labelFilter: [],
+    detectionEnabled: true,
   },
 ];
 
@@ -95,7 +86,21 @@ export const BUILT_IN_PROFILES: readonly PipelineProfile[] = [
 export interface PipelineSettings {
   readonly confidenceThreshold: number;
   readonly inferenceFps: number;
-  readonly model: DetectionModelId;
+  readonly model: string;
+  /**
+   * Which detection labels to keep, applied Java-side (docs/CV-CONTROL-PLAN.md §A) —
+   * **empty means "keep every label"**, the existing/unchanged semantics `StartStreamRequest`'s own
+   * doc comment already states. Never validated against the roster here — an entry that doesn't
+   * (yet) match anything the current model emits is simply never drawn, not rejected; see
+   * `features/fly/cv-control-panel-logic.ts` for how the panel seeds/edits this on a model switch.
+   */
+  readonly labelFilter: readonly string[];
+  /** Server-side detection on/off (docs/CV-CONTROL-PLAN.md §1) — `false` means zero inference CPU
+   * spent on this stream; video keeps flowing regardless either way. Defaults `true`, mirroring
+   * `PipelineConfig.DEFAULT_DETECTION_ENABLED`. Distinct from `FlyPage`'s own `boxesMode` (a purely
+   * client-side render toggle for detections already computed) — see `cv-control-panel.html`'s own
+   * copy for the exact wording that keeps the two from being confused in the UI. */
+  readonly detectionEnabled: boolean;
 }
 
 /**
@@ -194,6 +199,8 @@ export class SettingsStore {
         confidenceThreshold: this.activeProfile().confidenceThreshold,
         inferenceFps: this.activeProfile().inferenceFps,
         model: this.activeProfile().model,
+        labelFilter: this.activeProfile().labelFilter,
+        detectionEnabled: this.activeProfile().detectionEnabled,
       },
   );
 
@@ -230,6 +237,8 @@ export class SettingsStore {
       confidenceThreshold: current.confidenceThreshold,
       inferenceFps: current.inferenceFps,
       model: current.model,
+      labelFilter: current.labelFilter,
+      detectionEnabled: current.detectionEnabled,
     };
     this.saveCustomProfile(profile);
     this.draftSignal.set(null);
@@ -273,16 +282,17 @@ export class SettingsStore {
         this.flyAssetId.set(parsed.flyAssetId);
       }
       if (Array.isArray(parsed.customProfiles)) {
-        // Migration-safe: a profile saved before the model picker existed has no `model` field at
-        // all (not just an invalid one) — both fall back to `DEFAULT_DETECTION_MODEL` the same way
-        // a corrupt value on any other field here does, rather than rejecting the whole profile.
-        this.customProfiles.set(parsed.customProfiles.map(withValidModel));
+        // Migration-safe: a profile saved before the model picker (or, this cycle, before
+        // labelFilter/detectionEnabled) existed has no such field at all (not just an invalid one)
+        // — every one backfills to its own honest default the same way a corrupt value on any
+        // other field here does, rather than rejecting the whole profile.
+        this.customProfiles.set(parsed.customProfiles.map(withValidPipelineFields));
       }
       if (typeof parsed.activeProfileId === 'string') {
         this.activeProfileId.set(parsed.activeProfileId);
       }
       if (parsed.draft) {
-        this.draftSignal.set(withValidModel(parsed.draft));
+        this.draftSignal.set(withValidPipelineFields(parsed.draft));
       }
     } catch {
       // Corrupt or stale settings must never keep the app from starting.
@@ -311,22 +321,33 @@ function isMapLayerId(value: unknown): value is MapLayerId {
   return typeof value === 'string' && (MAP_LAYER_IDS as readonly string[]).includes(value);
 }
 
-const DETECTION_MODEL_IDS: readonly DetectionModelId[] = DETECTION_MODEL_OPTIONS.map(
-  (option) => option.id,
-);
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
 
-function isDetectionModelId(value: unknown): value is DetectionModelId {
-  return typeof value === 'string' && (DETECTION_MODEL_IDS as readonly string[]).includes(value);
+function isStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
 /**
- * Backfills a missing/corrupt `model` field to `DEFAULT_DETECTION_MODEL` — the one place both
- * `customProfiles` and `draft` go through on restore, so a profile saved before this field existed
- * (or a tampered/stale value) reads exactly as if it had always been the backend default, never as
- * a reason to drop the rest of the profile.
+ * Backfills a missing/corrupt `model`/`labelFilter`/`detectionEnabled` field — the one place both
+ * `customProfiles` and `draft` go through on restore, so a profile saved before any of these fields
+ * existed (or a tampered/stale value) reads exactly as if it had always carried the honest default,
+ * never a reason to drop the rest of the profile.
+ *
+ * **`model` is no longer checked against a closed set** (docs/CV-CONTROL-PLAN.md Wave E — see
+ * `DEFAULT_DETECTION_MODEL`'s own doc comment for why): any non-empty string passes through
+ * unchanged, including an id the current roster no longer lists — the picker degrades that to a
+ * bare id display, it is never treated as corrupt data. Only a missing/non-string value falls back
+ * to the default.
  */
-function withValidModel<T extends { model?: unknown }>(value: T): T & { model: DetectionModelId } {
-  return isDetectionModelId(value.model)
-    ? (value as T & { model: DetectionModelId })
-    : { ...value, model: DEFAULT_DETECTION_MODEL };
+function withValidPipelineFields<T extends { model?: unknown; labelFilter?: unknown; detectionEnabled?: unknown }>(
+  value: T,
+): T & { model: string; labelFilter: readonly string[]; detectionEnabled: boolean } {
+  return {
+    ...value,
+    model: isNonEmptyString(value.model) ? value.model : DEFAULT_DETECTION_MODEL,
+    labelFilter: isStringArray(value.labelFilter) ? value.labelFilter : [],
+    detectionEnabled: typeof value.detectionEnabled === 'boolean' ? value.detectionEnabled : true,
+  };
 }

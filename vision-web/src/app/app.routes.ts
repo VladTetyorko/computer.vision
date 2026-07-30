@@ -1,9 +1,12 @@
 import { Routes } from '@angular/router';
+import { HUBS_ROUTES } from './features/hubs/hubs.routes';
 import { FLY_ROUTES } from './features/fly/fly.routes';
 import { COMMAND_ROUTES } from './features/command/command.routes';
 import { WALL_ROUTES } from './features/wall/wall.routes';
 import { MAP_ROUTES } from './features/map/map.routes';
 import { DEVICES_ROUTES } from './features/devices/devices.routes';
+import { ASSETS_ROUTES } from './features/assets/assets.routes';
+import { WAREHOUSE_ROUTES } from './features/warehouse/warehouse.routes';
 import { ONBOARDING_ROUTES } from './features/onboarding/onboarding.routes';
 import { ASSET_DETAIL_ROUTES } from './features/asset-detail/asset-detail.routes';
 import { REPLAY_ROUTES } from './features/replay/replay.routes';
@@ -43,11 +46,14 @@ export const routes: Routes = [
     path: '',
     canActivate: [authGuard],
     children: [
+      ...HUBS_ROUTES,
       ...FLY_ROUTES,
       ...COMMAND_ROUTES,
       ...WALL_ROUTES,
       ...MAP_ROUTES,
       ...DEVICES_ROUTES,
+      ...ASSETS_ROUTES,
+      ...WAREHOUSE_ROUTES,
       ...ONBOARDING_ROUTES,
       ...ASSET_DETAIL_ROUTES,
       ...REPLAY_ROUTES,

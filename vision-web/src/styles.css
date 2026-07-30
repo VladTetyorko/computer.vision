@@ -730,3 +730,117 @@ tbody tr:last-child td {
 .leaflet-popup-close-button {
   color: blue;
 }
+
+/* ==========================================================================
+   Wave 0 additions (docs/UI-REDESIGN-PLAN.md, Frozen contract F1) — spacing
+   scale, a tokenized breakpoint reference, the one canonical frosted-pill HUD
+   surface, and a 12-column grid. Purely additive: every name below is new;
+   nothing above this line changed. Names/values here are frozen exactly as
+   docs/UI-REDESIGN-PLAN.md's own F1 section states them, so later waves
+   (W1-W4) can consume them without drift.
+   ========================================================================== */
+
+:root {
+  /* Spacing scale — 4px base, replacing this app's ad-hoc rem values one component at a time as
+     later waves touch them (this wave migrates none of the existing ad-hoc rem values itself). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Breakpoints — one reconciled set (was: shell 640 / asset 900 / cockpit 760,1280, per
+     docs/UI-REDESIGN-PLAN.md's own "Current state" audit). Documented as custom properties for
+     reference only — @media cannot read var(), so every stylesheet that needs one of these
+     hardcodes the matching px value below and cites the token name in its own trailing comment,
+     e.g. "@media (max-width: 640px) { ... } " followed by a comment naming --bp-sm. */
+  --bp-sm: 640px; /* below: single-column, top-bar collapses, drawers become bottom-sheets */
+  --bp-md: 900px; /* below: asset grid -> 1 col; cockpit map inset hides */
+  --bp-lg: 1200px; /* below: hub tile grid drops a column; cockpit tool-rail stays */
+
+  /* Frosted-pill HUD surface — the one canonical recipe (docs/UI-REDESIGN-PLAN.md D-B), replacing
+     the >= 8 copies of `background: rgb(6 9 14 / 62%); backdrop-filter: blur(6px); border: 1px
+     solid rgb(255 255 255 / 9%)` scattered across `fly.css`/`cv-control-panel.css`/
+     `flight-command-panel.css`/`fly-osd.ts`/`diagnostics-card.ts`/`preflight-checklist.ts` — none
+     of those existing copies are touched by this wave (out of scope: `src/app/features/**`); each
+     migrates to `.surface-hud`/`.surface-hud-strong` below as a later wave next touches it.
+     `--hud-bg` (62%) is the pill/button-weight variant; `--hud-bg-strong` (88%) is the denser
+     drawer/panel variant. */
+  --hud-bg: rgb(6 9 14 / 62%);
+  --hud-bg-strong: rgb(9 13 20 / 88%);
+  --hud-border: 1px solid rgb(255 255 255 / 9%);
+  --hud-blur: 6px;
+  --hud-blur-strong: 10px;
+}
+
+/* Frosted-pill utilities (frozen names) — a HUD pill/button (`.surface-hud`) and a denser
+   drawer/panel surface (`.surface-hud-strong`), both meant to sit over live video/map content. */
+.surface-hud {
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+}
+
+.surface-hud-strong {
+  background: var(--hud-bg-strong);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur-strong));
+}
+
+/* 12-column grid utilities (frozen names) — `.grid12` is the row; `.col-N` (N = 1..12) spans N of
+   12 columns. Below `--bp-md` (900px, hardcoded per the note above) every `.col-*` collapses to a
+   full-width single column — small screens get one stacked column regardless of what a wider
+   layout asked for, matching the asset page's existing 900px collapse precedent. */
+.grid12 {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.col-1 { grid-column: span 1; }
+.col-2 { grid-column: span 2; }
+.col-3 { grid-column: span 3; }
+.col-4 { grid-column: span 4; }
+.col-5 { grid-column: span 5; }
+.col-6 { grid-column: span 6; }
+.col-7 { grid-column: span 7; }
+.col-8 { grid-column: span 8; }
+.col-9 { grid-column: span 9; }
+.col-10 { grid-column: span 10; }
+.col-11 { grid-column: span 11; }
+.col-12 { grid-column: span 12; }
+
+@media (max-width: 900px) {
+  /* --bp-md */
+  .col-1,
+  .col-2,
+  .col-3,
+  .col-4,
+  .col-5,
+  .col-6,
+  .col-7,
+  .col-8,
+  .col-9,
+  .col-10,
+  .col-11,
+  .col-12 {
+    grid-column: span 12;
+  }
+}
+
+/* App-level page grid: `<main>` gets a max-width container so a route rendering directly into it
+   (no `.page` wrapper of its own) still reads at a sane line length on an ultra-wide display.
+   `.page` keeps working unchanged — its own identical 1400px cap just nests inertly inside this one
+   (same value, so no visual change). Excluded via `:has()` rather than a class on `<main>` itself,
+   since `app.html` is out of this wave's file scope (Wave 1 owns it) — this app's two existing
+   full-bleed shells must keep owning the entire viewport exactly as before: `features/fly/fly.css`'s
+   `.cockpit` (edge-to-edge video hero) and `features/command/command.css`'s `.command-shell`
+   (edge-to-edge map dashboard). Re-audit this selector's two named classes if either is ever
+   renamed — a stale selector here would silently stop excluding the shell it names. */
+main:not(:has(> .cockpit, > .command-shell)) {
+  max-width: 1400px;
+  margin: 0 auto;
+}

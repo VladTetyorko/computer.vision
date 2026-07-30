@@ -99,16 +99,107 @@ export interface ActiveStream {
 
 /**
  * Mirrors `dto.StartStreamRequest` — every field falls back to `PipelineConfig.defaults()`.
- * `model` (docs/CV-MODELS-PLAN.md item 4 — the detection-model picker,
- * `core/settings/settings-store.ts#DetectionModelId`) is the raw model id string verbatim, never
- * split here — it may be a comma-composite (`"yolo11n.pt,orion12l.pt"`) that only `cv-service`'s own
- * registry parses; the resulting `ModelRef`'s version always stays the backend default (there is no
- * per-stream version override, only a model-id one).
+ * `model` (docs/CV-CONTROL-PLAN.md, extending docs/CV-MODELS-PLAN.md item 4 — the detection-model
+ * picker, now data-driven from `GET /api/cv/models`, see `CvModel`/`CvModelsResponse` below) is the
+ * raw model id string verbatim, never split here — it may be a comma-composite
+ * (`"yolo11n.pt,orion12l.pt"`) that only `cv-service`'s own registry parses; the resulting
+ * `ModelRef`'s version always stays the backend default (there is no per-stream version override,
+ * only a model-id one).
+ *
+ * `labelFilter`/`detectionEnabled` (docs/CV-CONTROL-PLAN.md §2's frozen contract) are this cycle's
+ * own additions, both optional — an absent `labelFilter` keeps today's "empty = all labels"
+ * semantics, an absent `detectionEnabled` defaults `true` server-side (`PipelineConfig`'s own
+ * `DEFAULT_DETECTION_ENABLED`). Both are also PATCH-able live afterward — see
+ * `UpdateStreamConfigRequest`.
  */
 export interface StartStreamRequest {
   readonly confidenceThreshold?: number;
   readonly inferenceFps?: number;
   readonly model?: string;
+  readonly labelFilter?: readonly string[];
+  readonly detectionEnabled?: boolean;
+}
+
+// --- Live per-stream CV control (docs/CV-CONTROL-PLAN.md §2-4's frozen contract) ----------------
+// Gives the Fly cockpit's CV control panel (`features/fly/cv-control-panel.ts`) live control of a
+// *running* stream's detection pipeline, plus a data-driven model roster for the picker (replacing
+// the old hardcoded `DETECTION_MODEL_OPTIONS`/`DetectionModelId` union — see
+// `core/settings/settings-store.ts`'s own doc comment for that migration).
+
+/**
+ * Mirrors the body of `PATCH /api/streams/{streamId}/config` — every field independently optional;
+ * **only present fields change, absent fields are left exactly as they are** (a partial patch, not
+ * a full replace — unlike `AssetEdit`/`DeviceEdit`, which happen to send every field their own
+ * pages ever populate, this DTO is deliberately built one-or-a-few-fields-at-a-time by the CV panel:
+ * a hot-knob edit sends `confidenceThreshold`/`inferenceFps`/`labelFilter`/`detectionEnabled` and
+ * never `model`; a model change sends `model` alone — see `features/fly/cv-control-panel-logic.ts#buildHotKnobPatch`/
+ * `#buildModelChangePatch`, which keep those two families of change from ever mixing in one call so
+ * a hot-knob drag can never accidentally trigger a model re-arm).
+ *
+ * `maxInFlightInferences`/`overlayTelemetry`/`overlayBurnIn`/`eventRule`/the model **version** are
+ * deliberately **not** fields here — not PATCH-able in v1 (docs/CV-CONTROL-PLAN.md's own non-goals:
+ * `overlayBurnIn` changes the encode path, `eventRule` is bound into the event engine at stream
+ * start). Start-time only, via `StartStreamRequest` above.
+ */
+export interface UpdateStreamConfigRequest {
+  readonly confidenceThreshold?: number;
+  readonly inferenceFps?: number;
+  readonly labelFilter?: readonly string[];
+  readonly detectionEnabled?: boolean;
+  readonly model?: string;
+}
+
+/**
+ * Mirrors the `200` body of `PATCH /api/streams/{streamId}/config`. `modelReArmed` is `true` **only**
+ * when the request's `model` field was present and differed from the stream's running model — every
+ * other knob is hot and never re-arms. A brief detection gap happens in that case (video is never
+ * interrupted, per docs/CV-CONTROL-PLAN.md §A) — `cv-control-panel-logic.ts#reArmHint` is the one
+ * place this app turns that into operator-facing copy; `404`/`400`/`409` never reach this type at
+ * all (an `HttpErrorResponse`, decoded by the caller via `describeHttpError`).
+ */
+export interface PatchStreamConfigResponse {
+  readonly streamId: string;
+  readonly modelReArmed: boolean;
+}
+
+/**
+ * Mirrors one entry of `dto.CvModelsResponse#models` (`GET /api/cv/models`) — one row of the
+ * detection-model picker's roster, replacing the old hardcoded `DETECTION_MODEL_OPTIONS` array.
+ * `id` is the exact checkpoint filename `StartStreamRequest#model`/`UpdateStreamConfigRequest#model`
+ * forward verbatim (what cv-service's own registry routes on) — composite ids (`"a.pt,b.pt"`) are
+ * still valid values of those fields, but the roster itself lists atomic models only. `kind` is a
+ * free-form UI hint string (`"general"`/`"specialized"`/`"open-vocab"` today, not a closed union on
+ * the wire — a display concern, not a domain enum). `displayName` already carries the "what it
+ * detects, what it costs" hint verbatim (e.g. `"Everything (incl. buildings, slower)"`) — there is
+ * no separate hint field, unlike the old `DetectionModelOption#hint`.
+ *
+ * `openVocab` drives whether the CV panel leads with the class-filter chips for this model
+ * (docs/CV-CONTROL-PLAN.md §E: "labelFilter is the primary UX control for the open-vocab model").
+ * `defaultLabelFilter` is the class set a *closed-set* model's own picker pre-seeds
+ * (`cv-control-panel-logic.ts#seedLabelFilterForModel`); an **open-vocab** model's own
+ * `defaultLabelFilter` is deliberately **ignored** by that same seeding function — always seeds
+ * `[]` ("show every class") instead, regardless of what this field says, because a prompt-free
+ * open-vocab model's real vocabulary (~4585 classes, cv-service Wave A's own measurement) emits many
+ * synonym/scene labels for one real-world thing (`"building"`/`"skyscraper"`/`"office building"`/
+ * `"downtown"`/a named landmark, all for what a person would call "a building") — a fixed preset
+ * filter would silently drop most real detections rather than usefully narrowing them. See that
+ * function's own doc comment for the full reasoning, and `cv-control-panel-logic.ts#PEOPLE_VEHICLES_BUILDINGS_PRESET`
+ * for the opt-in, one-click (never silently-applied) alternative this panel offers instead.
+ */
+export interface CvModel {
+  readonly id: string;
+  readonly displayName: string;
+  readonly kind: string;
+  readonly openVocab: boolean;
+  readonly defaultLabelFilter: readonly string[];
+}
+
+/** Mirrors `GET /api/cv/models`'s `200` body — `yolo26n.pt` (the fast closed-set default) listed
+ * first, per docs/CV-CONTROL-PLAN.md §4. Never errors server-side; `FleetStore.models` degrades to
+ * an empty list on any transport failure instead (silent, background-enrichment read — see that
+ * class's own doc comment). */
+export interface CvModelsResponse {
+  readonly models: readonly CvModel[];
 }
 
 /** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as `ActiveStream#whepUrl`. */

@@ -1,11 +1,10 @@
 <div class="page">
   <div class="page-head">
     <div>
-      <h1>Warehouse</h1>
+      <h1>Devices</h1>
       <p>
-        Everything Vision already knows about — assets and the devices behind them. To bring in a
-        new source (register by hand, scan the network, or simulate one with no hardware at all),
-        use "+ Add source".
+        The raw device table — every registered source, its lifecycle, and who owns it. Looking for
+        an asset instead? Assets live on their own page now.
       </p>
     </div>
     <div class="row">
@@ -25,115 +24,41 @@
     </div>
   </div>
 
-  <!-- ---- Assets: the primary surface (docs/CYCLES-PLAN.md §11, CD-b item 1) ------------- -->
-  <!-- One row per asset — exactly Watch · Open · Archive. CDK virtual scroll keeps rendering
-       O(visible rows) toward the "thousands of assets" posture (item 4); low-level device
-       plumbing lives in the collapsed Advanced section below and the asset detail page's own
-       Hardware section — nothing lost, just no longer the front door. -->
   <section class="card">
-    <header>
-      <h2>Assets</h2>
-      <span class="muted">{{ assetListRows().length }} asset(s)</span>
-    </header>
-
-    @if (categoryFilterName(); as filterName) {
-      <div class="row category-filter-banner">
-        <span class="chip accent">Filtered by category: {{ filterName }}</span>
-        <button type="button" class="btn secondary small" (click)="clearCategoryFilter()">
-          Clear filter — show every category
+    <div class="toolbar-row">
+      <input
+        type="search"
+        name="deviceSearch"
+        class="device-search"
+        placeholder="Search by name, protocol, URI, or owning asset…"
+        aria-label="Search devices"
+        [ngModel]="searchQuery()"
+        (ngModelChange)="searchQuery.set($event)"
+      />
+      <div class="segmented" role="group" aria-label="View">
+        <button
+          type="button"
+          class="btn secondary small"
+          [class.active]="viewMode() === 'list'"
+          [attr.aria-pressed]="viewMode() === 'list'"
+          (click)="setViewMode('list')"
+        >
+          <vision-icon name="list" [size]="16" />
+          List
+        </button>
+        <button
+          type="button"
+          class="btn secondary small"
+          [class.active]="viewMode() === 'grid'"
+          [attr.aria-pressed]="viewMode() === 'grid'"
+          (click)="setViewMode('grid')"
+        >
+          <vision-icon name="grid" [size]="16" />
+          Grid
         </button>
       </div>
-    }
+    </div>
 
-    @if (assetListRows().length === 0) {
-      <div class="empty">
-        @if (categoryFilterName(); as filterName) {
-          <h3>No assets in "{{ filterName }}"</h3>
-          <p>Nothing is currently registered under this category.</p>
-        } @else {
-          <h3>No assets yet</h3>
-          <p>
-            Register the built-in simulated source to see the whole pipeline work without any
-            hardware — then use "+ Add source" above to bring in the real thing (register, scan, or
-            simulate a moving test drone) as a first-class asset.
-          </p>
-          <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
-            Add the simulated source
-          </button>
-        }
-      </div>
-    } @else {
-      <div class="asset-list-head">
-        <span>Name</span>
-        <span>Status</span>
-        <span aria-hidden="true"></span>
-      </div>
-      <cdk-virtual-scroll-viewport itemSize="60" class="asset-viewport">
-        <div
-          *cdkVirtualFor="let row of assetListRows(); trackBy: trackAssetRow"
-          class="asset-row"
-          [class.archived]="row.archived"
-        >
-          <div class="asset-row-main">
-            <span class="name truncate">{{ row.asset.displayName }}</span>
-            <span class="chip">{{ row.asset.categoryName }}</span>
-          </div>
-          <div class="asset-row-status">
-            <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-              {{ lifecycleLabel(row.lifecycle) }}
-            </span>
-            @if (!row.archived) {
-              @if (row.streaming) {
-                <span class="chip ok"><span class="dot live"></span>Live</span>
-              } @else {
-                <span class="chip">Offline</span>
-              }
-            }
-            <span class="muted device-count">{{ row.deviceCount }} device(s)</span>
-          </div>
-          <div class="asset-row-actions">
-            <!-- One primary action per row (docs/UX-REWORK-PLAN.md §U-a2 item 3c) — Watch live is
-                 the single most likely action here; Details/Archive/Restore live in the kebab. -->
-            @if (!row.archived && row.watchDeviceId) {
-              <button type="button" class="btn small" (click)="watchAsset(row)">Watch live</button>
-            }
-            <details class="kebab" #assetKebab>
-              <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + row.asset.displayName">⋯</summary>
-              <div class="kebab-menu" (click)="assetKebab.open = false">
-                <button type="button" (click)="openAsset(row)">Details</button>
-                <div class="kebab-divider" role="separator"></div>
-                @for (entry of assetActionsFor(row); track entry.action) {
-                  <div class="kebab-item">
-                    <button
-                      type="button"
-                      [class.danger-action]="entry.action === 'archive'"
-                      [disabled]="!entry.available || busyAssetId() === row.asset.assetId"
-                      [title]="entry.reason ?? ''"
-                      (click)="onAssetAction(row, entry.action)"
-                    >
-                      {{ assetActionLabel(entry.action) }}
-                    </button>
-                    @if (!entry.available && entry.reason) {
-                      <span class="kebab-reason">{{ entry.reason }}</span>
-                    }
-                  </div>
-                }
-              </div>
-            </details>
-          </div>
-        </div>
-      </cdk-virtual-scroll-viewport>
-    }
-  </section>
-
-  <!-- ---- Advanced: raw devices (docs/CYCLES-PLAN.md §11, CD-b item 1 — demoted, not deleted) -->
-  <section class="card">
-    <button type="button" class="btn secondary small advanced-toggle" (click)="toggleAdvancedDevices()">
-      {{ advancedDevicesOpen() ? 'Hide' : 'Show' }} advanced (raw devices)
-    </button>
-
-    @if (advancedDevicesOpen()) {
-    <div class="advanced-devices">
     <header>
       <h2>Registered devices</h2>
       <span class="muted">{{ warehouseRows().length }} device(s)</span>
@@ -141,10 +66,16 @@
 
     @if (warehouseRows().length === 0) {
       <div class="empty">
-        <h3>No devices yet</h3>
-        <p>Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.</p>
+        @if (hasAnyDevices()) {
+          <h3>No devices match</h3>
+          <p>Nothing currently matches this search.</p>
+          <button type="button" class="btn secondary" (click)="clearSearch()">Clear search</button>
+        } @else {
+          <h3>No devices yet</h3>
+          <p>Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.</p>
+        }
       </div>
-    } @else {
+    } @else if (viewMode() === 'list') {
       <table>
         <thead>
           <tr>
@@ -229,9 +160,9 @@
                     {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
                   </button>
                 }
-                <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): the same rename/lifecycle/
-                     assign actions as before, labeled verb+object, reasoned (§U-a2 item 3a) —
-                     destructive (Archive) lives at the bottom, behind a divider, in danger-action. -->
+                <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): rename/lifecycle/assign
+                     actions, labeled verb+object, reasoned (§U-a2 item 3a) — destructive (Archive)
+                     lives at the bottom, behind a divider, in danger-action. -->
                 <details class="kebab" #deviceKebab>
                   <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + row.device.name">⋯</summary>
                   <div class="kebab-menu" (click)="deviceKebab.open = false">
@@ -332,17 +263,186 @@
           }
         </tbody>
       </table>
-    }
-    </div>
+    } @else {
+      <!-- ---- Grid: device cards (new this cycle) -------------------------------------------- -->
+      <div class="device-card-grid">
+        @for (row of warehouseRows(); track row.device.id) {
+          <article class="device-card" [class.archived]="row.archived">
+            <header class="device-card-head">
+              <div class="device-card-name">
+                <div class="name truncate" [title]="row.device.name">{{ row.device.name }}</div>
+                <div class="mono faint truncate">{{ row.device.id }}</div>
+              </div>
+              <details class="kebab" #deviceGridKebab>
+                <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + row.device.name">⋯</summary>
+                <div class="kebab-menu" (click)="deviceGridKebab.open = false">
+                  @if (!row.archived && !row.owner) {
+                    <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+                  }
+                  @for (entry of deviceActionsFor(row); track entry.action) {
+                    @if (entry.action !== 'archive') {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                          [title]="entry.reason ?? ''"
+                          (click)="onDeviceAction(row, entry.action)"
+                        >
+                          {{ deviceActionLabel(entry.action) }}
+                        </button>
+                        @if (!entry.available && entry.reason) {
+                          <span class="kebab-reason">{{ entry.reason }}</span>
+                        }
+                      </div>
+                    }
+                  }
+                  <div class="kebab-divider" role="separator"></div>
+                  @for (entry of deviceActionsFor(row); track entry.action) {
+                    @if (entry.action === 'archive') {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          class="danger-action"
+                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                          [title]="entry.reason ?? ''"
+                          (click)="onDeviceAction(row, entry.action)"
+                        >
+                          {{ deviceActionLabel(entry.action) }}
+                        </button>
+                        @if (!entry.available && entry.reason) {
+                          <span class="kebab-reason">{{ entry.reason }}</span>
+                        }
+                      </div>
+                    }
+                  }
+                </div>
+              </details>
+            </header>
+
+            <div class="device-card-source">
+              <span class="chip">{{ row.device.protocol }}</span>
+              <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
+            </div>
+
+            <div class="device-card-chips">
+              @for (capability of row.device.capabilities; track capability) {
+                <span class="chip">{{ capability }}</span>
+              }
+              <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                {{ lifecycleLabel(row.lifecycle) }}
+              </span>
+              @if (!row.archived) {
+                @if (row.streaming) {
+                  <span class="chip ok"><span class="dot live"></span>Live</span>
+                } @else {
+                  <span class="chip">Stopped</span>
+                }
+              }
+              @if (simulatedInfo(row.device); as simInfo) {
+                <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">Simulated</span>
+              }
+            </div>
+
+            <div class="device-card-meta muted truncate">
+              @if (row.owner; as owner) {
+                Owned by <span [title]="owner.assetName">{{ owner.assetName }}</span>
+              } @else {
+                Unassigned
+              }
+            </div>
+
+            <div class="device-card-actions">
+              @if (!row.archived) {
+                @if (row.streaming) {
+                  <button type="button" class="btn small" (click)="watch(row.device)">Watch live</button>
+                  <button
+                    type="button"
+                    class="btn danger small"
+                    (click)="stop(row.device)"
+                    [disabled]="busyDeviceId() === row.device.id"
+                  >
+                    Stop stream
+                  </button>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn small"
+                    (click)="start(row.device)"
+                    [disabled]="busyDeviceId() === row.device.id"
+                  >
+                    {{ busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
+                  </button>
+                }
+              }
+              @if (simulatedInfo(row.device); as simInfo) {
+                <button
+                  type="button"
+                  class="btn danger small"
+                  (click)="stopSimulatedAsset(simInfo)"
+                  [disabled]="busySimulatedAssetId() === simInfo.assetId"
+                >
+                  {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
+                </button>
+              }
+            </div>
+
+            @if (rowActionMode(row.device.id); as mode) {
+              @switch (mode) {
+                @case ('rename') {
+                  <div class="inline-form column">
+                    <input
+                      name="renameDraftGrid"
+                      [ngModel]="renameDraft()"
+                      (ngModelChange)="renameDraft.set($event)"
+                      placeholder="device name"
+                      aria-label="New device name"
+                    />
+                    <div class="row">
+                      <button type="button" class="btn small" (click)="confirmRename(row.device)">Save</button>
+                      <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
+                    </div>
+                  </div>
+                }
+                @case ('assign') {
+                  <div class="inline-form column">
+                    <select
+                      name="assignDraftGrid"
+                      [ngModel]="assignDraft()"
+                      (ngModelChange)="assignDraft.set($event)"
+                      aria-label="Choose an asset to assign this device to"
+                    >
+                      <option value="" disabled>Choose an asset…</option>
+                      @for (asset of assignableAssets(); track asset.assetId) {
+                        <option [value]="asset.assetId">{{ asset.displayName }}</option>
+                      }
+                    </select>
+                    <div class="row">
+                      <button
+                        type="button"
+                        class="btn small"
+                        [disabled]="!assignDraft()"
+                        (click)="confirmAssign(row.device)"
+                      >
+                        Assign
+                      </button>
+                      <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
+                    </div>
+                  </div>
+                }
+              }
+            }
+          </article>
+        }
+      </div>
     }
   </section>
 
   <!-- ---- Promote to asset (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix; renamed to
        its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3; switched to the deviceIds contract per
        docs/REALTIME-PLAN.md §4's backend follow-up batch — no more duplicate-device workaround). -->
-  <!-- Reached from any Advanced row's kebab whose owner is unassigned — surgery for an already-
-       existing orphaned device (docs/UX-REWORK-PLAN.md §U-d); a brand-new source goes through the
-       onboarding wizard instead, which never produces an orphan in the first place. -->
+  <!-- Reached from any row's kebab whose owner is unassigned — surgery for an already-existing
+       orphaned device (docs/UX-REWORK-PLAN.md §U-d); a brand-new source goes through the onboarding
+       wizard instead, which never produces an orphan in the first place. -->
   @if (createAssetFor(); as createDevice) {
     <section class="card create-asset-panel">
       <header>

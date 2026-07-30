@@ -1,0 +1,171 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>Assets</h1>
+      <p>
+        Every asset Vision knows about, asset-first — search, filter, and jump straight to Watch,
+        Open, or Archive. Raw device plumbing lives on
+        <a routerLink="/devices">Devices</a>.
+      </p>
+    </div>
+    <div class="row">
+      <button type="button" class="btn" (click)="goToAddSource()">+ Add source</button>
+      <button type="button" class="btn secondary" (click)="refreshAll()" [disabled]="fleet.loading()">
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <!-- ---- Search + filters -------------------------------------------------------------------- -->
+  <section class="card asset-toolbar">
+    <div class="toolbar-row">
+      <input
+        type="search"
+        name="assetSearch"
+        class="asset-search"
+        placeholder="Search assets by name…"
+        aria-label="Search assets by name"
+        [ngModel]="searchQuery()"
+        (ngModelChange)="searchQuery.set($event)"
+      />
+
+      <label class="field-inline">
+        <span class="label">Category</span>
+        <select
+          name="assetCategoryFilter"
+          [ngModel]="categoryFilter()"
+          (ngModelChange)="categoryFilter.set($event)"
+        >
+          <option value="">All categories</option>
+          @for (option of categoryOptions(); track option.slug) {
+            <option [value]="option.slug">{{ option.name }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field-inline">
+        <span class="label">Status</span>
+        <select
+          name="assetStatusFilter"
+          [ngModel]="statusFilter()"
+          (ngModelChange)="statusFilter.set($event)"
+        >
+          <option value="all">Any status</option>
+          <option value="active">Active</option>
+          <option value="deactivated">Deactivated</option>
+        </select>
+      </label>
+
+      <label class="field-inline">
+        <span class="label">Streaming</span>
+        <select
+          name="assetStreamingFilter"
+          [ngModel]="streamingFilter()"
+          (ngModelChange)="streamingFilter.set($event)"
+        >
+          <option value="all">Any</option>
+          <option value="streaming">Streaming</option>
+          <option value="offline">Offline</option>
+        </select>
+      </label>
+
+      <label class="row toggle">
+        <input
+          type="checkbox"
+          name="showArchived"
+          [ngModel]="showArchived()"
+          (ngModelChange)="toggleShowArchived()"
+        />
+        <span>Show archived</span>
+      </label>
+
+      @if (hasActiveFilters()) {
+        <button type="button" class="btn secondary small" (click)="clearFilters()">Clear filters</button>
+      }
+    </div>
+  </section>
+
+  <!-- ---- Assets: the grid ---------------------------------------------------------------------- -->
+  <section class="card">
+    <header>
+      <h2>Assets</h2>
+      <span class="muted">{{ assetRows().length }} of {{ assets().length }} asset(s)</span>
+    </header>
+
+    @if (assetRows().length === 0) {
+      <div class="empty">
+        @if (hasAnyAssets()) {
+          <h3>No assets match</h3>
+          <p>Nothing currently matches this search/filter combination.</p>
+          <button type="button" class="btn secondary" (click)="clearFilters()">Clear filters</button>
+        } @else {
+          <h3>No assets yet</h3>
+          <p>
+            Register the built-in simulated source to see the whole pipeline work without any
+            hardware — then use "+ Add source" above to bring in the real thing (register, scan, or
+            simulate a moving test drone) as a first-class asset.
+          </p>
+          <button type="button" class="btn" (click)="registerSimulator()" [disabled]="submitting()">
+            Add the simulated source
+          </button>
+        }
+      </div>
+    } @else {
+      <div class="asset-card-grid">
+        @for (row of assetRows(); track row.asset.assetId) {
+          <article class="asset-card" [class.archived]="row.archived">
+            <header class="asset-card-head">
+              <span class="name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
+              <details class="kebab" #assetKebab>
+                <summary class="kebab-trigger" [attr.aria-label]="'More actions for ' + row.asset.displayName">⋯</summary>
+                <div class="kebab-menu" (click)="assetKebab.open = false">
+                  <button type="button" (click)="openAsset(row)">Details</button>
+                  <div class="kebab-divider" role="separator"></div>
+                  @for (entry of assetActionsFor(row); track entry.action) {
+                    <div class="kebab-item">
+                      <button
+                        type="button"
+                        [class.danger-action]="entry.action === 'archive'"
+                        [disabled]="!entry.available || busyAssetId() === row.asset.assetId"
+                        [title]="entry.reason ?? ''"
+                        (click)="onAssetAction(row, entry.action)"
+                      >
+                        {{ assetActionLabel(entry.action) }}
+                      </button>
+                      @if (!entry.available && entry.reason) {
+                        <span class="kebab-reason">{{ entry.reason }}</span>
+                      }
+                    </div>
+                  }
+                </div>
+              </details>
+            </header>
+
+            <div class="asset-card-chips">
+              <span class="chip">{{ row.asset.categoryName }}</span>
+              <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                {{ lifecycleLabel(row.lifecycle) }}
+              </span>
+              @if (!row.archived) {
+                @if (row.streaming) {
+                  <span class="chip ok"><span class="dot live"></span>Live</span>
+                } @else {
+                  <span class="chip">Offline</span>
+                }
+              }
+            </div>
+
+            <div class="asset-card-meta muted">{{ row.deviceCount }} device(s)</div>
+
+            <div class="asset-card-actions">
+              @if (!row.archived && row.watchDeviceId) {
+                <button type="button" class="btn small" (click)="watchAsset(row)">Watch live</button>
+              }
+              <button type="button" class="btn secondary small" (click)="openAsset(row)">Open</button>
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+</div>

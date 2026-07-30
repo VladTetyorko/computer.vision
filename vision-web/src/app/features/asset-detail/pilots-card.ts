@@ -6,6 +6,7 @@ import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
 import { AuthStore } from '../../core/auth/auth-store';
 import { canManageOrg } from '../../core/org/org-logic';
+import { SectionHeader } from '../../shared/ui/section-header';
 import type { AssignedPilot, UserSummary } from '../../core/api/models';
 
 /** Stable per-file console tag, mirroring `[auth]`/`[fleet]`/`[org]`. */
@@ -14,12 +15,16 @@ const LOG_PREFIX = '[pilots]';
 /**
  * The assigned-pilots card on the asset **manager** page (docs/U-SCOPE-PLAN.md, U-e slice 2 feature
  * 2) — lists the pilots assigned to one asset with add (pick a user) / remove (unassign). Mounted
- * by `features/asset-detail/asset-detail.html` inside the detail grid.
+ * by `features/asset-detail/asset-detail.html` inside the manager-only "Pilots" `vision-side-panel`
+ * drawer (docs/UI-REDESIGN-PLAN.md Wave 3 — previously a `span-2` grid child of the old single-
+ * column detail grid; the drawer trigger itself is separately gated by `AssetDetailPage.canManagePilots`
+ * so a non-manager never even sees the affordance, not just an empty drawer behind it).
  *
- * **Role-gated inside the component**: renders **nothing** unless the viewer can manage the org
+ * **Role-gated inside the component, too**: renders **nothing** unless the viewer can manage the org
  * (`canManageOrg(topRole)` — ADMIN/MANAGER); a pilot viewing an asset doesn't manage its roster, so
- * the host can mount this unconditionally and let the card decide. In dev-parity mode
- * (`vision.auth.enabled=false`) the dev admin is ADMIN, so the card shows exactly as before.
+ * the host can mount this unconditionally and let the card decide — this is the belt to the host's
+ * own suspenders, not a second source of truth. In dev-parity mode (`vision.auth.enabled=false`) the
+ * dev admin is ADMIN, so the card shows exactly as before.
  *
  * Owns its own small state (this asset's pilots + the full user list to pick from), keyed off the
  * `assetId` input — a self-contained card, not something the big `AssetDetailPage` needs to thread
@@ -30,7 +35,7 @@ const LOG_PREFIX = '[pilots]';
  */
 @Component({
   selector: 'vision-pilots-card',
-  imports: [FormsModule],
+  imports: [FormsModule, SectionHeader],
   templateUrl: './pilots-card.html',
   styleUrl: './pilots-card.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

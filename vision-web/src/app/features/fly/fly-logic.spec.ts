@@ -8,6 +8,7 @@ import {
   isWatchMode,
   lastSeenLabel,
   latestFinishedUsage,
+  nextCollapseAction,
   positionLabel,
   resolveActiveAssetId,
   sortAssetsForPicker,
@@ -191,5 +192,23 @@ describe('isAllDronesOption (docs/UX-REWORK-PLAN.md §U-a bullet 4 — merges "A
 
   it('is false for a real asset id', () => {
     expect(isAllDronesOption('known-1')).toBe(false);
+  });
+});
+
+describe('nextCollapseAction (docs/UI-REDESIGN-PLAN.md Wave 2 D-D — Esc\'s "closest thing open, first")', () => {
+  it('closes an open tool-rail drawer first, even if the stop-confirm/map are also open', () => {
+    expect(nextCollapseAction({ panelOpen: true, stopConfirmOpen: true, mapVisible: true })).toBe('panel');
+  });
+
+  it('closes the stop-confirm next once no drawer is open', () => {
+    expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: true, mapVisible: true })).toBe('stop-confirm');
+  });
+
+  it('hides the map inset last, once nothing else is open', () => {
+    expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: false, mapVisible: true })).toBe('map');
+  });
+
+  it('is a no-op when nothing is open', () => {
+    expect(nextCollapseAction({ panelOpen: false, stopConfirmOpen: false, mapVisible: false })).toBeNull();
   });
 });

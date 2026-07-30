@@ -1,15 +1,11 @@
-/* Reuses `.card`/`.btn`/`.empty` from `src/styles.css`. This stylesheet only owns the add-row and
-   the pilot list, both wrapping on a narrow viewport. `:host{display:contents}` makes the inner
-   `.card` the real grid child of `asset-detail.css#.detail-grid`; that file's own `.span-2`/
-   `.detail-grid .card` rules are view-encapsulated to the asset-detail component and can't reach
-   this component's DOM, so the full-width span + gap-not-margin spacing are set here instead. */
+/* Reuses `.card`/`.btn`/`.empty` from `src/styles.css`. Mounted inside `AssetDetailPage`'s "Pilots"
+   `vision-side-panel` drawer (docs/UI-REDESIGN-PLAN.md Wave 3) — the drawer body already provides
+   the card-like chrome/padding, so this component renders as a plain block, not a second nested
+   card; before Wave 3 it was a `.detail-grid` grid child instead (`:host{display:contents}` plus a
+   local `.card{grid-column:1/-1}` override so it could span the old two-column grid — both gone now
+   that it no longer sits in that grid at all). */
 :host {
-  display: contents;
-}
-
-.card {
-  grid-column: 1 / -1;
-  margin-bottom: 0;
+  display: block;
 }
 
 .pilots-add {
@@ -17,7 +13,7 @@
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-  margin-bottom: 0.85rem;
+  margin: 0.85rem 0;
 }
 
 .pilots-add select {
@@ -33,6 +29,8 @@
 
 .pilots-list {
   list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;

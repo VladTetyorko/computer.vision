@@ -4,19 +4,62 @@
     <span class="brand-name">Vision</span>
   </a>
 
-  <nav class="tabs" aria-label="Sections">
-    @for (tab of tabs; track tab.path) {
-      <a class="tab" [routerLink]="tab.path" routerLinkActive="active">{{ tab.label }}</a>
-    }
-    <details class="tab-more" routerLinkActive="active" #more>
-      <summary class="tab">More</summary>
-      <div class="tab-more-menu" (click)="more.open = false">
-        @for (link of moreLinks; track link.path) {
-          <a [routerLink]="link.path" routerLinkActive="active">{{ link.label }}</a>
-        }
+  <!-- ---- Wide layout: one trigger + one dropdown per mode (docs/UI-REDESIGN-PLAN.md Wave 1,
+       hidden below --bp-sm/640px in favor of .modes-narrow below) ------------------------------ -->
+  <nav class="modes modes-wide" aria-label="Modes">
+    @for (mode of modes; track mode.id) {
+      <div class="mode" routerLinkActive="active">
+        <a class="mode-link" [routerLink]="mode.hubRoute">
+          <vision-icon [name]="mode.icon" [size]="16" />
+          {{ mode.label }}
+        </a>
+        <details class="mode-more" #modeMenu>
+          <summary class="mode-more-trigger" [attr.aria-label]="mode.label + ' sections'">
+            <vision-icon name="chevron-down" [size]="14" />
+          </summary>
+          <div class="mode-more-menu" (click)="modeMenu.open = false">
+            @for (entry of mode.entries; track entry.name) {
+              <a [routerLink]="entry.to">
+                <vision-icon [name]="entry.icon" [size]="16" />
+                <span class="entry-name">{{ entry.name }}</span>
+                @if (entry.badge; as badge) {
+                  <span class="chip">{{ badge }}</span>
+                }
+              </a>
+            }
+          </div>
+        </details>
       </div>
-    </details>
+    }
   </nav>
+
+  <!-- ---- Narrow layout: every mode's entries collapse into one combined, labeled "Menu"
+       disclosure (docs/UI-REDESIGN-PLAN.md Wave 1: "modes collapse into a menu; keep it
+       understandable (labeled)") — shown only below --bp-sm/640px, see app.css. ------------------ -->
+  <details class="modes-narrow" routerLinkActive="active" #modesMenu>
+    <summary class="tab">
+      <vision-icon name="grid" [size]="16" />
+      Menu
+    </summary>
+    <div class="modes-narrow-menu" (click)="modesMenu.open = false">
+      @for (mode of modes; track mode.id) {
+        <div class="modes-narrow-group">
+          <a class="modes-narrow-mode" [routerLink]="mode.hubRoute">
+            <vision-icon [name]="mode.icon" [size]="16" />
+            {{ mode.label }}
+          </a>
+          @for (entry of mode.entries; track entry.name) {
+            <a class="modes-narrow-entry" [routerLink]="entry.to">
+              {{ entry.name }}
+              @if (entry.badge; as badge) {
+                <span class="chip">{{ badge }}</span>
+              }
+            </a>
+          }
+        </div>
+      }
+    </div>
+  </details>
 
   <div class="status">
     <vision-identity-chip />

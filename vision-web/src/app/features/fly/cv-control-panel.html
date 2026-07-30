@@ -1,0 +1,155 @@
+@if (open()) {
+  <vision-side-panel title="Detection" icon="scan" subtitle="Model · classes · confidence" (close)="close.emit()">
+    <p class="muted hint cv-scope-hint">
+      @if (streamId()) {
+        Changes below apply live to the running stream.
+      } @else {
+        No stream running yet — changes are saved and applied on the next Start.
+      }
+    </p>
+
+    <!-- ---- Model picker ------------------------------------------------------------------- -->
+    <section class="cv-section">
+      <span class="label">Model</span>
+      @if (models().length === 0) {
+        <p class="muted hint">
+          Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
+        </p>
+      } @else {
+        <div class="model-list" role="radiogroup" aria-label="Detection model">
+          @for (m of models(); track m.id) {
+            <button
+              type="button"
+              class="model-option"
+              role="radio"
+              [attr.aria-checked]="m.id === settings.effective().model"
+              [class.selected]="m.id === settings.effective().model"
+              [disabled]="modelBusy()"
+              (click)="onModelChange(m.id)"
+            >
+              <span class="model-name">{{ m.displayName }}</span>
+              <span class="chip model-kind">{{ m.kind }}</span>
+            </button>
+          }
+        </div>
+      }
+      @if (modelBusy()) {
+        <p class="muted hint">Applying — re-arming detection…</p>
+      }
+    </section>
+
+    <!-- ---- Classes: a checklist built from what the model is really seeing ----------------- -->
+    <section class="cv-section" [class.emphasized]="isOpenVocab()">
+      <div class="row spread">
+        <span class="label">
+          Classes
+          @if (isOpenVocab()) {
+            <span class="chip warn">Primary control for this model</span>
+          }
+        </span>
+      </div>
+
+      @if (settings.effective().labelFilter.length === 0) {
+        <p class="muted hint">Showing every class this model detects.</p>
+      } @else {
+        <p class="muted hint">
+          Showing {{ settings.effective().labelFilter.length }} of the classes below — the rest are hidden.
+        </p>
+      }
+
+      @if (chips().length > 0) {
+        <div class="chip-checklist" role="group" aria-label="Classes seen">
+          @for (label of chips(); track label) {
+            <button
+              type="button"
+              class="class-chip"
+              [class.checked]="isChecked(label)"
+              [attr.aria-pressed]="isChecked(label)"
+              (click)="toggleChip(label)"
+              [title]="isChecked(label) ? 'Showing — click to hide' : 'Hidden — click to show'"
+            >
+              <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
+              {{ label }}
+            </button>
+          }
+        </div>
+      } @else {
+        <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
+      }
+
+      <div class="chip-add-row">
+        <input
+          [value]="newLabelText()"
+          (input)="newLabelText.set($any($event.target).value)"
+          (keydown.enter)="addClass()"
+          placeholder="Add a class not seen yet (e.g. airplane)"
+          aria-label="Add a class to the filter"
+        />
+        <button type="button" class="btn secondary small" (click)="addClass()" [disabled]="!newLabelText().trim()">
+          Add
+        </button>
+      </div>
+
+      <div class="chip-action-row">
+        <button type="button" class="btn secondary small" (click)="fillPreset()">
+          + People, vehicles &amp; buildings
+        </button>
+        @if (settings.effective().labelFilter.length > 0) {
+          <button type="button" class="btn secondary small" (click)="clearLabelFilter()">Show all</button>
+        }
+      </div>
+      <p class="muted hint">
+        The preset button fills in a common starting set — it never applies on its own, and every
+        chip above stays editable afterward.
+      </p>
+    </section>
+
+    <!-- ---- Confidence / inference rate ------------------------------------------------------ -->
+    <section class="cv-section">
+      <label class="label" for="cv-confidence">
+        Confidence ≥ {{ settings.effective().confidenceThreshold.toFixed(2) }}
+      </label>
+      <input
+        id="cv-confidence"
+        type="range"
+        min="0.05"
+        max="0.95"
+        step="0.05"
+        [value]="settings.effective().confidenceThreshold"
+        (input)="onConfidence($any($event.target).value)"
+      />
+
+      <label class="label" for="cv-fps">Inference {{ settings.effective().inferenceFps }} fps</label>
+      <input
+        id="cv-fps"
+        type="range"
+        min="1"
+        max="30"
+        step="1"
+        [value]="settings.effective().inferenceFps"
+        (input)="onFps($any($event.target).value)"
+      />
+
+      <p class="muted hint">{{ perfHintText() }}</p>
+    </section>
+
+    <!-- ---- Detection on/off ------------------------------------------------------------------ -->
+    <section class="cv-section">
+      <label class="toggle">
+        <input
+          type="checkbox"
+          [checked]="settings.effective().detectionEnabled"
+          (change)="onDetectionEnabledToggle($any($event.target).checked)"
+        />
+        <span>
+          <strong>Detection</strong>
+          <span class="muted">
+            Off stops inference entirely (zero CPU spent detecting) — video keeps streaming either
+            way. Separate from the boxes overlay (shortcut B), which only controls how detections
+            already found are drawn, not whether the model runs.
+          </span>
+        </span>
+      </label>
+    </section>
+  </vision-side-panel>
+}

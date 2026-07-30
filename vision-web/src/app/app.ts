@@ -2,15 +2,12 @@ import { ChangeDetectionStrategy, Component, afterNextRender, computed, inject }
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
+import { NAV_MODES } from './features/hubs/nav-entries';
+import { Icon } from './shared/ui/icon';
 import { IdentityChip } from './shared/ui/identity-chip';
 import { NotificationBell } from './shared/ui/notification-bell';
 import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
-
-interface Tab {
-  readonly path: string;
-  readonly label: string;
-}
 
 /**
  * `<vision-notification-bell>` (`app.html`, next to the existing live-count/online status chips) is
@@ -21,10 +18,33 @@ interface Tab {
  * trigger), not the return of a header action button. See that component's own doc comment for the
  * `EventsStore` cost-model change it introduces (the events poll is now effectively always-on, not
  * just while Wall/Command/an asset page is mounted).
+ *
+ * **Hub-and-spoke nav (docs/UI-REDESIGN-PLAN.md Wave 1, replacing the flat Fly·Command·Warehouse·
+ * Settings tab row + "More ▾" overflow this class used to render directly)**: `NAV_MODES`
+ * (`features/hubs/nav-entries.ts`) is the **one** source of truth for both this header's three
+ * mode triggers/dropdowns (`app.html`) and the three hub launcher pages
+ * (`features/hubs/operate-hub.ts` etc.) — this class only re-exports it as `modes` for the template,
+ * it does not own or duplicate the entry list. Every mode is rendered as **two** independent
+ * affordances, per the Wave 1 task brief: (a) a plain `routerLink` straight to that mode's own hub
+ * page (`/operate`/`/monitor`/`/manage`), and (b) a `<details>` dropdown listing the same mode's
+ * entries — reusing the exact disclosure idiom this app already had for its old single "More ▾"
+ * overflow (`.tab-more`/`.tab-more-menu` in the pre-Wave-1 `app.css`) and `identity-chip`'s own
+ * menu, not a new dropdown component. `app.html` wraps both in one `routerLinkActive="active"`
+ * container per mode — Angular's `RouterLinkActive` directive scans **every** descendant
+ * `routerLink` when placed on an ancestor (the same trick the old `.tab-more` used, with no
+ * `routerLink` of its own, only child links), so a mode lights up as active whenever the hub route
+ * *or any of its own entries* is the current URL (e.g. visiting `/fly` highlights "Operate" even
+ * though `/fly` isn't `/operate` itself) — no separate "which mode is active" logic needed here.
+ *
+ * **Responsive collapse (`--bp-sm`/640px, `app.css`)**: below that width the three per-mode
+ * `<details>` triggers are replaced by a single combined "Menu" `<details>` (`app.html`'s
+ * `.modes-narrow`) listing all three modes' entries, grouped and labeled — never a silent reduction
+ * to icons-only; every existing capability stays one tap away, just relocated behind one disclosure
+ * instead of three.
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, IdentityChip, NotificationBell, ToastHost, UndoToast],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, IdentityChip, NotificationBell, ToastHost, UndoToast],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,38 +52,8 @@ interface Tab {
 export class App {
   protected readonly fleet = inject(FleetStore);
 
-  /**
-   * The plan's own end-state IA (docs/MVP3-PLAN.md "Information architecture change"): **Fly ·
-   * Command · Warehouse · Settings** — job-oriented, one tab per persona's own page (`Fly` the
-   * operator's cockpit, `Command` the manager's dashboard, docs/MVP3-PLAN.md §C-c) plus the
-   * warehouse (labeled **Warehouse**, docs/UX-REWORK-PLAN.md §U-d renamed it from C-c's own
-   * "Assets" — the route underneath is still `/devices`, with `/warehouse` now an alias; every
-   * existing `router.navigate(['/devices', ...])`/`routerLink="/devices"` call site across this app
-   * keeps working verbatim) and `Settings`. No capability lost: `/wall` and
-   * `/map` (and `/live/:deviceId`, never a tab to begin with) are all still fully reachable, just
-   * demoted out of the primary tab row into the "More" overflow (`moreLinks` below, rendered as a
-   * `<details>` dropdown in `app.html` — this app's existing disclosure idiom, see e.g.
-   * `shared/player/stream-info-panel.ts`'s "Technical details", reused here rather than inventing a
-   * new dropdown-menu component). **`/debug` is deliberately not in `moreLinks`**
-   * (docs/UX-REWORK-PLAN.md U-a item 5): its route (`features/debug/debug.routes.ts`) is
-   * untouched and still fully reachable by direct URL, just no longer advertised in any nav
-   * surface — a raw API console isn't a link a pilot/manager should stumble into from "More".
-   *
-   * **`Map` is gone from `moreLinks` (docs/UX-REWORK-PLAN.md §U-c)**: `/map` now redirects into
-   * `/command` (`features/map/map.routes.ts`) — Command absorbed the fleet map, the asset rail, and
-   * the docked live preview, so a separate "Map" link would just be a second door to the same
-   * screen. `Wall` stays (the plan's own user-amendments blockquote: "the Wall stays as its own
-   * route and covers 'all video at once', so Command does NOT absorb Wall").
-   */
-  protected readonly tabs: readonly Tab[] = [
-    { path: '/fly', label: 'Fly' },
-    { path: '/command', label: 'Command' },
-    { path: '/devices', label: 'Warehouse' },
-    { path: '/settings', label: 'Settings' },
-  ];
-
-  /** The plan's "still reachable, not removed" routes — folded into the header's "More" overflow. */
-  protected readonly moreLinks: readonly Tab[] = [{ path: '/wall', label: 'Wall' }];
+  /** The frozen F4 route→mode map — see this class's own doc comment above. */
+  protected readonly modes = NAV_MODES;
 
   protected readonly liveCount = computed(() => this.fleet.streams().length);
   protected readonly offline = computed(() => this.fleet.reachable() === false);

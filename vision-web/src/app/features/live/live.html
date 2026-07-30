@@ -128,20 +128,25 @@
             </header>
 
             <span class="label">Detection model</span>
-            <div class="row segmented" role="group" aria-label="Detection model">
-              @for (option of modelOptions; track option.id) {
-                <button
-                  type="button"
-                  class="btn secondary small"
-                  [class.active]="settings.effective().model === option.id"
-                  [title]="option.hint"
-                  (click)="onModel(option.id)"
-                >
-                  {{ option.label }}
-                </button>
-              }
-            </div>
-            <p class="muted hint">{{ currentModelHint() }}</p>
+            @if (modelOptions().length === 0) {
+              <p class="muted hint">
+                Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
+              </p>
+            } @else {
+              <div class="row segmented" role="group" aria-label="Detection model">
+                @for (option of modelOptions(); track option.id) {
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    [class.active]="settings.effective().model === option.id"
+                    [title]="option.displayName"
+                    (click)="onModel(option.id)"
+                  >
+                    {{ option.displayName }}
+                  </button>
+                }
+              </div>
+            }
 
             <label class="label" for="confidence">
               Confidence ≥ {{ settings.effective().confidenceThreshold.toFixed(2) }}

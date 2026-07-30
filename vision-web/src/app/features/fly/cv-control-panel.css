@@ -1,0 +1,164 @@
+/* This is now drawer *content* only — `<vision-side-panel>` (cv-control-panel.html) owns the head/
+   close chrome, the drawer surface, and the bottom-sheet collapse below `--bp-sm` (docs/UI-REDESIGN-
+   PLAN.md Wave 2, D-E: migration deleted the old hand-rolled `.cv-toggle`/`.cv-drawer`/
+   `.cv-drawer-head` chrome entirely). `:host { display: contents }` keeps this component from
+   introducing its own box in `fly.html`'s `.grid-main` layout — mirrors `shared/ui/confirm-dialog.ts`/
+   `arm-confirm-dialog.css`'s identical convention for a component that is only ever a conditional
+   overlay, never a layout participant itself. Only the truly global, unscoped rules in
+   `src/styles.css` (`.btn`, `.chip`, `.label`, `.muted`, `.mono`, `.row`/`.spread`, native control
+   styling) are relied on below — see that file for anything referenced but not defined here. */
+
+:host {
+  display: contents;
+}
+
+.cv-scope-hint {
+  margin-top: 0;
+}
+
+.cv-section {
+  margin-bottom: 0.9rem;
+}
+
+.cv-section:last-child {
+  margin-bottom: 0;
+}
+
+/* Prominence for the open-vocab model's own primary control (docs/CV-CONTROL-PLAN.md §E) — a soft
+   accent card-within-the-drawer, reusing the existing `--accent`/`--accent-soft` tokens rather than
+   inventing a new color for "this is the important one right now". */
+.cv-section.emphasized {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.7rem;
+}
+
+.hint {
+  font-size: 0.74rem;
+  margin: 0.15rem 0 0.5rem;
+  color: var(--text-muted);
+}
+
+/* ---- Model picker --------------------------------------------------------------------------- */
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  color: var(--text);
+  font-size: 0.82rem;
+  cursor: pointer;
+  /* Comfortable tap target on touch, not just a thin text row. */
+  min-height: 2.5rem;
+}
+
+.model-option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.model-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.model-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.model-name {
+  min-width: 0;
+}
+
+.model-kind {
+  flex: none;
+  text-transform: uppercase;
+}
+
+/* ---- Class-filter chip checklist ------------------------------------------------------------ */
+
+.chip-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.class-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: var(--radius-pill);
+  background: var(--panel-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  cursor: pointer;
+  min-height: 1.9rem;
+}
+
+.class-chip:hover {
+  border-color: var(--accent);
+}
+
+.class-chip.checked {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: #a9c8ff;
+}
+
+.chip-check {
+  width: 0.85em;
+  display: inline-block;
+  text-align: center;
+}
+
+.chip-add-row,
+.chip-action-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+
+.chip-add-row input {
+  flex: 1;
+  min-width: 8rem;
+  width: auto;
+}
+
+/* ---- Detection on/off toggle ------------------------------------------------------------------ */
+
+.toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.toggle input {
+  margin-top: 0.2rem;
+}

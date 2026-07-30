@@ -1,0 +1,22 @@
+<aside class="side-panel surface-hud-strong" role="dialog" [attr.aria-label]="title()" (keydown.escape)="close.emit()">
+  <header class="side-panel-head" #head tabindex="-1">
+    @if (icon(); as iconName) {
+      <vision-icon [name]="iconName" [size]="20" />
+    }
+    <div class="side-panel-title">
+      {{ title() }}
+      @if (subtitle(); as subtitle) {
+        <span class="sub">{{ subtitle }}</span>
+      }
+    </div>
+    <vision-icon-button icon="close" label="Close panel" (activated)="close.emit()" />
+  </header>
+
+  <div class="side-panel-body">
+    <ng-content />
+  </div>
+
+  <div class="side-panel-foot">
+    <ng-content select="[footer]" />
+  </div>
+</aside>

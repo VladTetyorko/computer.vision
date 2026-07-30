@@ -100,22 +100,29 @@
 
     <div class="knobs">
       <span class="label">Detection model</span>
-      <div class="profiles">
-        @for (option of modelOptions; track option.id) {
-          <button
-            type="button"
-            class="profile"
-            [class.selected]="settings.effective().model === option.id"
-            (click)="onModel(option.id)"
-          >
-            <span class="profile-name">{{ option.label }}</span>
-            <span class="profile-desc muted">{{ option.hint }}</span>
-          </button>
-        }
-      </div>
+      @if (modelOptions().length === 0) {
+        <p class="muted hint">
+          Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
+        </p>
+      } @else {
+        <div class="profiles">
+          @for (option of modelOptions(); track option.id) {
+            <button
+              type="button"
+              class="profile"
+              [class.selected]="settings.effective().model === option.id"
+              (click)="onModel(option.id)"
+            >
+              <span class="profile-name">{{ option.displayName }}</span>
+              <span class="profile-desc muted">{{ option.kind }} model</span>
+            </button>
+          }
+        </div>
+      }
       <p class="muted hint">
         Applied the next time a stream starts — a stream already running keeps the model it
-        started with.
+        started with. Live per-stream control (confidence/rate/classes/detection on-off, plus a
+        live model swap) lives on the Fly cockpit's own Detection panel while flying.
       </p>
 
       <label class="label" for="s-confidence">

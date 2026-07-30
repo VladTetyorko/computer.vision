@@ -50,23 +50,38 @@
     background: var(--accent);
 }
 
-.tabs {
+/* ---- Hub-and-spoke mode nav (docs/UI-REDESIGN-PLAN.md Wave 1) --------------------------------
+   Replaces the old flat `.tabs`/`.tab` row + single "More ▾" `.tab-more` overflow. Each mode is
+   two affordances sharing one `.mode` wrapper: `.mode-link` (a plain routerLink to the hub) and
+   `.mode-more` (a `<details>` dropdown of that mode's own entries) — `routerLinkActive="active"`
+   sits on `.mode` itself (no routerLink of its own), which is exactly the pre-existing `.tab-more`
+   trick: Angular's `RouterLinkActive` scans every *descendant* routerLink, so `.mode` lights up
+   whenever the hub route *or any entry inside its dropdown* is the current URL. Typographic
+   recipe (uppercase, 600 weight, loosened tracking, muted → text on hover, accent underline when
+   active) is unchanged from the old `.tab`. */
+.modes {
     display: flex;
-    gap: 0.25rem;
+    align-items: center;
     height: 100%;
 }
 
-/* Chrome/label typographic scale (docs/UX-REWORK-PLAN.md §U-b item 3): this app already had one
-   good instance of it (`.label` in `src/styles.css` — uppercase, 600 tracking, muted) and `th`
-   mirrors it independently; this systematizes the same treatment onto the header's own nav, the
-   one piece of top-level chrome that didn't have it. Two deliberate registers, not one: *display*
-   text (`h1`–`h3`, `.brand`) stays mixed-case, 600 weight, tight `-0.01em` tracking; *structural/
-   label* text (`.label`, `th`, and now `.tab`) goes uppercase, loosened tracking, because it's
-   naming a slot/category rather than being read as prose. */
-.tab {
+.modes-wide {
+    gap: var(--space-1);
+}
+
+.mode {
+    position: relative;
     display: flex;
     align-items: center;
-    padding: 0 0.85rem;
+    height: 100%;
+}
+
+.mode-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: 100%;
+    padding: 0 var(--space-2) 0 var(--space-3);
     color: var(--text-muted);
     font-size: 0.78rem;
     font-weight: 600;
@@ -76,49 +91,52 @@
     transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-.tab:hover {
+.mode-link:hover {
     color: var(--text);
 }
 
-.tab.active {
+.mode.active .mode-link {
     color: var(--text);
     border-bottom-color: var(--accent);
 }
 
-/* "More" overflow (docs/MVP3-PLAN.md §C-c's IA change) — a native <details> disclosure, this app's
-   existing pattern for a collapsed set of secondary links (see e.g. shared/player/stream-info-panel.ts's
-   "Technical details"), not a new dropdown-menu component. Only the header-context chrome below is
-   new; <details>/<summary> themselves are unstyled everywhere else in this app on purpose. */
-.tab-more {
+.mode-more {
     position: relative;
     display: flex;
     align-items: center;
+    height: 100%;
 }
 
-.tab-more > summary {
+.mode-more-trigger {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    padding: 0 var(--space-2);
+    color: var(--text-muted);
     cursor: pointer;
     list-style: none;
+    transition: color 0.15s ease;
 }
 
-.tab-more > summary::-webkit-details-marker {
+.mode-more-trigger::-webkit-details-marker {
     display: none;
 }
 
-.tab-more.active > summary {
+.mode-more-trigger:hover,
+.mode.active .mode-more-trigger {
     color: var(--text);
-    border-bottom-color: var(--accent);
 }
 
-.tab-more-menu {
+.mode-more-menu {
     position: absolute;
     top: 100%;
     left: 0;
     margin-top: 0.4rem;
-    min-width: 8rem;
-    padding: 0.35rem;
+    min-width: 14rem;
+    padding: var(--space-2);
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 0.1rem;
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -126,15 +144,116 @@
     z-index: 30;
 }
 
-.tab-more-menu a {
-    padding: 0.4rem 0.6rem;
+.mode-more-menu a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2);
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     font-size: 0.85rem;
 }
 
-.tab-more-menu a:hover,
-.tab-more-menu a.active {
+.mode-more-menu a:hover,
+.mode-more-menu a.active {
+    background: var(--panel-hover);
+    color: var(--text);
+}
+
+.mode-more-menu .entry-name {
+    flex: 1;
+}
+
+.mode-more-menu .chip {
+    flex: none;
+}
+
+/* ---- Narrow ("Menu") layout — hidden by default; shown only below --bp-sm/640px (see the media
+   query at the bottom of this file). One combined `<details>` replacing all three `.mode`
+   triggers, grouped and labeled per mode so nothing is reduced to an unlabeled icon. */
+.modes-narrow {
+    display: none;
+    position: relative;
+    align-items: center;
+}
+
+.modes-narrow > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    cursor: pointer;
+    list-style: none;
+}
+
+.modes-narrow > summary::-webkit-details-marker {
+    display: none;
+}
+
+.modes-narrow.active > summary {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+}
+
+.modes-narrow-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.4rem;
+    min-width: 15rem;
+    max-height: calc(100vh - var(--header-height) - var(--space-4));
+    overflow-y: auto;
+    padding: var(--space-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+    z-index: 30;
+}
+
+.modes-narrow-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.modes-narrow-group + .modes-narrow-group {
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border);
+}
+
+.modes-narrow-mode {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    color: var(--text);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-sm);
+}
+
+.modes-narrow-mode:hover,
+.modes-narrow-mode.active {
+    background: var(--panel-hover);
+}
+
+.modes-narrow-entry {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-6);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    border-radius: var(--radius-sm);
+}
+
+.modes-narrow-entry:hover,
+.modes-narrow-entry.active {
     background: var(--panel-hover);
     color: var(--text);
 }
@@ -161,6 +280,8 @@
     border-radius: 4px;
 }
 
+/* --bp-sm (styles.css F1) — below this width the header genuinely restructures, not just shrinks:
+   the three wide mode triggers hide in favor of the single combined "Menu" disclosure above. */
 @media (max-width: 640px) {
     .app-header {
         gap: 0.75rem;
@@ -171,7 +292,11 @@
         display: none;
     }
 
-    .tab {
-        padding: 0 0.6rem;
+    .modes-wide {
+        display: none;
+    }
+
+    .modes-narrow {
+        display: flex;
     }
 }

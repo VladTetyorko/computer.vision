@@ -36,6 +36,44 @@ export function freshestSample(
   return freshest;
 }
 
+// --- Telemetry facts formatting (docs/UI-REDESIGN-PLAN.md Wave 3) -------------------------------
+// Shared between the overview's freshest-telemetry summary card and the "Full telemetry" drill-in
+// drawer's per-device panels — before this wave each caller inlined its own `toFixed`/`'—'`
+// formatting directly in the template; the overview's new summary card needed the identical shape
+// a second time, so this is the "second consumer → pull it out" moment (mirrors
+// `groupTelemetryByDevice`'s own history above).
+
+/** One row of a telemetry facts grid. `mono` marks the one row (Position) that also carried the
+ *  `.mono` class in the original inline markup — tabular-nums coordinates, not the free-form units. */
+export interface TelemetryFactRow {
+  readonly label: string;
+  readonly value: string;
+  readonly mono?: boolean;
+}
+
+/**
+ * Position/altitude/heading/battery, each real or `'—'` — never a fabricated reading.
+ * Deliberately excludes sample age: callers show that separately, since "how stale" depends on
+ * which clock the caller is comparing against (the per-device drawer's own device clock vs. the
+ * overview summary's asset-wide freshest clock) — folding it in here would force one caller's
+ * clock onto the other.
+ */
+export function telemetryFactRows(sample: TelemetrySample | undefined): readonly TelemetryFactRow[] {
+  return [
+    {
+      label: 'Position',
+      value:
+        sample?.latitude !== undefined && sample?.longitude !== undefined
+          ? `${sample.latitude.toFixed(5)}, ${sample.longitude.toFixed(5)}`
+          : '—',
+      mono: true,
+    },
+    { label: 'Altitude', value: sample?.altitudeMeters !== undefined ? `${sample.altitudeMeters.toFixed(0)} m` : '—' },
+    { label: 'Heading', value: sample?.headingDegrees !== undefined ? `${sample.headingDegrees.toFixed(0)}°` : '—' },
+    { label: 'Battery', value: sample?.batteryPercent !== undefined ? `${sample.batteryPercent.toFixed(0)}%` : '—' },
+  ];
+}
+
 // --- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3 — advanced-mode key/value editor) ----
 
 /** One row of the advanced-mode attributes editor. */

@@ -1,62 +1,51 @@
+/* This is now drawer *content* only — `<vision-side-panel>` (flight-command-panel.html) owns the
+   head/close chrome, the drawer surface, and the bottom-sheet collapse below `--bp-sm`
+   (docs/UI-REDESIGN-PLAN.md Wave 2, D-E: migration deleted the old hand-rolled frosted-pill
+   `.command-cluster` "island" entirely — see `mode-picker`/`arm-btn` below for what's left).
+   `:host { display: contents }` keeps this component from introducing its own box in `fly.html`'s
+   `.grid-main` layout, mirroring `cv-control-panel.css`'s identical convention. */
+
 :host {
   display: contents;
 }
 
-/* One frosted-pill "island" for the whole cluster (mode picker + Set + Arm + Disarm) rather than
-   four separate loose controls in `.hud-header`'s already-busy row — mirrors `fly.css`'s own
-   `.switcher-control` chrome (background/blur/border/radius) so this reads as one more control
-   group in the same visual family, not a foreign insert. */
+/* Plain vertical layout inside the drawer body — full-width rows, roomy buttons (large touch
+   targets on a phone-width bottom sheet), not the old frosted-pill "island" squeezed into the
+   header row. */
 .command-cluster {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: rgb(6 9 14 / 62%);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgb(255 255 255 / 9%);
-  border-radius: var(--radius-pill);
-  padding: 0.3rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.command-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.command-row .btn {
+  white-space: nowrap;
+}
+
+/* The Arm/Disarm row: two equal-width, roomy buttons rather than content-sized ones — this is the
+   one row in the drawer where both actions deserve equal visual weight. */
+.command-row-danger .btn {
+  flex: 1;
+  justify-content: center;
 }
 
 .mode-picker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
+  flex: 1;
+  min-width: 8rem;
+  display: flex;
+  flex-direction: column;
   cursor: pointer;
-}
-
-.mode-picker-label {
-  flex: none;
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgb(231 236 243 / 60%);
 }
 
 .mode-select {
-  max-width: 7.5rem;
-  background: transparent;
-  border: none;
-  color: #e7ecf3;
-  padding: 0;
-  font-size: 0.78rem;
   cursor: pointer;
-}
-
-.mode-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-/* Same native-popup legibility fix as `fly.css`'s `.switcher option`. */
-.mode-select option {
-  background: var(--panel-raised);
-  color: var(--text);
-}
-
-.command-cluster .btn.small {
-  white-space: nowrap;
 }
 
 /* A quiet visual hint that Arm carries more weight than a plain `.btn.danger` (Disarm, Stop stream,

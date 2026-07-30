@@ -81,6 +81,45 @@ export function cycleBoxesMode(current: BoxesMode): BoxesMode {
 /** How many rows the events ticker overlay shows at once — glanceable, not a full feed (see the Wall rail for that). */
 export const TICKER_MAX_EVENTS = 4;
 
+// --- Tool-rail / drawer wiring (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) ---------------------------
+// The right-edge icon tool-rail replaces the split `mapVisible`/`detectionsStripOpen`/`cvPanelOpen`/
+// `shortcutsOpen` open-flags with a single per-page `PanelState` (`core/panel-state.ts`). The ids
+// below are the frozen set (D-D) — typed here (not just inline string literals in `fly.html`/
+// `fly.ts`) purely so a typo in a rail button's `panels.toggle(...)`/`panels.isOpen(...)` call is a
+// compile error, not a silently-dead button; `PanelState` itself stays a generic `string` id (it has
+// no reason to know this page's specific ids) per its own doc comment.
+
+/** The tool-rail's frozen ids, in their frozen left-to-right order (docs/UI-REDESIGN-PLAN.md D-D). */
+export type ToolRailPanelId = 'flight' | 'cv' | 'detections' | 'layers' | 'help';
+
+/**
+ * `Esc`'s own "closest thing open, first" priority (docs/UI-REDESIGN-PLAN.md D-D: "Esc calls
+ * `panels.close()`") — extracted from `fly.ts#collapseOverlays()` so the cascade order itself (any
+ * open tool-rail drawer, then the Stop-stream confirm, then the map inset) is unit-testable without
+ * a real `PanelState`/DOM. Mirrors the pre-Wave-2 cascade's own order (shortcuts/CV/detections were
+ * already the drawers-in-training even then, just modeled as separate flags) with one change: the
+ * map inset moves to *last* rather than sharing the old detections-strip slot, since it's the one
+ * overlay this wave deliberately keeps outside `PanelState` (D-D: "the map inset stays a separate
+ * persisted toggle … since it is glanceable, not a modal drawer") and is the least "in the way" of
+ * the three.
+ */
+export function nextCollapseAction(state: {
+  readonly panelOpen: boolean;
+  readonly stopConfirmOpen: boolean;
+  readonly mapVisible: boolean;
+}): 'panel' | 'stop-confirm' | 'map' | null {
+  if (state.panelOpen) {
+    return 'panel';
+  }
+  if (state.stopConfirmOpen) {
+    return 'stop-confirm';
+  }
+  if (state.mapVisible) {
+    return 'map';
+  }
+  return null;
+}
+
 /**
  * Whether `candidateAssetId` is the header switcher `<option>` that should carry the native
  * `selected` property (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2 — "switcher shows wrong selected
