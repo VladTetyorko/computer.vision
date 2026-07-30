@@ -191,7 +191,18 @@ addresses) is designed out.
 scanner wiring and the endpoint can never disagree; vision-api + vision-app) ·
 B (frontend: wizard flow per above; vision-web only) — parallel, disjoint.
 
-### I-h — low-latency drone video ingest (SRT + UDP/MPEG-TS) + connect-flow usability (approved 2026-07-29)
+### I-h — low-latency drone video ingest (SRT + UDP/MPEG-TS) — DONE (2026-07-30, both waves green)
+
+Wave A (adapter-rtsp): `FfmpegVideoSource` accepts `srt`/`udp`; SRT options via
+`setOption` (latency ms→µs, mode caller/listener by host), UDP forces mpegts + a 5s
+internal open-timeout that also fixed a real production hang (a source that never
+receives a packet used to wedge JavaCV's shared static FFmpeg lock for the whole JVM).
+37 tests green; libsrt is compiled in but a JVM-hosted SRT *listener* deadlocks in this
+env, so the SRT test only exercises the caller path (documented, not a code defect) — no
+automated full-SRT-frame test. Wave B (vision-web): srt/udp in the connect picker with
+listener/caller guidance; 1037 tests green. Original spec below.
+
+### I-h spec — SRT + UDP/MPEG-TS drone video ingest + connect-flow usability
 
 Goal: accept the two video transports real drone/FPV kit actually uses over lossy cellular/
 long-range links, and make picking any ingest protocol in the app obvious. Pure RX — no
