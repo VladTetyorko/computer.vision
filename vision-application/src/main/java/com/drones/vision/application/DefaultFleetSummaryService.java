@@ -86,7 +86,17 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
 
     @Override
     public FleetSummary summary(boolean includeArchived) {
-        List<AssetSummary> summaries = assetService.assets(includeArchived);
+        return summarize(assetService.assets(includeArchived));
+    }
+
+    @Override
+    public FleetSummary summary(VisibilityScope scope, boolean includeArchived) {
+        Objects.requireNonNull(scope, "scope must not be null");
+        return summarize(assetService.assets(scope, includeArchived));
+    }
+
+    /** Aggregates an already-resolved (scoped or unscoped) asset-summary set into the read model. */
+    private FleetSummary summarize(List<AssetSummary> summaries) {
         Map<DeviceId, StreamId> streamByDevice = streamByDevice();
         Map<AssetId, Integer> openEventCounts = openEventCounts();
         Instant now = Instant.now();

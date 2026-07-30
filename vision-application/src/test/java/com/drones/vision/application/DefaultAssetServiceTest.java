@@ -316,6 +316,53 @@ class DefaultAssetServiceTest {
         assertEquals(List.of(live, gone), service.assets(true).stream().map(AssetSummary::asset).toList());
     }
 
+    // --- Scoped reads (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1) ----------
+
+    @Test
+    void scopedAssetsUnboundedReturnsExactlyTheUnscopedResult() {
+        Asset live = asset(Set.of(DeviceId.random()));
+        Asset gone = asset(Set.of(DeviceId.random())).withState(LifecycleState.DELETED);
+        when(assetRepository.findAll()).thenReturn(List.of(live, gone));
+
+        assertEquals(service.assets(false), service.assets(VisibilityScope.unbounded(), false));
+        assertEquals(service.assets(true), service.assets(VisibilityScope.unbounded(), true));
+    }
+
+    @Test
+    void scopedAssetsGroupScopeKeepsOnlyAssetsOwnedByAScopedGroup() {
+        GroupId groupA = GroupId.random();
+        GroupId groupB = GroupId.random();
+        Asset inA = new Asset(AssetId.random(), "A", DRONE, new Ownership(actingUser, groupA),
+                Set.of(DeviceId.random()), Map.of());
+        Asset inB = new Asset(AssetId.random(), "B", DRONE, new Ownership(actingUser, groupB),
+                Set.of(DeviceId.random()), Map.of());
+        when(assetRepository.findAll()).thenReturn(List.of(inA, inB));
+
+        List<Asset> visible = service.assets(VisibilityScope.groups(Set.of(groupA)), false).stream()
+                .map(AssetSummary::asset).toList();
+
+        assertEquals(List.of(inA), visible);
+    }
+
+    @Test
+    void scopedDetailsThrowsNoSuchElementWhenAssetIsOutOfScope() {
+        Asset stored = new Asset(AssetId.random(), "A", DRONE, new Ownership(actingUser, GroupId.random()),
+                Set.of(DeviceId.random()), Map.of());
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.details(VisibilityScope.groups(Set.of()), stored.id()));
+    }
+
+    @Test
+    void scopedDetailsUnboundedReturnsTheSameDetails() {
+        Asset stored = asset(Set.of(DeviceId.random()));
+        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
+
+        assertEquals(service.details(stored.id()),
+                service.details(VisibilityScope.unbounded(), stored.id()));
+    }
+
     // --- Editing -------------------------------------------------------------
 
     @Test

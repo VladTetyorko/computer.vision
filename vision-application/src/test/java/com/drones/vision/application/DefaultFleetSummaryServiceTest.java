@@ -89,6 +89,19 @@ class DefaultFleetSummaryServiceTest {
     }
 
     @Test
+    void scopedSummaryAggregatesOnlyTheScopedAssetSet() {
+        VisibilityScope scope = VisibilityScope.groups(Set.of(GroupId.random()));
+        Asset drone = asset("d", DRONE, LifecycleState.ACTIVE, DeviceId.random());
+        when(assetService.assets(scope, false)).thenReturn(List.of(summary(drone, "Drone", AssetStatus.OFFLINE)));
+
+        FleetSummary result = service.summary(scope, false);
+
+        verify(assetService).assets(scope, false);
+        assertEquals(1, result.totalAssets());
+        assertEquals(1, result.categories().size());
+    }
+
+    @Test
     void summaryComposesPerCategoryLifecycleAndStreamingCounts() {
         Asset droneStreaming = asset("Drone A", DRONE, LifecycleState.ACTIVE, DeviceId.random());
         Asset droneOffline = asset("Drone B", DRONE, LifecycleState.ACTIVE, DeviceId.random());

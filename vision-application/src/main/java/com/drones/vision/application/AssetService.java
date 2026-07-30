@@ -67,6 +67,21 @@ public interface AssetService {
     List<AssetSummary> assets(boolean includeDeleted);
 
     /**
+     * Lists the assets a given visibility scope may see, as summaries (docs/U-SCOPE-PLAN.md, U-e
+     * slice 2, feature 1).
+     *
+     * <p>Filters the unscoped {@link #assets(boolean)} result by {@link VisibilityScope#includes};
+     * an {@link VisibilityScope#unbounded()} scope therefore returns precisely the unscoped result —
+     * the slice's guardrail. Internal/system callers that must see everything keep using the
+     * unscoped {@link #assets(boolean)} directly.
+     *
+     * @param scope          what the acting user may see
+     * @param includeDeleted whether to include soft-deleted assets
+     * @return an immutable snapshot, filtered to {@code scope}
+     */
+    List<AssetSummary> assets(VisibilityScope scope, boolean includeDeleted);
+
+    /**
      * Assembles the full detail view of one asset.
      *
      * @param id the asset id
@@ -74,6 +89,22 @@ public interface AssetService {
      * @throws java.util.NoSuchElementException if no asset has that id
      */
     AssetDetails details(AssetId id);
+
+    /**
+     * Assembles the full detail view of one asset the given scope may see (docs/U-SCOPE-PLAN.md,
+     * U-e slice 2, feature 1).
+     *
+     * <p>When the asset exists but is outside {@code scope}, this throws {@link
+     * java.util.NoSuchElementException} — the same 404 as an unknown id, deliberately, so a scoped
+     * read never reveals the existence of an asset outside the caller's scope (a 403 would). An
+     * {@link VisibilityScope#unbounded()} scope behaves exactly as {@link #details(AssetId)}.
+     *
+     * @param scope what the acting user may see
+     * @param id    the asset id
+     * @return summary, devices and recent usages
+     * @throws java.util.NoSuchElementException if no asset has that id, or it is outside {@code scope}
+     */
+    AssetDetails details(VisibilityScope scope, AssetId id);
 
     /**
      * Applies a partial edit.

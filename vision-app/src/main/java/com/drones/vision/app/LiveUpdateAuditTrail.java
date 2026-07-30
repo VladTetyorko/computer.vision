@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.domain.model.AuditEntry;
 import com.drones.vision.domain.model.AuditTargetType;
+import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 
@@ -52,5 +53,10 @@ final class LiveUpdateAuditTrail implements AuditTrailPort {
     @Override
     public List<AuditEntry> findByTarget(AuditTargetType targetType, String targetId, int limit) {
         return delegate.findByTarget(targetType, targetId, limit);
+    }
+
+    @Override
+    public List<AuditEntry> findByActor(UserId actor, int limit) {
+        return delegate.findByActor(actor, limit);
     }
 }

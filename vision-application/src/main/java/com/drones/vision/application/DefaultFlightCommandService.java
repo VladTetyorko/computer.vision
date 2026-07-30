@@ -1,5 +1,6 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.AuditAction;
 import com.drones.vision.domain.model.AuditEntry;
@@ -53,6 +54,14 @@ import java.util.Objects;
  * free-form {@code summary}/{@code details} carry the actual specifics ({@code command}, {@code
  * result}).
  *
+ * <h2>Scope gate (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 3)</h2>
+ * {@link #returnToHome} takes the acting user's {@link VisibilityScope}. When the scope does not
+ * include the resolved asset the command is refused up front with {@link AccessDeniedException}
+ * (403), <em>and audited</em> with {@code result=DENIED:out of scope} — an authorization refusal is
+ * a security-relevant event worth a trail line, unlike the "no commandable device" config guard,
+ * which is not an attempt and is not audited. An {@link VisibilityScope#unbounded()} scope includes
+ * every asset, so the gate never fires for ADMIN / auth-off — behavior is unchanged from before.
+ *
  * <h2>Threading</h2>
  * Holds no mutable state — all shared state is reached through the injected collaborators.
  */
@@ -63,6 +72,7 @@ public final class DefaultFlightCommandService implements FlightCommandService {
     private static final String ATTR_COMMAND = "command";
     private static final String ATTR_RESULT = "result";
     private static final String REFUSED_PREFIX = "REFUSED:";
+    private static final String DENIED_OUT_OF_SCOPE = "DENIED:out of scope";
 
     private final AssetService assetService;
     private final FlightCommandPort flightCommandPort;
@@ -76,11 +86,22 @@ public final class DefaultFlightCommandService implements FlightCommandService {
     }
 
     @Override
-    public CommandResult returnToHome(AssetId assetId, UserId actor) {
+    public CommandResult returnToHome(AssetId assetId, UserId actor, VisibilityScope scope) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
+        Objects.requireNonNull(scope, "scope must not be null");
 
         AssetDetails details = assetService.details(assetId); // NoSuchElementException -> 404
+        Asset asset = details.summary().asset();
+        if (!scope.includes(asset)) {
+            // The user may see the asset does not exist for them (a read would 404), but for a
+            // command it is more honest to deny explicitly (403). An unbounded scope never lands
+            // here. The denial is audited: an authorization refusal is a security-relevant event,
+            // unlike the "no commandable device" config guard below, which is not an attempt.
+            audit(actor, assetId, DENIED_OUT_OF_SCOPE);
+            throw new AccessDeniedException(
+                    "Asset " + assetId.value() + " is outside your scope; you may not command it");
+        }
         Device device = resolveCommandableDevice(assetId, details.devices());
 
         try {

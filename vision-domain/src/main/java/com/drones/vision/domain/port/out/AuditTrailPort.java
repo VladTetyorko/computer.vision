@@ -2,6 +2,7 @@ package com.drones.vision.domain.port.out;
 
 import com.drones.vision.domain.model.AuditEntry;
 import com.drones.vision.domain.model.AuditTargetType;
+import com.drones.vision.domain.model.UserId;
 
 import java.util.List;
 
@@ -17,6 +18,8 @@ import java.util.List;
  *       {@code limit}, newest first.</li>
  *   <li>{@link #findByTarget(AuditTargetType, String, int)} returns the newest entries for one
  *       thing, newest first — the history shown on an asset's page.</li>
+ *   <li>{@link #findByActor(UserId, int)} returns the newest entries made by one actor, newest
+ *       first — the "my activity" feed shown to a user (docs/U-SCOPE-PLAN.md, feature 7).</li>
  * </ul>
  *
  * <p>Recording must never break the operation being audited: implementations that can fail
@@ -54,4 +57,13 @@ public interface AuditTrailPort {
      * @return an immutable snapshot, newest first
      */
     List<AuditEntry> findByTarget(AuditTargetType targetType, String targetId, int limit);
+
+    /**
+     * Lists the most recent entries made by one actor, newest first.
+     *
+     * @param actor the acting user whose history to return
+     * @param limit maximum number of entries to return; must be positive
+     * @return an immutable snapshot, newest first
+     */
+    List<AuditEntry> findByActor(UserId actor, int limit);
 }

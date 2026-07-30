@@ -2,6 +2,7 @@ package com.drones.vision.app.devsupport;
 
 import com.drones.vision.domain.model.AuditEntry;
 import com.drones.vision.domain.model.AuditTargetType;
+import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 
 import java.util.Comparator;
@@ -36,6 +37,14 @@ public final class InMemoryAuditTrail implements AuditTrailPort {
     public List<AuditEntry> findByTarget(AuditTargetType targetType, String targetId, int limit) {
         return newestFirst()
                 .filter(entry -> entry.targetType() == targetType && entry.targetId().equals(targetId))
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public List<AuditEntry> findByActor(UserId actor, int limit) {
+        return newestFirst()
+                .filter(entry -> entry.actor().equals(actor))
                 .limit(limit)
                 .toList();
     }

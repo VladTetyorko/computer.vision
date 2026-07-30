@@ -14,7 +14,7 @@ package com.drones.vision.application;
 public interface FleetSummaryService {
 
     /**
-     * Summarizes the fleet.
+     * Summarizes the fleet, unscoped (every asset). Used by internal/system callers.
      *
      * @param includeArchived whether to include soft-deleted ({@link
      *                        com.drones.vision.domain.model.LifecycleState#DELETED}) assets —
@@ -24,4 +24,16 @@ public interface FleetSummaryService {
      * @return the aggregated summary
      */
     FleetSummary summary(boolean includeArchived);
+
+    /**
+     * Summarizes only the fleet a given visibility scope may see (docs/U-SCOPE-PLAN.md, U-e slice 2,
+     * feature 1) — the same aggregation as {@link #summary(boolean)}, over the scoped asset set.
+     *
+     * <p>An {@link VisibilityScope#unbounded()} scope yields exactly {@link #summary(boolean)}.
+     *
+     * @param scope           what the acting user may see
+     * @param includeArchived whether to include soft-deleted assets
+     * @return the aggregated summary, over the assets {@code scope} includes
+     */
+    FleetSummary summary(VisibilityScope scope, boolean includeArchived);
 }

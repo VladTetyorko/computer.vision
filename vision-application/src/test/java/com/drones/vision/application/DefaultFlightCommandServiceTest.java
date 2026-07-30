@@ -72,7 +72,7 @@ class DefaultFlightCommandServiceTest {
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
         when(flightCommandPort.returnToHome(telemetryDevice)).thenReturn(CommandResult.ACCEPTED);
 
-        CommandResult result = service.returnToHome(assetId, actor);
+        CommandResult result = service.returnToHome(assetId, actor, VisibilityScope.unbounded());
 
         assertEquals(CommandResult.ACCEPTED, result);
         ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
@@ -92,7 +92,7 @@ class DefaultFlightCommandServiceTest {
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
         when(flightCommandPort.returnToHome(telemetryDevice)).thenReturn(CommandResult.NO_ACK);
 
-        CommandResult result = service.returnToHome(assetId, actor);
+        CommandResult result = service.returnToHome(assetId, actor, VisibilityScope.unbounded());
 
         assertEquals(CommandResult.NO_ACK, result);
         ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
@@ -104,7 +104,7 @@ class DefaultFlightCommandServiceTest {
     void returnToHomeThrowsNoSuchElementForAnUnknownAsset() {
         when(assetService.details(assetId)).thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
-        assertThrows(NoSuchElementException.class, () -> service.returnToHome(assetId, actor));
+        assertThrows(NoSuchElementException.class, () -> service.returnToHome(assetId, actor, VisibilityScope.unbounded()));
         verify(auditTrail, never()).record(any());
     }
 
@@ -114,7 +114,7 @@ class DefaultFlightCommandServiceTest {
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(false);
 
         IllegalStateException ex =
-                assertThrows(IllegalStateException.class, () -> service.returnToHome(assetId, actor));
+                assertThrows(IllegalStateException.class, () -> service.returnToHome(assetId, actor, VisibilityScope.unbounded()));
         assertTrue(ex.getMessage().contains(assetId.value().toString()));
         verify(flightCommandPort, never()).returnToHome(any());
         verify(auditTrail, never()).record(any());
@@ -133,7 +133,7 @@ class DefaultFlightCommandServiceTest {
         when(flightCommandPort.supports(any())).thenReturn(true);
         when(flightCommandPort.returnToHome(active)).thenReturn(CommandResult.ACCEPTED);
 
-        CommandResult result = service.returnToHome(assetId, actor);
+        CommandResult result = service.returnToHome(assetId, actor, VisibilityScope.unbounded());
 
         assertEquals(CommandResult.ACCEPTED, result);
         verify(flightCommandPort, never()).returnToHome(deactivated);
@@ -148,12 +148,43 @@ class DefaultFlightCommandServiceTest {
                 .thenThrow(new IllegalArgumentException("Betaflight has no return-to-home capability"));
 
         IllegalStateException ex =
-                assertThrows(IllegalStateException.class, () -> service.returnToHome(assetId, actor));
+                assertThrows(IllegalStateException.class, () -> service.returnToHome(assetId, actor, VisibilityScope.unbounded()));
         assertEquals("Betaflight has no return-to-home capability", ex.getMessage());
 
         ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
         verify(auditTrail).record(captor.capture());
         assertEquals("REFUSED:Betaflight has no return-to-home capability", captor.getValue().details().get("result"));
+    }
+
+    @Test
+    void returnToHomeDeniedWhenAssetIsOutOfScopeAndAuditsTheDenial() {
+        stubDetails(telemetryDevice);
+
+        AccessDeniedException ex = assertThrows(AccessDeniedException.class,
+                () -> service.returnToHome(assetId, actor, VisibilityScope.groups(Set.of())));
+        assertTrue(ex.getMessage().contains(assetId.value().toString()));
+
+        verify(flightCommandPort, never()).returnToHome(any());
+        ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditTrail).record(captor.capture());
+        assertEquals("DENIED:out of scope", captor.getValue().details().get("result"));
+    }
+
+    @Test
+    void returnToHomeAllowedWhenAssetIsWithinAGroupScope() {
+        GroupId group = GroupId.random();
+        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(actor, group),
+                Set.of(telemetryDevice.id()), java.util.Map.of());
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        when(assetService.details(assetId))
+                .thenReturn(new AssetDetails(summary, List.of(telemetryDevice), List.of()));
+        when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
+        when(flightCommandPort.returnToHome(telemetryDevice)).thenReturn(CommandResult.ACCEPTED);
+
+        CommandResult result = service.returnToHome(assetId, actor, VisibilityScope.groups(Set.of(group)));
+
+        assertEquals(CommandResult.ACCEPTED, result);
+        verify(flightCommandPort).returnToHome(telemetryDevice);
     }
 
     @Test
@@ -164,7 +195,7 @@ class DefaultFlightCommandServiceTest {
                 .thenThrow(new IllegalStateException("Vehicle sysid 1 refused return-to-home: MAV_RESULT_DENIED"));
 
         IllegalStateException ex =
-                assertThrows(IllegalStateException.class, () -> service.returnToHome(assetId, actor));
+                assertThrows(IllegalStateException.class, () -> service.returnToHome(assetId, actor, VisibilityScope.unbounded()));
         assertEquals("Vehicle sysid 1 refused return-to-home: MAV_RESULT_DENIED", ex.getMessage());
 
         ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);

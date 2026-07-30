@@ -111,6 +111,16 @@ public final class DefaultAssetService implements AssetService {
     }
 
     @Override
+    public List<AssetSummary> assets(VisibilityScope scope, boolean includeDeleted) {
+        Objects.requireNonNull(scope, "scope must not be null");
+        // Reuse the unscoped result and filter: an unbounded scope returns it unchanged (the
+        // guardrail), a bounded one keeps only assets the scope includes.
+        return assets(includeDeleted).stream()
+                .filter(summary -> scope.includes(summary.asset()))
+                .toList();
+    }
+
+    @Override
     public AssetDetails details(AssetId id) {
         Asset asset = require(id);
         List<Device> devices = asset.devices().stream()
@@ -119,6 +129,18 @@ public final class DefaultAssetService implements AssetService {
                 .toList();
         return new AssetDetails(toSummary(asset, streamService.activeDeviceIds()), devices,
                 usageRepository.findRecentByAsset(id, RECENT_USAGES_LIMIT));
+    }
+
+    @Override
+    public AssetDetails details(VisibilityScope scope, AssetId id) {
+        Objects.requireNonNull(scope, "scope must not be null");
+        AssetDetails details = details(id); // NoSuchElementException -> 404 for an unknown id
+        if (!scope.includes(details.summary().asset())) {
+            // Out of scope: report exactly as "unknown" so existence is not revealed (a 404, not a
+            // 403). Same message as require()'s so the two cases are indistinguishable to a caller.
+            throw new NoSuchElementException("Unknown asset: " + id.value());
+        }
+        return details;
     }
 
     // --- Editing -------------------------------------------------------------
