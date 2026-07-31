@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { PanelState } from '../../core/panel-state';
 import { UiStore } from '../../core/ui/ui-store';
 import { relativeTimeLabel } from '../../core/events/events-logic';
 import { ageSeconds, isStale } from '../../core/telemetry/telemetry-logic';
@@ -81,7 +80,7 @@ export class AssetDetailPage {
     return this.editors.isOpen(id);
   }
 
-  protected readonly panels = new PanelState();
+  protected readonly panels = new UiStore();
   protected readonly subView = signal<'overview' | 'usage' | 'hardware'>('overview');
 
   private readonly imageLoadFailed = signal(false);
