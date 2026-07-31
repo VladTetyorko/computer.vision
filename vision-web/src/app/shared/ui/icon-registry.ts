@@ -72,7 +72,8 @@ export type IconName =
   | 'warehouse'
   | 'source'
   | 'pilot'
-  | 'map';
+  | 'map'
+  | 'gamepad';
 
 export const ICONS: Record<IconName, string> = {
   home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10.5V19a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-8.5"/>',
@@ -135,6 +136,9 @@ export const ICONS: Record<IconName, string> = {
     '<line x1="12" y1="14.4" x2="6" y2="19"/><line x1="12" y1="14.4" x2="18" y2="19"/><circle cx="6" cy="5" r="2"/>' +
     '<circle cx="18" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/>',
   battery: '<rect x="2" y="7" width="18" height="10" rx="1.5"/><line x1="22" y1="10" x2="22" y2="14"/><line x1="6" y1="10" x2="6" y2="14"/>',
+  gamepad:
+    '<rect x="2" y="7" width="20" height="10" rx="4"/><line x1="7" y1="10" x2="7" y2="14"/>' +
+    '<line x1="5" y1="12" x2="9" y2="12"/><circle cx="16" cy="11" r="1"/><circle cx="18.5" cy="13.5" r="1"/>',
   satellite:
     '<path d="M15 4a10 10 0 0 1 5 8"/><path d="M13 8a6 6 0 0 1 3 5"/>' +
     '<rect x="8.5" y="8.5" width="5" height="5" rx="1" transform="rotate(-45 11 11)"/>' +

@@ -215,6 +215,13 @@
         />
       }
 
+      <!-- Controller (RC transmitter monitor) — docs/RC-CONTROL-PLAN.md Phase 0. Read-only, not
+           capability-gated (it never touches the drone). Mounted only while open so its Gamepad rAF
+           poll loop runs only then. -->
+      @if (isPanelOpen('rc')) {
+        <vision-rc-monitor (close)="panels.close()" />
+      }
+
       <!-- Detections strip — previously an always-visible bottom-right toggle+strip, now the
            `detections` drawer (docs/UI-REDESIGN-PLAN.md Wave 2 item 5); same `live()` gate as before. -->
       @if (live() && isPanelOpen('detections')) {
@@ -299,6 +306,14 @@
           (activated)="togglePanel('flight')"
         />
       }
+      <!-- Controller (RC monitor) — always available; a read-only monitor, not a command. -->
+      <vision-icon-button
+        icon="gamepad"
+        label="Controller"
+        variant="hud"
+        [active]="isPanelOpen('rc')"
+        (activated)="togglePanel('rc')"
+      />
       @if (!watchMode()) {
         <span class="rail-item">
           <vision-icon-button

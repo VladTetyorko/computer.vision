@@ -41,6 +41,7 @@ import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import { CvControlPanel } from './cv-control-panel';
+import { RcMonitor } from './rc-monitor';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -124,6 +125,7 @@ const LOG_PREFIX = '[fly]';
     ReturnHomeButton,
     FlightCommandPanel,
     CvControlPanel,
+    RcMonitor,
   ],
   templateUrl: './fly.html',
   styleUrl: './fly.css',

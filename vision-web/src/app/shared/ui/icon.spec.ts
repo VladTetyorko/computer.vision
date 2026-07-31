@@ -14,6 +14,8 @@ const FROZEN_NAMES: readonly IconName[] = [
   'ruler', 'power',
   'alert', 'replay', 'history', 'wrench', 'chip', 'firmware', 'report', 'category', 'warehouse',
   'source', 'pilot', 'map',
+  // docs/RC-CONTROL-PLAN.md Phase 0 — the RC transmitter monitor's tool-rail glyph.
+  'gamepad',
 ];
 
 describe('ICONS registry', () => {
