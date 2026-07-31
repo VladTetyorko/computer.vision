@@ -50,7 +50,7 @@
     </vision-side-panel>
   }
 
-  @if (modeConfirmOpen()) {
+  @if (isDialogOpen('mode')) {
     <vision-confirm-dialog
       [message]="modeMessage()"
       confirmLabel="Set mode"
@@ -61,7 +61,7 @@
     />
   }
 
-  @if (disarmConfirmOpen()) {
+  @if (isDialogOpen('disarm')) {
     <vision-confirm-dialog
       [message]="disarmMessage()"
       confirmLabel="Disarm"
@@ -72,7 +72,7 @@
     />
   }
 
-  @if (armConfirmOpen()) {
+  @if (isDialogOpen('arm')) {
     <vision-arm-confirm-dialog
       [assetDisplayName]="assetDisplayName()"
       [busy]="armBusy()"

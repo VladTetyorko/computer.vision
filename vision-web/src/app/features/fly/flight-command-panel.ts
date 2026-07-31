@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { UiStore } from '../../core/ui/ui-store';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -8,6 +9,10 @@ import { ArmConfirmDialog } from './arm-confirm-dialog';
 import type { FlightCapability } from '../../core/api/models';
 import { commandOutcomeToast, disarmConfirmMessage, modeConfirmMessage } from './flight-command-panel-logic';
 import type { FlightCommandToast } from './flight-command-panel-logic';
+
+/** The panel's mutually-exclusive confirm dialogs (docs/UI-ARCHITECTURE-PLAN.md) — a typed id set so
+ * the template can't ask about a dialog that doesn't exist. */
+type CommandDialog = 'mode' | 'arm' | 'disarm';
 
 /**
  * The Fly cockpit's Arm/Disarm/Mode panel (docs/DRONE-INFRA-PLAN.md I-e Stage 2 — "UI — Wave C"),
@@ -71,11 +76,23 @@ export class FlightCommandPanel {
   /** Emitted when the drawer's own close control (`<vision-side-panel>`'s head button, or Esc) fires
    * — the host is the one that actually closes it (`panels.close()`). Confirm dialogs below are
    * deliberately siblings of `<vision-side-panel>` in the template, not projected inside it — see
-   * this class's own doc comment above `armConfirmOpen` for why that placement matters. */
+   * this class's own doc comment above the arm section for why that placement matters. */
   readonly close = output<void>();
 
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
+
+  /**
+   * The panel's three confirm dialogs (mode / arm / disarm) as **one mutually-exclusive overlay
+   * group** (docs/UI-ARCHITECTURE-PLAN.md) rather than three independent `signal(false)` flags:
+   * opening any one closes whichever other was open, so the panel can never show two confirms at
+   * once — a consistency guarantee by construction, not by discipline. Transient (no `storageKey`) —
+   * a confirm must never survive a reload. `isDialogOpen` is the typed template accessor.
+   */
+  private readonly dialog = new UiStore();
+  protected isDialogOpen(id: CommandDialog): boolean {
+    return this.dialog.isOpen(id);
+  }
 
   // --- Mode picker ---------------------------------------------------------------------------
   /** `undefined` = "use the first selectable mode" — mirrors `fly.ts#primaryDeviceIdOverride`'s own
@@ -86,7 +103,6 @@ export class FlightCommandPanel {
     const override = this.selectedModeOverride();
     return override !== undefined && modes.includes(override) ? override : modes[0];
   });
-  protected readonly modeConfirmOpen = signal(false);
   protected readonly modeBusy = signal(false);
   protected readonly modeMessage = computed(() => modeConfirmMessage(this.assetDisplayName(), this.selectedMode() ?? ''));
 
@@ -96,18 +112,18 @@ export class FlightCommandPanel {
 
   protected requestSetMode(): void {
     if (this.selectedMode() !== undefined) {
-      this.modeConfirmOpen.set(true);
+      this.dialog.open('mode');
     }
   }
 
   protected cancelMode(): void {
-    this.modeConfirmOpen.set(false);
+    this.dialog.close('mode');
   }
 
   protected async confirmMode(): Promise<void> {
     const mode = this.selectedMode();
     if (mode === undefined) {
-      this.modeConfirmOpen.set(false);
+      this.dialog.close('mode');
       return;
     }
     this.modeBusy.set(true);
@@ -118,7 +134,7 @@ export class FlightCommandPanel {
       this.toasts.error(describeHttpError(error));
     } finally {
       this.modeBusy.set(false);
-      this.modeConfirmOpen.set(false);
+      this.dialog.close('mode');
     }
   }
 
@@ -137,15 +153,14 @@ export class FlightCommandPanel {
    * `position: fixed` scrim covering everything regardless of whether the drawer underneath is
    * "open"), but never dismisses the confirm dialog itself; only its own Cancel/Confirm buttons do.
    */
-  protected readonly armConfirmOpen = signal(false);
   protected readonly armBusy = signal(false);
 
   protected requestArm(): void {
-    this.armConfirmOpen.set(true);
+    this.dialog.open('arm');
   }
 
   protected cancelArm(): void {
-    this.armConfirmOpen.set(false);
+    this.dialog.close('arm');
   }
 
   protected async confirmArm(): Promise<void> {
@@ -157,21 +172,20 @@ export class FlightCommandPanel {
       this.toasts.error(describeHttpError(error));
     } finally {
       this.armBusy.set(false);
-      this.armConfirmOpen.set(false);
+      this.dialog.close('arm');
     }
   }
 
   // --- Disarm ----------------------------------------------------------------------------------
-  protected readonly disarmConfirmOpen = signal(false);
   protected readonly disarmBusy = signal(false);
   protected readonly disarmMessage = computed(() => disarmConfirmMessage(this.assetDisplayName(), this.armed()));
 
   protected requestDisarm(): void {
-    this.disarmConfirmOpen.set(true);
+    this.dialog.open('disarm');
   }
 
   protected cancelDisarm(): void {
-    this.disarmConfirmOpen.set(false);
+    this.dialog.close('disarm');
   }
 
   protected async confirmDisarm(): Promise<void> {
@@ -183,7 +197,7 @@ export class FlightCommandPanel {
       this.toasts.error(describeHttpError(error));
     } finally {
       this.disarmBusy.set(false);
-      this.disarmConfirmOpen.set(false);
+      this.dialog.close('disarm');
     }
   }
 
