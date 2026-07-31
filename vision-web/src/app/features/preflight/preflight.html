@@ -1,0 +1,41 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1><vision-icon name="list" [size]="24" />Pre-flight checklist</h1>
+      <p>The live status card for any drone — video feed, telemetry link, GPS fix, battery, armable.</p>
+    </div>
+  </div>
+
+  <vision-notice icon="help">
+    Saved, editable checklist templates are coming — the card below is today's live status only.
+  </vision-notice>
+
+  @if (facade.loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.error(); as error) {
+    <vision-empty title="Couldn't load assets" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.loadAssets()">Try again</button>
+    </vision-empty>
+  } @else if (!facade.hasAnyAssets()) {
+    <vision-empty title="No assets yet" message="Add a source, then its pre-flight status shows up here.">
+      <a class="btn" routerLink="/add-source">Add source</a>
+    </vision-empty>
+  } @else {
+    <div class="card preflight-card">
+      <label class="preflight-picker">
+        <span class="label">Drone</span>
+        <select
+          aria-label="Choose a drone"
+          [ngModel]="facade.selectedAssetId()"
+          (ngModelChange)="facade.selectAsset($event)"
+        >
+          @for (asset of facade.sortedAssets(); track asset.assetId) {
+            <option [value]="asset.assetId">{{ asset.displayName }}</option>
+          }
+        </select>
+      </label>
+
+      <vision-preflight-checklist [items]="facade.preflightItems()" />
+    </div>
+  }
+</div>

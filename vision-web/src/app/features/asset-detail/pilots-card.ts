@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
@@ -33,6 +33,12 @@ const LOG_PREFIX = '[pilots]';
  * means the asset is outside the manager's scope ("outside your scope" toast); a `404` on the pilots
  * read means the asset is unknown/out-of-scope — the card simply shows its empty state rather than a
  * scary error, matching the backend's "don't reveal existence" rule.
+ *
+ * **`changed` output** (docs/UI-REDESIGN-PLAN.md Wave 4, new, optional) — emitted after a
+ * successful add/remove, for a host that keeps its own separate summary of this asset's pilots in
+ * sync (`features/roster/**`'s collapsed-row badges, the one other place this asset's pilot list is
+ * shown besides this card itself). `AssetDetailPage`'s own drawer host doesn't bind it — nothing
+ * else on that page shows a pilot summary outside this card.
  */
 @Component({
   selector: 'vision-pilots-card',
@@ -43,6 +49,9 @@ const LOG_PREFIX = '[pilots]';
 })
 export class PilotsCard {
   readonly assetId = input.required<string>();
+
+  /** Emitted after a successful assign/unassign — see this class's own doc comment. */
+  readonly changed = output<void>();
 
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
@@ -119,6 +128,7 @@ export class PilotsCard {
       await action();
       await this.load(this.assetId());
       this.toasts.ok(okMessage);
+      this.changed.emit();
     } catch (error) {
       if (error instanceof HttpErrorResponse && error.status === 403) {
         this.toasts.error('That asset is outside your scope — you can only assign pilots to your own assets.');

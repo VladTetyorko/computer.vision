@@ -1,0 +1,23 @@
+/* Reuses `.page`/`.page-head`/`.card`/`.chip`/`.empty`/`.btn`/`table` from `src/styles.css` —
+   no new colors. */
+
+.page-head h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.categories-search {
+  min-width: 14rem;
+  min-height: 40px;
+}
+
+/* Horizontal scroll on a narrow viewport rather than crushing the columns — the table itself is
+   never wrapped in a scaled-down font. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+td.actions {
+  text-align: right;
+}

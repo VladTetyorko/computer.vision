@@ -1,0 +1,16 @@
+/* Reuses `.page`/`.page-head`/`vision-notice` from `src/styles.css`/`shared/ui`. `vision-events-rail`
+   normally sizes itself as a fixed-width sticky sidebar (`wall.css#.events-rail`) — this page is the
+   rail's own full-width, full-height home instead, mirroring that class's "host applies its own
+   sizing class to this component's tag" convention (see `events-rail.ts`'s own doc comment). */
+
+.page-head h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.alerts-rail {
+  width: 100%;
+  max-height: none;
+  position: static;
+}

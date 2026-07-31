@@ -11,6 +11,7 @@ import type {
   AssignedPilot,
   Assignment,
   AuditEntry,
+  Category,
   CreateAssetRequest,
   CreateGroupRequest,
   CreateUserRequest,
@@ -192,6 +193,18 @@ export class VisionApi {
 
   getAsset(assetId: string): Promise<AssetDetails> {
     return firstValueFrom(this.http.get<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}`));
+  }
+
+  /**
+   * The defined category reference list (`CategoryController`, docs/UI-REDESIGN-PLAN.md Wave 4) —
+   * every category the asset-creation UI's picker can offer, **including one with zero assets
+   * currently in it** (unlike deriving categories from whatever's loaded, `core/fleet/category-logic.ts#deriveCategoryOptions`'s
+   * pre-existing fallback approach). Never errors server-side; an empty install still returns the
+   * backend's own seed list. First real call site: `features/categories/**`'s grouped view, joining
+   * this against `fleetSummary().categories`' per-category counts by `slug`/`categoryId`.
+   */
+  listCategories(): Promise<Category[]> {
+    return firstValueFrom(this.http.get<Category[]>('/api/categories'));
   }
 
   /**

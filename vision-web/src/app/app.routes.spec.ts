@@ -1,7 +1,31 @@
+import type { Route, Routes } from '@angular/router';
 import { describe, expect, it } from 'vitest';
 import { routes } from './app.routes';
 import { flattenRoutes, routeExists } from './features/hubs/route-audit-logic';
 import { NAV_MODES } from './features/hubs/nav-entries';
+
+/**
+ * Recursively finds the route object whose joined `path` (parent segments included, mirroring
+ * `route-audit-logic.ts#flattenRoutes`' own walk) equals `target` — used by the Wave 4 "resolves to
+ * its own component, not ComingSoon" regression check below, which needs the actual route object
+ * (to call its `loadComponent`), not just a path-shape match.
+ */
+function findRouteByPath(list: Routes, target: string, prefix = ''): Route | undefined {
+  for (const route of list) {
+    const segment = route.path ?? '';
+    const full = segment ? `${prefix}/${segment}` : prefix;
+    if (full.replace(/^\//, '') === target && (route.loadComponent || route.component)) {
+      return route;
+    }
+    if (route.children) {
+      const found = findRouteByPath(route.children, target, full);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return undefined;
+}
 
 /**
  * The Wave 1 "no dead link" regression test (docs/UI-REDESIGN-PLAN.md Wave 1's own Verify bullet:
@@ -74,20 +98,38 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     expect(routeExists(flat, '/devices')).toBe(true);
   });
 
-  it('every scaffold ComingSoon path resolves', () => {
-    const scaffolds = [
-      '/operate/preflight',
-      '/operate/missions',
-      '/monitor/alerts',
-      '/monitor/layouts',
-      '/manage/categories',
-      '/manage/health',
-      '/manage/firmware',
-      '/manage/reports',
-      '/manage/roster',
-    ];
+  it('every remaining pure-scaffold ComingSoon path resolves', () => {
+    const scaffolds = ['/operate/missions', '/monitor/layouts', '/manage/health', '/manage/firmware'];
     for (const path of scaffolds) {
       expect(routeExists(flat, path), path).toBe(true);
+    }
+  });
+
+  it('every Wave 4 functional/split page resolves at its pinned path (docs/UI-REDESIGN-PLAN.md Wave 4)', () => {
+    const wave4Pages = ['/operate/preflight', '/monitor/alerts', '/manage/categories', '/manage/reports', '/manage/roster'];
+    for (const path of wave4Pages) {
+      expect(routeExists(flat, path), path).toBe(true);
+    }
+  });
+
+  it('Wave 4 pages resolve to their own real component, not the ComingSoon scaffold', async () => {
+    const wave4 = [
+      { path: 'operate/preflight', className: 'PreflightPage' },
+      { path: 'monitor/alerts', className: 'AlertsPage' },
+      { path: 'manage/categories', className: 'CategoriesPage' },
+      { path: 'manage/reports', className: 'ReportsPage' },
+      { path: 'manage/roster', className: 'RosterPage' },
+    ];
+    for (const { path, className } of wave4) {
+      const route = findRouteByPath(routes, path);
+      expect(route?.loadComponent, path).toBeDefined();
+      // Every `loadComponent` in this app already unwraps to the component class itself
+      // (`() => import('./x').then((m) => m.XPage)`, not the raw module namespace) — see
+      // `app.routes.ts`'s own doc comment. The test build's decorator transform prefixes the
+      // runtime class name with `_` (`_PreflightPage`), so this checks by suffix, not equality.
+      const component = (await route!.loadComponent!()) as { name: string };
+      expect(component.name.endsWith(className), `${path}: got "${component.name}"`).toBe(true);
+      expect(component.name, path).not.toContain('ComingSoon');
     }
   });
 

@@ -16,6 +16,11 @@ import { DEBUG_ROUTES } from './features/debug/debug.routes';
 import { ORG_ROUTES } from './features/org-settings/org-settings.routes';
 import { ACTIVITY_ROUTES } from './features/activity/activity.routes';
 import { LOGIN_ROUTES } from './features/auth/login/login.routes';
+import { PREFLIGHT_ROUTES } from './features/preflight/preflight.routes';
+import { ALERTS_ROUTES } from './features/alerts/alerts.routes';
+import { ROSTER_ROUTES } from './features/roster/roster.routes';
+import { CATEGORIES_ROUTES } from './features/categories/categories.routes';
+import { REPORTS_ROUTES } from './features/reports/reports.routes';
 import { authGuard } from './core/auth/auth-guard';
 
 /**
@@ -47,6 +52,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
     children: [
       ...HUBS_ROUTES,
+      ...PREFLIGHT_ROUTES,
+      ...ALERTS_ROUTES,
+      ...ROSTER_ROUTES,
+      ...CATEGORIES_ROUTES,
+      ...REPORTS_ROUTES,
       ...FLY_ROUTES,
       ...COMMAND_ROUTES,
       ...WALL_ROUTES,

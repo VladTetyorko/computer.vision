@@ -1,0 +1,224 @@
+import type { AssetAttention } from '../api/models';
+import { formatDuration } from '../stream-info-logic';
+import { TELEMETRY_AGE_RED_SECONDS } from '../telemetry/telemetry-logic';
+import { gpsSeverity } from '../telemetry/flight-state-logic';
+import { geofenceBreachReasonText, type GeofenceBreach } from '../geofence/geofence-logic';
+
+/**
+ * Pure, Angular-free "does this asset need attention right now" rules — originally
+ * `features/command/command-logic.ts`'s own "Attention rules" section, moved here
+ * (docs/UI-REDESIGN-PLAN.md Wave 4) when `features/reports/reports-logic.ts` needed the identical
+ * rules for the Inventory reports page's own attention list. This codebase has no precedent for one
+ * page importing another page's module (see `core/fleet/device-logic.ts`'s doc comment for the
+ * original precedent this follows, most recently repeated by `core/telemetry/telemetry-logic.ts#trackingIdChanged`) —
+ * a shared `core/` home was used instead. `features/command/command-logic.ts` re-exports every name
+ * below so its own pre-existing import sites (`asset-panel.ts`, `command-facade.ts`,
+ * `command-logic.spec.ts`) keep working verbatim; only `EntityRow`/`buildEntityRows`/`rowRank` (the
+ * entity-rail sort, Command-specific) and the layout-grid arithmetic stayed behind in that file.
+ *
+ * Every rule/threshold/ranking below is byte-for-byte unchanged from its pre-move behavior.
+ */
+
+// --- Attention rules --------------------------------------------------------------------------
+
+/** Battery below this percent is worth flagging at all. */
+export const BATTERY_ATTENTION_PERCENT = 20;
+
+/** Battery below this percent escalates the same reason to the most severe tier. */
+export const BATTERY_CRITICAL_PERCENT = 10;
+
+/**
+ * Telemetry older than this, on a *currently streaming* asset, is itself an attention reason.
+ * Reuses `core/telemetry/telemetry-logic.ts#TELEMETRY_AGE_RED_SECONDS` directly rather than
+ * re-deriving the same threshold under a new name.
+ */
+export const TELEMETRY_STALE_MS = TELEMETRY_AGE_RED_SECONDS * 1000;
+
+export type AttentionReasonKind =
+  | 'geofence-breach'
+  | 'failsafe'
+  | 'battery-critical'
+  | 'telemetry-stale'
+  | 'battery-low'
+  | 'gps-degraded'
+  | 'open-events';
+export type AttentionSeverity = 'critical' | 'warning';
+
+export interface AttentionReason {
+  readonly kind: AttentionReasonKind;
+  readonly severity: AttentionSeverity;
+  /** A complete sentence — the panel's "why" line joins one or more of these with a space. */
+  readonly text: string;
+}
+
+/**
+ * How urgently each reason kind reads, highest first — an asset's overall rank is the max of its
+ * own triggered reasons' ranks (see `features/command/command-logic.ts#buildEntityRows`), so an
+ * asset with *any* higher-rank reason always outranks one with only lower-rank reasons, regardless
+ * of how many of the latter it has.
+ *
+ * `geofence-breach` (docs/OPS-CORE-PLAN.md §G-c) is the very top rank, above even `failsafe` — an
+ * aircraft that has physically crossed a keep-out/keep-in boundary is an active, external,
+ * safety-and-legal-exposure event happening *right now* to something a manager doesn't control the
+ * way a failsafe (an onboard, self-correcting response) already is; it outranks every other signal
+ * precisely because a breach can co-occur with any of them and still needs to be the first thing a
+ * manager's eye lands on.
+ *
+ * `failsafe` (docs/FC-INTEGRATIONS-PLAN.md F-d) is the next rank, above battery-critical — a flight
+ * controller reporting an active failsafe is otherwise the single most urgent "this drone needs
+ * attention right now" signal this app has, worse than a low/critical battery reading alone (a
+ * failsafe can itself be *caused* by one, but the failsafe state is the more actionable fact).
+ * Battery-critical and telemetry-stale share the next two ranks deliberately, both above
+ * battery-low: a dead battery mid-flight and a lost telemetry link mid-flight are the same kind of
+ * "this drone may not come back" risk. `gps-degraded` ranks below battery-low but above open-events
+ * — a degraded fix matters, but a battery running low is the more universally urgent of the two.
+ * Open detection events rank lowest — informational, not a safety condition.
+ */
+export const REASON_RANK: Readonly<Record<AttentionReasonKind, number>> = {
+  'geofence-breach': 7,
+  failsafe: 6,
+  'battery-critical': 5,
+  'telemetry-stale': 4,
+  'battery-low': 3,
+  'gps-degraded': 2,
+  'open-events': 1,
+};
+
+/** `'unknown'` (no reading yet) never triggers a reason — never a fabricated tier from no data. */
+export type BatteryAttentionSeverity = 'critical' | 'warning' | 'ok' | 'unknown';
+
+/**
+ * The single battery-severity rule every consumer uses — a Command rail row's chip color, its
+ * detail panel's own battery fact, and the Reports attention table all derive from this one
+ * function, so "when is a battery reading worth calling out" is answered in exactly one place.
+ */
+export function batteryAttentionSeverity(percent: number | undefined): BatteryAttentionSeverity {
+  if (percent === undefined) {
+    return 'unknown';
+  }
+  if (percent < BATTERY_CRITICAL_PERCENT) {
+    return 'critical';
+  }
+  return percent < BATTERY_ATTENTION_PERCENT ? 'warning' : 'ok';
+}
+
+function batteryReason(percent: number | undefined): AttentionReason | undefined {
+  const severity = batteryAttentionSeverity(percent);
+  if (severity === 'critical') {
+    return { kind: 'battery-critical', severity: 'critical', text: `Battery critical at ${Math.round(percent!)}%.` };
+  }
+  if (severity === 'warning') {
+    return { kind: 'battery-low', severity: 'warning', text: `Battery low at ${Math.round(percent!)}%.` };
+  }
+  return undefined;
+}
+
+/**
+ * Telemetry stale *while streaming* only — an asset that isn't currently flying reporting old
+ * telemetry is expected (it landed a while ago), not itself an urgent, right-now attention item the
+ * way a live drone going quiet is.
+ */
+function telemetryReason(asset: AssetAttention): AttentionReason | undefined {
+  if (!asset.streaming || asset.telemetryAgeMs === undefined || asset.telemetryAgeMs <= TELEMETRY_STALE_MS) {
+    return undefined;
+  }
+  const ageSeconds = Math.round(asset.telemetryAgeMs / 1000);
+  return {
+    kind: 'telemetry-stale',
+    severity: 'critical',
+    text: `Telemetry stale for ${ageSeconds}s while streaming.`,
+  };
+}
+
+function openEventsReason(openEventCount: number): AttentionReason | undefined {
+  if (openEventCount <= 0) {
+    return undefined;
+  }
+  return {
+    kind: 'open-events',
+    severity: 'warning',
+    text: `${openEventCount} open detection ${openEventCount === 1 ? 'event' : 'events'}.`,
+  };
+}
+
+/**
+ * `asset.failsafe` (docs/FC-INTEGRATIONS-PLAN.md F-d, `AssetAttention`'s own field) — `undefined`/
+ * `false` never trigger a reason, only an explicit `true` (never fabricated from absent
+ * flight-controller data). States what the aircraft is doing, not an instruction — same poka-yoke
+ * rule `core/telemetry/flight-state-logic.ts#flightBanner` follows for the cockpit's own banner text.
+ */
+function failsafeReason(asset: AssetAttention): AttentionReason | undefined {
+  if (asset.failsafe !== true) {
+    return undefined;
+  }
+  return { kind: 'failsafe', severity: 'critical', text: 'Failsafe active — returning to home.' };
+}
+
+/**
+ * `gpsFixType` is deliberately a *parameter*, not read off `AssetAttention` — the fleet-summary DTO
+ * doesn't surface GPS quality (only `flightMode`/`armed`/`failsafe` do, see that interface's own doc
+ * comment), so a caller with access to this asset's live marker (`core/map/map-logic.ts#FleetMarker`)
+ * passes its `gpsFixType` in; a caller with no marker for this asset (not currently plotted/live)
+ * simply omits it, and this reason never fires — "unknown" silently means "not evaluated", not "ok".
+ * Reuses `flight-state-logic.ts#gpsSeverity` rather than re-deriving the same fix-quality tiers.
+ */
+function gpsDegradedReason(gpsFixType: number | undefined): AttentionReason | undefined {
+  if (gpsFixType === undefined) {
+    return undefined;
+  }
+  const severity = gpsSeverity(gpsFixType);
+  if (severity === 'ok') {
+    return undefined;
+  }
+  return {
+    kind: 'gps-degraded',
+    severity: severity === 'critical' ? 'critical' : 'warning',
+    text: `GPS fix degraded (fix type ${gpsFixType}).`,
+  };
+}
+
+/**
+ * `geofenceBreaches` (docs/OPS-CORE-PLAN.md §G-c, optional) is, like `gpsFixType`, not carried by
+ * `AssetAttention` at all — it's derived from the generic `LiveEvent` feed
+ * (`core/geofence/geofence-logic.ts#activeGeofenceBreaches`, sourced from `LiveStore.liveEvents()`),
+ * not the fleet-summary DTO. An empty/absent array never fires this reason — "no breach known", not
+ * "definitely not breaching" (the honest-unknown rule every other optional reason input here follows).
+ */
+function geofenceBreachReason(breaches: readonly GeofenceBreach[] | undefined): AttentionReason | undefined {
+  if (!breaches || breaches.length === 0) {
+    return undefined;
+  }
+  return { kind: 'geofence-breach', severity: 'critical', text: geofenceBreachReasonText(breaches) };
+}
+
+/**
+ * Every reason `asset` triggers, most severe first. An asset with none of these returns an empty
+ * array — "all quiet" for that asset.
+ *
+ * `gpsFixType` (docs/FC-INTEGRATIONS-PLAN.md F-d, optional) and `geofenceBreaches`
+ * (docs/OPS-CORE-PLAN.md §G-c, optional) are the two reason inputs not carried by `AssetAttention`
+ * itself — see `gpsDegradedReason`'s/`geofenceBreachReason`'s own doc comments for where a caller
+ * sources each. A caller with neither in hand (e.g. `features/reports/reports-logic.ts`'s read-only
+ * dashboard, which has no live map marker or geofence feed to draw from) simply omits both — those
+ * two reason kinds never fire for it, honestly "not evaluated" rather than "not present".
+ */
+export function attentionReasons(
+  asset: AssetAttention,
+  gpsFixType?: number,
+  geofenceBreaches?: readonly GeofenceBreach[],
+): readonly AttentionReason[] {
+  const reasons = [
+    geofenceBreachReason(geofenceBreaches),
+    failsafeReason(asset),
+    batteryReason(asset.batteryPercent),
+    telemetryReason(asset),
+    gpsDegradedReason(gpsFixType),
+    openEventsReason(asset.openEventCount),
+  ].filter((reason): reason is AttentionReason => reason !== undefined);
+  return [...reasons].sort((a, b) => REASON_RANK[b.kind] - REASON_RANK[a.kind]);
+}
+
+/** The rail/panel's own "age" column — the freshest telemetry sample's age, or `'—'` when none exists yet. */
+export function attentionAgeLabel(asset: AssetAttention): string {
+  return asset.telemetryAgeMs === undefined ? '—' : `${formatDuration(asset.telemetryAgeMs / 1000)} ago`;
+}

@@ -1,0 +1,84 @@
+/* Reuses `.page`/`.page-head`/`.card`/`.chip`/`.empty`/`.btn` from `src/styles.css` — no new colors. */
+
+.page-head h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.roster-search {
+  min-width: 14rem;
+  min-height: 40px;
+}
+
+.roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.roster-row {
+  padding: 0;
+}
+
+/* Hide the native disclosure triangle — `.roster-chevron` (an inline `<vision-icon>`) is the one
+   visible affordance, rotated open via the `[open]` pseudo-class rather than JS state. */
+.roster-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  min-height: 44px;
+}
+
+.roster-summary::-webkit-details-marker {
+  display: none;
+}
+
+.roster-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roster-chevron {
+    transition: none;
+  }
+}
+
+details[open] > .roster-summary .roster-chevron {
+  transform: rotate(90deg);
+}
+
+.roster-name {
+  flex: none;
+  max-width: 16rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.roster-pilots {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.roster-body {
+  padding: 0 var(--space-16) var(--space-16);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-16);
+}
+
+@media (max-width: 640px) {
+  .roster-name {
+    max-width: 100%;
+    flex-basis: 100%;
+  }
+}

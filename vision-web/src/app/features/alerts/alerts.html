@@ -1,0 +1,15 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1><vision-icon name="alert" [size]="24" />Alerts center</h1>
+      <p>Recent detection events across the fleet, newest first.</p>
+    </div>
+  </div>
+
+  <vision-notice icon="help">
+    Saved alert thresholds and acknowledgement are coming — this feed already streams live via the
+    header bell and Wall.
+  </vision-notice>
+
+  <vision-events-rail class="alerts-rail" (open)="facade.openEvent($event)" />
+</div>

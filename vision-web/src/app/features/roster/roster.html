@@ -1,0 +1,56 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1><vision-icon name="pilot" [size]="24" />Pilots / roster</h1>
+      <p>Every asset's pilot assignments in one place — expand an asset to add or remove a pilot.</p>
+    </div>
+    @if (facade.hasAnyAssets()) {
+      <input
+        type="search"
+        class="roster-search"
+        placeholder="Search assets or pilots…"
+        aria-label="Search assets or pilots"
+        [ngModel]="facade.searchQuery()"
+        (ngModelChange)="facade.searchQuery.set($event)"
+      />
+    }
+  </div>
+
+  @if (facade.loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.error(); as error) {
+    <vision-empty title="Couldn't load the roster" [message]="error">
+      <button type="button" class="btn secondary" (click)="facade.load()">Try again</button>
+    </vision-empty>
+  } @else if (!facade.hasAnyAssets()) {
+    <vision-empty title="No assets yet" message="Add a source, then assign pilots to it here.">
+      <a class="btn" routerLink="/add-source">Add source</a>
+    </vision-empty>
+  } @else if (facade.rows().length === 0) {
+    <vision-empty title="No matches" message="Try a different search." />
+  } @else {
+    <div class="roster-list">
+      @for (row of facade.rows(); track row.asset.assetId) {
+        <details class="card roster-row" (toggle)="onToggle(row, $event)">
+          <summary class="roster-summary">
+            <vision-icon class="roster-chevron" name="chevron-right" [size]="16" />
+            <span class="roster-name truncate">{{ row.asset.displayName }}</span>
+            <span class="chip">{{ row.asset.categoryName }}</span>
+            <span class="roster-pilots">
+              @if (row.pilotNames.length === 0) {
+                <span class="muted">No pilots assigned</span>
+              } @else {
+                @for (name of row.pilotNames; track name) {
+                  <span class="chip accent">{{ name }}</span>
+                }
+              }
+            </span>
+          </summary>
+          <div class="roster-body">
+            <vision-pilots-card [assetId]="row.asset.assetId" (changed)="facade.refreshPilotsFor(row.asset.assetId)" />
+          </div>
+        </details>
+      }
+    </div>
+  }
+</div>

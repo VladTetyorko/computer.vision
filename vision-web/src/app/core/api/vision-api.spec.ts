@@ -52,6 +52,12 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual([]);
   });
 
+  it('lists categories', async () => {
+    const promise = api.listCategories();
+    http.expectOne({ method: 'GET', url: '/api/categories' }).flush([{ slug: 'drone', name: 'Drone', attributeHints: [] }]);
+    await expect(promise).resolves.toEqual([{ slug: 'drone', name: 'Drone', attributeHints: [] }]);
+  });
+
   it('fetches one asset by id', async () => {
     const promise = api.getAsset('a-1');
     http.expectOne({ method: 'GET', url: '/api/assets/a-1' }).flush({ assetId: 'a-1' });

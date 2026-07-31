@@ -14,10 +14,17 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * everywhere it's linked from (top-bar dropdown, hub tile, and — once a later wave gets there — any
  * in-page breadcrumb).
  *
- * **`badge: 'soon'`** marks every F4 "scaffold" entry — its `to` still routes somewhere real (the
- * shared `ComingSoon` placeholder, `coming-soon.ts`), never a dead link (docs/UI-REDESIGN-PLAN.md
- * §D-G: "a scaffold never renders invented rows"). Entries with no badge are F4 "functional" —
- * routed straight at the real, already-shipped page.
+ * **`badge: 'soon'`** marks every remaining pure-**SCAFFOLD** entry (docs/UI-REDESIGN-PLAN.md Wave 4's
+ * Additions table) — its `to` still routes somewhere real (the shared `ComingSoon` placeholder,
+ * `coming-soon.ts`), never a dead link (docs/UI-REDESIGN-PLAN.md §D-G: "a scaffold never renders
+ * invented rows"). Entries with no badge are functional (F4) or now functional/**SPLIT** (Wave 4) —
+ * routed straight at a real page. Wave 4 built five of the nine originally-scaffolded areas
+ * (`features/preflight/**`, `features/alerts/**`, `features/roster/**`, `features/categories/**`,
+ * `features/reports/**`) and dropped their `badge` accordingly — each of those five still carries an
+ * honest inline `<vision-notice>` on its own page for whatever part of it stayed scaffold (SPLIT
+ * areas only; the roster page is fully functional, no notice). The four still-`badge: 'soon'`
+ * entries below (`/operate/missions`, `/monitor/layouts`, `/manage/health`, `/manage/firmware`) are
+ * genuinely pure scaffold — no functional part exists yet.
  *
  * **`Assets`/`Devices`/`Warehouse` now resolve to three distinct pages** (this cycle's inventory
  * restructure, no dedicated `docs/*-PLAN.md` — superseding this wave's original single `DevicesPage`
@@ -83,9 +90,8 @@ export const NAV_MODES: readonly NavMode[] = [
       {
         icon: 'list',
         name: 'Pre-flight checklist',
-        description: "Saved, editable checklist templates — today's live status card runs on the cockpit.",
+        description: "The live status card for any drone — saved, editable templates are coming.",
         to: '/operate/preflight',
-        badge: 'soon',
       },
       {
         icon: 'compass',
@@ -135,9 +141,8 @@ export const NAV_MODES: readonly NavMode[] = [
       {
         icon: 'alert',
         name: 'Alerts center',
-        description: 'Saved alert thresholds and acknowledgement — the live feed already streams via the bell.',
+        description: 'The live detection-events feed — saved thresholds and acknowledgement are coming.',
         to: '/monitor/alerts',
-        badge: 'soon',
       },
       {
         icon: 'replay',
@@ -189,14 +194,12 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'Pilots / roster',
         description: "A dedicated roster across every asset's pilot assignments.",
         to: '/manage/roster',
-        badge: 'soon',
       },
       {
         icon: 'category',
         name: 'Asset categories',
-        description: 'Create and edit the categories assets are grouped by.',
+        description: 'Every category, with live counts — creating and editing categories is coming.',
         to: '/manage/categories',
-        badge: 'soon',
       },
       {
         icon: 'wrench',
@@ -215,9 +218,8 @@ export const NAV_MODES: readonly NavMode[] = [
       {
         icon: 'report',
         name: 'Inventory reports',
-        description: 'Exportable, fleet-wide inventory and utilization reports.',
+        description: 'A live, read-only fleet dashboard — exportable reports are coming.',
         to: '/manage/reports',
-        badge: 'soon',
       },
     ],
   },

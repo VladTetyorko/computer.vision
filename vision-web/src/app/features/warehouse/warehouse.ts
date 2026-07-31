@@ -23,12 +23,10 @@ interface WarehouseTile {
  * `features/hubs/operate-hub.ts`/`monitor-hub.ts`/`manage-hub.ts`'s own "thin page over a small tile
  * list" shape without actually being a fourth `NAV_MODES` hub.
  *
- * **People → `/manage/roster`** (docs/UI-REDESIGN-PLAN.md Wave 1's own `ComingSoon` scaffold, same
- * target as the Manage hub's "Pilots / roster" tile — deliberately shared, mirroring `Map`/`Command
- * dashboard` both resolving to `/command` in `features/hubs/nav-entries.ts`): there is no dedicated
- * roster page yet, so this is the honest "nearest real destination", never a dead link — per-asset
- * pilot assignment already works from each asset's own Pilots card (`features/asset-detail/pilots-card.ts`),
- * linked from `/assets` below.
+ * **People → `/manage/roster`** — `features/roster/**`'s fleet-wide pilot roster
+ * (docs/UI-REDESIGN-PLAN.md Wave 4; was Wave 1's own `ComingSoon` scaffold until then), same target
+ * as the Manage hub's "Pilots / roster" tile — deliberately shared, mirroring `Map`/`Command
+ * dashboard` both resolving to `/command` in `features/hubs/nav-entries.ts`.
  *
  * **Assets → `/assets`**: the asset-first grid (search/filter/cards) split out of the old combined
  * page — see `features/assets/assets.ts`'s own class doc comment.

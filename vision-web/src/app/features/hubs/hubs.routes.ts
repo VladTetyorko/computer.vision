@@ -17,21 +17,23 @@ import type { Routes } from '@angular/router';
  *    there is no cross-fleet "all recordings" aggregation endpoint yet (F4's own named follow-up),
  *    so this is genuinely the most honest "real route that exists today" for that tile, not a fake
  *    library index.
- * 3. **Nine `ComingSoon` scaffold routes** — every F4 area with no real page yet (`/operate/preflight`,
- *    `/operate/missions`, `/monitor/alerts`, `/monitor/layouts`, `/manage/categories`,
- *    `/manage/health`, `/manage/firmware`, `/manage/reports`, `/manage/roster`), each a `data:` object
- *    binding straight onto `ComingSoon`'s inputs via `withComponentInputBinding()` (see that
- *    component's own class doc) — never a new page file. `data: {preload: false}` on all nine: a
- *    scaffold page is exactly the kind of route not worth pre-fetching ahead of a real navigation
- *    (mirrors `**`'s own `data: {preload: false}` in `app.routes.ts`).
+ * 3. **Four `ComingSoon` scaffold routes** — the areas docs/UI-REDESIGN-PLAN.md Wave 4's own
+ *    Additions table classifies as pure **SCAFFOLD** (`/operate/missions`, `/monitor/layouts`,
+ *    `/manage/health`, `/manage/firmware`) — each a `data:` object binding straight onto
+ *    `ComingSoon`'s inputs via `withComponentInputBinding()` (see that component's own class doc),
+ *    never a new page file. `data: {preload: false}` on all four: a scaffold page is exactly the
+ *    kind of route not worth pre-fetching ahead of a real navigation (mirrors `**`'s own
+ *    `data: {preload: false}` in `app.routes.ts`).
  *
- * **`Pilots / roster` and `Inventory reports` are scaffolded here even though F4 classifies their
- * backend as already-functional** (`AssignmentController`/`FleetController`+`AssetStatsController`
- * are both live) — there is simply no frontend page for either yet (a roster view, a fleet-wide
- * reports dashboard); building either is named Wave 4's job (docs/UI-REDESIGN-PLAN.md's own
- * Additions section), not this wave's. Routing them at `ComingSoon` now, with an honest "nearest
- * real capability" link (each asset's own Pilots card; Command's fleet summary), is what keeps this
- * wave from either 404ing on them or reaching ahead into Wave 4's scope to half-build a real page.
+ * **Wave 4 (docs/UI-REDESIGN-PLAN.md) replaced the other five scaffold routes with real pages** —
+ * `/operate/preflight` (`features/preflight/**`), `/monitor/alerts` (`features/alerts/**`),
+ * `/manage/roster` (`features/roster/**`), `/manage/categories` (`features/categories/**`), and
+ * `/manage/reports` (`features/reports/**`) each own their own `<name>.routes.ts` now, spread
+ * directly into `app.routes.ts` alongside this file's own export (not listed here any more) — see
+ * each feature's own routes file for its doc comment, and `nav-entries.ts` for the matching
+ * `badge: 'soon'` removal. This file's own doc comment (and Wave 1's original nine-scaffold count)
+ * is updated to match; the four routes still listed below are the ones that are still honestly
+ * `ComingSoon`.
  */
 export const HUBS_ROUTES: Routes = [
   {
@@ -51,19 +53,6 @@ export const HUBS_ROUTES: Routes = [
   },
   { path: 'monitor/replay', redirectTo: 'replay', pathMatch: 'full' },
   {
-    path: 'operate/preflight',
-    title: 'Pre-flight checklist · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Operate',
-      title: 'Pre-flight checklist',
-      description: "Saved, editable checklist templates are coming — today's live status card (GPS fix, battery, link) already runs on the cockpit.",
-      nearestLabel: 'Open the cockpit',
-      nearestTo: '/fly',
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
-  {
     path: 'operate/missions',
     title: 'Flight plans / missions · Vision',
     data: {
@@ -71,19 +60,6 @@ export const HUBS_ROUTES: Routes = [
       eyebrow: 'Operate',
       title: 'Flight plans / missions',
       description: "Saved, uploadable flight plans are coming — flight-controller mission upload isn't built yet either.",
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
-  {
-    path: 'monitor/alerts',
-    title: 'Alerts center · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Monitor',
-      title: 'Alerts center',
-      description: 'Saved alert thresholds and acknowledgement are coming — the live event feed already streams via the header bell and Wall.',
-      nearestLabel: 'Open Wall',
-      nearestTo: '/wall',
     },
     loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
   },
@@ -97,19 +73,6 @@ export const HUBS_ROUTES: Routes = [
       description: 'Naming and saving Wall tile arrangements is coming — a client-side feature, no backend needed.',
       nearestLabel: 'Open Wall',
       nearestTo: '/wall',
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
-  {
-    path: 'manage/categories',
-    title: 'Asset categories · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Manage',
-      title: 'Asset categories',
-      description: 'Creating and editing categories is coming — browsing and filtering assets by category already works on Assets.',
-      nearestLabel: 'Open Assets',
-      nearestTo: '/assets',
     },
     loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
   },
@@ -134,32 +97,6 @@ export const HUBS_ROUTES: Routes = [
       eyebrow: 'Manage',
       title: 'Firmware',
       description: 'A firmware inventory and update flow are coming — today firmware is only a reported telemetry string, nowhere to manage it yet.',
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
-  {
-    path: 'manage/reports',
-    title: 'Inventory reports · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Manage',
-      title: 'Inventory reports',
-      description: "Exportable, generated reports are coming — Command's fleet summary already covers live counts and the attention queue.",
-      nearestLabel: 'Open Command',
-      nearestTo: '/command',
-    },
-    loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
-  },
-  {
-    path: 'manage/roster',
-    title: 'Pilots / roster · Vision',
-    data: {
-      preload: false,
-      eyebrow: 'Manage',
-      title: 'Pilots / roster',
-      description: "A dedicated roster across every asset is coming — pilot assignment already works from each asset's own Pilots card, reached from Assets.",
-      nearestLabel: 'Open Assets',
-      nearestTo: '/assets',
     },
     loadComponent: () => import('./coming-soon').then((m) => m.ComingSoon),
   },

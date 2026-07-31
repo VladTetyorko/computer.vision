@@ -1,0 +1,76 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1><vision-icon name="category" [size]="24" />Asset categories</h1>
+      <p>Every category assets are grouped by, with live counts.</p>
+    </div>
+    @if (facade.hasAny()) {
+      <input
+        type="search"
+        class="categories-search"
+        placeholder="Search categories…"
+        aria-label="Search categories"
+        [ngModel]="facade.searchQuery()"
+        (ngModelChange)="facade.searchQuery.set($event)"
+      />
+    }
+  </div>
+
+  <vision-notice icon="help">
+    Creating and editing categories is coming — browsing and filtering assets by category already
+    works below.
+  </vision-notice>
+
+  <section class="card">
+    <vision-section-header title="Categories" [subtitle]="facade.rows().length + ' shown'" />
+
+    @if (facade.loading()) {
+      <p class="muted">Loading…</p>
+    } @else if (facade.error(); as error) {
+      <vision-empty title="Couldn't load categories" [message]="error">
+        <button type="button" class="btn secondary" (click)="facade.load()">Try again</button>
+      </vision-empty>
+    } @else if (!facade.hasAny()) {
+      <vision-empty title="No categories yet" message="Categories appear here once assets are registered." />
+    } @else if (facade.rows().length === 0) {
+      <vision-empty title="No matches" message="Try a different search." />
+    } @else {
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Total</th>
+              <th>Active</th>
+              <th>Deactivated</th>
+              <th>Streaming</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of facade.rows(); track row.slug) {
+              <tr>
+                <td>{{ row.name }}</td>
+                <td>{{ row.total }}</td>
+                <td>{{ row.active }}</td>
+                <td>{{ row.deactivated }}</td>
+                <td>
+                  @if (row.streaming > 0) {
+                    <span class="chip ok"><span class="dot live"></span>{{ row.streaming }}</span>
+                  } @else {
+                    <span class="muted">0</span>
+                  }
+                </td>
+                <td class="actions">
+                  <a class="btn secondary small" [routerLink]="['/assets']" [queryParams]="{ category: row.slug }">
+                    View assets
+                  </a>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+</div>

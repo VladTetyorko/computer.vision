@@ -3576,13 +3576,123 @@ Scope: `features/asset-detail/**` only. Consumed Wave 0 primitives unedited.
   the ASCII wireframe's two boxes); the drawer is titled **"Characteristics"** (the section's own name)
   not the wireframe's "Attributes".
 
+## UI-REDESIGN-PLAN Wave 4 — additions: Pilots/roster, Alerts center, Asset categories, Inventory reports, Pre-flight checklist (docs/UI-REDESIGN-PLAN.md Wave 4)
+
+Replaced 5 of the 9 F4 `ComingSoon` scaffold routes with real pages, per the plan's own
+functional-vs-scaffold Additions table; the 4 genuinely-scaffold areas (`/operate/missions`,
+`/monitor/layouts`, `/manage/health`, `/manage/firmware`) are untouched. Consumes only existing REST
+endpoints — no new backend, `vision-api` unchanged except one new typed wrapper for an endpoint that
+already existed (`listCategories`, below).
+
+- **`features/roster/**` — `/manage/roster`, FUNCTIONAL-NOW.** The fleet-wide pilot roster:
+  `roster-logic.ts` (+`.spec.ts`, pure) — `sortAssetsByName`, `buildRosterRows(assets, pilotsByAsset,
+  users)` (joins each asset to its assigned pilots' resolved display names, mirroring
+  `pilots-card.ts#assigned`'s own userId→name fallback rule at fleet scope), `searchRosterRows`.
+  `RosterFacade` loads every asset (`listAssets`), the user list (`listUsers`, once), and each asset's
+  own pilots (`listAssetPilots`, one call per asset in parallel — same N-call shape as
+  `AssetsFacade.refreshAssets`'s `getAsset` calls) so collapsed rows show pilot-name chips without
+  expanding first. `RosterPage` renders one `<details>` per asset (chevron rotates open, native
+  disclosure, no extra JS beyond an id set) — expanding mounts the **exact, unmodified**
+  `<vision-pilots-card [assetId]>` (asset-detail's own add/remove card, reused verbatim, not
+  reimplemented). **`PilotsCard` gained one new optional output, `changed = output<void>()`**
+  (`features/asset-detail/pilots-card.ts`), emitted after a successful assign/unassign — the roster
+  page's only way to keep its own collapsed-row badges in sync without re-fetching the whole roster
+  (`(changed)="facade.refreshPilotsFor(row.asset.assetId)"`); `AssetDetailPage`'s own drawer host
+  doesn't bind it, zero behavior change there. **Route-guarded** (`canActivate: [orgGuard]`, the same
+  guard `/org` uses) rather than pilots-card's own internal `canManage()` re-check — this page's
+  *entire* purpose is management, unlike asset-detail (which pilots itself can reach), so the route
+  guard alone is the correct belt, mirroring `OrgSettingsPage`'s identical precedent (no second
+  in-component suspenders). A PILOT following the Manage hub's tile is redirected to `/fly` before the
+  component ever mounts — dev-parity unaffected (`vision.auth.enabled=false` → dev admin is ADMIN,
+  reachable exactly as before).
+- **`features/alerts/**` — `/monitor/alerts`, SPLIT.** The live detection-events feed is functional,
+  reusing `<vision-events-rail>` **unmodified** (the identical component Wall/the header bell already
+  render) — `AlertsFacade` is `WallFacade`'s own `activate()`/`release()`/`openEvent` wiring, ported
+  byte-for-byte (a fourth page-scoped `EventsStore` consumer). An honest `<vision-notice>` states
+  plainly that saved threshold rules + acknowledge are coming (`EventRule` persistence + acknowledge
+  state — `eventRule` is only a stream-start param today, not a stored rule) — no fake toggle. No role
+  gate (same openness as Wall).
+- **`features/categories/**` — `/manage/categories`, SPLIT.** The grouped/counted view is functional:
+  `categories-logic.ts` (+`.spec.ts`, pure) — `buildCategoryRows(categories, counts)` joins
+  `CategoryController`'s defined-category list against `FleetSummary.categories`' per-category counts
+  by slug/`categoryId` (a defined category with zero assets still renders, all-zero, never omitted);
+  `searchCategoryRows`. Each row links **View assets** → `/assets?category=<slug>` (the existing
+  `?category=` deep-link filter, unchanged). An honest `<vision-notice>` states category create/edit is
+  coming (only `GET /api/categories` exists) — no fake "+ Add category". No role gate (browsing
+  categories isn't a management action, mirrors `/assets`).
+- **`features/reports/**` — `/manage/reports`, SPLIT.** A read-only stats dashboard, one
+  `VisionApi.fleetSummary()` fetch backing everything: `reports-logic.ts` (+`.spec.ts`, pure) —
+  `reportKpis(summary)` (total/streaming/active/deactivated/needs-attention, degrading to all-zero
+  with nothing loaded), `categoryBars(categories)` (a `dataviz` bar-list — thin 10px bars, one hue
+  `var(--color-info)`, every category direct-labeled, floored at 4% so a nonzero total stays visible),
+  `attentionRows(assets)` (every asset with ≥1 triggered reason, most-reasons-first). KPI tiles use the
+  shared `<vision-stat>`; the attention list reuses `asset-panel.css`'s own `.severity-chip`
+  CRITICAL/WARNING idiom (repeated locally — that class is component-scoped there). An honest
+  `<vision-notice>` states exportable/generated reports are coming (no export endpoint). No role gate
+  (same openness as `/command`, which this page's own data source already powers).
+- **`features/preflight/**` — `/operate/preflight`, SPLIT.** A live status card for any selected
+  drone: `preflight-logic.ts` (+`.spec.ts`, pure) — `sortAssetsByName`, `defaultPreflightAssetId(assets,
+  rememberedAssetId)` (prefers `SettingsStore.flyAssetId` when it's still in the fleet, else the first
+  asset alphabetically — **read-only**, this page never writes `flyAssetId` back, so visiting it never
+  silently changes the cockpit's own remembered drone). `PreflightFacade` mirrors
+  `asset-detail-facade.ts`'s telemetry-tracking guard (`trackingIdChanged`, one `TelemetryStore.track`
+  call per asset switch) and reuses `core/telemetry/flight-state-logic.ts#derivePreflight` — the exact
+  function `FlyFacade.preflightItems` already calls — feeding the **unmodified**
+  `<vision-preflight-checklist>` from `features/fly/`. An honest `<vision-notice>` states saved,
+  editable checklist templates are coming (named follow-up: a checklist-template entity + CRUD
+  endpoint, zero backend hits today). No role gate (same openness as `/fly`).
+- **`core/fleet/attention-logic.ts` (+`.spec.ts`, new)** — the attention-severity rules
+  (`BATTERY_ATTENTION_PERCENT`/`_CRITICAL_PERCENT`, `TELEMETRY_STALE_MS`, `REASON_RANK`,
+  `batteryAttentionSeverity`, `attentionReasons`, `attentionAgeLabel`, and the
+  `AttentionReason`/`AttentionReasonKind`/`AttentionSeverity`/`BatteryAttentionSeverity` types) **moved
+  out of `features/command/command-logic.ts`** so the Reports page could reuse them without importing
+  across feature folders (this codebase's standing rule — see `core/fleet/device-logic.ts`'s doc
+  comment). `command-logic.ts` re-exports every name so its own pre-existing import sites
+  (`asset-panel.ts`, `command-facade.ts`, `command-logic.spec.ts`) keep working verbatim, unmodified;
+  `EntityRow`/`buildEntityRows`/the layout-grid arithmetic (Command-specific) stayed behind. The
+  moved-out test cases live in `attention-logic.spec.ts` now; `command-logic.spec.ts` keeps only its
+  own `buildEntityRows`/`commandGridColumns` cases. **Zero behavior change** to Command itself — pure
+  relocation, verified by the full pre-existing `command-logic.spec.ts` suite passing unchanged
+  against the re-exported functions.
+- **`VisionApi.listCategories()` (new)** — `GET /api/categories` → `Category[]`, the endpoint's first
+  frontend call site (`CategoryController` already existed; `core/fleet/category-logic.ts`'s own
+  picker deliberately keeps its own "derive from loaded assets" fast path rather than switching to
+  this, per that file's updated doc comment — the two serve different jobs, an asset-creation picker
+  vs. this page's own full defined-category list).
+- **Routing/nav**: each page owns its own `<name>.routes.ts` (`PREFLIGHT_ROUTES`/`ALERTS_ROUTES`/
+  `ROSTER_ROUTES`/`CATEGORIES_ROUTES`/`REPORTS_ROUTES`), spread into `app.routes.ts` alongside
+  `HUBS_ROUTES`; the matching 5 route objects were removed from `hubs.routes.ts` (now 4 scaffold
+  routes, not 9 — see that file's own updated doc comment). `nav-entries.ts` dropped `badge: 'soon'`
+  from all 5 entries (their copy also updated to describe what's live vs. coming); the 4 remaining
+  scaffold entries are untouched. `app.routes.spec.ts` gained a Wave-4-specific check (every one of
+  the 5 paths resolves to its own real component, not `ComingSoon` — walks the actual route tree and
+  awaits `loadComponent`, not just a path-shape match).
+- **Degrade/dev-parity**: every page's own fetch failure shows a distinct "couldn't load" empty state
+  with a retry button (never a blocked page); a genuinely empty fleet/category list shows its own
+  honest empty state, never fabricated rows. No page's visibility changes under
+  `vision.auth.enabled=false` — Roster's `orgGuard` is the only gate, and its own dev-parity rule
+  (dev admin resolves to ADMIN) is unchanged, reused as-is.
+- **Tests**: 5 new pure-logic spec files (roster/categories/reports/preflight-logic, ~45 cases) +
+  `attention-logic.spec.ts` (18 cases, moved) + `vision-api.spec.ts`/`app.routes.spec.ts` additions.
+  Full suite: 1330/1330 (`npm run test:ci`). `tsc --noEmit` clean on both configs.
+- **Build**: `ng build --configuration production` green. Initial bundle **365.77 kB → 364.64 kB raw**
+  (**-1.13 kB**, i.e. a net decrease — the `attention-logic.ts` split shrank the `command`/
+  `asset-detail` lazy chunks by more than the few bytes any initial-bundle surface touched), 104.39 kB
+  → 104.25 kB transfer. Five new lazy chunks, all small: `preflight` 5.18 kB, `alerts` 2.20 kB,
+  `roster` 6.88 kB, `categories` 5.45 kB, `reports` 7.79 kB raw.
+- **Left as pure scaffold, confirmed correct**: `/operate/missions`, `/monitor/layouts`,
+  `/manage/health`, `/manage/firmware` — each verified to have no functional slice worth splitting out
+  this wave (missions/firmware have zero backend hits at all; health has only the pre-existing
+  Command attention list to point at, already linked from its own `ComingSoon` `nearestTo`; layouts is
+  a pure client-side follow-up with no backend blocking it either way).
+
 ## Status — UI redesign
 
-docs/UI-REDESIGN-PLAN.md Waves 0–3 are **done** (foundation → nav/hubs → cockpit grid → asset overview);
-Wave 4 additions (real Pilots-roster and fleet-wide Reports pages, currently `ComingSoon` scaffolds)
-are pending. The merged tree passes `tsc` (`tsconfig.app.json` + `.spec.json`) and `ng build
---configuration production` green; initial-bundle budget now 390/440 kB (see Wave 1). Full suite last
-recorded 1247/1247, 70 spec files (per Wave 1's run, the latest to include all three waves' new specs).
+docs/UI-REDESIGN-PLAN.md Waves 0–4 are **done** (foundation → nav/hubs → cockpit grid → asset overview
+→ additions). The merged tree passes `tsc` (`tsconfig.app.json` + `.spec.json`) and `ng build
+--configuration production` green; initial-bundle budget now 364.64/440 kB (Wave 4's own build, above —
+see Wave 1 for the original 390 kB figure this superseded). Full suite: 1330/1330, 83 spec files (Wave
+4's own run, the latest to include all four waves' specs).
 
 ## Fly cockpit relayout — full-screen hero video + bottom OSD strip + a neutral failsafe banner (direct user request, not tied to a docs/*-PLAN.md item)
 
