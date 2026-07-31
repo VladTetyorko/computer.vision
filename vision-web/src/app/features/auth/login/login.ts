@@ -1,8 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
-import { AuthStore } from '../../../core/auth/auth-store';
 import { Notice } from '../../../shared/ui/notice';
+import { LoginFacade } from './login-facade';
 
 /**
  * The login screen (docs/U-AUTH-PLAN.md wave 4) — the one destination `core/auth/auth-guard.ts`
@@ -17,8 +16,9 @@ import { Notice } from '../../../shared/ui/notice';
  * than inventing a parallel visual language for the one unauthenticated page.
  *
  * Dumb by this codebase's own convention: every real decision — busy state, what the inline error
- * says, what "success" means — lives in `AuthStore.login()`; this component owns only the two
- * field signals and where to navigate once that call resolves `true`.
+ * says, what "success" means — lives in `AuthStore.login()`, orchestrated by `LoginFacade`
+ * (docs/UI-ARCHITECTURE-PLAN.md) — this component owns only the route-bound `returnUrl` input and
+ * renders the facade's signals/commands.
  */
 @Component({
   selector: 'vision-login',
@@ -26,31 +26,15 @@ import { Notice } from '../../../shared/ui/notice';
   templateUrl: './login.html',
   styleUrl: './login.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [LoginFacade],
 })
 export class LoginPage {
-  private readonly auth = inject(AuthStore);
-  private readonly router = inject(Router);
-
   /** Bound from `?returnUrl=` (set by `auth-guard.ts` when it redirects here) — where to land after a successful sign-in. Falls back to the operator's own default landing page. */
   readonly returnUrl = input<string>('/fly');
 
-  protected readonly username = signal('');
-  protected readonly password = signal('');
+  protected readonly facade = inject(LoginFacade);
 
-  protected readonly busy = this.auth.loginBusy;
-  protected readonly error = this.auth.loginError;
-
-  protected canSubmit(): boolean {
-    return !this.busy() && this.username().trim().length > 0 && this.password().length > 0;
-  }
-
-  protected async submit(): Promise<void> {
-    if (!this.canSubmit()) {
-      return; // no empty-field request, and `busy()` itself rules out a double-submit mid-flight.
-    }
-    const ok = await this.auth.login(this.username().trim(), this.password());
-    if (ok) {
-      await this.router.navigateByUrl(this.returnUrl());
-    }
+  protected submit(): void {
+    void this.facade.submit(this.returnUrl());
   }
 }

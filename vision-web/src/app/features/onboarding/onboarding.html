@@ -11,11 +11,11 @@
   </div>
 
   <ol class="stepper" aria-label="Onboarding steps">
-    @for (item of steps; track item.step) {
+    @for (item of facade.steps; track item.step) {
       <li
         class="stepper-item"
-        [class.active]="store.step() === item.step"
-        [class.done]="stepIndex(item.step) < stepIndex(store.step())"
+        [class.active]="facade.store.step() === item.step"
+        [class.done]="facade.stepIndex(item.step) < facade.stepIndex(facade.store.step())"
       >
         <span class="stepper-index">{{ $index + 1 }}</span>
         <span class="stepper-label">{{ item.label }}</span>
@@ -24,7 +24,7 @@
   </ol>
 
   <section class="card wizard-card">
-    @switch (store.step()) {
+    @switch (facade.store.step()) {
       <!-- ---- Step 1: Profile ------------------------------------------------------------- -->
       @case ('profile') {
         <h2>Profile</h2>
@@ -35,8 +35,8 @@
           <input
             id="p-name"
             name="displayName"
-            [ngModel]="store.displayName()"
-            (ngModelChange)="store.displayName.set($event)"
+            [ngModel]="facade.store.displayName()"
+            (ngModelChange)="facade.store.displayName.set($event)"
             placeholder="Falcon-2"
             required
           />
@@ -47,8 +47,8 @@
           <input
             id="p-reg"
             name="registrationNumber"
-            [ngModel]="store.registrationNumber()"
-            (ngModelChange)="store.registrationNumber.set($event)"
+            [ngModel]="facade.store.registrationNumber()"
+            (ngModelChange)="facade.store.registrationNumber.set($event)"
             placeholder="N12345"
           />
         </div>
@@ -58,11 +58,11 @@
           <select
             id="p-category"
             name="category"
-            [ngModel]="store.category()"
-            (ngModelChange)="store.chooseCategory($event)"
+            [ngModel]="facade.store.category()"
+            (ngModelChange)="facade.store.chooseCategory($event)"
           >
             <option value="" disabled>Choose a category…</option>
-            @for (option of store.categoryOptions(); track option.slug) {
+            @for (option of facade.store.categoryOptions(); track option.slug) {
               <option [value]="option.slug">{{ option.name }}</option>
             }
           </select>
@@ -71,7 +71,7 @@
         <div class="field photo-field">
           <span class="label">Photo (optional)</span>
           <div class="row photo-row">
-            @if (store.photoPreviewUrl(); as preview) {
+            @if (facade.store.photoPreviewUrl(); as preview) {
               <img class="photo-preview" [src]="preview" alt="Selected photo preview" />
             } @else {
               <div class="photo-placeholder" aria-hidden="true"></div>
@@ -89,20 +89,20 @@
                 type="button"
                 class="btn secondary small"
                 (click)="photoInput.click()"
-                [disabled]="store.photoProcessing()"
+                [disabled]="facade.store.photoProcessing()"
               >
                 {{
-                  store.photoProcessing()
+                  facade.store.photoProcessing()
                     ? 'Processing…'
-                    : store.photoPreviewUrl()
+                    : facade.store.photoPreviewUrl()
                       ? 'Replace photo'
                       : 'Choose photo'
                 }}
               </button>
-              @if (store.photoPreviewUrl()) {
-                <button type="button" class="btn secondary small" (click)="store.removePhoto()">Remove</button>
+              @if (facade.store.photoPreviewUrl()) {
+                <button type="button" class="btn secondary small" (click)="facade.store.removePhoto()">Remove</button>
               }
-              @if (store.photoError(); as error) {
+              @if (facade.store.photoError(); as error) {
                 <p class="disabled-reason">{{ error }}</p>
               }
               <p class="muted hint">Downscaled to fit under 2MB automatically — any size photo works.</p>
@@ -110,7 +110,7 @@
           </div>
         </div>
 
-        @if (!store.canAdvanceProfile()) {
+        @if (!facade.store.canAdvanceProfile()) {
           <p class="disabled-reason">Enter a display name and choose a category.</p>
         }
       }
@@ -119,30 +119,30 @@
       @case ('connect') {
         <h2>Connect</h2>
 
-        @if (!store.connectMethod()) {
+        @if (!facade.store.connectMethod()) {
           <p class="muted hint">Every current way in, one door.</p>
           <div class="method-grid">
-            <button type="button" class="method-tile" (click)="store.chooseMethod('register')">
+            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('register')">
               <span class="method-glyph glyph-register" aria-hidden="true"></span>
               <span class="method-title">Register manually</span>
               <span class="method-sub">Type in a protocol and URI you already know.</span>
             </button>
-            <button type="button" class="method-tile" (click)="store.chooseMethod('discover')">
+            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('discover')">
               <span class="method-glyph glyph-discover" aria-hidden="true"></span>
               <span class="method-title">Discover on network</span>
               <span class="method-sub">Scan for ONVIF, mDNS, and local V4L2 candidates.</span>
             </button>
-            <button type="button" class="method-tile" (click)="store.chooseMethod('simulate')">
+            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('simulate')">
               <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
               <span class="method-title">Simulate</span>
               <span class="method-sub">Zero hardware — a file, an RTSP rehearsal, or a moving test drone.</span>
             </button>
-            <button type="button" class="method-tile" (click)="store.chooseMethod('listen')">
+            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('listen')">
               <span class="method-glyph glyph-listen" aria-hidden="true"></span>
               <span class="method-title">Listen for drones</span>
               <span class="method-sub">Scan for MAVLink heartbeats on UDP 14550 — no typing, no sysid.</span>
             </button>
-            <button type="button" class="method-tile" (click)="store.chooseDroneMethod()">
+            <button type="button" class="method-tile" (click)="facade.store.chooseDroneMethod()">
               <span class="method-glyph glyph-drone" aria-hidden="true"></span>
               <span class="method-title">Add a real drone</span>
               <span class="method-sub">
@@ -156,15 +156,15 @@
             <button
               type="button"
               class="btn secondary small back-btn"
-              (click)="onConnectBack()"
+              (click)="facade.onConnectBack()"
               aria-label="Back"
             >
               ‹
             </button>
-            <span class="muted">{{ connectMethodLabels[store.connectMethod()!] }}</span>
+            <span class="muted">{{ facade.connectMethodLabels[facade.store.connectMethod()!] }}</span>
           </div>
 
-          @switch (store.connectMethod()) {
+          @switch (facade.store.connectMethod()) {
             @case ('register') {
               <div class="register-form">
                 <div class="field">
@@ -172,26 +172,26 @@
                   <select
                     id="c-protocol"
                     name="protocol"
-                    [ngModel]="store.protocolSelect()"
-                    (ngModelChange)="store.protocolSelect.set($event)"
+                    [ngModel]="facade.store.protocolSelect()"
+                    (ngModelChange)="facade.store.protocolSelect.set($event)"
                     required
                   >
                     <option value="" disabled>Choose a protocol…</option>
-                    @for (option of store.registerableProtocols; track option.value) {
+                    @for (option of facade.store.registerableProtocols; track option.value) {
                       <option [value]="option.value">{{ option.value }} — {{ option.hint }}</option>
                     }
-                    <option [value]="store.customProtocolOption">Custom… — a protocol not listed above</option>
+                    <option [value]="facade.store.customProtocolOption">Custom… — a protocol not listed above</option>
                   </select>
                 </div>
 
-                @if (store.isCustomProtocol()) {
+                @if (facade.store.isCustomProtocol()) {
                   <div class="field">
                     <label class="label" for="c-protocol-custom">Custom protocol</label>
                     <input
                       id="c-protocol-custom"
                       name="customProtocol"
-                      [ngModel]="store.customProtocol()"
-                      (ngModelChange)="store.customProtocol.set($event)"
+                      [ngModel]="facade.store.customProtocol()"
+                      (ngModelChange)="facade.store.customProtocol.set($event)"
                       placeholder="e.g. onvif"
                       required
                     />
@@ -203,19 +203,19 @@
                   <input
                     id="c-uri"
                     name="uri"
-                    [ngModel]="store.uri()"
-                    (ngModelChange)="store.uri.set($event)"
-                    [placeholder]="store.uriPlaceholder()"
+                    [ngModel]="facade.store.uri()"
+                    (ngModelChange)="facade.store.uri.set($event)"
+                    [placeholder]="facade.store.uriPlaceholder()"
                     required
                   />
                 </div>
               </div>
 
-              @if (settings.advancedMode()) {
+              @if (facade.settings.advancedMode()) {
                 <div class="advanced">
                   <div class="spread">
                     <h3>Stream options</h3>
-                    <button type="button" class="btn secondary small" (click)="store.addOptionRow()">
+                    <button type="button" class="btn secondary small" (click)="facade.store.addOptionRow()">
                       Add option
                     </button>
                   </div>
@@ -223,7 +223,7 @@
                     Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
                     e.g. <code>rtsp_transport = tcp</code>.
                   </p>
-                  @if (store.protocol() === 'srt') {
+                  @if (facade.store.protocol() === 'srt') {
                     <p class="muted hint">
                       SRT: <code>mode</code> = <code>listener</code> (accept the drone/encoder
                       dialing in — the common case) or <code>caller</code> (this app dials out to
@@ -231,7 +231,7 @@
                       buffer (defaults to ~120). <code>streamid</code>/<code>passphrase</code> are
                       also available.
                     </p>
-                  } @else if (store.protocol() === 'udp') {
+                  } @else if (facade.store.protocol() === 'udp') {
                     <p class="muted hint">
                       UDP: leave the URI's host as <code>0.0.0.0</code> to accept from any sender,
                       or give a specific host to accept only from that source. MPEG-TS framing is
@@ -239,24 +239,24 @@
                       are available for a lossy link.
                     </p>
                   }
-                  @for (row of store.options(); track $index) {
+                  @for (row of facade.store.options(); track $index) {
                     <div class="option-row">
                       <input
                         [value]="row.key"
-                        (input)="store.updateOptionKey($index, $any($event.target).value)"
+                        (input)="facade.store.updateOptionKey($index, $any($event.target).value)"
                         placeholder="key"
                         [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
                       />
                       <input
                         [value]="row.value"
-                        (input)="store.updateOptionValue($index, $any($event.target).value)"
+                        (input)="facade.store.updateOptionValue($index, $any($event.target).value)"
                         placeholder="value"
                         [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
                       />
                       <button
                         type="button"
                         class="btn secondary small"
-                        (click)="store.removeOptionRow($index)"
+                        (click)="facade.store.removeOptionRow($index)"
                         aria-label="Remove option"
                       >
                         ×
@@ -277,18 +277,18 @@
                 <label class="row scan-timeout">
                   <span class="muted">Timeout</span>
                   <select
-                    [ngModel]="store.scanTimeout()"
-                    (ngModelChange)="store.scanTimeout.set($event)"
+                    [ngModel]="facade.store.scanTimeout()"
+                    (ngModelChange)="facade.store.scanTimeout.set($event)"
                     name="scanTimeout"
-                    [disabled]="store.scanning()"
+                    [disabled]="facade.store.scanning()"
                   >
-                    @for (timeout of store.scanTimeouts; track timeout) {
+                    @for (timeout of facade.store.scanTimeouts; track timeout) {
                       <option [value]="timeout">{{ timeout / 1000 }}s</option>
                     }
                   </select>
                 </label>
-                <button type="button" class="btn" (click)="store.scan()" [disabled]="store.scanning()">
-                  {{ store.scanning() ? 'Scanning…' : 'Scan' }}
+                <button type="button" class="btn" (click)="facade.store.scan()" [disabled]="facade.store.scanning()">
+                  {{ facade.store.scanning() ? 'Scanning…' : 'Scan' }}
                 </button>
               </div>
 
@@ -297,7 +297,7 @@
                 enumeration. Nothing is port-scanned.
               </p>
 
-              @if (store.scanResult(); as result) {
+              @if (facade.store.scanResult(); as result) {
                 @if (result.failedMethods.length > 0) {
                   <vision-notice variant="danger">
                     Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
@@ -335,12 +335,12 @@
                             }
                           </td>
                           <td class="details">
-                            @for (pair of detailPairs(candidate.details); track pair.key) {
+                            @for (pair of facade.detailPairs(candidate.details); track pair.key) {
                               <span class="chip" [title]="pair.value">{{ pair.key }}</span>
                             }
                           </td>
                           <td class="actions">
-                            <button type="button" class="btn secondary small" (click)="store.useCandidate(candidate)">
+                            <button type="button" class="btn secondary small" (click)="facade.store.useCandidate(candidate)">
                               Use
                             </button>
                           </td>
@@ -359,8 +359,8 @@
                  picker: the scanner self-time-boxes (~5-10s). -->
             @case ('listen') {
               <div class="row scan-row">
-                <button type="button" class="btn" (click)="store.scanForDrones()" [disabled]="store.droneScanning()">
-                  {{ store.droneScanning() ? 'Listening…' : store.droneScanResult() ? 'Scan again' : 'Scan' }}
+                <button type="button" class="btn" (click)="facade.store.scanForDrones()" [disabled]="facade.store.droneScanning()">
+                  {{ facade.store.droneScanning() ? 'Listening…' : facade.store.droneScanResult() ? 'Scan again' : 'Scan' }}
                 </button>
               </div>
 
@@ -370,9 +370,9 @@
                 or not it's already registered.
               </p>
 
-              @if (store.droneScanning()) {
+              @if (facade.store.droneScanning()) {
                 <div class="empty"><p class="faint">Listening for heartbeats…</p></div>
-              } @else if (store.droneScanResult(); as result) {
+              } @else if (facade.store.droneScanResult(); as result) {
                 @if (result.failedMethods.length > 0) {
                   <vision-notice variant="danger">
                     The MAVLink scanner failed — check that nothing else is bound to its port.
@@ -382,29 +382,29 @@
                 @if (result.devices.length === 0) {
                   <div class="empty">
                     <p>No drones heard on UDP 14550 — check the link recipes in infra/edge/.</p>
-                    <button type="button" class="btn secondary small" (click)="store.scanForDrones()">
+                    <button type="button" class="btn secondary small" (click)="facade.store.scanForDrones()">
                       Scan again
                     </button>
                   </div>
                 } @else {
                   <ul class="vehicle-list">
                     @for (vehicle of result.devices; track vehicle.address + vehicle.name) {
-                      <li class="vehicle-row" [class.claimed]="droneVehicleClaimed(vehicle)">
+                      <li class="vehicle-row" [class.claimed]="facade.droneVehicleClaimed(vehicle)">
                         <div class="vehicle-main">
                           <span class="vehicle-name">{{ vehicle.name }}</span>
                           <div class="vehicle-chips">
-                            @for (chip of droneVehicleChips(vehicle); track chip.key) {
+                            @for (chip of facade.droneVehicleChips(vehicle); track chip.key) {
                               <span class="chip" [title]="chip.value">{{ chip.label }}: {{ chip.value }}</span>
                             }
                           </div>
                         </div>
-                        @if (droneVehicleClaimed(vehicle)) {
+                        @if (facade.droneVehicleClaimed(vehicle)) {
                           <div class="vehicle-actions">
                             <button type="button" class="btn secondary small" disabled>Use</button>
                             <p class="disabled-reason">Already registered</p>
                           </div>
                         } @else {
-                          <button type="button" class="btn secondary small" (click)="store.useDroneVehicle(vehicle)">
+                          <button type="button" class="btn secondary small" (click)="facade.store.useDroneVehicle(vehicle)">
                             Use
                           </button>
                         }
@@ -422,7 +422,7 @@
                  WizardStep of their own — see onboarding-logic.ts's ConnectMethod doc comment).
                  Finishing the config hands off straight to the "listen" case above, verbatim. -->
             @case ('drone') {
-              @switch (store.droneSubStep()) {
+              @switch (facade.store.droneSubStep()) {
                 @case ('picker') {
                   <p class="muted hint">
                     Pick the firmware and the link carrying its MAVLink telemetry — every combination
@@ -433,14 +433,14 @@
                   <div class="field">
                     <span class="label">Firmware</span>
                     <div class="segmented" role="group" aria-label="Firmware">
-                      @for (firmware of firmwareOptions; track firmware) {
+                      @for (firmware of facade.firmwareOptions; track firmware) {
                         <button
                           type="button"
                           class="btn secondary small"
-                          [class.active]="store.droneFirmware() === firmware"
-                          (click)="store.chooseDroneFirmware(firmware)"
+                          [class.active]="facade.store.droneFirmware() === firmware"
+                          (click)="facade.store.chooseDroneFirmware(firmware)"
                         >
-                          {{ firmwareLabels[firmware] }}
+                          {{ facade.firmwareLabels[firmware] }}
                         </button>
                       }
                     </div>
@@ -449,23 +449,23 @@
                   <div class="field">
                     <span class="label">Link</span>
                     <div class="segmented" role="group" aria-label="Link">
-                      @for (link of linkOptions; track link) {
+                      @for (link of facade.linkOptions; track link) {
                         <button
                           type="button"
                           class="btn secondary small"
-                          [class.active]="store.droneLink() === link"
-                          (click)="store.chooseDroneLink(link)"
+                          [class.active]="facade.store.droneLink() === link"
+                          (click)="facade.store.chooseDroneLink(link)"
                         >
-                          {{ linkLabels[link] }}
+                          {{ facade.linkLabels[link] }}
                         </button>
                       }
                     </div>
-                    @if (store.droneLink(); as link) {
-                      <p class="muted hint">{{ linkHints[link] }}</p>
+                    @if (facade.store.droneLink(); as link) {
+                      <p class="muted hint">{{ facade.linkHints[link] }}</p>
                     }
                   </div>
 
-                  @if (store.droneCompatibility(); as compat) {
+                  @if (facade.store.droneCompatibility(); as compat) {
                     <div class="drone-compat">
                       <span
                         class="chip"
@@ -487,7 +487,7 @@
                         type="button"
                         class="btn"
                         [disabled]="compat.level === 'no-go'"
-                        (click)="store.continueToDroneConfig()"
+                        (click)="facade.store.continueToDroneConfig()"
                       >
                         Continue to configuration
                       </button>
@@ -511,14 +511,14 @@
 
                   <div class="field">
                     <label class="label" for="drone-address">This platform's address</label>
-                    @if (store.networkAddresses().length > 0) {
+                    @if (facade.store.networkAddresses().length > 0) {
                       <select
                         id="drone-address"
                         name="droneAddress"
-                        [ngModel]="store.selectedServerAddress()"
-                        (ngModelChange)="store.setSelectedServerAddress($event)"
+                        [ngModel]="facade.store.selectedServerAddress()"
+                        (ngModelChange)="facade.store.setSelectedServerAddress($event)"
                       >
-                        @for (addr of store.networkAddresses(); track addr.address) {
+                        @for (addr of facade.store.networkAddresses(); track addr.address) {
                           <option [value]="addr.address">{{ addr.address }} ({{ addr.interfaceName }})</option>
                         }
                       </select>
@@ -526,27 +526,27 @@
                       <input
                         id="drone-address"
                         name="droneAddress"
-                        [ngModel]="store.selectedServerAddress()"
-                        (ngModelChange)="store.setSelectedServerAddress($event)"
+                        [ngModel]="facade.store.selectedServerAddress()"
+                        (ngModelChange)="facade.store.setSelectedServerAddress($event)"
                         placeholder="Couldn't detect an address — enter this host's LAN IP"
                       />
                     }
                     <p class="muted hint">
-                      MAVLink port <span class="mono">{{ store.mavlinkPort() }}</span>
-                      @if (store.networkAddresses().length > 1) {
+                      MAVLink port <span class="mono">{{ facade.store.mavlinkPort() }}</span>
+                      @if (facade.store.networkAddresses().length > 1) {
                         — multiple network interfaces detected, switch above if this isn't the right one.
                       }
                     </p>
                   </div>
 
-                  @for (block of store.droneConfigBlocks(); track block.title) {
+                  @for (block of facade.store.droneConfigBlocks(); track block.title) {
                     <div class="config-block">
                       <div class="spread">
                         <h3>{{ block.title }}</h3>
                         <div class="row">
-                          <button type="button" class="btn secondary small" (click)="copyBlock(block)">Copy</button>
+                          <button type="button" class="btn secondary small" (click)="facade.copyBlock(block)">Copy</button>
                           @if (block.filename) {
-                            <button type="button" class="btn secondary small" (click)="downloadBlock(block)">
+                            <button type="button" class="btn secondary small" (click)="facade.downloadBlock(block)">
                               Download {{ block.filename }}
                             </button>
                           }
@@ -557,7 +557,7 @@
                   }
 
                   <div class="row">
-                    <button type="button" class="btn" (click)="store.finishDroneConfigAndListen()">
+                    <button type="button" class="btn" (click)="facade.store.finishDroneConfigAndListen()">
                       Continue — listen for it
                     </button>
                   </div>
@@ -571,8 +571,8 @@
                 <select
                   id="sim-mode"
                   name="simMode"
-                  [ngModel]="store.simMode()"
-                  (ngModelChange)="store.simMode.set($event)"
+                  [ngModel]="facade.store.simMode()"
+                  (ngModelChange)="facade.store.simMode.set($event)"
                 >
                   <option value="direct">Play a file directly</option>
                   <option value="rtsp">Transmit a file over RTSP</option>
@@ -581,36 +581,36 @@
                 </select>
               </div>
 
-              @if (store.simNeedsVideoPath()) {
+              @if (facade.store.simNeedsVideoPath()) {
                 <div class="field wide">
                   <label class="label" for="sim-video-path">Server-side video path</label>
                   <input
                     id="sim-video-path"
                     name="simVideoPath"
-                    [ngModel]="store.simVideoPath()"
-                    (ngModelChange)="store.simVideoPath.set($event)"
+                    [ngModel]="facade.store.simVideoPath()"
+                    (ngModelChange)="facade.store.simVideoPath.set($event)"
                     placeholder="/srv/videos/flight.mp4"
                     required
                   />
                 </div>
               }
 
-              @if (store.simNeedsHomePoint()) {
+              @if (facade.store.simNeedsHomePoint()) {
                 <div class="field wide flight-plan-field">
                   <span class="label">Flight plan</span>
-                  @if (store.flightPlanSummary(); as summary) {
+                  @if (facade.store.flightPlanSummary(); as summary) {
                     <div class="row flight-plan-summary">
                       <span class="chip accent">{{ summary }}</span>
-                      <button type="button" class="btn secondary small" (click)="store.openFlightPlanDialog()">
+                      <button type="button" class="btn secondary small" (click)="facade.store.openFlightPlanDialog()">
                         Edit
                       </button>
-                      <button type="button" class="btn secondary small" (click)="store.clearFlightPlan()">
+                      <button type="button" class="btn secondary small" (click)="facade.store.clearFlightPlan()">
                         Clear
                       </button>
                     </div>
                   } @else {
                     <div class="row flight-plan-summary">
-                      <button type="button" class="btn secondary small" (click)="store.openFlightPlanDialog()">
+                      <button type="button" class="btn secondary small" (click)="facade.store.openFlightPlanDialog()">
                         Draw flight plan on map
                       </button>
                       <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
@@ -628,8 +628,8 @@
                         name="simLatitude"
                         type="number"
                         step="any"
-                        [ngModel]="store.simLatitude()"
-                        (ngModelChange)="store.simLatitude.set($event)"
+                        [ngModel]="facade.store.simLatitude()"
+                        (ngModelChange)="facade.store.simLatitude.set($event)"
                         placeholder="optional"
                       />
                     </div>
@@ -641,8 +641,8 @@
                         name="simLongitude"
                         type="number"
                         step="any"
-                        [ngModel]="store.simLongitude()"
-                        (ngModelChange)="store.simLongitude.set($event)"
+                        [ngModel]="facade.store.simLongitude()"
+                        (ngModelChange)="facade.store.simLongitude.set($event)"
                         placeholder="optional"
                       />
                     </div>
@@ -653,16 +653,16 @@
                   <input
                     type="checkbox"
                     name="simAutoStart"
-                    [ngModel]="store.simAutoStart()"
-                    (ngModelChange)="store.simAutoStart.set($event)"
+                    [ngModel]="facade.store.simAutoStart()"
+                    (ngModelChange)="facade.store.simAutoStart.set($event)"
                   />
                   <span>Start streaming immediately</span>
                 </label>
               }
 
               <p class="muted hint">
-                {{ store.simModeHint() }}
-                @if (store.simNeedsVideoPath()) {
+                {{ facade.store.simModeHint() }}
+                @if (facade.store.simNeedsVideoPath()) {
                   The path must exist on the machine running the platform, not your browser.
                 }
               </p>
@@ -670,9 +670,9 @@
           }
         }
 
-        @if (store.connectMethod() && !store.canAdvanceConnect()) {
+        @if (facade.store.connectMethod() && !facade.store.canAdvanceConnect()) {
           <p class="disabled-reason">
-            @switch (store.connectMethod()) {
+            @switch (facade.store.connectMethod()) {
               @case ('discover') {
                 Pick "Use" on a discovered candidate, or switch to Register manually.
               }
@@ -699,16 +699,16 @@
         <p class="muted hint">Before this becomes an asset, make sure it actually produces a frame.</p>
 
         <div class="row">
-          <button type="button" class="btn" (click)="store.probe()" [disabled]="store.probing()">
-            {{ store.probing() ? 'Testing…' : store.lastProbeResult() || store.lastProbeError() ? 'Retry' : 'Run test' }}
+          <button type="button" class="btn" (click)="facade.store.probe()" [disabled]="facade.store.probing()">
+            {{ facade.store.probing() ? 'Testing…' : facade.store.lastProbeResult() || facade.store.lastProbeError() ? 'Retry' : 'Run test' }}
           </button>
         </div>
 
-        @if (store.probing()) {
+        @if (facade.store.probing()) {
           <div class="empty"><p class="faint">Connecting…</p></div>
-        } @else if (store.lastProbeError(); as error) {
+        } @else if (facade.store.lastProbeError(); as error) {
           <vision-notice variant="danger">{{ error }}</vision-notice>
-        } @else if (store.lastProbeResult(); as result) {
+        } @else if (facade.store.lastProbeResult(); as result) {
           <div class="test-result">
             <img
               class="test-frame"
@@ -743,7 +743,7 @@
           <div class="empty"><p class="faint">Not tested yet.</p></div>
         }
 
-        @if (!store.canAdvanceTest()) {
+        @if (!facade.store.canAdvanceTest()) {
           <p class="disabled-reason">Run the test and get a successful frame before continuing.</p>
         }
       }
@@ -754,41 +754,41 @@
         <p class="muted hint">Everything looks right? This is the last step.</p>
 
         <dl class="facts">
-          <div class="fact"><dt>Name</dt><dd>{{ store.displayName() }}</dd></div>
-          <div class="fact"><dt>Category</dt><dd>{{ categoryName() }}</dd></div>
-          @if (store.registrationNumber()) {
-            <div class="fact"><dt>Registration</dt><dd>{{ store.registrationNumber() }}</dd></div>
+          <div class="fact"><dt>Name</dt><dd>{{ facade.store.displayName() }}</dd></div>
+          <div class="fact"><dt>Category</dt><dd>{{ facade.categoryName() }}</dd></div>
+          @if (facade.store.registrationNumber()) {
+            <div class="fact"><dt>Registration</dt><dd>{{ facade.store.registrationNumber() }}</dd></div>
           }
-          <div class="fact"><dt>Connection</dt><dd>{{ connectionSummary() }}</dd></div>
+          <div class="fact"><dt>Connection</dt><dd>{{ facade.connectionSummary() }}</dd></div>
         </dl>
 
-        @if (store.photoPreviewUrl(); as preview) {
+        @if (facade.store.photoPreviewUrl(); as preview) {
           <img class="photo-preview" [src]="preview" alt="Selected photo preview" />
         }
 
-        <button type="button" class="btn" (click)="store.createAsset()" [disabled]="store.creating()">
-          {{ store.creating() ? 'Creating…' : 'Create asset' }}
+        <button type="button" class="btn" (click)="facade.store.createAsset()" [disabled]="facade.store.creating()">
+          {{ facade.store.creating() ? 'Creating…' : 'Create asset' }}
         </button>
       }
     }
 
     <div class="row wizard-nav">
-      @if (store.step() !== 'profile') {
-        <button type="button" class="btn secondary" (click)="store.back()">Back</button>
+      @if (facade.store.step() !== 'profile') {
+        <button type="button" class="btn secondary" (click)="facade.store.back()">Back</button>
       }
-      @if (store.step() !== 'create') {
-        <button type="button" class="btn" [disabled]="!store.canAdvance()" (click)="store.next()">Next</button>
+      @if (facade.store.step() !== 'create') {
+        <button type="button" class="btn" [disabled]="!facade.store.canAdvance()" (click)="facade.store.next()">Next</button>
       }
     </div>
   </section>
 
-  @if (store.flightPlanDialogOpen()) {
+  @if (facade.store.flightPlanDialogOpen()) {
     <vision-flight-plan-dialog
-      [homeLatitude]="store.simLatitude()"
-      [homeLongitude]="store.simLongitude()"
-      [initialPlan]="store.flightPlan() ?? null"
-      (saved)="store.onFlightPlanSaved($event)"
-      (cancelled)="store.onFlightPlanCancelled()"
+      [homeLatitude]="facade.store.simLatitude()"
+      [homeLongitude]="facade.store.simLongitude()"
+      [initialPlan]="facade.store.flightPlan() ?? null"
+      (saved)="facade.store.onFlightPlanSaved($event)"
+      (cancelled)="facade.store.onFlightPlanCancelled()"
     />
   }
 </div>

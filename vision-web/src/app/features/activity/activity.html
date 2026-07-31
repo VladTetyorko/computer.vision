@@ -7,20 +7,20 @@
   </div>
 
   <section class="card">
-    @if (loading()) {
+    @if (facade.loading()) {
       <p class="muted">Loading…</p>
-    } @else if (error(); as error) {
+    } @else if (facade.error(); as error) {
       <vision-empty title="Couldn't load your activity" [message]="error">
-        <button type="button" class="btn secondary" (click)="load()">Try again</button>
+        <button type="button" class="btn secondary" (click)="facade.load()">Try again</button>
       </vision-empty>
-    } @else if (rows().length === 0) {
+    } @else if (facade.rows().length === 0) {
       <vision-empty
         title="Nothing here yet"
         message="Your actions — creating an asset, renaming a device, archiving — will show up here."
       />
     } @else {
       <ul class="activity-list">
-        @for (row of rows(); track row.id) {
+        @for (row of facade.rows(); track row.id) {
           <li class="activity-row">
             <div class="activity-row-head">
               <span class="chip accent">{{ row.actionLabel }}</span>

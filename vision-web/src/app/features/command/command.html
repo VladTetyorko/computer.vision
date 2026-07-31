@@ -2,61 +2,61 @@
   <div class="command-topbar">
     <div class="row topbar-left">
       <span class="brand-label">Command</span>
-      @if (summary(); as s) {
+      @if (facade.summary(); as s) {
         <span class="chip">{{ s.totalAssets }} assets</span>
       }
       <vision-weather-chip />
     </div>
     <div class="row topbar-right">
       <button type="button" class="btn secondary small" (click)="toggleZonesPanel()">
-        Zones ({{ geofence.zones().length }})
+        Zones ({{ facade.zones().length }})
       </button>
       <label class="row archived-toggle">
         <input
           type="checkbox"
-          [checked]="includeArchived()"
-          (change)="toggleIncludeArchived($any($event.target).checked)"
+          [checked]="facade.includeArchived()"
+          (change)="facade.toggleIncludeArchived($any($event.target).checked)"
         />
         <span class="muted">Include archived</span>
       </label>
     </div>
   </div>
 
-  @if (zonesPanelOpen()) {
+  @if (isOverlayOpen('zones')) {
     <vision-zones-panel
-      [assetPositions]="assetPositions()"
-      [centerHint]="weatherPosition() ?? null"
+      [assetPositions]="facade.assetPositions()"
+      [centerHint]="facade.weatherPosition() ?? null"
       (closePanel)="toggleZonesPanel()"
     />
   }
 
-  @if (summaryError() && summary() === undefined) {
+  @if (facade.summaryError() && facade.summary() === undefined) {
     <vision-notice variant="warn">Could not reach the fleet summary — retrying every 5 seconds. The map below still works independently.</vision-notice>
   }
 
-  <div class="command-body" [style.grid-template-columns]="gridColumns()">
-    @if (railOpen()) {
+  <div class="command-body" [style.grid-template-columns]="facade.gridColumns()">
+    @if (facade.railOpen()) {
       <aside class="command-rail">
         <header class="rail-head">
           <h2>Assets</h2>
-          <span class="muted">{{ entityRows().length }}</span>
+          <span class="muted">{{ facade.entityRows().length }}</span>
         </header>
 
-        @if (summary() === undefined) {
+        @if (facade.summary() === undefined) {
           <p class="muted hint">Loading…</p>
-        } @else if (entityRows().length === 0) {
+        } @else if (facade.entityRows().length === 0) {
           <p class="muted hint">No assets registered yet.</p>
         } @else {
           <ul class="rail-list">
-            @for (row of entityRows(); track row.asset.assetId) {
+            @for (row of facade.entityRows(); track row.asset.assetId) {
               <li>
                 <button
                   type="button"
                   class="rail-row"
-                  [class.selected]="row.asset.assetId === selectedAssetId()"
+                  [class.selected]="row.asset.assetId === facade.selectedAssetId()"
                   [class.critical]="row.severity === 'critical'"
                   [class.warning]="row.severity === 'warning'"
-                  (click)="selectAsset(row.asset.assetId)"
+                  (click)="facade.selectAsset(row.asset.assetId)"
                 >
                   <span class="dot" [class.live]="row.asset.streaming"></span>
                   <span class="rail-name truncate">{{ row.asset.displayName }}</span>
@@ -80,15 +80,15 @@
     <button
       type="button"
       class="side-toggle rail-toggle"
-      (click)="toggleRail()"
-      [attr.aria-expanded]="railOpen()"
-      [title]="railOpen() ? 'Hide asset list' : 'Show asset list'"
+      (click)="facade.toggleRail()"
+      [attr.aria-expanded]="facade.railOpen()"
+      [title]="facade.railOpen() ? 'Hide asset list' : 'Show asset list'"
     >
-      {{ railOpen() ? '‹' : '›' }}
+      {{ facade.railOpen() ? '‹' : '›' }}
     </button>
 
     <div class="command-stage">
-      @if (mapIsEmpty()) {
+      @if (facade.mapIsEmpty()) {
         <div class="stage-empty">
           <h3>No assets registered yet</h3>
           <p>
@@ -97,44 +97,44 @@
           </p>
           <div class="row empty-actions">
             <a class="btn secondary" routerLink="/devices">Go to Devices</a>
-            <button type="button" class="btn" (click)="addTestDrone()" [disabled]="addingTestDrone()">
-              {{ addingTestDrone() ? 'Placing…' : 'Add a test drone' }}
+            <button type="button" class="btn" (click)="facade.addTestDrone()" [disabled]="facade.addingTestDrone()">
+              {{ facade.addingTestDrone() ? 'Placing…' : 'Add a test drone' }}
             </button>
           </div>
         </div>
       } @else {
         <vision-fleet-map
           class="command-map"
-          [zones]="geofence.zones()"
-          (watch)="watchAsset($event)"
-          (preview)="selectAsset($event)"
-          (openEventAsset)="openEventAsset($event)"
+          [zones]="facade.zones()"
+          (watch)="facade.watchAsset($event)"
+          (preview)="facade.selectAsset($event)"
+          (openEventAsset)="facade.openEventAsset($event)"
         />
       }
     </div>
 
-    @if (panelState() !== 'hidden') {
+    @if (facade.panelState() !== 'hidden') {
       <button
         type="button"
         class="side-toggle panel-toggle"
-        (click)="togglePanelCollapse()"
-        [attr.aria-expanded]="panelState() === 'open'"
-        [title]="panelState() === 'open' ? 'Collapse panel' : 'Show panel'"
+        (click)="facade.togglePanelCollapse()"
+        [attr.aria-expanded]="facade.panelState() === 'open'"
+        [title]="facade.panelState() === 'open' ? 'Collapse panel' : 'Show panel'"
       >
-        {{ panelState() === 'open' ? '›' : '‹' }}
+        {{ facade.panelState() === 'open' ? '›' : '‹' }}
       </button>
 
-      @if (panelState() === 'open') {
-        @if (selectedAsset(); as asset) {
+      @if (facade.panelState() === 'open') {
+        @if (facade.selectedAsset(); as asset) {
           <vision-asset-panel
             class="command-panel"
             [asset]="asset"
-            [marker]="selectedMarker()"
-            [videoDeviceId]="selectedVideoDeviceId()"
-            [stream]="selectedStream()"
-            (watchLive)="watchSelected()"
-            (openDetails)="openSelectedDetails()"
-            (closePanel)="closePanel()"
+            [marker]="facade.selectedMarker()"
+            [videoDeviceId]="facade.selectedVideoDeviceId()"
+            [stream]="facade.selectedStream()"
+            (watchLive)="facade.watchSelected()"
+            (openDetails)="facade.openSelectedDetails()"
+            (closePanel)="facade.closePanel()"
           />
         }
       }

@@ -13,8 +13,8 @@
     <label class="toggle">
       <input
         type="checkbox"
-        [checked]="settings.advancedMode()"
-        (change)="toggleAdvanced($any($event.target).checked)"
+        [checked]="facade.settings.advancedMode()"
+        (change)="facade.toggleAdvanced($any($event.target).checked)"
       />
       <span>
         <strong>Advanced mode</strong>
@@ -27,7 +27,7 @@
 
     <label class="setting">
       <span class="label">Default tiles per row on the Wall</span>
-      <select [value]="settings.wallDensity()" (change)="setDensity($any($event.target).value)">
+      <select [value]="facade.settings.wallDensity()" (change)="facade.setDensity($any($event.target).value)">
         @for (density of [2, 3, 4, 5, 6]; track density) {
           <option [value]="density">{{ density }}</option>
         }
@@ -42,8 +42,8 @@
     <label class="toggle">
       <input
         type="checkbox"
-        [checked]="settings.eventNotifications()"
-        (change)="toggleEventNotifications($any($event.target).checked)"
+        [checked]="facade.settings.eventNotifications()"
+        (change)="facade.toggleEventNotifications($any($event.target).checked)"
       />
       <span>
         <strong>Notify me about new detection events</strong>
@@ -56,11 +56,11 @@
       </span>
     </label>
 
-    @if (notificationPermission() === 'denied') {
+    @if (facade.notificationPermission() === 'denied') {
       <p class="muted hint">
         Notifications are blocked for this site in your browser settings — allow them there first.
       </p>
-    } @else if (notificationPermission() === 'unsupported') {
+    } @else if (facade.notificationPermission() === 'unsupported') {
       <p class="muted hint">This browser does not support notifications.</p>
     }
   </section>
@@ -69,10 +69,10 @@
   <section class="card">
     <header>
       <h2>Detection profile</h2>
-      @if (settings.isCustom()) {
-        <span class="chip warn">Custom (based on {{ settings.activeProfile().name }})</span>
+      @if (facade.settings.isCustom()) {
+        <span class="chip warn">Custom (based on {{ facade.settings.activeProfile().name }})</span>
       } @else {
-        <span class="chip">{{ settings.activeProfile().name }}</span>
+        <span class="chip">{{ facade.settings.activeProfile().name }}</span>
       }
     </header>
 
@@ -82,17 +82,17 @@
     </p>
 
     <div class="profiles">
-      @for (profile of settings.profiles(); track profile.id) {
+      @for (profile of facade.settings.profiles(); track profile.id) {
         <button
           type="button"
           class="profile"
-          [class.selected]="profile.id === settings.activeProfileId()"
-          (click)="onProfileChange(profile.id)"
+          [class.selected]="profile.id === facade.settings.activeProfileId()"
+          (click)="facade.onProfileChange(profile.id)"
         >
           <span class="profile-name">{{ profile.name }}</span>
           <span class="profile-desc muted">{{ profile.description }}</span>
           <span class="profile-values mono faint">
-            conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps · {{ modelLabel(profile.model) }}
+            conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps · {{ facade.modelLabel(profile.model) }}
           </span>
         </button>
       }
@@ -100,18 +100,18 @@
 
     <div class="knobs">
       <span class="label">Detection model</span>
-      @if (modelOptions().length === 0) {
+      @if (facade.modelOptions().length === 0) {
         <p class="muted hint">
-          Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
+          Model list unavailable — using <span class="mono">{{ facade.settings.effective().model }}</span>.
         </p>
       } @else {
         <div class="profiles">
-          @for (option of modelOptions(); track option.id) {
+          @for (option of facade.modelOptions(); track option.id) {
             <button
               type="button"
               class="profile"
-              [class.selected]="settings.effective().model === option.id"
-              (click)="onModel(option.id)"
+              [class.selected]="facade.settings.effective().model === option.id"
+              (click)="facade.onModel(option.id)"
             >
               <span class="profile-name">{{ option.displayName }}</span>
               <span class="profile-desc muted">{{ option.kind }} model</span>
@@ -126,7 +126,7 @@
       </p>
 
       <label class="label" for="s-confidence">
-        Confidence threshold — {{ settings.effective().confidenceThreshold.toFixed(2) }}
+        Confidence threshold — {{ facade.settings.effective().confidenceThreshold.toFixed(2) }}
       </label>
       <input
         id="s-confidence"
@@ -134,15 +134,15 @@
         min="0.05"
         max="0.95"
         step="0.05"
-        [value]="settings.effective().confidenceThreshold"
-        (input)="onConfidence($any($event.target).value)"
+        [value]="facade.settings.effective().confidenceThreshold"
+        (input)="facade.onConfidence($any($event.target).value)"
       />
       <p class="muted hint">
         Lower finds more objects and more false positives; higher is quieter but misses things.
       </p>
 
       <label class="label" for="s-fps">
-        Inference rate — {{ settings.effective().inferenceFps }} fps
+        Inference rate — {{ facade.settings.effective().inferenceFps }} fps
       </label>
       <input
         id="s-fps"
@@ -150,51 +150,51 @@
         min="1"
         max="30"
         step="1"
-        [value]="settings.effective().inferenceFps"
-        (input)="onFps($any($event.target).value)"
+        [value]="facade.settings.effective().inferenceFps"
+        (input)="facade.onFps($any($event.target).value)"
       />
       <p class="muted hint">
         How often frames go to the detector. Video still passes through at full frame rate.
       </p>
     </div>
 
-    @if (deltaFromDefaults().length > 0) {
+    @if (facade.deltaFromDefaults().length > 0) {
       <div class="delta">
         <strong>Differs from backend defaults:</strong>
-        {{ deltaFromDefaults().join(' · ') }}
+        {{ facade.deltaFromDefaults().join(' · ') }}
       </div>
     } @else {
       <div class="delta muted">Identical to the backend defaults.</div>
     }
 
-    @if (settings.isCustom()) {
+    @if (facade.settings.isCustom()) {
       <div class="save-row">
         <input
-          [value]="newProfileName()"
-          (input)="newProfileName.set($any($event.target).value)"
+          [value]="facade.newProfileName()"
+          (input)="facade.newProfileName.set($any($event.target).value)"
           placeholder="Name this profile"
           aria-label="New profile name"
         />
-        <button type="button" class="btn" (click)="saveAs()" [disabled]="!newProfileName().trim()">
+        <button type="button" class="btn" (click)="facade.saveAs()" [disabled]="!facade.newProfileName().trim()">
           Save as new
         </button>
-        <button type="button" class="btn secondary" (click)="settings.revertDraft()">Revert</button>
+        <button type="button" class="btn secondary" (click)="facade.settings.revertDraft()">Revert</button>
       </div>
     }
 
-    @if (customProfiles().length > 0) {
+    @if (facade.customProfiles().length > 0) {
       <div class="custom-list">
         <h3>Your profiles</h3>
-        @for (profile of customProfiles(); track profile.id) {
+        @for (profile of facade.customProfiles(); track profile.id) {
           <div class="custom-row">
             <span>{{ profile.name }}</span>
             <span class="mono faint">
-              conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps · {{ modelLabel(profile.model) }}
+              conf {{ profile.confidenceThreshold }} · {{ profile.inferenceFps }} fps · {{ facade.modelLabel(profile.model) }}
             </span>
             <button
               type="button"
               class="btn danger small"
-              (click)="settings.deleteCustomProfile(profile.id)"
+              (click)="facade.settings.deleteCustomProfile(profile.id)"
             >
               Delete
             </button>
@@ -210,16 +210,16 @@
     <dl>
       <dt>Backend</dt>
       <dd>
-        @switch (fleet.reachable()) {
+        @switch (facade.fleet.reachable()) {
           @case (true) { <span class="chip ok">reachable</span> }
           @case (false) { <span class="chip danger">unreachable</span> }
           @default { <span class="chip">checking…</span> }
         }
       </dd>
       <dt>Devices</dt>
-      <dd>{{ fleet.devices().length }}</dd>
+      <dd>{{ facade.fleet.devices().length }}</dd>
       <dt>Active streams</dt>
-      <dd>{{ fleet.streams().length }}</dd>
+      <dd>{{ facade.fleet.streams().length }}</dd>
     </dl>
     <p class="muted hint">
       Phase-1 control plane: RTSP in, HLS out. Events, training and identity arrive in later

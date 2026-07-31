@@ -5,11 +5,11 @@
       <p>Every running stream at once. Tiles off-screen stop decoding to keep the visible ones smooth.</p>
     </div>
 
-    @if (tiles().length > 0) {
+    @if (facade.tiles().length > 0) {
       <label class="row density">
         <span class="muted">Tiles per row</span>
-        <select [value]="settings.wallDensity()" (change)="setDensity($any($event.target).value)">
-          @for (density of densities; track density) {
+        <select [value]="facade.settings.wallDensity()" (change)="facade.setDensity($any($event.target).value)">
+          @for (density of facade.densities; track density) {
             <option [value]="density">{{ density }}</option>
           }
         </select>
@@ -17,16 +17,16 @@
     }
   </div>
 
-  @if (unwatchable() > 0) {
+  @if (facade.unwatchable() > 0) {
     <vision-notice variant="warn">
-      {{ unwatchable() }} stream(s) are running without a publisher URL — nothing to watch until
+      {{ facade.unwatchable() }} stream(s) are running without a publisher URL — nothing to watch until
       mediamtx is reachable and <code>vision.publish.enabled</code> is true.
     </vision-notice>
   }
 
   <div class="wall-layout">
     <div class="wall-main">
-      @if (tiles().length === 0) {
+      @if (facade.tiles().length === 0) {
         <div class="card">
           <vision-empty
             title="Nothing is streaming"
@@ -36,8 +36,8 @@
           </vision-empty>
         </div>
       } @else {
-        <div class="grid" [style.--columns]="settings.wallDensity()">
-          @for (tile of tiles(); track tile.stream.streamId) {
+        <div class="grid" [style.--columns]="facade.settings.wallDensity()">
+          @for (tile of facade.tiles(); track tile.stream.streamId) {
             <vision-wall-tile [stream]="tile.stream" [device]="tile.device" />
           }
         </div>
@@ -47,6 +47,6 @@
     <!-- ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1; docs/MVP3-PLAN.md §C-c: extracted
          to shared/ui/events-rail.ts so the Command dashboard could reuse it — see that component's own
          doc comment) ------------------------------------------------------------------------ -->
-    <vision-events-rail class="events-rail" (open)="openEvent($event)" />
+    <vision-events-rail class="events-rail" (open)="facade.openEvent($event)" />
   </div>
 </div>

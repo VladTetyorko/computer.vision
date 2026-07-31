@@ -1,36 +1,36 @@
 <div class="page">
-  @if (loading() && !timeline()) {
+  @if (facade.loading() && !facade.timeline()) {
     <div class="page-head">
       <div class="skeleton-line title"></div>
     </div>
     <div class="card skeleton-card"></div>
-  } @else if (notFound()) {
+  } @else if (facade.notFound()) {
     <div class="card empty">
       <h3>Replay unavailable</h3>
-      <p>{{ errorMessage() }}</p>
-      <a class="btn" [routerLink]="backLink()">Back</a>
+      <p>{{ facade.errorMessage() }}</p>
+      <a class="btn" [routerLink]="facade.backLink()">Back</a>
     </div>
-  } @else if (usageOpen()) {
+  } @else if (facade.usageOpen()) {
     <div class="card empty">
       <h3>This flight is still in progress</h3>
       <p>
         Replay is for finished flights — this usage hasn't ended yet, so there's nothing fixed to
         scrub through. Watch it live instead.
       </p>
-      @if (videoDeviceId(); as deviceId) {
+      @if (facade.videoDeviceId(); as deviceId) {
         <a class="btn" [routerLink]="['/live', deviceId]">Watch live</a>
       } @else {
-        <a class="btn" [routerLink]="backLink()">Back</a>
+        <a class="btn" [routerLink]="facade.backLink()">Back</a>
       }
     </div>
-  } @else if (timeline(); as t) {
+  } @else if (facade.timeline(); as t) {
     <div class="page-head">
       <div>
-        <a class="back-link" [routerLink]="backLink()">← {{ asset()?.displayName ?? 'Back' }}</a>
+        <a class="back-link" [routerLink]="facade.backLink()">← {{ facade.asset()?.displayName ?? 'Back' }}</a>
         <h1>Flight replay</h1>
         <p>
-          {{ clockLabel(fromMs()) }} – {{ clockLabel(toMs()) }}
-          <span class="muted">({{ totalLabel() }} flight)</span>
+          {{ facade.clockLabel(facade.fromMs()) }} – {{ facade.clockLabel(facade.toMs()) }}
+          <span class="muted">({{ facade.totalLabel() }} flight)</span>
         </p>
       </div>
     </div>
@@ -40,16 +40,16 @@
       <section class="card span-2">
         <header>
           <h2>Position</h2>
-          <span class="muted mono">at {{ clockLabel(atMs()) }}</span>
+          <span class="muted mono">at {{ facade.clockLabel(facade.atMs()) }}</span>
         </header>
-        @if (fullTrail().length === 0) {
+        @if (facade.fullTrail().length === 0) {
           <p class="muted hint">No position data recorded for this flight.</p>
         } @else {
           <vision-replay-map
-            [fullTrail]="fullTrail()"
-            [trail]="trail()"
-            [markerPosition]="markerPosition()"
-            [markerHeadingDegrees]="markerSample()?.headingDegrees"
+            [fullTrail]="facade.fullTrail()"
+            [trail]="facade.trail()"
+            [markerPosition]="facade.markerPosition()"
+            [markerHeadingDegrees]="facade.markerSample()?.headingDegrees"
           />
         }
       </section>
@@ -60,11 +60,11 @@
           <h2>Recording</h2>
         </header>
 
-        @if (videoAvailable()) {
+        @if (facade.videoAvailable()) {
           <video
             #recordingVideo
             class="recording-video"
-            [src]="recording()!.url"
+            [src]="facade.recording()!.url"
             controls
             preload="metadata"
             (timeupdate)="onVideoTimeUpdate()"
@@ -72,17 +72,17 @@
           ></video>
 
           <div class="row clip-actions">
-            <button type="button" class="btn secondary small" (click)="markClipStart()">Mark clip start</button>
-            <button type="button" class="btn secondary small" (click)="markClipEnd()">Mark clip end</button>
-            @if (hasClipSelection()) {
-              <button type="button" class="btn secondary small" (click)="clearClipSelection()">Clear selection</button>
+            <button type="button" class="btn secondary small" (click)="facade.markClipStart()">Mark clip start</button>
+            <button type="button" class="btn secondary small" (click)="facade.markClipEnd()">Mark clip end</button>
+            @if (facade.hasClipSelection()) {
+              <button type="button" class="btn secondary small" (click)="facade.clearClipSelection()">Clear selection</button>
             }
-            @if (downloadClipUrl(); as href) {
+            @if (facade.downloadClipUrl(); as href) {
               <a class="btn small" [href]="href" download>Download clip</a>
             }
           </div>
           <p class="muted hint">
-            {{ hasClipSelection() ? 'Clip covers the marked start/end.' : 'No selection — clip covers the whole flight.' }}
+            {{ facade.hasClipSelection() ? 'Clip covers the marked start/end.' : 'No selection — clip covers the whole flight.' }}
           </p>
         } @else {
           <div class="empty-recording">
@@ -96,16 +96,16 @@
       <section class="card span-2 scrub-card">
         <header>
           <h2>Playback</h2>
-          <span class="muted mono">{{ elapsedLabel() }} / {{ totalLabel() }}</span>
+          <span class="muted mono">{{ facade.elapsedLabel() }} / {{ facade.totalLabel() }}</span>
         </header>
 
         <div class="row transport">
-          <button type="button" class="btn" (click)="togglePlay()">
-            {{ playing() ? 'Pause' : atMs() >= toMs() ? 'Replay' : 'Play' }}
+          <button type="button" class="btn" (click)="facade.togglePlay()">
+            {{ facade.playing() ? 'Pause' : facade.atMs() >= facade.toMs() ? 'Replay' : 'Play' }}
           </button>
           <div class="row speeds" role="group" aria-label="Playback speed">
-            @for (s of speeds; track s) {
-              <button type="button" class="btn secondary small" [class.active]="speed() === s" (click)="setSpeed(s)">
+            @for (s of facade.speeds; track s) {
+              <button type="button" class="btn secondary small" [class.active]="facade.speed() === s" (click)="facade.setSpeed(s)">
                 {{ s }}×
               </button>
             }
@@ -113,16 +113,16 @@
         </div>
 
         <div class="scrub-track">
-          @if (detectionBuckets().length > 0) {
+          @if (facade.detectionBuckets().length > 0) {
             <div class="density-strip" aria-hidden="true">
-              @for (bucket of detectionBuckets(); track bucket.atMs) {
+              @for (bucket of facade.detectionBuckets(); track bucket.atMs) {
                 <button
                   type="button"
                   class="density-marker"
-                  [style.left.%]="bucketPercent(bucket)"
-                  [style.--density]="bucket.count / maxBucketCount()"
-                  [title]="bucket.count + ' detection(s) near ' + clockLabel(bucket.atMs)"
-                  (click)="jumpTo(bucket.atMs)"
+                  [style.left.%]="facade.bucketPercent(bucket)"
+                  [style.--density]="bucket.count / facade.maxBucketCount()"
+                  [title]="bucket.count + ' detection(s) near ' + facade.clockLabel(bucket.atMs)"
+                  (click)="facade.jumpTo(bucket.atMs)"
                 ></button>
               }
             </div>
@@ -130,18 +130,18 @@
           <input
             type="range"
             class="scrub-input"
-            [min]="fromMs()"
-            [max]="toMs()"
-            [step]="scrubStepMs()"
-            [value]="atMs()"
-            (input)="onScrub($any($event.target).value)"
+            [min]="facade.fromMs()"
+            [max]="facade.toMs()"
+            [step]="facade.scrubStepMs()"
+            [value]="facade.atMs()"
+            (input)="facade.onScrub($any($event.target).value)"
             aria-label="Scrub position"
           />
         </div>
 
         @if (t.detections.length === 0) {
           <p class="muted hint">No detections recorded for this flight.</p>
-        } @else if (detectionStripCapNote(); as note) {
+        } @else if (facade.detectionStripCapNote(); as note) {
           <p class="muted hint">{{ note }}</p>
         }
       </section>
@@ -149,15 +149,15 @@
       <!-- ---- Telemetry at scrub time ----------------------------------------------------------- -->
       <section class="card span-2">
         <header><h2>Telemetry at scrub time</h2></header>
-        @if (assetTelemetryDevices().length === 0) {
+        @if (facade.assetTelemetryDevices().length === 0) {
           <p class="muted hint">This asset has no telemetry-capable device.</p>
         } @else {
           <div class="telemetry-grid">
-            @for (device of assetTelemetryDevices(); track device.id) {
+            @for (device of facade.assetTelemetryDevices(); track device.id) {
               <div class="telemetry-panel">
                 <div class="panel-name truncate">{{ device.name }}</div>
-                @if (sampleAtScrubFor(device.id); as sample) {
-                  <p class="faint sample-time mono">reading at {{ clockLabel(sampleTimeMs(sample)) }}</p>
+                @if (facade.sampleAtScrubFor(device.id); as sample) {
+                  <p class="faint sample-time mono">reading at {{ facade.clockLabel(facade.sampleTimeMs(sample)) }}</p>
                   <dl class="facts">
                     <div class="fact">
                       <dt>Position</dt>
@@ -194,13 +194,13 @@
         <header><h2>Detections at scrub time</h2></header>
         @if (t.detections.length === 0) {
           <p class="muted hint">No detections recorded for this flight.</p>
-        } @else if (!detectionIsNear()) {
+        } @else if (!facade.detectionIsNear()) {
           <p class="muted hint">No detection data near this moment.</p>
-        } @else if (nearestDetection()!.detections.length === 0) {
+        } @else if (facade.nearestDetection()!.detections.length === 0) {
           <p class="muted hint">Nothing detected at this instant.</p>
         } @else {
           <div class="row chips-wrap">
-            @for (d of nearestDetection()!.detections; track d.label) {
+            @for (d of facade.nearestDetection()!.detections; track d.label) {
               <span class="chip">{{ d.label }} · {{ d.confidence.toFixed(2) }}</span>
             }
           </div>

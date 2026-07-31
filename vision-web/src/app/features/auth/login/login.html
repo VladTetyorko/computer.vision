@@ -17,9 +17,9 @@
         name="username"
         autocomplete="username"
         autocapitalize="none"
-        [ngModel]="username()"
-        (ngModelChange)="username.set($event)"
-        [disabled]="busy()"
+        [ngModel]="facade.username()"
+        (ngModelChange)="facade.username.set($event)"
+        [disabled]="facade.busy()"
         required
       />
     </label>
@@ -30,19 +30,19 @@
         type="password"
         name="password"
         autocomplete="current-password"
-        [ngModel]="password()"
-        (ngModelChange)="password.set($event)"
-        [disabled]="busy()"
+        [ngModel]="facade.password()"
+        (ngModelChange)="facade.password.set($event)"
+        [disabled]="facade.busy()"
         required
       />
     </label>
 
-    @if (error(); as error) {
+    @if (facade.error(); as error) {
       <vision-notice variant="danger">{{ error }}</vision-notice>
     }
 
-    <button type="submit" class="btn login-submit" [disabled]="!canSubmit()">
-      {{ busy() ? 'Signing in…' : 'Sign in' }}
+    <button type="submit" class="btn login-submit" [disabled]="!facade.canSubmit()">
+      {{ facade.busy() ? 'Signing in…' : 'Sign in' }}
     </button>
   </form>
 </div>

@@ -1,33 +1,10 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  DestroyRef,
-  ElementRef,
-  computed,
-  effect,
-  inject,
-  input,
-  signal,
-  viewChild,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
-import { ToastService } from '../../core/toast.service';
-import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
-import { EventsStore } from '../../core/events/events-store';
-import { PanelState, readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
-import { videoDevices } from '../../core/fleet/device-logic';
-import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-logic';
-import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
-import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { WeatherStore } from '../../core/weather/weather-store';
-import { parseWindLimitMps } from '../../core/weather/weather-logic';
-import { Player, type BoxesMode, type Transport } from '../../shared/player/player';
+import { UiStore } from '../../core/ui/ui-store';
+import { Player } from '../../shared/player/player';
 import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { Icon } from '../../shared/ui/icon';
@@ -39,74 +16,54 @@ import { PreflightChecklist } from './preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';
-import { canShowCommandPanel } from './flight-command-panel-logic';
 import { CvControlPanel } from './cv-control-panel';
 import { RcMonitor } from './rc-monitor';
-import {
-  ALL_DRONES_OPTION_VALUE,
-  TICKER_MAX_EVENTS,
-  cycleBoxesMode,
-  isAllDronesOption,
-  isSwitcherOptionSelected,
-  isWatchMode,
-  lastSeenLabel,
-  latestFinishedUsage,
-  nextCollapseAction,
-  positionLabel,
-  resolveActiveAssetId,
-  sortAssetsForPicker,
-  streamStateLabel,
-  trackingIdChanged,
-  type ToolRailPanelId,
-} from './fly-logic';
-import type { AssetDetails, AssetSummary, DetectionEvent, FlightCapability } from '../../core/api/models';
+import { FlyFacade } from './fly-facade';
+import { lastSeenLabel, nextCollapseAction, positionLabel, streamStateLabel, type ToolRailPanelId } from './fly-logic';
+import type { AssetSummary } from '../../core/api/models';
 
-/** Asset characteristics/usages + the picker's own asset list are re-read at this cadence. */
-const ASSET_POLL_INTERVAL_MS = 5_000;
-
-/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the map inset toggle predates
- * `PanelState` and stays exactly as it was (docs/UI-REDESIGN-PLAN.md D-D: the map inset is a
- * glanceable, separately-persisted toggle, not a tool-rail drawer). See `core/panel-state.ts`'s own
- * doc comment for why this isn't routed through `SettingsStore`. */
-const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
-
-/** `PanelState`'s own storage key for this page's tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) —
- * one key for all five drawers (`flight`/`cv`/`detections`/`layers`/`help`), replacing the three
- * split flags this page and `cv-control-panel.ts` used to persist separately
- * (`vision.fly.detectionsStripOpen`, `cv-control-panel.ts`'s own `vision.fly.cvPanelOpen`) and the
- * un-persisted `shortcutsOpen` signal. Per docs/UI-REDESIGN-PLAN.md D-H's own documented fallback,
- * this is a **fresh** key, not a migration of the old ones — every drawer starts closed the first
- * time a browser loads this build, rather than attempting to reconcile three old boolean keys into
- * one new string id. */
+/** `UiStore`'s own storage key for this page's tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) —
+ * one key for all six drawers (`flight`/`rc`/`cv`/`detections`/`layers`/`help`). Unchanged from the
+ * pre-`UiStore` `PanelState` key — `UiStore` round-trips the same `localStorage` shape
+ * (docs/UI-ARCHITECTURE-PLAN.md: "API-compatible with `PanelState`"), so an already-open drawer
+ * survives this refactor across a reload. */
 const ACTIVE_PANEL_KEY = 'vision.fly.activePanel';
 
-/**
- * Console prefix for this page's diagnostic logging (the "Fly shows only the asset name and an
- * empty box" investigation) — this codebase has no logging service/convention (grep-verified), so
- * plain `console.*` with a stable prefix, mirroring `shared/player/player.ts`'s own `[player]`.
- */
-const LOG_PREFIX = '[fly]';
+/** This page's one mutually-exclusive **confirm-dialog** group (docs/UI-ARCHITECTURE-PLAN.md) —
+ * today just the Stop-stream confirm, migrated off its own `stopConfirmOpen` boolean `signal(false)`
+ * so it can never drift out of sync with a tool-rail drawer or a future second confirm. Typed as a
+ * union (not a bare string), mirroring `flight-command-panel.ts#CommandDialog`/`command.ts#CommandOverlay`'s
+ * identical precedent, even with one member today. */
+type FlyDialog = 'stop';
 
 /**
  * `/fly` — the operator cockpit and the app's default landing page (docs/MVP3-PLAN.md §C-b, the
  * "one job, one page" persona: *flies ONE drone at a time; everything else is noise*).
  *
- * First visit shows an asset picker (streaming assets first); the choice is remembered
- * (`SettingsStore.flyAssetId`), so every later visit — and every deep link carrying `?asset=` —
- * lands straight in the cockpit. The cockpit itself is thin composition over pieces this app
- * already had: `<vision-player>` (WHEP-first, self-recovering, the `stopped` terminal state),
- * `<vision-live-map>`, `<vision-detections-strip>` (moved to `shared/player/` for this reuse — see its own doc
- * comment), `TelemetryStore`/`DetectionsStore`/`EventsStore` (identical DI-sharing/activate-release
- * idioms as `LivePage`/`AssetDetailPage`/`WallPage`). The one new piece is `<vision-fly-osd>` — see
- * its own doc comment for why the shape genuinely differs from `TelemetryOsd`.
+ * **Layered per docs/UI-ARCHITECTURE-PLAN.md (wave W1)**: every store/service injection, derived
+ * read-model, and HTTP-backed command lives in {@link FlyFacade} (provided below, alongside
+ * `TelemetryStore`/`DetectionsStore`/`WeatherStore` — unchanged, still one poller-set per route
+ * activation). This component is left holding only:
+ *   - the route-bound `requestedAssetId`/`watch` inputs (only a component can receive one) and the
+ *     constructor wiring that forwards them into the facade (see `FlyFacade`'s own doc comment for
+ *     why one is a one-shot handoff and the other stays continuously reactive);
+ *   - the overlay state a `UiStore` group is explicitly meant to be **host-owned** (per that class's
+ *     own doc comment "a host owns one instance directly", mirrored by `asset-detail.ts`'s
+ *     `editors`/`panels` and `command.ts`'s `overlay`): `panels` (the six tool-rail drawers,
+ *     unchanged shape/ids, now backed by `UiStore` instead of `PanelState` — see this file's own
+ *     `ACTIVE_PANEL_KEY` doc comment) and `dialog` (the Stop-stream confirm, a one-member transient
+ *     `UiStore` group replacing the old `stopConfirmOpen` signal);
+ *   - DOM-only concerns no facade could hold anyway: the fullscreen `viewChild`/`toggleFullscreen`,
+ *     and the page-scoped `document` `keydown` listener (`handleKeydown`) that maps physical keys to
+ *     facade commands / `UiStore` calls — kept here rather than in the facade (unlike `LiveFacade`'s
+ *     own self-contained keydown listener) purely because fullscreen needs a `viewChild`, which only
+ *     a component can declare;
+ *   - a handful of pure, stateless template helpers for the picker's `@for` rows (`assetStreamState`/
+ *     `assetLastSeen`/`assetPosition`), the same "plain method reading its `@for` argument, called
+ *     from the template" idiom `asset-detail.ts`'s own `barLabel`/`detailPairs` already established.
  *
- * **Multi-device asset**: `primaryDevice` is whichever `VIDEO`-capable device is currently
- * selected (`primaryDeviceId`, defaulting to the asset's first one) — the big player always shows
- * this one; every *other* `VIDEO`-capable device on the asset renders as a small clickable tile
- * that swaps which one is primary. Start/Stop and the deliberately-stopped state (mirrors
- * `LivePage`/`AssetDetailPage`'s own `explicitlyStopped`/`hasBeenLive` pair exactly) both act on
- * the primary device's own stream only — switching primary resets both, since it's effectively a
- * fresh device to watch.
+ * Every HTTP call, toast, silent-degrade path, poll cadence, and keyboard shortcut is unchanged from
+ * the pre-facade page — see {@link FlyFacade}'s own doc comment for the full "what moved" account.
  */
 @Component({
   selector: 'vision-fly',
@@ -132,8 +89,10 @@ const LOG_PREFIX = '[fly]';
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `LivePage`/`AssetDetailPage`.
   // `WeatherStore` (docs/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
-  // comment for why it can't be a shared root singleton.
-  providers: [TelemetryStore, DetectionsStore, WeatherStore],
+  // comment for why it can't be a shared root singleton. `FlyFacade` shares this same injector so
+  // its own `inject(TelemetryStore)`/`inject(DetectionsStore)`/`inject(WeatherStore)` resolve to
+  // these exact instances (see `FlyFacade`'s own doc comment).
+  providers: [TelemetryStore, DetectionsStore, WeatherStore, FlyFacade],
 })
 export class FlyPage {
   /**
@@ -147,445 +106,45 @@ export class FlyPage {
   /** `?watch=1` — hides Start/Stop (docs/MVP3-PLAN.md §C-b, C-c's own drill-down target). */
   readonly watch = input<string | undefined>(undefined);
 
-  private readonly api = inject(VisionApi);
-  private readonly toasts = inject(ToastService);
-
-  protected readonly fleet = inject(FleetStore);
-  protected readonly settings = inject(SettingsStore);
-  protected readonly telemetry = inject(TelemetryStore);
-  protected readonly detections = inject(DetectionsStore);
-  protected readonly events = inject(EventsStore);
-  protected readonly geofence = inject(GeofenceStore);
-  private readonly weather = inject(WeatherStore);
+  protected readonly facade = inject(FlyFacade);
 
   private readonly stageHost = viewChild<ElementRef<HTMLDivElement>>('stage');
 
-  // --- Picker ------------------------------------------------------------------------------
-  /** Skeleton card count while the first `listAssets()` call is in flight. */
-  protected readonly skeletonRows = [1, 2, 3] as const;
-  protected readonly pickerAssets = signal<readonly AssetSummary[] | undefined>(undefined);
-  protected readonly pickerError = signal(false);
-  protected readonly orderedPickerAssets = computed(() => sortAssetsForPicker(this.pickerAssets() ?? []));
-
-  /** The header switcher's own sentinel `<option>` value (docs/UX-REWORK-PLAN.md §U-a bullet 4). */
-  protected readonly ALL_DRONES_OPTION = ALL_DRONES_OPTION_VALUE;
-
-  protected readonly activeAssetId = signal<string | undefined>(undefined);
-  protected readonly asset = signal<AssetDetails | undefined>(undefined);
-  protected readonly showPicker = computed(() => this.activeAssetId() === undefined);
-
-  // --- Telemetry/detections re-entry guards (docs/REALTIME-PLAN.md Phase R-a item 2) ---------
-  // The last deviceId/streamId the corresponding constructor effect actually acted on — compared
-  // by value (mirrors `core/map/map-store.ts#reconcileTrackers`), not by the enclosing `asset()`/
-  // `stream()` object's own identity, which changes every ~5s poll tick regardless.
-  private lastTelemetryDeviceId: string | undefined = undefined;
-  private lastDetectionsStreamId: string | undefined = undefined;
-  /** `${assetId} ${firmware}` — see the capabilities-tracking effect below (constructor). */
-  private lastCapabilitiesKey: string | undefined = undefined;
-
-  // --- Cockpit: video device selection ------------------------------------------------------
-  protected readonly videoDevicesList = computed(() => videoDevices(this.asset()?.devices ?? []));
-  /** `undefined` = "use the asset's first VIDEO device" — reset on every asset/device switch. */
-  private readonly primaryDeviceIdOverride = signal<string | undefined>(undefined);
-  protected readonly primaryDevice = computed(() => {
-    const devices = this.videoDevicesList();
-    const chosen = devices.find((device) => device.id === this.primaryDeviceIdOverride());
-    return chosen ?? devices[0];
-  });
-  /**
-   * Secondary video-device tiles (`fly.html`'s `@for (device of secondaryDevices(); track
-   * device.id)`). **Verified against docs/REALTIME-PLAN.md Phase R-a item 4**: this computed
-   * returns a brand-new array (and, on every ~5s `refreshPoll`, brand-new `Device` objects too)
-   * regardless of whether anything actually changed, but `@for`'s own `track device.id` already
-   * keeps the same `<vision-player>` component instance alive across that — Angular reuses/moves
-   * the DOM node rather than destroying it, as long as the tracked id is stable — and that
-   * instance's own reattach guard (`shared/player/player.ts`'s `lastAttachKey`/`player-recovery.ts#attachKey`)
-   * only tears down/rebuilds when the fed `src`/`whepUrl` values themselves change, never on mere
-   * reorder/resize. Neither `suspended` nor `stopped` is bound on a secondary tile's player (see
-   * `fly.html`), so its attach key reduces to exactly `(src, whepUrl)` — i.e. tears down only when
-   * the underlying stream id actually changes, per that item's exit criterion.
-   */
-  protected readonly secondaryDevices = computed(() => {
-    const primaryId = this.primaryDevice()?.id;
-    return this.videoDevicesList().filter((device) => device.id !== primaryId);
-  });
-
-  protected readonly stream = computed(() => {
-    const device = this.primaryDevice();
-    return device ? this.fleet.streamFor(device.id) : undefined;
-  });
-  protected readonly live = computed(() => this.stream() !== undefined);
-
-  // --- Deliberately-stopped state (docs/MVP2-PLAN.md §S, S-b) — identical pair/rule to
-  // `LivePage`/`AssetDetailPage`; reset whenever the primary device changes since that's
-  // effectively a fresh device to watch.
-  private readonly explicitlyStopped = signal(false);
-  private readonly hasBeenLive = signal(false);
-  protected readonly stopped = computed(() => this.explicitlyStopped() || (this.hasBeenLive() && !this.live()));
-
-  protected readonly watchMode = computed(() => isWatchMode(this.watch()));
-
-  protected readonly telemetryDevicesList = computed(() => telemetryDevices(this.asset()?.devices ?? []));
-  protected readonly hasTelemetryDevice = computed(() => this.telemetryDevicesList().length > 0);
-
-  // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md
-  // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
-  // already reads, no second telemetry source.
-  protected readonly failsafeBanner = computed(() => flightBanner(this.telemetry.latest()));
-
-  /** Re-derives whenever the tracked sample/primary-device/live state changes — a ground-check
-   * glance, not a live-ticking instrument (the OSD's own age chip is that); see
-   * `flight-state-logic.ts#derivePreflight`'s own doc comment for why `Date.now()` is read here,
-   * at the call site, rather than inside that pure function. */
-  protected readonly preflightItems = computed(() =>
-    derivePreflight(this.telemetry.latest(), this.primaryDevice() !== undefined, this.live(), Date.now()),
-  );
-
-  /** Pre-arm ground check — hidden once watch-mode drops the controls entirely, or once the FC
-   * itself confirms armed (the OSD chip bar is the live instrument from that point on). */
-  protected readonly showPreflightChecklist = computed(() => {
-    if (this.watchMode()) {
-      return false;
-    }
-    const sample = this.telemetry.latest();
-    return sample === undefined || sample.flightState?.armed !== true;
-  });
-
-  /** docs/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
-   * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */
-  protected readonly diagnosticsRows = computed(() => deriveDiagnostics(this.telemetry.latest()?.extra));
-
-  /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates `<vision-return-home-button>` (below,
-   * `fly.html`'s `.hud-header`). Same "re-derive whenever the tracked sample changes, not a
-   * continuously-ticking clock" convention as `preflightItems` above: `telemetry.latest()` itself
-   * already re-emits roughly every poll/live-update tick while the vehicle is transmitting, so this
-   * tracks freshness closely enough without a dedicated 1s timer.
-   */
-  protected readonly canBringHome = computed(() => {
-    const sample = this.telemetry.latest();
-    return canCommandReturnHome(sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
-  });
-
-  /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 2 — the vehicle's own capability matrix, fetched once per
-   * asset selection and re-fetched the first time this vehicle's firmware becomes known (see the
-   * capabilities-tracking effect below for why). `undefined` while in flight or on any failure —
-   * `<vision-flight-command-panel>` renders nothing at all in that case, the plan's own "degrade to
-   * hidden if the capabilities call fails" rule.
-   */
-  protected readonly capabilities = signal<FlightCapability | undefined>(undefined);
-
-  /** Gates `<vision-flight-command-panel>` (below, `fly.html`'s `.hud-header`) — `capabilities`
-   * itself must have loaded *and* say `commandable`, on top of the identical firmware+freshness bar
-   * `canBringHome` already clears (`flight-command-panel-logic.ts#canShowCommandPanel`). */
-  protected readonly canShowCommands = computed(() => {
-    const sample = this.telemetry.latest();
-    return canShowCommandPanel(this.capabilities(), sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
-  });
-
-  // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) --------------------------------------
-  /** The live telemetry fix when one exists, else the asset's own last-known position — "best position we have right now". */
-  private readonly weatherPosition = computed(() => {
-    const latest = this.telemetry.latest();
-    if (latest?.latitude !== undefined && latest.longitude !== undefined) {
-      return { latitude: latest.latitude, longitude: latest.longitude };
-    }
-    return this.asset()?.lastKnownPosition;
-  });
-  /** `AssetDetails.attributes['windLimitMps']` when present, else the plan's own 10 m/s default. */
-  protected readonly windLimitMps = computed(() => parseWindLimitMps(this.asset()?.attributes));
-
-  protected readonly latencySeconds = signal<number | null>(null);
-  protected readonly transport = signal<Transport>('hls');
-  protected readonly boxesMode = signal<BoxesMode>('overlay');
-
-  protected readonly mapVisible = signal(readPersistedFlag(MAP_VISIBLE_KEY, true));
+  // --- Overlay state — host-owned, see this class's own doc comment above ------------------------
 
   /**
    * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/UI-REDESIGN-PLAN.md
-   * Wave 2, D-D/F3) — a plain field, not DI (`PanelState`'s own doc comment: "provided per host" in
-   * the sense that matters is a host-owned instance, never a shared singleton). Replaces this page's
-   * former `detectionsStripOpen`/`shortcutsOpen` signals and `cv-control-panel.ts`'s own
-   * self-persisted `cvPanelOpen` flag with the frozen rail ids (`ToolRailPanelId`): `flight` (the
-   * migrated `<vision-flight-command-panel>` body), `cv` (the migrated `<vision-cv-control-panel>`
-   * body), `detections`, `layers`, `help`.
+   * Wave 2, D-D/F3; migrated from `PanelState` to `UiStore` by docs/UI-ARCHITECTURE-PLAN.md wave
+   * W1 — API-compatible, same persisted `ACTIVE_PANEL_KEY` shape). Frozen rail ids
+   * (`ToolRailPanelId`): `flight`, `rc`, `cv`, `detections`, `layers`, `help`.
    */
-  protected readonly panels = new PanelState(ACTIVE_PANEL_KEY);
+  protected readonly panels = new UiStore(ACTIVE_PANEL_KEY);
 
-  protected readonly stopConfirmOpen = signal(false);
-  protected readonly busy = signal(false);
-
-  protected readonly latestFinishedUsageEntry = computed(() =>
-    latestFinishedUsage(this.asset()?.recentUsages ?? []),
-  );
-
-  // --- Events ticker overlay (docs/MVP3-PLAN.md §C-b: "this stream's events via events-store,
-  // newest, auto-fading") — filters the shared global feed by this asset's id, same derivation
-  // `AssetDetailPage`'s own offline-branch already uses (`filterEvents(events.events(), {assetId})`);
-  // "auto-fading" is a pure CSS animation per row (`fly.css`), not a JS timer.
-  protected readonly tickerEvents = computed(() => {
-    const assetId = this.activeAssetId();
-    if (!assetId) {
-      return [] as readonly DetectionEvent[];
-    }
-    return filterEvents(this.events.events(), { assetId }).slice(0, TICKER_MAX_EVENTS);
-  });
+  /** The Stop-stream confirm's own `UiStore` group — see this file's own `FlyDialog` doc comment. */
+  private readonly dialog = new UiStore();
+  protected isDialogOpen(id: FlyDialog): boolean {
+    return this.dialog.isOpen(id);
+  }
 
   constructor() {
-    void this.initPicker();
+    // One-shot `?asset=`/remembered-asset resolution — see `FlyFacade#initPicker`'s own doc comment.
+    void this.facade.initPicker(this.requestedAssetId());
 
-    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever the map toggle
-    // actually changes (the `M` shortcut, or `collapseOverlays`'s `Esc` handling); the initial
-    // `signal()` value above already restored whatever was last saved. The tool-rail's own five
-    // drawers persist through `this.panels` itself (`PanelState`'s own `storageKey` round-trip),
-    // no separate effect needed here.
-    effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
-
-    // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherStore.track`
-    // itself no-ops instantly unless the 10-minute cache is actually stale (docs/OPS-CORE-PLAN.md §W).
-    effect(() => this.weather.track(this.weatherPosition()));
-
-    // Latches once `live()` is ever observed true for the current primary device — see `stopped`'s
-    // own doc comment above.
-    effect(() => {
-      if (this.live()) {
-        this.hasBeenLive.set(true);
-      }
-    });
-
-    // Logs exactly what `<vision-player>` is being fed (docs/MVP3-PLAN.md follow-up: makes an
-    // "empty box, no error" report diagnosable from the console alone) — every time the primary
-    // device's stream entry changes, not just once, since the whole point is to catch a stream
-    // that flips between present/absent as `FleetStore`'s own poll lands.
-    effect(() => {
-      const device = this.primaryDevice();
-      const stream = this.stream();
-      if (!device) {
-        return;
-      }
-      if (!stream) {
-        console.info(`${LOG_PREFIX} primary device ${device.id} has no active stream yet`);
-        return;
-      }
-      console.info(`${LOG_PREFIX} primary device ${device.id} stream`, {
-        streamId: stream.streamId,
-        viewUrl: stream.viewUrl,
-        whepUrl: stream.whepUrl,
-      });
-    });
-
-    // Any device on the asset resolves the same owning-asset/open-usage pair (mirrors
-    // `AssetDetailPage`'s identical effect) — start tracking as soon as the asset has *any*
-    // TELEMETRY-capable device, regardless of which VIDEO device is currently primary.
-    //
-    // **Guarded on the derived deviceId primitive** (docs/REALTIME-PLAN.md Phase R-a item 2):
-    // `this.asset()` is a fresh `AssetDetails` object every ~5s poll tick (`refreshPoll`) even when
-    // nothing about the tracked device actually changed, so this effect re-runs on that cadence
-    // regardless. Without this guard, re-entering `telemetry.track()` with the *same* deviceId every
-    // ~5s re-ran `findOpenUsageId` from scratch each time — the diagnosed O(N) burst (`GET
-    // /api/assets` + `GET /api/assets/{id}` per fleet asset, docs/REALTIME-PLAN.md §0). Mirrors
-    // `core/map/map-store.ts#reconcileTrackers`' own reconcile-by-id idiom: compare the id *value*, not
-    // object identity, and no-op the store call when it hasn't changed.
-    effect(() => {
-      const devices = this.asset()?.devices ?? [];
-      const deviceId = this.hasTelemetryDevice() && devices.length > 0 ? devices[0].id : undefined;
-      if (!trackingIdChanged(deviceId, this.lastTelemetryDeviceId)) {
-        return;
-      }
-      this.lastTelemetryDeviceId = deviceId;
-      if (deviceId) {
-        // Already has the owning asset id (docs/REALTIME-PLAN.md Phase R-a item 3) — skips
-        // `TelemetryStore`'s own O(N) fleet-listing fallback.
-        this.telemetry.track(deviceId, this.activeAssetId());
-      } else {
-        this.telemetry.reset();
-      }
-    });
-
-    // Detections only make sense while the primary device's stream is actually running.
-    // Guarded on the derived streamId primitive for the identical reason as telemetry above — a
-    // stream object re-arriving unchanged every ~5s poll tick must not re-enter `track()` (which
-    // clears results immediately, a visible flicker, docs/REALTIME-PLAN.md §0).
-    effect(() => {
-      const streamId = this.stream()?.streamId;
-      if (!trackingIdChanged(streamId, this.lastDetectionsStreamId)) {
-        return;
-      }
-      this.lastDetectionsStreamId = streamId;
-      if (streamId) {
-        // Already has the owning asset id (docs/REALTIME-PLAN.md §4, Phase R-c) — lets
-        // `DetectionsStore` subscribe to live `detections:<assetId>` instead of only polling.
-        this.detections.track(streamId, this.activeAssetId());
-      } else {
-        this.detections.reset();
-      }
-    });
-
-    // docs/DRONE-INFRA-PLAN.md I-e Stage 2 — flight-command panel capabilities. Fetched once per
-    // asset selection, and again the first time this vehicle's own firmware becomes known (an
-    // unheard vehicle reports `commandable=false` until its first heartbeat arrives, per the plan's
-    // own capability matrix — a fresh fetch once firmware resolves is what flips a just-connected
-    // vehicle's panel from hidden to shown without needing a manual refresh).
-    //
-    // **Guarded on a composite `(assetId, firmware)` key** (mirrors `trackSessionKey`,
-    // `core/live/live-fallback-logic.ts`), not `assetId` alone: `telemetry.latest()` is a fresh
-    // object most poll ticks (signals compare with `Object.is`), so without the firmware half of the
-    // key this effect would re-fetch every ~poll tick with an unchanged firmware value — the exact
-    // O(N)-re-entry class of bug `trackingIdChanged`'s other call sites in this file already guard
-    // against (docs/REALTIME-PLAN.md Phase R-a item 2).
-    effect(() => {
-      const assetId = this.activeAssetId();
-      const firmware = this.telemetry.latest()?.flightState?.firmware;
-      const key = assetId ? `${assetId} ${firmware ?? ''}` : undefined;
-      if (!trackingIdChanged(key, this.lastCapabilitiesKey)) {
-        return;
-      }
-      this.lastCapabilitiesKey = key;
-      if (assetId) {
-        void this.loadCapabilities(assetId);
-      } else {
-        this.capabilities.set(undefined);
-      }
-    });
-
-    // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — one more of the handful of
-    // pages that keeps the shared global events poll alive while mounted.
-    this.events.activate();
-
-    const scheduler = inject(PollScheduler);
-    const stopPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refreshPoll());
+    // `watch` must stay reactive across a same-route navigation — mirrors `LivePage`'s identical
+    // `effect(() => this.facade.setDeviceId(...))`.
+    effect(() => this.facade.setWatch(this.watch()));
 
     const onKeydown = (event: KeyboardEvent): void => this.handleKeydown(event);
     document.addEventListener('keydown', onKeydown);
 
     inject(DestroyRef).onDestroy(() => {
-      this.events.release();
-      stopPoll();
       document.removeEventListener('keydown', onKeydown);
     });
   }
 
-  // --- Picker / asset selection ---------------------------------------------------------------
-
-  private async initPicker(): Promise<void> {
-    try {
-      const assets = await this.api.listAssets();
-      this.pickerAssets.set(assets);
-      this.pickerError.set(false);
-      const resolved = resolveActiveAssetId(assets, this.requestedAssetId(), this.settings.flyAssetId());
-      console.info(`${LOG_PREFIX} picker loaded ${assets.length} asset(s)`, {
-        requestedAssetId: this.requestedAssetId(),
-        rememberedAssetId: this.settings.flyAssetId(),
-        resolved,
-      });
-      if (resolved) {
-        this.selectAsset(resolved);
-      }
-    } catch (error) {
-      console.warn(`${LOG_PREFIX} could not load the asset picker`, { error });
-      this.pickerError.set(true);
-    }
-  }
-
-  protected retryPicker(): void {
-    void this.initPicker();
-  }
-
-  /** Refreshes the picker's asset list (feeds the header switcher too) and the active asset, if any. */
-  private async refreshPoll(): Promise<void> {
-    try {
-      const assets = await this.api.listAssets();
-      this.pickerAssets.set(assets);
-    } catch {
-      // Silent-degrade — background enrichment, not a user-initiated action, matches every other
-      // poller in this app.
-    }
-    const id = this.activeAssetId();
-    if (id) {
-      await this.loadAsset(id);
-    }
-  }
-
-  private async loadAsset(assetId: string): Promise<void> {
-    try {
-      const details = await this.api.getAsset(assetId);
-      this.asset.set(details);
-    } catch (error) {
-      if (this.asset() === undefined) {
-        // The very first load for this pick failed — a genuine dead end, not a background hiccup
-        // on top of an already-working cockpit (that case silently keeps the stale data instead).
-        console.warn(`${LOG_PREFIX} could not load asset ${assetId} — returning to the picker`, { error });
-        this.toasts.error('Could not load that drone — it may have been removed.');
-        this.activeAssetId.set(undefined);
-        this.settings.flyAssetId.set(null);
-      }
-    }
-  }
-
-  /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 2 — background capability read, not a user-initiated action:
-   * silent-degrade on any failure (404 unknown asset, 403 out of scope, network) straight to
-   * `undefined`, no toast — the flight-command panel just stays hidden, mirroring
-   * `TelemetryStore`/`DetectionsStore`'s own "best-effort context" silent-failure convention rather
-   * than `loadAsset`'s own user-facing error toast (that one guards the entire cockpit's own load).
-   */
-  private async loadCapabilities(assetId: string): Promise<void> {
-    try {
-      const caps = await this.api.flightCapabilities(assetId);
-      this.capabilities.set(caps);
-    } catch (error) {
-      console.warn(`${LOG_PREFIX} could not load flight capabilities for ${assetId} — command panel stays hidden`, {
-        error,
-      });
-      this.capabilities.set(undefined);
-    }
-  }
-
-  /** Picking from the picker grid, the header switcher, or a resolved `?asset=`/remembered id — one path. */
-  protected selectAsset(assetId: string): void {
-    if (assetId === this.activeAssetId()) {
-      return;
-    }
-    console.info(`${LOG_PREFIX} selecting asset ${assetId}`);
-    this.settings.flyAssetId.set(assetId);
-    this.activeAssetId.set(assetId);
-    this.asset.set(undefined);
-    this.primaryDeviceIdOverride.set(undefined);
-    this.explicitlyStopped.set(false);
-    this.hasBeenLive.set(false);
-    this.capabilities.set(undefined);
-    void this.loadAsset(assetId);
-  }
-
-  /** Returns to the full picker without forgetting the remembered choice (re-picking re-sets it anyway). */
-  protected openPicker(): void {
-    this.activeAssetId.set(undefined);
-  }
-
-  /**
-   * `fly.html`'s header switcher binds this per-`<option>` (`[selected]`) rather than `[value]` on
-   * the `<select>` itself — see `fly-logic.ts#isSwitcherOptionSelected`'s doc comment for the
-   * `<select>`/`@for` ordering race this sidesteps (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2).
-   */
-  protected switcherOptionSelected(candidateAssetId: string): boolean {
-    return isSwitcherOptionSelected(candidateAssetId, this.activeAssetId());
-  }
-
-  /**
-   * The header switcher's single `(change)` handler (docs/UX-REWORK-PLAN.md §U-a bullet 4: fold
-   * the old standalone "All drones" button into this one control) — the sentinel option opens the
-   * full picker, any other value is a real asset id and switches straight to it, same as before.
-   */
-  protected onSwitcherChange(value: string): void {
-    if (isAllDronesOption(value)) {
-      this.openPicker();
-      return;
-    }
-    this.selectAsset(value);
-  }
-
   // --- Picker card facts (docs/UX-REWORK-PLAN.md §U-a2 §3 — the asset card rebuild) -----------
+  // Pure, stateless, called from the picker's own `@for` — no facade state needed beyond the loop
+  // argument itself, same idiom as `asset-detail.ts`'s own `barLabel`/`detailPairs`.
 
   protected assetStreamState(asset: AssetSummary): 'Streaming' | 'Offline' {
     return streamStateLabel(asset.status);
@@ -599,82 +158,30 @@ export class FlyPage {
     return positionLabel(asset.lastKnownPosition);
   }
 
-  // --- Video device switching -----------------------------------------------------------------
-
-  protected setPrimaryDevice(deviceId: string): void {
-    if (deviceId === this.primaryDevice()?.id) {
-      return;
-    }
-    this.primaryDeviceIdOverride.set(deviceId);
-    this.explicitlyStopped.set(false);
-    this.hasBeenLive.set(false);
-  }
-
-  // --- Player wiring -----------------------------------------------------------------------
-
-  protected onLatency(seconds: number | null): void {
-    this.latencySeconds.set(seconds);
-  }
-
-  protected onTransport(transport: Transport): void {
-    console.info(`${LOG_PREFIX} player transport changed to ${transport}`);
-    this.transport.set(transport);
-  }
-
-  // --- Start / Stop, with a confirm step for Stop -----------------------------------------
-
-  protected async start(): Promise<void> {
-    const device = this.primaryDevice();
-    if (!device) {
-      return;
-    }
-    console.info(`${LOG_PREFIX} starting stream for device ${device.id}`);
-    this.busy.set(true);
-    try {
-      await this.fleet.start(device.id, this.settings.effective());
-      this.explicitlyStopped.set(false); // a fresh attach — see `stopped`'s own doc comment
-    } finally {
-      this.busy.set(false);
-    }
-  }
+  // --- Stop, with a confirm step (docs/UX-REWORK-PLAN.md §U-a2 §2 poka-yoke rule 2) -------------
+  // The facade owns the actual command (`FlyFacade#stop`); this page only owns the confirm gate.
 
   protected requestStop(): void {
-    this.stopConfirmOpen.set(true);
+    this.dialog.open('stop');
   }
 
   protected cancelStop(): void {
-    this.stopConfirmOpen.set(false);
+    this.dialog.close('stop');
   }
 
   protected async confirmStop(): Promise<void> {
-    const stream = this.stream();
-    if (!stream) {
-      this.stopConfirmOpen.set(false);
-      return;
-    }
-    this.busy.set(true);
-    try {
-      await this.fleet.stop(stream.streamId);
-      this.explicitlyStopped.set(true);
-    } finally {
-      this.busy.set(false);
-      this.stopConfirmOpen.set(false);
-    }
-  }
-
-  // --- Events ticker ---------------------------------------------------------------------------
-
-  protected tickerLabel(event: DetectionEvent): string {
-    return `${capitalizeLabel(event.label)} · ${formatConfidence(event.peakConfidence)}`;
+    await this.facade.stop();
+    this.dialog.close('stop');
   }
 
   // --- Keyboard shortcuts (docs/MVP3-PLAN.md §C-b) ------------------------------------------
-  // Mirrors `LivePage`'s own `M`-only listener exactly (page-scoped `document` `keydown`,
-  // ignored while a form field has focus or a modifier is held, added/removed with the route),
-  // extended to the cockpit's fuller shortcut set.
+  // Mirrors `LivePage`'s own `M`-only listener (page-scoped `document` `keydown`, ignored while a
+  // form field has focus or a modifier is held, added/removed with the route), extended to the
+  // cockpit's fuller shortcut set. Kept on this component (not the facade) purely because
+  // fullscreen needs `stageHost`, a `viewChild` only a component can declare.
 
   private handleKeydown(event: KeyboardEvent): void {
-    if (this.showPicker()) {
+    if (this.facade.showPicker()) {
       return; // shortcuts are cockpit-only — the picker has no map/boxes/fullscreen to toggle
     }
     if (event.metaKey || event.ctrlKey || event.altKey) {
@@ -687,13 +194,13 @@ export class FlyPage {
     switch (event.key) {
       case 'm':
       case 'M':
-        if (this.hasTelemetryDevice()) {
-          this.mapVisible.update((visible) => !visible);
+        if (this.facade.hasTelemetryDevice()) {
+          this.facade.toggleMapVisible();
         }
         break;
       case 'b':
       case 'B':
-        this.boxesMode.update(cycleBoxesMode);
+        this.facade.cycleBoxes();
         break;
       case 'f':
       case 'F':
@@ -711,32 +218,32 @@ export class FlyPage {
     event.preventDefault();
   }
 
-  /** Closest-thing-open-first (docs/UI-REDESIGN-PLAN.md D-D) — any open tool-rail drawer, then the
+  /** Closest-thing-open-first (docs/UI-REDESIGN-PLAN.md D-D): any open tool-rail drawer, then the
    * Stop-stream confirm, then the map inset; see `fly-logic.ts#nextCollapseAction`'s own doc comment
    * for the cascade order this delegates to. */
   protected collapseOverlays(): void {
     const action = nextCollapseAction({
       panelOpen: this.panels.active() !== null,
-      stopConfirmOpen: this.stopConfirmOpen(),
-      mapVisible: this.mapVisible(),
+      stopConfirmOpen: this.dialog.isOpen('stop'),
+      mapVisible: this.facade.mapVisible(),
     });
     switch (action) {
       case 'panel':
         this.panels.close();
         break;
       case 'stop-confirm':
-        this.stopConfirmOpen.set(false);
+        this.dialog.close('stop');
         break;
       case 'map':
-        this.mapVisible.set(false);
+        this.facade.hideMap();
         break;
     }
   }
 
   // --- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) --------------------------------------
   // Thin wrappers around `this.panels` typed to the frozen `ToolRailPanelId` set (`fly-logic.ts`) so
-  // `fly.html`'s rail buttons/drawers can't typo an id past the compiler — `PanelState` itself stays
-  // a generic `string` id (see that class's own doc comment).
+  // `fly.html`'s rail buttons/drawers can't typo an id past the compiler — `UiStore` itself stays a
+  // generic `string` id (see that class's own doc comment).
 
   protected togglePanel(id: ToolRailPanelId): void {
     this.panels.toggle(id);

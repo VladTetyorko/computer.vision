@@ -1,10 +1,10 @@
 <div class="page">
-  @if (loading() && !asset()) {
+  @if (facade.loading() && !facade.asset()) {
     <div class="page-head">
       <div class="skeleton-line title"></div>
     </div>
     <div class="card skeleton-card"></div>
-  } @else if (notFound()) {
+  } @else if (facade.notFound()) {
     <div class="card">
       <vision-empty title="Unknown asset">
         <p>
@@ -14,14 +14,14 @@
         <a class="btn" routerLink="/devices">Back to Devices</a>
       </vision-empty>
     </div>
-  } @else if (asset(); as a) {
+  } @else if (facade.asset(); as a) {
     <div class="page-head">
       <div class="row header-identity">
         @if (assetImageSrc(); as src) {
           <img class="asset-photo" [src]="src" (error)="onImageError()" alt="" />
         }
         <div>
-        @if (editingAsset()) {
+        @if (isEditorOpen('asset')) {
           <div class="inline-form column edit-asset">
             <input
               [value]="nameDraft()"
@@ -36,7 +36,7 @@
               aria-label="Category"
             />
             <div class="row">
-              <button type="button" class="btn small" (click)="confirmEditAsset()" [disabled]="busy()">Save</button>
+              <button type="button" class="btn small" (click)="confirmEditAsset()" [disabled]="facade.busy()">Save</button>
               <button type="button" class="btn secondary small" (click)="cancelEditAsset()">Cancel</button>
             </div>
           </div>
@@ -44,10 +44,10 @@
           <h1>{{ a.displayName }}</h1>
           <p>
             <span class="chip">{{ a.categoryName }}</span>
-            <span class="chip" [class.ok]="lifecycle() === 'ACTIVE'" [class.faded]="archived()">
-              {{ lifecycle() }}
+            <span class="chip" [class.ok]="facade.lifecycle() === 'ACTIVE'" [class.faded]="facade.archived()">
+              {{ facade.lifecycle() }}
             </span>
-            @if (live()) {
+            @if (facade.live()) {
               <span class="chip ok"><span class="dot live"></span>Streaming</span>
             }
           </p>
@@ -59,16 +59,16 @@
         <!-- Lifecycle simplification (docs/UX-REWORK-PLAN.md §U-a2 item 2): operator-facing
              surfaces show only Archive/Restore — activate/deactivate no longer render here at all.
              Archive fires immediately (item 3b, "Undo over confirm") — no confirm dialog. -->
-        @if (!editingAsset() && !archived()) {
+        @if (!isEditorOpen('asset') && !facade.archived()) {
           <button type="button" class="btn secondary" (click)="renameAsset()">Rename asset…</button>
         }
-        @if (assetLifecycleAction(); as entry) {
+        @if (facade.assetLifecycleAction(); as entry) {
           <button
             type="button"
             class="btn secondary"
             [class.danger-action]="entry.action === 'archive'"
             (click)="onAssetLifecycleAction(entry.action)"
-            [disabled]="busy()"
+            [disabled]="facade.busy()"
           >
             {{ assetActionLabel(entry.action) }}
           </button>
@@ -90,18 +90,18 @@
         <section class="card col-12 cockpit-band">
           <div class="row cockpit-status">
             <vision-icon name="cockpit" [size]="18" />
-            <span class="chip" [class.ok]="live()">
-              @if (live()) {
+            <span class="chip" [class.ok]="facade.live()">
+              @if (facade.live()) {
                 <span class="dot live"></span>
               }
-              {{ live() ? 'Streaming' : 'Offline' }}
+              {{ facade.live() ? 'Streaming' : 'Offline' }}
             </span>
             <span class="muted cockpit-hint">Piloting and live video are in the cockpit — this page is for managing the asset.</span>
           </div>
           <div class="row cockpit-actions">
-            <button type="button" class="btn" (click)="openCockpit()">Open cockpit</button>
-            @if (videoDevice(); as vd) {
-              <button type="button" class="btn secondary" (click)="watch()" title="Watch this stream on its own page">Watch live</button>
+            <button type="button" class="btn" (click)="facade.openCockpit()">Open cockpit</button>
+            @if (facade.videoDevice(); as vd) {
+              <button type="button" class="btn secondary" (click)="facade.watch()" title="Watch this stream on its own page">Watch live</button>
             }
           </div>
         </section>
@@ -109,11 +109,11 @@
         <!-- ---- Position + freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) —
              the single freshest sample across every source device, not the old landing page's full
              per-device dump (that lives in the "Full telemetry" drawer now). -->
-        @if (assetTelemetryDevices().length > 0) {
+        @if (facade.assetTelemetryDevices().length > 0) {
           <section class="card col-4">
             <div class="icon-heading">
               <vision-icon name="map-pin" [size]="18" />
-              <vision-section-header title="Position" [subtitle]="freshestSourceName() ? 'source: ' + freshestSourceName() : undefined">
+              <vision-section-header title="Position" [subtitle]="facade.freshestSourceName() ? 'source: ' + facade.freshestSourceName() : undefined">
                 <button type="button" actions class="btn secondary small" (click)="panels.open('telemetry')">
                   Full telemetry
                   <vision-icon name="chevron-right" [size]="14" />
@@ -122,12 +122,12 @@
             </div>
             <vision-live-map />
             <dl class="facts freshest-facts">
-              @for (row of freshestFacts(); track row.label) {
+              @for (row of facade.freshestFacts(); track row.label) {
                 <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
               }
               <div class="fact">
                 <dt>Sample</dt>
-                <dd [class.stale-text]="freshestStale()">{{ freshestAgeSeconds()?.toFixed(0) ?? '—' }}s ago</dd>
+                <dd [class.stale-text]="facade.freshestStale()">{{ facade.freshestAgeSeconds()?.toFixed(0) ?? '—' }}s ago</dd>
               </div>
             </dl>
           </section>
@@ -140,7 +140,7 @@
             <vision-section-header title="Utilization" />
           </div>
           <div class="kpi-tiles">
-            @for (tile of kpiTiles(); track tile.label) {
+            @for (tile of facade.kpiTiles(); track tile.label) {
               <vision-stat [label]="tile.label" [value]="tile.value" [sub]="tile.sub" [live]="tile.live ?? false" />
             }
           </div>
@@ -157,11 +157,11 @@
               </button>
             </vision-section-header>
           </div>
-          @if (flightBars().length === 0) {
+          @if (facade.flightBars().length === 0) {
             <p class="muted hint">No recorded flights yet.</p>
           } @else {
             <div class="util-chart">
-              @for (bar of flightBars(); track bar.usageId) {
+              @for (bar of facade.flightBars(); track bar.usageId) {
                 <div class="util-bar-col">
                   @if (bar.open) {
                     <span class="dot live util-bar-pip" title="In progress"></span>
@@ -211,7 +211,7 @@
             <button type="button" class="btn secondary" (click)="panels.open('attributes')">
               <vision-icon name="list" [size]="16" />Characteristics<vision-icon name="chevron-right" [size]="14" />
             </button>
-            @if (canManagePilots()) {
+            @if (facade.canManagePilots()) {
               <button type="button" class="btn secondary" (click)="panels.open('pilots')">
                 <vision-icon name="pilot" [size]="16" />Pilots<vision-icon name="chevron-right" [size]="14" />
               </button>
@@ -262,7 +262,7 @@
                       <a class="btn secondary small" [routerLink]="['/assets', a.assetId, 'replay', usage.usageId]">
                         Replay
                       </a>
-                    } @else if (videoDevice(); as vd) {
+                    } @else if (facade.videoDevice(); as vd) {
                       <a class="btn secondary small" [routerLink]="['/live', vd.id]">Watch live</a>
                     }
                   </td>
@@ -285,20 +285,20 @@
           </vision-section-header>
         </div>
 
-        @if (assignOpen()) {
+        @if (isEditorOpen('assign')) {
           <div class="inline-form assign-form">
-            @if (loadingAssignable()) {
+            @if (facade.loadingAssignable()) {
               <span class="muted">Loading unowned devices…</span>
-            } @else if (assignableDevices().length === 0) {
+            } @else if (facade.assignableDevices().length === 0) {
               <span class="muted">No unowned devices available — register or discover one first.</span>
             } @else {
               <select name="assignDraft" [value]="assignDraft()" (change)="assignDraft.set($any($event.target).value)" aria-label="Choose a device to attach">
                 <option value="" disabled selected>Choose a device…</option>
-                @for (device of assignableDevices(); track device.id) {
+                @for (device of facade.assignableDevices(); track device.id) {
                   <option [value]="device.id">{{ device.name }} ({{ device.protocol }})</option>
                 }
               </select>
-              <button type="button" class="btn small" [disabled]="!assignDraft() || busy()" (click)="confirmAssign()">Attach</button>
+              <button type="button" class="btn small" [disabled]="!assignDraft() || facade.busy()" (click)="confirmAssign()">Attach</button>
             }
             <button type="button" class="btn secondary small" (click)="cancelAssign()">Cancel</button>
           </div>
@@ -334,7 +334,7 @@
                   <span class="chip" [class.ok]="device.state === 'ACTIVE'" [class.faded]="device.state === 'DELETED'">
                     {{ device.state }}
                   </span>
-                  @if (fleet.liveDeviceIds().has(device.id)) {
+                  @if (facade.fleet.liveDeviceIds().has(device.id)) {
                     <span class="chip ok"><span class="dot live"></span>Live</span>
                   }
                 </td>
@@ -348,7 +348,7 @@
                         <div class="kebab-item">
                           <button
                             type="button"
-                            [disabled]="!entry.available || busyDeviceId() === device.id"
+                            [disabled]="!entry.available || facade.busyDeviceId() === device.id"
                             [title]="entry.reason ?? ''"
                             (click)="onDeviceAction(device, entry.action)"
                           >
@@ -367,7 +367,7 @@
                           <button
                             type="button"
                             class="danger-action"
-                            [disabled]="!entry.available || busyDeviceId() === device.id"
+                            [disabled]="!entry.available || facade.busyDeviceId() === device.id"
                             [title]="entry.reason ?? ''"
                             (click)="onDeviceAction(device, entry.action)"
                           >
@@ -409,14 +409,14 @@
 
     @if (panels.isOpen('telemetry')) {
       <vision-side-panel title="Full telemetry" subtitle="Per source device" icon="signal" (close)="panels.close()">
-        @if (assetTelemetryDevices().length === 0) {
+        @if (facade.assetTelemetryDevices().length === 0) {
           <p class="muted hint">No telemetry-capable devices on this asset.</p>
         } @else {
           <div class="telemetry-grid">
-            @for (device of assetTelemetryDevices(); track device.id) {
+            @for (device of facade.assetTelemetryDevices(); track device.id) {
               <div class="telemetry-panel" [class.stale]="deviceStale(device.id)">
                 <div class="panel-name truncate">{{ device.name }}</div>
-                @if (latestSampleFor(device.id); as sample) {
+                @if (facade.latestSampleFor(device.id); as sample) {
                   <dl class="facts">
                     @for (row of deviceFacts(device.id); track row.label) {
                       <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
@@ -441,17 +441,17 @@
     @if (panels.isOpen('events')) {
       <vision-side-panel
         title="Events"
-        [subtitle]="live() ? 'Live stream feed' : 'Recent, from the global feed'"
+        [subtitle]="facade.live() ? 'Live stream feed' : 'Recent, from the global feed'"
         icon="scan"
         (close)="panels.close()"
       >
-        @if (displayedEvents().length === 0) {
+        @if (facade.displayedEvents().length === 0) {
           <p class="muted hint">
-            No detection events recorded {{ live() ? 'for this stream yet' : 'for this asset yet' }}.
+            No detection events recorded {{ facade.live() ? 'for this stream yet' : 'for this asset yet' }}.
           </p>
         } @else {
           <ul class="event-list">
-            @for (event of displayedEvents(); track event.id) {
+            @for (event of facade.displayedEvents(); track event.id) {
               <li class="event-row" [class.open]="event.state === 'OPEN'">
                 <span class="chip event-state" [class.ok]="event.state === 'OPEN'">
                   <span class="dot" [class.live]="event.state === 'OPEN'"></span>{{ event.state }}
@@ -483,7 +483,7 @@
           <div class="fact">
             <dt>Registration</dt>
             <dd>
-              @if (editingRegistrationNumber()) {
+              @if (isEditorOpen('registration')) {
                 <span class="inline-form registration-edit">
                   <input
                     [value]="registrationNumberDraft()"
@@ -491,7 +491,7 @@
                     placeholder="N12345"
                     aria-label="Registration / tail number"
                   />
-                  <button type="button" class="btn small" (click)="confirmEditRegistrationNumber()" [disabled]="busy()">
+                  <button type="button" class="btn small" (click)="confirmEditRegistrationNumber()" [disabled]="facade.busy()">
                     Save
                   </button>
                   <button type="button" class="btn secondary small" (click)="cancelEditRegistrationNumber()">
@@ -500,7 +500,7 @@
                 </span>
               } @else {
                 <span class="row registration-row">
-                  <span>{{ registrationNumber() ?? '—' }}</span>
+                  <span>{{ facade.registrationNumber() ?? '—' }}</span>
                   <button type="button" class="btn secondary small" (click)="openEditRegistrationNumber()">
                     Edit
                   </button>
@@ -522,9 +522,9 @@
         <!-- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
              key/value surgery, including the registrationNumber key the inline edit above already
              covers more conveniently for the common case. -->
-        @if (settings.advancedMode()) {
+        @if (facade.settings.advancedMode()) {
           <div class="attributes-editor">
-            @if (!attributesEditorOpen()) {
+            @if (!isEditorOpen('attributes')) {
               <button type="button" class="btn secondary small" (click)="openAttributesEditor()">
                 Edit attributes…
               </button>
@@ -574,7 +574,7 @@
       </vision-side-panel>
     }
 
-    @if (panels.isOpen('pilots') && canManagePilots()) {
+    @if (panels.isOpen('pilots') && facade.canManagePilots()) {
       <vision-side-panel title="Pilots" icon="pilot" (close)="panels.close()">
         <vision-pilots-card [assetId]="assetId()" />
       </vision-side-panel>

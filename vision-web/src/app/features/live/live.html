@@ -1,5 +1,5 @@
 <div class="page">
-  @if (device(); as d) {
+  @if (facade.device(); as d) {
     <div class="page-head">
       <div>
         <h1>{{ d.name }}</h1>
@@ -12,11 +12,11 @@
       </div>
       <div class="row">
         <a class="btn secondary" routerLink="/devices">All devices</a>
-        @if (live()) {
-          <button type="button" class="btn danger" (click)="stop()" [disabled]="busy()">Stop stream</button>
+        @if (facade.live()) {
+          <button type="button" class="btn danger" (click)="facade.stop()" [disabled]="facade.busy()">Stop stream</button>
         } @else {
-          <button type="button" class="btn" (click)="start()" [disabled]="busy()">
-            {{ busy() ? 'Starting…' : 'Start stream' }}
+          <button type="button" class="btn" (click)="facade.start()" [disabled]="facade.busy()">
+            {{ facade.busy() ? 'Starting…' : 'Start stream' }}
           </button>
         }
       </div>
@@ -25,19 +25,19 @@
     <!-- Video-first (docs/CYCLES-PLAN.md §9, CU-b item 4): the player dominates; OSD, detections
          and settings all moved into the collapsible right rail below — nothing sits on top of the
          video itself any more. -->
-    <div class="layout" [class.rail-collapsed]="!railOpen()">
+    <div class="layout" [class.rail-collapsed]="!facade.railOpen()">
       <div class="stage">
         <vision-player
-          [src]="stream()?.viewUrl ?? null"
-          [whepUrl]="stream()?.whepUrl ?? null"
-          [stopped]="stopped()"
-          [detections]="detections.results()"
-          [boxesMode]="boxesMode()"
-          (latencyChanged)="onLatency($event)"
-          (transportChanged)="onTransport($event)"
+          [src]="facade.stream()?.viewUrl ?? null"
+          [whepUrl]="facade.stream()?.whepUrl ?? null"
+          [stopped]="facade.stopped()"
+          [detections]="facade.detections.results()"
+          [boxesMode]="facade.boxesMode()"
+          (latencyChanged)="facade.onLatency($event)"
+          (transportChanged)="facade.onTransport($event)"
         />
 
-        @if (live() && !stream()?.viewUrl) {
+        @if (facade.live() && !facade.stream()?.viewUrl) {
           <vision-notice variant="warn">
             The stream is running but the publisher returned no view URL. Start mediamtx
             (<code>docker compose up -d mediamtx</code>) and restart the stream.
@@ -48,19 +48,19 @@
       <button
         type="button"
         class="rail-toggle"
-        (click)="toggleRail()"
-        [attr.aria-expanded]="railOpen()"
-        [title]="railOpen() ? 'Hide details' : 'Show details'"
+        (click)="facade.toggleRail()"
+        [attr.aria-expanded]="facade.railOpen()"
+        [title]="facade.railOpen() ? 'Hide details' : 'Show details'"
       >
-        {{ railOpen() ? '›' : '‹' }}
+        {{ facade.railOpen() ? '›' : '‹' }}
       </button>
 
-      @if (railOpen()) {
+      @if (facade.railOpen()) {
         <aside class="side">
-          @if (hasTelemetry()) {
+          @if (facade.hasTelemetry()) {
             <section class="card">
               <header><h2>Telemetry</h2></header>
-              @if (telemetry.hasTelemetry()) {
+              @if (facade.telemetry.hasTelemetry()) {
                 <vision-telemetry-osd />
               } @else {
                 <p class="muted hint">No telemetry yet — waiting for the first sample.</p>
@@ -68,7 +68,7 @@
             </section>
           }
 
-          @if (live()) {
+          @if (facade.live()) {
             <section class="card">
               <header>
                 <h2>Detections</h2>
@@ -76,24 +76,24 @@
                   <button
                     type="button"
                     class="btn secondary small"
-                    [class.active]="boxesMode() === 'overlay'"
-                    (click)="setBoxesMode('overlay')"
+                    [class.active]="facade.boxesMode() === 'overlay'"
+                    (click)="facade.setBoxesMode('overlay')"
                   >
                     Overlay
                   </button>
                   <button
                     type="button"
                     class="btn secondary small"
-                    [class.active]="boxesMode() === 'burned'"
-                    (click)="setBoxesMode('burned')"
+                    [class.active]="facade.boxesMode() === 'burned'"
+                    (click)="facade.setBoxesMode('burned')"
                   >
                     Burned
                   </button>
                   <button
                     type="button"
                     class="btn secondary small"
-                    [class.active]="boxesMode() === 'off'"
-                    (click)="setBoxesMode('off')"
+                    [class.active]="facade.boxesMode() === 'off'"
+                    (click)="facade.setBoxesMode('off')"
                   >
                     Off
                   </button>
@@ -105,12 +105,12 @@
 
           <section class="card">
             <header><h2>Stream</h2></header>
-            <vision-stream-info [deviceId]="deviceId()" [latencySeconds]="latencySeconds()" [transport]="transport()" />
+            <vision-stream-info [deviceId]="deviceId()" [latencySeconds]="facade.latencySeconds()" [transport]="facade.transport()" />
 
-            @if (settings.advancedMode() && optionPairs().length > 0) {
+            @if (facade.settings.advancedMode() && facade.optionPairs().length > 0) {
               <div class="options">
                 <h3>Options</h3>
-                @for (pair of optionPairs(); track pair.key) {
+                @for (pair of facade.optionPairs(); track pair.key) {
                   <div class="opt mono"><span>{{ pair.key }}</span><span>{{ pair.value }}</span></div>
                 }
               </div>
@@ -120,27 +120,27 @@
           <section class="card">
             <header>
               <h2>Detection settings</h2>
-              @if (settings.isCustom()) {
+              @if (facade.settings.isCustom()) {
                 <span class="chip warn">Custom</span>
               } @else {
-                <span class="chip">{{ settings.activeProfile().name }}</span>
+                <span class="chip">{{ facade.settings.activeProfile().name }}</span>
               }
             </header>
 
             <span class="label">Detection model</span>
-            @if (modelOptions().length === 0) {
+            @if (facade.modelOptions().length === 0) {
               <p class="muted hint">
-                Model list unavailable — using <span class="mono">{{ settings.effective().model }}</span>.
+                Model list unavailable — using <span class="mono">{{ facade.settings.effective().model }}</span>.
               </p>
             } @else {
               <div class="row segmented" role="group" aria-label="Detection model">
-                @for (option of modelOptions(); track option.id) {
+                @for (option of facade.modelOptions(); track option.id) {
                   <button
                     type="button"
                     class="btn secondary small"
-                    [class.active]="settings.effective().model === option.id"
+                    [class.active]="facade.settings.effective().model === option.id"
                     [title]="option.displayName"
-                    (click)="onModel(option.id)"
+                    (click)="facade.onModel(option.id)"
                   >
                     {{ option.displayName }}
                   </button>
@@ -149,7 +149,7 @@
             }
 
             <label class="label" for="confidence">
-              Confidence ≥ {{ settings.effective().confidenceThreshold.toFixed(2) }}
+              Confidence ≥ {{ facade.settings.effective().confidenceThreshold.toFixed(2) }}
             </label>
             <input
               id="confidence"
@@ -157,12 +157,12 @@
               min="0.05"
               max="0.95"
               step="0.05"
-              [value]="settings.effective().confidenceThreshold"
-              (input)="onConfidence($any($event.target).value)"
+              [value]="facade.settings.effective().confidenceThreshold"
+              (input)="facade.onConfidence($any($event.target).value)"
             />
 
             <label class="label" for="fps">
-              Inference {{ settings.effective().inferenceFps }} fps
+              Inference {{ facade.settings.effective().inferenceFps }} fps
             </label>
             <input
               id="fps"
@@ -170,8 +170,8 @@
               min="1"
               max="30"
               step="1"
-              [value]="settings.effective().inferenceFps"
-              (input)="onFps($any($event.target).value)"
+              [value]="facade.settings.effective().inferenceFps"
+              (input)="facade.onFps($any($event.target).value)"
             />
 
             <p class="muted hint">
@@ -179,27 +179,27 @@
               rate — this is how often frames are sent for inference.
             </p>
 
-            @if (settings.isCustom()) {
-              <button type="button" class="btn secondary small" (click)="settings.revertDraft()">
-                Revert to {{ settings.activeProfile().name }}
+            @if (facade.settings.isCustom()) {
+              <button type="button" class="btn secondary small" (click)="facade.settings.revertDraft()">
+                Revert to {{ facade.settings.activeProfile().name }}
               </button>
             }
           </section>
 
-          @if (hasTelemetry()) {
+          @if (facade.hasTelemetry()) {
             <section class="card">
               <header>
                 <h2>Map</h2>
                 <button
                   type="button"
                   class="btn secondary small"
-                  (click)="toggleMapInset()"
+                  (click)="facade.toggleMapInset()"
                   title="Toggle the map inset — keyboard shortcut M"
                 >
-                  {{ mapInsetVisible() ? 'Hide' : 'Show' }} <span class="key-hint">M</span>
+                  {{ facade.mapInsetVisible() ? 'Hide' : 'Show' }} <span class="key-hint">M</span>
                 </button>
               </header>
-              @if (mapInsetVisible()) {
+              @if (facade.mapInsetVisible()) {
                 <vision-live-map />
               }
             </section>

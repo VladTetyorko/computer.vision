@@ -1,4 +1,4 @@
-@if (showPicker()) {
+@if (facade.showPicker()) {
   <div class="page">
     <div class="page-head">
       <div>
@@ -7,19 +7,19 @@
       </div>
     </div>
 
-    @if (pickerError()) {
+    @if (facade.pickerError()) {
       <div class="card empty">
         <h3>Could not reach the backend</h3>
         <p>Streaming assets can't be listed right now.</p>
-        <button type="button" class="btn" (click)="retryPicker()">Retry</button>
+        <button type="button" class="btn" (click)="facade.retryPicker()">Retry</button>
       </div>
-    } @else if (pickerAssets() === undefined) {
+    } @else if (facade.pickerAssets() === undefined) {
       <div class="picker-grid">
-        @for (row of skeletonRows; track row) {
+        @for (row of facade.skeletonRows; track row) {
           <div class="card skeleton-card"></div>
         }
       </div>
-    } @else if (orderedPickerAssets().length === 0) {
+    } @else if (facade.orderedPickerAssets().length === 0) {
       <div class="card empty">
         <h3>No drones registered yet</h3>
         <p>
@@ -30,8 +30,8 @@
       </div>
     } @else {
       <div class="picker-grid">
-        @for (a of orderedPickerAssets(); track a.assetId) {
-          <button type="button" class="card picker-card" (click)="selectAsset(a.assetId)">
+        @for (a of facade.orderedPickerAssets(); track a.assetId) {
+          <button type="button" class="card picker-card" (click)="facade.selectAsset(a.assetId)">
             <div class="row spread">
               <h3 class="truncate">{{ a.displayName }}</h3>
               <span class="chip" [class.ok]="a.status === 'STREAMING'">
@@ -67,7 +67,7 @@
       </div>
     }
   </div>
-} @else if (asset(); as a) {
+} @else if (facade.asset(); as a) {
   <!-- ---- Cockpit grid (docs/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user
        request — see fly.css's own grid comment for the full reasoning) ------------------------
        Named CSS-grid areas (fly.css): `banner` is a real grid row that reflows the rest of the grid
@@ -78,7 +78,7 @@
        tool-rail drawer is open both overlay `main` itself (absolute within `.grid-main`, never
        within `.cockpit`) — see fly.css's own comment on `.grid-main`. -->
   <div class="cockpit" #stage>
-    @if (failsafeBanner(); as banner) {
+    @if (facade.failsafeBanner(); as banner) {
       <div class="grid-banner">
         <vision-failsafe-banner [banner]="banner" />
       </div>
@@ -87,19 +87,19 @@
     <div class="grid-main">
       <div class="stage-video">
         <vision-player
-          [src]="stream()?.viewUrl ?? null"
-          [whepUrl]="stream()?.whepUrl ?? null"
-          [stopped]="stopped()"
+          [src]="facade.stream()?.viewUrl ?? null"
+          [whepUrl]="facade.stream()?.whepUrl ?? null"
+          [stopped]="facade.stopped()"
           [compact]="true"
-          [detections]="detections.results()"
-          [boxesMode]="boxesMode()"
-          (latencyChanged)="onLatency($event)"
-          (transportChanged)="onTransport($event)"
+          [detections]="facade.detections.results()"
+          [boxesMode]="facade.boxesMode()"
+          (latencyChanged)="facade.onLatency($event)"
+          (transportChanged)="facade.onTransport($event)"
         />
 
-        @if (!primaryDevice()) {
+        @if (!facade.primaryDevice()) {
           <div class="notice stage-notice">This drone has no camera device to watch.</div>
-        } @else if (live() && !stream()?.viewUrl) {
+        } @else if (facade.live() && !facade.stream()?.viewUrl) {
           <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
         }
       </div>
@@ -116,13 +116,13 @@
              listed drone directly, or the trailing "All drones…" entry to open the full picker. -->
         <label class="switcher-control" title="Switch drone, or pick 'All drones…' for the full picker">
           <span class="switcher-label">Drone</span>
-          <select class="switcher" aria-label="Switch drone" (change)="onSwitcherChange($any($event.target).value)">
-            @for (candidate of orderedPickerAssets(); track candidate.assetId) {
-              <option [value]="candidate.assetId" [selected]="switcherOptionSelected(candidate.assetId)">
+          <select class="switcher" aria-label="Switch drone" (change)="facade.onSwitcherChange($any($event.target).value)">
+            @for (candidate of facade.orderedPickerAssets(); track candidate.assetId) {
+              <option [value]="candidate.assetId" [selected]="facade.switcherOptionSelected(candidate.assetId)">
                 {{ candidate.displayName }}
               </option>
             }
-            <option [value]="ALL_DRONES_OPTION">All drones…</option>
+            <option [value]="facade.ALL_DRONES_OPTION">All drones…</option>
           </select>
         </label>
 
@@ -136,7 +136,7 @@
         <vision-return-home-button
           [assetId]="a.assetId"
           [assetDisplayName]="a.displayName"
-          [canCommand]="canBringHome()"
+          [canCommand]="facade.canBringHome()"
           [compact]="true"
         />
       </div>
@@ -144,25 +144,25 @@
       <!-- ---- Map inset (M) — a separate persisted toggle, not a drawer (docs/UI-REDESIGN-PLAN.md
            D-D: "glanceable, not a modal drawer"); overlays `main`, hidden entirely below `--bp-md`
            (900px, fly.css) regardless of this toggle's own state. -->
-      @if (mapVisible() && hasTelemetryDevice()) {
+      @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
         <div class="main-map">
-          <vision-live-map [zones]="geofence.zones()" />
+          <vision-live-map [zones]="facade.geofence.zones()" />
         </div>
       }
 
       <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
-      @if (secondaryDevices().length > 0) {
+      @if (facade.secondaryDevices().length > 0) {
         <div class="main-secondary">
-          @for (device of secondaryDevices(); track device.id) {
+          @for (device of facade.secondaryDevices(); track device.id) {
             <button
               type="button"
               class="secondary-tile"
-              (click)="setPrimaryDevice(device.id)"
+              (click)="facade.setPrimaryDevice(device.id)"
               [title]="'Switch to ' + device.name"
             >
               <vision-player
-                [src]="fleet.streamFor(device.id)?.viewUrl ?? null"
-                [whepUrl]="fleet.streamFor(device.id)?.whepUrl ?? null"
+                [src]="facade.fleet.streamFor(device.id)?.viewUrl ?? null"
+                [whepUrl]="facade.fleet.streamFor(device.id)?.whepUrl ?? null"
                 [compact]="true"
               />
               <span class="tile-label">{{ device.name }}</span>
@@ -173,17 +173,17 @@
 
       <!-- ---- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
            in watch mode, and once the FC itself confirms armed. -->
-      @if (showPreflightChecklist()) {
+      @if (facade.showPreflightChecklist()) {
         <div class="main-preflight">
-          <vision-preflight-checklist [items]="preflightItems()" />
+          <vision-preflight-checklist [items]="facade.preflightItems()" />
         </div>
       }
 
       <!-- ---- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
            vibration/EKF/rangefinder/mission progress); hidden entirely with no diagnostic keys. -->
-      @if (diagnosticsRows().length > 0) {
+      @if (facade.diagnosticsRows().length > 0) {
         <div class="main-diagnostics">
-          <vision-diagnostics-card [rows]="diagnosticsRows()" />
+          <vision-diagnostics-card [rows]="facade.diagnosticsRows()" />
         </div>
       }
 
@@ -197,19 +197,19 @@
       <vision-flight-command-panel
         [assetId]="a.assetId"
         [assetDisplayName]="a.displayName"
-        [capabilities]="capabilities()"
-        [canCommand]="canShowCommands()"
-        [armed]="telemetry.latest()?.flightState?.armed"
+        [capabilities]="facade.capabilities()"
+        [canCommand]="facade.canShowCommands()"
+        [armed]="facade.telemetry.latest()?.flightState?.armed"
         [open]="isPanelOpen('flight')"
         (close)="panels.close()"
       />
 
       <!-- Detection (CV) console — migrated into the shared drawer shell (D-E); hidden entirely in
            watch mode, same "viewer, not controller" gate as Start/Stop below. -->
-      @if (!watchMode()) {
+      @if (!facade.watchMode()) {
         <vision-cv-control-panel
-          [streamId]="stream()?.streamId"
-          [detectionResults]="detections.results()"
+          [streamId]="facade.stream()?.streamId"
+          [detectionResults]="facade.detections.results()"
           [open]="isPanelOpen('cv')"
           (close)="panels.close()"
         />
@@ -224,7 +224,7 @@
 
       <!-- Detections strip — previously an always-visible bottom-right toggle+strip, now the
            `detections` drawer (docs/UI-REDESIGN-PLAN.md Wave 2 item 5); same `live()` gate as before. -->
-      @if (live() && isPanelOpen('detections')) {
+      @if (facade.live() && isPanelOpen('detections')) {
         <vision-side-panel title="Detections" icon="eye" (close)="panels.close()">
           <vision-detections-strip />
         </vision-side-panel>
@@ -239,13 +239,13 @@
         <vision-side-panel title="Layers" icon="layers" subtitle="Detection box rendering" (close)="panels.close()">
           <span class="label">Boxes (shortcut: B)</span>
           <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
-            <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesMode.set('overlay')">
+            <button type="button" role="tab" class="btn" [class.active]="facade.boxesMode() === 'overlay'" [attr.aria-selected]="facade.boxesMode() === 'overlay'" (click)="facade.boxesMode.set('overlay')">
               Overlay
             </button>
-            <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesMode.set('burned')">
+            <button type="button" role="tab" class="btn" [class.active]="facade.boxesMode() === 'burned'" [attr.aria-selected]="facade.boxesMode() === 'burned'" (click)="facade.boxesMode.set('burned')">
               Burned in
             </button>
-            <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesMode.set('off')">
+            <button type="button" role="tab" class="btn" [class.active]="facade.boxesMode() === 'off'" [attr.aria-selected]="facade.boxesMode() === 'off'" (click)="facade.boxesMode.set('off')">
               Off
             </button>
           </div>
@@ -288,7 +288,7 @@
     <!-- ---- Bottom OSD strip (docs/UI-REDESIGN-PLAN.md Wave 2 — Power/Nav/Link/Env clusters,
          relaid out as a bottom row per direct user request; see fly.css's own grid comment). ---- -->
     <div class="grid-telemetry">
-      <vision-fly-osd [latencySeconds]="latencySeconds()" [transport]="transport()" [windLimitMps]="windLimitMps()" />
+      <vision-fly-osd [latencySeconds]="facade.latencySeconds()" [transport]="facade.transport()" [windLimitMps]="facade.windLimitMps()" />
     </div>
 
 
@@ -297,7 +297,7 @@
          like its old inline control was (flight: `canShowCommands()`; cv: `!watchMode()`;
          detections: `live()`; layers/help: always). -->
     <div class="grid-rail">
-      @if (canShowCommands()) {
+      @if (facade.canShowCommands()) {
         <vision-icon-button
           icon="drone"
           label="Flight controls"
@@ -314,7 +314,7 @@
         [active]="isPanelOpen('rc')"
         (activated)="togglePanel('rc')"
       />
-      @if (!watchMode()) {
+      @if (!facade.watchMode()) {
         <span class="rail-item">
           <vision-icon-button
             icon="scan"
@@ -323,12 +323,12 @@
             [active]="isPanelOpen('cv')"
             (activated)="togglePanel('cv')"
           />
-          @if (settings.effective().detectionEnabled === false) {
+          @if (facade.settings.effective().detectionEnabled === false) {
             <span class="rail-dot" title="Detection is off"></span>
           }
         </span>
       }
-      @if (live()) {
+      @if (facade.live()) {
         <vision-icon-button
           icon="eye"
           label="Detections"
@@ -354,25 +354,25 @@
     </div>
 
     <!-- ---- Controls: Start/Stop, Replay ------------------------------------------------------ -->
-    @if (!watchMode()) {
+    @if (!facade.watchMode()) {
       <div class="grid-controls">
-        @if (latestFinishedUsageEntry(); as finished) {
+        @if (facade.latestFinishedUsageEntry(); as finished) {
           <a class="btn secondary" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
             Replay last flight
           </a>
         }
-        @if (live()) {
-          <button type="button" class="btn danger big danger-action" (click)="requestStop()" [disabled]="busy()">
+        @if (facade.live()) {
+          <button type="button" class="btn danger big danger-action" (click)="requestStop()" [disabled]="facade.busy()">
             Stop stream
           </button>
         } @else {
           <!-- Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2): disabled with the reason inline,
                never enabled-then-error — a drone with no camera device has nothing to stream. -->
           <div class="start-control">
-            <button type="button" class="btn big" (click)="start()" [disabled]="busy() || !primaryDevice()">
-              {{ busy() ? 'Starting…' : 'Start stream' }}
+            <button type="button" class="btn big" (click)="facade.start()" [disabled]="facade.busy() || !facade.primaryDevice()">
+              {{ facade.busy() ? 'Starting…' : 'Start stream' }}
             </button>
-            @if (!primaryDevice()) {
+            @if (!facade.primaryDevice()) {
               <p class="muted hint start-hint">No camera device on this drone — nothing to stream.</p>
             }
           </div>
@@ -380,14 +380,14 @@
       </div>
     }
 
-    @if (stopConfirmOpen()) {
+    @if (isDialogOpen('stop')) {
       <div class="hud-confirm">
         <div class="card inline-confirm-card">
           <!-- Poka-yoke rule 2 (docs/UX-REWORK-PLAN.md §U-a2 §2): high-consequence, mid-flight —
                keeps its confirm, but states the consequence, not just the question. -->
           <p>Stop {{ a.displayName }}'s stream? It ends the stream for all viewers, not just you.</p>
           <div class="row">
-            <button type="button" class="btn danger small danger-action" (click)="confirmStop()" [disabled]="busy()">
+            <button type="button" class="btn danger small danger-action" (click)="confirmStop()" [disabled]="facade.busy()">
               Confirm stop
             </button>
             <button type="button" class="btn secondary small" (click)="cancelStop()">Cancel</button>

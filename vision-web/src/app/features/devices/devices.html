@@ -12,13 +12,13 @@
         <input
           type="checkbox"
           name="showArchived"
-          [ngModel]="showArchived()"
-          (ngModelChange)="toggleShowArchived()"
+          [ngModel]="facade.showArchived()"
+          (ngModelChange)="facade.toggleShowArchived()"
         />
         <span>Show archived</span>
       </label>
-      <button type="button" class="btn" (click)="goToAddSource()">+ Add source</button>
-      <button type="button" class="btn secondary" (click)="refreshAll()" [disabled]="fleet.loading()">
+      <button type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
+      <button type="button" class="btn secondary" (click)="facade.refreshAll()" [disabled]="facade.fleet.loading()">
         Refresh
       </button>
     </div>
@@ -32,8 +32,8 @@
         class="device-search"
         placeholder="Search by name, protocol, URI, or owning asset…"
         aria-label="Search devices"
-        [ngModel]="searchQuery()"
-        (ngModelChange)="searchQuery.set($event)"
+        [ngModel]="facade.searchQuery()"
+        (ngModelChange)="facade.searchQuery.set($event)"
       />
       <div class="segmented" role="group" aria-label="View">
         <button
@@ -61,11 +61,11 @@
 
     <header>
       <h2>Registered devices</h2>
-      <span class="muted">{{ warehouseRows().length }} device(s)</span>
+      <span class="muted">{{ facade.warehouseRows().length }} device(s)</span>
     </header>
 
-    @if (warehouseRows().length === 0) {
-      @if (hasAnyDevices()) {
+    @if (facade.warehouseRows().length === 0) {
+      @if (facade.hasAnyDevices()) {
         <vision-empty title="No devices match" message="Nothing currently matches this search.">
           <button type="button" class="btn secondary" (click)="clearSearch()">Clear search</button>
         </vision-empty>
@@ -88,7 +88,7 @@
           </tr>
         </thead>
         <tbody>
-          @for (row of warehouseRows(); track row.device.id) {
+          @for (row of facade.warehouseRows(); track row.device.id) {
             <tr [class.archived]="row.archived">
               <td>
                 <div class="name">{{ row.device.name }}</div>
@@ -130,12 +130,12 @@
               <td class="actions">
                 @if (!row.archived) {
                   @if (row.streaming) {
-                    <button type="button" class="btn small" (click)="watch(row.device)">Watch live</button>
+                    <button type="button" class="btn small" (click)="facade.watch(row.device)">Watch live</button>
                     <button
                       type="button"
                       class="btn danger small"
-                      (click)="stop(row.device)"
-                      [disabled]="busyDeviceId() === row.device.id"
+                      (click)="facade.stop(row.device)"
+                      [disabled]="facade.busyDeviceId() === row.device.id"
                     >
                       Stop stream
                     </button>
@@ -143,10 +143,10 @@
                     <button
                       type="button"
                       class="btn small"
-                      (click)="start(row.device)"
-                      [disabled]="busyDeviceId() === row.device.id"
+                      (click)="facade.start(row.device)"
+                      [disabled]="facade.busyDeviceId() === row.device.id"
                     >
-                      {{ busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
+                      {{ facade.busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
                     </button>
                   }
                 }
@@ -154,10 +154,10 @@
                   <button
                     type="button"
                     class="btn danger small"
-                    (click)="stopSimulatedAsset(simInfo)"
-                    [disabled]="busySimulatedAssetId() === simInfo.assetId"
+                    (click)="facade.stopSimulatedAsset(simInfo)"
+                    [disabled]="facade.busySimulatedAssetId() === simInfo.assetId"
                   >
-                    {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
+                    {{ facade.busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
                   </button>
                 }
                 <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): rename/lifecycle/assign
@@ -172,7 +172,7 @@
                       <div class="kebab-item">
                         <button
                           type="button"
-                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                          [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
                           [title]="entry.reason ?? ''"
                           (click)="onDeviceAction(row, entry.action)"
                         >
@@ -191,7 +191,7 @@
                         <button
                           type="button"
                           class="danger-action"
-                          [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                          [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
                           [title]="entry.reason ?? ''"
                           (click)="onDeviceAction(row, entry.action)"
                         >
@@ -236,7 +236,7 @@
                           aria-label="Choose an asset to assign this device to"
                         >
                           <option value="" disabled>Choose an asset…</option>
-                          @for (asset of assignableAssets(); track asset.assetId) {
+                          @for (asset of facade.assignableAssets(); track asset.assetId) {
                             <option [value]="asset.assetId">{{ asset.displayName }}</option>
                           }
                         </select>
@@ -263,7 +263,7 @@
     } @else {
       <!-- ---- Grid: device cards (new this cycle) -------------------------------------------- -->
       <div class="device-card-grid">
-        @for (row of warehouseRows(); track row.device.id) {
+        @for (row of facade.warehouseRows(); track row.device.id) {
           <article class="device-card" [class.archived]="row.archived">
             <header class="device-card-head">
               <div class="device-card-name">
@@ -279,7 +279,7 @@
                     <div class="kebab-item">
                       <button
                         type="button"
-                        [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                        [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
                         [title]="entry.reason ?? ''"
                         (click)="onDeviceAction(row, entry.action)"
                       >
@@ -298,7 +298,7 @@
                       <button
                         type="button"
                         class="danger-action"
-                        [disabled]="!entry.available || busyDeviceId() === row.device.id"
+                        [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
                         [title]="entry.reason ?? ''"
                         (click)="onDeviceAction(row, entry.action)"
                       >
@@ -348,12 +348,12 @@
             <div class="device-card-actions">
               @if (!row.archived) {
                 @if (row.streaming) {
-                  <button type="button" class="btn small" (click)="watch(row.device)">Watch live</button>
+                  <button type="button" class="btn small" (click)="facade.watch(row.device)">Watch live</button>
                   <button
                     type="button"
                     class="btn danger small"
-                    (click)="stop(row.device)"
-                    [disabled]="busyDeviceId() === row.device.id"
+                    (click)="facade.stop(row.device)"
+                    [disabled]="facade.busyDeviceId() === row.device.id"
                   >
                     Stop stream
                   </button>
@@ -361,10 +361,10 @@
                   <button
                     type="button"
                     class="btn small"
-                    (click)="start(row.device)"
-                    [disabled]="busyDeviceId() === row.device.id"
+                    (click)="facade.start(row.device)"
+                    [disabled]="facade.busyDeviceId() === row.device.id"
                   >
-                    {{ busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
+                    {{ facade.busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
                   </button>
                 }
               }
@@ -372,10 +372,10 @@
                 <button
                   type="button"
                   class="btn danger small"
-                  (click)="stopSimulatedAsset(simInfo)"
-                  [disabled]="busySimulatedAssetId() === simInfo.assetId"
+                  (click)="facade.stopSimulatedAsset(simInfo)"
+                  [disabled]="facade.busySimulatedAssetId() === simInfo.assetId"
                 >
-                  {{ busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
+                  {{ facade.busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
                 </button>
               }
             </div>
@@ -406,7 +406,7 @@
                       aria-label="Choose an asset to assign this device to"
                     >
                       <option value="" disabled>Choose an asset…</option>
-                      @for (asset of assignableAssets(); track asset.assetId) {
+                      @for (asset of facade.assignableAssets(); track asset.assetId) {
                         <option [value]="asset.assetId">{{ asset.displayName }}</option>
                       }
                     </select>
@@ -460,7 +460,7 @@
       <div class="field">
         <label class="label" for="create-asset-category">Category</label>
         <select id="create-asset-category" name="createAssetCategory" [(ngModel)]="createAssetCategory">
-          @for (option of categoryOptions(); track option.slug) {
+          @for (option of facade.categoryOptions(); track option.slug) {
             <option [value]="option.slug">{{ option.name }}</option>
           }
         </select>
