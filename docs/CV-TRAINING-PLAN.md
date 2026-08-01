@@ -1,6 +1,31 @@
 # CV-TRAINING-PLAN — operator-in-the-loop model improvement loop
 
-Status: **PLANNED** (not started). Authoritative spec for closing the CV improvement loop: capture
+Status: **BUILT — the whole loop ships** (2026-08-01). Capture → correct → export → **train** →
+promote is live end to end. Owner: CV training.
+
+> **Reconciliation — what actually shipped vs. this doc's original sketch** (the sections below are
+> the original spec, kept for context; where they differ, reality wins):
+> - **Phase 1** (capture → correct → dataset export): built as specified — `Dataset`/`TrainingSample`/
+>   `Annotation`/`SampleImage` + the four ports, `DatasetService`/`LabelingService`, JPA + `V11` +
+>   in-memory fallbacks, `FilesystemDatasetExport`, REST gated by `vision.training.enabled`, and the
+>   `/manage/training` labeling UI.
+> - **Phase 2 model registry** (list/promote): `cv-service` `ListModels`/`PromoteModel`, domain
+>   `ModelRegistryPort` (with `active()` added — the "which is live" flag, kept off `ModelRef`), the
+>   `GrpcModelRegistryPort` adapter, `ModelRegistryService`, REST, and the `/manage/training/models`
+>   promote UI.
+> - **Phase 2 training** (`StartTraining`): built **device-agnostic** (ultralytics uses CUDA if
+>   present, else CPU — slow, flagged), **not** the GPU-host-only/offline-manual-default this doc
+>   sketched. The domain shape landed as **`TrainingPort`** (callback-streaming) + `TrainingJobSpec`/
+>   `TrainingProgress`/`JobState` and an application **`TrainingJobService`** (local jobId, off-thread,
+>   pollable `TrainingJobView`) — **not** the `ModelTrainingPort`/`TrainingJob(poll)` shape §7 sketched.
+>   Dataset delivery to the training host is via a configured `CV_DATASET_DIR` (rsync-consistent).
+>   REST `POST /api/datasets/{id}/train` + `GET /api/training/jobs[/{id}]`; a "Train a model" card +
+>   live progress page in the web. Known accepted seam: cv-service reports `version=""` (no per-model
+>   versioning) so the promote UI sends a `'latest'` sentinel.
+>
+> Original spec follows.
+
+Authoritative spec for closing the CV improvement loop: capture
 frames + their detections during ops → operator confirms/corrects → a labeled dataset accumulates →
 export a YOLO dataset → (offline) fine-tune → ingest + promote the new model live. Owner: CV
 training. Freezes the wire/type contract and disjoint waves. Builds on the shipped CV control plane
