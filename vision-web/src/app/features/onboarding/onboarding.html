@@ -120,34 +120,34 @@
         <h2>Connect</h2>
 
         @if (!facade.store.connectMethod()) {
-          <p class="muted hint">Every current way in, one door.</p>
+          <p class="muted hint">How do you want to connect it?</p>
           <div class="method-grid">
             <button type="button" class="method-tile" (click)="facade.store.chooseMethod('register')">
               <span class="method-glyph glyph-register" aria-hidden="true"></span>
-              <span class="method-title">Register manually</span>
-              <span class="method-sub">Type in a protocol and URI you already know.</span>
+              <span class="method-title">Enter a stream address</span>
+              <span class="method-sub">Paste a camera's stream URL if you already have one (RTSP, MJPEG, HTTP).</span>
             </button>
             <button type="button" class="method-tile" (click)="facade.store.chooseMethod('discover')">
               <span class="method-glyph glyph-discover" aria-hidden="true"></span>
-              <span class="method-title">Discover on network</span>
-              <span class="method-sub">Scan for ONVIF, mDNS, and local V4L2 candidates.</span>
+              <span class="method-title">Find cameras on my network</span>
+              <span class="method-sub">Scan your local network and pick from what's found — no address needed.</span>
             </button>
             <button type="button" class="method-tile" (click)="facade.store.chooseMethod('simulate')">
               <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
-              <span class="method-title">Simulate</span>
-              <span class="method-sub">Zero hardware — a file, an RTSP rehearsal, or a moving test drone.</span>
+              <span class="method-title">Use a test source</span>
+              <span class="method-sub">No hardware needed — a video file or a moving test drone.</span>
             </button>
             <button type="button" class="method-tile" (click)="facade.store.chooseMethod('listen')">
               <span class="method-glyph glyph-listen" aria-hidden="true"></span>
-              <span class="method-title">Listen for drones</span>
-              <span class="method-sub">Scan for MAVLink heartbeats on UDP 14550 — no typing, no sysid.</span>
+              <span class="method-title">Find nearby drones</span>
+              <span class="method-sub">Listen for drones already broadcasting telemetry — nothing to type.</span>
             </button>
             <button type="button" class="method-tile" (click)="facade.store.chooseDroneMethod()">
               <span class="method-glyph glyph-drone" aria-hidden="true"></span>
               <span class="method-title">Add a real drone</span>
               <span class="method-sub">
-                Betaflight/INAV/ArduPilot, guided — copy-paste settings with this platform's own
-                address and port already filled in.
+                Connect a flight controller (Betaflight, INAV, ArduPilot) — we'll walk you through it
+                with the connection settings pre-filled.
               </span>
             </button>
           </div>
@@ -199,7 +199,7 @@
                 }
 
                 <div class="field wide">
-                  <label class="label" for="c-uri">URI</label>
+                  <label class="label" for="c-uri">Stream address</label>
                   <input
                     id="c-uri"
                     name="uri"
@@ -683,7 +683,7 @@
                 Finish the picker and configuration steps above, then listen for the vehicle.
               }
               @case ('register') {
-                Enter a protocol and a URI.
+                Choose a protocol and enter the stream address.
               }
               @case ('simulate') {
                 Enter the server-side video path.
