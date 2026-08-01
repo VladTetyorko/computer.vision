@@ -21,6 +21,7 @@ import { ALERTS_ROUTES } from './features/alerts/alerts.routes';
 import { ROSTER_ROUTES } from './features/roster/roster.routes';
 import { CATEGORIES_ROUTES } from './features/categories/categories.routes';
 import { REPORTS_ROUTES } from './features/reports/reports.routes';
+import { LABELING_ROUTES } from './features/labeling/labeling.routes';
 import { authGuard } from './core/auth/auth-guard';
 
 /**
@@ -57,6 +58,7 @@ export const routes: Routes = [
       ...ROSTER_ROUTES,
       ...CATEGORIES_ROUTES,
       ...REPORTS_ROUTES,
+      ...LABELING_ROUTES,
       ...FLY_ROUTES,
       ...COMMAND_ROUTES,
       ...WALL_ROUTES,

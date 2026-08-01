@@ -1,0 +1,75 @@
+.back-link {
+  display: inline-flex;
+  margin-bottom: var(--space-16);
+}
+
+.classes-row {
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-16);
+}
+
+.capture-card,
+.export-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.capture-row,
+.export-row {
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.capture-row select {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.export-result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  margin-top: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.sample-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: var(--space-16);
+  margin: var(--space-16) 0;
+}
+
+.sample-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  color: inherit;
+  text-decoration: none;
+}
+
+.sample-card:hover {
+  border-color: var(--border-strong);
+}
+
+.thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+}
+
+.sample-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  font-size: 0.75rem;
+}
+
+.discard-btn {
+  align-self: flex-start;
+}

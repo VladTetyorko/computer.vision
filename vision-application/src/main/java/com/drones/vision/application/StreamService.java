@@ -1,5 +1,6 @@
 package com.drones.vision.application;
 
+import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
@@ -65,6 +66,30 @@ public interface StreamService {
      *         this instance, or it is but hasn't published a frame yet
      */
     Optional<VideoFrame> latestFrame(StreamId streamId);
+
+    /**
+     * The most recently arrived frame on a running stream, before overlay burn-in and at full
+     * resolution (docs/CV-TRAINING-PLAN.md &sect;2/&sect;D) — exactly {@link
+     * StreamPipeline#latestRawFrame()}. Backs training-sample capture, which wants clean pixels to
+     * label, never {@link #latestFrame}'s possibly-annotated one.
+     *
+     * @param streamId the stream to inspect
+     * @return the frame, or {@link Optional#empty()} if {@code streamId} is unknown/not running on
+     *         this instance, or it is but hasn't received a frame yet
+     */
+    Optional<VideoFrame> latestRawFrame(StreamId streamId);
+
+    /**
+     * The most recently completed detection result's detections on a running stream — exactly {@link
+     * StreamPipeline#latestDetections()} (docs/CV-TRAINING-PLAN.md &sect;2), surfaced here so a
+     * caller outside the pipeline (e.g. training-sample capture) never needs to reach into pipeline
+     * internals.
+     *
+     * @param streamId the stream to inspect
+     * @return the raw, un-extrapolated detections, or an empty list if {@code streamId} is
+     *         unknown/not running on this instance, or no inference has completed yet
+     */
+    List<Detection> latestDetections(StreamId streamId);
 
     /**
      * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md &sect;5) — a

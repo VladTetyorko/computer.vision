@@ -1,0 +1,143 @@
+:host {
+  display: block;
+}
+
+.editor {
+  display: grid;
+  grid-template-columns: 1fr 22rem;
+  gap: var(--space-16);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  /* --bp-md */
+  .editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stage-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.legend {
+  flex-wrap: wrap;
+  gap: var(--space-16);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: 0.75rem;
+}
+
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: var(--radius-sm);
+  background: var(--border-strong);
+}
+
+/* Same fixed hues `sample-box-editor.ts#drawBox` paints on the canvas — kept in sync deliberately
+   (both hard-coded, not tokens, since the canvas can't consume CSS custom properties). */
+.swatch.model {
+  background: #4f8cff;
+}
+
+.swatch.operator {
+  background: #37c977;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: min(65vh, 640px);
+  min-height: 240px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.stage img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  /* Pointer events drive the whole gesture set (drag/resize/create) — without this, a touch drag
+     scrolls the page instead of drawing/moving a box. */
+  touch-action: none;
+}
+
+.overlay.disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.box-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-16);
+  max-height: min(65vh, 640px);
+  overflow-y: auto;
+}
+
+.box-list-head {
+  margin-bottom: var(--space-4);
+}
+
+.empty-hint {
+  font-size: 0.85rem;
+}
+
+.box-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.box-row:hover {
+  background: var(--panel-hover);
+}
+
+.box-row.selected {
+  border-color: var(--color-info);
+  background: var(--color-info-soft);
+}
+
+.box-row .swatch {
+  flex: none;
+}
+
+.label-select {
+  flex: 1;
+  min-width: 0;
+}

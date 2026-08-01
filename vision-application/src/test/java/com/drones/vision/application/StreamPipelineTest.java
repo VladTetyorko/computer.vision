@@ -277,6 +277,46 @@ class StreamPipelineTest {
     }
 
     @Test
+    void latestRawFrameIsEmptyBeforeAnyFrameHasArrived() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertEquals(Optional.empty(), pipeline.latestRawFrame());
+    }
+
+    @Test
+    void latestRawFrameReflectsTheRawLastArrivedFrameWhenNoOverlayIsConfigured() {
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2));
+        pipeline.start();
+
+        assertEquals(Optional.of(f1), pipeline.latestRawFrame());
+    }
+
+    @Test
+    void latestRawFrameStaysTheRawFrameEvenWhenOverlayBurnInPublishesADifferentRenderedFrame() {
+        // docs/CV-TRAINING-PLAN.md §2/§D: latestRawFrame() must expose the pre-overlay frame, never
+        // the (possibly burned-in) instance latestFrame()/streamPublisherPort see -- this is the one
+        // thing that actually distinguishes the two seams, so it is the load-bearing assertion here.
+        VideoFrame f0 = frame(0);
+        VideoFrame f1 = frame(1);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f0, f1));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        OverlayPort overlayPort = mock(OverlayPort.class);
+        VideoFrame rendered = frame(99);
+        when(overlayPort.render(any())).thenReturn(rendered);
+
+        StreamPipeline pipeline = pipeline(publisher, config(30, 2), overlayPort);
+        pipeline.start();
+
+        assertEquals(Optional.of(rendered), pipeline.latestFrame(), "latestFrame() sees the rendered instance");
+        assertEquals(Optional.of(f1), pipeline.latestRawFrame(), "latestRawFrame() must stay the clean source frame");
+    }
+
+    @Test
     void samplesEveryNthFrameBasedOnMeasuredSourceFpsOnceWarmedUp() {
         // inferenceFps=10 against a real (constant-cadence) 30fps source ->
         // sample every 3rd frame (sequence % 3 == 0), same outcome the old

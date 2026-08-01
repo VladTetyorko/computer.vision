@@ -5,11 +5,15 @@ import com.drones.vision.adapter.persistence.entity.AssetImageEntity;
 import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
 import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
+import com.drones.vision.adapter.persistence.entity.DatasetEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
+import com.drones.vision.adapter.persistence.entity.MarkEntity;
+import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
+import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -72,6 +76,10 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(UserEntity.class);
         configuration.addAnnotatedClass(GroupEntity.class);
         configuration.addAnnotatedClass(AssignmentEntity.class);
+        configuration.addAnnotatedClass(MarkEntity.class);
+        configuration.addAnnotatedClass(DatasetEntity.class);
+        configuration.addAnnotatedClass(TrainingSampleEntity.class);
+        configuration.addAnnotatedClass(SampleImageEntity.class);
         return configuration.buildSessionFactory();
     }
 }

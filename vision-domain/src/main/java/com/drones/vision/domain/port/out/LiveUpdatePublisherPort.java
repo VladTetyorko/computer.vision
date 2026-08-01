@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.Telemetry;
 
 /**
@@ -30,6 +31,14 @@ import com.drones.vision.domain.model.Telemetry;
  *       advanced (a further qualifying observation while already open), or closed — the same
  *       occurrence {@code DetectionEventRepositoryPort#save} already persists, announced at the
  *       exact same seam rather than duplicated bookkeeping.</li>
+ *   <li>{@link #publishMarkCreated(Mark)}/{@link #publishMarkUpdated(Mark)}/{@link
+ *       #publishMarkCleared(Mark)} — a {@code Mark} (docs/TACTICAL-MARKS-PLAN.md §1) was created
+ *       (manual drop or geolocate), annotated, or cleared/deleted. A driving adapter folds these
+ *       three calls into a single always-on {@code "marks"} SSE topic with the lifecycle carried
+ *       as an {@code action} field in the payload (docs/TACTICAL-MARKS-PLAN.md §5) — three port
+ *       methods here, one wire topic there. {@code default}-bodied no-ops so every existing
+ *       implementor ({@code LiveUpdateRegistry}, {@code NoopLiveUpdatePublisher}) keeps compiling
+ *       unchanged until a later wave overrides them.</li>
  * </ul>
  *
  * <h2>Contract</h2>
@@ -88,4 +97,37 @@ public interface LiveUpdatePublisherPort {
      * @param event the event's current state
      */
     void publishDetectionEvent(DetectionEvent event);
+
+    /**
+     * Announces that a {@link Mark} was created (manual drop or geolocate). {@code default} no-op
+     * so pre-existing implementors compile unchanged; an implementor that wants live marks
+     * overrides this to broadcast the {@code "marks"} topic with {@code action = "created"}
+     * (docs/TACTICAL-MARKS-PLAN.md §5).
+     *
+     * @param mark the mark that was created
+     */
+    default void publishMarkCreated(Mark mark) {
+    }
+
+    /**
+     * Announces that a {@link Mark} was annotated (label/note/kind/position edited, not a status
+     * change). {@code default} no-op; an implementor that wants live marks overrides this to
+     * broadcast {@code action = "updated"} (docs/TACTICAL-MARKS-PLAN.md §5).
+     *
+     * @param mark the mark's new state
+     */
+    default void publishMarkUpdated(Mark mark) {
+    }
+
+    /**
+     * Announces that a {@link Mark} was cleared (status &rarr; {@code CLEARED}) or deleted.
+     * {@code default} no-op; an implementor that wants live marks overrides this to broadcast
+     * {@code action = "cleared"} (docs/TACTICAL-MARKS-PLAN.md §5) — for a delete, {@code mark} is
+     * the last-known state with {@code status} set to {@code CLEARED} so clients can still resolve
+     * which pin to drop.
+     *
+     * @param mark the mark's last-known state
+     */
+    default void publishMarkCleared(Mark mark) {
+    }
 }

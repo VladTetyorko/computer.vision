@@ -1,5 +1,7 @@
 package com.drones.vision.adapter.persistence;
 
+import com.drones.vision.domain.model.Annotation;
+import com.drones.vision.domain.model.AnnotationSource;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.AssetImage;
@@ -7,6 +9,9 @@ import com.drones.vision.domain.model.AssetUsage;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.Dataset;
+import com.drones.vision.domain.model.DatasetId;
+import com.drones.vision.domain.model.DatasetStatus;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionQuery;
 import com.drones.vision.domain.model.DetectionResult;
@@ -19,13 +24,22 @@ import com.drones.vision.domain.model.GeofenceZone;
 import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.Mark;
+import com.drones.vision.domain.model.MarkId;
+import com.drones.vision.domain.model.MarkKind;
+import com.drones.vision.domain.model.MarkSource;
+import com.drones.vision.domain.model.MarkStatus;
 import com.drones.vision.domain.model.Membership;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.Role;
+import com.drones.vision.domain.model.SampleImage;
+import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.model.TrainingSample;
+import com.drones.vision.domain.model.TrainingSampleId;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.User;
 import com.drones.vision.domain.model.UserId;
@@ -36,11 +50,15 @@ import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.domain.port.out.DatasetRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 import com.drones.vision.domain.port.out.UserRepositoryPort;
 
 import jakarta.persistence.EntityManager;
@@ -947,6 +965,346 @@ class PostgresDockerIntegrationTest {
         }
     }
 
+    /** docs/TACTICAL-MARKS-PLAN.md §3 — every {@link MarkRepositoryPort} method, upsert semantics. */
+    @Nested
+    class MarkRepositoryTests {
+
+        private final MarkRepositoryPort repository = new JpaMarkRepository(entityManagerFactory);
+
+        private Ownership ownership() {
+            return new Ownership(UserId.random(), GroupId.random());
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(MarkId.random()).isEmpty());
+        }
+
+        @Test
+        void savedMarkRoundTripsWithAltitudeAndNote() {
+            Mark mark = new Mark(MarkId.random(), new GeoPosition(50.45, 30.52, 100.0), MarkKind.TARGET,
+                    "Bunker", "Reinforced, two entrances", ownership(), NOW, MarkStatus.ACTIVE, MarkSource.MANUAL);
+
+            repository.save(mark);
+
+            Optional<Mark> found = repository.findById(mark.id());
+            assertTrue(found.isPresent());
+            assertEquals(mark, found.get());
+        }
+
+        @Test
+        void detectionSourcedMarkWithNoAltitudeOrNoteRoundTripsWithNullFields() {
+            Mark mark = new Mark(MarkId.random(), new GeoPosition(50.45, 30.52, null), MarkKind.HAZARD,
+                    "Estimated hazard", null, ownership(), NOW, MarkStatus.ACTIVE, MarkSource.DETECTION);
+
+            repository.save(mark);
+
+            Optional<Mark> found = repository.findById(mark.id());
+            assertTrue(found.isPresent());
+            assertNull(found.get().position().altitudeMeters());
+            assertNull(found.get().note());
+            assertEquals(MarkSource.DETECTION, found.get().source());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingId() {
+            MarkId id = MarkId.random();
+            Ownership ownership = ownership();
+            repository.save(new Mark(id, new GeoPosition(10.0, 20.0, null), MarkKind.POI, "Original", null,
+                    ownership, NOW, MarkStatus.ACTIVE, MarkSource.MANUAL));
+            repository.save(new Mark(id, new GeoPosition(11.0, 21.0, 5.0), MarkKind.FRIENDLY, "Renamed",
+                    "Updated note", ownership, NOW, MarkStatus.CLEARED, MarkSource.MANUAL));
+
+            Optional<Mark> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals("Renamed", found.get().label());
+            assertEquals(MarkKind.FRIENDLY, found.get().kind());
+            assertEquals("Updated note", found.get().note());
+            assertEquals(MarkStatus.CLEARED, found.get().status());
+            assertEquals(new GeoPosition(11.0, 21.0, 5.0), found.get().position());
+        }
+
+        @Test
+        void findAllReturnsEverySavedMark() {
+            Mark first = new Mark(MarkId.random(), new GeoPosition(10.0, 20.0, null), MarkKind.TARGET, "First",
+                    null, ownership(), NOW, MarkStatus.ACTIVE, MarkSource.MANUAL);
+            Mark second = new Mark(MarkId.random(), new GeoPosition(11.0, 21.0, null), MarkKind.HAZARD, "Second",
+                    null, ownership(), NOW, MarkStatus.ACTIVE, MarkSource.DETECTION);
+            repository.save(first);
+            repository.save(second);
+
+            List<Mark> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void deleteByIdIsIdempotentAndRemovesTheMark() {
+            Mark mark = new Mark(MarkId.random(), new GeoPosition(10.0, 20.0, null), MarkKind.TARGET, "Temp", null,
+                    ownership(), NOW, MarkStatus.ACTIVE, MarkSource.MANUAL);
+            repository.save(mark);
+
+            repository.deleteById(mark.id());
+            assertTrue(repository.findById(mark.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.deleteById(mark.id());
+        }
+    }
+
+    /** docs/CV-TRAINING-PLAN.md §1, Wave T3 — every {@link DatasetRepositoryPort} method, upsert semantics. */
+    @Nested
+    class DatasetRepositoryTests {
+
+        private final DatasetRepositoryPort repository = new JpaDatasetRepository(entityManagerFactory);
+
+        private Ownership ownership() {
+            return new Ownership(UserId.random(), GroupId.random());
+        }
+
+        private Dataset dataset(DatasetId id, DatasetStatus status) {
+            return new Dataset(id, "Buildings", new CategoryId("building"), List.of("building", "tower"),
+                    ownership(), status, NOW);
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(DatasetId.random()).isEmpty());
+        }
+
+        @Test
+        void savedDatasetRoundTripsTargetCategoryAndClasses() {
+            Dataset dataset = dataset(DatasetId.random(), DatasetStatus.OPEN);
+
+            repository.save(dataset);
+
+            Optional<Dataset> found = repository.findById(dataset.id());
+            assertTrue(found.isPresent());
+            assertEquals(dataset, found.get());
+        }
+
+        @Test
+        void savedDatasetWithNoTargetCategoryAndNoClassesRoundTripsAsEmpty() {
+            Dataset dataset = new Dataset(DatasetId.random(), "Uncategorized", null, List.of(), ownership(),
+                    DatasetStatus.OPEN, NOW);
+
+            repository.save(dataset);
+
+            Optional<Dataset> found = repository.findById(dataset.id());
+            assertTrue(found.isPresent());
+            assertNull(found.get().targetCategory());
+            assertTrue(found.get().classes().isEmpty());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingId() {
+            DatasetId id = DatasetId.random();
+            repository.save(dataset(id, DatasetStatus.OPEN));
+            repository.save(new Dataset(id, "Renamed", new CategoryId("tower"), List.of("tower"), ownership(),
+                    DatasetStatus.ARCHIVED, NOW));
+
+            Optional<Dataset> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals("Renamed", found.get().name());
+            assertEquals(DatasetStatus.ARCHIVED, found.get().status());
+            assertEquals(List.of("tower"), found.get().classes());
+        }
+
+        @Test
+        void findAllReturnsEverySavedDataset() {
+            Dataset first = dataset(DatasetId.random(), DatasetStatus.OPEN);
+            Dataset second = dataset(DatasetId.random(), DatasetStatus.EXPORTING);
+            repository.save(first);
+            repository.save(second);
+
+            List<Dataset> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void deleteIsIdempotentAndRemovesTheDataset() {
+            Dataset dataset = dataset(DatasetId.random(), DatasetStatus.OPEN);
+            repository.save(dataset);
+
+            repository.delete(dataset.id());
+            assertTrue(repository.findById(dataset.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.delete(dataset.id());
+        }
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §1, Wave T3 — every {@link TrainingSampleRepositoryPort} method
+     * incl. the dataset/status filter {@code idx_training_samples_dataset_status} serves.
+     */
+    @Nested
+    class TrainingSampleRepositoryTests {
+
+        private final TrainingSampleRepositoryPort repository =
+                new JpaTrainingSampleRepository(entityManagerFactory);
+
+        private TrainingSample sample(TrainingSampleId id, DatasetId datasetId, SampleStatus status) {
+            List<Annotation> annotations = List.of(
+                    new Annotation("building", new BoundingBox(0.1, 0.2, 0.3, 0.25), AnnotationSource.MODEL));
+            return new TrainingSample(id, datasetId, StreamId.random(), AssetId.random(), NOW, 1920, 1080,
+                    annotations, status, null, null);
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(TrainingSampleId.random()).isEmpty());
+        }
+
+        @Test
+        void savedSampleRoundTripsAnnotationsAndDimensions() {
+            TrainingSample sample = sample(TrainingSampleId.random(), DatasetId.random(), SampleStatus.PENDING);
+
+            repository.save(sample);
+
+            Optional<TrainingSample> found = repository.findById(sample.id());
+            assertTrue(found.isPresent());
+            assertEquals(sample, found.get());
+        }
+
+        @Test
+        void savedSampleWithNoAssetIdAndNoAnnotationsRoundTripsAsEmpty() {
+            TrainingSample sample = new TrainingSample(TrainingSampleId.random(), DatasetId.random(),
+                    StreamId.random(), null, NOW, 640, 480, List.of(), SampleStatus.PENDING, null, null);
+
+            repository.save(sample);
+
+            Optional<TrainingSample> found = repository.findById(sample.id());
+            assertTrue(found.isPresent());
+            assertNull(found.get().assetId());
+            assertTrue(found.get().annotations().isEmpty());
+        }
+
+        @Test
+        void saveIsAnUpsertMovingPendingToLabeledAndStampingTheReviewer() {
+            TrainingSampleId id = TrainingSampleId.random();
+            DatasetId datasetId = DatasetId.random();
+            repository.save(sample(id, datasetId, SampleStatus.PENDING));
+
+            UserId reviewer = UserId.random();
+            List<Annotation> corrected = List.of(new Annotation("building",
+                    new BoundingBox(0.11, 0.19, 0.32, 0.27), AnnotationSource.OPERATOR));
+            TrainingSample labeled = new TrainingSample(id, datasetId, StreamId.random(), AssetId.random(), NOW,
+                    1920, 1080, corrected, SampleStatus.LABELED, reviewer, NOW);
+
+            repository.save(labeled);
+
+            Optional<TrainingSample> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals(SampleStatus.LABELED, found.get().status());
+            assertEquals(reviewer, found.get().labeledBy());
+            assertEquals(corrected, found.get().annotations());
+        }
+
+        @Test
+        void findByDatasetFiltersByStatusAndBoundsByLimit() {
+            DatasetId datasetId = DatasetId.random();
+            repository.save(sample(TrainingSampleId.random(), datasetId, SampleStatus.PENDING));
+            repository.save(sample(TrainingSampleId.random(), datasetId, SampleStatus.LABELED));
+            repository.save(sample(TrainingSampleId.random(), datasetId, SampleStatus.LABELED));
+            repository.save(sample(TrainingSampleId.random(), DatasetId.random(), SampleStatus.LABELED));
+
+            List<TrainingSample> labeled = repository.findByDataset(datasetId, SampleStatus.LABELED, 10);
+            assertEquals(2, labeled.size());
+            assertTrue(labeled.stream().allMatch(s -> s.status() == SampleStatus.LABELED));
+
+            List<TrainingSample> everyStatus = repository.findByDataset(datasetId, null, 10);
+            assertEquals(3, everyStatus.size());
+
+            List<TrainingSample> bounded = repository.findByDataset(datasetId, null, 1);
+            assertEquals(1, bounded.size());
+        }
+
+        @Test
+        void countByDatasetMatchesFindByDatasetsFilter() {
+            DatasetId datasetId = DatasetId.random();
+            repository.save(sample(TrainingSampleId.random(), datasetId, SampleStatus.PENDING));
+            repository.save(sample(TrainingSampleId.random(), datasetId, SampleStatus.LABELED));
+            repository.save(sample(TrainingSampleId.random(), datasetId, SampleStatus.DISCARDED));
+
+            assertEquals(3, repository.countByDataset(datasetId, null));
+            assertEquals(1, repository.countByDataset(datasetId, SampleStatus.PENDING));
+            assertEquals(1, repository.countByDataset(datasetId, SampleStatus.LABELED));
+            assertEquals(1, repository.countByDataset(datasetId, SampleStatus.DISCARDED));
+        }
+
+        @Test
+        void findByDatasetAndCountByDatasetOnAnUnknownDatasetAreEmpty() {
+            assertTrue(repository.findByDataset(DatasetId.random(), null, 10).isEmpty());
+            assertEquals(0, repository.countByDataset(DatasetId.random(), null));
+        }
+
+        @Test
+        void deleteIsIdempotentAndRemovesTheSample() {
+            TrainingSample sample = sample(TrainingSampleId.random(), DatasetId.random(), SampleStatus.PENDING);
+            repository.save(sample);
+
+            repository.delete(sample.id());
+            assertTrue(repository.findById(sample.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.delete(sample.id());
+        }
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — every {@link SampleImageStorePort} method, the
+     * {@code AssetImageRepositoryPort} shape reused for training-sample frames.
+     */
+    @Nested
+    class SampleImageStoreTests {
+
+        private final SampleImageStorePort store = new JpaSampleImageStore(entityManagerFactory);
+
+        @Test
+        void unknownSampleIdReturnsEmptyOptional() {
+            assertTrue(store.findById(TrainingSampleId.random()).isEmpty());
+        }
+
+        @Test
+        void savedImageRoundTripsBytesAndContentType() {
+            TrainingSampleId id = TrainingSampleId.random();
+            byte[] data = {1, 2, 3, 4, 5};
+
+            store.save(id, new SampleImage(data, "image/jpeg"));
+
+            Optional<SampleImage> found = store.findById(id);
+            assertTrue(found.isPresent());
+            assertArrayEquals(data, found.get().data());
+            assertEquals("image/jpeg", found.get().contentType());
+        }
+
+        @Test
+        void saveIsAnUpsert() {
+            TrainingSampleId id = TrainingSampleId.random();
+            store.save(id, new SampleImage(new byte[]{1}, "image/jpeg"));
+            store.save(id, new SampleImage(new byte[]{2, 2}, "image/png"));
+
+            Optional<SampleImage> found = store.findById(id);
+            assertTrue(found.isPresent());
+            assertArrayEquals(new byte[]{2, 2}, found.get().data());
+            assertEquals("image/png", found.get().contentType());
+        }
+
+        @Test
+        void deleteIsIdempotentAndRemovesTheImage() {
+            TrainingSampleId id = TrainingSampleId.random();
+            store.save(id, new SampleImage(new byte[]{9}, "image/png"));
+
+            store.delete(id);
+            assertTrue(store.findById(id).isEmpty());
+
+            // second call on an already-absent id must not throw
+            store.delete(id);
+        }
+    }
+
     /**
      * docs/MVP2-PLAN.md P-b's retention guard, in test form: uses the small-cap constructor
      * overload (rather than the production {@value JpaTelemetryRepository#DEFAULT_RETENTION_LIMIT_PER_USAGE}
@@ -1193,6 +1551,79 @@ class PostgresDockerIntegrationTest {
                                     + "and tc.constraint_type = 'PRIMARY KEY'")
                     .getSingleResult()).longValue();
             assertEquals(2, pkColumns, "the primary key must be the composite (pilot_user_id, asset_id)");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/TACTICAL-MARKS-PLAN.md §3 — same schema-shape proof as the V4/V6/V7/V8/V9 tests: the
+     * brand-new {@code marks} table exists on top of V1-V9, with {@code altitude_meters} and
+     * {@code note} staying nullable (ground point unknown / no note given) while {@code latitude}
+     * is required.
+     */
+    @Test
+    void v10MigrationCreatesTheMarksTableOnTopOfV1ThroughV9() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] altitudeColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'marks' and column_name = 'altitude_meters'")
+                    .getSingleResult();
+            assertEquals("YES", altitudeColumn[0], "altitude_meters must be nullable (ground point unknown)");
+            assertEquals("double precision", altitudeColumn[1]);
+
+            Object[] latitudeColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'marks' and column_name = 'latitude'")
+                    .getSingleResult();
+            assertEquals("NO", latitudeColumn[0], "latitude is required");
+            assertEquals("double precision", latitudeColumn[1]);
+
+            String noteNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns where table_name = 'marks' "
+                                    + "and column_name = 'note'")
+                    .getSingleResult();
+            assertEquals("YES", noteNullable, "note is optional");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §1, Wave T3 — same schema-shape proof as the V4/V6/V7/V8/V9/V10
+     * tests: the three brand-new training-pipeline tables exist on top of V1-V10, with {@code
+     * target_category}/{@code asset_id} staying nullable (no target category / stream not yet
+     * resolved to an asset) while {@code stream_id} and {@code sample_images.data} stay required.
+     */
+    @Test
+    void v11MigrationCreatesTheTrainingDatasetsTablesOnTopOfV1ThroughV10() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            String targetCategoryNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns where table_name = 'datasets' "
+                                    + "and column_name = 'target_category'")
+                    .getSingleResult();
+            assertEquals("YES", targetCategoryNullable, "target_category is optional");
+
+            String assetIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'training_samples' and column_name = 'asset_id'")
+                    .getSingleResult();
+            assertEquals("YES", assetIdNullable, "asset_id is unknown until the stream resolves to an asset");
+
+            String streamIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'training_samples' and column_name = 'stream_id'")
+                    .getSingleResult();
+            assertEquals("NO", streamIdNullable, "stream_id is required");
+
+            Object[] dataColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'sample_images' and column_name = 'data'")
+                    .getSingleResult();
+            assertEquals("NO", dataColumn[0], "sample_images.data is required");
+            assertEquals("bytea", dataColumn[1]);
         } finally {
             em.close();
         }

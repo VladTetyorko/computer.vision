@@ -1,0 +1,118 @@
+<div class="page">
+  <vision-section-header
+    eyebrow="Manage"
+    title="CV training datasets"
+    subtitle="Capture live frames, correct their boxes, and export YOLO datasets to fine-tune detection models."
+  >
+    <div actions>
+      <a routerLink="/manage" class="btn secondary small">Back to Manage</a>
+    </div>
+  </vision-section-header>
+
+  @if (facade.training.disabled()) {
+    <vision-empty
+      icon="alert"
+      title="Training tools aren't enabled here"
+      message="This deployment hasn't turned on the CV training feature yet. Ask an administrator to enable vision.training.enabled if you need to build a dataset."
+    />
+  } @else {
+    @if (facade.canManage()) {
+      <div class="card">
+        <header>
+          <h2>New dataset</h2>
+        </header>
+        <div class="form-grid">
+          <label>
+            <span class="label">Name</span>
+            <input
+              type="text"
+              [ngModel]="facade.newName()"
+              (ngModelChange)="facade.newName.set($event)"
+              placeholder="e.g. Buildings — site A"
+            />
+          </label>
+          <label>
+            <span class="label">Target category (optional)</span>
+            <select [ngModel]="facade.newTargetCategory()" (ngModelChange)="facade.newTargetCategory.set($event)">
+              <option value="">None</option>
+              @for (c of facade.categories(); track c.slug) {
+                <option [value]="c.slug">{{ c.name }}</option>
+              }
+            </select>
+          </label>
+          <label class="span-2">
+            <span class="label">Classes (comma-separated)</span>
+            <input
+              type="text"
+              [ngModel]="facade.newClassesText()"
+              (ngModelChange)="facade.newClassesText.set($event)"
+              placeholder="e.g. building, tower"
+            />
+            @if (facade.parsedClasses().length > 0) {
+              <span class="faint parsed-classes">{{ facade.parsedClasses().join(', ') }}</span>
+            }
+          </label>
+        </div>
+        <div class="row submit-row">
+          <button type="button" class="btn" [disabled]="!facade.canSubmit()" (click)="facade.submitCreate()">
+            <vision-icon name="plus" [size]="14" />
+            Create dataset
+          </button>
+        </div>
+      </div>
+    }
+
+    @if (facade.training.loading() && !facade.training.loaded()) {
+      <p class="muted">Loading datasets…</p>
+    } @else if (facade.training.datasets().length === 0) {
+      <vision-empty
+        icon="target"
+        title="No datasets yet"
+        [message]="facade.canManage() ? 'Create one above, then capture frames from a live stream to start building ground truth.' : 'Ask a manager to create one — you\'ll be able to capture and label samples into it.'"
+      />
+    } @else {
+      <div class="dataset-grid">
+        @for (d of facade.training.datasets(); track d.id) {
+          <div class="card dataset-card">
+            <header>
+              <div>
+                <h2><a [routerLink]="['/manage/training', d.id]">{{ d.name }}</a></h2>
+                @if (d.targetCategory) {
+                  <span class="chip">{{ d.targetCategory }}</span>
+                }
+              </div>
+              @if (facade.canManage()) {
+                <vision-icon-button
+                  icon="trash"
+                  label="Delete this dataset"
+                  variant="danger"
+                  (activated)="facade.confirmDelete(d.id)"
+                />
+              }
+            </header>
+            <div class="row classes-row">
+              @for (c of d.classes; track c) {
+                <span class="chip">{{ c }}</span>
+              }
+            </div>
+            <div class="row counts-row">
+              <span class="chip warn">{{ d.sampleCounts.PENDING }} pending</span>
+              <span class="chip ok">{{ d.sampleCounts.LABELED }} labeled</span>
+              <span class="chip">{{ d.sampleCounts.DISCARDED }} discarded</span>
+            </div>
+            <a class="btn secondary small open-link" [routerLink]="['/manage/training', d.id]">Open</a>
+
+            @if (facade.dialogs.isOpen(d.id)) {
+              <vision-confirm-dialog
+                [message]="'Delete “' + d.name + '”? Its samples/images are not removed, but the dataset can no longer be found or exported.'"
+                confirmLabel="Delete dataset"
+                (confirmed)="facade.deleteConfirmed(d.id, d.name)"
+                (cancelled)="facade.cancelDelete()"
+              />
+            }
+          </div>
+        }
+      </div>
+    }
+  }
+</div>

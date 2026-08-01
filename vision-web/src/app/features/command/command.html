@@ -11,6 +11,9 @@
       <button type="button" class="btn secondary small" (click)="toggleZonesPanel()">
         Zones ({{ facade.zones().length }})
       </button>
+      <button type="button" class="btn secondary small" (click)="toggleMarksPanel()">
+        Marks ({{ facade.marks.marks().length }})
+      </button>
       <label class="row archived-toggle">
         <input
           type="checkbox"
@@ -28,6 +31,10 @@
       [centerHint]="facade.weatherPosition() ?? null"
       (closePanel)="toggleZonesPanel()"
     />
+  }
+
+  @if (isOverlayOpen('marks')) {
+    <vision-marks-panel (closePanel)="toggleMarksPanel()" />
   }
 
   @if (facade.summaryError() && facade.summary() === undefined) {
@@ -106,9 +113,14 @@
         <vision-fleet-map
           class="command-map"
           [zones]="facade.zones()"
+          [marks]="facade.marks.marks()"
+          [selectedMarkId]="facade.marks.selectedMarkId()"
           (watch)="facade.watchAsset($event)"
           (preview)="facade.selectAsset($event)"
           (openEventAsset)="facade.openEventAsset($event)"
+          (markSelected)="facade.marks.select($event)"
+          (markMoved)="facade.marks.moveTo($event.id, $event.position)"
+          (mapClicked)="facade.marks.handleMapClick($event)"
         />
       }
     </div>

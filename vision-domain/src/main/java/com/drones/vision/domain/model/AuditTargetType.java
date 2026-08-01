@@ -13,5 +13,11 @@ public enum AuditTargetType {
     ASSET,
 
     /** A single source underneath an asset. */
-    DEVICE
+    DEVICE,
+
+    /** A training dataset accumulating labeled samples (docs/CV-TRAINING-PLAN.md §1/§2). */
+    DATASET,
+
+    /** A trained CV model version in the registry (docs/CV-TRAINING-PLAN.md §8, Phase 2). */
+    MODEL
 }

@@ -202,6 +202,12 @@ export const NAV_MODES: readonly NavMode[] = [
         to: '/manage/categories',
       },
       {
+        icon: 'target',
+        name: 'CV training',
+        description: 'Capture live frames, correct the boxes, and export YOLO datasets to improve detection models.',
+        to: '/manage/training',
+      },
+      {
         icon: 'wrench',
         name: 'Maintenance / health',
         description: 'Maintenance records and health history per asset.',

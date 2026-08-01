@@ -219,6 +219,17 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile List<Detection> latestDetections = List.of();
     private volatile VideoFrame latestFrame;
 
+    /**
+     * The most recently arrived frame <b>before</b> {@link #overlayIfNeeded} runs (docs/CV-TRAINING-PLAN.md
+     * §2/§D) — a sibling snapshot to {@link #latestFrame}, kept purely additively: written once per
+     * {@link #onNext}, alongside {@link #latestFrame}, and read only by {@link #latestRawFrame()}. No
+     * other behavior in this class reads or depends on it, so it cannot perturb the publish/detect
+     * path. Training capture wants clean, un-annotated, full-resolution pixels — {@link #latestFrame}
+     * may carry burned-in detection boxes/OSD when overlay rendering is configured, which would
+     * contaminate a captured training image.
+     */
+    private volatile VideoFrame latestRawFrame;
+
     // Only ever touched from within onNext(), which Flow.Subscriber's contract serializes
     // (signals are never delivered concurrently) -- a plain (non-volatile) boolean latch is
     // enough, exactly like the frame-cadence fields below. Suppresses repeated WARNING logs for
@@ -475,6 +486,18 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         return Optional.ofNullable(latestFrame);
     }
 
+    /**
+     * @return the most recently arrived frame exactly as the source produced it — before overlay
+     *         burn-in, at full resolution (docs/CV-TRAINING-PLAN.md §2/§D), or {@link
+     *         Optional#empty()} before the first frame has arrived. Backs training-sample capture,
+     *         which wants clean pixels to label, never the (possibly overlay-rendered) frame {@link
+     *         #latestFrame()} exposes. Same latest-wins, no-copy, any-thread-safe convention as
+     *         {@link #latestFrame()}.
+     */
+    public Optional<VideoFrame> latestRawFrame() {
+        return Optional.ofNullable(latestRawFrame);
+    }
+
     @Override
     public void onSubscribe(Flow.Subscription subscription) {
         this.subscription = subscription;
@@ -488,6 +511,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         recordArrivalAndRecomputeSampling();
         try {
+            latestRawFrame = frame;
             VideoFrame published = overlayIfNeeded(frame);
             latestFrame = published;
             streamPublisherPort.publish(streamId, published);

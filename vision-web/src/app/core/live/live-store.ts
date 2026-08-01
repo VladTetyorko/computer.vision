@@ -8,6 +8,7 @@ import type {
   LiveConnected,
   LiveEnvelope,
   LiveEvent,
+  MarkEvent,
   TelemetrySample,
 } from '../api/models';
 import {
@@ -37,16 +38,24 @@ const MAX_LIVE_EVENTS = 200;
 const MAX_LIVE_DETECTION_EVENTS = 300;
 
 /**
+ * How many `marks` arrivals `markEvents` retains — matches `LiveUpdateRegistry`'s own
+ * `MARKS_BUFFER_CAPACITY` (vision-api), though unlike `detection-events` that server-side buffer is
+ * never replayed to a new connection (see `MarkEvent`'s own doc comment) — this cap just bounds this
+ * store's own in-memory arrival log for `core/marks/marks-store.ts` to fold in.
+ */
+const MAX_LIVE_MARK_EVENTS = 300;
+
+/**
  * Owns the app's **one** `GET /api/live` connection (docs/REALTIME-PLAN.md §4, Phase R-c) — the
  * server-push replacement for steady-state polling. `TelemetryStore`/`DetectionsStore` project this
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
  *
- * <h2>Six topics now, four projected stores — read before wiring a new consumer</h2>
+ * <h2>Seven topics now, five projected stores — read before wiring a new consumer</h2>
  * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
- * `detections:<assetId>`) and grew two more, always-on like `fleet`/`event`
- * (docs/REALTIME-PLAN.md §4's backend follow-up batch): `devices` and `detection-events`. All four
- * of the plan's originally-named stores now have a matching topic:
+ * `detections:<assetId>`) and grew three more, always-on like `fleet`/`event`: `devices` and
+ * `detection-events` (docs/REALTIME-PLAN.md §4's backend follow-up batch), then `marks`
+ * (docs/TACTICAL-MARKS-PLAN.md §5). All four of the original plan's own stores have a matching topic:
  * - `telemetry:<assetId>` ↔ `TelemetryStore` (same domain — {@link TelemetrySample}s for one asset).
  * - `detections:<assetId>` ↔ `DetectionsStore` (same domain — the latest {@link DetectionResult}),
  *   **but keyed differently**: `DetectionsStore.track(streamId, assetId?)` still takes a
@@ -67,6 +76,12 @@ const MAX_LIVE_DETECTION_EVENTS = 300;
  *   /api/events` reads) for `EventsStore` to project, exactly like `event`/`LiveEvent` remains
  *   unconsumed (no store's domain matches it — `liveEvents` below is exposed anyway, arriving for
  *   free, for a future consumer that doesn't exist yet).
+ * - `marks` ↔ `core/marks/marks-store.ts#MarksStore` (docs/TACTICAL-MARKS-PLAN.md §5) — the shared
+ *   tactical-marks operational picture. Carries {@link MarkEvent}s (`{action, mark}`, FIFO,
+ *   **not** snapshot-on-connect — see that type's own doc comment) for `MarksStore` to fold into its
+ *   own `GET /api/marks`-seeded list; unlike every other topic here this one has no poll fallback at
+ *   all — `MarksStore` always does the initial GET regardless of live availability and treats this
+ *   feed purely as incremental deltas on top, plus its own slow safety-net poll.
  *
  * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
  * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
@@ -156,6 +171,18 @@ export class LiveStore {
   private readonly detectionEventsSignal = signal<readonly DetectionEvent[]>([]);
   /** `core/events/events-store.ts#EventsStore`'s own projection source — see this field's own doc comment above. */
   readonly detectionEvents = this.detectionEventsSignal.asReadonly();
+
+  /**
+   * Every `marks` arrival this connection has seen, chronological (oldest-first, true FIFO append —
+   * same reasoning as `detectionEventsSignal` above: `core/marks/marks-store.ts#MarksStore` processes
+   * new arrivals in order and must never see a later `cleared` clobbered by an earlier `created` for
+   * the same mark id). Always-on, like `detection-events`, but **not** snapshot-on-connect — a fresh
+   * connection starts this array empty and only accumulates deltas going forward (see `MarkEvent`'s
+   * own doc comment in `core/api/models.ts` for why).
+   */
+  private readonly markEventsSignal = signal<readonly MarkEvent[]>([]);
+  /** `core/marks/marks-store.ts#MarksStore`'s own projection source — see this field's own doc comment above. */
+  readonly markEvents = this.markEventsSignal.asReadonly();
 
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
@@ -339,6 +366,10 @@ export class LiveStore {
         this.detectionEventsSignal.update((events) =>
           [...events, envelope.payload].slice(-MAX_LIVE_DETECTION_EVENTS),
         );
+        return;
+      case 'marks':
+        // Chronological append — identical reasoning to `detection-events` above.
+        this.markEventsSignal.update((events) => [...events, envelope.payload].slice(-MAX_LIVE_MARK_EVENTS));
         return;
     }
   }

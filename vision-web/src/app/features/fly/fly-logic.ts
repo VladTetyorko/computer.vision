@@ -90,8 +90,9 @@ export const TICKER_MAX_EVENTS = 4;
 // no reason to know this page's specific ids) per its own doc comment.
 
 /** The tool-rail's frozen ids, in their frozen left-to-right order (docs/UI-REDESIGN-PLAN.md D-D;
- * `rc` added by docs/RC-CONTROL-PLAN.md Phase 0 — the read-only RC transmitter monitor). */
-export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'layers' | 'help';
+ * `rc` added by docs/RC-CONTROL-PLAN.md Phase 0 — the read-only RC transmitter monitor; `marks`
+ * added by docs/TACTICAL-MARKS-PLAN.md M5 — the shared tactical-marks operational picture). */
+export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'layers' | 'help';
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/UI-REDESIGN-PLAN.md D-D: "Esc calls

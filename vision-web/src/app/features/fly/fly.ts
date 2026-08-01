@@ -18,6 +18,7 @@ import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';
 import { CvControlPanel } from './cv-control-panel';
 import { RcMonitor } from './rc-monitor';
+import { MarksPanel } from './marks-panel';
 import { FlyFacade } from './fly-facade';
 import { lastSeenLabel, nextCollapseAction, positionLabel, streamStateLabel, type ToolRailPanelId } from './fly-logic';
 import type { AssetSummary } from '../../core/api/models';
@@ -83,6 +84,7 @@ type FlyDialog = 'stop';
     FlightCommandPanel,
     CvControlPanel,
     RcMonitor,
+    MarksPanel,
   ],
   templateUrl: './fly.html',
   styleUrl: './fly.css',
@@ -133,6 +135,17 @@ export class FlyPage {
     // `watch` must stay reactive across a same-route navigation — mirrors `LivePage`'s identical
     // `effect(() => this.facade.setDeviceId(...))`.
     effect(() => this.facade.setWatch(this.watch()));
+
+    // Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — a captured map click always produces a
+    // `MarksStore.draft()` regardless of whether the `marks` drawer happens to be open at that
+    // moment (the map inset and the drawer are independent siblings — see `MarksStore`'s own class
+    // doc comment). Auto-reopening the drawer here is what keeps a draft from silently landing
+    // out of sight if the operator armed a kind, closed the drawer, then clicked the map.
+    effect(() => {
+      if (this.facade.marks.draft()) {
+        this.panels.open('marks');
+      }
+    });
 
     const onKeydown = (event: KeyboardEvent): void => this.handleKeydown(event);
     document.addEventListener('keydown', onKeydown);

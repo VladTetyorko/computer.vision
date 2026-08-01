@@ -10,6 +10,8 @@ import com.drones.vision.api.dto.EventResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
+import com.drones.vision.api.dto.MarkPayload;
+import com.drones.vision.api.dto.MarkResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
 import com.drones.vision.application.AssetService;
@@ -19,6 +21,8 @@ import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.Mark;
+import com.drones.vision.domain.model.MarkStatus;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
@@ -54,15 +58,19 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <h2>Topics</h2>
  * {@link LiveTopic#FLEET}/{@link LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
- * LiveTopic#DETECTION_EVENTS} are implicit and on for every connection; {@code
- * telemetry:<assetId>}/{@code detections:<assetId>} are opt-in (requested via the {@code topics}
- * query parameter at connect time, or added/removed later via {@link #updateTopics(String,
+ * LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MARKS} are implicit and on for every connection;
+ * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in (requested via the {@code
+ * topics} query parameter at connect time, or added/removed later via {@link #updateTopics(String,
  * UpdateLiveTopicsRequest)}). {@code devices}/{@code detection-events} extend this channel beyond
  * its original R-c scope: {@code devices} lets {@code FleetStore} (vision-web) drop its 5s {@code
  * GET /api/devices}+{@code GET /api/streams} poll, and {@code detection-events} lets {@code
  * EventsStore} drop its {@code GET /api/events} poll — see each topic's own javadoc ({@link
  * LiveTopicKind#DEVICES}/{@link LiveTopicKind#DETECTION_EVENTS}) for why each is its own topic
- * rather than folded into {@code fleet}/{@code event}.
+ * rather than folded into {@code fleet}/{@code event}. {@code marks} (docs/TACTICAL-MARKS-PLAN.md
+ * §5) is this channel's newest addition — the shared tactical-marks operational picture, deployment-
+ * wide with no per-group filter, carrying its three lifecycle actions ({@code created}/{@code
+ * updated}/{@code cleared}) inside the payload rather than as three topic kinds, exactly like
+ * {@code detection-events} carries OPEN/CLOSED in one topic (see {@link LiveTopicKind#MARKS}).
  *
  * <h2>Snapshot-on-connect</h2>
  * Every topic is backed by a {@link LiveRingBuffer} (see that class for the FIFO-vs-latest-only
@@ -79,8 +87,18 @@ import java.util.concurrent.atomic.AtomicLong;
  * started" (documented limitation: a viewer connecting for the first time to an asset's {@code
  * telemetry}/{@code detections} topic sees nothing until the next sample/result arrives, even if
  * the asset has been streaming all along; acceptable for a process-local, single-instance ring
- * buffer per the plan's own scope) — {@link LiveTopic#EVENT} is the one always-on topic that stays
- * in that "honestly limited" bucket, since {@code EventPublisherPort} has no read side to query.
+ * buffer per the plan's own scope) — {@link LiveTopic#EVENT} and {@link LiveTopic#MARKS} are the
+ * always-on topics that stay in that "honestly limited" bucket. For {@code marks} this is a
+ * deliberate choice, not an oversight: a live-query seed would need a fifth {@code
+ * ObjectProvider<MarkService>} constructor parameter (the same circular-dependency shape {@code
+ * assetService}/{@code deviceService}/{@code streamService}/{@code detectionEventRepositoryPort}
+ * already carry — {@code DefaultMarkService} itself depends on {@link LiveUpdatePublisherPort}),
+ * which would push this class's constructor past the five-parameter ceiling (see {@code
+ * .claude/skills/java-clean-code/SKILL.md} §3, and this class's own {@link #freshFleetEnvelope()}
+ * javadoc, which already declines a similar addition for the same reason). A viewer's first
+ * connection instead relies entirely on its own {@code GET /api/marks} read for the current
+ * picture (docs/TACTICAL-MARKS-PLAN.md M5 — {@code MarksStore} always does that initial GET before
+ * layering live deltas on top), so this buffer starting empty costs nothing in practice.
  *
  * <h2>Resume</h2>
  * A reconnecting {@code EventSource} sends back {@code Last-Event-ID} (this class's own {@code
@@ -145,6 +163,13 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
      */
     static final int DETECTION_EVENT_BUFFER_CAPACITY = 300;
 
+    /**
+     * Retained entries on the shared {@code marks} topic (FIFO — see {@link LiveRingBuffer}) — same
+     * capacity as {@link #EVENT_BUFFER_CAPACITY}/{@link #DETECTION_EVENT_BUFFER_CAPACITY} for the
+     * same reason (generous resume slack for a comparatively low-rate, individually-meaningful feed).
+     */
+    static final int MARKS_BUFFER_CAPACITY = 300;
+
     private final ObjectProvider<AssetService> assetService;
     private final ObjectProvider<DeviceService> deviceService;
     private final ObjectProvider<StreamService> streamService;
@@ -159,6 +184,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
     private final LiveRingBuffer eventBuffer = new LiveRingBuffer(EVENT_BUFFER_CAPACITY, false);
     private final LiveRingBuffer devicesBuffer = new LiveRingBuffer(1, true);
     private final LiveRingBuffer detectionEventsBuffer = new LiveRingBuffer(DETECTION_EVENT_BUFFER_CAPACITY, false);
+    private final LiveRingBuffer marksBuffer = new LiveRingBuffer(MARKS_BUFFER_CAPACITY, false);
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> telemetryBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
 
@@ -236,7 +262,8 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
      *                     telemetry:<assetId>}/{@code detections:<assetId>} entries; {@code
      *                     null}/blank means none requested. {@link LiveTopic#FLEET}/{@link
      *                     LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
-     *                     LiveTopic#DETECTION_EVENTS} are added automatically regardless.
+     *                     LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MARKS} are added
+     *                     automatically regardless.
      * @param lastEventId  the {@code Last-Event-ID} header value, parsed to a {@code seq}, or
      *                     {@code null} if absent (a fresh connection, not a resume)
      * @return the emitter to return from the controller method
@@ -251,6 +278,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         connection.topics().add(LiveTopic.EVENT);
         connection.topics().add(LiveTopic.DEVICES);
         connection.topics().add(LiveTopic.DETECTION_EVENTS);
+        connection.topics().add(LiveTopic.MARKS);
         connection.topics().addAll(requestedTopics);
         connections.put(connectionId, connection);
 
@@ -290,7 +318,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
         for (String raw : request.remove()) {
             LiveTopic topic = LiveTopic.parse(raw);
             if (topic.kind() == LiveTopicKind.TELEMETRY || topic.kind() == LiveTopicKind.DETECTIONS) {
-                connection.topics().remove(topic); // FLEET/EVENT/DEVICES/DETECTION_EVENTS stay on regardless -- see class javadoc
+                connection.topics().remove(topic); // FLEET/EVENT/DEVICES/DETECTION_EVENTS/MARKS stay on regardless -- see class javadoc
             }
         }
         try {
@@ -361,6 +389,44 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
             detectionEventsBuffer.append(envelope);
             broadcast(LiveTopic.DETECTION_EVENTS, envelope);
         });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Broadcasts on the {@code marks} topic with {@code action = "created"} (docs/TACTICAL-MARKS-
+     * PLAN.md §5).
+     */
+    @Override
+    public void publishMarkCreated(Mark mark) {
+        Objects.requireNonNull(mark, "mark must not be null");
+        scheduler.execute(() -> broadcastMark("created", mark));
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Broadcasts on the {@code marks} topic with {@code action = "updated"}.
+     */
+    @Override
+    public void publishMarkUpdated(Mark mark) {
+        Objects.requireNonNull(mark, "mark must not be null");
+        scheduler.execute(() -> broadcastMark("updated", mark));
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Broadcasts on the {@code marks} topic with {@code action = "cleared"}, forcing {@code
+     * mark.status = "CLEARED"} in the payload even when the {@code mark} passed in (the delete path)
+     * is still {@link MarkStatus#ACTIVE} at the moment of removal — so a client can resolve which
+     * pin to drop without a second lookup (docs/TACTICAL-MARKS-PLAN.md §5).
+     */
+    @Override
+    public void publishMarkCleared(Mark mark) {
+        Objects.requireNonNull(mark, "mark must not be null");
+        Mark cleared = mark.status() == MarkStatus.CLEARED ? mark : mark.withStatus(MarkStatus.CLEARED);
+        scheduler.execute(() -> broadcastMark("cleared", cleared));
     }
 
     /**
@@ -457,7 +523,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
             case FLEET -> buffer.append(freshFleetEnvelope());
             case DEVICES -> buffer.append(freshDevicesEnvelope());
             case DETECTION_EVENTS -> seedDetectionEventsIfEmpty(buffer);
-            default -> { } // EVENT/TELEMETRY/DETECTIONS: honestly-limited, nothing to seed
+            default -> { } // EVENT/TELEMETRY/DETECTIONS/MARKS: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MARKS specifically stays in this bucket
         }
     }
 
@@ -468,6 +534,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
             case EVENT -> eventBuffer;
             case DEVICES -> devicesBuffer;
             case DETECTION_EVENTS -> detectionEventsBuffer;
+            case MARKS -> marksBuffer;
             case TELEMETRY -> telemetryBuffers.computeIfAbsent(topic.assetId(),
                     id -> new LiveRingBuffer(TELEMETRY_BUFFER_CAPACITY, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
@@ -529,6 +596,19 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
     private LiveEnvelopeResponse detectionEventEnvelope(DetectionEvent event) {
         return new LiveEnvelopeResponse(sequencer.incrementAndGet(), null, LiveTopicKind.DETECTION_EVENTS.wire(),
                 DetectionEventResponse.from(event));
+    }
+
+    /**
+     * Builds the {@code marks} envelope and appends/broadcasts it — shared by {@link
+     * #publishMarkCreated}/{@link #publishMarkUpdated}/{@link #publishMarkCleared}, which differ
+     * only in {@code action} (and, for {@code cleared}, in having already forced {@code mark}'s
+     * status before calling this).
+     */
+    private void broadcastMark(String action, Mark mark) {
+        LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(), null,
+                LiveTopicKind.MARKS.wire(), new MarkPayload(action, MarkResponse.from(mark)));
+        marksBuffer.append(envelope);
+        broadcast(LiveTopic.MARKS, envelope);
     }
 
     private String viewUrl(StreamId streamId) {

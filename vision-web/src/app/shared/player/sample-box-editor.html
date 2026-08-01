@@ -1,0 +1,71 @@
+<div class="editor">
+  <div class="stage-col">
+    <div class="legend row">
+      <span class="legend-item"><span class="swatch model"></span>Model suggestion</span>
+      <span class="legend-item"><span class="swatch operator"></span>Operator</span>
+      <span class="hint faint">Drag a corner to resize, drag inside a box to move it, drag empty space to draw a new one.</span>
+    </div>
+    <div class="stage" #stage>
+      <img #img [src]="imageUrl()" alt="Captured frame" draggable="false" (load)="onImageLoad()" />
+      <canvas
+        #canvas
+        class="overlay"
+        [class.disabled]="disabled()"
+        (pointerdown)="onPointerDown($event)"
+        (pointermove)="onPointerMove($event)"
+        (pointerup)="onPointerUp($event)"
+        (pointercancel)="onPointerUp($event)"
+        (pointerleave)="onPointerLeave($event)"
+      ></canvas>
+    </div>
+  </div>
+
+  <div class="box-list">
+    <div class="box-list-head spread">
+      <span class="label">Boxes ({{ draft().length }})</span>
+      <button
+        type="button"
+        class="btn secondary small"
+        [disabled]="disabled() || classes().length === 0"
+        (click)="addBox()"
+      >
+        <vision-icon name="plus" [size]="14" />
+        Add box
+      </button>
+    </div>
+
+    @if (classes().length === 0) {
+      <vision-notice variant="warn" icon="alert">
+        This dataset has no classes yet — every box needs a label from the dataset's own vocabulary.
+      </vision-notice>
+    }
+
+    @if (draft().length === 0) {
+      <p class="muted empty-hint">No boxes yet. Drag on the frame above to draw one, or use Add box.</p>
+    }
+
+    @for (ann of draft(); track $index; let i = $index) {
+      <div class="box-row" [class.selected]="selectedIndex() === i" (click)="select(i)">
+        <span class="swatch" [class.model]="ann.source === 'MODEL'" [class.operator]="ann.source === 'OPERATOR'"></span>
+        <select
+          class="label-select"
+          [ngModel]="ann.label"
+          (ngModelChange)="setLabel(i, $event)"
+          [disabled]="disabled()"
+          (click)="$event.stopPropagation()"
+        >
+          @if (!classes().includes(ann.label)) {
+            <option [value]="ann.label">{{ ann.label }} (not in vocabulary)</option>
+          }
+          @for (c of classes(); track c) {
+            <option [value]="c">{{ c }}</option>
+          }
+        </select>
+        <span class="chip" [class.accent]="ann.source === 'OPERATOR'">{{ ann.source === 'MODEL' ? 'Model' : 'Operator' }}</span>
+        @if (!disabled()) {
+          <vision-icon-button icon="trash" label="Remove this box" variant="danger" (activated)="remove(i)" />
+        }
+      </div>
+    }
+  </div>
+</div>

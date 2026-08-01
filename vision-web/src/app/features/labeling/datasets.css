@@ -1,0 +1,63 @@
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+}
+
+.form-grid .span-2 {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+}
+
+.parsed-classes {
+  margin-top: var(--space-4);
+  font-size: 0.75rem;
+}
+
+.submit-row {
+  justify-content: flex-end;
+  margin-top: var(--space-16);
+}
+
+.dataset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: var(--space-16);
+}
+
+.dataset-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.dataset-card header {
+  align-items: flex-start;
+}
+
+.dataset-card h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--space-4);
+}
+
+.classes-row,
+.counts-row {
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.open-link {
+  align-self: flex-start;
+  margin-top: var(--space-8);
+}

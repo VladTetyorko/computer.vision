@@ -17,6 +17,7 @@ import com.drones.vision.api.FleetController;
 import com.drones.vision.api.FlightCommandController;
 import com.drones.vision.api.GeofenceController;
 import com.drones.vision.api.GroupAdminController;
+import com.drones.vision.api.MarksController;
 import com.drones.vision.api.SimulationController;
 import com.drones.vision.api.UserAdminController;
 import com.drones.vision.application.ActivityService;
@@ -32,6 +33,7 @@ import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ManualControlService;
+import com.drones.vision.application.MarkService;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
@@ -48,6 +50,7 @@ import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
 import com.drones.vision.domain.port.out.FlightCommandPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.domain.port.out.MarkRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import org.junit.jupiter.api.Test;
@@ -300,6 +303,18 @@ class AssetWiringTest {
     @Autowired
     private CvModelsController cvModelsController;
 
+    /** docs/TACTICAL-MARKS-PLAN.md M2: the mark repository store (in-memory by default). */
+    @Autowired
+    private MarkRepositoryPort markRepositoryPort;
+
+    /** docs/TACTICAL-MARKS-PLAN.md M4: the shared tactical-marks CRUD/geolocate service. */
+    @Autowired
+    private MarkService markService;
+
+    /** docs/TACTICAL-MARKS-PLAN.md M4: {@code GET/POST /api/marks}, {@code POST /api/marks/geolocate}, {@code PATCH}/{@code DELETE /api/marks/{id}}. */
+    @Autowired
+    private MarksController marksController;
+
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
@@ -345,6 +360,9 @@ class AssetWiringTest {
         assertNotNull(cvModelsController, "CvModelsController must resolve its constructor dependency (docs/CV-CONTROL-PLAN.md §4)");
         assertNotNull(manualControlService, "ManualControlService bean must be registered (docs/RC-CONTROL-PHASE1-PLAN.md R4)");
         assertNotNull(mavlinkManualControlSender, "MavlinkManualControlSender bean must be registered (docs/RC-CONTROL-PHASE1-PLAN.md R4)");
+        assertNotNull(markRepositoryPort, "MarkRepositoryPort bean must be registered (docs/TACTICAL-MARKS-PLAN.md M2)");
+        assertNotNull(markService, "MarkService bean must be registered (docs/TACTICAL-MARKS-PLAN.md M4)");
+        assertNotNull(marksController, "MarksController must resolve its constructor dependencies (docs/TACTICAL-MARKS-PLAN.md M4)");
     }
 
     /**

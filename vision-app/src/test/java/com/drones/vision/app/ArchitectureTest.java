@@ -36,9 +36,16 @@ class ArchitectureTest {
 
     @Test
     void applicationDependsOnlyOnApplicationDomainAndJava() {
+        // `javax.imageio..` is admitted alongside `java..`: it is JDK standard library (the
+        // `java.desktop` module), the sibling writer of the already-permitted `java.awt.image`
+        // (`BufferedImage` is `java..` and allowed) — not a framework or adapter dependency, so the
+        // boundary this rule actually protects (no Spring/adapter/external coupling in the use-case
+        // layer) is fully preserved. Consumed by `TrainingFrameEncoder` to encode a full-resolution
+        // JPEG of a captured training frame (docs/CV-TRAINING-PLAN.md §D); allowing the layer to hold
+        // a BufferedImage but not write one was an inconsistent line, not a principled one.
         ArchRule rule = noClasses().that().resideInAPackage("..application..")
                 .should().dependOnClassesThat()
-                .resideOutsideOfPackages("..application..", "..domain..", "java..");
+                .resideOutsideOfPackages("..application..", "..domain..", "java..", "javax.imageio..");
         rule.check(classes);
     }
 

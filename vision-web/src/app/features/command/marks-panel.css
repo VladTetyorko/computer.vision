@@ -1,0 +1,134 @@
+/* Drawer *content* only — `<vision-side-panel>` owns the head/close chrome and the drawer surface,
+   mirroring `features/fly/marks-panel.css`'s identical convention. */
+
+:host {
+  display: contents;
+}
+
+vision-notice {
+  margin-bottom: var(--space-16);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-24);
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.kind-picker {
+  flex-wrap: wrap;
+}
+
+.kind-picker .btn {
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* Only the edit form's kind picker ever shows an active state (the current kind); the New-mark
+   picker's buttons are one-shot triggers, never "selected". */
+.kind-picker .btn.active {
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
+}
+
+.draft-form,
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.edit-form {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
+.kind-chip {
+  align-self: flex-start;
+}
+
+.draft-input {
+  width: 100%;
+  padding: var(--space-8);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.draft-input:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 1px;
+}
+
+.mark-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+.mark-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.mark-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.mark-row.selected {
+  border-color: var(--color-info);
+  background: var(--panel-hover);
+}
+
+.mark-row-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.mark-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--space-2);
+}
+
+.mark-row-label {
+  font-weight: 600;
+}
+
+.mark-row-kind {
+  font-size: 0.72rem;
+}
+
+.mark-row-actions {
+  justify-content: flex-end;
+}
+
+.mark-note {
+  margin: 0;
+}

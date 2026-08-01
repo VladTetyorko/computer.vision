@@ -16,6 +16,8 @@ const FROZEN_NAMES: readonly IconName[] = [
   'source', 'pilot', 'map',
   // docs/RC-CONTROL-PLAN.md Phase 0 — the RC transmitter monitor's tool-rail glyph.
   'gamepad',
+  // docs/TACTICAL-MARKS-PLAN.md M5 — TARGET's crosshair and FRIENDLY's flag.
+  'target', 'flag',
 ];
 
 describe('ICONS registry', () => {

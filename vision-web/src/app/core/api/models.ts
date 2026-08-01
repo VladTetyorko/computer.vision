@@ -821,12 +821,14 @@ export interface DevicesSnapshot {
  * Mirrors `dto.LiveEnvelopeResponse` — the shape of every regular (default-named) `GET /api/live`
  * SSE `data:` line; the event's own `id:` field carries `seq` as a string (which is what makes
  * `EventSource`'s automatic `Last-Event-ID` resume work with no client code at all). A discriminated
- * union on `type` so a `switch` narrows `payload` to the right shape per branch — the six `type`
+ * union on `type` so a `switch` narrows `payload` to the right shape per branch — the seven `type`
  * values and their payloads are fixed 1:1 with `LiveTopicKind`'s wire values and
- * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events` (docs/REALTIME-PLAN.md
- * §4's backend follow-up batch) are, like `fleet`/`event`, always-on — every connection gets them
+ * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events`/`marks` (each its own
+ * backend follow-up batch) are, like `fleet`/`event`, always-on — every connection gets them
  * regardless of the `topics` query parameter, so there is no subscribe/unsubscribe management for
- * either on this side, only envelope routing by `type`.
+ * either on this side, only envelope routing by `type`. `marks` (docs/TACTICAL-MARKS-PLAN.md §5) is
+ * deliberately **not** snapshot-on-connect the way `detection-events` is — see {@link MarkEvent}'s
+ * own doc comment.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -834,7 +836,8 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId: string; readonly type: 'detections'; readonly payload: DetectionResult }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'event'; readonly payload: LiveEvent }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'devices'; readonly payload: DevicesSnapshot }
-  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent };
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'marks'; readonly payload: MarkEvent };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -888,6 +891,95 @@ export interface GeofenceZoneRequest {
   readonly polygon: readonly GeoPosition[];
   readonly maxAltitudeMeters?: number;
   readonly enabled: boolean;
+}
+
+// --- Tactical marks (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire contract) ---------------------
+// Structurally a point version of a geofence zone with tactical types: shared, group-visible pins
+// (target/hazard/POI/friendly) any in-scope user can drop or annotate, persisted AND pushed live
+// over the `marks` `GET /api/live` topic (see {@link MarkEvent} below) — the shared operational
+// picture across the cockpit map inset and the Command map.
+
+/** Mirrors `domain.model.MarkKind` — colour-by-kind category, not a breach semantic (see `core/marks/mark-logic.ts#markColor`). */
+export type MarkKind = 'TARGET' | 'HAZARD' | 'POI' | 'FRIENDLY';
+
+/** Mirrors `domain.model.MarkStatus` — `CLEARED` marks drop off `GET /api/marks` and are removed client-side. */
+export type MarkStatus = 'ACTIVE' | 'CLEARED';
+
+/** Mirrors `domain.model.MarkSource` — `DETECTION` marks came from the cockpit's geolocate action, an honest estimate (see `GeolocateMarkRequest`). */
+export type MarkSource = 'MANUAL' | 'DETECTION';
+
+/**
+ * Mirrors `dto.MarkResponse`, the body of every `/api/marks` endpoint and the `mark` field inside
+ * {@link MarkEvent} on the `marks` live topic — one shape parsed regardless of transport.
+ * `note` is absent (not `null`) when the mark carries none, `@JsonInclude(NON_NULL)` like every
+ * other optional field in this file.
+ */
+export interface Mark {
+  readonly id: string;
+  readonly kind: MarkKind;
+  readonly label: string;
+  readonly note?: string;
+  readonly position: GeoPosition;
+  readonly createdBy: string;
+  readonly createdAt: string;
+  readonly status: MarkStatus;
+  readonly source: MarkSource;
+}
+
+/** Mirrors `dto.CreateMarkRequest` — a manual mark (a map click). `position` reuses {@link GeoPosition} verbatim (`PointRequest`'s shape is identical). */
+export interface CreateMarkRequest {
+  readonly kind: MarkKind;
+  readonly label: string;
+  readonly note?: string;
+  readonly position: GeoPosition;
+}
+
+/**
+ * Mirrors `dto.GeolocateMarkRequest` — the cockpit "geolocate" action: the server reads `assetId`'s
+ * freshest telemetry and projects a ground point ahead of the drone. Every field but `assetId` is
+ * optional — `kind` absent defaults server-side to `TARGET`, `label` to `"Contact"`,
+ * `depressionDegrees` to `GeoProjection.DEFAULT_DEPRESSION_DEGREES` (45°, not exposed as a cockpit
+ * control in v1) — so the one-tap "Mark target" action can send only `assetId`.
+ */
+export interface GeolocateMarkRequest {
+  readonly assetId: string;
+  readonly kind?: MarkKind;
+  readonly label?: string;
+  readonly note?: string;
+  readonly depressionDegrees?: number;
+}
+
+/**
+ * Mirrors `dto.PatchMarkRequest` — a true partial patch (unlike `GeofenceZoneRequest`'s
+ * wholesale-replace `PUT`): every field optional, only a present field changes anything. Used for
+ * annotation (label/note/kind), drag-to-correct (`position` only), and clear (`status: 'CLEARED'`
+ * only) alike. `core/marks/marks-store.ts` never sends a field it doesn't mean to change.
+ */
+export interface PatchMarkRequest {
+  readonly kind?: MarkKind;
+  readonly label?: string;
+  readonly note?: string;
+  readonly position?: GeoPosition;
+  readonly status?: MarkStatus;
+}
+
+/**
+ * Mirrors `dto.MarkPayload` — the payload of a {@link LiveEnvelope} whose `type` is `'marks'`. One
+ * always-on topic carries every mark lifecycle event, with the specific lifecycle riding in
+ * `action` rather than three separate topic kinds (mirrors how `detection-events` carries
+ * OPEN/CLOSED in one topic) — `'created'` (a map-click create or a cockpit geolocate), `'updated'`
+ * (an annotation/drag-to-correct with no status change), or `'cleared'` (a status→`CLEARED`
+ * transition, or a delete — `mark.status` is always `'CLEARED'` in this case, even for a delete of
+ * a still-`ACTIVE` mark, so a client can resolve which pin to drop with no second lookup).
+ *
+ * **Deliberately not snapshot-on-connect**, unlike `detection-events`: a fresh `GET /api/live`
+ * connection gets no backlog on this topic (`LiveUpdateRegistry`'s own javadoc, "honestly limited")
+ * — `core/marks/marks-store.ts` always does its own initial `GET /api/marks` first and merges live
+ * deltas on top, never relying on the live channel alone for the current picture.
+ */
+export interface MarkEvent {
+  readonly action: 'created' | 'updated' | 'cleared';
+  readonly mark: Mark;
 }
 
 // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------
@@ -1225,3 +1317,110 @@ export type ManualControlServerMessage =
   | ManualControlAckMessage
   | ManualControlReleasedMessage
   | ManualControlWatchdogMessage;
+
+// --- CV training / dataset improvement loop (docs/CV-TRAINING-PLAN.md §3-4's frozen wire contract,
+// Wave T5) ------------------------------------------------------------------------------------
+// Every endpoint below is gated server-side by `vision.training.enabled` (default `false`) — the
+// whole `DatasetController`/`LabelingController` pair is absent, not just erroring, when it's off,
+// so a request 404s exactly like any unmapped path. `core/training/training-store.ts`'s own doc
+// comment explains how that one clean signal (a 404 on the *list* call, the one endpoint that can
+// never legitimately 404 for any other reason) becomes an honest "not enabled here" empty state
+// instead of a generic error toast.
+
+/** Mirrors `dto.AnnotationResponse`/`AnnotationRequest`. `MODEL` = pre-filled from the stream's live
+ *  detections at capture time; `OPERATOR` = drawn or corrected by hand in the labeling editor. */
+export type AnnotationSource = 'MODEL' | 'OPERATOR';
+
+/** One ground-truth (or model-suggested, until reviewed) box + label on a `TrainingSample`. `box` is
+ *  the same normalized top-left `[0,1]` shape as every other `BoundingBox` in this app. */
+export interface Annotation {
+  readonly label: string;
+  readonly source: AnnotationSource;
+  readonly box: BoundingBox;
+}
+
+/** Mirrors domain `SampleStatus`. `PENDING` = just captured, annotations are still the model's own
+ *  guess; `LABELED` = operator-confirmed ground truth, the only status export includes; `DISCARDED`
+ *  = operator rejected the frame (kept for provenance, never exported). */
+export type SampleStatus = 'PENDING' | 'LABELED' | 'DISCARDED';
+
+/**
+ * Mirrors `dto.SampleResponse` — one captured frame + its (evolving) annotations. `assetId`/
+ * `labeledBy`/`labeledAt` are genuinely **absent** (`@JsonInclude(NON_NULL)`), not serialized
+ * `null`, until resolved/reviewed — vision-api/MODULE.md's own Status/T4 entry flags this as a
+ * deliberate deviation from the plan's illustrative JSON (which shows literal `null`s); this
+ * mirrors every other optional DTO field in this file (`AssetDeletionResponse#…`, etc.).
+ */
+export interface TrainingSample {
+  readonly id: string;
+  readonly datasetId: string;
+  readonly streamId: string;
+  readonly assetId?: string;
+  readonly capturedAt: string;
+  readonly width: number;
+  readonly height: number;
+  readonly status: SampleStatus;
+  readonly labeledBy?: string;
+  readonly labeledAt?: string;
+  readonly annotations: readonly Annotation[];
+}
+
+export type DatasetStatus = 'OPEN' | 'EXPORTING' | 'ARCHIVED';
+
+/**
+ * Mirrors `dto.DatasetResponse`. `targetCategory` is genuinely absent (`NON_NULL`) when the dataset
+ * isn't tied to one category. `sampleCounts` always carries all three `SampleStatus` keys, even at
+ * zero — computed server-side from `TrainingSampleRepositoryPort#countByDataset`, not a stored field.
+ */
+export interface Dataset {
+  readonly id: string;
+  readonly name: string;
+  readonly targetCategory?: string;
+  readonly classes: readonly string[];
+  readonly status: DatasetStatus;
+  readonly createdAt: string;
+  readonly sampleCounts: Record<SampleStatus, number>;
+}
+
+/** Mirrors `dto.DatasetsResponse` — `GET /api/datasets`'s wrapper shape (not a bare array), mirroring `CvModelsResponse`'s own wrapped-list precedent. */
+export interface DatasetsResponse {
+  readonly datasets: readonly Dataset[];
+}
+
+/** Mirrors `dto.SamplesResponse` — `GET /api/datasets/{id}/samples`'s wrapper shape. */
+export interface SamplesResponse {
+  readonly samples: readonly TrainingSample[];
+}
+
+/** Mirrors `dto.CreateDatasetRequest`. Absent `classes` defaults to `[]` server-side. */
+export interface CreateDatasetRequest {
+  readonly name: string;
+  readonly targetCategory?: string;
+  readonly classes?: readonly string[];
+}
+
+/** Mirrors `dto.CaptureSampleRequest` — the body of `POST /api/streams/{streamId}/samples`. */
+export interface CaptureSampleRequest {
+  readonly datasetId: string;
+}
+
+/** Mirrors `dto.LabelAnnotationsRequest` — the confirm/correct body of `PUT
+ *  /api/samples/{id}/annotations`. `status` is restricted to the two reviewed terminal states (a
+ *  sample can never be PUT back to `PENDING`); absent `annotations` defaults to `[]` server-side
+ *  (an empty label set — a valid "confirmed, nothing here" / negative sample). */
+export interface LabelAnnotationsRequest {
+  readonly status: 'LABELED' | 'DISCARDED';
+  readonly annotations: readonly Annotation[];
+}
+
+/** Mirrors `dto.DatasetExportResponse`. `downloadUrl` is a same-origin path
+ *  (`/api/datasets/<id>/export/<exportId>`), safe to bind straight to an `<a href>`. */
+export interface DatasetExport {
+  readonly datasetId: string;
+  readonly exportId: string;
+  readonly exportedAt: string;
+  readonly classes: readonly string[];
+  readonly sampleCount: number;
+  readonly sizeBytes: number;
+  readonly downloadUrl: string;
+}

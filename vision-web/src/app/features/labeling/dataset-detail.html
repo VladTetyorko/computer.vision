@@ -1,0 +1,130 @@
+<div class="page">
+  @if (facade.notFound()) {
+    <a routerLink="/manage/training" class="btn secondary small back-link">Back to datasets</a>
+    <vision-empty
+      icon="alert"
+      title="Dataset not found"
+      message="It may have been deleted, or you may not have access to it."
+    />
+  } @else {
+    <vision-section-header
+      eyebrow="Dataset"
+      [title]="facade.dataset()?.name ?? 'Loading…'"
+      [subtitle]="facade.dataset()?.targetCategory ? 'Target category: ' + facade.dataset()!.targetCategory : undefined"
+    >
+      <div actions>
+        <a routerLink="/manage/training" class="btn secondary small">Back to datasets</a>
+      </div>
+    </vision-section-header>
+
+    @if (facade.dataset(); as dataset) {
+      <div class="row classes-row">
+        @for (c of dataset.classes; track c) {
+          <span class="chip">{{ c }}</span>
+        }
+      </div>
+
+      <div class="card capture-card">
+        <header>
+          <h2>Capture a frame</h2>
+        </header>
+        @if (facade.fleet.streams().length === 0) {
+          <p class="muted">No live streams right now — start one from Wall or Fly, then come back here to capture a frame.</p>
+        } @else {
+          <div class="row capture-row">
+            <select [ngModel]="facade.captureStreamId()" (ngModelChange)="facade.captureStreamId.set($event)">
+              <option value="" disabled>Pick a live stream…</option>
+              @for (s of facade.fleet.streams(); track s.streamId) {
+                <option [value]="s.streamId">{{ facade.streamLabel(s) }}</option>
+              }
+            </select>
+            <button
+              type="button"
+              class="btn"
+              [disabled]="!facade.captureStreamId() || facade.capturing()"
+              (click)="facade.capture()"
+            >
+              <vision-icon name="scan" [size]="14" />
+              {{ facade.capturing() ? 'Capturing…' : 'Capture frame' }}
+            </button>
+          </div>
+        }
+      </div>
+
+      <div class="segmented" role="tablist" aria-label="Sample status">
+        @for (status of statuses; track status) {
+          <button
+            type="button"
+            class="btn secondary small"
+            role="tab"
+            [class.active]="facade.statusFilter() === status"
+            [attr.aria-selected]="facade.statusFilter() === status"
+            (click)="facade.setStatusFilter(status)"
+          >
+            {{ status === 'PENDING' ? 'Pending' : status === 'LABELED' ? 'Labeled' : 'Discarded' }}
+            ({{ dataset.sampleCounts[status] }})
+          </button>
+        }
+      </div>
+
+      @if (facade.samplesLoading() && facade.samples().length === 0) {
+        <p class="muted">Loading samples…</p>
+      } @else if (facade.samples().length === 0) {
+        <vision-empty
+          icon="grid"
+          title="Nothing here yet"
+          [message]="facade.statusFilter() === 'PENDING' ? 'Capture a frame above to get started.' : 'Samples will appear here once you review some.'"
+        />
+      } @else {
+        <div class="sample-grid">
+          @for (sample of facade.samples(); track trackSample($index, sample)) {
+            <a class="card sample-card" [routerLink]="['/manage/training', dataset.id, 'samples', sample.id]">
+              <img class="thumb" [src]="facade.sampleImageUrl(sample.id)" alt="Captured frame" loading="lazy" />
+              <div class="sample-meta">
+                <span class="mono faint">{{ formatWhen(sample.capturedAt) }}</span>
+                <span class="chip">{{ sample.annotations.length }} box{{ sample.annotations.length === 1 ? '' : 'es' }}</span>
+              </div>
+              @if (sample.status === 'PENDING') {
+                <button
+                  type="button"
+                  class="btn secondary small discard-btn"
+                  (click)="$event.preventDefault(); $event.stopPropagation(); facade.discard(sample)"
+                >
+                  Discard
+                </button>
+              }
+            </a>
+          }
+        </div>
+      }
+
+      <div class="card export-card">
+        <header>
+          <h2>Export</h2>
+        </header>
+        <p class="muted">
+          Exports every labeled sample as a YOLO-format dataset (images + labels + <span class="mono">data.yaml</span>).
+          Pending and discarded samples are skipped.
+        </p>
+        <div class="row export-row">
+          <button type="button" class="btn" [disabled]="!facade.canExport() || facade.exporting()" (click)="facade.exportDataset()">
+            <vision-icon name="archive" [size]="14" />
+            {{ facade.exporting() ? 'Exporting…' : 'Export dataset' }}
+          </button>
+          @if (!facade.canExport()) {
+            <span class="faint">Label at least one sample first.</span>
+          }
+        </div>
+        @if (facade.lastExport(); as exportResult) {
+          <div class="export-result">
+            <a class="btn secondary small" [href]="exportResult.downloadUrl" download>
+              <vision-icon name="archive" [size]="14" />
+              Download zip ({{ formatBytes(exportResult.sizeBytes) }})
+            </a>
+            <span class="muted">{{ exportResult.sampleCount }} sample(s), {{ exportResult.classes.length }} class(es)</span>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
 import { FleetMapStore } from '../../core/map/map-store';
@@ -8,12 +8,17 @@ import { WeatherChip } from '../../shared/ui/weather-chip';
 import { Notice } from '../../shared/ui/notice';
 import { AssetPanel } from './asset-panel';
 import { ZonesPanel } from './zones-panel';
+import { MarksPanel } from './marks-panel';
 import { CommandFacade } from './command-facade';
 
-/** Command's one mutually-exclusive overlay group (docs/UI-ARCHITECTURE-PLAN.md) — today just the
- * Zones panel, but typed as a union (not a bare string) so a future second overlay can't typo its id
- * past the compiler, mirroring `flight-command-panel.ts#CommandDialog`'s identical precedent. */
-type CommandOverlay = 'zones';
+/** Command's mutually-exclusive overlay group (docs/UI-ARCHITECTURE-PLAN.md) — Zones and, since
+ * docs/TACTICAL-MARKS-PLAN.md M5, Marks; typed as a union (not a bare string) so a typo'd id can't
+ * compile, mirroring `flight-command-panel.ts#CommandDialog`'s identical precedent. **Deliberately
+ * different shells**: Zones stays its pre-existing full backdrop modal (`<vision-zones-panel>`'s own
+ * `role="dialog" aria-modal="true"` — unchanged by this wave), but Marks uses the non-blocking
+ * `<vision-side-panel>` drawer shell instead (no backdrop) — a true modal would swallow every click
+ * on the map underneath, which the Marks panel's own create-by-map-click flow needs to still reach. */
+type CommandOverlay = 'zones' | 'marks';
 
 /**
  * `/command` — the manager dashboard (docs/UX-REWORK-PLAN.md §U-c, superseding docs/MVP3-PLAN.md
@@ -48,7 +53,7 @@ type CommandOverlay = 'zones';
  */
 @Component({
   selector: 'vision-command',
-  imports: [FleetMap, AssetPanel, ZonesPanel, WeatherChip, RouterLink, Notice],
+  imports: [FleetMap, AssetPanel, ZonesPanel, MarksPanel, WeatherChip, RouterLink, Notice],
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -89,7 +94,20 @@ export class CommandPage {
     this.overlay.toggle('zones' satisfies CommandOverlay);
   }
 
+  protected toggleMarksPanel(): void {
+    this.overlay.toggle('marks' satisfies CommandOverlay);
+  }
+
   constructor() {
     this.facade.trackRequestedAsset(this.requestedAssetId);
+
+    // Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — see `fly.ts`'s identical effect's own doc
+    // comment: a map click always produces a `MarksStore.draft()` regardless of whether the Marks
+    // panel happens to be open; this is what keeps a draft from landing out of sight.
+    effect(() => {
+      if (this.facade.marks.draft()) {
+        this.overlay.open('marks' satisfies CommandOverlay);
+      }
+    });
   }
 }

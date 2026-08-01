@@ -13,9 +13,14 @@ import type {
   AuditEntry,
   Category,
   CreateAssetRequest,
+  CreateDatasetRequest,
   CreateGroupRequest,
+  CreateMarkRequest,
   CreateUserRequest,
   CvModelsResponse,
+  Dataset,
+  DatasetExport,
+  DatasetsResponse,
   DetectionEvent,
   DetectionResult,
   Device,
@@ -25,14 +30,20 @@ import type {
   FlightCommandResponse,
   GeofenceZone,
   GeofenceZoneRequest,
+  GeolocateMarkRequest,
   GroupSummary,
+  LabelAnnotationsRequest,
   LiveSubscription,
+  Mark,
   MeResponse,
+  PatchMarkRequest,
   PatchStreamConfigResponse,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   RegisterDeviceRequest,
   ReturnHomeResponse,
+  SampleStatus,
+  SamplesResponse,
   ScanRequest,
   ScanResult,
   SettableLifecycleState,
@@ -42,6 +53,7 @@ import type {
   StartStreamResult,
   SystemNetworkResponse,
   TelemetrySample,
+  TrainingSample,
   UpdateLiveTopicsRequest,
   UpdateStreamConfigRequest,
   UsageRecording,
@@ -453,6 +465,33 @@ export class VisionApi {
     return firstValueFrom(this.http.delete<void>(`/api/geofences/${encodeURIComponent(id)}`));
   }
 
+  // --- Tactical marks (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire contract) ------------------
+
+  /** Every active mark, deployment-wide, newest first. */
+  listMarks(): Promise<Mark[]> {
+    return firstValueFrom(this.http.get<Mark[]>('/api/marks'));
+  }
+
+  /** Drops a manual mark (a map click). */
+  createMark(request: CreateMarkRequest): Promise<Mark> {
+    return firstValueFrom(this.http.post<Mark>('/api/marks', request));
+  }
+
+  /** Drops a mark projected from an asset's freshest telemetry (the cockpit "geolocate" action). 400 if the asset has no/incomplete telemetry. */
+  geolocateMark(request: GeolocateMarkRequest): Promise<Mark> {
+    return firstValueFrom(this.http.post<Mark>('/api/marks/geolocate', request));
+  }
+
+  /** Partial edit — annotation and/or a status transition; only present fields change. 403 if the caller is neither the mark's creator nor a manager; 404 unknown id. */
+  patchMark(id: string, request: PatchMarkRequest): Promise<Mark> {
+    return firstValueFrom(this.http.patch<Mark>(`/api/marks/${encodeURIComponent(id)}`, request));
+  }
+
+  /** 403 if the caller is neither the mark's creator nor a manager; 404 unknown id. */
+  deleteMark(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/marks/${encodeURIComponent(id)}`));
+  }
+
   // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------
 
   /**
@@ -671,5 +710,94 @@ export class VisionApi {
     return firstValueFrom(
       this.http.get<AuditEntry[]>('/api/me/activity', limit === undefined ? {} : { params: { limit } }),
     );
+  }
+
+  // --- CV training / dataset improvement loop (docs/CV-TRAINING-PLAN.md §3-4's frozen wire
+  // contract, Wave T5) — capture a live frame + its detections into a dataset, correct the boxes,
+  // export a YOLO dataset. Every method below is gated server-side by `vision.training.enabled`
+  // (default `false`) and 404s as a whole when it's off — `core/training/training-store.ts` is the
+  // one place that's turned into an honest "not enabled here" state; every other caller here just
+  // lets the rejected promise propagate like any other endpoint in this class.
+
+  /** Every dataset in the caller's scope (`DatasetsResponse#datasets`, not a bare array — mirrors `CvModelsResponse`'s own wrapped-list shape). */
+  listDatasets(): Promise<DatasetsResponse> {
+    return firstValueFrom(this.http.get<DatasetsResponse>('/api/datasets'));
+  }
+
+  /** `403` when the caller may not manage the organization (create is a manage-org action, unlike capture/label below) — `core/training/training-store.ts` surfaces it as a toast. */
+  createDataset(request: CreateDatasetRequest): Promise<Dataset> {
+    return firstValueFrom(this.http.post<Dataset>('/api/datasets', request));
+  }
+
+  /** `403` is the dataset's own **non-hiding** scope check (`DatasetService#get`'s deliberate deviation from the usual "out of scope reads 404" rule — see vision-api/MODULE.md); `404` unknown id. */
+  getDataset(id: string): Promise<Dataset> {
+    return firstValueFrom(this.http.get<Dataset>(`/api/datasets/${encodeURIComponent(id)}`));
+  }
+
+  /** Does not cascade to the dataset's own samples/images (`DatasetService#delete`'s own contract). `204` on success, idempotent is **not** guaranteed (a repeat call 404s once actually gone). */
+  deleteDataset(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/datasets/${encodeURIComponent(id)}`));
+  }
+
+  /**
+   * Captures the stream's current **raw**, full-resolution frame + its latest detections into a
+   * new `PENDING` sample (annotations pre-filled `source: 'MODEL'`) — the operator-tap "Add to
+   * dataset" gesture (docs/CV-TRAINING-PLAN.md §B). `404` when the dataset is unknown or the stream
+   * has no frame published yet; `403` dataset/source asset outside scope.
+   */
+  captureSample(streamId: string, datasetId: string): Promise<TrainingSample> {
+    return firstValueFrom(
+      this.http.post<TrainingSample>(`/api/streams/${encodeURIComponent(streamId)}/samples`, {
+        datasetId,
+      }),
+    );
+  }
+
+  /** One dataset's samples, optionally filtered by status (`SamplesResponse#samples`). `limit` defaults server-side to 50 when omitted. */
+  datasetSamples(datasetId: string, status?: SampleStatus, limit?: number): Promise<SamplesResponse> {
+    const params: Record<string, string | number> = {};
+    if (status !== undefined) {
+      params['status'] = status;
+    }
+    if (limit !== undefined) {
+      params['limit'] = limit;
+    }
+    return firstValueFrom(
+      this.http.get<SamplesResponse>(`/api/datasets/${encodeURIComponent(datasetId)}/samples`, { params }),
+    );
+  }
+
+  /**
+   * The path for a sample's captured frame (docs/CV-TRAINING-PLAN.md §3/§D — the raw, pre-overlay,
+   * full-resolution JPEG, not the dashboard's downscaled `snapshotUrl`) — not promise-returning, like
+   * `assetImageUrl`/`snapshotUrl` above: meant to be bound straight to an `<img src>`, which fetches
+   * it itself and degrades to its own `error` handler on a `404` (unknown sample or no image stored).
+   */
+  sampleImageUrl(sampleId: string): string {
+    return `/api/samples/${encodeURIComponent(sampleId)}/image`;
+  }
+
+  /**
+   * Confirm/correct: replaces a sample's annotations and sets its terminal status (`LABELED`/
+   * `DISCARDED`). `400` when an annotation's label isn't a member of the dataset's own `classes` —
+   * `features/labeling/sample-editor-logic.ts#validateAnnotations` checks this client-side first so
+   * the confirm button is disabled before the request ever goes out, but the server is the one real
+   * authority (a dataset's `classes` can't be edited from this UI once samples exist).
+   */
+  putSampleAnnotations(sampleId: string, request: LabelAnnotationsRequest): Promise<TrainingSample> {
+    return firstValueFrom(
+      this.http.put<TrainingSample>(`/api/samples/${encodeURIComponent(sampleId)}/annotations`, request),
+    );
+  }
+
+  /**
+   * Exports every `LABELED` sample as a YOLO-format zip (`PENDING`/`DISCARDED` skipped). Despite the
+   * `202` status the response body is already the complete manifest (`DatasetExport#downloadUrl` is
+   * immediately fetchable) — this is a synchronous export, not a job to poll, per the frozen
+   * contract; `features/labeling/dataset-detail.ts` renders `downloadUrl` as a plain download link
+   * the moment this promise resolves.
+   */
+  exportDataset(datasetId: string): Promise<DatasetExport> {
+    return firstValueFrom(this.http.post<DatasetExport>(`/api/datasets/${encodeURIComponent(datasetId)}/export`, {}));
   }
 }

@@ -1,6 +1,7 @@
 package com.drones.vision.application;
 
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
@@ -338,6 +339,20 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? Optional.empty() : active.pipeline().latestFrame();
+    }
+
+    @Override
+    public Optional<VideoFrame> latestRawFrame(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : active.pipeline().latestRawFrame();
+    }
+
+    @Override
+    public List<Detection> latestDetections(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? List.of() : active.pipeline().latestDetections();
     }
 
     /**

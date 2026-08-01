@@ -3,6 +3,7 @@ package com.drones.vision.application;
 import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.Capability;
+import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
@@ -334,6 +335,76 @@ class DefaultStreamServiceTest {
         service.stop(streamId);
 
         assertEquals(Optional.empty(), service.latestFrame(streamId));
+    }
+
+    @Test
+    void latestRawFrameIsEmptyForAnUnknownStream() {
+        assertEquals(Optional.empty(), service.latestRawFrame(StreamId.random()));
+    }
+
+    @Test
+    void latestRawFrameDelegatesToTheRunningStreamsPipeline() {
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>()); // never completes
+
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        assertEquals(Optional.of(frame), service.latestRawFrame(streamId));
+    }
+
+    @Test
+    void latestRawFrameIsEmptyOnceAStreamHasBeenStopped() {
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        when(detectionPort.detect(any(), any())).thenReturn(new CompletableFuture<>());
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        service.stop(streamId);
+
+        assertEquals(Optional.empty(), service.latestRawFrame(streamId));
+    }
+
+    @Test
+    void latestDetectionsIsEmptyForAnUnknownStream() {
+        assertEquals(List.of(), service.latestDetections(StreamId.random()));
+    }
+
+    @Test
+    void latestDetectionsDelegatesToTheRunningStreamsPipeline() {
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        Detection detection = new Detection("person", 0.9,
+                new com.drones.vision.domain.model.BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new ModelRef("yolo26n.pt", "latest"));
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
+                Duration.ZERO);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        assertEquals(List.of(detection), service.latestDetections(streamId));
+    }
+
+    @Test
+    void latestDetectionsIsEmptyOnceAStreamHasBeenStopped() {
+        VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
+                ByteBuffer.wrap(new byte[]{1, 2, 3}));
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
+        Detection detection = new Detection("person", 0.9,
+                new com.drones.vision.domain.model.BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new ModelRef("yolo26n.pt", "latest"));
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
+                Duration.ZERO);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+
+        service.stop(streamId);
+
+        assertEquals(List.of(), service.latestDetections(streamId));
     }
 
     @Test

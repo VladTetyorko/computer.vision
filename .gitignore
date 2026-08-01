@@ -45,3 +45,7 @@ cv-service/cv_service/gen/
 # Default bind-mount source for docker-compose.yml's vision-app service
 # (DEMO_CLIPS_DIR) -- local video clips, never committed.
 /clips/
+
+### CV training exports (docs/CV-TRAINING-PLAN.md, Wave T4) ###
+# Default vision.training.export-dir -- generated YOLO dataset export zips, never committed.
+/data/

@@ -5,11 +5,15 @@ import com.drones.vision.adapter.persistence.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.JpaAssignmentRepository;
 import com.drones.vision.adapter.persistence.JpaCategoryRepository;
+import com.drones.vision.adapter.persistence.JpaDatasetRepository;
 import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.JpaGroupRepository;
+import com.drones.vision.adapter.persistence.JpaMarkRepository;
+import com.drones.vision.adapter.persistence.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
+import com.drones.vision.adapter.persistence.JpaTrainingSampleRepository;
 import com.drones.vision.adapter.persistence.JpaUserRepository;
 import com.drones.vision.adapter.persistence.PersistenceUnit;
 import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
@@ -17,22 +21,30 @@ import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssignmentRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
+import com.drones.vision.app.devsupport.InMemoryDatasetRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
 import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
 import com.drones.vision.app.devsupport.InMemoryGroupRepository;
+import com.drones.vision.app.devsupport.InMemoryMarkRepository;
+import com.drones.vision.app.devsupport.InMemorySampleImageStore;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.app.devsupport.InMemoryTrainingSampleRepository;
 import com.drones.vision.app.devsupport.InMemoryUserRepository;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.domain.port.out.DatasetRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 import com.drones.vision.domain.port.out.UserRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
@@ -56,7 +68,7 @@ import org.springframework.context.annotation.Configuration;
  * {@link EntityManagerFactory} opens a real database connection and runs Flyway, so it must not
  * even be attempted when persistence is disabled — {@link org.springframework.boot.autoconfigure.condition.ConditionalOnProperty}
  * keeps the bean method itself from ever running in that case (same idiom {@code
- * DiscoveryWiringConfiguration} uses for its scanner beans). The eight port beans below then
+ * DiscoveryWiringConfiguration} uses for its scanner beans). The twelve port beans below then
  * consume it through {@link ObjectProvider}, which tolerates the bean being entirely absent when
  * disabled — {@link ObjectProvider#getObject()} is only ever called on the branch where {@link
  * VisionPersistenceProperties#enabled()} guarantees it exists.
@@ -181,5 +193,48 @@ public class PersistenceWiringConfiguration {
             return new JpaAssignmentRepository(entityManagerFactory.getObject());
         }
         return new InMemoryAssignmentRepository();
+    }
+
+    /** docs/TACTICAL-MARKS-PLAN.md §3 — tactical marks, same toggle idiom as the eleven above. */
+    @Bean
+    public MarkRepositoryPort markRepositoryPort(VisionPersistenceProperties properties,
+                                                  ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaMarkRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryMarkRepository();
+    }
+
+    /** docs/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets, same toggle idiom as the twelve above. */
+    @Bean
+    public DatasetRepositoryPort datasetRepositoryPort(VisionPersistenceProperties properties,
+                                                        ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaDatasetRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryDatasetRepository();
+    }
+
+    /** docs/CV-TRAINING-PLAN.md §1, Wave T3 — training samples, same toggle idiom as the thirteen above. */
+    @Bean
+    public TrainingSampleRepositoryPort trainingSampleRepositoryPort(VisionPersistenceProperties properties,
+                                                                     ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaTrainingSampleRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryTrainingSampleRepository();
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the training-sample image store, same toggle idiom
+     * as the fourteen above.
+     */
+    @Bean
+    public SampleImageStorePort sampleImageStorePort(VisionPersistenceProperties properties,
+                                                      ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaSampleImageStore(entityManagerFactory.getObject());
+        }
+        return new InMemorySampleImageStore();
     }
 }

@@ -16,11 +16,12 @@ import type * as Leaflet from 'leaflet';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
 import { EventsStore } from '../../../core/events/events-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../../core/events/events-logic';
-import type { DetectionEvent, GeofenceZone } from '../../../core/api/models';
+import type { DetectionEvent, GeofenceZone, GeoPosition, Mark } from '../../../core/api/models';
 import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
 import { FleetMapStore } from '../../../core/map/map-store';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 import { zoneKindLabel, zoneLayerStyle } from '../../../core/geofence/geofence-logic';
+import { markKindLabel, markStyle, type MarkMoved } from '../../../core/marks/mark-logic';
 
 /** Padding so the outermost markers aren't flush against the map's edge after a fit. */
 const FIT_PADDING: Leaflet.PointTuple = [48, 48];
@@ -160,6 +161,24 @@ export class FleetMap {
    */
   readonly zones = input<readonly GeofenceZone[]>([]);
 
+  /**
+   * Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — `CommandPage` passes `MarksStore.marks()`
+   * (via its facade); empty by default. Same interactive rendering as `shared/map/live-map/live-map.ts`'s
+   * identical input — see that component's own doc comment for the full click/drag contract; kept
+   * here as its own independent implementation (not a shared base class) mirroring how the zones
+   * layer above is already independently implemented in both map components.
+   */
+  readonly marks = input<readonly Mark[]>([]);
+  /** The currently-selected mark id, if any — rendered larger/highlighted. */
+  readonly selectedMarkId = input<string | undefined>(undefined);
+
+  /** A mark marker was clicked. */
+  readonly markSelected = output<string>();
+  /** A mark marker was dragged to a new position (drag-to-correct). */
+  readonly markMoved = output<MarkMoved>();
+  /** Any click on the map's own background — see `live-map.ts`'s identical output for the full contract. */
+  readonly mapClicked = output<GeoPosition>();
+
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
   protected readonly autoFit = signal(true);
@@ -174,6 +193,7 @@ export class FleetMap {
   private readonly markerHandles = new Map<string, MarkerHandle>();
   private readonly eventMarkerHandles = new Map<string, Leaflet.Marker>();
   private readonly zoneLayerHandles = new Map<string, Leaflet.Polygon>();
+  private readonly markLayerHandles = new Map<string, Leaflet.Marker>();
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
   private generation = 0;
@@ -211,6 +231,10 @@ export class FleetMap {
     // auto-fit for the identical reason: a zone drawn far from the fleet's current position must
     // never yank the map away from the assets themselves.
     effect(() => this.applyZones(this.zones()));
+
+    // Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — a fifth, independent, interactive layer;
+    // also excluded from auto-fit for the identical reason.
+    effect(() => this.applyMarks(this.marks(), this.selectedMarkId()));
 
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
@@ -267,6 +291,13 @@ export class FleetMap {
       }
     });
 
+    // Tactical marks create-by-click (docs/TACTICAL-MARKS-PLAN.md M5) — Leaflet's own `click` event
+    // (not the raw DOM listener above), which only fires for the map's own background — see
+    // `live-map.ts`'s identical listener for the full reasoning.
+    map.on('click', (event: Leaflet.LeafletMouseEvent) => {
+      this.mapClicked.emit({ latitude: event.latlng.lat, longitude: event.latlng.lng });
+    });
+
     // The signals may already carry data by the time the chunk finishes loading.
     const markers = this.store.markers();
     this.applyMarkers(markers);
@@ -276,6 +307,7 @@ export class FleetMap {
     }
     this.applyEventMarkers(this.eventMarkers());
     this.applyZones(this.zones());
+    this.applyMarks(this.marks(), this.selectedMarkId());
   }
 
   private applyMarkers(markers: readonly FleetMarker[]): void {
@@ -463,6 +495,59 @@ export class FleetMap {
     }
   }
 
+  // --- Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — interactive, unlike zones above --------
+  // Independent implementation mirroring `shared/map/live-map/live-map.ts`'s identical methods —
+  // see the `marks` input's own doc comment for why this isn't factored into a shared base class.
+
+  private applyMarks(marks: readonly Mark[], selectedMarkId: string | undefined): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return; // map chunk/instance not ready yet — `initMap()` re-applies once it is
+    }
+    const seen = new Set<string>();
+    for (const mark of marks) {
+      seen.add(mark.id);
+      this.upsertMarkLayer(L, map, mark, mark.id === selectedMarkId);
+    }
+    for (const id of [...this.markLayerHandles.keys()]) {
+      if (!seen.has(id)) {
+        this.markLayerHandles.get(id)?.remove();
+        this.markLayerHandles.delete(id);
+      }
+    }
+  }
+
+  private upsertMarkLayer(L: typeof Leaflet, map: Leaflet.Map, mark: Mark, selected: boolean): void {
+    const point = L.latLng(mark.position.latitude, mark.position.longitude);
+    const tooltip = escapeHtml(`${markKindLabel(mark.kind)}: ${mark.label}`);
+    let marker = this.markLayerHandles.get(mark.id);
+    if (!marker) {
+      marker = L.marker(point, { icon: this.markIcon(L, mark, selected), draggable: true, keyboard: false }).addTo(map);
+      marker.on('click', () => this.markSelected.emit(mark.id));
+      marker.on('dragend', () => {
+        const latlng = marker!.getLatLng();
+        this.markMoved.emit({ id: mark.id, position: { latitude: latlng.lat, longitude: latlng.lng } });
+      });
+      marker.bindTooltip(tooltip, { direction: 'top', offset: [0, -8] });
+      this.markLayerHandles.set(mark.id, marker);
+    } else {
+      marker.setLatLng(point);
+      marker.setIcon(this.markIcon(L, mark, selected));
+      marker.setTooltipContent(tooltip);
+    }
+  }
+
+  private markIcon(L: typeof Leaflet, mark: Mark, selected: boolean): Leaflet.DivIcon {
+    const style = markStyle(mark.kind, selected);
+    return L.divIcon({
+      className: `mark-marker${selected ? ' mark-selected' : ''}`,
+      html: `<div class="mark-dot" style="width:${style.diameterPx}px;height:${style.diameterPx}px;background:${style.fillColor};border-color:${style.color}"></div>`,
+      iconSize: [style.diameterPx, style.diameterPx],
+      iconAnchor: [style.diameterPx / 2, style.diameterPx / 2],
+    });
+  }
+
   private fitToMarkers(markers: readonly FleetMarker[]): void {
     const L = this.leaflet;
     if (!L || !this.map || markers.length === 0) {
@@ -546,6 +631,10 @@ export class FleetMap {
       polygon.remove();
     }
     this.zoneLayerHandles.clear();
+    for (const marker of this.markLayerHandles.values()) {
+      marker.remove();
+    }
+    this.markLayerHandles.clear();
     this.map?.remove();
     this.map = null;
     this.tileLayer = null;

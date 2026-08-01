@@ -8,6 +8,7 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { MarksStore } from '../../core/marks/marks-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
@@ -92,6 +93,15 @@ export class FlyFacade {
   readonly detections = inject(DetectionsStore);
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
+  /**
+   * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5) — exposed as the
+   * whole store (not a thin passthrough), mirroring `geofence` above: `fly.html` wires
+   * `<vision-live-map>`'s `[marks]`/`[selectedMarkId]`/`(markSelected)`/`(markMoved)`/`(mapClicked)`
+   * straight to it, and `<vision-marks-panel>` injects this same `providedIn: 'root'` singleton
+   * directly (a non-routed presentational child, per `architecture.spec.ts`'s own carve-out —
+   * mirrors `flight-command-panel.ts` injecting `VisionApi` directly).
+   */
+  readonly marks = inject(MarksStore);
   private readonly weather = inject(WeatherStore);
 
   // --- Picker ------------------------------------------------------------------------------
@@ -231,6 +241,17 @@ export class FlyFacade {
   });
   /** `AssetDetails.attributes['windLimitMps']` when present, else the plan's own 10 m/s default. */
   readonly windLimitMps = computed(() => parseWindLimitMps(this.asset()?.attributes));
+
+  /**
+   * The selected mark's "from drone" bearing/distance readout (docs/TACTICAL-MARKS-PLAN.md §3)
+   * reuses `weatherPosition` verbatim rather than re-deriving "best position we have right now" a
+   * second time — same live-fix-else-last-known fallback, same honest degrade to `undefined` (the
+   * readout shows "—") when neither exists. No "from home" counterpart: surveyed, no home/launch
+   * position is modeled anywhere in this app's telemetry/asset data (docs/TACTICAL-MARKS-PLAN.md
+   * Open Q3's own documented default — "show from-drone always; from-home only when a home position
+   * exists" — so `<vision-marks-panel>` renders drone-only and says so, never a fabricated distance).
+   */
+  readonly dronePosition = this.weatherPosition;
 
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');

@@ -73,7 +73,10 @@ export type IconName =
   | 'source'
   | 'pilot'
   | 'map'
-  | 'gamepad';
+  | 'gamepad'
+  // tactical marks (docs/TACTICAL-MARKS-PLAN.md M5)
+  | 'target'
+  | 'flag';
 
 export const ICONS: Record<IconName, string> = {
   home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10.5V19a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-8.5"/>',
@@ -174,4 +177,7 @@ export const ICONS: Record<IconName, string> = {
     '<path d="M6 11v2a1.5 1.5 0 0 0 1.5 1.5H8v-4h-.5A1.5 1.5 0 0 0 6 11Z"/>' +
     '<path d="M18 11v2a1.5 1.5 0 0 1-1.5 1.5H16v-4h.5A1.5 1.5 0 0 1 18 11Z"/>',
   map: '<polygon points="3 6 9 4 15 6 21 4 21 18 15 20 9 18 3 20 3 6"/><line x1="9" y1="4" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="20"/>',
+  // Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — TARGET's crosshair and FRIENDLY's flag.
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><line x1="12" y1="1" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="1" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="23" y2="12"/>',
+  flag: '<line x1="5" y1="21" x2="5" y2="3"/><path d="M5 4h13l-3.2 4.5L18 13H5"/>',
 };

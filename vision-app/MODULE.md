@@ -41,6 +41,7 @@ Spring Boot assembly: the only module that knows about every adapter, wires port
 | `usageTracker` | `UsageTracker` | `new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort, telemetryRepositoryPort, List<TelemetrySourcePort>, liveUpdatePublisherPort, geofenceMonitor)` — the 7-arg ctor (docs/OPS-CORE-PLAN.md §G, on top of docs/REALTIME-PLAN.md §4's own 6-arg bump); both `liveUpdatePublisherPort` and `geofenceMonitor` are always real beans (never `null`), so this is unconditional wiring, not a feature-flag branch here |
 | `geofenceMonitor` | `GeofenceMonitor` | `new GeofenceMonitor(geofenceRepositoryPort, eventPublisherPort, liveUpdatePublisherPort)` — docs/OPS-CORE-PLAN.md §G; breach evaluation on the telemetry hot path, threaded into `usageTracker` above |
 | `geofenceService` | `GeofenceService` | `new DefaultGeofenceService(geofenceRepositoryPort, geofenceMonitor)` — docs/OPS-CORE-PLAN.md §G; CRUD/list behind `GET/POST /api/geofences`, `PUT`/`DELETE /api/geofences/{id}` (vision-api's `GeofenceController`); a one-line assembly, mirroring `replayService`'s shape |
+| `markService` | `MarkService` | `new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort)` — docs/TACTICAL-MARKS-PLAN.md M4; the shared tactical-marks operational picture behind `GET/POST /api/marks`, `POST /api/marks/geolocate`, `PATCH`/`DELETE /api/marks/{id}` (vision-api's `MarksController`); `usageTracker` backs the cockpit "geolocate" action (`UsageTracker#latestTelemetry`), `liveUpdatePublisherPort` is always a real bean (never `null`) so every create/update/clear is announced on the `marks` SSE topic unconditionally, the same "always a real bean" posture `usageTracker`/`streamService` already have |
 | `streamService` | `StreamService` | `new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort)` — the 10-arg ctor (docs/REALTIME-PLAN.md §4), wired with `usageTracker`, `overlayRenderer` (docs/MVP1-PLAN.md §C8 bullet 2), `detectionEventRepositoryPort` (docs/MVP2-PLAN.md §E, E-a) and `liveUpdatePublisherPort` — same "always a real bean, unconditional wiring" note as `usageTracker` above |
 | `liveUpdatePublisherPort` | `LiveUpdatePublisherPort` | `LiveUpdateRegistry` (vision-api, `com.drones.vision.api.live`) if `vision.live.enabled` (default `true`) else `NoopLiveUpdatePublisher` (devsupport) — see "Server-push data plane" below |
 | `detectionEventRepositoryPort` | `DetectionEventRepositoryPort` | `InMemoryDetectionEventRepository` (devsupport) — docs/MVP2-PLAN.md §E, E-a; persistence explicitly deferred, same posture as `auditTrailPort`; wrapped in `LiveUpdateDetectionEventRepository` when `vision.live.enabled=true` (default — backend follow-up batch, extends the `detection-events` live topic) — see "Server-push data plane" below |
@@ -81,7 +82,11 @@ Spring Boot assembly: the only module that knows about every adapter, wires port
 | `InMemoryUserRepository` | `UserRepositoryPort` | `JpaUserRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a `ConcurrentHashMap<UserId, User>`, `findByUsername` lower-cases its key (`Locale.ROOT`) then matches the already-lower-cased stored username (docs/U-AUTH-PLAN.md wave 3) |
 | `InMemoryGroupRepository` | `GroupRepositoryPort` | `JpaGroupRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<GroupId, Group>`, `save` is upsert-by-id (docs/U-AUTH-PLAN.md wave 3) |
 | `InMemoryAssignmentRepository` | `AssignmentRepositoryPort` | `JpaAssignmentRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a concurrent set of (pilot, asset) links → `assign` idempotent-no-duplicate, `unassign` idempotent-removal for free (docs/U-SCOPE-PLAN.md slice 2, feature 2) |
+| `InMemoryMarkRepository` | `MarkRepositoryPort` | `JpaMarkRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<MarkId, Mark>`, no eviction/cap (docs/TACTICAL-MARKS-PLAN.md §3/M2); consumed by the `markService` bean (docs/TACTICAL-MARKS-PLAN.md M4, see Bean inventory above) |
 | `InMemoryTelemetryRepository` | `TelemetryRepositoryPort` | `JpaTelemetryRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; one `CopyOnWriteArrayList` per `UsageId` here vs. an indexed `(usage_id, at)` query in the JPA replacement, which also adds retention pruning this class doesn't have (see adapter-persistence/MODULE.md) |
+| `InMemoryDatasetRepository` | `DatasetRepositoryPort` | `JpaDatasetRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<DatasetId, Dataset>`, no eviction/cap (docs/CV-TRAINING-PLAN.md §1, Wave T3) |
+| `InMemoryTrainingSampleRepository` | `TrainingSampleRepositoryPort` | `JpaTrainingSampleRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<TrainingSampleId, TrainingSample>`; `findByDataset` filters + sorts newest-captured-first in memory before bounding to `limit`, the same deterministic order the JPA replacement picks (docs/CV-TRAINING-PLAN.md §1, Wave T3) |
+| `InMemorySampleImageStore` | `SampleImageStorePort` | `JpaSampleImageStore` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<TrainingSampleId, SampleImage>`, no eviction/cap (docs/CV-TRAINING-PLAN.md §1/§C, Wave T3) |
 | `InMemoryAuditTrail` | `AuditTrailPort` | none — `AuditTrailPort` was out of scope for both docs/MVP2-PLAN.md P-a and P-b; stays unconditionally in-memory in `WiringConfiguration` regardless of `vision.persistence.enabled` |
 | `LoggingEventPublisher` | `EventPublisherPort` | message-broker-backed (MQTT/Kafka), Phase 7 |
 | `InMemoryDetectionEventRepository` | `DetectionEventRepositoryPort` | none — persistence explicitly deferred for docs/MVP2-PLAN.md §E, E-a (same posture as `InMemoryAuditTrail`); own ring cap is `MAX_EVENTS_PER_STREAM`=500 events per stream (oldest evicted; `save` is a genuine upsert-by-id, unlike `InMemoryDetectionRepository`'s append-only rows — see the class's own javadoc) |
@@ -101,7 +106,7 @@ Spring Boot assembly: the only module that knows about every adapter, wires port
 
 `PersistenceWiringConfiguration` is a **separate `@Configuration` class** from `WiringConfiguration` — same split-out-by-concern precedent as `DiscoveryWiringConfiguration` — because its toggle can't be a single `if/else` inside one `@Bean` method the way `detectionPort`/`streamPublisherPort` pick their implementation: constructing an `EntityManagerFactory` (`adapter-persistence`'s `PersistenceUnit.start`) eagerly opens a real JDBC connection and runs a Flyway migration, so it must not even be *attempted* while persistence is disabled, unlike a cheap no-op fallback object. The one `EntityManagerFactory` bean is instead gated by `@ConditionalOnProperty(prefix="vision.persistence", name="enabled", havingValue="true")` (`@Bean(destroyMethod="close")`, so context shutdown closes it cleanly when it does exist) — the same idiom `DiscoveryWiringConfiguration` already uses for its scanner beans, just on a single bean instead of six.
 
-The twelve port beans (`categoryRepositoryPort`, `deviceRepositoryPort`, `assetRepositoryPort`, `assetUsageRepositoryPort`, `telemetryRepositoryPort`, `detectionRepositoryPort`, `assetImageRepositoryPort`, `geofenceRepositoryPort`, `userRepositoryPort`/`groupRepositoryPort` — added by docs/U-AUTH-PLAN.md wave 3 — and `assignmentRepositoryPort` — added by docs/U-SCOPE-PLAN.md slice 2, JPA `JpaAssignmentRepository` vs `InMemoryAssignmentRepository`) then each take an `ObjectProvider<EntityManagerFactory>` alongside `VisionPersistenceProperties` and branch exactly like `detectionPort` does: `properties.enabled()` true → `entityManagerFactory.getObject()` (safe — the conditional bean is guaranteed to exist on this branch) wrapped in the matching `Jpa*Repository`; false → the matching devsupport `InMemory*Repository`, unchanged from before either feature. `ObjectProvider` (rather than a plain `EntityManagerFactory` parameter) is what lets these eight `@Bean` methods exist in the same context as the *conditionally absent* `persistenceEntityManagerFactory` bean without Spring failing dependency resolution when it's missing. The three P-b beans use each `Jpa*Repository`'s one-argument constructor (its generous default retention cap — see adapter-persistence/MODULE.md's Retention section) rather than the two-argument override; no `vision.persistence.*` property surfaces the cap yet, since nothing has asked for it to be tunable — see adapter-persistence/MODULE.md's Status for that honest gap.
+The sixteen port beans (`categoryRepositoryPort`, `deviceRepositoryPort`, `assetRepositoryPort`, `assetUsageRepositoryPort`, `telemetryRepositoryPort`, `detectionRepositoryPort`, `assetImageRepositoryPort`, `geofenceRepositoryPort`, `userRepositoryPort`/`groupRepositoryPort` — added by docs/U-AUTH-PLAN.md wave 3 — `assignmentRepositoryPort` — added by docs/U-SCOPE-PLAN.md slice 2 — `markRepositoryPort` — added by docs/TACTICAL-MARKS-PLAN.md M2, JPA `JpaMarkRepository` vs `InMemoryMarkRepository` — and `datasetRepositoryPort`/`trainingSampleRepositoryPort`/`sampleImageStorePort` — added by docs/CV-TRAINING-PLAN.md §1, Wave T3, JPA `JpaDatasetRepository`/`JpaTrainingSampleRepository`/`JpaSampleImageStore` vs `InMemoryDatasetRepository`/`InMemoryTrainingSampleRepository`/`InMemorySampleImageStore`) then each take an `ObjectProvider<EntityManagerFactory>` alongside `VisionPersistenceProperties` and branch exactly like `detectionPort` does: `properties.enabled()` true → `entityManagerFactory.getObject()` (safe — the conditional bean is guaranteed to exist on this branch) wrapped in the matching `Jpa*Repository`; false → the matching devsupport `InMemory*Repository`, unchanged from before either feature. `ObjectProvider` (rather than a plain `EntityManagerFactory` parameter) is what lets these sixteen `@Bean` methods exist in the same context as the *conditionally absent* `persistenceEntityManagerFactory` bean without Spring failing dependency resolution when it's missing. The three P-b beans use each `Jpa*Repository`'s one-argument constructor (its generous default retention cap — see adapter-persistence/MODULE.md's Retention section) rather than the two-argument override; no `vision.persistence.*` property surfaces the cap yet, since nothing has asked for it to be tunable — see adapter-persistence/MODULE.md's Status for that honest gap. `markRepositoryPort` is now consumed by the `markService` bean (docs/TACTICAL-MARKS-PLAN.md M4, see Bean inventory above). `datasetRepositoryPort`/`trainingSampleRepositoryPort`/`sampleImageStorePort` are now consumed by `TrainingWiringConfiguration`'s `trainingStores`/`datasetService`/`labelingService` beans (docs/CV-TRAINING-PLAN.md Wave T4 — see "CV training loop wiring" below) — the same "wire the port ahead of its consumer" precedent `markRepositoryPort` set at M2, now closed. `DatasetExportPort`/`FilesystemDatasetExport` (adapter-persistence) is **also** now wired, but deliberately **not here** — it needs `VisionTrainingProperties#exportDir()` (`vision.training.*`, gated by `vision.training.enabled` rather than `vision.persistence.enabled`), so its `@Bean` lives in `TrainingWiringConfiguration`, a separate `@Configuration` class — see below.
 
 **Removed from `WiringConfiguration`**: P-a's task removed the `categoryRepositoryPort`/`deviceRepositoryPort`/`assetRepositoryPort` `@Bean` methods (previously always `InMemory*Repository`, unconditionally); this task (P-b) removed `assetUsageRepositoryPort`/`telemetryRepositoryPort`/`detectionRepositoryPort` the same way. All six now live in `PersistenceWiringConfiguration` as described above. `AuditTrailPort` is untouched (still an unconditional `InMemory*` bean in `WiringConfiguration` — never in either cycle's scope).
 
@@ -146,6 +151,21 @@ Unlike HLS, WHEP gets **no proxy controller and no app-relative view base**. `Wi
 **Deliberately a static, in-source constant — not the dormant `ModelRegistryPort`, not a new cv-service RPC** (docs/CV-CONTROL-PLAN.md §D, a frozen decision): that port models versioned promote/rollback (a Phase-3 training-studio concern) and has no implementation; wiring it now for a picker that only needs a display list would be over-building for v1. This roster changes at deploy time (edit `cvModelRoster()`, rebuild), not at runtime — a documented future seam, not built now, is either that port or a small `cv-service` roster RPC (its own `ModelRegistry` already knows the local checkpoint set).
 
 `AssetWiringTest` extended (two more `assertNotNull` calls plus one roster-content assertion in the existing bean-inventory test, no new test method — same judgment call `ReplayService`/`FleetSummaryService`/etc. made for their own small, focused beans): asserts `cvModelRoster` is registered and includes the default `yolo26n.pt` model, and that `CvModelsController` resolves its one constructor dependency.
+
+## CV training loop wiring (docs/CV-TRAINING-PLAN.md §3, Wave T4)
+
+`VisionTrainingProperties` (`@ConfigurationProperties(prefix="vision.training")`, mirrors `VisionCvProperties`'s record/`@DefaultValue` idiom): `enabled` (`@DefaultValue("false")`) and `exportDir` (`@DefaultValue("data/training-exports")`, blank-rejected in the compact ctor).
+
+`TrainingWiringConfiguration` — a **separate `@Configuration` class**, same split-by-concern precedent as `DiscoveryWiringConfiguration`/`PersistenceWiringConfiguration` — wires the whole capture→label→export loop's application-layer beans, each individually `@ConditionalOnProperty(prefix="vision.training", name="enabled", havingValue="true")` (the `persistenceEntityManagerFactory`/scanner-bean idiom, not the port-selection `if/else` idiom, since none of these four beans has a no-op fallback — they simply don't exist when the flag is off, the same "absent entirely" posture `LiveController` takes for its own controller, applied here to a whole small cluster):
+
+- `datasetExportPort` → `FilesystemDatasetExport(Path.of(properties.exportDir()))` (adapter-persistence) — the plan's Open Questions §1 placement.
+- `trainingStores` → `TrainingStores(datasetRepositoryPort, trainingSampleRepositoryPort, sampleImageStorePort, datasetExportPort)` — the four Wave-T1 ports bundled for `DefaultLabelingService`'s constructor (see `TrainingStores`'s own javadoc); the three port arguments are already unconditional beans in `PersistenceWiringConfiguration` (docs/CV-TRAINING-PLAN.md Wave T3).
+- `datasetService` → `new DefaultDatasetService(datasetRepositoryPort, auditTrailPort)` — behind `DatasetController` (vision-api, component-scanned).
+- `labelingService` → `new DefaultLabelingService(trainingStores, streamService, assetRepositoryPort, auditTrailPort)` — behind `LabelingController` (vision-api, component-scanned); `streamService`/`assetRepositoryPort`/`auditTrailPort` are all already-wired, unconditional beans elsewhere in this module.
+
+**Default-off guardrail** (docs/CV-TRAINING-PLAN.md §G): with `vision.training.enabled=false` (the default), all four beans above and both controllers are entirely absent from the context — `GET/POST /api/datasets`[/{id}], `POST /api/streams/{id}/samples`, `GET /api/samples/{id}/image`, `PUT /api/samples/{id}/annotations`, and `/api/datasets/{id}/export`* all 404 like any unmapped route, exactly as before this feature existed. `TrainingDisabledWiringTest` proves this via `ApplicationContext#getBeansOfType` (the same "a plain `@Autowired` would fail the context on zero candidates" reasoning `LiveDisabledWiringTest`/`DiscoveryDisabledWiringTest` already document); `TrainingEnabledWiringTest` (`vision.training.enabled=true`, `vision.training.export-dir` redirected to a `@TempDir` via `@DynamicPropertySource`, same idiom as `RtspSimulationDockerE2ETest`'s mediamtx port) proves the opposite — every bean resolves to its real implementation and both controllers resolve.
+
+`application.properties` gained a `vision.training.enabled=false` line plus a commented-out `vision.training.export-dir=data/training-exports` documenting the default (same "commented to document, not override" idiom as `vision.rc.watchdog-timeout-ms`). `.gitignore` gained `/data/` (the default export-dir's parent, mirroring `/clips/`'s own "generated, never committed" precedent) — a completed export's zip lands under `<export-dir>/<datasetId>/<exportId>.zip` (`FilesystemDatasetExport`, adapter-persistence) and is never a build artifact worth committing.
 
 ## CV inference wiring (docs/MVP1-PLAN.md §C7 bullet 4)
 
@@ -201,13 +221,16 @@ Unlike HLS, WHEP gets **no proxy controller and no app-relative view base**. `Wi
 
   A second `@Test`, `postSimulationsWithARouteFliesTelemetryTowardTheFinalCheckpoint` (docs/CYCLES-PLAN.md §7, CT-a, docker-free like the rest of this class), posts the same generated video plus a `telemetry` object — a 3-waypoint north-heading route (300m legs, so 600m total), `speedMps=100`, `routeMode="once"` — then polls `TelemetryRepositoryPort` for ≥8 samples (chosen so the last few observed samples are reliably past the route's exact 6-tick completion, not landing on it) and asserts each successive sample's equirectangular-approximated distance to the final checkpoint trends toward zero (5m tolerance between consecutive samples) and the last sample is within 50m of it — `routeMode=once` (rather than the `loop` default) keeps this assertion robust regardless of which tick the poll happens to observe last, since the drone holds at the end instead of retracing. **Gotcha this test itself proves**: `SimulatedTelemetrySource`'s route ticks in this module at the real, unthrottled 1Hz cadence (the faster test-only constructor isn't reachable here, see below) — `distanceMeters` still advances deterministically per tick regardless of wall-clock jitter, but the test must budget real seconds (`ROUTE_TELEMETRY_TIMEOUT`=30s) for enough ticks to elapse, not milliseconds.
 - **DeviceProbeSmokeTest** (docs/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 1) — end-to-end proof that `POST /api/devices/probe` really resolves a real `VideoSourcePort` adapter and grabs a real frame, over the full production wiring (no test doubles needed at all — a probe never touches `StreamPublisherPort`). `MockMvc` built by hand (same `webAppContextSetup` technique as `FileSimulationSmokeTest`). Three tests: a `sim`-protocol probe (`SimulatedVideoSource`, zero hardware) asserting 640×720→640×480 dims, `codec="mjpeg"`, and — a real, wired assertion — `telemetryDetected=true` (adapter-simulation's `SimulatedTelemetrySource` genuinely claims a `sim`-protocol `TELEMETRY`-capable synthetic probe device, see `DefaultProbeService`'s own javadoc for why this is a fair read, not a false positive); a `file`-protocol probe through the real FFmpeg ingest path against a tiny JavaCV-generated mp4 (duplicated video-generation helper, same precedent as `MjpegSimulationSmokeTest`/`RtspSimulationDockerE2ETest`), asserting the generated video's own 64×48 dimensions, an absent `codec` (BGR24 carries no wire-codec memory), and `telemetryDetected=false` with the UX-DESIGN §5.1 warning; and a plain 400 for an unrecognized protocol. Deliberately does **not** re-test failure-message translation here (already covered by `DefaultProbeServiceTest`/`DeviceProbeControllerTest` with mocks) — this class exists to prove the wiring/seam, not to re-prove logic already unit-tested elsewhere.
-- **AssetWiringTest** — `@SpringBootTest(vision.publish.enabled=false)`: asserts every asset-model service/repository-port bean exists (`AssetService`, `CategoryService`, `DeviceService`, `SimulationService`, `SimulationController`, `CategoryRepositoryPort`, `AssetRepositoryPort`, `AssetUsageRepositoryPort`, `TelemetryRepositoryPort`, `AuditTrailPort`, the `actingOwnership` `Ownership` bean) via `@Autowired` + `assertNotNull` — mirrors `PublishWiringTest`/`DiscoveryWiringTest`'s per-concern wiring-test style; a missing bean would already fail context startup, so this is mostly a readable inventory. Extended for docs/CYCLES-PLAN.md §1c to also cover `SimulationService`/`SimulationController` rather than adding a separate wiring-test class, since they're asset-model beans built directly on `AssetService`. Further extended for §5 (superseding the §3-era single `@Autowired FeedTransmitterPort` field, which stopped working once a second implementation existed): autowires the whole `List<FeedTransmitterPort>` and asserts both `RtspFeedTransmitter` and `MjpegFeedTransmitter` are present, and separately asserts the `FeedTransmitterRegistry` bean resolves an `rtsp`/`mjpeg` `FeedSpec` to the matching adapter. Further extended for docs/MVP2-PLAN.md **R-a2**: `ReplayService` is asserted as a registered bean in the same inventory test, since it's a small, asset-model-adjacent one-liner (mirrors `categoryService`'s own shape) — no new wiring-test class needed. Further extended for docs/MVP2-PLAN.md **X-a**: autowires `List<TelemetrySourcePort>` and asserts `MavlinkTelemetrySource` is present (2 new test methods, mirroring the §5 `FeedTransmitterPort` pattern exactly): `mavlinkTelemetrySourceIsWiredAsATelemetrySourcePortBean` and `mavlinkFeedTransmitterIsWiredAsAFeedTransmitterPortBeanAndResolvesByProtocol` (asserts both `List<FeedTransmitterPort>` membership and `FeedTransmitterRegistry` resolving a `mavlink` `FeedSpec`) — up from 3 test methods to 5. Further extended for docs/MVP2-PLAN.md **E-a**: `DetectionEventRepositoryPort` and `EventController` both added to the same bean-inventory test (no new test method, two more `assertNotNull` calls) — the same "small, focused, asset-model-adjacent bean" reasoning as `ReplayService`/R-a2 above; `EventController`'s single constructor dependency resolving is itself proof the bean graph is wired correctly, mirroring `simulationController`'s own assertion. Further extended for docs/MVP3-PLAN.md **C-a**: `FleetSummaryService` and `FleetController` added to the same bean-inventory test (no new test method, two more `assertNotNull` calls) — same reasoning again, this time mirroring `EventController`'s own pair exactly. Further extended for docs/UX-REWORK-PLAN.md **§U-d item 3**: `ProbeService`/`DeviceProbeController` and `AssetImageRepositoryPort`/`AssetImageController` all added to the same bean-inventory test (no new test method, four more `assertNotNull` calls) — same "small, focused" reasoning yet again. Further extended for docs/DRONE-INFRA-PLAN.md **I-e Stage 1 wave 2**: `FlightCommandService`/`FlightCommandController` added to the same bean-inventory test (two more `assertNotNull` calls, same reasoning) plus one new test method, `flightCommandServiceIsWiredAgainstTheMavlinkCommander` — autowires both the `FlightCommandPort` interface and the concrete `MavlinkFlightCommander` bean and asserts `assertSame`, proving the one `FlightCommandPort` bean in this context really is the mavlink commander (there being exactly one implementation makes an interface-vs-concrete-type identity check the simplest honest proof that `flightCommandService`'s constructor argument resolved correctly, short of exposing a getter purely for testing) — up from 5 test methods to 6. Further extended for docs/ASSET-MANAGER-PAGE-PLAN.md **Wave A**: `AssetStatsService`/`AssetStatsController` added to the same bean-inventory test (two more `assertNotNull` calls, no new test method — same "small, focused, asset-model-adjacent bean" reasoning as `ReplayService`/`FleetSummaryService` above) — still 6 test methods.
+- **AssetWiringTest** — `@SpringBootTest(vision.publish.enabled=false)`: asserts every asset-model service/repository-port bean exists (`AssetService`, `CategoryService`, `DeviceService`, `SimulationService`, `SimulationController`, `CategoryRepositoryPort`, `AssetRepositoryPort`, `AssetUsageRepositoryPort`, `TelemetryRepositoryPort`, `AuditTrailPort`, the `actingOwnership` `Ownership` bean) via `@Autowired` + `assertNotNull` — mirrors `PublishWiringTest`/`DiscoveryWiringTest`'s per-concern wiring-test style; a missing bean would already fail context startup, so this is mostly a readable inventory. Extended for docs/CYCLES-PLAN.md §1c to also cover `SimulationService`/`SimulationController` rather than adding a separate wiring-test class, since they're asset-model beans built directly on `AssetService`. Further extended for §5 (superseding the §3-era single `@Autowired FeedTransmitterPort` field, which stopped working once a second implementation existed): autowires the whole `List<FeedTransmitterPort>` and asserts both `RtspFeedTransmitter` and `MjpegFeedTransmitter` are present, and separately asserts the `FeedTransmitterRegistry` bean resolves an `rtsp`/`mjpeg` `FeedSpec` to the matching adapter. Further extended for docs/MVP2-PLAN.md **R-a2**: `ReplayService` is asserted as a registered bean in the same inventory test, since it's a small, asset-model-adjacent one-liner (mirrors `categoryService`'s own shape) — no new wiring-test class needed. Further extended for docs/MVP2-PLAN.md **X-a**: autowires `List<TelemetrySourcePort>` and asserts `MavlinkTelemetrySource` is present (2 new test methods, mirroring the §5 `FeedTransmitterPort` pattern exactly): `mavlinkTelemetrySourceIsWiredAsATelemetrySourcePortBean` and `mavlinkFeedTransmitterIsWiredAsAFeedTransmitterPortBeanAndResolvesByProtocol` (asserts both `List<FeedTransmitterPort>` membership and `FeedTransmitterRegistry` resolving a `mavlink` `FeedSpec`) — up from 3 test methods to 5. Further extended for docs/MVP2-PLAN.md **E-a**: `DetectionEventRepositoryPort` and `EventController` both added to the same bean-inventory test (no new test method, two more `assertNotNull` calls) — the same "small, focused, asset-model-adjacent bean" reasoning as `ReplayService`/R-a2 above; `EventController`'s single constructor dependency resolving is itself proof the bean graph is wired correctly, mirroring `simulationController`'s own assertion. Further extended for docs/MVP3-PLAN.md **C-a**: `FleetSummaryService` and `FleetController` added to the same bean-inventory test (no new test method, two more `assertNotNull` calls) — same reasoning again, this time mirroring `EventController`'s own pair exactly. Further extended for docs/UX-REWORK-PLAN.md **§U-d item 3**: `ProbeService`/`DeviceProbeController` and `AssetImageRepositoryPort`/`AssetImageController` all added to the same bean-inventory test (no new test method, four more `assertNotNull` calls) — same "small, focused" reasoning yet again. Further extended for docs/DRONE-INFRA-PLAN.md **I-e Stage 1 wave 2**: `FlightCommandService`/`FlightCommandController` added to the same bean-inventory test (two more `assertNotNull` calls, same reasoning) plus one new test method, `flightCommandServiceIsWiredAgainstTheMavlinkCommander` — autowires both the `FlightCommandPort` interface and the concrete `MavlinkFlightCommander` bean and asserts `assertSame`, proving the one `FlightCommandPort` bean in this context really is the mavlink commander (there being exactly one implementation makes an interface-vs-concrete-type identity check the simplest honest proof that `flightCommandService`'s constructor argument resolved correctly, short of exposing a getter purely for testing) — up from 5 test methods to 6. Further extended for docs/ASSET-MANAGER-PAGE-PLAN.md **Wave A**: `AssetStatsService`/`AssetStatsController` added to the same bean-inventory test (two more `assertNotNull` calls, no new test method — same "small, focused, asset-model-adjacent bean" reasoning as `ReplayService`/`FleetSummaryService` above) — still 6 test methods. Further extended for docs/TACTICAL-MARKS-PLAN.md **M4**: `MarkRepositoryPort`/`MarkService`/`MarksController` added to the same bean-inventory test (three more `assertNotNull` calls, no new test method — same "small, focused, asset-model-adjacent bean" reasoning as `AssetStatsService`/`FleetSummaryService` above) — still 6 test methods.
 - **`devsupport.InMemoryDetectionEventRepositoryTest`** (docs/MVP2-PLAN.md §E, E-a) — plain unit tests (no Spring context), same package as the class under test, mirroring `InMemoryDetectionRepositoryTest`'s style: per-stream isolation, newest-first `findByStream`/`findRecent` ordering by `lastSeen` (not save order), `save` upserting by id rather than duplicating (an update replaces the existing entry, `lastSeen`/`peakConfidence` reflect the newest observation), `findRecent`'s cross-stream span and `sinceInclusive` filtering, unknown-stream → empty list, and the ring cap itself (saves `MAX_EVENTS_PER_STREAM + 5` distinct events, asserts exactly `MAX_EVENTS_PER_STREAM` remain and the 5 oldest were evicted).
 - **RtspSimulationDockerE2ETest** — docs/CYCLES-PLAN.md §3's C3 done-criterion in test form, in the `FileSimulationSmokeTest` mould but for `transport=rtsp` and a real mediamtx container: docker-gated (`@EnabledIf("dockerAvailable")`, same idiom as adapter-rtsp's/adapter-publish-hls's `MediamtxDockerIntegrationTest` — skips cleanly, not a failure, whenever the `docker` CLI isn't usable) rather than docker-free like `FileSimulationSmokeTest`. Starts a real mediamtx container once in a static `@BeforeAll` (which — because `@EnabledIf` gates the whole class, including `@BeforeAll` — never runs when docker is unavailable) and feeds its randomized host RTSP port into `vision.publish.mediamtx.rtsp-base` via `@DynamicPropertySource` before the Spring context loads, since `rtspFeedTransmitter` reads that same property. `vision.publish.enabled=false` plus the same `@Import(FileSimulationSmokeTest.RecordingPublisherConfig.class)` (reusing `FileSimulationSmokeTest`'s package-private `RecordingPublisherConfig`/`RecordingStreamPublisher` nested types directly, rather than duplicating them, since both classes live in this same `com.drones.vision.app` package) swaps in a recording `StreamPublisherPort`. `POST /api/simulations` with `"transport":"rtsp"` → 201; awaits a real frame at the recording publisher (generous timeout — this is a genuine encoder→wire→demuxer→pipeline round trip through a real container, on top of the native-library-extraction cost `FileSimulationSmokeTest` already documents paying once) and ≥2 telemetry samples; `DELETE /api/simulations/{assetId}` → 204; asserts the usage closed **and** polls `Thread.getAllStackTraces()` for `rtsp-feed-`-prefixed thread names to confirm the TX thread actually stopped (bounded past `RtspFeedTransmitter`'s own 20s join timeout).
 - **MjpegSimulationSmokeTest** — docs/CYCLES-PLAN.md §5's C5 done-criterion in test form, in the `FileSimulationSmokeTest`/`RtspSimulationDockerE2ETest` mould but for `transport=mjpeg` — and, unlike the RTSP E2E test, **needs no docker**: `MjpegFeedTransmitter` serves its own in-process HTTP server, so the whole TX→wire→RX round trip happens inside this one JVM (the same property adapter-mjpeg's own `MjpegRoundTripIntegrationTest` already proves at the adapter level). Reuses `FileSimulationSmokeTest.RecordingPublisherConfig`/`RecordingStreamPublisher` the same way `RtspSimulationDockerE2ETest` does. `POST /api/simulations` with `"transport":"mjpeg"` → 201; awaits a frame at the recording publisher and ≥2 telemetry samples; `DELETE /api/simulations/{assetId}` → 204; asserts the usage closed **and** polls `Thread.getAllStackTraces()` for any `mjpeg-`-prefixed thread name (covers both `MjpegVideoSource`'s RX read thread and `MjpegFeedTransmitter`'s per-viewer TX thread — see adapter-mjpeg/MODULE.md) to confirm both sides actually stopped. No RTSP-style fixed "feed establish" delay is needed: `MjpegFeedTransmitter#start` only returns once its HTTP context is already registered on an already-listening server.
 - **CvWiringTest** — `@SpringBootTest(vision.publish.enabled=false, vision.live.enabled=false)`, default `vision.cv.*` (disabled): asserts `detectionPort` is a `NoopDetectionPort` and `eventPublisherPort` is the plain `LoggingEventPublisher` (not wrapped) — the pre-C7-behavior counterpart to `CvEnabledWiringTest`. `vision.live.enabled=false` (docs/REALTIME-PLAN.md §4) isolates this test from the server-push feature's own `EventPublisherPort` decorator, which would otherwise also wrap the result by default — see `LiveWiringTest`/`LiveDisabledWiringTest` for that feature's own dedicated coverage.
 - **CvEnabledWiringTest** — `@SpringBootTest(vision.publish.enabled=false, vision.cv.enabled=true, vision.cv.endpoint=localhost:59321, vision.cv.detect-width=480, vision.cv.jpeg-quality=0.6, vision.live.enabled=false)`: asserts `detectionPort` resolves to a `GrpcDetectionPort` and `eventPublisherPort` resolves to `DetectionSessionCleanupEventPublisher`. The configured endpoint is never actually connected to here (a `ManagedChannel` only connects lazily on first use, so an arbitrary port number is fine) — the real round trip against an actual gRPC server is `CvDetectionE2ETest`'s job. `vision.live.enabled=false` for the same isolation reason as `CvWiringTest` above (otherwise `LiveUpdateEventPublisher` would wrap `DetectionSessionCleanupEventPublisher` one layer further out, breaking this test's `instanceof` assertion). The non-default `detect-width`/`jpeg-quality` (docs/REMOTE-CV-PLAN.md P1 item 5) prove Spring binds those kebab-case keys onto `VisionCvProperties` and the bean graph still constructs cleanly with them — `GrpcDetectionPort` exposes no getter for either (only wire behavior, covered by adapter-cv-grpc's own `GrpcDetectionPortTest`), so a clean context load plus the existing `instanceof` assertion is the full extent of what this class can observe about them.
 - **VisionCvPropertiesTest** (docs/REMOTE-CV-PLAN.md P1 item 5) — plain unit test (no Spring context), same package as the class under test, mirroring this module's other no-context record-validation style: `host()`/`port()` parsing, blank-`endpoint` rejection, `detectWidth`/`jpegQuality` boundary validation (`< 64` / `<= 0` / `> 1` rejected, the respective boundary values `64`/`1.0` accepted), and a pin on the `640`/`0.8` default values `application.properties`' commented-out lines document.
+- **VisionTrainingPropertiesTest** (docs/CV-TRAINING-PLAN.md §3, Wave T4) — plain unit test (no Spring context), same "no-context record-validation" style as `VisionCvPropertiesTest`: blank/`null` `exportDir` rejection, a pin on the `data/training-exports` default value `application.properties`' commented-out line documents, and `enabled` defaulting `false`.
+- **TrainingDisabledWiringTest** (docs/CV-TRAINING-PLAN.md §3/§G, Wave T4) — `@SpringBootTest(vision.publish.enabled=false)`, default `vision.training.*` (disabled): the guardrail proof — asserts `DatasetController`/`LabelingController` and `DatasetService`/`LabelingService`/`TrainingStores`/`DatasetExportPort`/`FilesystemDatasetExport` are all **zero**-count via `ApplicationContext#getBeansOfType` (same "`@Autowired` would fail the context on zero candidates" reasoning as `LiveDisabledWiringTest`/`DiscoveryDisabledWiringTest`) — every training route 404s exactly as before this feature existed.
+- **TrainingEnabledWiringTest** — `@SpringBootTest(vision.publish.enabled=false, vision.training.enabled=true)`, `vision.training.export-dir` redirected to a fresh `@TempDir` via `@DynamicPropertySource` (same "start the property source first, read it before context refresh" idiom `RtspSimulationDockerE2ETest` uses for its mediamtx port, here purely so this test's on-disk footprint stays empty rather than writing into the real default relative path — `FilesystemDatasetExport`'s constructor does no I/O of its own, so this is a cleanliness choice, not a correctness requirement): the opposite counterpart — asserts `datasetService`/`labelingService` resolve to `DefaultDatasetService`/`DefaultLabelingService`, `datasetExportPort` resolves to `FilesystemDatasetExport`, and `trainingStores`/`DatasetController`/`LabelingController` all resolve.
 - **LiveWiringTest** (docs/REALTIME-PLAN.md §4) — `@SpringBootTest(vision.publish.enabled=false)`, default `vision.live.*` (enabled, the default): asserts `liveUpdatePublisherPort` resolves to the real `LiveUpdateRegistry` (not the no-op), the `LiveController` bean exists, and `eventPublisherPort`/`auditTrailPort`/`detectionEventRepositoryPort` (the last, backend follow-up batch) are each wrapped in their respective live-update decorators.
 - **LiveDisabledWiringTest** — `@SpringBootTest(vision.live.enabled=false, vision.publish.enabled=false)`: the opposite counterpart — asserts `liveUpdatePublisherPort` falls back to `NoopLiveUpdatePublisher`, **zero** `LiveController`/`LiveUpdateRegistry` beans exist (looked up via `ApplicationContext#getBeansOfType`, same "`@Autowired` would fail the context entirely on zero candidates" reasoning as `DiscoveryDisabledWiringTest`), and neither `eventPublisherPort`/`auditTrailPort` nor `detectionEventRepositoryPort` (backend follow-up batch) is wrapped.
 - **LiveUpdateAuditTrailTest**/**LiveUpdateEventPublisherTest**/**LiveUpdateDetectionEventRepositoryTest** — plain unit tests (no Spring context), same package as the decorators under test: `LiveUpdateAuditTrailTest` proves `record` both delegates and announces `publishFleetChanged`, while `findRecent`/`findByTarget` are pure pass-throughs with zero live-update interaction; `LiveUpdateEventPublisherTest` proves every event is delegated + announced via `publishEvent`, and that only the four fleet-lifecycle event types (`DEVICE_ONLINE`/`DEVICE_OFFLINE`/`STREAM_STARTED`/`STREAM_STOPPED`) additionally trigger `publishFleetChanged` (looped over `EnumSet`/its complement rather than `@ParameterizedTest`, since this codebase has no existing precedent for that JUnit feature); `LiveUpdateDetectionEventRepositoryTest` (backend follow-up batch) mirrors `LiveUpdateAuditTrailTest`'s own shape — `save` both delegates and announces `publishDetectionEvent` with the saved event, `findRecent`/`findByStream` are pure pass-throughs.
@@ -222,8 +245,8 @@ Unlike HLS, WHEP gets **no proxy controller and no app-relative view base**. `Wi
 - **DiscoveryDisabledWiringTest** — `@SpringBootTest(vision.discovery.enabled=false, vision.publish.enabled=false)`: asserts the context still loads with **zero** `DeviceDiscoveryPort` beans and `ScanDevicesUseCase` degrades to an empty result. **Gotcha:** looks these up via `ApplicationContext.getBeansOfType(DeviceDiscoveryPort.class)`, not `@Autowired List<DeviceDiscoveryPort>` — a plain `@Autowired` collection field is required-by-default and throws `NoSuchBeanDefinitionException` at zero candidates (unlike a `@Bean` factory-method `List<>` parameter, which Spring happily supplies empty), which would defeat the point of asserting "nothing registered."
 - **VisionApplicationTests** — `@SpringBootTest(vision.publish.enabled=false)`, bare `contextLoads()`.
 - **`devsupport.InMemoryDetectionRepositoryTest`** — plain unit tests (no Spring context), same package as the class under test: per-stream isolation, newest-first `query` ordering regardless of save order, label/time-range filtering, cross-stream query when `streamId` is `null`, unknown-stream → empty list, and the ring cap itself (saves `MAX_RESULTS_PER_STREAM + 5` results, asserts exactly `MAX_RESULTS_PER_STREAM` remain and the 5 oldest were evicted).
-- **PersistenceWiringTest** (docs/MVP2-PLAN.md P-a + P-b, extended docs/UX-REWORK-PLAN.md §U-d item 3) — `@SpringBootTest(vision.publish.enabled=false)`, default `vision.persistence.*` (disabled): asserts `categoryRepositoryPort`/`deviceRepositoryPort`/`assetRepositoryPort`/`assetUsageRepositoryPort`/`telemetryRepositoryPort`/`detectionRepositoryPort`/`assetImageRepositoryPort` all resolve to their `InMemory*Repository` fallbacks, **and** `applicationContext.getBeansOfType(EntityManagerFactory.class)` is empty — proving `persistenceEntityManagerFactory`'s `@ConditionalOnProperty` really kept it from running at all (no database reachable needed for this test to pass).
-- **PersistenceWiringConfigurationTest** (docs/MVP2-PLAN.md P-a + P-b, extended docs/UX-REWORK-PLAN.md §U-d item 3) — deliberately **not** a `@SpringBootTest`: the enabled-branch counterpart to `PersistenceWiringTest`, which can't safely use a real Spring context the way `CvEnabledWiringTest` does for gRPC (a `ManagedChannel` connects lazily; an `EntityManagerFactory` does not — building one eagerly opens a JDBC connection and runs Flyway, so a real `vision.persistence.enabled=true` context would need a reachable Postgres). Instead calls `PersistenceWiringConfiguration`'s seven `@Bean` methods directly as plain Java with a Mockito-mocked `ObjectProvider<EntityManagerFactory>` (`getObject()` returns a mocked `EntityManagerFactory`, never actually touched — `Jpa*Repository`'s constructor only stores the reference) — asserts `enabled=true` selects `JpaCategoryRepository`/`JpaDeviceRepository`/`JpaAssetRepository`/`JpaAssetUsageRepository`/`JpaTelemetryRepository`/`JpaDetectionRepository`/`JpaAssetImageRepository` and `enabled=false` selects the matching `InMemory*` fallbacks without ever calling the provider. No Spring context, no Docker, no database.
+- **PersistenceWiringTest** (docs/MVP2-PLAN.md P-a + P-b, extended docs/UX-REWORK-PLAN.md §U-d item 3, docs/OPS-CORE-PLAN.md G-b, docs/TACTICAL-MARKS-PLAN.md M2) — `@SpringBootTest(vision.publish.enabled=false)`, default `vision.persistence.*` (disabled): asserts `categoryRepositoryPort`/`deviceRepositoryPort`/`assetRepositoryPort`/`assetUsageRepositoryPort`/`telemetryRepositoryPort`/`detectionRepositoryPort`/`assetImageRepositoryPort`/`geofenceRepositoryPort`/`markRepositoryPort` all resolve to their `InMemory*Repository` fallbacks, **and** `applicationContext.getBeansOfType(EntityManagerFactory.class)` is empty — proving `persistenceEntityManagerFactory`'s `@ConditionalOnProperty` really kept it from running at all (no database reachable needed for this test to pass).
+- **PersistenceWiringConfigurationTest** (docs/MVP2-PLAN.md P-a + P-b, extended docs/UX-REWORK-PLAN.md §U-d item 3, docs/OPS-CORE-PLAN.md G-b, docs/TACTICAL-MARKS-PLAN.md M2) — deliberately **not** a `@SpringBootTest`: the enabled-branch counterpart to `PersistenceWiringTest`, which can't safely use a real Spring context the way `CvEnabledWiringTest` does for gRPC (a `ManagedChannel` connects lazily; an `EntityManagerFactory` does not — building one eagerly opens a JDBC connection and runs Flyway, so a real `vision.persistence.enabled=true` context would need a reachable Postgres). Instead calls `PersistenceWiringConfiguration`'s `@Bean` methods directly as plain Java with a Mockito-mocked `ObjectProvider<EntityManagerFactory>` (`getObject()` returns a mocked `EntityManagerFactory`, never actually touched — `Jpa*Repository`'s constructor only stores the reference) — asserts `enabled=true` selects `JpaCategoryRepository`/`JpaDeviceRepository`/`JpaAssetRepository`/`JpaAssetUsageRepository`/`JpaTelemetryRepository`/`JpaDetectionRepository`/`JpaAssetImageRepository`/`JpaGeofenceRepository`/`JpaMarkRepository` and `enabled=false` selects the matching `InMemory*` fallbacks without ever calling the provider. No Spring context, no Docker, no database.
 
 ## Dev principal
 
@@ -476,7 +499,7 @@ Spring Security lives **only here** (added `spring-boot-starter-security` to thi
 | `principalResolver` | `PrincipalResolver` (vision-api) | `DevPrincipalResolver` when auth disabled/absent (returns `DevPrincipal`; **`scope()`→`VisibilityScope.unbounded()` — the slice-2 guardrail, so the default-off build sees everything and behaves exactly as today**), `SecurityContextPrincipalResolver(scopeResolver)` (reads `SecurityContextHolder` per call; `scope()`→`scopeResolver.scopeFor(session user)`, recomputed per call — documented, a per-request cache is a small follow-up) when enabled — gated |
 | `sessionAuthenticator` | `SessionAuthenticator` (vision-api) | `NoopSessionAuthenticator` when disabled (the controller never calls it in that mode), `SecuritySessionAuthenticator(authService, securityContextRepository)` when enabled — gated |
 
-`UserRepositoryPort`/`GroupRepositoryPort`/`AssignmentRepositoryPort` are wired in `PersistenceWiringConfiguration` (now **12** port beans — `assignmentRepositoryPort` added by docs/U-SCOPE-PLAN.md slice 2, `JpaAssignmentRepository` vs `InMemoryAssignmentRepository`) alongside every other port, gated by `vision.persistence.enabled` — orthogonal to `vision.auth.enabled`.
+`UserRepositoryPort`/`GroupRepositoryPort`/`AssignmentRepositoryPort` are wired in `PersistenceWiringConfiguration` (now **13** port beans — `assignmentRepositoryPort` added by docs/U-SCOPE-PLAN.md slice 2, `JpaAssignmentRepository` vs `InMemoryAssignmentRepository`; `markRepositoryPort` added by docs/TACTICAL-MARKS-PLAN.md M2, `JpaMarkRepository` vs `InMemoryMarkRepository`) alongside every other port, gated by `vision.persistence.enabled` — orthogonal to `vision.auth.enabled`.
 
 **`CurrentUser` rewrite**: the old `actingOwnership` `Ownership` bean was **removed** (see the struck row in the Bean inventory). `vision-api`'s `CurrentUser` now autowires the `principalResolver` seam. `VisionUserDetails` (this module) is Spring Security's view of an authenticated `User`; **Ownership derivation**: `ownerId` = the user's own id, `groupId` = the group of the user's highest-role membership, or — for a user with no membership yet — a **personal group whose id equals the user's own id** (documented, stable fallback so an unassigned user still has a valid scope until slice 2's visibility model). Roles → `ROLE_<name>` authorities.
 
@@ -528,3 +551,267 @@ Depends on R2 (`vision-application`, already green) and R3 (`adapters/adapter-ma
 **A live race, not a design gap**: R4's vision-api half (the WebSocket handler/config/interceptor/DTOs, `VisionRcProperties`, and this module's own wiring/security changes) landed from a different session running concurrently with this one on the identical file scope — verified via `git status`/direct reads before every edit rather than assumed, per the task's own "check whether any of it is already on disk" instruction. Where the two efforts collided on the exact same file (`ManualControlWebSocketHandlerTest`), the later write won and was kept as-is (a stronger test, including a genuine multi-threaded send-lock race detector) rather than reverted; everywhere else (this module's `WiringConfiguration`/`SecurityConfig`/`application.properties`, the `AssetWiringTest` extension, the two new security test classes, both `MODULE.md`s) was untouched by the other session at the time of writing and is this session's own, independently verified green.
 
 **Deviations from the brief**: `manualControlService`'s watchdog scheduler is a bean-method-local `Executors.newSingleThreadScheduledExecutor(...)` call, not a shared bean — see "RC manual-control relay wiring" above for why (`DefaultManualControlService`'s own default-scheduler factory is private, and only the 6-arg canonical constructor honors the resolved property, so the wiring layer must build its own). No other deviation in shape.
+
+## docs/TACTICAL-MARKS-PLAN.md M2 done (tactical marks, persistence wiring half)
+
+Wave M2 of docs/TACTICAL-MARKS-PLAN.md: wires `MarkRepositoryPort` (vision-domain, M1, already green) to
+`adapter-persistence`'s new `JpaMarkRepository` or this module's new `InMemoryMarkRepository`
+devsupport fallback, exactly mirroring `geofenceRepositoryPort`'s toggle. Deliberately **not** in
+scope here: `MarkService`/`MarksController` (M3/M4) — this wave wires only the repository port, so
+`markRepositoryPort` currently has no consumer bean in this context (see "Persistence wiring"
+above).
+
+1. `InMemoryMarkRepository` (new, this module's devsupport, `com.drones.vision.app.devsupport`) —
+   a plain `ConcurrentHashMap<MarkId, Mark>`, no eviction/cap, mirroring `InMemoryGeofenceRepository`
+   field-for-field (`save`=`Map#put` upsert, `findById`=`Optional.ofNullable`, `findAll`=`List.copyOf`,
+   `deleteById`=idempotent `Map#remove`).
+2. `PersistenceWiringConfiguration#markRepositoryPort` — a 13th `@Bean` method, the exact same
+   `VisionPersistenceProperties#enabled()` branch every other repository port there already uses:
+   `JpaMarkRepository` (adapter-persistence) when `true`, `InMemoryMarkRepository` when `false`
+   (default). `WiringConfiguration` itself is untouched — like `geofenceRepositoryPort`, the port bean
+   lives entirely in `PersistenceWiringConfiguration`; nothing in `WiringConfiguration` consumes it
+   yet.
+3. `AssetWiringTest` deliberately **not** touched — it only asserts full-stack (repository + service +
+   controller) bean triples (see its own entry in Test inventory above), and `MarkService`/
+   `MarksController` don't exist yet; extending it now would assert nothing new. `PersistenceWiringTest`
+   gained one test method (`defaultConfigurationKeepsInMemoryMarkRepository`); `PersistenceWiringConfigurationTest`
+   gained one test method (`enabledSelectsJpaMarkRepository`, plus the existing
+   `disabledSelectsInMemoryRepositoriesWithoutTouchingTheProvider` extended with one more assertion).
+   New `devsupport.InMemoryMarkRepositoryTest` (5 tests, mirroring `InMemoryAssignmentRepositoryTest`'s
+   dedicated-unit-test shape rather than `InMemoryGeofenceRepository`'s no-dedicated-test precedent —
+   explicitly asked for by the task brief).
+
+See adapter-persistence/MODULE.md's own M2 entry for the `MarkEntity`/`JpaMarkRepository`/
+`V10__marks.sql` writeup (including the corrected migration number — the plan's `V8` guess was stale
+by the time this wave ran; `V9__pilot_assignments.sql` already existed, so the actual next-free
+version is `V10`).
+
+`./mvnw -B -pl adapters/adapter-persistence,vision-app test -DskipWeb`: **adapter-persistence 78/78
+green** (was 71, run against a real `postgres:16` Testcontainers instance, not skipped — docker was
+reachable in this environment) — **vision-app 149/149 green** (was 142) — `InMemoryMarkRepositoryTest`
+(5, new), `PersistenceWiringTest` +1, `PersistenceWiringConfigurationTest` +1 (7 total new test
+methods across both modules, matching the +7/+7 count exactly). `ArchitectureTest`'s 5 rules stayed
+green with no changes needed — `MarkEntity`/`JpaMarkRepository` (adapter-persistence) and
+`InMemoryMarkRepository` (this module's devsupport) landed in exactly the layer their existing
+`GeofenceZoneEntity`/`JpaGeofenceRepository`/`InMemoryGeofenceRepository` counterparts already
+occupy.
+
+**Deviations from the brief**: the migration version (`V10`, not the plan's placeholder `V8`) — the
+plan explicitly asked for this to be verified and reported, not treated as a deviation to avoid.
+Otherwise none.
+
+**For M4 (api wiring)**: `markRepositoryPort` is ready to be consumed by a `markService` `@Bean` in
+`WiringConfiguration` (`new DefaultMarkService(markRepositoryPort, usageTracker,
+liveUpdatePublisherPort)` per the plan's §2) the moment M3 lands `MarkService`/`DefaultMarkService`
+in vision-application — `usageTracker` and `liveUpdatePublisherPort` are both already real beans in
+this context (unconditional/`vision.live.enabled`-gated respectively) with nothing new to wire for
+them. `MarksController` (vision-api, M4) will need no `WiringConfiguration` entry of its own beyond
+`markService` existing as a bean, the same "resolves its constructor dependency automatically"
+pattern every other controller here follows.
+
+## docs/TACTICAL-MARKS-PLAN.md M4 done (tactical marks, api + wiring half)
+
+Wave M4 of docs/TACTICAL-MARKS-PLAN.md: `MarksController` + DTOs + the `marks` live-envelope
+extension (all vision-api, see that module's own MODULE.md for the full REST/DTO/live writeup) plus
+the one-line `markService` `@Bean` this module adds (see Bean inventory above) — exactly the shape
+M2's own "For M4" note above anticipated. **This wave's M3 dependency landed revised**: `MarkService`
+(vision-application) is unscoped — `list()` takes no arguments and returns every `ACTIVE` mark
+deployment-wide, and `update`/`delete` gate a lifecycle transition or delete to creator-or-manager via
+`AccessDeniedException`, not a `VisibilityScope`-filtered read — superseding the plan's original
+group-scoped `list(VisibilityScope, GroupId)` text (see vision-application/MODULE.md's own M3 entry
+for the full rationale: a PILOT's scope carries no group at all, so a group-filtered picture would
+have hidden a pilot's own marks from themselves).
+
+1. **`markService`** (`WiringConfiguration`, one `@Bean` method) — `new
+   DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort)`, a one-line
+   assembly mirroring `geofenceService`'s shape exactly. All three collaborators were already real
+   beans in this context before this wave (`markRepositoryPort` since M2, `usageTracker`/
+   `liveUpdatePublisherPort` unconditional) — no new property, no new conditional branch.
+2. **`AssetWiringTest`** extended (three more `assertNotNull` calls in the existing bean-inventory
+   test, no new test method — same judgment call every other "small, focused, asset-model-adjacent
+   bean" addition above made): asserts `markRepositoryPort`, `markService`, and `marksController` all
+   resolve — the last one doubling as proof `MarksController`'s two-argument constructor
+   (`MarkService`, `CurrentUser`) wires correctly.
+3. **No change to `SecurityConfig`** — `/api/marks/**` already falls under the secured chain's
+   existing `/api/**` `.authenticated()` rule (docs/U-AUTH-PLAN.md wave 3); marks needed no new
+   permit-list entry or path pattern.
+4. **No change to `PersistenceWiringConfiguration`** — `markRepositoryPort` was already wired by M2;
+   this wave only adds a *consumer* of that existing bean.
+
+`./mvnw -B -pl vision-domain,vision-application install -DskipTests` then `./mvnw -B -pl
+adapters/adapter-persistence,vision-api,vision-app test -DskipWeb`: **vision-api 373/373 green** (was
+351, +22: new `MarksControllerTest` — 17 tests covering every endpoint's happy path plus the 400/403/
+404 error contract, the geolocate incomplete-telemetry 400, and the `kind`/`label`/`depressionDegrees`
+defaulting `GeolocateMarkRequest` performs at the wire boundary; `LiveUpdateRegistryTest` — 5 new
+tests proving `publishMarkCreated`/`publishMarkUpdated` broadcast a `marks` envelope with the matching
+`action`, that `publishMarkCleared` forces `mark.status="CLEARED"` in the payload even when the `Mark`
+passed in is still `ACTIVE` (the delete path) and leaves it `CLEARED` when already `CLEARED`, and that
+the `marks` topic — like `event` — has nothing to replay on a fresh connect since it deliberately
+carries no live-query seed, see below) — **vision-app 149/149 green** (unchanged from M2's own count:
+this wave added zero new test *methods* here, only three more assertions inside
+`AssetWiringTest`'s existing one). `ArchitectureTest`'s 5 rules stayed green with no changes needed —
+`MarksController`/the DTOs/the live-stack extension all landed in vision-api (never vision-domain/
+vision-application), and vision-api still imports no `org.springframework.security` type (the acting
+user is reached exclusively through `CurrentUser`, per the seam docs/U-AUTH-PLAN.md wave 3
+established). **Docker**: `adapter-persistence`'s `PostgresDockerIntegrationTest` result varied
+across otherwise-identical scoped-build invocations in the sandboxed environment this wave was
+verified in (one run: `Tests run: 0`, its `@EnabledIf(dockerAvailable)` gate disabled the class;
+another run: **78/78 green**, a real Postgres Testcontainers round-trip) — a docker-availability
+flake in this sandbox either way, with no bearing on M4's own correctness since this wave touched no
+persistence code at all.
+
+**A deliberate, documented gap in the live stack, not an oversight**: unlike `fleet`/`devices`/
+`detection-events`, the new `marks` topic has **no live-query seed** for a fresh connection whose
+buffer is still empty. Seeding it the way those three do would need a fifth `ObjectProvider<MarkService>`
+constructor parameter on `LiveUpdateRegistry` (vision-api) — the same circular-bean-dependency shape
+its four existing `ObjectProvider`s already carry, since `DefaultMarkService` itself depends on
+`LiveUpdatePublisherPort` — which would push that class's constructor past the five-parameter ceiling
+(`.claude/skills/java-clean-code/SKILL.md` §3; that class is already at the ceiling per its own
+`freshFleetEnvelope()` javadoc, which declined the identical trade for `AssetImageRepositoryPort`).
+`marks` instead joins `event` in the registry's "honestly limited" bucket: a viewer's first connection
+relies entirely on its own `GET /api/marks` read for the current picture, with the live topic carrying
+only *deltas* from that point on — exactly the shape docs/TACTICAL-MARKS-PLAN.md M5's own `MarksStore`
+plan already calls for (initial GET, then merge live deltas), so this costs nothing in practice. See
+vision-api/MODULE.md's own `com.drones.vision.api.live` subsection and `LiveUpdateRegistry`'s class
+javadoc for the full reasoning.
+
+**The frozen `marks` SSE envelope, verbatim** (what M5's `MarksStore` parses):
+
+```json
+{ "seq": 128, "type": "marks",
+  "payload": { "action": "created",
+    "mark": { "id": "<uuid>", "kind": "TARGET", "label": "Bunker", "note": null,
+              "position": { "latitude": 50.45, "longitude": 30.52, "altitudeMeters": null },
+              "createdBy": "<uuid>", "createdAt": "2026-07-31T10:00:00Z",
+              "status": "ACTIVE", "source": "MANUAL" } } }
+```
+
+`action` is `"created"` (create/geolocate), `"updated"` (annotate/drag-to-correct), or `"cleared"`
+(status→`CLEARED` or delete — `mark.status` is always `"CLEARED"` in this case, even for a delete of
+a still-`ACTIVE` mark). The topic is always-on (every `GET /api/live` connection is auto-subscribed,
+like `fleet`/`event`/`devices`/`detection-events`) and deployment-wide — no per-group filter, matching
+`MarkService#list()`'s own unscoped shape and the pre-existing `fleet`/`event` topics' own posture
+(docs/TACTICAL-MARKS-PLAN.md's own Open Q4, accepted as-is).
+
+**Deviations from the brief**: one, explicit and reasoned above — the plan's §5 text describes seeding
+the `marks` buffer from an injected `MarkService` snapshot on an empty-buffer replay, mirroring `fleet`/
+`devices`/`detection-events`; this wave omits that seed specifically to respect the five-parameter
+constructor ceiling `LiveUpdateRegistry` was already at, choosing the same "honestly limited, GET
+covers the gap" posture the plan's own `event` topic already accepts. Otherwise none — endpoint
+shapes, status codes, DTO field names, and the live envelope match the frozen contract exactly.
+
+## docs/CV-TRAINING-PLAN.md Wave T3 done (CV model-improvement loop, devsupport + wiring half)
+
+Wave T3 of docs/CV-TRAINING-PLAN.md: in-memory fallbacks for the three new repository ports T1
+(vision-domain, already green) froze, plus their wiring in `PersistenceWiringConfiguration` —
+`adapter-persistence`'s half (the four JPA implementations, `V11__training_datasets.sql`,
+`FilesystemDatasetExport`) is its own MODULE.md's entry.
+
+1. **`InMemoryDatasetRepository`/`InMemoryTrainingSampleRepository`/`InMemorySampleImageStore`**
+   (new, this module's devsupport, `com.drones.vision.app.devsupport`) — plain `ConcurrentHashMap`s,
+   the same shape as every other devsupport fallback in this table (see the devsupport table
+   above). `InMemoryTrainingSampleRepository#findByDataset` filters by `datasetId`/optional
+   `status`, sorts newest-`capturedAt`-first, then bounds to `limit` — the exact order
+   `JpaTrainingSampleRepository` (adapter-persistence) picks for what
+   `TrainingSampleRepositoryPort#findByDataset`'s own javadoc otherwise leaves
+   implementation-defined, so the two stay behavior-compatible (a Postgres round trip and an
+   in-memory one return samples in the same order for the same input).
+2. **`PersistenceWiringConfiguration`** gained three more `@Bean` methods —
+   `datasetRepositoryPort`/`trainingSampleRepositoryPort`/`sampleImageStorePort` — each branching
+   on the existing `VisionPersistenceProperties#enabled()` exactly like the thirteen port beans
+   already there (no new property; see "Persistence wiring" above for the updated paragraph). Wired
+   *ahead of* any consumer — `DatasetService`/`LabelingService`/their controllers are separate,
+   disjoint waves (T2/T4) — the same precedent `markRepositoryPort` set at M2.
+3. **No change to `SecurityConfig`, `WiringConfiguration`, or any existing bean** — this wave only
+   added new `@Bean` methods to `PersistenceWiringConfiguration` and new devsupport classes; nothing
+   pre-existing was touched.
+
+`PersistenceWiringConfigurationTest` gained three enabled-branch test methods
+(`enabledSelectsJpaDatasetRepository`/`enabledSelectsJpaTrainingSampleRepository`/
+`enabledSelectsJpaSampleImageStore`, mirroring `enabledSelectsJpaMarkRepository`'s own shape) plus
+three more assertions in `disabledSelectsInMemoryRepositoriesWithoutTouchingTheProvider`.
+`PersistenceWiringTest` gained three more `@Autowired` fields + test methods
+(`defaultConfigurationKeepsInMemoryDatasetRepository`/`...TrainingSampleRepository`/
+`...SampleImageStore`), same shape as `defaultConfigurationKeepsInMemoryMarkRepository`. New
+`devsupport.InMemoryDatasetRepositoryTest` (5 tests)/`InMemoryTrainingSampleRepositoryTest` (7
+tests, incl. the `findByDataset`/`countByDataset` status-filter-and-limit contract)/
+`InMemorySampleImageStoreTest` (4 tests) — each proving the exact port contract
+`Jpa*Repository`/`JpaSampleImageStore` (adapter-persistence) is judged against in its own Postgres
+tests, the same "same contract, two implementations" pairing every other in-memory-vs-JPA repo in
+this module already has.
+
+`./mvnw -B -pl vision-domain,vision-application install -DskipTests` then `./mvnw -B -pl
+adapters/adapter-persistence,vision-app test -DskipWeb`: **adapter-persistence 101/101 green** (was
+78, docker reachable in this environment — see that module's own MODULE.md for the full breakdown)
+— **vision-app 171/171 green** (was 149) — `InMemoryDatasetRepositoryTest` (5, new) +
+`InMemoryTrainingSampleRepositoryTest` (7, new) + `InMemorySampleImageStoreTest` (4, new) +
+`PersistenceWiringConfigurationTest` (+3 test methods, +3 assertions in the existing disabled-branch
+one) + `PersistenceWiringTest` (+3 test methods) = +22. `ArchitectureTest`'s 5 rules verified green
+in isolation (`-Dtest=ArchitectureTest`, 5/5) against this wave's own code — **note for whoever next
+runs the full scoped build**: at the time this wave finished, a concurrent, uncommitted, in-progress
+change to `vision-application` from a parallel wave (T2, `TrainingFrameEncoder.java`, not part of
+this module and not touched here) was independently failing
+`ArchitectureTest.applicationDependsOnlyOnApplicationDomainAndJava` (`javax.imageio.*` calls — outside
+the rule's `java..` allowlist, since `javax` and `java` are different top-level packages). That
+failure is T2's to resolve, not this wave's; it is called out here only so a later reader doesn't
+mistake it for something T3 broke. `AssetWiringTest` deliberately **not** touched — it only asserts
+full-stack (repository + service + controller) bean triples, and no `DatasetService`/`LabelingService`
+controller exists yet (T2/T4).
+
+**Deviations from the brief**: none against the T1 frozen contract. `AssetWiringTest` was left alone
+per the same judgment call `InMemoryMarkRepository`'s M2 wave made — a repository-only wave adds no
+service/controller triple to assert.
+
+## docs/CV-TRAINING-PLAN.md Wave T4 done (CV model-improvement loop, REST + wiring)
+
+Wave T4: exposes the already-green T2 (`DatasetService`/`LabelingService`, vision-application) and
+T3 (JPA + devsupport repos, adapter-persistence/vision-app) layers over HTTP — `vision-api`'s
+`DatasetController`/`LabelingController` plus this module's `TrainingWiringConfiguration`/
+`VisionTrainingProperties`. See "CV training loop wiring" above for the wiring itself.
+
+1. **`VisionTrainingProperties`** (new) — `vision.training.enabled` (default `false`) / `exportDir`
+   (default `data/training-exports`, blank-rejected).
+2. **`TrainingWiringConfiguration`** (new, separate `@Configuration`) — four
+   individually-`@ConditionalOnProperty`-gated beans: `datasetExportPort`
+   (`FilesystemDatasetExport`), `trainingStores`, `datasetService`
+   (`DefaultDatasetService`), `labelingService` (`DefaultLabelingService`).
+3. **`PersistenceWiringConfiguration`'s own doc comment** updated — `datasetRepositoryPort`/
+   `trainingSampleRepositoryPort`/`sampleImageStorePort` (wired ahead of their consumer at T3) now
+   have one: `TrainingWiringConfiguration`'s `trainingStores`/`datasetService`/`labelingService`.
+4. **`application.properties`** gained `vision.training.enabled=false` plus a commented default for
+   `vision.training.export-dir`. **`.gitignore`** gained `/data/` (generated export zips, never
+   committed, mirroring `/clips/`).
+5. **No change to any pre-existing bean, `WiringConfiguration`, or `PersistenceWiringConfiguration`
+   `@Bean` method** — this wave only added `TrainingWiringConfiguration`/`VisionTrainingProperties`
+   and vision-api's two controllers/dto set (see vision-api/MODULE.md for the REST surface itself).
+
+New tests: `VisionTrainingPropertiesTest` (4), `TrainingDisabledWiringTest` (3, the default-off
+guardrail proof), `TrainingEnabledWiringTest` (5) — see "Test inventory" above for each. No
+pre-existing test was modified.
+
+`./mvnw -B -pl vision-domain,vision-application,adapters/adapter-persistence install -DskipTests`
+then `./mvnw -B -pl adapters/adapter-persistence,vision-api,vision-app test -DskipWeb`:
+**adapter-persistence 101/101 green** (unchanged — this wave touched no adapter-persistence file,
+confirms nothing regressed), **vision-api 404/404 green** (was 373, +31: `DatasetControllerTest`
+12 + `LabelingControllerTest` 19 — see vision-api/MODULE.md), **vision-app 183/183 green** (was
+171, +12: `VisionTrainingPropertiesTest` 4 + `TrainingDisabledWiringTest` 3 +
+`TrainingEnabledWiringTest` 5). `ArchitectureTest`'s 5 rules verified green as part of the same
+`vision-app` run (vision-api still carries no `org.springframework.security` dependency; the acting
+user reaches both new controllers through the existing `CurrentUser`/`PrincipalResolver` seam,
+unchanged). Docker reachable in this environment — `adapter-persistence`'s
+`PostgresDockerIntegrationTest` (incl. its T3-added `DatasetRepositoryTests`/
+`TrainingSampleRepositoryTests`/`SampleImageStoreTests` nested classes) ran for real, not skipped.
+
+**Deviations from the brief**: none against the frozen contract. Two judgment calls the plan left
+open, resolved here (flagged for T5, the web labeling UI, to consume as documented):
+`GET /api/datasets`/`GET /api/datasets/{id}/samples` wrap their arrays under `{"datasets":[...]}`/
+`{"samples":[...]}` (the plan's own distinct `DatasetsResponse`/`SamplesResponse` type names, read
+as intentionally different from this codebase's usual bare-array list convention — mirrors
+`CvModelsResponse`'s `{"models":[...]}` shape, the one existing precedent for a wrapped list DTO);
+`SampleResponse`'s nullable fields (`assetId`/`labeledBy`/`labeledAt`) are `@JsonInclude(NON_NULL)`
+(omitted when absent) per this codebase's own DTO convention, rather than the plan's illustrative
+JSON example literally serializing `null`. `DatasetResponse#sampleCounts` is computed by
+`DatasetController` directly from `TrainingSampleRepositoryPort#countByDataset` (a read-only driven
+port taken alongside `DatasetService`, the same "controllers call a driving-port service, driven
+ports only read-only" exception `AssetController` already documents for its own image/telemetry
+reads) — neither `DatasetService` nor `Dataset` itself carries a notion of sample counts.

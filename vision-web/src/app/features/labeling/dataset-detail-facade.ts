@@ -1,0 +1,159 @@
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
+import { VisionApi } from '../../core/api/vision-api';
+import { describeHttpError } from '../../core/api-error';
+import { ToastService } from '../../core/toast.service';
+import { FleetStore } from '../../core/fleet/fleet-store';
+import type { Dataset, DatasetExport, SampleStatus, TrainingSample } from '../../core/api/models';
+import { canExportDataset, streamCaptureLabel } from './dataset-detail-logic';
+
+/** Stable per-file console tag, mirroring every other store/facade in this app. */
+const LOG_PREFIX = '[labeling]';
+
+/**
+ * `DatasetDetailPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — one dataset's own sample grid,
+ * capture flow, and export action. Injects `VisionApi` directly rather than `TrainingStore` (the
+ * same "a routed page's facade may talk to a service directly for page-local state" shape
+ * `RosterFacade` already uses) — this dataset's own record, its samples, and the last export result
+ * are all single-consumer state no other page reads, so growing the shared store with them would be
+ * unjustified ceremony. `FleetStore` (already app-wide, `providedIn: 'root'`) supplies the capture
+ * stream picker's live stream list for free — no second poller.
+ *
+ * **Capture entry point lives here, not in Fly/Live/Replay** (docs/CV-TRAINING-PLAN.md Wave T5's own
+ * task brief flags the collision with parallel `features/fly/**` work) — the operator picks *which*
+ * active stream to capture from right here, inside the dataset they're building, rather than a
+ * scattered "Add to dataset" button on every video surface. One coherent place to do the whole
+ * capture → correct → export loop, and zero risk of touching a file another task owns.
+ */
+@Injectable()
+export class DatasetDetailFacade {
+  private readonly api = inject(VisionApi);
+  private readonly toasts = inject(ToastService);
+
+  readonly fleet = inject(FleetStore);
+
+  readonly dataset = signal<Dataset | null>(null);
+  readonly loading = signal(true);
+  /** `true` once a load has confirmed the dataset is unknown or out of scope (404/403) — a `vision-empty`, never a blocked page. */
+  readonly notFound = signal(false);
+
+  readonly statusFilter = signal<SampleStatus>('PENDING');
+  readonly samples = signal<readonly TrainingSample[]>([]);
+  readonly samplesLoading = signal(false);
+
+  readonly captureStreamId = signal('');
+  readonly capturing = signal(false);
+
+  readonly exporting = signal(false);
+  readonly lastExport = signal<DatasetExport | null>(null);
+
+  readonly canExport = computed(() => canExportDataset(this.dataset()));
+
+  private currentDatasetId = '';
+
+  streamLabel(stream: { readonly streamId: string; readonly deviceId: string }): string {
+    return streamCaptureLabel(stream, this.fleet.devices());
+  }
+
+  sampleImageUrl(sampleId: string): string {
+    return this.api.sampleImageUrl(sampleId);
+  }
+
+  /** Called once by the page's own constructor `effect()` on every `datasetId` route-input change. */
+  load(datasetId: string): void {
+    this.currentDatasetId = datasetId;
+    this.lastExport.set(null);
+    this.captureStreamId.set('');
+    this.statusFilter.set('PENDING');
+    void this.fetchDataset(datasetId);
+    void this.fetchSamples(datasetId, 'PENDING');
+  }
+
+  setStatusFilter(status: SampleStatus): void {
+    this.statusFilter.set(status);
+    void this.fetchSamples(this.currentDatasetId, status);
+  }
+
+  async capture(): Promise<void> {
+    const streamId = this.captureStreamId();
+    if (!streamId || !this.currentDatasetId || this.capturing()) {
+      return;
+    }
+    this.capturing.set(true);
+    try {
+      await this.api.captureSample(streamId, this.currentDatasetId);
+      this.toasts.ok('Captured a frame — review it below.');
+      await this.fetchDataset(this.currentDatasetId);
+      if (this.statusFilter() === 'PENDING') {
+        await this.fetchSamples(this.currentDatasetId, 'PENDING');
+      }
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.capturing.set(false);
+    }
+  }
+
+  /** Quick "not useful" skip straight from the grid — keeps the sample's existing (unreviewed) annotations, only flips its status, mirroring the sample editor's own Discard action. */
+  async discard(sample: TrainingSample): Promise<void> {
+    try {
+      await this.api.putSampleAnnotations(sample.id, { status: 'DISCARDED', annotations: sample.annotations });
+      await this.fetchDataset(this.currentDatasetId);
+      await this.fetchSamples(this.currentDatasetId, this.statusFilter());
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    }
+  }
+
+  async exportDataset(): Promise<void> {
+    if (!this.currentDatasetId || this.exporting()) {
+      return;
+    }
+    this.exporting.set(true);
+    try {
+      const result = await this.api.exportDataset(this.currentDatasetId);
+      this.lastExport.set(result);
+      this.toasts.ok(`Exported ${result.sampleCount} labeled sample${result.sampleCount === 1 ? '' : 's'}.`);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.exporting.set(false);
+    }
+  }
+
+  /** Re-reads the current sample list — the sample editor calls this (via the page's own navigation back) so a save made there is reflected the moment the operator returns to the grid. */
+  async refreshSamples(): Promise<void> {
+    await this.fetchSamples(this.currentDatasetId, this.statusFilter());
+    await this.fetchDataset(this.currentDatasetId);
+  }
+
+  private async fetchDataset(datasetId: string): Promise<void> {
+    this.loading.set(true);
+    this.notFound.set(false);
+    try {
+      this.dataset.set(await this.api.getDataset(datasetId));
+    } catch (error) {
+      if (error instanceof HttpErrorResponse && (error.status === 404 || error.status === 403)) {
+        this.notFound.set(true);
+      } else {
+        console.warn(`${LOG_PREFIX} failed to load dataset ${datasetId}`, { error });
+        this.toasts.error(describeHttpError(error));
+      }
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  private async fetchSamples(datasetId: string, status: SampleStatus): Promise<void> {
+    this.samplesLoading.set(true);
+    try {
+      const response = await this.api.datasetSamples(datasetId, status);
+      this.samples.set(response.samples);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} failed to load samples for dataset ${datasetId}`, { error });
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.samplesLoading.set(false);
+    }
+  }
+}

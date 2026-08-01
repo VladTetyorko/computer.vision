@@ -8,6 +8,7 @@ import { FleetMapStore } from '../../core/map/map-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { activeGeofenceBreaches, groupBreachesByAsset } from '../../core/geofence/geofence-logic';
+import { MarksStore } from '../../core/marks/marks-store';
 import { LiveStore } from '../../core/live/live-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { fleetCentroid } from '../../core/weather/weather-logic';
@@ -65,6 +66,16 @@ export class CommandFacade {
   /** The Zones panel's own zone list — a thin passthrough of `GeofenceStore.zones()` so `CommandPage`
    * never injects that store directly. */
   readonly zones = this.geofence.zones;
+
+  /**
+   * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5) — exposed as the
+   * whole store (not a thin passthrough, unlike `zones` above): `command.html` wires
+   * `<vision-fleet-map>`'s `[marks]`/`[selectedMarkId]`/`(markSelected)`/`(markMoved)`/`(mapClicked)`
+   * straight to it, and `<vision-marks-panel>` (`features/command/marks-panel.ts`) injects this same
+   * `providedIn: 'root'` singleton directly (a non-routed presentational child, mirroring
+   * `zones-panel.ts` injecting `GeofenceStore` directly).
+   */
+  readonly marks = inject(MarksStore);
 
   /**
    * `assetId → gpsFixType`, built from `FleetMapStore` (docs/FC-INTEGRATIONS-PLAN.md F-d) — feeds

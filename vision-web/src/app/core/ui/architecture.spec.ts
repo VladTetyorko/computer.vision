@@ -38,6 +38,9 @@ const ROUTED_PAGES = [
   'activity/activity',
   'settings/settings',
   'auth/login/login',
+  'labeling/datasets',
+  'labeling/dataset-detail',
+  'labeling/sample-editor',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

@@ -7,13 +7,14 @@ import java.util.Set;
 
 /**
  * A subscribable {@code GET /api/live} topic (docs/REALTIME-PLAN.md §4, item 2) — {@code fleet},
- * {@code event}, {@code devices}, and {@code detection-events} are implicit and always-on (every
- * connection gets all four regardless of the {@code topics} query parameter); {@code
- * telemetry:<assetId>}/{@code detections:<assetId>} are opt-in, named explicitly by the caller.
+ * {@code event}, {@code devices}, {@code detection-events}, and {@code marks} are implicit and
+ * always-on (every connection gets all five regardless of the {@code topics} query parameter);
+ * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in, named explicitly by the
+ * caller.
  *
  * @param kind    which kind of topic
  * @param assetId the asset this topic is scoped to; {@code null} for {@link #FLEET}/{@link
- *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}
+ *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MARKS}
  */
 record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
@@ -28,6 +29,9 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
     /** The always-on debounced-detection-event topic (extends the R-c channel — see {@link LiveTopicKind#DETECTION_EVENTS}). */
     static final LiveTopic DETECTION_EVENTS = new LiveTopic(LiveTopicKind.DETECTION_EVENTS, null);
+
+    /** The always-on shared tactical-marks topic (docs/TACTICAL-MARKS-PLAN.md §5 — see {@link LiveTopicKind#MARKS}). */
+    static final LiveTopic MARKS = new LiveTopic(LiveTopicKind.MARKS, null);
 
     static LiveTopic telemetry(AssetId assetId) {
         return new LiveTopic(LiveTopicKind.TELEMETRY, assetId);
@@ -69,6 +73,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
             case EVENT -> EVENT;
             case DEVICES -> DEVICES;
             case DETECTION_EVENTS -> DETECTION_EVENTS;
+            case MARKS -> MARKS;
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
         };

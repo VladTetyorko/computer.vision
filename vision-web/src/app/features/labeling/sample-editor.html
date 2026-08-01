@@ -1,0 +1,49 @@
+<div class="page">
+  @if (facade.notFound()) {
+    <a [routerLink]="['/manage/training', datasetId()]" class="btn secondary small back-link">Back to dataset</a>
+    <vision-empty icon="alert" title="Sample not found" message="It may have been deleted, or you may not have access to it." />
+  } @else if (facade.loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.sample(); as sample) {
+    <vision-section-header
+      eyebrow="Sample"
+      [title]="formatWhen(sample.capturedAt)"
+      [subtitle]="sample.width + ' × ' + sample.height + ' px · ' + sampleStatusLabel(sample.status)"
+    >
+      <div actions>
+        <a [routerLink]="['/manage/training', datasetId()]" class="btn secondary small">Back to dataset</a>
+      </div>
+    </vision-section-header>
+
+    @if (facade.dataset(); as dataset) {
+      <vision-sample-box-editor
+        [imageUrl]="facade.imageUrl(sample.id)"
+        [naturalWidth]="sample.width"
+        [naturalHeight]="sample.height"
+        [classes]="dataset.classes"
+        [annotations]="facade.annotations()"
+        [disabled]="facade.saving()"
+        (annotationsChange)="onAnnotationsChange($event)"
+      />
+    }
+
+    @if (!facade.canConfirm() && facade.validation().invalidLabels.length > 0) {
+      <vision-notice variant="warn" icon="alert">
+        {{ facade.validation().invalidLabels.length }} box(es) use a label not in this dataset's vocabulary —
+        pick one from the dropdown before confirming.
+      </vision-notice>
+    }
+    @if (facade.validation().hasDegenerateBox) {
+      <vision-notice variant="warn" icon="alert">One or more boxes have no size — resize or remove them before confirming.</vision-notice>
+    }
+
+    <div class="row action-row">
+      <button type="button" class="btn danger" [disabled]="facade.saving()" (click)="facade.discardSample()">
+        Discard sample
+      </button>
+      <button type="button" class="btn" [disabled]="facade.saving() || !facade.canConfirm()" (click)="facade.confirm()">
+        {{ facade.saving() ? 'Saving…' : 'Confirm — mark labeled' }}
+      </button>
+    </div>
+  }
+</div>

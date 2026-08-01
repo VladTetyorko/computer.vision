@@ -1,6 +1,7 @@
 package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
+import com.drones.vision.api.dto.MarkPayload;
 import com.drones.vision.application.ActiveStream;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssetStatus;
@@ -21,7 +22,13 @@ import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.Mark;
+import com.drones.vision.domain.model.MarkId;
+import com.drones.vision.domain.model.MarkKind;
+import com.drones.vision.domain.model.MarkSource;
+import com.drones.vision.domain.model.MarkStatus;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.StreamDescriptor;
@@ -108,6 +115,12 @@ class LiveUpdateRegistryTest {
     private static DetectionEvent detectionEvent(StreamId streamId, Instant firstSeen) {
         return new DetectionEvent(DetectionEventId.random(), streamId, null, "person", 0.8, firstSeen, firstSeen,
                 DetectionEventState.OPEN, null);
+    }
+
+    private static Mark mark(MarkStatus status) {
+        Ownership ownership = new Ownership(UserId.random(), GroupId.random());
+        return new Mark(MarkId.random(), new GeoPosition(50.45, 30.52, null), MarkKind.TARGET, "Bunker", null,
+                ownership, Instant.now(), status, MarkSource.MANUAL);
     }
 
     @Test
@@ -206,6 +219,76 @@ class LiveUpdateRegistryTest {
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.DETECTION_EVENTS).snapshot();
         assertEquals(1, buffered.size());
         assertEquals("detection-events", buffered.get(0).type());
+    }
+
+    @Test
+    void publishMarkCreatedAppendsAMarksEnvelopeWithActionCreated() {
+        LiveUpdateRegistry registry = registry();
+        Mark created = mark(MarkStatus.ACTIVE);
+
+        registry.publishMarkCreated(created);
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MARKS).snapshot();
+        assertEquals(1, buffered.size());
+        assertEquals("marks", buffered.get(0).type());
+        MarkPayload payload = (MarkPayload) buffered.get(0).payload();
+        assertEquals("created", payload.action());
+        assertEquals(created.id().value().toString(), payload.mark().id());
+        assertEquals("ACTIVE", payload.mark().status());
+    }
+
+    @Test
+    void publishMarkUpdatedAppendsAMarksEnvelopeWithActionUpdated() {
+        LiveUpdateRegistry registry = registry();
+        Mark updated = mark(MarkStatus.ACTIVE);
+
+        registry.publishMarkUpdated(updated);
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MARKS).snapshot();
+        assertEquals(1, buffered.size());
+        assertEquals("marks", buffered.get(0).type());
+        MarkPayload payload = (MarkPayload) buffered.get(0).payload();
+        assertEquals("updated", payload.action());
+        assertEquals("ACTIVE", payload.mark().status(), "annotation-only updates leave status untouched");
+    }
+
+    @Test
+    void publishMarkClearedForcesStatusClearedInThePayloadEvenWhenTheMarkPassedInIsStillActive() {
+        LiveUpdateRegistry registry = registry();
+        // The delete path (DefaultMarkService#delete) publishes the pre-deletion Mark, whose status
+        // may still be ACTIVE -- the wire contract requires the envelope to present "CLEARED"
+        // regardless, so a client can resolve which pin to drop without a second lookup.
+        Mark stillActive = mark(MarkStatus.ACTIVE);
+
+        registry.publishMarkCleared(stillActive);
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MARKS).snapshot();
+        assertEquals(1, buffered.size());
+        MarkPayload payload = (MarkPayload) buffered.get(0).payload();
+        assertEquals("cleared", payload.action());
+        assertEquals("CLEARED", payload.mark().status(), "cleared must force status=CLEARED even for a still-ACTIVE input Mark");
+        assertEquals(stillActive.id().value().toString(), payload.mark().id());
+    }
+
+    @Test
+    void publishMarkClearedKeepsStatusClearedWhenTheMarkPassedInIsAlreadyCleared() {
+        LiveUpdateRegistry registry = registry();
+        Mark alreadyCleared = mark(MarkStatus.CLEARED);
+
+        registry.publishMarkCleared(alreadyCleared);
+
+        MarkPayload payload = (MarkPayload) registry.bufferFor(LiveTopic.MARKS).snapshot().get(0).payload();
+        assertEquals("CLEARED", payload.mark().status());
+    }
+
+    @Test
+    void marksTopicIsHonestlyLimitedAndHasNothingToReplayWhenNothingHasEverBeenPublished() {
+        LiveUpdateRegistry registry = registry();
+
+        // Deliberate, documented gap: unlike fleet/devices/detection-events, marks has no
+        // live-query seed (would need a sixth constructor parameter -- see class javadoc). A
+        // viewer's first connection instead relies on its own GET /api/marks read.
+        assertEquals(List.of(), registry.replayFor(LiveTopic.MARKS, null));
     }
 
     @Test

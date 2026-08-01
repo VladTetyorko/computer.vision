@@ -832,6 +832,22 @@ tbody tr:last-child td {
   color: var(--text);
 }
 
+/* Leaflet tooltips (docs/TACTICAL-MARKS-PLAN.md M5 — the first non-permanent `bindTooltip` usage in
+   this app; the existing `.zone-label` rules in each map component's own CSS only ever set
+   `permanent: true`) are, like popups above, injected with Leaflet's own white default chrome.
+   Themed globally, once, for the identical reason the popup rule above is global rather than
+   duplicated per map component. */
+.leaflet-tooltip {
+  background: var(--panel-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.leaflet-tooltip-top:before {
+  border-top-color: var(--panel-raised);
+}
+
 /* ==========================================================================
    Wave 0 additions (docs/UI-REDESIGN-PLAN.md, Frozen contract F1) — spacing
    scale, a tokenized breakpoint reference, the one canonical frosted-pill HUD

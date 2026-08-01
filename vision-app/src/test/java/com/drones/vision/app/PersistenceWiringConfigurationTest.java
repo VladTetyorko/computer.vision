@@ -4,18 +4,26 @@ import com.drones.vision.adapter.persistence.JpaAssetImageRepository;
 import com.drones.vision.adapter.persistence.JpaAssetRepository;
 import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
 import com.drones.vision.adapter.persistence.JpaCategoryRepository;
+import com.drones.vision.adapter.persistence.JpaDatasetRepository;
 import com.drones.vision.adapter.persistence.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.JpaGeofenceRepository;
+import com.drones.vision.adapter.persistence.JpaMarkRepository;
+import com.drones.vision.adapter.persistence.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
+import com.drones.vision.adapter.persistence.JpaTrainingSampleRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
+import com.drones.vision.app.devsupport.InMemoryDatasetRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
 import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
+import com.drones.vision.app.devsupport.InMemoryMarkRepository;
+import com.drones.vision.app.devsupport.InMemorySampleImageStore;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.app.devsupport.InMemoryTrainingSampleRepository;
 
 import jakarta.persistence.EntityManagerFactory;
 
@@ -126,6 +134,46 @@ class PersistenceWiringConfigurationTest {
     }
 
     @Test
+    void enabledSelectsJpaMarkRepository() {
+        when(entityManagerFactoryProvider.getObject()).thenReturn(mock(EntityManagerFactory.class));
+        VisionPersistenceProperties enabled = new VisionPersistenceProperties(true,
+                VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
+
+        assertInstanceOf(JpaMarkRepository.class,
+                configuration.markRepositoryPort(enabled, entityManagerFactoryProvider));
+    }
+
+    @Test
+    void enabledSelectsJpaDatasetRepository() {
+        when(entityManagerFactoryProvider.getObject()).thenReturn(mock(EntityManagerFactory.class));
+        VisionPersistenceProperties enabled = new VisionPersistenceProperties(true,
+                VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
+
+        assertInstanceOf(JpaDatasetRepository.class,
+                configuration.datasetRepositoryPort(enabled, entityManagerFactoryProvider));
+    }
+
+    @Test
+    void enabledSelectsJpaTrainingSampleRepository() {
+        when(entityManagerFactoryProvider.getObject()).thenReturn(mock(EntityManagerFactory.class));
+        VisionPersistenceProperties enabled = new VisionPersistenceProperties(true,
+                VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
+
+        assertInstanceOf(JpaTrainingSampleRepository.class,
+                configuration.trainingSampleRepositoryPort(enabled, entityManagerFactoryProvider));
+    }
+
+    @Test
+    void enabledSelectsJpaSampleImageStore() {
+        when(entityManagerFactoryProvider.getObject()).thenReturn(mock(EntityManagerFactory.class));
+        VisionPersistenceProperties enabled = new VisionPersistenceProperties(true,
+                VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
+
+        assertInstanceOf(JpaSampleImageStore.class,
+                configuration.sampleImageStorePort(enabled, entityManagerFactoryProvider));
+    }
+
+    @Test
     void disabledSelectsInMemoryRepositoriesWithoutTouchingTheProvider() {
         VisionPersistenceProperties disabled = new VisionPersistenceProperties(false,
                 VisionPersistenceProperties.DEFAULT_JDBC_URL, "vision", "vision");
@@ -146,5 +194,13 @@ class PersistenceWiringConfigurationTest {
                 configuration.assetImageRepositoryPort(disabled, entityManagerFactoryProvider));
         assertInstanceOf(InMemoryGeofenceRepository.class,
                 configuration.geofenceRepositoryPort(disabled, entityManagerFactoryProvider));
+        assertInstanceOf(InMemoryMarkRepository.class,
+                configuration.markRepositoryPort(disabled, entityManagerFactoryProvider));
+        assertInstanceOf(InMemoryDatasetRepository.class,
+                configuration.datasetRepositoryPort(disabled, entityManagerFactoryProvider));
+        assertInstanceOf(InMemoryTrainingSampleRepository.class,
+                configuration.trainingSampleRepositoryPort(disabled, entityManagerFactoryProvider));
+        assertInstanceOf(InMemorySampleImageStore.class,
+                configuration.sampleImageStorePort(disabled, entityManagerFactoryProvider));
     }
 }

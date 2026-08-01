@@ -4,18 +4,26 @@ import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
 import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
+import com.drones.vision.app.devsupport.InMemoryDatasetRepository;
 import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
 import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
 import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
+import com.drones.vision.app.devsupport.InMemoryMarkRepository;
+import com.drones.vision.app.devsupport.InMemorySampleImageStore;
 import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
+import com.drones.vision.app.devsupport.InMemoryTrainingSampleRepository;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.domain.port.out.DatasetRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 
@@ -69,6 +77,18 @@ class PersistenceWiringTest {
     private GeofenceRepositoryPort geofenceRepositoryPort;
 
     @Autowired
+    private MarkRepositoryPort markRepositoryPort;
+
+    @Autowired
+    private DatasetRepositoryPort datasetRepositoryPort;
+
+    @Autowired
+    private TrainingSampleRepositoryPort trainingSampleRepositoryPort;
+
+    @Autowired
+    private SampleImageStorePort sampleImageStorePort;
+
+    @Autowired
     private ApplicationContext applicationContext;
 
     @Test
@@ -109,6 +129,26 @@ class PersistenceWiringTest {
     @Test
     void defaultConfigurationKeepsInMemoryGeofenceRepository() {
         assertInstanceOf(InMemoryGeofenceRepository.class, geofenceRepositoryPort);
+    }
+
+    @Test
+    void defaultConfigurationKeepsInMemoryMarkRepository() {
+        assertInstanceOf(InMemoryMarkRepository.class, markRepositoryPort);
+    }
+
+    @Test
+    void defaultConfigurationKeepsInMemoryDatasetRepository() {
+        assertInstanceOf(InMemoryDatasetRepository.class, datasetRepositoryPort);
+    }
+
+    @Test
+    void defaultConfigurationKeepsInMemoryTrainingSampleRepository() {
+        assertInstanceOf(InMemoryTrainingSampleRepository.class, trainingSampleRepositoryPort);
+    }
+
+    @Test
+    void defaultConfigurationKeepsInMemorySampleImageStore() {
+        assertInstanceOf(InMemorySampleImageStore.class, sampleImageStorePort);
     }
 
     @Test

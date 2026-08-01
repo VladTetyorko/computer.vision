@@ -4,8 +4,10 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * The six kinds of {@link LiveTopic} (docs/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
- * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs) — {@link #wire()}
+ * The seven kinds of {@link LiveTopic} (docs/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
+ * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MARKS}
+ * extends it again for the shared tactical-marks operational picture, docs/TACTICAL-MARKS-PLAN.md
+ * §5) — {@link #wire()}
  * is both the topic-string prefix (e.g. {@code "telemetry:<assetId>"}) and the {@code
  * com.drones.vision.api.dto.LiveEnvelopeResponse#type()} value for envelopes of that kind, since
  * the two are deliberately the same vocabulary.
@@ -35,7 +37,15 @@ enum LiveTopicKind {
      * Debounced {@code DetectionEvent} occurrences (open/advance/close) — the same shape {@code GET
      * /api/events} serves, carried here instead of the unrelated generic {@link #EVENT} topic.
      */
-    DETECTION_EVENTS("detection-events");
+    DETECTION_EVENTS("detection-events"),
+    /**
+     * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md §5) — always-on,
+     * deployment-wide, no per-group filter (matching {@code MarkService#list()}'s own unscoped
+     * shape). The three logical lifecycle events (created/updated/cleared) ride as an {@code
+     * action} field inside the payload rather than as three separate topic kinds, mirroring how
+     * {@link #DETECTION_EVENTS} carries OPEN/CLOSED in one topic instead of two.
+     */
+    MARKS("marks");
 
     private final String wire;
 

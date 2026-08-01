@@ -111,3 +111,20 @@
 :host ::ng-deep .zone-label::before {
   display: none;
 }
+
+/* ---- Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — interactive, colour-by-kind ------------
+   Colour itself comes from `core/marks/mark-logic.ts#markStyle` as an inline style (the single
+   source of truth also used by the marks panel's kind chips) — this rule only supplies the shared
+   shape/border/shadow every kind renders with. */
+
+:host ::ng-deep .mark-dot {
+  display: block;
+  border-radius: 50%;
+  border: 2px solid var(--panel-raised);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 35%);
+}
+
+:host ::ng-deep .mark-selected .mark-dot {
+  border-color: var(--text);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 25%);
+}

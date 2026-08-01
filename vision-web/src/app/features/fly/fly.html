@@ -146,7 +146,14 @@
            (900px, fly.css) regardless of this toggle's own state. -->
       @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
         <div class="main-map">
-          <vision-live-map [zones]="facade.geofence.zones()" />
+          <vision-live-map
+            [zones]="facade.geofence.zones()"
+            [marks]="facade.marks.marks()"
+            [selectedMarkId]="facade.marks.selectedMarkId()"
+            (markSelected)="facade.marks.select($event)"
+            (markMoved)="facade.marks.moveTo($event.id, $event.position)"
+            (mapClicked)="facade.marks.handleMapClick($event)"
+          />
         </div>
       }
 
@@ -236,6 +243,16 @@
           <vision-detections-strip />
         </vision-side-panel>
       }
+
+      <!-- Marks — the shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5).
+           Always available (no `canShowCommands()`/`watchMode()` gate — annotating the shared
+           picture is not a flight command, any in-scope viewer may create/annotate). -->
+      <vision-marks-panel
+        [assetId]="a.assetId"
+        [dronePosition]="facade.dronePosition()"
+        [open]="isPanelOpen('marks')"
+        (close)="panels.close()"
+      />
 
       <!-- Layers — a UI for the detection-boxes overlay mode (docs/UI-REDESIGN-PLAN.md Wave 2 item
            5's "map controls… become… layers": the boxes-rendering layer over the video is the
@@ -344,6 +361,13 @@
           (activated)="togglePanel('detections')"
         />
       }
+      <vision-icon-button
+        icon="target"
+        label="Marks"
+        variant="hud"
+        [active]="isPanelOpen('marks')"
+        (activated)="togglePanel('marks')"
+      />
       <vision-icon-button
         icon="layers"
         label="Layers"

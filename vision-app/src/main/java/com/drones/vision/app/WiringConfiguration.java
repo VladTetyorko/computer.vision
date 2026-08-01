@@ -33,6 +33,7 @@ import com.drones.vision.application.DefaultFleetSummaryService;
 import com.drones.vision.application.DefaultFlightCommandService;
 import com.drones.vision.application.DefaultGeofenceService;
 import com.drones.vision.application.DefaultManualControlService;
+import com.drones.vision.application.DefaultMarkService;
 import com.drones.vision.application.DefaultProbeService;
 import com.drones.vision.application.DefaultReplayService;
 import com.drones.vision.application.DefaultSimulationService;
@@ -45,6 +46,7 @@ import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
 import com.drones.vision.application.ManualControlService;
+import com.drones.vision.application.MarkService;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
@@ -65,6 +67,7 @@ import com.drones.vision.domain.port.out.FlightCommandPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.ManualControlPort;
+import com.drones.vision.domain.port.out.MarkRepositoryPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
@@ -538,6 +541,22 @@ public class WiringConfiguration {
                                       GeofenceMonitor geofenceMonitor) {
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
                 telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort, geofenceMonitor);
+    }
+
+    /**
+     * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md) behind {@code
+     * MarksController} (vision-api, component-scanned) — a one-line assembly, mirroring {@link
+     * #geofenceService}'s shape. {@code usageTracker} backs the cockpit "geolocate" action ({@link
+     * UsageTracker#latestTelemetry(com.drones.vision.domain.model.AssetId)}); {@code
+     * liveUpdatePublisherPort} is threaded through unconditionally, the same "always a real bean"
+     * reasoning as {@link #usageTracker}/{@link #streamService} above, so every create/update/clear
+     * is announced on the {@code marks} SSE topic regardless of {@link VisionLiveProperties#enabled()}
+     * (the no-op branch makes that announcement free).
+     */
+    @Bean
+    public MarkService markService(MarkRepositoryPort markRepositoryPort, UsageTracker usageTracker,
+                                    LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        return new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort);
     }
 
     /**

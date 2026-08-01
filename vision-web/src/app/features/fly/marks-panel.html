@@ -1,0 +1,149 @@
+@if (open()) {
+  <vision-side-panel title="Marks" icon="target" subtitle="Shared tactical picture" (close)="close.emit()">
+    <vision-notice variant="neutral">
+      Geolocated marks are estimates — drag any pin on the map to correct it.
+    </vision-notice>
+
+    <div class="section mark-target-section">
+      <button type="button" class="btn" (click)="markTarget()" [disabled]="geolocating()">
+        {{ geolocating() ? 'Marking…' : 'Mark target' }}
+      </button>
+      <p class="muted hint">Drops a target pin at the ground point the drone is currently looking toward.</p>
+    </div>
+
+    <div class="section">
+      <span class="label">New mark</span>
+      @if (store.pendingKind(); as pendingKind) {
+        <p class="muted hint">Click the map to place a {{ markKindLabel(pendingKind) }} mark.</p>
+        <button type="button" class="btn secondary small" (click)="cancelPlacement()">Cancel</button>
+      } @else if (store.draft(); as draft) {
+        <div class="draft-form">
+          <span class="chip kind-chip" [style.borderColor]="markColor(draft.kind)" [style.color]="markColor(draft.kind)">
+            <vision-icon [name]="markKindIcon(draft.kind)" [size]="14" />
+            {{ markKindLabel(draft.kind) }}
+          </span>
+          <input
+            class="draft-input"
+            type="text"
+            placeholder="Label"
+            [ngModel]="draftLabel()"
+            (ngModelChange)="draftLabel.set($event)"
+            (keydown.enter)="confirmDraft()"
+            (keydown.escape)="cancelDraft()"
+          />
+          <input
+            class="draft-input"
+            type="text"
+            placeholder="Note (optional)"
+            [ngModel]="draftNote()"
+            (ngModelChange)="draftNote.set($event)"
+            (keydown.enter)="confirmDraft()"
+            (keydown.escape)="cancelDraft()"
+          />
+          <div class="row">
+            <button type="button" class="btn small" (click)="confirmDraft()" [disabled]="draftLabel().trim().length === 0">Save</button>
+            <button type="button" class="btn secondary small" (click)="cancelDraft()">Cancel</button>
+          </div>
+        </div>
+      } @else {
+        <div class="row kind-picker">
+          @for (kind of kinds; track kind) {
+            <button type="button" class="btn secondary small" (click)="beginPlacement(kind)">
+              <span class="mark-icon" [style.color]="markColor(kind)"><vision-icon [name]="markKindIcon(kind)" [size]="14" /></span>
+              {{ markKindLabel(kind) }}
+            </button>
+          }
+        </div>
+        <p class="muted hint">Pick a kind, then click anywhere on the map.</p>
+      }
+    </div>
+
+    <div class="section">
+      <span class="label">Active marks ({{ store.marks().length }})</span>
+      @if (!store.loaded()) {
+        <p class="muted hint">Loading…</p>
+      } @else if (store.marks().length === 0) {
+        <p class="muted hint">No marks yet — drop one from the map, or geolocate the drone's target above.</p>
+      } @else {
+        <ul class="mark-list">
+          @for (mark of store.marks(); track mark.id) {
+            <li class="mark-row" [class.selected]="mark.id === store.selectedMarkId()">
+              <button type="button" class="mark-row-main" (click)="selectMark(mark)">
+                <span class="mark-icon" [style.color]="markColor(mark.kind)"><vision-icon [name]="markKindIcon(mark.kind)" [size]="16" /></span>
+                <span class="mark-row-text">
+                  <span class="mark-row-label truncate">{{ mark.label }}</span>
+                  <span class="muted mark-row-kind">{{ markKindLabel(mark.kind) }}</span>
+                </span>
+              </button>
+              <div class="row mark-row-actions">
+                <button type="button" class="btn secondary small" (click)="startEdit(mark)">Edit</button>
+                <button type="button" class="btn secondary small" (click)="clearMark(mark)">Clear</button>
+                <button type="button" class="btn danger-action small" (click)="deleteMark(mark)">Delete</button>
+              </div>
+
+              @if (editingMarkId() === mark.id) {
+                <div class="edit-form">
+                  <div class="row kind-picker">
+                    @for (kind of kinds; track kind) {
+                      <button
+                        type="button"
+                        class="btn secondary small"
+                        [class.active]="editKind() === kind"
+                        (click)="editKind.set(kind)"
+                      >
+                        <span class="mark-icon" [style.color]="markColor(kind)"><vision-icon [name]="markKindIcon(kind)" [size]="14" /></span>
+                        {{ markKindLabel(kind) }}
+                      </button>
+                    }
+                  </div>
+                  <input
+                    class="draft-input"
+                    type="text"
+                    placeholder="Label"
+                    [ngModel]="editLabel()"
+                    (ngModelChange)="editLabel.set($event)"
+                    (keydown.enter)="saveEdit(mark)"
+                    (keydown.escape)="cancelEdit()"
+                  />
+                  <input
+                    class="draft-input"
+                    type="text"
+                    placeholder="Note (optional)"
+                    [ngModel]="editNote()"
+                    (ngModelChange)="editNote.set($event)"
+                    (keydown.enter)="saveEdit(mark)"
+                    (keydown.escape)="cancelEdit()"
+                  />
+                  <div class="row">
+                    <button type="button" class="btn small" (click)="saveEdit(mark)" [disabled]="editLabel().trim().length === 0">Save</button>
+                    <button type="button" class="btn secondary small" (click)="cancelEdit()">Cancel</button>
+                  </div>
+                </div>
+              } @else if (mark.id === store.selectedMarkId()) {
+                <div class="mark-detail">
+                  @if (mark.note; as note) {
+                    <p class="muted mark-note">{{ note }}</p>
+                  }
+                  <dl class="facts">
+                    <div class="fact">
+                      <dt>From drone</dt>
+                      <dd class="mono">{{ readout() ?? '—' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Source</dt>
+                      <dd>{{ mark.source === 'DETECTION' ? 'Geolocated (estimate)' : 'Manual' }}</dd>
+                    </div>
+                    <div class="fact">
+                      <dt>Position</dt>
+                      <dd class="mono">{{ mark.position.latitude.toFixed(5) }}, {{ mark.position.longitude.toFixed(5) }}</dd>
+                    </div>
+                  </dl>
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  </vision-side-panel>
+}
