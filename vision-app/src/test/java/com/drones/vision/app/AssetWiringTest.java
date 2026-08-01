@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
 import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
+import com.drones.vision.adapter.mavlink.MavlinkManualControlSender;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
@@ -30,6 +31,7 @@ import com.drones.vision.application.FleetSummaryService;
 import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
+import com.drones.vision.application.ManualControlService;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
@@ -250,6 +252,14 @@ class AssetWiringTest {
     @Autowired
     private AssetStatsController assetStatsController;
 
+    /** docs/RC-CONTROL-PHASE1-PLAN.md R4: the watchdog-supervised RC-relay session service behind {@code /ws/manual-control}. */
+    @Autowired
+    private ManualControlService manualControlService;
+
+    /** docs/RC-CONTROL-PHASE1-PLAN.md R4: the one {@code ManualControlPort} bean {@link #manualControlService} is constructed with. */
+    @Autowired
+    private MavlinkManualControlSender mavlinkManualControlSender;
+
     /** docs/U-SCOPE-PLAN.md slice 2 feature 1: visibility-scope resolution (unconditional bean). */
     @Autowired
     private ScopeResolver scopeResolver;
@@ -333,6 +343,8 @@ class AssetWiringTest {
         assertTrue(cvModelRoster.stream().anyMatch(m -> "yolo26n.pt".equals(m.id())),
                 "cvModelRoster must include the default yolo26n.pt model (docs/CV-CONTROL-PLAN.md §4)");
         assertNotNull(cvModelsController, "CvModelsController must resolve its constructor dependency (docs/CV-CONTROL-PLAN.md §4)");
+        assertNotNull(manualControlService, "ManualControlService bean must be registered (docs/RC-CONTROL-PHASE1-PLAN.md R4)");
+        assertNotNull(mavlinkManualControlSender, "MavlinkManualControlSender bean must be registered (docs/RC-CONTROL-PHASE1-PLAN.md R4)");
     }
 
     /**

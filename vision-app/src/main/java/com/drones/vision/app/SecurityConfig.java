@@ -31,6 +31,15 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * SecuritySessionAuthenticator} saves the context into on login, so a subsequent request resolves
  * the same identity.
  *
+ * <p>{@code /ws/**} (docs/RC-CONTROL-PHASE1-PLAN.md §4, R4) is matched alongside {@code /api/**}:
+ * the {@code /ws/manual-control} WebSocket upgrade rides the same session cookie and must be
+ * authenticated before the handshake completes, so {@code ManualControlHandshakeInterceptor}
+ * (vision-api) never has to reject an identity-less connection itself when this chain is active —
+ * Spring Security answers the upgrade {@code GET} {@code 401} first. This is the only addition
+ * this wave makes to this class, and it <em>tightens</em> access (auth-required) rather than
+ * loosening it; the disabled/permit-all chain already covered {@code /ws/**} via its own {@code
+ * anyRequest().permitAll()}, so behavior there is unchanged.
+ *
  * <h2>CSRF decision</h2>
  * CSRF is <strong>disabled for the API</strong>, deliberately, and documented. The endpoints are
  * JSON-only, same-origin, and ride a {@code SameSite=Lax} session cookie (Spring Boot's servlet
@@ -64,7 +73,7 @@ public class SecurityConfig {
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login", "/api/auth/logout").permitAll()
-                        .requestMatchers("/api/**").authenticated()
+                        .requestMatchers("/api/**", "/ws/**").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

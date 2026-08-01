@@ -1,7 +1,8 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, output } from '@angular/core';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
 import { RcInputService } from '../../core/rc/rc-input.service';
+import { ManualControlClient } from '../../core/rc/manual-control-client';
 import {
   axisToPercent,
   barLeftPercent,
@@ -10,164 +11,47 @@ import {
   defaultButtonLabel,
   isButtonOn,
 } from '../../core/rc/rc-input-logic';
+import { channelBindingLabel, engageDisabledReason, latencyLabel } from './rc-monitor-logic';
 
 /**
- * `vision-rc-monitor` — the cockpit's RC transmitter monitor drawer (docs/RC-CONTROL-PLAN.md Phase
- * 0). Read-only: it shows a plugged-in RadioMaster's live sticks (axes) and switches (buttons) so an
- * operator can confirm the platform sees the controller and check its update rate. **Nothing here
- * touches the drone** — relaying to the flight controller is Phase 1.
+ * `vision-rc-monitor` — the cockpit's RC transmitter drawer. Phase 0 (docs/RC-CONTROL-PLAN.md) added
+ * the read-only monitor at the top: a plugged-in RadioMaster's live sticks (axes) and switches
+ * (buttons), so an operator can confirm the platform sees the controller and check its update rate.
+ * R5 (docs/RC-CONTROL-PHASE1-PLAN.md) adds **Take control** below it — the SITL relay engage/
+ * release gesture, additive, the monitor above is unchanged.
  *
- * Provides its own `RcInputService` and drives its lifecycle: reading starts when this drawer mounts
- * and stops when it closes (the cockpit mounts it via `@if (isPanelOpen('rc'))`), so the Gamepad rAF
- * loop only runs while the panel is open.
+ * Provides its own `RcInputService` **and** `ManualControlClient` and drives `RcInputService`'s
+ * lifecycle (reading starts when this drawer mounts, per `ngOnInit`); `ManualControlClient` needs
+ * no explicit start — its own constructor wires the deadman triggers, and its own `DestroyRef`
+ * teardown (this component unmounting, i.e. the RC panel closing) is one of them. The cockpit
+ * mounts this component via `@if (isPanelOpen('rc'))`, so both the Gamepad rAF loop and any live
+ * relay session only exist while the drawer is open.
  */
 @Component({
   selector: 'vision-rc-monitor',
   imports: [SidePanel, Notice],
-  providers: [RcInputService],
+  providers: [RcInputService, ManualControlClient],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <vision-side-panel title="Controller" icon="gamepad" subtitle="RC transmitter monitor" (close)="close.emit()">
-      @if (!rc.supported()) {
-        <vision-notice variant="warn">
-          This browser doesn't expose gamepad input. Use Chrome or Edge to read the transmitter.
-        </vision-notice>
-      } @else if (!rc.connected()) {
-        <p class="muted">
-          Plug your RadioMaster in over USB in <strong>USB Joystick</strong> mode, then move a stick or
-          flip a switch — the browser only reveals a controller after its first input.
-        </p>
-        <vision-notice variant="warn">
-          In USB Joystick mode the radio stops transmitting over RF. Keep this a bench/SITL check —
-          it does not fly anything yet.
-        </vision-notice>
-      } @else {
-        <div class="rc-head">
-          <span class="rc-device mono truncate" [title]="rc.device()?.id">{{ rc.deviceLabel() }}</span>
-          <span class="chip ok"><span class="dot ok"></span>{{ rc.updateRateHz() }} Hz</span>
-        </div>
-
-        <span class="label rc-group-label">Axes ({{ rc.axes().length }})</span>
-        <div class="rc-list">
-          @for (v of rc.axes(); track $index) {
-            <div class="rc-row">
-              <span class="rc-name">{{ axisLabel($index) }}</span>
-              <div class="rc-bar" role="img" [attr.aria-label]="axisLabel($index) + ': ' + axisToPercent(v) + ' percent'">
-                <span class="rc-tick"></span>
-                <span class="rc-fill" [style.left.%]="barLeftPercent(v)" [style.width.%]="barWidthPercent(v)"></span>
-              </div>
-              <span class="rc-value mono">{{ axisToPercent(v) }}</span>
-            </div>
-          }
-        </div>
-
-        <span class="label rc-group-label">Switches ({{ rc.buttons().length }})</span>
-        <div class="rc-switches">
-          @for (b of rc.buttons(); track $index) {
-            <span class="rc-switch" [class.on]="isOn(b)">{{ buttonLabel($index) }}</span>
-          }
-        </div>
-      }
-    </vision-side-panel>
-  `,
-  styles: `
-    :host {
-      display: contents;
-    }
-
-    .rc-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: var(--space-8);
-      margin-bottom: var(--space-16);
-    }
-
-    .rc-device {
-      font-size: 0.85rem;
-      min-width: 0;
-    }
-
-    .rc-group-label {
-      margin-top: var(--space-16);
-    }
-
-    .rc-list {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-8);
-    }
-
-    .rc-row {
-      display: grid;
-      grid-template-columns: 3.5rem 1fr 3rem;
-      align-items: center;
-      gap: var(--space-8);
-    }
-
-    .rc-name {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-    }
-
-    /* Center-origin bar: a track with a center tick and a fill that grows from the middle. */
-    .rc-bar {
-      position: relative;
-      height: 0.5rem;
-      border-radius: var(--radius-pill);
-      background: var(--panel-raised);
-      border: 1px solid var(--border);
-      overflow: hidden;
-    }
-
-    .rc-tick {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 50%;
-      width: 1px;
-      background: var(--border-strong);
-    }
-
-    .rc-fill {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      background: var(--color-info);
-    }
-
-    .rc-value {
-      font-size: 0.8rem;
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .rc-switches {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--space-8);
-    }
-
-    .rc-switch {
-      padding: var(--space-4) var(--space-8);
-      border-radius: var(--radius-sm);
-      background: var(--panel-raised);
-      border: 1px solid var(--border);
-      color: var(--text-faint);
-      font-size: 0.72rem;
-      font-variant-numeric: tabular-nums;
-      transition: color 0.1s ease, background 0.1s ease, border-color 0.1s ease;
-    }
-
-    .rc-switch.on {
-      background: var(--color-success-soft);
-      border-color: var(--color-success-line);
-      color: var(--color-success-text);
-    }
-  `,
+  templateUrl: './rc-monitor.html',
+  styleUrl: './rc-monitor.css',
 })
 export class RcMonitor implements OnInit {
   protected readonly rc = inject(RcInputService);
+  protected readonly client = inject(ManualControlClient);
+
+  /** The currently-flown asset — mirrors `flight-command-panel.ts`'s own `assetId`/
+   * `assetDisplayName` inputs (`fly.html` renders both components inside the same
+   * `@else if (facade.asset(); as a)` branch, so `a.assetId`/`a.displayName` are always defined
+   * wherever either is actually mounted). */
+  readonly assetId = input.required<string>();
+  readonly assetDisplayName = input.required<string>();
+  /** `FlyFacade.canShowCommands()` — the same capability gate `flight-command-panel` uses (docs/
+   * RC-CONTROL-PHASE1-PLAN.md R5: "reuse the same gate the flight panel uses"). Not the *exact* same
+   * server-side capability the relay itself checks (`ManualControlPort.supports` + reachability,
+   * decided only when the `engage` WS frame is actually sent) — this is the closest existing signal
+   * this UI has to avoid offering the control on a vehicle that plainly isn't being heard at all; a
+   * server `denied` still handles the cases this front-line gate can't see. */
+  readonly canCommand = input<boolean>(false);
   readonly close = output<void>();
 
   protected readonly axisToPercent = axisToPercent;
@@ -176,8 +60,32 @@ export class RcMonitor implements OnInit {
   protected readonly axisLabel = defaultAxisLabel;
   protected readonly buttonLabel = defaultButtonLabel;
   protected readonly isOn = isButtonOn;
+  protected readonly latencyLabel = latencyLabel;
+  protected readonly channelBindingLabel = channelBindingLabel;
+
+  protected readonly disabledReason = computed(() =>
+    engageDisabledReason({
+      hasAsset: this.assetId().length > 0,
+      canCommand: this.canCommand(),
+      gamepadSupported: this.rc.supported(),
+      gamepadConnected: this.rc.connected(),
+      engageState: this.client.state(),
+    }),
+  );
+  protected readonly engageDisabled = computed(() => this.disabledReason() !== undefined);
 
   ngOnInit(): void {
     this.rc.start();
+  }
+
+  protected engage(): void {
+    if (this.engageDisabled()) {
+      return;
+    }
+    this.client.engage(this.assetId());
+  }
+
+  protected release(): void {
+    this.client.release();
   }
 }

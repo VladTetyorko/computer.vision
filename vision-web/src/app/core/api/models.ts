@@ -1119,3 +1119,109 @@ export interface AuditEntry {
   readonly summary: string;
   readonly details: Readonly<Record<string, string>>;
 }
+
+// --- Manual control relay (docs/RC-CONTROL-PHASE1-PLAN.md §4 — WS /ws/manual-control) -----------
+// Like `LiveConnected`/`LiveEnvelope` above, these frames arrive over a raw `WebSocket`
+// (`core/rc/manual-control-client.ts`), never through `VisionApi`/`HttpClient` — mirrored here 1:1
+// with the plan's own frozen JSON shapes per this file's own top doc comment: this is exactly as
+// much "the wire contract" as anything fetched the usual way. **SITL only** — see the plan doc for
+// the full hardware/safety framing; this file only carries the JSON shapes.
+
+/**
+ * One physical control → one RC channel, as sent on the `engaged` frame's `channelMap` — trims
+ * `domain.model.ControlBinding` to what the client needs to *display* the map (the calibration
+ * fields `minMicros`/`centerMicros`/`maxMicros`/`deadband`/`reversed` stay server-side; nothing
+ * here recomputes microseconds — that mapping is entirely the backend's `ChannelMap#apply` job).
+ */
+export interface ManualControlChannelBinding {
+  readonly source: 'AXIS' | 'BUTTON';
+  readonly sourceIndex: number;
+  readonly rcChannel: number;
+  readonly label: string;
+}
+
+/**
+ * `denied.code` — the four refusal codes §4 freezes (`OUT_OF_SCOPE`/`NOT_COMMANDABLE`/
+ * `UNSUPPORTED`/`ALREADY_ENGAGED`) for an `engage` refusal, widened to a plain `string` rather than
+ * a closed union: `ManualControlWebSocketHandler` (vision-api) also sends `denied` with
+ * `MALFORMED`/`UNKNOWN_TYPE`/`BAD_REQUEST` for a frame the handler couldn't process at all — its
+ * own javadoc calls this out explicitly ("deliberately a plain string, not a closed enum on the
+ * wire"). `denied.reason` is always the human-readable string this app actually renders; `code`
+ * exists for a caller that wants to branch on it, not because this app currently does. */
+export type ManualControlDeniedCode = string;
+
+/** `released.reason` — an explicit client `release` vs. any socket teardown the server observed
+ * (which may itself be best-effort, per §4: "the socket may already be gone"). */
+export type ManualControlReleasedReason = 'EXPLICIT' | 'SOCKET_CLOSE';
+
+// Client → server frames.
+
+export interface ManualControlEngageMessage {
+  readonly type: 'engage';
+  readonly assetId: string;
+}
+
+/** `axes`/`buttons` are the raw Gamepad API values straight off `RcInputService`
+ * (`axes()`/`buttons()`) — axes -1..1, buttons 0..1; mapping to microseconds is entirely
+ * server-side via `ChannelMap`, never computed here. */
+export interface ManualControlChannelsMessage {
+  readonly type: 'channels';
+  readonly axes: readonly number[];
+  readonly buttons: readonly number[];
+  readonly seq: number;
+  readonly tSent: number;
+}
+
+export interface ManualControlReleaseMessage {
+  readonly type: 'release';
+}
+
+export type ManualControlClientMessage =
+  | ManualControlEngageMessage
+  | ManualControlChannelsMessage
+  | ManualControlReleaseMessage;
+
+// Server → client frames.
+
+export interface ManualControlEngagedMessage {
+  readonly type: 'engaged';
+  readonly assetId: string;
+  readonly rateHz: number;
+  readonly channelMap: readonly ManualControlChannelBinding[];
+}
+
+export interface ManualControlDeniedMessage {
+  readonly type: 'denied';
+  readonly code: ManualControlDeniedCode;
+  readonly reason: string;
+}
+
+/** One per `channels` frame the server processed — `seq`/`tSent` echo the client's own values,
+ * `tServer` is the server's own receipt clock. `manual-control-logic.ts#computeLatencyMs` measures
+ * glass-to-stick RTT as `Date.now() - tSent` at the *client's* receipt of this frame, not
+ * `tServer - tSent` (that would only be one-way server-processing latency, not a round trip). */
+export interface ManualControlAckMessage {
+  readonly type: 'ack';
+  readonly seq: number;
+  readonly tSent: number;
+  readonly tServer: number;
+}
+
+export interface ManualControlReleasedMessage {
+  readonly type: 'released';
+  readonly reason: ManualControlReleasedReason;
+}
+
+/** The session was already auto-released server-side by the input-loss watchdog before this
+ * arrived — the client must re-`engage` to resume, never assume it can keep streaming. */
+export interface ManualControlWatchdogMessage {
+  readonly type: 'watchdog';
+  readonly timeoutMs: number;
+}
+
+export type ManualControlServerMessage =
+  | ManualControlEngagedMessage
+  | ManualControlDeniedMessage
+  | ManualControlAckMessage
+  | ManualControlReleasedMessage
+  | ManualControlWatchdogMessage;

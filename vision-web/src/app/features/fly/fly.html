@@ -215,11 +215,18 @@
         />
       }
 
-      <!-- Controller (RC transmitter monitor) — docs/RC-CONTROL-PLAN.md Phase 0. Read-only, not
-           capability-gated (it never touches the drone). Mounted only while open so its Gamepad rAF
-           poll loop runs only then. -->
+      <!-- Controller (RC transmitter monitor + Take control) — docs/RC-CONTROL-PLAN.md Phase 0
+           (the read-only monitor, always available) + docs/RC-CONTROL-PHASE1-PLAN.md R5 (the SITL
+           relay engage/release below it, gated on the same `canShowCommands()` the flight panel
+           uses). Mounted only while open so its Gamepad rAF poll loop — and any live relay session,
+           via `ManualControlClient`'s own `DestroyRef` teardown — only run then. -->
       @if (isPanelOpen('rc')) {
-        <vision-rc-monitor (close)="panels.close()" />
+        <vision-rc-monitor
+          [assetId]="a.assetId"
+          [assetDisplayName]="a.displayName"
+          [canCommand]="facade.canShowCommands()"
+          (close)="panels.close()"
+        />
       }
 
       <!-- Detections strip — previously an always-visible bottom-right toggle+strip, now the

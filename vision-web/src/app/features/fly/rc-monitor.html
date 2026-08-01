@@ -1,0 +1,113 @@
+<vision-side-panel title="Controller" icon="gamepad" subtitle="RC transmitter monitor" (close)="close.emit()">
+  @if (!rc.supported()) {
+    <vision-notice variant="warn">
+      This browser doesn't expose gamepad input. Use Chrome or Edge to read the transmitter.
+    </vision-notice>
+  } @else {
+    @if (!rc.connected()) {
+      <p class="muted">
+        Plug your RadioMaster in over USB in <strong>USB Joystick</strong> mode, then move a stick or
+        flip a switch — the browser only reveals a controller after its first input.
+      </p>
+      <vision-notice variant="warn">
+        In USB Joystick mode the radio stops transmitting over RF. Keep this a bench/SITL check —
+        it does not fly anything yet.
+      </vision-notice>
+    } @else {
+      <div class="rc-head">
+        <span class="rc-device mono truncate" [title]="rc.device()?.id">{{ rc.deviceLabel() }}</span>
+        <span class="chip ok"><span class="dot ok"></span>{{ rc.updateRateHz() }} Hz</span>
+      </div>
+
+      <span class="label rc-group-label">Axes ({{ rc.axes().length }})</span>
+      <div class="rc-list">
+        @for (v of rc.axes(); track $index) {
+          <div class="rc-row">
+            <span class="rc-name">{{ axisLabel($index) }}</span>
+            <div class="rc-bar" role="img" [attr.aria-label]="axisLabel($index) + ': ' + axisToPercent(v) + ' percent'">
+              <span class="rc-tick"></span>
+              <span class="rc-fill" [style.left.%]="barLeftPercent(v)" [style.width.%]="barWidthPercent(v)"></span>
+            </div>
+            <span class="rc-value mono">{{ axisToPercent(v) }}</span>
+          </div>
+        }
+      </div>
+
+      <span class="label rc-group-label">Switches ({{ rc.buttons().length }})</span>
+      <div class="rc-switches">
+        @for (b of rc.buttons(); track $index) {
+          <span class="rc-switch" [class.on]="isOn(b)">{{ buttonLabel($index) }}</span>
+        }
+      </div>
+    }
+
+    <!-- Take control (docs/RC-CONTROL-PHASE1-PLAN.md R5) — SITL relay, additive below the read-only
+         monitor above. Deliberately a sibling of the connected/not-connected branch above, not
+         nested inside it: a mid-session gamepad disconnect flips that branch back to "not
+         connected", but the engage state below must keep showing (e.g. a watchdog/released notice)
+         right up until the operator re-plugs the transmitter and takes control again. -->
+    <div class="rc-engage">
+      <span class="label rc-group-label">Take control</span>
+
+      @switch (client.state()) {
+        @case ('engaged') {
+          <vision-notice variant="ok">
+            Live — this transmitter is flying {{ assetDisplayName() }} (SITL). Releasing, closing
+            this panel, or switching tabs stops it immediately and hands control back to the
+            aircraft's own failsafe.
+          </vision-notice>
+          <div class="rc-engage-stats">
+            <span class="chip ok">{{ client.rateHz() }} Hz link</span>
+            <span class="chip">{{ latencyLabel(client.latencyMs()) }} RTT</span>
+          </div>
+          @if (client.channelMap(); as map) {
+            <span class="label rc-group-label">Channel map</span>
+            <ul class="rc-channel-map">
+              @for (binding of map; track binding.rcChannel) {
+                <li>{{ channelBindingLabel(binding) }}</li>
+              }
+            </ul>
+          }
+          <button type="button" class="btn danger big danger-action" (click)="release()">RELEASE</button>
+        }
+        @case ('denied') {
+          <vision-notice variant="danger">
+            Control denied — {{ client.deniedReason() ?? 'the aircraft refused control.' }}
+          </vision-notice>
+          <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">Try again</button>
+          @if (disabledReason(); as reason) {
+            <p class="disabled-reason">{{ reason }}</p>
+          }
+        }
+        @case ('released') {
+          @if (client.watchdogTripped()) {
+            <vision-notice variant="warn">
+              Control released — input stalled. The aircraft's own failsafe took over.
+            </vision-notice>
+          } @else {
+            <vision-notice variant="neutral">Control released.</vision-notice>
+          }
+          <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
+            Take control
+          </button>
+          @if (disabledReason(); as reason) {
+            <p class="disabled-reason">{{ reason }}</p>
+          }
+        }
+        @default {
+          <p class="muted hint">
+            SITL only. Taking control relays this transmitter's sticks to the flight controller over
+            MAVLink RC override, at the server's own fixed rate. Releasing, closing this panel, or
+            switching tabs drops control immediately.
+          </p>
+          <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
+            {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
+          </button>
+          @if (disabledReason(); as reason) {
+            <p class="disabled-reason">{{ reason }}</p>
+          }
+        }
+      }
+    </div>
+  }
+</vision-side-panel>

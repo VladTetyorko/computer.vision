@@ -1,0 +1,139 @@
+:host {
+  display: contents;
+}
+
+.rc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
+.rc-device {
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.rc-group-label {
+  margin-top: var(--space-16);
+}
+
+.rc-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.rc-row {
+  display: grid;
+  grid-template-columns: 3.5rem 1fr 3rem;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.rc-name {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* Center-origin bar: a track with a center tick and a fill that grows from the middle. */
+.rc-bar {
+  position: relative;
+  height: 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.rc-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.rc-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--color-info);
+}
+
+.rc-value {
+  font-size: 0.8rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.rc-switch {
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.1s ease, background 0.1s ease, border-color 0.1s ease;
+}
+
+.rc-switch.on {
+  background: var(--color-success-soft);
+  border-color: var(--color-success-line);
+  color: var(--color-success-text);
+}
+
+/* ---- Take control (docs/RC-CONTROL-PHASE1-PLAN.md R5) --------------------------------------- */
+
+.rc-engage {
+  margin-top: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.hint {
+  font-size: 0.72rem;
+}
+
+.rc-engage .btn.big {
+  margin-top: var(--space-8);
+  padding: var(--space-8) var(--space-24);
+  font-size: 1rem;
+  border-radius: var(--radius);
+  align-self: stretch;
+  justify-content: center;
+}
+
+.rc-engage vision-notice {
+  margin-bottom: var(--space-8);
+}
+
+.rc-engage-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+.rc-channel-map {
+  list-style: none;
+  margin: 0 0 var(--space-8);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

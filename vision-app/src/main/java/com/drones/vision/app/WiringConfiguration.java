@@ -3,6 +3,7 @@ package com.drones.vision.app;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
 import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
+import com.drones.vision.adapter.mavlink.MavlinkManualControlSender;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
@@ -31,6 +32,7 @@ import com.drones.vision.application.DefaultDeviceService;
 import com.drones.vision.application.DefaultFleetSummaryService;
 import com.drones.vision.application.DefaultFlightCommandService;
 import com.drones.vision.application.DefaultGeofenceService;
+import com.drones.vision.application.DefaultManualControlService;
 import com.drones.vision.application.DefaultProbeService;
 import com.drones.vision.application.DefaultReplayService;
 import com.drones.vision.application.DefaultSimulationService;
@@ -42,6 +44,7 @@ import com.drones.vision.application.FleetSummaryService;
 import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.GeofenceMonitor;
 import com.drones.vision.application.GeofenceService;
+import com.drones.vision.application.ManualControlService;
 import com.drones.vision.application.ProbeService;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.SimulationService;
@@ -61,6 +64,7 @@ import com.drones.vision.domain.port.out.FeedTransmitterPort;
 import com.drones.vision.domain.port.out.FlightCommandPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.domain.port.out.ManualControlPort;
 import com.drones.vision.domain.port.out.OverlayPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
@@ -73,7 +77,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.net.URI;
+import java.time.Clock;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Wires the framework-free domain/application layer to adapters.
@@ -121,7 +128,7 @@ import java.util.List;
  */
 @Configuration
 @EnableConfigurationProperties({VisionPublishProperties.class, VisionCvProperties.class, VisionLiveProperties.class,
-        VisionSimulationProperties.class})
+        VisionSimulationProperties.class, VisionRcProperties.class})
 public class WiringConfiguration {
 
     @Bean
@@ -271,6 +278,50 @@ public class WiringConfiguration {
     @Bean
     public MavlinkFlightCommander mavlinkFlightCommander(MavlinkTelemetrySource mavlinkTelemetrySource) {
         return new MavlinkFlightCommander(mavlinkTelemetrySource);
+    }
+
+    /**
+     * Streaming, ack-less RC-override relay TX (docs/RC-CONTROL-PHASE1-PLAN.md §3, R3) — the
+     * concrete {@link ManualControlPort} {@link #manualControlService} below resolves by interface.
+     * Borrows {@link #mavlinkTelemetrySource}'s shared hub socket exactly like {@link
+     * #mavlinkFlightCommander} does (same instance-borrowing pattern, same "wired unconditionally,
+     * no {@code vision.mavlink.*}-shaped enable flag" reasoning as that bean's own javadoc).
+     */
+    @Bean
+    public MavlinkManualControlSender mavlinkManualControlSender(MavlinkTelemetrySource mavlinkTelemetrySource) {
+        return new MavlinkManualControlSender(mavlinkTelemetrySource);
+    }
+
+    /**
+     * The stateful, watchdog-supervised RC-relay session service (docs/RC-CONTROL-PHASE1-PLAN.md
+     * §2, R2) behind {@code ManualControlWebSocketHandler} (vision-api, component-scanned). {@link
+     * #mavlinkManualControlSender} is the one {@link ManualControlPort} bean in this context today,
+     * resolved here by its interface type — the same "concrete bean, matched by interface where
+     * needed" idiom {@link #flightCommandService} uses for {@link #mavlinkFlightCommander}.
+     *
+     * <p>Uses {@code DefaultManualControlService}'s <b>6-arg canonical constructor</b> — not either
+     * convenience constructor — so {@link VisionRcProperties#watchdogTimeoutMs()} actually takes
+     * effect; the convenience constructors hardcode {@code DEFAULT_WATCHDOG_TIMEOUT_MS}. The
+     * scheduler is a fresh single-thread daemon {@code "rc-watchdog"} executor, mirroring {@code
+     * DefaultManualControlService}'s own {@code defaultWatchdogScheduler()} shape one level up (this
+     * bean needs its own instance to hand the 6-arg constructor explicitly) — not a separate
+     * {@code @Bean}, since nothing else in this context needs to see it, the same "no bean for a
+     * collaborator only one method builds" posture {@link UsageTracker}'s own internal scheduler
+     * takes at the application layer.
+     */
+    @Bean
+    public ManualControlService manualControlService(AssetService assetService, ManualControlPort manualControlPort,
+                                                       AuditTrailPort auditTrailPort, VisionRcProperties rcProperties) {
+        return new DefaultManualControlService(assetService, manualControlPort, auditTrailPort, Clock.systemUTC(),
+                rcWatchdogScheduler(), rcProperties.watchdogTimeoutMs());
+    }
+
+    private static ScheduledExecutorService rcWatchdogScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "rc-watchdog");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     /**

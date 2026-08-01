@@ -26,6 +26,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- RC-CONTROL Phase 1 R4 (docs/RC-CONTROL-PHASE1-PLAN.md §4): the /ws/manual-control raw
+             WebSocketHandler endpoint. The one new dependency this wave adds. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

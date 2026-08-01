@@ -406,7 +406,10 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **`shared/ui/empty-state.ts`** — `<vision-empty title [message] [icon]>` (class `EmptyState`): the shared zero-state, generalizing the ~15 `<div class="empty"><h3>…</h3><p>…</p></div>` copies. Renders the global `.empty` primitive; CTA projected via `<ng-content>`. `title` is required — a single-line status `.empty` with no heading (e.g. onboarding's "Listening…") intentionally stays a raw `.empty` div, not this component.
 - **`shared/ui/kebab-menu.ts`** — `<vision-kebab-menu label>` (class `KebabMenu`): wraps the native `<details>/<summary>` `.kebab*` disclosure documented in `styles.css`; callers project only the menu entries (`<button>`, `.kebab-divider`, `.danger-action`). Self-closes when a projected entry is clicked (was a per-page `(click)="…open=false"`). `label` → the trigger `aria-label`. Consumers: assets, devices, asset-detail.
 - **`shared/ui/stat.ts`** — `<vision-stat label value [sub] [live] [tone]>` (class `Stat`): the shared KPI tile, generalizing asset-detail's `.kpi-tile` row. Follows the **`dataviz` stat-tile contract** — semibold **proportional** value (deliberately NOT `--mono`/`tabular-nums`, which is reserved for small fast-ticking OSD/HUD numerals in their own components) over a muted uppercase caption; optional `sub` line, `live` dot, and value `tone`. Owns the tile chrome; the responsive `.kpi-tiles` grid stays on the host.
-- **`core/rc/**` — RC transmitter input (docs/RC-CONTROL-PLAN.md Phase 0).** `rc-input-logic.ts` (pure, unit-tested): `RcDeviceInfo`/`RcSnapshot` + display helpers (`axisToPercent`, center-origin `barLeftPercent`/`barWidthPercent`, `computeUpdateRateHz`, `deviceLabel`). `rc-input.service.ts` — `RcInputService`, **provided per host** (like `TelemetryStore`), reads a plugged-in transmitter via the **Gamepad API** (`connected`/`device`/`axes`/`buttons`/`updateRateHz` signals; an rAF poll loop, zoneless-safe; `start()`/`stop()` lifecycle guarded by `DestroyRef`). **Read-only, Phase 0** — no backend, no MAVLink, no drone. Consumed by `features/fly/rc-monitor.ts` (`<vision-rc-monitor>`), the cockpit's `rc` tool-rail drawer (always available, not capability-gated; mounted only while open so the poll loop runs only then). WebHID/raw-report fidelity + the actual `RC_CHANNELS_OVERRIDE` relay are Phases 1–2 in the plan doc.
+- **`core/rc/**` — RC transmitter input + the SITL relay client (docs/RC-CONTROL-PLAN.md Phase 0, docs/RC-CONTROL-PHASE1-PLAN.md R5).**
+  - **Phase 0 (read-only monitor).** `rc-input-logic.ts` (pure, unit-tested): `RcDeviceInfo`/`RcSnapshot` + display helpers (`axisToPercent`, center-origin `barLeftPercent`/`barWidthPercent`, `computeUpdateRateHz`, `deviceLabel`). `rc-input.service.ts` — `RcInputService`, **provided per host** (like `TelemetryStore`), reads a plugged-in transmitter via the **Gamepad API** (`connected`/`device`/`axes`/`buttons`/`updateRateHz` signals; an rAF poll loop, zoneless-safe; `start()`/`stop()` lifecycle guarded by `DestroyRef`). No backend, no MAVLink, no drone.
+  - **R5 (the SITL relay — "Take control").** `manual-control-logic.ts` (pure, unit-tested, mirrors `rc-input-logic.ts`'s split): client→server frame builders (`buildEngageFrame`/`buildChannelsFrame`/`buildReleaseFrame`), a defensive `parseManualControlServerMessage(raw)` (any malformed/missing field → `undefined`, never a crash — mirrors `geofence-logic.ts#parseGeofenceBreach`'s own rule; **`denied.code` is deliberately NOT validated against the four frozen refusal codes** — the backend also sends a handler-defensive code, see Gotchas), `computeLatencyMs(tSent, nowMs)` (glass-to-stick RTT = `nowMs - tSent`, **not** `tServer - tSent`), `pushLatencySample`/`rollingAverageMs` (a 10-sample rolling window, `undefined` until the first `ack`), `sendIntervalMs(rateHz)` (clamped 10..50Hz, mirrors the adapter's own `VISION_RC_OVERRIDE_HZ` clamp). `manual-control-client.ts` — `ManualControlClient`, **provided per host** alongside `RcInputService` (injects it directly, DI-sharing the host's instance): opens one `WebSocket('/ws/manual-control')` per `engage(assetId)` call (same-origin, session-cookie auth, mirrors `core/live/live-store.ts`'s `EventSource`), sends `engage` on open, and once the server's own `engaged` frame confirms, streams `channels` frames (`RcInputService.axes()`/`buttons()`, an incrementing `seq`, `tSent=Date.now()`) via `setInterval` at the server-confirmed `rateHz`. Signals: `state` (`'idle'|'engaging'|'engaged'|'denied'|'released'`), `deniedReason`, `latencyMs` (rolling from `ack`), `channelMap`, `rateHz`, `watchdogTripped`. **One socket per session, deliberately** — every release path (explicit, deadman, `denied`, `released`, `watchdog`) closes the socket rather than reusing it for a later `engage`, even though §4 technically allows connection reuse; a documented v1 simplification (this class's own doc comment), not a protocol requirement. **The deadman — `release()` is idempotent, every trigger just calls it**: the explicit RELEASE control, this class's own `DestroyRef.onDestroy` (the RC panel closing — `rc-monitor.ts` only mounts this provider while `isPanelOpen('rc')`), a `visibilitychange` listener (tab hiding), a constructor `effect()` over `RcInputService.connected()` (gamepad disconnecting), and the raw `WebSocket`'s own `onclose`/`onerror` (any drop). A `watchdog`/`released` server frame mirrors the same teardown client-side. No optimistic UI in the *positive* direction (`state` only reads `'engaged'` after the server's own frame); the *negative* direction sets `'released'` synchronously with this class giving up on the connection, regardless of whether the server's own `released` frame ever arrives.
+  - Consumed by `features/fly/rc-monitor.ts` (`<vision-rc-monitor>`), the cockpit's `rc` tool-rail drawer: the Phase-0 monitor (always available, not capability-gated) is unchanged; R5 adds a **Take control** section below it (`rc-monitor.html`/`.css`, `rc-monitor-logic.ts` — `engageDisabledReason`/`latencyLabel`/`channelBindingLabel`), gated on `assetId`/`assetDisplayName`/`canCommand` inputs (`fly.html` wires `[canCommand]="facade.canShowCommands()"`, the same gate `flight-command-panel` uses — see that section's own note on why this is a front-line UX gate, not the actual server-side capability check). A disabled Take-control button always shows its poka-yoke reason inline (`.disabled-reason`); the engaged state shows a live rateHz/latency chip pair, the channel map, and a big `.btn.danger` **RELEASE** (text-labeled, never icon-only); `denied` shows the server's own human `reason`; `released` distinguishes a watchdog trip (`vision-notice variant="warn"`, "input stalled") from an explicit release. Mounted only while the drawer is open (`@if (isPanelOpen('rc'))`), so both the Gamepad rAF loop and any live relay session end the instant it closes. WebHID/raw-report fidelity, the real `RC_CHANNELS_OVERRIDE` MAVLink send, and Phase 2 (a real airframe) are out of this module's scope — see `adapters/adapter-mavlink/MODULE.md`/`vision-application/MODULE.md`/`vision-api/MODULE.md` for R1-R4.
 - **`core/ui/ui-store.ts#UiStore`** (docs/UI-ARCHITECTURE-PLAN.md) — the canonical mutually-exclusive-overlay coordinator, generalizing `PanelState` (below) to *every* overlay group, not just drawers: within one instance, opening any overlay closes the others (`active`/`isOpen`/`open`/`close(id?)`/`toggle`; optional `storageKey` for persistent groups, omit for transient confirms/editors). Scoped per group — a feature provides one per independent overlay set (a persisted tool-rail group + a transient dialog group). This is what makes overlay state consistent *by construction*. Consumers so far: `flight-command-panel` (3 confirms), `fly` (tool-rail + stop-confirm), `command` (zones), `asset-detail` (4 editors). **API-compatible with `PanelState`** — `PanelState` is the predecessor and is being retired in favour of `UiStore` as each host migrates.
 - **`core/panel-state.ts` additions**: `readPersistedString(key, fallback: string|null): string|null` / `writePersistedString(key, value: string|null)` — the string-valued sibling of the pre-existing `readPersistedFlag`/`writePersistedFlag` (untouched, same file); writing `null` removes the key outright rather than persisting the literal text `"null"`. **`PanelState`** — one-open-at-a-time drawer manager: `active: Signal<string|null>`, `isOpen(id)`, `open(id)` (closes any other), `close()`, `toggle(id)`; an optional constructor `storageKey` round-trips `active` through the two functions above. **Deliberately a plain class, not `@Injectable()`** — see the Status entry for why the frozen "constructed with an optional storageKey" contract doesn't fit Angular constructor-DI cleanly; a host owns one instance directly (`new PanelState('vision.fly.activePanel')`), which is "provided per host" in the sense that matters and fully unit-testable with no `TestBed`. Not consumed by any page yet — Wave 2 (Fly's tool-rail) and Wave 3 (asset-detail's drill-ins) are the intended first hosts.
 
@@ -475,6 +478,126 @@ to `ToolRailPanelId`. **Key hardware constraint driving the whole plan:** EdgeTX
 and the radio's RF are mutually exclusive, so joystick-feeding the platform means the platform is the
 *sole* control path (Topology A) — full analysis, the drone-side receiver-failsafe gotcha, and the
 SITL-first phasing are in docs/RC-CONTROL-PLAN.md.
+
+## Status — RC-CONTROL Phase 1, R5: Take control + WS relay client + deadman (docs/RC-CONTROL-PHASE1-PLAN.md) — 2026-07-31
+
+Green: `npm run test:ci` = 88 files / 1416 tests total (+56 new: 24 `manual-control-logic.spec.ts` +
+14 `manual-control-client.spec.ts` + 11 `rc-monitor-logic.spec.ts` + 7 `rc-monitor.spec.ts`); `npx tsc
+--noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`; `ng build --configuration
+production` clean. **Bundle delta** (isolated via a `git worktree add
+--detach` baseline at the pre-this-session commit, not just read off one build): initial bundle
+**unchanged** (364.64 kB raw / 104.26 kB transfer — everything this wave adds is reachable only from
+the `fly` lazy chunk, nothing eager/`providedIn:'root'`); **`fly` chunk 74.26 kB → 83.67 kB raw
+(+9.41 kB), 17.06 kB → 19.17 kB transfer (+2.11 kB)** — `manual-control-client.ts`/`manual-control-logic.ts`
++ the expanded `rc-monitor.ts`/`.html`/`.css` + `rc-monitor-logic.ts`.
+
+Built the R5 wave of docs/RC-CONTROL-PHASE1-PLAN.md — the web half of the SITL RC relay, coded
+against the plan's frozen §4 WebSocket contract while R4 (the backend half, same contract) landed in
+parallel in the same working tree. See the permanent `core/rc/**` reference above for the full
+`ManualControlClient`/`rc-monitor.ts` writeup; this entry is the changelog.
+
+- **`core/api/models.ts`** gained the §4 frame shapes (`ManualControlChannelBinding`,
+  `ManualControlEngageMessage`/`ChannelsMessage`/`ReleaseMessage` client→server,
+  `ManualControlEngagedMessage`/`DeniedMessage`/`AckMessage`/`ReleasedMessage`/`WatchdogMessage`
+  server→client) — mirrored here 1:1 per this file's own "the wire contract" convention, exactly
+  like `LiveConnected`/`LiveEnvelope` (raw `EventSource` frames) already established; these arrive
+  over a raw `WebSocket`, never `HttpClient`.
+- **`core/rc/manual-control-logic.ts`/`.spec.ts`** (new) — pure frame/latency/rate math, see the
+  reference bullet above.
+- **`core/rc/manual-control-client.ts`/`.spec.ts`** (new) — `ManualControlClient`, the WS relay
+  service. The spec drives a hand-written `MockWebSocket` test double (this suite's first WS mock,
+  mirrors `PollScheduler.spec.ts`'s "first use of fake timers" precedent) through every frame type,
+  the send-loop cadence (`vi.useFakeTimers()`), and all five deadman triggers — including one that
+  builds `ManualControlClient` inside its own **child `EnvironmentInjector`**
+  (`createEnvironmentInjector`) rather than registering it on `TestBed`'s root testing module, so the
+  "destroying the client" test can destroy exactly that child injector (simulating the RC panel
+  unmounting) without tearing down `TestBed`'s own root injector out from under the harness's
+  automatic per-test teardown — the first spec in this app to exercise `DestroyRef.onDestroy` this
+  way; worth reusing this pattern if a future spec needs to test another provider's teardown path.
+- **`features/fly/rc-monitor-logic.ts`/`.spec.ts`** (new) — `engageDisabledReason`/`latencyLabel`/
+  `channelBindingLabel`, mirrors `flight-command-panel-logic.ts`'s own component-adjacent split.
+- **`features/fly/rc-monitor.ts`** — split from one inline-template component into
+  `rc-monitor.ts`/`.html`/`.css` (the Phase-0 file was small enough to stay inline; R5's Take-control
+  section roughly doubled it, past this app's own informal threshold for when a component earns
+  separate template/style files — matches `flight-command-panel`'s shape). Gained `assetId`/
+  `assetDisplayName`/`canCommand` inputs and the `providers` array's second entry
+  (`ManualControlClient`, alongside the pre-existing `RcInputService`). The Phase-0 monitor markup
+  (axes bars, switch pills) is byte-for-byte unchanged; the new "Take control" `<div class="rc-engage">`
+  is a **sibling** of the connected/not-connected branch, not nested inside it — deliberately, so a
+  mid-session gamepad disconnect (which flips that branch back to "not connected") doesn't also hide
+  an in-progress watchdog/released notice the operator still needs to see.
+- **`features/fly/rc-monitor.spec.ts`** (new, component-level — this wave's own explicit ask, an
+  exception to this app's usual "pure-logic-only" component-spec precedent) — overrides
+  `RcMonitor`'s `providers` array (`TestBed.overrideComponent(..., { set: { providers: […] } })`,
+  the first use of that API in this suite) with duck-typed `FakeRcInputService`/
+  `FakeManualControlClient` doubles exposing writable signals, then asserts the gated button/reason,
+  the engaged state's rateHz/latency chips + channel map + RELEASE control, the denied reason text,
+  and the watchdog-vs-explicit-release distinction in `released`.
+- **`features/fly/fly.html`** — `<vision-rc-monitor>`'s mount gained the three new input bindings
+  (`[assetId]="a.assetId"`, `[assetDisplayName]="a.displayName"`, `[canCommand]="facade.canShowCommands()"`),
+  same `a`/`facade` already in scope for `<vision-flight-command-panel>` right above it.
+
+**Design/dataviz choices**: no new chart — the latency/rate readouts follow the Phase-0 monitor's own
+existing idiom (`.chip`/`.chip.ok`, `font-variant-numeric: tabular-nums` baked into `.chip` itself),
+not `<vision-stat>` (that component's own doc comment reserves it for headline KPIs, explicitly
+*not* small fast-ticking OSD-style numerals like a live latency readout). No new icon — reused
+`gamepad` (already the drawer's own header icon) rather than touching the frozen `IconName` set/spec.
+
+**Design decision — a toggle "Take control"/"RELEASE", not a press-and-hold "Hold to fly" deadman**:
+the plan named hold-to-fly as the safer option "if feasible". Judged **not feasible here**: flying
+via the physical transmitter needs both hands on its sticks, so a pointer-held browser button would
+either need a third hand or force the operator to let go of a stick to keep the relay alive — exactly
+backwards from what a deadman should encourage. The toggle is safe *because* of the many independent
+deadman triggers already covering the "operator stopped paying attention" case (panel close, tab
+hidden, gamepad disconnect, socket drop, server watchdog) — RELEASE itself stays a big, always-visible,
+text-labeled `.btn.danger.big` while engaged, per the plan's own fallback requirement for the toggle
+option.
+
+**Degrade/error handling**: a malformed/unrecognized server frame is defensively dropped
+(`parseManualControlServerMessage` → `undefined`), never thrown — a single bad frame can't tear down
+the relay session. A capabilities/asset-load failure upstream (`FlyFacade.canShowCommands()` already
+degrading to `false` on any capability-fetch error) simply disables Take-control with its own inline
+reason — never a dead button, never a fabricated "commandable" state.
+
+**Role-gating**: none beyond `canCommand` — the plan's frozen §4 auth model is a same-origin session
+cookie the WS handshake rides automatically (`ManualControlHandshakeInterceptor`, vision-api, R4),
+identical to every other call in this app; there is no separate role check to encode client-side, the
+server's own scope/commandability gate is authoritative (`OUT_OF_SCOPE`/`NOT_COMMANDABLE`/
+`UNSUPPORTED` `denied` codes).
+
+**Dev parity (`vision.auth.enabled=false`)**: unaffected — the WS handshake resolves the same
+unbounded dev principal every REST call already does (R4's own doc comments confirm this explicitly),
+so nothing in this wave needed a dev-parity branch.
+
+**Mismatch found vs. the frozen §4 doc, reconciled against R4's actual landed code (not just the
+doc)**: the plan's own written contract lists exactly four `denied.code` values
+(`OUT_OF_SCOPE`/`NOT_COMMANDABLE`/`UNSUPPORTED`/`ALREADY_ENGAGED`); R4's actual
+`ManualControlWebSocketHandler` also sends `denied` with three handler-defensive codes
+(`MALFORMED`/`UNKNOWN_TYPE`/`BAD_REQUEST`) for a frame it couldn't parse/route at all — its own
+javadoc calls this out explicitly ("deliberately a plain string, not a closed enum on the wire").
+This client's first cut validated `denied.code` against the closed four-value set, which would have
+silently **dropped** those three frames (never surfacing `reason` at all) — found by reading R4's
+actual landed DTOs/handler before finalizing this report, not just the plan doc, and fixed:
+`ManualControlDeniedCode` widened to `string` (`models.ts`), `manual-control-logic.ts#isDenied` now
+only checks that `code`/`reason` are both present strings. Every other frame shape/field name
+(`ManualControlEngagedFrame`/`AckFrame`/`ReleasedFrame`/`WatchdogFrame`/`ChannelsRequest`, the
+`/ws/manual-control` path, same-origin session-cookie auth) matched this client's own first-cut
+implementation exactly — no other reconciliation needed. One documented rough edge on R4's side worth
+knowing: `engaged.rateHz` is a fixed constant on the backend (`ManualControlEngagedFrame.DEFAULT_RATE_HZ`
+= 33), not read live from the adapter's own `VISION_RC_OVERRIDE_HZ` env knob — this client already
+throttles its own send loop to whatever `rateHz` the `engaged` frame actually says (`sendIntervalMs`),
+so it is correct either way, just worth knowing the number won't move if that env knob is ever tuned
+without also touching vision-api's own constant.
+
+**Incomplete / left for the SITL verification step (this plan's own explicit "user-run, not CI"
+section)**: no live SITL run happened in this task (no SITL instance, no RC transmitter in this
+environment) — everything above is verified against R4's actual landed backend code (reconciling the
+wire shapes) plus this app's own mocked-WebSocket test suite, not a live end-to-end session. The
+plan's own §5 default channel map (ch1-4 axes Roll/Pitch/Throttle/Yaw, ch5-8 buttons Aux 1-4) is
+rendered verbatim from whatever `channelMap` the `engaged` frame carries (this client invents nothing
+client-side), so it will display correctly against R4 as landed, but the actual latency/watchdog
+numbers, the "does the copter track the sticks" question, and the audit-trail verification are all
+still the human's own SITL step per the plan.
 
 ## Status — design-token consolidation + repeatable-element components (docs/STYLE-TOKENS-PLAN.md) — 2026-07-30
 
