@@ -95,6 +95,7 @@ The app's default landing page and the operator persona's one job: *flies ONE dr
   - **Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W, new)** — `<vision-weather-chip>` inside `<vision-fly-osd>`'s own chip bar (that component injects `WeatherStore` from `FlyPage`'s `providers` directly, same DI-sharing idiom as `TelemetryStore`), centered on the flown asset's own live-telemetry fix (falling back to `AssetDetails.lastKnownPosition` before one arrives) with `windLimitMps` read from `AssetDetails.attributes['windLimitMps']` — see `core/weather/**`'s own section above.
   - **CV control panel (docs/CV-CONTROL-PLAN.md Wave E, new)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, detection on/off. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up.
   - **Marks — the shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5, new)** — `[marks]="marks.marks()"`/`[selectedMarkId]="marks.selectedMarkId()"`/`(markSelected)`/`(markMoved)`/`(mapClicked)` wired straight to `FlyFacade.marks` (a public `inject(MarksStore)`, mirroring `geofence` above) on the cockpit's own `<vision-live-map>`. A new `marks` tool-rail drawer (`<vision-marks-panel>`, `features/fly/marks-panel.ts`/`.html`/`.css`, a `target` icon) — a non-routed presentational child injecting `MarksStore` directly (`architecture.spec.ts`'s own carve-out, mirrors `flight-command-panel.ts` injecting `VisionApi` directly): a one-tap **Mark target** button (`marksStore.geolocate(assetId)` — projects a `DETECTION`-sourced pin from the drone's own live telemetry, an honest estimate the panel's own notice states plainly, draggable to correct), a kind-picker → click-the-map → label/note confirm flow for a `MANUAL` pin, the active-marks list (select/**Edit**/Clear/Delete per row — Edit reopens the same kind-picker+label+note shape inline for `annotate(id, edit)`; all three actions shown for every mark, the backend gates annotate/clear/delete alike to creator-or-manager and 403s otherwise, surfaced as a friendly toast rather than a hard-hidden control, docs/TACTICAL-MARKS-PLAN.md's own Roles section), and the selected mark's bearing/distance readout from the drone (`FlyFacade.dronePosition`, an alias of the existing `weatherPosition` computed — no "from home" readout, no home/launch position is modeled anywhere in this app's telemetry). See `core/marks/**`'s own section below for the store/logic.
+  - **Tool-rail grouped by job (docs/UX-SIMPLIFY-REVIEW.md F4, new)** — the right-edge `.grid-rail` had grown to 7 glyph-only drawers (flight · rc · cv · detections · marks · layers · help), past the "glance and know" limit the finding names. Purely visual: every drawer/id/gate/shortcut is unchanged, only where each button sits changed. `fly.html`/`fly.css` now wrap the rail buttons in four `.rail-group`s (each `role="group" aria-label="…"` for assistive tech) separated by a thin `.rail-divider` (`--hairline`, the same token `.secondary-tile`'s own border already uses — a HUD-appropriate seam, not new chrome): **Control** (flight, rc), **Vision** (cv, detections, layers — reordered from the old flight·cv·detections·layers·help left-to-right list so Layers sits with the rest of what governs how the video renders), **Situational** (marks), and **Help** pinned to the rail's bottom via `.rail-group-help{margin-top:auto}` (a column-flex item consuming the remaining space above it) — reference material, deliberately separated from the flying tools above it. No group gets a text label: at the rail's ~2.25rem button width a word like "Situational" doesn't read clean (the finding's own fallback: "if it crowds, use just the divider"). No "more"/overflow affordance either — the finding explicitly rules that out on a safety-of-flight screen; all 7 buttons stay always-visible, gated exactly as before (`canShowCommands()`/`!watchMode()`/`live()`/always). `ToolRailPanelId` (`fly-logic.ts`) is unchanged; its own doc comment now notes the union's declaration order no longer matches the rail's visual order.
 
 ### `src/app/features/command/**` — `/command`, the manager's map-first dashboard (docs/UX-REWORK-PLAN.md §U-c)
 
@@ -187,7 +188,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
 
 ### `src/app/features/devices/**` — the raw device table/grid (docs/CYCLES-PLAN.md §4, §8, §9, §11; split from Assets — see this file's own Assets/Devices/Warehouse restructure Status entry near the end for the full rationale/history)
 
-`/devices` — search, lifecycle actions, the archived toggle, and the register/discover/simulate-adjacent "+ Add source"/"Promote to asset…" flows. **No longer renders assets at all** — the asset-first list this page used to also carry (CD-b's "Assets" surface) moved wholesale to `features/assets/**` below; this page is what's left, no longer collapsed behind an "Advanced" disclosure (there's nothing else on the page to demote it beneath any more — it *is* the page).
+`/devices` — search, lifecycle actions, the archived toggle, and the register/discover/simulate-adjacent "+ Add source"/"Promote to asset…" flows. **No longer renders assets at all** — the asset-first list this page used to also carry (CD-b's "Assets" surface) moved wholesale to `features/assets/**` below; this page is what's left, no longer collapsed behind an "Advanced" disclosure (there's nothing else on the page to demote it beneath any more — it *is* the page). **Off the primary Manage nav as of docs/UX-SIMPLIFY-REVIEW.md F2** — `features/hubs/nav-entries.ts`'s `Devices` entry now carries `group: 'advanced'`/`managerOnly: true` (ADMIN/MANAGER only, one section down on `/manage`), but this page itself, its route, and every capability below are completely unchanged — see the dated Status entry near the bottom of this file for the full nav rationale.
 
 - `devices-page-logic.ts` (renamed from `warehouse-logic.ts` per vision-web/docs/UI-STRUCTURE-PLAN.md §3, B1) — pure, Angular-free logic behind the Devices page's own view models, unit-tested. The **generic** lifecycle-action-menu state machine and edit-request builders live in `core/fleet/warehouse-logic.ts` (docs/CYCLES-PLAN.md §11, CD-b — the asset detail page needs them too), re-exported here for this page's own import sites. What's left, specific to this page's rendering:
   - `mapDeviceOwners(assets: AssetDetails[])` — deviceId → owning asset, generalizing `simulate-logic.ts#mapSimulatedDevices` from just the `simulated` category to every asset the page loads (ownership isn't on `Device` itself).
@@ -209,7 +210,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
 
 ### `src/app/features/assets/**` — the asset-first grid: search, filter, cards (new this cycle — split out of the old combined Devices page)
 
-`/assets` — one card per **asset**, search by name, filter by category/lifecycle/streaming, watch/open/archive. A sibling route of `features/asset-detail/**`'s `assets/:assetId` (distinct path-segment count, no ambiguity).
+`/assets` — one card per **asset**, search by name, filter by category/lifecycle/streaming, watch/open/archive. A sibling route of `features/asset-detail/**`'s `assets/:assetId` (distinct path-segment count, no ambiguity). **The one home for "what I own/fly" (docs/UX-SIMPLIFY-REVIEW.md F2)** — Warehouse (below) is deleted and `/devices` demoted off the primary Manage nav, leaving Assets as the single, ungated, always-visible Manage entry for inventory; see the dated Status entry near the bottom of this file for the full before/after.
 
 - **`assets-logic.ts` + `.spec.ts`** (pure, Angular-free, moved from `features/devices/devices-page-logic.ts` — this is now the **only** consumer, so it stayed feature-local rather than moving to `core/`, mirroring that file's own precedent for a single-consumer split): `AssetListRow`/`buildAssetListRows(assets, liveDeviceIds)` (deviceCount/streaming/watchDeviceId, `lifecycle`/`archived` defaulting a missing `AssetSummary#lifecycle` to `'ACTIVE'`), `filterAssetListRowsByArchived`, `filterAssetListRowsByCategory` (the `?category=` deep-link filter, docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — unchanged behavior, now also the value the category `<select>` reads/writes), plus two **new** filters — `filterAssetListRowsByStatus(rows, 'all'|'active'|'deactivated')` (deliberately excludes `DELETED` either way; that's the separate "show archived" toggle's job) and `filterAssetListRowsByStreaming(rows, 'all'|'streaming'|'offline')` — and `searchAssetListRowsByName(rows, query)` (case-insensitive substring on `displayName`). The old CW-b-era `AssetRow`/`buildAssetRows`/`filterAssetRowsByArchived` (a dead leftover type the old file kept only for its own spec coverage — never rendered) were dropped outright during the move, not carried forward.
 - **`assets.ts`/`.html`/`.css` — `AssetsPage`.** Every asset action from the old combined page's "Assets" section carried over **byte-for-byte**: Watch (`watchAsset`, hidden when the asset has no VIDEO-capable device) → `/live/:deviceId`; Open (`openAsset`) → `/assets/:assetId`; Archive (`archiveAssetNow`, immediate + `UndoToastService` toast naming the `AssetDeletionResponse` counts, no confirm dialog — docs/UX-REWORK-PLAN.md §U-a2 item 3b) and its own `undoArchiveAsset` cascade-restore; Restore (`restoreAssetNow`) for an archived asset shown via "Show archived". The empty-state "Add the simulated source" quick-add (`registerSimulator`) moved here too — it belongs with "browse assets", not "browse devices". **New this cycle**:
@@ -219,9 +220,9 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
   - **Dropped CDK virtual scroll** (deliberate trade-off, documented not silently lost): the old asset-first list used `@angular/cdk/scrolling` for `O(visible rows)` rendering toward a "thousands of assets" posture (docs/CYCLES-PLAN.md §11 item 4). A responsive multi-column card grid needs viewport-aware/autosize virtual scroll to do the same, which this cycle's scope (search/filter/grid split) didn't take on — `assetRows()` renders via a plain `@for` now, `O(total filtered rows)`. The underlying *fetch* (`refreshAssets()`, one `getAsset()` per asset) was already `O(total assets)` even before this cycle (the list's own documented ceiling), so this trade-off narrows an already-partial scalability guarantee rather than removing a whole-page one; revisiting virtualization for the grid is a named follow-up, not solved here.
   - **`?category=<slug>`** (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's readiness-tile drill-down target, unchanged mechanism, moved from `/devices?category=` to `/assets?category=`) seeds the category filter reactively (an `effect`, so a second drill-down click while already on this page still re-narrows).
 
-### `src/app/features/warehouse/**` — the two-tile launcher (new this cycle)
+### `src/app/features/warehouse/**` — **deleted** (docs/UX-SIMPLIFY-REVIEW.md F2, 2026-08-01)
 
-`/warehouse` — used to be a plain alias onto the combined Devices/Warehouse page (docs/UX-REWORK-PLAN.md §U-d's rename); now that Assets and Devices are separate pages, Warehouse earns its own identity as the door between them. `warehouse.ts` (`WarehousePage`, inline template, no separate `.html`/`.css` — small enough) renders exactly two `vision-nav-tile`s in a `vision-tile-grid` (mirrors `features/hubs/**`'s own "thin page over a small tile list" shape without being a fourth `NAV_MODES` hub): **People** (icon `pilot`) → `/manage/roster` (the existing `ComingSoon` scaffold — no dedicated roster page exists yet; deliberately the same target as the Manage hub's own "Pilots / roster" tile, mirroring `Map`/`Command dashboard` both resolving to `/command` in `nav-entries.ts`) and **Assets** (icon `drone`) → `/assets`. Tile accents reuse `features/hubs/tile-accent.ts`'s cool-arc palette (import only, not modified) for visual consistency with the three real hubs. `warehouse.spec.ts` mirrors `features/hubs/hub-pages.spec.ts`'s own "every tile has a real, non-`#` href" check.
+Used to be the two-tile launcher between People (`/manage/roster`) and Assets (`/assets`) — see git history for that page's own writeup. Both destinations were already reachable directly from the Manage hub, so this page was a third door to a concept ("where are my cameras / who flies them") that already had two; deleted outright, not just unrouted. `warehouse.ts`/`warehouse.spec.ts` are gone; `warehouse.routes.ts` is the only file left in this folder, now holding a single `{path:'warehouse', redirectTo:'assets', pathMatch:'full'}` entry (mirrors `features/map/map.routes.ts`'s own "folds into X" redirect precedent) so an old bookmark/deep link still lands somewhere real. See the dated Status entry near the bottom of this file for the full nav-simplification writeup.
 
 ### `src/app/features/onboarding/**` — the add-a-source wizard (docs/UX-REWORK-PLAN.md §U-d; drone onboarding docs/DRONE-INFRA-PLAN.md I-g; SRT/UDP ingest I-h)
 
@@ -484,6 +485,12 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **`shared/ui/events-rail.css`'s `.event-meta`/`.event-time` flex row let a long, unbreakable device/asset name (e.g. `X2Twitter.com_hzTcxvzE2-narxmk_720p`, a real simulated-source filename) overflow past its own box and visually overlap `.event-time`/`.event-affordance` at Wall's 300px sidebar (`wall.css`).** Root cause: neither the name nor its containing elements had `min-width: 0` (a flex item's default `min-width: auto` is its content's own minimum size — for an unbreakable token, that's its full rendered width) or any `overflow`/`text-overflow` handling, so the text simply rendered past its box rather than shrinking or wrapping. **Fixed**: the row is now two lines — an unshrinkable top line (state chip, label, time, action; all `flex: none` except `.event-label`, which truncates with ellipsis rather than overflowing if a long relative-time string squeezes it) and a full-width `.event-meta` line below for the source name + confidence, so the name gets the *entire* row's width to truncate against instead of whatever `.event-row-top` has left over (confirmed live: at Wall's 300px sidebar the name previously had ~5px available — invisible — vs. ~225px now, comfortably legible before needing to ellipsize). `.event-source` truncates with `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` and carries the full name in a `title` attribute; `.event-confidence` stays `flex: none` so the `%` is never the part that gives way. Verified via CDP screenshots at both Wall's 300px sidebar (name truncates, e.g. `X2Twitter.com_hzTcxvzE2-narxmk…`) and Command's full-width embed (name renders in full) — no overlap at either.
 - **Pre-existing, out-of-scope: `shared/map/fleet-map.ts`'s own layer switcher (`.controls.layers`, `top:0.5rem;left:0.5rem`) overlaps Leaflet's own default zoom control (also `topleft` — `L.map(...)` is constructed with no `zoomControl: false` option, `fleet-map.ts`'s own `initMap()`), confirmed live via a docs/UX-REWORK-PLAN.md §U-c verification screenshot of the new full-bleed Command map** (the "Standard" layer button's own left portion renders behind the zoom control's opaque `+`/`−` box). **Confirmed pre-existing, not a regression from this cycle**: `git diff` against `shared/map/**` for this task is empty — this component was read, not modified (out of this task's own file scope: "don't rework fleet-map/live-map themselves") — so this exact collision already existed on the old `/map` page and the old Command dashboard's own embedded map section, unchanged by anything here. Flagged for whoever next touches `shared/map/fleet-map.ts`: either add `zoomControl: false` and a custom-positioned zoom control that respects `.controls.layers`' own corner, or move one of the two controls to a different corner (`L.control.zoom({position: 'topright'})` collides with the Recenter control's own `top:0.5rem;right:0.5rem` instead — whichever corner is chosen needs auditing against *all three* corner occupants, not just two).
 - **Doc-comment staleness flagged by an earlier cycle — fixed by the infra+cleanup batch, 2026-07-24.** `shared/map/live-dock.ts` (the file whose own doc comment carried the worst of this staleness — "each host page (`MapPage`, and now `CommandPage`, …) guarantees at most one is ever rendered") is now **deleted outright** (see the `/map` fleet overview section above), so that particular comment is simply gone rather than fixed in place. `shared/map/fleet-map.ts`'s own doc comment ("`MapPage` resolves a clicked marker's `watch` output…", "activated/released here — `MapPage` owns that lifecycle") and `core/map/map-store.ts`'s own doc comment (naming `MapPage` as a co-consumer) were rewritten to name `CommandPage` as the sole current host and, for the events lifecycle, `shared/ui/notification-bell.ts` as the actual owner. `core/events/events-store.ts`'s own doc comment — the most substantively stale of the four, since it described "O(visible) discipline" as this store's defining trait when `shared/ui/notification-bell.ts`'s permanent `activate()` had already superseded it — was rewritten to describe the current always-on-in-practice reality directly (see the Detection events section's own "Update, docs/UX-REWORK-PLAN.md §U-c" paragraph above). Left here as a worked example of the failure mode, not because it recurs: a doc comment describing *why* a design choice was made ages fine; a doc comment asserting *who else does this today* silently rots the moment that "who" changes, with no compiler to catch it.
+
+## Status — Fly cockpit tool-rail grouping, F4 (docs/UX-SIMPLIFY-REVIEW.md) — 2026-08-01
+
+Green: `npm run test:ci` = 95 files / 1535 tests; `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`; `ng build --configuration production` green. Bundle delta (prod build, before → after, measured via a local `git stash`/`stash pop` around the build — a pure CSS/markup change with no shared-module edits, so a stashed-tree baseline carries none of the M5 entry's own shared-tree-concurrency risk): initial (main) chunk 367.16 kB → 367.16 kB raw (unchanged) / 104.71 kB → 104.72 kB transfer (+0.01 kB, rounding); `fly` lazy chunk 96.07 kB → 96.67 kB raw (+0.60 kB) / 21.25 kB → 21.34 kB transfer (+0.09 kB). Every other chunk unchanged — the edit is scoped to `features/fly/**` alone.
+
+F4 of docs/UX-SIMPLIFY-REVIEW.md: the cockpit's right-edge tool-rail had grown to 7 glyph-only drawers, past "glance and know". **Visual grouping only** — every drawer, its `ToolRailPanelId`, its capability gate, and its behavior (open/close, `Esc` cascade, keyboard shortcuts) are byte-for-byte unchanged; only the rail's layout changed. See the Fly section's own "Tool-rail grouped by job" bullet above for the shipped grouping (Control/Vision/Situational/Help, dividers not text labels, Help pinned to the bottom via `margin-top:auto`) and the full rationale. **Files**: `features/fly/fly.html` (rail buttons wrapped in `.rail-group`s), `features/fly/fly.css` (`.rail-group`/`.rail-group-help`/`.rail-divider` rules, `.grid-rail`'s own gap token), `features/fly/fly-logic.ts` (doc-comment-only: `ToolRailPanelId`'s own comment no longer claims its declaration order is the rail's visual order). No `.spec.ts` changes — no pure logic was added (a divider/grouping is markup+CSS, not a new decision function) and this app's own convention is pure-logic vitest over component specs, of which this page has none to update.
 
 ## Status — tactical marks, M5 web (docs/TACTICAL-MARKS-PLAN.md) — 2026-08-01
 
@@ -4239,3 +4246,192 @@ Edited (minimal wiring only, per this task's own hard constraints): `core/api/mo
 `features/hubs/nav-entries.ts` (one new `NavEntry` under `manage`, icon `target` — reuses an
 existing `IconName`, no `icon-registry.ts` edit), `core/ui/architecture.spec.ts` (three
 `ROUTED_PAGES` entries), and this file.
+
+## Nav simplification — de-duplicated nav, Assets/Devices/Warehouse collapsed to one home, role-scoped Manage (docs/UX-SIMPLIFY-REVIEW.md F1/F2/F3) — 2026-08-01
+
+Implements the review's three lowest-risk-to-highest-impact findings in one pass: F1 (duplicate nav
+destinations), F3 (Manage hub grouping/role-scoping), and F2 (the Assets/Devices/Warehouse three-doors
+collapse) — done together rather than as three separate cycles since all three land in the same file
+(`features/hubs/nav-entries.ts`) and each other's specs. **Scope, per the task's own hard fence**:
+`features/hubs/**`, `app/app.routes.ts` (read, not edited — see below), `features/warehouse/**`
+(deletion), `features/assets/assets.ts` (one doc-comment fix, no behavior change), and the specs that
+reference these (`app.routes.spec.ts`, `hub-pages.spec.ts`, `nav-entries.spec.ts`). `features/fly/**`,
+`features/command/**`, `features/devices/**`, and every shared marks file untouched — F4 (the cockpit
+tool-rail regrouping) is a separate, later wave.
+
+### F1 — one canonical `NavEntry` per destination
+
+Before: `/command` linked 3× (Operate's "Geofence & safety zones", Monitor's "Map", Monitor's "Command
+dashboard"), `/wall` 2× (Operate's "Live view", Monitor's "Wall"), `/fly` 2× (Operate's "Cockpit",
+Operate's "Vision" — the CV console has always lived inline on the cockpit, so "Vision" was never a
+different page). Fixed by keeping each destination's single most-primary hub and deleting the rest —
+**no feature lost**, only the extra doors: **Cockpit** (`/fly`) and **Wall** (`/wall`, renamed from
+Operate's old "Live view" — `grid` icon reused from the deleted Monitor "Wall" entry, description
+merged from both) stay under **Operate**; **Command** (`/command`, one merged entry named "Command",
+`gauge` icon, description merged from the old "Map"/"Command dashboard" pair) moves to **Monitor**
+only. Operate's old "Geofence & safety zones" tile is gone outright — geofence/safety-zone editing is
+the Zones panel *inside* the Command page itself (`features/command/zones-panel.ts`, untouched), not a
+second door to the same URL; it's still one click away, via Monitor → Command.
+
+`nav-entries.spec.ts` gained a standing regression guard for this finding specifically (not just the
+three routes it happened to name): `'F1 — no destination (to) is linked from more than one NavEntry
+anywhere in NAV_MODES'` walks every entry across all three modes and fails if any `to` repeats.
+
+### F3 — Manage hub: grouped + role-scoped
+
+Two new optional `NavEntry` fields (`nav-entries.ts`): **`group`** (`'configuration'`|`'diagnostics'`|
+`'advanced'`, omitted = "everyday, ungrouped") and **`managerOnly`** (hidden unless
+`canManageOrg(topRole)` — `core/org/org-logic.ts`, ADMIN/MANAGER — the *exact* gate
+`shared/ui/identity-chip.ts`'s Organization link and `core/org/org-guard.ts`'s route guard already use;
+no new role system invented). Manage's 10 entries now split:
+
+- **Everyday, ungrouped, ungated** (every authenticated role): Assets, Add source. **Pilots / roster**
+  sits alongside them (no `group`) but *is* `managerOnly` — its own route (`ROSTER_ROUTES`) is already
+  `orgGuard`-gated, so hiding the tile for a pilot matches where a click would land anyway, not a new
+  restriction.
+- **Configuration** (`managerOnly`, "set up once, not every day"): Asset categories, CV training,
+  Firmware, Inventory reports.
+- **Diagnostics** (`managerOnly`, "troubleshooting, not day-to-day management"): Maintenance/health,
+  and a **new** `Debug` entry (`/debug`, `gear` icon — reuses an existing, previously-unused
+  `IconName`; no `icon-registry.ts` edit) — `DebugPage`'s raw API console had no nav entry at all
+  before this task, reachable only by typing the URL.
+- **Advanced** (`managerOnly`, F2's Devices demotion — see below): Devices.
+
+`manage-hub.ts` (the only one of the three hub pages that now does more than "flat `NAV_MODES` filter
++ one `vision-tile-grid`") injects `AuthStore` directly and computes `canManageOrg`, mirroring
+`shared/ui/identity-chip.ts`'s own precedent for a small, non-facaded presentational component reading
+the session for a role check — not a `ROUTED_PAGES`/architecture-guard violation, since none of the
+three hub pages are in that list (same carve-out the old `warehouse.ts` had: "a static tile list with
+no store/derived state… no facade"). Four `computed()`s (`core`/`configuration`/`diagnostics`/
+`advanced`) filter `mode.entries` by `managerOnly`+`group`; each non-empty group renders as its own
+`vision-section-header` + `vision-tile-grid` (both pre-existing Wave-0 primitives, reused as-is — no
+new shared component). Tile accent is keyed off the entry's own fixed index in `mode.entries`
+(`accentFor`), not a per-group-local counter, so a tile's color stays stable regardless of which
+section it renders in.
+
+**Net effect**: a plain PILOT's `/manage` now renders exactly **2** tiles (Assets, Add source) — F3's
+own "an operator's Manage hub should be nearly empty" — instead of the old flat wall of 10. An
+ADMIN/MANAGER still sees all 10, now grouped into three labelled sections instead of one undifferentiated
+grid.
+
+**Known gap, flagged not fixed (out of this task's own file scope):** the app-shell top bar's own
+Manage dropdown (`app.ts`/`app.html`) reads `NAV_MODES` unfiltered and still lists every entry
+regardless of role — closing that needs touching `app.ts`/`app.html`, which the task brief
+deliberately excluded (nav de-duplication + hub restructuring only, not the shell). `manage-hub.ts`'s
+own class doc comment carries this same note for the next person who touches either file.
+
+### F2 — Assets/Devices/Warehouse collapsed to one home
+
+**Assets stays the one home** for "what I own/fly" (`/assets`, label unchanged — "Assets", not
+"Sources"/"Fleet") — it already listed everything the user watches/flies; nothing about the page
+itself changed, only what competed with it:
+
+- **Warehouse deleted outright.** `warehouse.ts`/`warehouse.spec.ts` removed; `warehouse.routes.ts`
+  (the only file left in `features/warehouse/**`) now holds one entry —
+  `{path:'warehouse', redirectTo:'assets', pathMatch:'full'}` — mirroring
+  `features/map/map.routes.ts`'s own "`/map` folds into Command" redirect precedent exactly, so an old
+  bookmark/deep link to `/warehouse` still lands somewhere real instead of the `**` catch-all, and any
+  query string survives the hop. **`app.routes.ts` needed no edit** — its existing
+  `import {WAREHOUSE_ROUTES} from './features/warehouse/warehouse.routes'` + spread already point at
+  this file; only what that export resolves to changed. `architecture.spec.ts#ROUTED_PAGES` needed no
+  edit either — Warehouse was never in that list (no facade, per its own prior "static tile list, no
+  ceremony" carve-out).
+- **Devices demoted off the primary Manage nav**, not deleted — `/devices` (`DevicesPage`, its facade,
+  every lifecycle action) is completely untouched; only its `NavEntry` moved into F3's `advanced`
+  group, `managerOnly`. Device-level plumbing (protocol/URI/firmware) already lives inside each asset's
+  own Hardware section (`features/asset-detail/**`, unchanged) — that was already true before this
+  task, this only stops `/devices` from also being a top-level Manage peer.
+- **Add source** stays exactly as it was: one clear "+ Add source" button on the Assets home
+  (`assets.html`, pre-existing — no change needed) plus its own `/manage` tile and the `/add-source`
+  wizard, untouched.
+
+**One link repointed**: `assets.ts`'s own class doc comment referenced `features/warehouse/warehouse.ts`
+by path — updated (doc-comment only, zero behavior change) since that file no longer exists. **No
+other code linked to `/warehouse`** — grepped the whole `src/app` tree for the literal string after
+the delete; the only remaining hits are `core/fleet/warehouse-logic.ts` (an unrelated, pre-existing
+shared logic module that happens to share the word "warehouse" in its name — untouched, out of scope)
+and stale prose in `features/devices/**`'s own doc comments describing the *old* "Warehouse is a
+two-tile launcher" shape (out of this task's edit scope — `features/devices/**` isn't in the hard file
+fence — flagged here as a known, harmless staleness for whoever next touches that file).
+
+### Before/after nav entry count
+
+| Mode | Before | After | Change |
+|---|---|---|---|
+| Operate | 7 | 5 | −2 (Vision alias + Geofence/command-dup removed; Live view renamed Wall) |
+| Monitor | 7 | 5 | −2 (Wall dup removed; Map + Command dashboard merged into one Command) |
+| Manage | 10 | 10 (2 for a PILOT) | 0 nominal (Warehouse removed, Debug added); role-scoped for the first time |
+| **Total** | **24** | **20** (12 for a PILOT) | **−4 nominal, −12 as actually seen by an operator** |
+
+Every removed entry was a duplicate `to` (F1) or a launcher with no unique content of its own (F2) —
+zero pages, panels, or capabilities deleted; only doors.
+
+### Degrade / role-gate / dev-parity
+
+No new failure surface — this task only rearranges existing, already-tested navigation data and adds
+one pure `AuthStore`-read role filter, no new HTTP call. **Role-gate**: `ManageHub` reads
+`AuthStore.user()?.topRole` via `canManageOrg` exactly like `identity-chip.ts`/`org-guard.ts` already
+do; a `null`/loading session (not yet resolved) reads as `canManageOrg(undefined) === false`, so the
+grouped sections simply don't render until the real session resolves — never a flash of admin-only
+tiles for a still-loading pilot session, and never a broken page (worst case: a moment where only the
+two ungated tiles show, which then expand once `AuthStore.ready` settles — the same "resolve before
+deciding" posture `org-guard.ts`'s own doc comment already describes for the route guard). **Dev-parity**
+(`vision.auth.enabled=false`): the dev principal already resolves to ADMIN (`org-guard.ts`'s own
+documented mechanism, unchanged) — `canManageOrg` is `true`, so `ManageHub` renders its full grouped
+set exactly as before this task; nothing here reads `authEnabled` directly, and the redirect/route
+changes carry no role gate of their own (same as before — `/devices`/`/assets`/`/warehouse` were never
+route-guarded, and still aren't; only the *nav tile* for Devices is now role-hidden, not the route).
+
+### Tests
+
+New: `nav-entries.spec.ts` gained the F1 uniqueness guard, an F2 "no Warehouse entry anywhere" check,
+an F3 group-shape `describe` block (every `group` is one of the three frozen values, every grouped
+entry is also `managerOnly`, Assets/Add source are ungrouped+ungated, Devices is `advanced`+
+`managerOnly`), and a Monitor-specific "exactly one `/command` entry, no separate Wall entry" check.
+`hub-pages.spec.ts` split: the old single parametrized loop now covers only Operate/Monitor (unchanged
+shape); a new `describe('ManageHub — grouped, role-scoped', …)` block renders `ManageHub` with a real
+`AuthStore` + mocked `VisionApi.authMe()` (mirrors `identity-chip.spec.ts`'s own pattern) for PILOT/
+MANAGER/ADMIN, asserting the PILOT case renders exactly `['/assets', '/add-source']` with zero section
+headers, the ADMIN/MANAGER cases render every `NAV_MODES` manage entry across three labelled sections,
+and every tile at every role is a real non-empty href. `app.routes.spec.ts`'s warehouse assertion
+rewritten to check the route resolves as a `redirect` (not a `component`) specifically, not just that
+it resolves at all. Removed: `warehouse.spec.ts` (component deleted).
+
+**94 spec files / 1544 tests, all green** (`npm run test:ci`). `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, measured via a `git worktree add
+--detach` baseline at this branch's own last commit** (this shared tree carries a concurrent agent's
+own uncommitted, unrelated `features/fly/**` changes throughout this task — confirmed via `git status`,
+none touched by this task — so a same-tree diff would conflate the two, same precedent this file's own
+"Assets/Devices/Warehouse inventory restructure" and "CV-TRAINING-PLAN Wave T5" entries already
+established):
+
+- **Initial bundle: 367.16 kB → 366.96 kB raw (−0.20 kB) / 104.71 kB → 104.66 kB transfer (−0.05 kB)**
+  — a small net *decrease* (fewer `NavEntry` object literals eagerly referenced from `app.ts`'s `modes`).
+- **`warehouse` lazy chunk: 1.56 kB raw / 812 B transfer → gone** (page deleted).
+- **`manage-hub` lazy chunk: 1.34 kB → 3.65 kB raw (+2.31 kB) / 694 B → 1.17 kB transfer (+476 B)** —
+  the grouping/role-scoping logic (`AuthStore` inject, four `computed()`s, three extra
+  `vision-section-header`+`vision-tile-grid` template blocks).
+- **`operate-hub`/`monitor-hub` lazy chunks: byte-for-byte unchanged** (1.33 kB / 1.34 kB respectively)
+  — confirms F1's data-only changes cost nothing beyond the initial bundle's own small decrease.
+- **`assets` lazy chunk: byte-for-byte unchanged** (14.49 kB / 4.26 kB) — the one edit there was
+  doc-comment-only.
+- Every other lazy chunk (`fly` excepted — see above, not this task's) — `command`, `devices`, `debug`,
+  `settings`, `wall`, `replay`, `live`, `org-settings`, `roster`, `categories`, `reports`, `alerts`,
+  `preflight`, `activity`, `login`, `onboarding`, `asset-detail`, `hls`, `leaflet-src`, `datasets`,
+  `dataset-detail`, `sample-editor`, `coming-soon`, `not-found` — byte-for-byte unchanged, confirming
+  this task's changes stayed inside its own declared file scope.
+
+### Files touched
+
+Edited: `features/hubs/nav-entries.ts` (de-duplicated + regrouped + role-scoped `NAV_MODES`, rewritten
+class doc comment), `features/hubs/manage-hub.ts` (grouping/role-scoping logic + template),
+`features/hubs/nav-entries.spec.ts`, `features/hubs/hub-pages.spec.ts`, `features/warehouse/warehouse.routes.ts`
+(rewritten to a redirect), `app/app.routes.spec.ts` (one assertion sharpened), `features/assets/assets.ts`
+(one doc-comment fix), this file. Deleted: `features/warehouse/warehouse.ts`,
+`features/warehouse/warehouse.spec.ts`. Untouched (verified, not just assumed): `app/app.routes.ts`
+(no edit needed — see F2 above), `app/app.ts`/`app.html` (the known top-bar-dropdown gap, see F3
+above), `features/fly/**`, `features/command/**`, `features/devices/**`, every shared marks file.

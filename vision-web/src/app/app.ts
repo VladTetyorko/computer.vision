@@ -1,7 +1,9 @@
 import { ChangeDetectionStrategy, Component, afterNextRender, computed, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { AuthStore } from './core/auth/auth-store';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
+import { canManageOrg } from './core/org/org-logic';
 import { NAV_MODES } from './features/hubs/nav-entries';
 import { Icon } from './shared/ui/icon';
 import { IdentityChip } from './shared/ui/identity-chip';
@@ -51,9 +53,23 @@ import { UndoToast } from './shared/ui/undo-toast';
 })
 export class App {
   protected readonly fleet = inject(FleetStore);
+  private readonly auth = inject(AuthStore);
 
-  /** The frozen F4 route→mode map — see this class's own doc comment above. */
-  protected readonly modes = NAV_MODES;
+  /** Same ADMIN/MANAGER gate `ManageHub`/`identity-chip` use (docs/UX-SIMPLIFY-REVIEW.md F3). */
+  private readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+
+  /**
+   * The frozen route→mode map (see this class's own doc comment), with each mode's `managerOnly`
+   * entries dropped for a non-manager — so the header dropdowns role-scope in lockstep with the
+   * `/manage` hub page (docs/UX-SIMPLIFY-REVIEW.md F3; closes the gap flagged in `manage-hub.ts`
+   * that the header used to list every entry regardless of role).
+   */
+  protected readonly modes = computed(() =>
+    NAV_MODES.map((mode) => ({
+      ...mode,
+      entries: mode.entries.filter((entry) => !entry.managerOnly || this.canManage()),
+    })),
+  );
 
   protected readonly liveCount = computed(() => this.fleet.streams().length);
   protected readonly offline = computed(() => this.fleet.reachable() === false);

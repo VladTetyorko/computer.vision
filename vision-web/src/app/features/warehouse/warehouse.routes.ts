@@ -1,18 +1,19 @@
 import type { Routes } from '@angular/router';
 
 /**
- * The `/warehouse` route — a two-tile launcher between the two halves of inventory (People, Assets),
- * replacing what used to be a plain alias onto the combined Devices/Warehouse page
- * (`features/devices/devices.routes.ts` before this split — see that file's own doc comment for the
- * link-compatibility history). `/devices` itself is untouched and keeps resolving to the raw device
- * table (`features/devices/**`) — this route only changes what `/warehouse` itself renders. Split
- * into its own file per vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see
- * `features/fly/fly.routes.ts`'s doc comment for why.
+ * `/warehouse` — **deleted** (docs/UX-SIMPLIFY-REVIEW.md F2). `WarehousePage` used to be a two-tile
+ * launcher whose only job was linking to People (`/manage/roster`) and Assets (`/assets`) — both
+ * already reachable directly from the Manage hub, so it was a third door to a concept ("where are my
+ * cameras / who flies them") that already had two doors. Assets is now the one home for "what I
+ * own/fly" (`features/hubs/nav-entries.ts`'s own class doc comment has the full writeup); nothing
+ * here replaces Warehouse's old content, because nothing needs to.
+ *
+ * `WarehousePage`/`warehouse.ts`/`warehouse.spec.ts` are gone outright, not just unrouted. This file
+ * now holds only a plain path redirect — mirrors `features/map/map.routes.ts`'s own "`/map` folds
+ * into Command" precedent exactly, right down to the reasoning: any existing bookmark/deep link to
+ * `/warehouse` still lands somewhere real (`/assets`) instead of the `**` not-found catch-all, and any
+ * query string a caller appended survives the hop (a path redirect, not a component route).
+ * `app.routes.ts`'s own `import`/spread of `WAREHOUSE_ROUTES` needed no change — the route path and
+ * export name are unchanged, only what the path resolves to.
  */
-export const WAREHOUSE_ROUTES: Routes = [
-  {
-    path: 'warehouse',
-    title: 'Warehouse · Vision',
-    loadComponent: () => import('./warehouse').then((m) => m.WarehousePage),
-  },
-];
+export const WAREHOUSE_ROUTES: Routes = [{ path: 'warehouse', redirectTo: 'assets', pathMatch: 'full' }];

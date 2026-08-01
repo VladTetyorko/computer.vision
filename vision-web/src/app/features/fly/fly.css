@@ -210,15 +210,49 @@
   padding: var(--space-16);
 }
 
-/* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids/order: flight · cv · detections
-   · layers · help, each a `vision-icon-button` toggling `panels` (fly.ts). */
+/* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·
+   marks · layers · help, each a `vision-icon-button` toggling `panels` (fly.ts). Grouped by job
+   (docs/UX-SIMPLIFY-REVIEW.md F4 — see fly.html's own comment above `.grid-rail` for the full
+   grouping rationale); this rule now spaces `.rail-group`s apart, each group handling its own
+   tighter inner gap. */
 .grid-rail {
   grid-area: rail;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-8);
+  gap: var(--space-16);
   padding: var(--space-16) var(--space-8);
+}
+
+/* One job-group (Control / Vision / Situational / Help) — same inner gap the rail itself used to
+   apply directly to every button; grouping only changes spacing/dividers between groups, not within
+   one. */
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+/* Pins the Help group to the rail's bottom edge, separated from the flying tools above it — Help is
+   reference material, not something touched mid-flight (F4). `margin-top: auto` on a column-flex
+   item consumes all remaining space above it, so this works at any rail height without a fixed
+   offset. */
+.rail-group-help {
+  margin-top: auto;
+}
+
+/* The thin seam between job-groups — reuses `--hairline` (styles.css: "the faint white 1px edge used
+   on surfaces floating over video/map"), the same token `.secondary-tile`'s own border already uses
+   elsewhere in this file, rather than inventing new rail chrome. Narrower than the icon buttons
+   themselves so it reads as a quiet seam, not a rule. No text group label: at this rail's ~2.25rem
+   button width, group names ("Situational") don't read clean (F4: "if it crowds, use just the
+   divider") — `role="group"`/`aria-label` on each `.rail-group` (fly.html) carries the same grouping
+   for assistive tech instead. */
+.rail-divider {
+  width: 1.25rem;
+  height: 1px;
+  background: var(--hairline);
 }
 
 .rail-item {

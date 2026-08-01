@@ -11,8 +11,11 @@ import type { AssetListRow } from './assets-logic';
  * The Assets page (`/assets`) — asset-first grid: search by name, filter by category/lifecycle/
  * streaming, one card per asset with exactly Watch · Open · Archive. Split out of the old combined
  * Devices page (docs/CYCLES-PLAN.md §11's "asset-first list") once inventory got its own dedicated
- * pages for Assets and Devices, Warehouse becoming a two-tile launcher between them — see
- * `features/warehouse/warehouse.ts` and `features/devices/devices.ts`'s own class doc comments.
+ * pages for Assets and Devices. **Assets is the one home for "what I own/fly"**
+ * (docs/UX-SIMPLIFY-REVIEW.md F2) — Warehouse, a two-tile launcher that briefly sat between this page
+ * and `features/devices/**`, was deleted outright (`/warehouse` now redirects here); see
+ * `features/hubs/nav-entries.ts`'s own class doc comment for the full before/after and
+ * `features/devices/devices.ts`'s own class doc comment for what stayed behind.
  * Every asset-lifecycle action here (rename lives on the asset detail page, not this list — see
  * `operatorAssetActions`'s own doc comment for why only Archive/Restore reach this surface) is
  * unchanged from the page this was split out of, byte-for-byte in behavior.

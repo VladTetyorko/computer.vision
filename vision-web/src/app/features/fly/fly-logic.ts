@@ -89,9 +89,13 @@ export const TICKER_MAX_EVENTS = 4;
 // compile error, not a silently-dead button; `PanelState` itself stays a generic `string` id (it has
 // no reason to know this page's specific ids) per its own doc comment.
 
-/** The tool-rail's frozen ids, in their frozen left-to-right order (docs/UI-REDESIGN-PLAN.md D-D;
- * `rc` added by docs/RC-CONTROL-PLAN.md Phase 0 — the read-only RC transmitter monitor; `marks`
- * added by docs/TACTICAL-MARKS-PLAN.md M5 — the shared tactical-marks operational picture). */
+/** The tool-rail's frozen ids (docs/UI-REDESIGN-PLAN.md D-D; `rc` added by docs/RC-CONTROL-PLAN.md
+ * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/TACTICAL-MARKS-PLAN.md M5
+ * — the shared tactical-marks operational picture). This union's own declaration order is no longer
+ * the rail's visual order: docs/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
+ * rc), Vision (cv, detections, layers), Situational (marks), Help (pinned last, separated) — see
+ * fly.html's own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is
+ * unchanged; only where each button sits in the rail moved. */
 export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'layers' | 'help';
 
 /**

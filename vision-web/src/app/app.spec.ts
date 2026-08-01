@@ -32,17 +32,20 @@ function fakeLiveStore() {
   return { liveEvents: () => [] as unknown[] };
 }
 
-function fakeAuthStore() {
-  return { user: () => null, authEnabled: () => false };
+function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
+  return {
+    user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
+    authEnabled: () => false,
+  };
 }
 
-function render() {
+function render(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
   TestBed.configureTestingModule({
     providers: [
       provideRouter([]),
       { provide: FleetStore, useValue: fakeFleetStore() },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
-      { provide: AuthStore, useValue: fakeAuthStore() },
+      { provide: AuthStore, useValue: fakeAuthStore(topRole) },
       { provide: EventsStore, useValue: fakeEventsStore() },
       { provide: LiveStore, useValue: fakeLiveStore() },
       { provide: VisionApi, useValue: {} },
@@ -65,16 +68,31 @@ describe('App shell — hub-and-spoke mode nav', () => {
     expect(root.querySelectorAll('.modes-wide .mode-more').length).toBe(3);
   });
 
-  it("each mode's dropdown lists exactly that mode's own entries, in order", () => {
+  it("each mode's dropdown lists that mode's entries a non-manager may see, in order (docs/UX-SIMPLIFY-REVIEW.md F3)", () => {
+    // Default fake = null user (a plain operator): `managerOnly` entries are filtered out, so the
+    // header dropdowns role-scope in lockstep with the /manage hub page.
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
     const modeEls = root.querySelectorAll('.modes-wide .mode');
 
     NAV_MODES.forEach((mode, i) => {
+      const visible = mode.entries.filter((entry) => !entry.managerOnly);
       const links = Array.from(modeEls[i].querySelectorAll('.mode-more-menu a')) as HTMLAnchorElement[];
-      expect(links.map((a) => a.getAttribute('href')), mode.id).toEqual(mode.entries.map((entry) => entry.to));
+      expect(links.map((a) => a.getAttribute('href')), mode.id).toEqual(visible.map((entry) => entry.to));
       const names = links.map((a) => a.querySelector('.entry-name')?.textContent?.trim());
-      expect(names, mode.id).toEqual(mode.entries.map((entry) => entry.name));
+      expect(names, mode.id).toEqual(visible.map((entry) => entry.name));
+    });
+  });
+
+  it("shows a mode's managerOnly entries to an ADMIN/MANAGER (role-scoped header, F3)", () => {
+    const fixture = render('ADMIN');
+    const root = fixture.nativeElement as HTMLElement;
+    const modeEls = root.querySelectorAll('.modes-wide .mode');
+
+    NAV_MODES.forEach((mode, i) => {
+      const links = Array.from(modeEls[i].querySelectorAll('.mode-more-menu a')) as HTMLAnchorElement[];
+      // a manager sees the full, unfiltered set for every mode
+      expect(links.map((a) => a.getAttribute('href')), mode.id).toEqual(mode.entries.map((entry) => entry.to));
     });
   });
 
@@ -118,7 +136,8 @@ describe('App shell — hub-and-spoke mode nav', () => {
     NAV_MODES.forEach((mode, i) => {
       expect(groups[i].querySelector('.modes-narrow-mode')?.textContent).toContain(mode.label);
       const entries = groups[i].querySelectorAll('.modes-narrow-entry');
-      expect(entries.length).toBe(mode.entries.length);
+      // default fake = non-manager: managerOnly entries filtered (F3), same as the wide dropdown
+      expect(entries.length).toBe(mode.entries.filter((entry) => !entry.managerOnly).length);
     });
   });
 

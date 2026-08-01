@@ -93,8 +93,9 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     expect(routeExists(flat, '/assets/probe-1')).toBe(true);
   });
 
-  it('/warehouse resolves to the two-tile launcher, /devices to the raw device page — distinct pages now', () => {
+  it('/warehouse redirects to /assets (docs/UX-SIMPLIFY-REVIEW.md F2 — Warehouse deleted, not just unrouted); /devices still resolves to the raw device page, off the primary nav but not removed', () => {
     expect(routeExists(flat, '/warehouse')).toBe(true);
+    expect(flattenRoutes(routes).find((route) => route.path === '/warehouse')?.kind).toBe('redirect');
     expect(routeExists(flat, '/devices')).toBe(true);
   });
 

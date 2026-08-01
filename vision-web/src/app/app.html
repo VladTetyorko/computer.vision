@@ -7,7 +7,7 @@
   <!-- ---- Wide layout: one trigger + one dropdown per mode (docs/UI-REDESIGN-PLAN.md Wave 1,
        hidden below --bp-sm/640px in favor of .modes-narrow below) ------------------------------ -->
   <nav class="modes modes-wide" aria-label="Modes">
-    @for (mode of modes; track mode.id) {
+    @for (mode of modes(); track mode.id) {
       <div class="mode" routerLinkActive="active">
         <a class="mode-link" [routerLink]="mode.hubRoute">
           <vision-icon [name]="mode.icon" [size]="16" />
@@ -42,7 +42,7 @@
       Menu
     </summary>
     <div class="modes-narrow-menu" (click)="modesMenu.open = false">
-      @for (mode of modes; track mode.id) {
+      @for (mode of modes(); track mode.id) {
         <div class="modes-narrow-group">
           <a class="modes-narrow-mode" [routerLink]="mode.hubRoute">
             <vision-icon [name]="mode.icon" [size]="16" />
