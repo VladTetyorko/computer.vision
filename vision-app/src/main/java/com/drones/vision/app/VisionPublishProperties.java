@@ -63,7 +63,7 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
     public VisionPublishProperties {
         if (mediamtx == null) {
             mediamtx = new Mediamtx(URI.create(Mediamtx.DEFAULT_RTSP_BASE), URI.create(Mediamtx.DEFAULT_HLS_BASE),
-                    URI.create(Mediamtx.DEFAULT_WHEP_BASE));
+                    URI.create(Mediamtx.DEFAULT_WHEP_BASE), URI.create(Mediamtx.DEFAULT_PLAYBACK_BASE));
         }
         if (viewBase == null) {
             viewBase = URI.create(DEFAULT_VIEW_BASE);
@@ -71,27 +71,41 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
     }
 
     /**
-     * @param rtspBase base RTSP URL of the mediamtx sidecar to push published frames to,
-     *                 e.g. {@code rtsp://localhost:8554}; default {@value Mediamtx#DEFAULT_RTSP_BASE}
-     * @param hlsBase  internal address where mediamtx serves HLS, used only as the upstream
-     *                 {@code HlsProxyController} forwards to — viewers never see it directly;
-     *                 e.g. {@code http://localhost:8888}; default {@value Mediamtx#DEFAULT_HLS_BASE}
-     * @param whepBase mediamtx's WebRTC/WHEP egress base (docs/MVP2-PLAN.md §L), e.g. {@code
-     *                 http://localhost:8889}; default {@value Mediamtx#DEFAULT_WHEP_BASE}.
-     *                 <b>Unlike {@code hlsBase}</b>, this is not an internal-only address behind a
-     *                 proxy: {@code WiringConfiguration} hands it straight to
-     *                 {@code MediamtxStreamPublisher} as the base {@code whepUrl} is built from, and
-     *                 that URL goes to the browser verbatim (a WHEP session cannot be proxied the
-     *                 way HLS segments are — see {@code StreamPublisherPort#whepUrl}'s javadoc) — so
-     *                 this must already be an address the *viewer's* browser can reach, not just
-     *                 this app's own JVM.
+     * @param rtspBase     base RTSP URL of the mediamtx sidecar to push published frames to,
+     *                     e.g. {@code rtsp://localhost:8554}; default {@value Mediamtx#DEFAULT_RTSP_BASE}
+     * @param hlsBase      internal address where mediamtx serves HLS, used only as the upstream
+     *                     {@code HlsProxyController} forwards to — viewers never see it directly;
+     *                     e.g. {@code http://localhost:8888}; default {@value Mediamtx#DEFAULT_HLS_BASE}
+     * @param whepBase     mediamtx's WebRTC/WHEP egress base (docs/MVP2-PLAN.md §L), e.g. {@code
+     *                     http://localhost:8889}; default {@value Mediamtx#DEFAULT_WHEP_BASE}.
+     *                     <b>Unlike {@code hlsBase}</b>, this is not an internal-only address behind a
+     *                     proxy: {@code WiringConfiguration} hands it straight to
+     *                     {@code MediamtxStreamPublisher} as the base {@code whepUrl} is built from, and
+     *                     that URL goes to the browser verbatim (a WHEP session cannot be proxied the
+     *                     way HLS segments are — see {@code StreamPublisherPort#whepUrl}'s javadoc) — so
+     *                     this must already be an address the *viewer's* browser can reach, not just
+     *                     this app's own JVM.
+     * @param playbackBase base HTTP URL of mediamtx's playback server (docs/OPS-CORE-PLAN.md §R,
+     *                     docs/CV-TRAINING-V2-PLAN.md §7), e.g. {@code http://localhost:19996};
+     *                     default {@value Mediamtx#DEFAULT_PLAYBACK_BASE} — byte-identical to what
+     *                     {@code MediamtxStreamPublisher}'s old 3-arg constructor used to *derive*
+     *                     from {@code whepBase}'s host at a fixed port, so the default deployment's
+     *                     behavior is unchanged; only a deployment whose {@code whepBase} is not
+     *                     localhost now gets this explicit default instead of a guess at that other
+     *                     host — docs/CV-TRAINING-V2-PLAN.md §I names this the one deliberate
+     *                     behavior change. {@code WiringConfiguration} passes this straight through
+     *                     to both {@code MediamtxStreamPublisher}'s 4-arg constructor and {@code
+     *                     MediamtxReplayFrameExtractor} — never proxied, same "handed to the
+     *                     playback server verbatim" posture as {@code whepBase}.
      */
     public record Mediamtx(@DefaultValue(Mediamtx.DEFAULT_RTSP_BASE) URI rtspBase,
                             @DefaultValue(Mediamtx.DEFAULT_HLS_BASE) URI hlsBase,
-                            @DefaultValue(Mediamtx.DEFAULT_WHEP_BASE) URI whepBase) {
+                            @DefaultValue(Mediamtx.DEFAULT_WHEP_BASE) URI whepBase,
+                            @DefaultValue(Mediamtx.DEFAULT_PLAYBACK_BASE) URI playbackBase) {
 
         static final String DEFAULT_RTSP_BASE = "rtsp://localhost:8554";
         static final String DEFAULT_HLS_BASE = "http://localhost:8888";
         static final String DEFAULT_WHEP_BASE = "http://localhost:8889";
+        static final String DEFAULT_PLAYBACK_BASE = "http://localhost:19996";
     }
 }

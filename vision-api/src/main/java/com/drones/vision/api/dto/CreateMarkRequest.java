@@ -1,5 +1,6 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.MarkSpec;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.MarkKind;
@@ -13,7 +14,7 @@ import java.util.stream.Collectors;
  *
  * <p>{@code kind} is matched case-insensitively against {@link MarkKind} names — same idiom as
  * {@link com.drones.vision.api.dto.GeofenceZoneRequest}/{@link SetLifecycleStateRequest} — throwing
- * {@link IllegalArgumentException} (→400 via {@link com.drones.vision.api.ApiExceptionHandler}) for
+ * {@link IllegalArgumentException} (→400 via {@link ApiExceptionHandler}) for
  * an unrecognized value, listing the valid ones. {@code position} is required; a missing one is
  * left to {@link MarkSpec}'s own compact-constructor null check to report, mirroring how {@link
  * com.drones.vision.api.dto.GeofenceZoneRequest#toSpec()} lets {@code GeofenceZoneSpec} validate

@@ -10,7 +10,7 @@ import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TrainingSample;
 import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.port.out.DatasetExportPort;
+import com.drones.vision.domain.port.out.DatasetUploadPort;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -31,7 +31,7 @@ class YoloDatasetWriterTest {
         TrainingSample sample = sample(List.of());
         SampleImage image = new SampleImage(new byte[]{1, 2, 3}, "image/jpeg");
 
-        DatasetExportPort.ExportEntry entry = YoloDatasetWriter.toEntry(sample, image, List.of("building"));
+        DatasetUploadPort.ExportEntry entry = YoloDatasetWriter.toEntry(sample, image, List.of("building"));
 
         assertEquals(sample.id().value() + ".jpg", entry.imageName());
         assertEquals(3, entry.imageBytes().length);
@@ -42,7 +42,7 @@ class YoloDatasetWriterTest {
         TrainingSample sample = sample(List.of());
         SampleImage image = new SampleImage(new byte[]{1}, "image/jpeg");
 
-        DatasetExportPort.ExportEntry entry = YoloDatasetWriter.toEntry(sample, image, List.of("building"));
+        DatasetUploadPort.ExportEntry entry = YoloDatasetWriter.toEntry(sample, image, List.of("building"));
 
         assertEquals("", entry.labelFileText());
     }
@@ -54,7 +54,7 @@ class YoloDatasetWriterTest {
         TrainingSample sample = sample(List.of(annotation));
         SampleImage image = new SampleImage(new byte[]{1}, "image/jpeg");
 
-        DatasetExportPort.ExportEntry entry =
+        DatasetUploadPort.ExportEntry entry =
                 YoloDatasetWriter.toEntry(sample, image, List.of("building", "tower"));
 
         // class index 1 ("tower"), cx = 0.10 + 0.30/2 = 0.25, cy = 0.20 + 0.40/2 = 0.40
@@ -68,7 +68,7 @@ class YoloDatasetWriterTest {
         TrainingSample sample = sample(List.of(first, second));
         SampleImage image = new SampleImage(new byte[]{1}, "image/jpeg");
 
-        DatasetExportPort.ExportEntry entry =
+        DatasetUploadPort.ExportEntry entry =
                 YoloDatasetWriter.toEntry(sample, image, List.of("building", "tower"));
 
         String[] lines = entry.labelFileText().split("\n");
@@ -85,5 +85,21 @@ class YoloDatasetWriterTest {
 
         assertThrows(IllegalStateException.class,
                 () -> YoloDatasetWriter.toEntry(sample, image, List.of("building")));
+    }
+
+    // --- dataYaml ----------------------------------------------------------------
+
+    @Test
+    void dataYamlListsClassNamesCountAndTheFixedImagesPaths() {
+        String yaml = YoloDatasetWriter.dataYaml(List.of("building", "tower"));
+
+        assertEquals("names: [building, tower]\nnc: 2\ntrain: images\nval: images\n", yaml);
+    }
+
+    @Test
+    void dataYamlHandlesAnEmptyClassList() {
+        String yaml = YoloDatasetWriter.dataYaml(List.of());
+
+        assertEquals("names: []\nnc: 0\ntrain: images\nval: images\n", yaml);
     }
 }

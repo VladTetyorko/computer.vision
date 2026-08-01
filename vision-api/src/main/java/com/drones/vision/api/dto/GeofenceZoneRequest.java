@@ -1,5 +1,6 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.GeofenceZoneSpec;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.ZoneKind;
@@ -16,7 +17,7 @@ import java.util.stream.Collectors;
  *
  * <p>{@code kind} is matched case-insensitively against {@link ZoneKind} names — same idiom as
  * {@link SetLifecycleStateRequest#toLifecycleState()}/{@link CapabilityParsing} — throwing {@link
- * IllegalArgumentException} (→400 via {@link com.drones.vision.api.ApiExceptionHandler}) for an
+ * IllegalArgumentException} (→400 via {@link ApiExceptionHandler}) for an
  * unrecognized value, listing the valid ones. A polygon with fewer than 3 vertices is **not**
  * checked here — that duplication belongs to {@link GeofenceZoneSpec}'s own compact constructor
  * (already enforced), so this DTO just maps shapes and lets the spec validate; {@code null}

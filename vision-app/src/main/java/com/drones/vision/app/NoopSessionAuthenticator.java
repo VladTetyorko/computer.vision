@@ -14,7 +14,7 @@ import java.util.Optional;
  * so its methods exist only to satisfy the always-present bean dependency (docs/U-AUTH-PLAN.md,
  * wave 3). There is no session to establish or tear down when auth is off.
  */
-final class NoopSessionAuthenticator implements SessionAuthenticator {
+public final class NoopSessionAuthenticator implements SessionAuthenticator {
 
     @Override
     public Optional<User> login(String username, String password, HttpServletRequest request,

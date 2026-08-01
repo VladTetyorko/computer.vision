@@ -2,6 +2,7 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.UsageRecordingResponse;
 import com.drones.vision.api.dto.UsageTimelineResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.UsageTimeline;
 import com.drones.vision.domain.model.UsageId;

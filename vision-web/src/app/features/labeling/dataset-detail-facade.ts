@@ -7,11 +7,10 @@ import { ToastService } from '../../core/toast.service';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { AuthStore } from '../../core/auth/auth-store';
 import { canManageOrg } from '../../core/org/org-logic';
-import type { Dataset, DatasetExport, SampleStatus, TrainingJobResponse, TrainingSample } from '../../core/api/models';
+import type { Dataset, SampleStatus, TrainingJobResponse, TrainingSample } from '../../core/api/models';
 import {
   DEFAULT_BASE_MODEL,
   DEFAULT_TRAINING_EPOCHS,
-  canExportDataset,
   canStartTrainingDataset,
   canSubmitTrainingRequest,
   streamCaptureLabel,
@@ -22,25 +21,29 @@ const LOG_PREFIX = '[labeling]';
 
 /**
  * `DatasetDetailPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — one dataset's own sample grid,
- * capture flow, and export action. Injects `VisionApi` directly rather than `TrainingStore` (the
+ * capture flow, and train action. Injects `VisionApi` directly rather than `TrainingStore` (the
  * same "a routed page's facade may talk to a service directly for page-local state" shape
- * `RosterFacade` already uses) — this dataset's own record, its samples, and the last export result
- * are all single-consumer state no other page reads, so growing the shared store with them would be
- * unjustified ceremony. `FleetStore` (already app-wide, `providedIn: 'root'`) supplies the capture
- * stream picker's live stream list for free — no second poller.
+ * `RosterFacade` already uses) — this dataset's own record and its samples are both single-consumer
+ * state no other page reads, so growing the shared store with them would be unjustified ceremony.
+ * `FleetStore` (already app-wide, `providedIn: 'root'`) supplies the capture stream picker's live
+ * stream list for free — no second poller.
  *
  * **Capture entry point lives here, not in Fly/Live/Replay** (docs/CV-TRAINING-PLAN.md Wave T5's own
  * task brief flags the collision with parallel `features/fly/**` work) — the operator picks *which*
  * active stream to capture from right here, inside the dataset they're building, rather than a
  * scattered "Add to dataset" button on every video surface. One coherent place to do the whole
- * capture → correct → export loop, and zero risk of touching a file another task owns.
+ * capture → correct → train loop, and zero risk of touching a file another task owns. (A second,
+ * replay-driven capture entry point lives in `features/replay/**` — see that facade's own doc
+ * comment; docs/CV-TRAINING-V2-PLAN.md §8.)
  *
- * **"Train a model" (docs/CV-TRAINING-PLAN.md Phase 2's last web wave) lives here too, not a
- * separate page of its own** — starting a fine-tune is one more action against *this* dataset, the
- * same footing as capture/export. `TrainingJobController#start` requires `canManageOrg` (a `403`
- * otherwise, mirroring `ModelRegistryController#promote`'s own gate — starting a training run is a
- * privileged control-plane action), so {@link canManage} hides the whole "Train a model" card for a
- * PILOT, unlike capture/export which stay open to anyone who can see the dataset. On success,
+ * **"Train a model" (docs/CV-TRAINING-PLAN.md Phase 2's last web wave; the manual export step this
+ * doc comment used to describe was deleted in docs/CV-TRAINING-V2-PLAN.md — `POST
+ * /api/datasets/{id}/train` now uploads the dataset itself, no separate export artifact) lives here
+ * too, not a separate page of its own** — starting a fine-tune is one more action against *this*
+ * dataset, the same footing as capture. `TrainingJobController#start` requires `canManageOrg` (a
+ * `403` otherwise, mirroring `ModelRegistryController#promote`'s own gate — starting a training run
+ * is a privileged control-plane action), so {@link canManage} hides the whole "Train a model" card
+ * for a PILOT, unlike capture which stays open to anyone who can see the dataset. On success,
  * {@link startTraining} navigates straight to the freshly started job's own progress page
  * (`/manage/training/jobs/:jobId`, `features/training-jobs/**`) — the operator lands on the run
  * they just started rather than a static confirmation. {@link recentJobs} is a best-effort,
@@ -69,11 +72,6 @@ export class DatasetDetailFacade {
 
   readonly captureStreamId = signal('');
   readonly capturing = signal(false);
-
-  readonly exporting = signal(false);
-  readonly lastExport = signal<DatasetExport | null>(null);
-
-  readonly canExport = computed(() => canExportDataset(this.dataset()));
 
   /** `TrainingJobController#start`'s own manager gate, mirrored client-side — see this class's own doc comment. */
   readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
@@ -112,7 +110,6 @@ export class DatasetDetailFacade {
   /** Called once by the page's own constructor `effect()` on every `datasetId` route-input change. */
   load(datasetId: string): void {
     this.currentDatasetId = datasetId;
-    this.lastExport.set(null);
     this.captureStreamId.set('');
     this.statusFilter.set('PENDING');
     void this.fetchDataset(datasetId);
@@ -153,22 +150,6 @@ export class DatasetDetailFacade {
       await this.fetchSamples(this.currentDatasetId, this.statusFilter());
     } catch (error) {
       this.toasts.error(describeHttpError(error));
-    }
-  }
-
-  async exportDataset(): Promise<void> {
-    if (!this.currentDatasetId || this.exporting()) {
-      return;
-    }
-    this.exporting.set(true);
-    try {
-      const result = await this.api.exportDataset(this.currentDatasetId);
-      this.lastExport.set(result);
-      this.toasts.ok(`Exported ${result.sampleCount} labeled sample${result.sampleCount === 1 ? '' : 's'}.`);
-    } catch (error) {
-      this.toasts.error(describeHttpError(error));
-    } finally {
-      this.exporting.set(false);
     }
   }
 

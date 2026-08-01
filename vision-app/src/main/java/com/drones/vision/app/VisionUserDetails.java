@@ -95,7 +95,7 @@ public final class VisionUserDetails implements UserDetails {
     }
 
     /** Authorities as a plain list, for building an authenticated token. */
-    List<GrantedAuthority> authorities() {
+    public List<GrantedAuthority> authorities() {
         return List.copyOf(getAuthorities());
     }
 }

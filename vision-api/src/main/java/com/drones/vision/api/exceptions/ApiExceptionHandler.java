@@ -1,5 +1,8 @@
-package com.drones.vision.api;
+package com.drones.vision.api.exceptions;
 
+import com.drones.vision.api.AssetImageController;
+import com.drones.vision.api.DeviceProbeController;
+import com.drones.vision.api.HlsProxyController;
 import com.drones.vision.api.dto.ErrorResponse;
 import com.drones.vision.application.AccessDeniedException;
 import com.drones.vision.application.ProbeFailedException;

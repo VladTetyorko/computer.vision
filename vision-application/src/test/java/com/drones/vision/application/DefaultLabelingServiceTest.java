@@ -4,16 +4,19 @@ import com.drones.vision.domain.model.Annotation;
 import com.drones.vision.domain.model.AnnotationSource;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.AssetUsage;
 import com.drones.vision.domain.model.AuditAction;
 import com.drones.vision.domain.model.AuditEntry;
 import com.drones.vision.domain.model.AuditTargetType;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.CategoryId;
 import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetExport;
 import com.drones.vision.domain.model.DatasetId;
 import com.drones.vision.domain.model.DatasetStatus;
+import com.drones.vision.domain.model.DatasetUpload;
 import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.DetectionQuery;
+import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.ModelRef;
@@ -24,18 +27,23 @@ import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TrainingSample;
 import com.drones.vision.domain.model.TrainingSampleId;
+import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
+import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.DatasetExportPort;
 import com.drones.vision.domain.port.out.DatasetRepositoryPort;
+import com.drones.vision.domain.port.out.DatasetUploadPort;
+import com.drones.vision.domain.port.out.DetectionRepositoryPort;
+import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
 import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -60,8 +68,11 @@ class DefaultLabelingServiceTest {
     private FakeDatasetRepositoryPort datasetRepository;
     private FakeTrainingSampleRepositoryPort sampleRepository;
     private FakeSampleImageStorePort imageStore;
-    private FakeDatasetExportPort exportPort;
+    private FakeDatasetUploadPort uploadPort;
     private FakeAssetRepositoryPort assetRepository;
+    private FakeAssetUsageRepositoryPort usageRepository;
+    private FakeDetectionRepositoryPort detectionRepository;
+    private FakeReplayFrameExtractionPort frameExtractor;
     private FakeAuditTrailPort auditTrail;
     private StreamService streamService;
     private LabelingService service;
@@ -78,12 +89,17 @@ class DefaultLabelingServiceTest {
         datasetRepository = new FakeDatasetRepositoryPort();
         sampleRepository = new FakeTrainingSampleRepositoryPort();
         imageStore = new FakeSampleImageStorePort();
-        exportPort = new FakeDatasetExportPort();
+        uploadPort = new FakeDatasetUploadPort();
         assetRepository = new FakeAssetRepositoryPort();
+        usageRepository = new FakeAssetUsageRepositoryPort();
+        detectionRepository = new FakeDetectionRepositoryPort();
+        frameExtractor = new FakeReplayFrameExtractionPort();
         auditTrail = new FakeAuditTrailPort();
         streamService = mock(StreamService.class);
-        TrainingStores stores = new TrainingStores(datasetRepository, sampleRepository, imageStore, exportPort);
-        service = new DefaultLabelingService(stores, streamService, assetRepository, auditTrail, () -> fixedNow);
+        TrainingStores stores = new TrainingStores(datasetRepository, sampleRepository, imageStore, uploadPort);
+        ReplaySources replay = new ReplaySources(usageRepository, detectionRepository, frameExtractor);
+        service = new DefaultLabelingService(stores, replay, streamService, assetRepository, auditTrail,
+                () -> fixedNow);
 
         when(streamService.streams()).thenReturn(List.of());
     }
@@ -98,6 +114,10 @@ class DefaultLabelingServiceTest {
     private static VideoFrame jpegFrame(byte[] bytes) {
         return new VideoFrame(StreamId.random(), 0, Instant.parse("2026-08-01T09:59:00Z"), 1920, 1080,
                 PixelFormat.JPEG, ByteBuffer.wrap(bytes));
+    }
+
+    private static VideoFrame jpegFrame(StreamId onStream, Instant capturedAt, byte[] bytes) {
+        return new VideoFrame(onStream, 0, capturedAt, 1920, 1080, PixelFormat.JPEG, ByteBuffer.wrap(bytes));
     }
 
     private Asset asset(AssetId assetId, GroupId owningGroup) {
@@ -230,6 +250,154 @@ class DefaultLabelingServiceTest {
         assertEquals(owningAsset.id(), sample.assetId());
     }
 
+    // --- captureFromReplay -----------------------------------------------------
+
+    private static final Instant USAGE_STARTED_AT = Instant.parse("2026-08-01T09:00:00Z");
+    private static final Instant USAGE_ENDED_AT = Instant.parse("2026-08-01T09:10:00Z");
+    private static final double AT_SECONDS = 120.0; // -> 09:02:00Z
+    private static final Instant AT = USAGE_STARTED_AT.plusSeconds((long) AT_SECONDS);
+
+    private AssetUsage openUsage(AssetId assetId, StreamId onStream) {
+        AssetUsage usage = new AssetUsage(UsageId.random(), assetId, USAGE_STARTED_AT, USAGE_ENDED_AT, null, null, 0,
+                onStream);
+        return usageRepository.save(usage);
+    }
+
+    @Test
+    void captureFromReplayBuildsAPendingSampleWithModelAnnotationsFromTheNearestInWindowDetection() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        Asset owningAsset = asset(AssetId.random(), group);
+        StreamId replayStreamId = StreamId.random();
+        AssetUsage usage = openUsage(owningAsset.id(), replayStreamId);
+        VideoFrame frame = jpegFrame(replayStreamId, AT, new byte[]{4, 5, 6});
+        frameExtractor.put(replayStreamId, AT, frame);
+
+        Detection detection = new Detection("building", 0.7, new BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new ModelRef("yolo26n.pt", "latest"));
+        // one second inside the +-2s tolerance window, and a farther-away decoy to prove "nearest" wins
+        detectionRepository.save(new DetectionResult(replayStreamId, 1, AT.minusSeconds(1),
+                List.of(detection), Duration.ZERO));
+        Detection decoy = new Detection("building", 0.5, new BoundingBox(0.9, 0.9, 0.05, 0.05),
+                new ModelRef("yolo26n.pt", "latest"));
+        detectionRepository.save(new DetectionResult(replayStreamId, 2, AT.plusSeconds(2),
+                List.of(decoy), Duration.ZERO));
+
+        TrainingSample sample = service.captureFromReplay(new ReplayCaptureSpec(usage.id(), dataset.id(), AT_SECONDS),
+                actor, VisibilityScope.unbounded());
+
+        assertEquals(dataset.id(), sample.datasetId());
+        assertEquals(replayStreamId, sample.streamId());
+        assertEquals(owningAsset.id(), sample.assetId());
+        assertEquals(AT, sample.capturedAt());
+        assertEquals(SampleStatus.PENDING, sample.status());
+        assertNull(sample.labeledBy());
+        assertNull(sample.labeledAt());
+        assertEquals(1, sample.annotations().size());
+        Annotation annotation = sample.annotations().get(0);
+        assertEquals("building", annotation.label());
+        assertEquals(AnnotationSource.MODEL, annotation.source());
+        assertEquals(detection.box(), annotation.box(), "must pick the nearest detection, not the decoy");
+
+        SampleImage storedImage = imageStore.findById(sample.id()).orElseThrow();
+        assertEquals(3, storedImage.data().length);
+
+        AuditEntry entry = onlyEntry();
+        assertEquals(AuditAction.UPDATED, entry.action());
+        assertEquals("CAPTURE_REPLAY", entry.details().get("action"));
+        assertEquals("CAPTURED", entry.details().get("result"));
+    }
+
+    @Test
+    void captureFromReplayYieldsEmptyAnnotationsWhenNothingWasDetectedInTheWindow() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        Asset owningAsset = asset(AssetId.random(), group);
+        StreamId replayStreamId = StreamId.random();
+        AssetUsage usage = openUsage(owningAsset.id(), replayStreamId);
+        frameExtractor.put(replayStreamId, AT, jpegFrame(replayStreamId, AT, new byte[]{1}));
+        // no detections saved at all
+
+        TrainingSample sample = service.captureFromReplay(new ReplayCaptureSpec(usage.id(), dataset.id(), AT_SECONDS),
+                actor, VisibilityScope.unbounded());
+
+        assertEquals(List.of(), sample.annotations());
+    }
+
+    @Test
+    void captureFromReplayThrowsNoSuchElementForAnUnknownUsage() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+
+        assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(UsageId.random(), dataset.id(), AT_SECONDS), actor,
+                VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void captureFromReplayThrowsNoSuchElementWhenTheUsageHasNoRecordedStream() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        Asset owningAsset = asset(AssetId.random(), group);
+        AssetUsage usage = new AssetUsage(UsageId.random(), owningAsset.id(), USAGE_STARTED_AT, USAGE_ENDED_AT,
+                null, null, 0); // 7-arg convenience ctor -> streamId null
+        usageRepository.save(usage);
+
+        assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(usage.id(), dataset.id(), AT_SECONDS), actor, VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void captureFromReplayThrowsNoSuchElementWhenNoFrameIsRecordedAtThatInstant() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        Asset owningAsset = asset(AssetId.random(), group);
+        StreamId replayStreamId = StreamId.random();
+        AssetUsage usage = openUsage(owningAsset.id(), replayStreamId);
+        // frameExtractor has nothing registered for (replayStreamId, AT)
+
+        assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(usage.id(), dataset.id(), AT_SECONDS), actor, VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void captureFromReplayThrowsIllegalArgumentWhenAtSecondsIsPastTheUsageWindow() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        Asset owningAsset = asset(AssetId.random(), group);
+        StreamId replayStreamId = StreamId.random();
+        AssetUsage usage = openUsage(owningAsset.id(), replayStreamId); // ends 10 minutes after start
+
+        assertThrows(IllegalArgumentException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(usage.id(), dataset.id(), 900.0), actor, VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void captureFromReplayDeniedWhenTheUsagesAssetIsOutOfScope() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        Asset owningAsset = asset(AssetId.random(), GroupId.random()); // different group than the scope below
+        StreamId replayStreamId = StreamId.random();
+        AssetUsage usage = openUsage(owningAsset.id(), replayStreamId);
+
+        assertThrows(AccessDeniedException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(usage.id(), dataset.id(), AT_SECONDS), actor,
+                VisibilityScope.groups(Set.of(group))));
+
+        assertEquals(0, sampleRepository.store.size());
+        AuditEntry entry = onlyEntry();
+        assertEquals("DENIED:out of scope", entry.details().get("result"));
+    }
+
+    @Test
+    void captureFromReplayThrowsNoSuchElementForAnUnknownDataset() {
+        assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(UsageId.random(), DatasetId.random(), AT_SECONDS), actor,
+                VisibilityScope.unbounded()));
+    }
+
+    @Test
+    void captureFromReplayDeniedWhenDatasetIsOutOfScope() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+
+        assertThrows(AccessDeniedException.class, () -> service.captureFromReplay(
+                new ReplayCaptureSpec(UsageId.random(), dataset.id(), AT_SECONDS), actor,
+                VisibilityScope.groups(Set.of(GroupId.random()))));
+    }
+
     // --- label -----------------------------------------------------------------
 
     @Test
@@ -260,6 +428,20 @@ class DefaultLabelingServiceTest {
                 new LabelSpec(badAnnotations, SampleStatus.LABELED), actor, VisibilityScope.unbounded()));
         assertTrue(ex.getMessage().contains("tank"));
         assertEquals(pending, sampleRepository.findById(pending.id()).orElseThrow());
+    }
+
+    @Test
+    void labelDiscardsASampleWhoseAnnotationLabelIsNotInDatasetClasses() {
+        Dataset dataset = dataset(ownership, List.of("building"));
+        TrainingSample pending = pendingSample(dataset.id(), null);
+        List<Annotation> outOfVocab = List.of(
+                new Annotation("tank", new BoundingBox(0.1, 0.1, 0.1, 0.1), AnnotationSource.MODEL));
+
+        TrainingSample discarded = service.label(pending.id(),
+                new LabelSpec(outOfVocab, SampleStatus.DISCARDED), actor, VisibilityScope.unbounded());
+
+        assertEquals(SampleStatus.DISCARDED, discarded.status());
+        assertEquals(outOfVocab, discarded.annotations());
     }
 
     @Test
@@ -353,10 +535,10 @@ class DefaultLabelingServiceTest {
                 VisibilityScope.groups(Set.of(GroupId.random()))));
     }
 
-    // --- export ------------------------------------------------------------------
+    // --- uploadForTraining -------------------------------------------------------
 
     @Test
-    void exportIncludesOnlyLabeledSamplesAndConvertsBoxesToYoloCenterFormat() {
+    void uploadForTrainingIncludesOnlyLabeledSamplesAndConvertsBoxesToYoloCenterFormat() {
         Dataset dataset = dataset(ownership, List.of("building", "tower"));
         // A PENDING sample and a DISCARDED sample must both be excluded.
         pendingSample(dataset.id(), null);
@@ -369,35 +551,38 @@ class DefaultLabelingServiceTest {
                 new Annotation("tower", new BoundingBox(0.10, 0.20, 0.30, 0.40), AnnotationSource.OPERATOR)));
         imageStore.save(labeled.id(), new SampleImage(new byte[]{7, 7, 7}, "image/jpeg"));
 
-        DatasetExport export = service.export(dataset.id(), actor, VisibilityScope.unbounded());
+        DatasetUpload upload = service.uploadForTraining(dataset.id(), actor, VisibilityScope.unbounded());
 
-        assertEquals(dataset.id(), export.datasetId());
-        assertEquals(1, exportPort.lastEntries.size(), "only the LABELED sample must be exported");
-        DatasetExportPort.ExportEntry entry = exportPort.lastEntries.get(0);
+        assertEquals(dataset.id(), upload.datasetId());
+        assertEquals(1, upload.sampleCount());
+        assertEquals(1, uploadPort.lastEntries.size(), "only the LABELED sample must be uploaded");
+        DatasetUploadPort.ExportEntry entry = uploadPort.lastEntries.get(0);
         assertEquals(labeled.id().value() + ".jpg", entry.imageName());
         // class index 1 ("tower"), cx = 0.10 + 0.30/2 = 0.25, cy = 0.20 + 0.40/2 = 0.40
         assertEquals("1 0.250000 0.400000 0.300000 0.400000\n", entry.labelFileText());
+        assertEquals("names: [building, tower]\nnc: 2\ntrain: images\nval: images\n", uploadPort.lastDataYaml);
 
         AuditEntry auditEntry = auditTrail.entries.get(auditTrail.entries.size() - 1);
         assertEquals(AuditAction.UPDATED, auditEntry.action());
-        assertEquals("EXPORTED:1", auditEntry.details().get("result"));
+        assertEquals("UPLOADED:1", auditEntry.details().get("result"));
     }
 
     @Test
-    void exportThrowsIllegalStateWhenALabeledSampleHasNoStoredImage() {
+    void uploadForTrainingThrowsIllegalStateWhenALabeledSampleHasNoStoredImage() {
         Dataset dataset = dataset(ownership, List.of("building"));
         labeledSample(dataset.id(),
                 List.of(new Annotation("building", new BoundingBox(0.1, 0.1, 0.1, 0.1), AnnotationSource.OPERATOR)));
         // no image saved for it
 
-        assertThrows(IllegalStateException.class, () -> service.export(dataset.id(), actor, VisibilityScope.unbounded()));
+        assertThrows(IllegalStateException.class,
+                () -> service.uploadForTraining(dataset.id(), actor, VisibilityScope.unbounded()));
     }
 
     @Test
-    void exportDeniedWhenDatasetIsOutOfScope() {
+    void uploadForTrainingDeniedWhenDatasetIsOutOfScope() {
         Dataset dataset = dataset(ownership, List.of("building"));
 
-        assertThrows(AccessDeniedException.class, () -> service.export(dataset.id(), actor,
+        assertThrows(AccessDeniedException.class, () -> service.uploadForTraining(dataset.id(), actor,
                 VisibilityScope.groups(Set.of(GroupId.random()))));
     }
 
@@ -498,19 +683,16 @@ class DefaultLabelingServiceTest {
         }
     }
 
-    private static final class FakeDatasetExportPort implements DatasetExportPort {
+    private static final class FakeDatasetUploadPort implements DatasetUploadPort {
         private List<ExportEntry> lastEntries = List.of();
+        private String lastDataYaml = "";
 
         @Override
-        public DatasetExport write(DatasetId datasetId, List<String> classes, List<ExportEntry> entries) {
+        public DatasetUpload upload(DatasetId datasetId, String dataYaml, List<ExportEntry> entries) {
+            lastDataYaml = dataYaml;
             lastEntries = List.copyOf(entries);
-            return new DatasetExport(datasetId, "export-1", Instant.now(), classes, entries.size(), 1024,
-                    "/tmp/export-1");
-        }
-
-        @Override
-        public Optional<java.nio.file.Path> resolve(DatasetId datasetId, String exportId) {
-            return Optional.empty();
+            long sizeBytes = entries.stream().mapToLong(e -> e.imageBytes().length).sum();
+            return new DatasetUpload(datasetId, Instant.now(), entries.size(), sizeBytes);
         }
     }
 
@@ -543,6 +725,66 @@ class DefaultLabelingServiceTest {
         @Override
         public void deleteById(AssetId id) {
             store.remove(id);
+        }
+    }
+
+    private static final class FakeAssetUsageRepositoryPort implements AssetUsageRepositoryPort {
+        private final Map<UsageId, AssetUsage> store = new LinkedHashMap<>();
+
+        @Override
+        public AssetUsage save(AssetUsage usage) {
+            store.put(usage.id(), usage);
+            return usage;
+        }
+
+        @Override
+        public Optional<AssetUsage> findById(UsageId id) {
+            return Optional.ofNullable(store.get(id));
+        }
+
+        @Override
+        public List<AssetUsage> findRecentByAsset(AssetId assetId, int limit) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+
+        @Override
+        public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+    }
+
+    private static final class FakeDetectionRepositoryPort implements DetectionRepositoryPort {
+        private final List<DetectionResult> store = new ArrayList<>();
+
+        @Override
+        public void save(DetectionResult result) {
+            store.add(result);
+        }
+
+        @Override
+        public List<DetectionResult> query(DetectionQuery query) {
+            return store.stream()
+                    .filter(r -> query.streamId() == null || r.streamId().equals(query.streamId()))
+                    .filter(r -> query.from() == null || !r.capturedAt().isBefore(query.from()))
+                    .filter(r -> query.to() == null || r.capturedAt().isBefore(query.to())) // to is exclusive
+                    .filter(r -> query.label() == null
+                            || r.detections().stream().anyMatch(d -> query.label().equals(d.label())))
+                    .limit(query.limit())
+                    .toList();
+        }
+    }
+
+    private static final class FakeReplayFrameExtractionPort implements ReplayFrameExtractionPort {
+        private final Map<StreamId, Map<Instant, VideoFrame>> store = new LinkedHashMap<>();
+
+        void put(StreamId streamId, Instant at, VideoFrame frame) {
+            store.computeIfAbsent(streamId, k -> new LinkedHashMap<>()).put(at, frame);
+        }
+
+        @Override
+        public Optional<VideoFrame> frameAt(StreamId streamId, Instant at) {
+            Map<Instant, VideoFrame> byInstant = store.get(streamId);
+            return byInstant == null ? Optional.empty() : Optional.ofNullable(byInstant.get(at));
         }
     }
 

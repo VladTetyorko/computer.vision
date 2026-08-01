@@ -1,4 +1,6 @@
-package com.drones.vision.api;
+package com.drones.vision.api.exceptions;
+
+import com.drones.vision.api.HlsProxyController;
 
 /**
  * Thrown by {@link HlsProxyController} when the configured upstream HLS

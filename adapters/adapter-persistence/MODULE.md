@@ -11,10 +11,13 @@ operational picture (docs/TACTICAL-MARKS-PLAN.md M2).
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration`, opt-in via `vision.persistence.enabled`)
-**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 101 tests (up from 78, docs/CV-TRAINING-PLAN.md
+**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 97 tests (down from 101,
+docs/CV-TRAINING-V2-PLAN.md W6 — `FilesystemDatasetExport`/`FilesystemDatasetExportTest` deleted, -4
+pure-filesystem tests; delivery to the training host now rides a gRPC upload, `adapter-cv-grpc`'s
+`GrpcDatasetUploadPort`, not a filesystem export — see that section below; up from 78, docs/CV-TRAINING-PLAN.md
 Wave T3 — new `DatasetEntity`/`JpaDatasetRepository`, `TrainingSampleEntity`/`JpaTrainingSampleRepository`,
-`SampleImageEntity`/`JpaSampleImageStore`, and `FilesystemDatasetExport`, +19 Postgres-backed round-trip/schema
-tests +4 pure-filesystem tests; up from 71, docs/TACTICAL-MARKS-PLAN.md
+`SampleImageEntity`/`JpaSampleImageStore`, +19 Postgres-backed round-trip/schema
+tests; up from 71, docs/TACTICAL-MARKS-PLAN.md
 M2 — new `MarkEntity`/`JpaMarkRepository`, +6 round-trip tests +1 schema test; up from 66, docs/U-SCOPE-PLAN.md
 slice 2 — new `AssignmentEntity`/`AssignmentId`/`JpaAssignmentRepository`, +4 round-trip tests +1 schema test; up from 56, docs/OPS-CORE-PLAN.md
 G-b — new `GeofenceZoneEntity`/`JpaGeofenceRepository`, +6 round-trip tests +1 schema test; up from 46, docs/FC-INTEGRATIONS-PLAN.md
@@ -50,7 +53,6 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `final class JpaDatasetRepository implements DatasetRepositoryPort` — constructor `(EntityManagerFactory)`. docs/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets; `save` is merge-by-id (upsert), `delete` a real hard delete (idempotent), same shape as `JpaGeofenceRepository`/`JpaMarkRepository`. `targetCategory` maps a nullable `CategoryId` to/from a plain nullable varchar.
 - `final class JpaTrainingSampleRepository implements TrainingSampleRepositoryPort` — constructor `(EntityManagerFactory)`. docs/CV-TRAINING-PLAN.md §1, Wave T3 — captured frames + their evolving annotations; `save` is merge-by-id (upsert — a sample mutates over its own review lifecycle, unlike `JpaDetectionRepository`'s append-only rows). `findByDataset`/`countByDataset` share one JPQL-with-optional-clause shape for the `(datasetId, statusOrNull)` filter `idx_training_samples_dataset_status` indexes; `findByDataset` orders newest-captured-first before bounding to `limit`.
 - `final class JpaSampleImageStore implements SampleImageStorePort` — constructor `(EntityManagerFactory)`. docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the `JpaAssetImageRepository` shape, verbatim, reused for training-sample frames; `save` is merge-by-`sampleId` (upsert).
-- `final class FilesystemDatasetExport implements DatasetExportPort` — constructor `(Path exportRoot)`. docs/CV-TRAINING-PLAN.md §1/§5, Wave T3 — writes one zip file per export (`<exportRoot>/<datasetId>/<exportId>.zip`) containing the frozen YOLO layout (`data.yaml`, `images/<name>`, `labels/<name>`) built directly with `ZipOutputStream` — no loose unzipped directory is ever written (see the class's own javadoc for why). Not wired to a Spring bean yet — `vision.training.export-dir` and its `@Bean` land with T4's `VisionTrainingProperties`.
 - package-private `final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas).
 
 ### `com.drones.vision.adapter.persistence.entity`
@@ -221,16 +223,10 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   tables: asserts `datasets.target_category` and `training_samples.asset_id` stay nullable while
   `training_samples.stream_id` and `sample_images.data` (`bytea`) are required, proving
   `V11__training_datasets.sql` applied cleanly on top of V1-V10.
-- `FilesystemDatasetExportTest` (4, docs/CV-TRAINING-PLAN.md §1/§5, Wave T3, top-level, **not**
-  Docker-gated — this port has nothing to do with Postgres) — `resolve` on an unknown
-  dataset/export pair is empty; `write` produces a zip whose entries match the frozen layout
-  exactly (`data.yaml` with the right `names`/`nc`/`train`/`val`, `images/<name>` bytes verbatim,
-  `labels/<name>.txt` text verbatim, same stem as its image) and whose manifest's `location`
-  resolves back to the same file via `resolve`; a zero-entry export still produces a valid archive
-  (just `data.yaml`); repeated `write` calls for the same dataset produce independent exports
-  (different `exportId`s, both resolvable).
-
-101 tests total, all green in this environment (`docker info` reachable) — up from 78
+97 tests total, all green in this environment (`docker info` reachable) — down from 101
+(docs/CV-TRAINING-V2-PLAN.md W6: `FilesystemDatasetExport`/`FilesystemDatasetExportTest` (4, pure
+filesystem) deleted — dataset delivery to the training host is now a gRPC upload, `adapter-cv-grpc`'s
+`GrpcDatasetUploadPort`, not a filesystem export this module writes); up from 78
 (docs/CV-TRAINING-PLAN.md Wave T3: new `DatasetRepositoryTests` (6) + `TrainingSampleRepositoryTests`
 (8) + `SampleImageStoreTests` (4) + the V11 schema test (1) = +19 Postgres-backed, plus
 `FilesystemDatasetExportTest` (4, pure filesystem, always runs) = +23 total); up from 71
@@ -427,10 +423,28 @@ involvement for this one port). See vision-domain/MODULE.md for the four frozen 
 - **No connection pool** (see "Bootstrap"/Gotchas) — a config-only follow-up, not a structural one.
 - **No referential integrity between categories/devices/assets/usages/telemetry/detections** (see Conventions) — a deliberate parity choice against the in-memory contract, not an oversight; revisit only if the in-memory reference implementations themselves ever grow those checks.
 - **Ownership has no separate port/table** — `Asset.ownership` (`ownerId`/`groupId`) is just two columns on `assets`, matching the domain model (`Ownership` is a value type embedded in `Asset`, not its own aggregate) — there is no `OwnershipRepositoryPort` to implement.
-- **`FilesystemDatasetExport` has no Spring bean yet** (docs/CV-TRAINING-PLAN.md Wave T3) — it
-  needs `VisionTrainingProperties#exportDir()`, which doesn't exist until T4 wires
-  `vision.training.*`; `DatasetExportPort` is otherwise unimplemented-in-context until then. Every
-  other Wave-T1 port has a wired bean (Jpa-or-InMemory, gated by the existing
-  `vision.persistence.enabled`) even though no `DatasetService`/`LabelingService` consumer bean
-  exists yet either — same "wire the port ahead of its consumer" precedent `markRepositoryPort` set.
 - **`telemetry_samples`/`detection_results` have no batched-insert path** — docs/MVP2-PLAN.md P-b's bullet mentions "batched inserts" alongside the append-heavy framing; `save` here is one row per call (matching the ports' one-sample/one-result-at-a-time method signatures exactly — there is no `saveAll`/`saveBatch` on either port to implement), same per-call `EntityManager` cost as every other write in this module (see `JpaOperations`'s Gotcha). Not a correctness gap against the port contracts, but worth flagging: a genuinely high-rate telemetry/detection source (e.g. 10fps CV on several concurrent streams) would see this module's per-write JDBC-connection-open cost before it saw any query-side limit.
+
+## docs/CV-TRAINING-V2-PLAN.md W6 done (export step deleted)
+
+**Deleted**: `FilesystemDatasetExport.java` + `FilesystemDatasetExportTest.java` (docs/CV-TRAINING-V2-PLAN.md
+§A) — the manual filesystem export step this class implemented (`DatasetExportPort`, itself deleted
+in `vision-domain` W1) is gone. Dataset delivery to the training host is now an implicit part of
+`POST /api/datasets/{id}/train`, over a gRPC client-streaming upload straight onto the wire —
+`adapter-cv-grpc`'s `GrpcDatasetUploadPort implements DatasetUploadPort`, framing the same frozen §5
+YOLO layout (`data.yaml`, `images/<name>`, `labels/<name>`) as a streamed zip instead of a file this
+module ever wrote to disk. No replacement class lives in this module — there is nothing left for
+adapter-persistence to own here; see adapters/adapter-cv-grpc/MODULE.md for the new port
+implementation.
+
+**`PostgresDockerIntegrationTest`**: `DatasetRepositoryTests#findAllReturnsEverySavedDataset` used
+`DatasetStatus.EXPORTING` as its second fixture's status — that enum constant was deleted in
+`vision-domain` W1 (nothing ever set it in production; the only two references anywhere in the repo
+were this test and a DTO javadoc, per that wave's own report). Fixed by using `DatasetStatus.ARCHIVED`
+instead — the test's actual intent ("two datasets with different statuses both round-trip through
+`findAll`") is unchanged, just now exercised with a status that still exists.
+
+`./mvnw -B -pl adapters/adapter-persistence test`: **97/97 green** (was 101, -4 — see "Build/test"
+above), run against a real `postgres:16` Testcontainers instance (docker reachable, not skipped).
+
+**Deviations from the brief**: none.

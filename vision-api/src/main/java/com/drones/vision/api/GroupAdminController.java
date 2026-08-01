@@ -2,6 +2,7 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.CreateGroupRequest;
 import com.drones.vision.api.dto.GroupResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.GroupService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;

@@ -2,6 +2,7 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

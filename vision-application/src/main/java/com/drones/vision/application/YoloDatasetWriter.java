@@ -4,15 +4,15 @@ import com.drones.vision.domain.model.Annotation;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.SampleImage;
 import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.port.out.DatasetExportPort;
+import com.drones.vision.domain.port.out.DatasetUploadPort;
 
 import java.util.List;
 import java.util.Locale;
 
 /**
- * Pure, in-memory composition of one {@link TrainingSample}'s YOLO export entry
- * (docs/CV-TRAINING-PLAN.md §5) — no I/O, fully unit-testable; {@link
- * com.drones.vision.domain.port.out.DatasetExportPort} only sinks the bytes this class produces.
+ * Pure, in-memory composition of one {@link TrainingSample}'s YOLO upload entry plus a dataset's
+ * {@code data.yaml} content (docs/CV-TRAINING-PLAN.md §5) — no I/O, fully unit-testable; {@link
+ * DatasetUploadPort} only frames/transports the bytes this class produces.
  *
  * <h2>Box conversion (frozen, docs/CV-TRAINING-PLAN.md §5)</h2>
  * The platform's {@link BoundingBox} is top-left-origin, normalized {@code [0,1]}
@@ -22,8 +22,8 @@ import java.util.Locale;
  * classes} list.
  *
  * <p>Package-private, stateless, no interface — one call site ({@link
- * DefaultLabelingService#export}), no second implementation ever plausible (java-clean-code
- * SKILL.md §1).
+ * DefaultLabelingService#uploadForTraining}), no second implementation ever plausible
+ * (java-clean-code SKILL.md §1).
  */
 final class YoloDatasetWriter {
 
@@ -33,22 +33,37 @@ final class YoloDatasetWriter {
     }
 
     /**
-     * Builds the {@link com.drones.vision.domain.port.out.DatasetExportPort.ExportEntry} for one
-     * {@link com.drones.vision.domain.model.SampleStatus#LABELED} sample.
+     * Builds the {@link DatasetUploadPort.ExportEntry} for one {@link
+     * com.drones.vision.domain.model.SampleStatus#LABELED} sample.
      *
-     * @param sample  the labeled sample being exported
+     * @param sample  the labeled sample being uploaded
      * @param image   the sample's stored image bytes
      * @param classes the dataset's ordered YOLO class vocabulary; every {@code sample}
      *                annotation's label must be a member (guaranteed by {@link
      *                DefaultLabelingService#label}'s own membership check at label time — a
      *                missing label here means that invariant was somehow violated)
-     * @return the entry ready to hand to {@link
-     *         com.drones.vision.domain.port.out.DatasetExportPort#write}
+     * @return the entry ready to hand to {@link DatasetUploadPort#upload}
      * @throws IllegalStateException if an annotation's label is not in {@code classes}
      */
-    static DatasetExportPort.ExportEntry toEntry(TrainingSample sample, SampleImage image, List<String> classes) {
+    static DatasetUploadPort.ExportEntry toEntry(TrainingSample sample, SampleImage image, List<String> classes) {
         String imageName = sample.id().value() + IMAGE_EXTENSION;
-        return new DatasetExportPort.ExportEntry(imageName, image.data(), labelText(sample.annotations(), classes));
+        return new DatasetUploadPort.ExportEntry(imageName, image.data(), labelText(sample.annotations(), classes));
+    }
+
+    /**
+     * Builds the {@code data.yaml} content for a dataset's ordered class vocabulary — moved
+     * verbatim from the deleted {@code FilesystemDatasetExport} (docs/CV-TRAINING-V2-PLAN.md §4):
+     * {@code names: [a, b]}, {@code nc: 2}, {@code train}/{@code val} both {@code images}
+     * (docs/CV-TRAINING-PLAN.md §5).
+     *
+     * @param classes the dataset's ordered YOLO class vocabulary; may be empty
+     * @return the {@code data.yaml} file content to ship alongside the images/labels
+     */
+    static String dataYaml(List<String> classes) {
+        return "names: [" + String.join(", ", classes) + "]\n"
+                + "nc: " + classes.size() + "\n"
+                + "train: images\n"
+                + "val: images\n";
     }
 
     /**

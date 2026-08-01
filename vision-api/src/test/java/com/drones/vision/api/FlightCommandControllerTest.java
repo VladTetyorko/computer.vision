@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AccessDeniedException;
 import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.application.VisibilityScope;

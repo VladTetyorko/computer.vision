@@ -2,7 +2,7 @@ import type { ActiveStream, Dataset, Device } from '../../core/api/models';
 
 /**
  * Pure logic behind `DatasetDetailPage` (`/manage/training/:datasetId`, docs/CV-TRAINING-PLAN.md
- * Wave T5) — the capture-stream picker's labels and the export button's enabled predicate.
+ * Wave T5) — the capture-stream picker's labels and the "Train a model" button's enabled predicate.
  */
 
 /**
@@ -19,12 +19,6 @@ export function streamCaptureLabel(
   return device ? device.name : `Stream ${stream.streamId.slice(0, 8)}`;
 }
 
-/** Exporting an all-`PENDING`/`DISCARDED` dataset would produce an empty (if valid) zip — gate the
- *  button on at least one `LABELED` sample so "Export" only ever fires once there's something to fine-tune on. */
-export function canExportDataset(dataset: Pick<Dataset, 'sampleCounts'> | null): boolean {
-  return (dataset?.sampleCounts.LABELED ?? 0) > 0;
-}
-
 /** A sane starting point for the "Train a model" form's base-model field — a small, fast-to-fine-
  *  tune YOLO checkpoint (docs/CV-TRAINING-PLAN.md's own frozen wire-contract example). Prefilled,
  *  not forced — the field stays free text (with a `<datalist>` of whatever the CV registry already
@@ -36,14 +30,11 @@ export const DEFAULT_BASE_MODEL = 'yolo26n.pt';
  *  wire-contract example. */
 export const DEFAULT_TRAINING_EPOCHS = 50;
 
-/** Whether "Train a model" is meaningful right now — the same ≥1-`LABELED`-sample gate
- *  {@link canExportDataset} already encodes (a fine-tune has nothing to learn from an
- *  all-`PENDING`/`DISCARDED` dataset either, matching `LabelingService#export`'s own filter that a
- *  training run would ultimately consume). Kept as its own named predicate so
- *  `DatasetDetailFacade`/`dataset-detail.html` can gate the Train card without reading "canExport"
- *  for an unrelated action. */
+/** Whether "Train a model" is meaningful right now — an all-`PENDING`/`DISCARDED` dataset has
+ *  nothing to fine-tune on (`POST /api/datasets/{id}/train` 400s an all-`PENDING` dataset server-side
+ *  too, docs/CV-TRAINING-V2-PLAN.md §5), so the button stays gated on at least one `LABELED` sample. */
 export function canStartTrainingDataset(dataset: Pick<Dataset, 'sampleCounts'> | null): boolean {
-  return canExportDataset(dataset);
+  return (dataset?.sampleCounts.LABELED ?? 0) > 0;
 }
 
 /**
@@ -56,20 +47,4 @@ export function canStartTrainingDataset(dataset: Pick<Dataset, 'sampleCounts'> |
  */
 export function canSubmitTrainingRequest(baseModel: string, epochs: number | null, starting: boolean): boolean {
   return !starting && baseModel.trim().length > 0 && epochs !== null && Number.isInteger(epochs) && epochs >= 1;
-}
-
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
-
-/** A human-readable size for `DatasetExport#sizeBytes` (e.g. "2.3 MB") — one decimal place above bytes themselves, base-1024. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-  return `${value.toFixed(1)} ${BYTE_UNITS[unitIndex]}`;
 }

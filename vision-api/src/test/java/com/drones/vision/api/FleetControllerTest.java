@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AssetAttention;
 import com.drones.vision.application.CategoryCounts;
 import com.drones.vision.application.FleetSummary;

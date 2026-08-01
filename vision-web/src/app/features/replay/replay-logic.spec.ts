@@ -273,13 +273,17 @@ describe('advancePlaybackClock', () => {
   });
 });
 
-describe('videoOffsetSeconds (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+describe('videoOffsetSeconds (docs/OPS-CORE-PLAN.md §R, R-c — the `<video>` DOM sync; also the exact `atSeconds` conversion `ReplayFacade.addToDataset()` reuses, docs/CV-TRAINING-V2-PLAN.md §8)', () => {
   it('converts a scrub position into the video\'s own currentTime, seconds', () => {
     expect(videoOffsetSeconds(sec(30), T0)).toBe(30);
   });
 
   it('never goes negative — a scrub position before the recording\'s own start clamps to 0', () => {
     expect(videoOffsetSeconds(T0 - 5000, T0)).toBe(0);
+  });
+
+  it('carries sub-second precision — the new POST /api/usages/{usageId}/samples endpoint accepts a fractional atSeconds (docs/CV-TRAINING-V2-PLAN.md §5)', () => {
+    expect(videoOffsetSeconds(T0 + 412_500, T0)).toBe(412.5);
   });
 });
 

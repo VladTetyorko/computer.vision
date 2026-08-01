@@ -1,17 +1,18 @@
 package com.drones.vision.domain.port.out;
 
-import com.drones.vision.domain.port.out.DatasetExportPort.ExportEntry;
+import com.drones.vision.domain.port.out.DatasetUploadPort.ExportEntry;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * {@link DatasetExportPort} itself is a plain interface with no behavior of its own to unit-test
+ * {@link DatasetUploadPort} itself is a plain interface with no behavior of its own to unit-test
  * (same convention as every other port here); its nested {@link ExportEntry} record does carry
- * compact-constructor validation, so that gets the record test treatment.
+ * compact-constructor validation, so that gets the record test treatment — carried over verbatim
+ * from the deleted {@code DatasetExportPort}'s own {@code ExportEntry} test.
  */
-class DatasetExportPortTest {
+class DatasetUploadPortTest {
 
     @Test
     void rejectsBlankImageName() {

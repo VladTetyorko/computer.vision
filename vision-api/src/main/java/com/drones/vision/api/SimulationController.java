@@ -2,6 +2,7 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.SimulationResponse;
 import com.drones.vision.api.dto.StartSimulationRequest;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.SimulatedAsset;
 import com.drones.vision.application.SimulationService;
 import com.drones.vision.domain.model.AssetId;

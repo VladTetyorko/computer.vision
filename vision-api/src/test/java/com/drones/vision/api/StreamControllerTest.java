@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.ActiveStream;
 import com.drones.vision.application.PipelineConfigPatch;
 import com.drones.vision.application.StreamService;

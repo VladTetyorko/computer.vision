@@ -26,12 +26,12 @@ import java.util.Objects;
  * GrpcDetectionPort} — with CV disabled, the plain delegate is used directly and this class is
  * never constructed.
  */
-final class DetectionSessionCleanupEventPublisher implements EventPublisherPort {
+public final class DetectionSessionCleanupEventPublisher implements EventPublisherPort {
 
     private final EventPublisherPort delegate;
     private final GrpcDetectionPort grpcDetectionPort;
 
-    DetectionSessionCleanupEventPublisher(EventPublisherPort delegate, GrpcDetectionPort grpcDetectionPort) {
+    public DetectionSessionCleanupEventPublisher(EventPublisherPort delegate, GrpcDetectionPort grpcDetectionPort) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
         this.grpcDetectionPort = Objects.requireNonNull(grpcDetectionPort, "grpcDetectionPort must not be null");
     }

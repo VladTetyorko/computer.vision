@@ -1,9 +1,11 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.publishhls.MediamtxReplayFrameExtractor;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.api.HlsProxyController;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
 import org.junit.jupiter.api.Test;
@@ -11,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,6 +65,9 @@ class PublishWiringTest {
 
     @Autowired
     private HlsProxyController hlsProxyController;
+
+    @Autowired
+    private ReplayFrameExtractionPort replayFrameExtractionPort;
 
     @Test
     void defaultConfigurationSelectsMediamtxPublisher() {
@@ -131,5 +138,36 @@ class PublishWiringTest {
         assertEquals("http://localhost:18889/" + streamId.value() + "/whep", whepUrl.get().toString(),
                 "whepUrl must be VisionPublishProperties.Mediamtx#whepBase's default, handed to the "
                         + "viewer verbatim -- WHEP has no app-relative proxy the way HLS does");
+    }
+
+    /**
+     * docs/CV-TRAINING-V2-PLAN.md §7/§I: {@code streamPublisherPort} now takes the 4-arg {@code
+     * MediamtxStreamPublisher} constructor with an explicit {@code
+     * VisionPublishProperties.Mediamtx#playbackBase()} rather than the 3-arg overload's old guess
+     * derived from {@code whepBase}'s host — asserting {@code playbackUrl}'s host:port here proves
+     * the property's own default ({@code http://localhost:19996}) reproduces that guess exactly, so
+     * the default deployment's behavior is unchanged.
+     */
+    @Test
+    void playbackUrlUsesThePlaybackBasePropertysDefaultHostAndPort() {
+        StreamId streamId = StreamId.random();
+        Instant start = Instant.parse("2026-08-01T10:00:00Z");
+
+        Optional<URI> playbackUrl = streamPublisherPort.playbackUrl(streamId, start, Duration.ofSeconds(5));
+
+        assertTrue(playbackUrl.isPresent());
+        assertTrue(playbackUrl.get().toString().startsWith("http://localhost:19996/get?path=" + streamId.value()),
+                "playbackUrl must be built against VisionPublishProperties.Mediamtx#playbackBase's default host:port, "
+                        + "got " + playbackUrl.get());
+    }
+
+    /**
+     * docs/CV-TRAINING-V2-PLAN.md §7: the replay-capture frame extractor is wired the same
+     * {@code vision.publish.enabled} on/off split as {@code streamPublisherPort} itself, since a
+     * replay frame can only ever come from a recording mediamtx publishing produced.
+     */
+    @Test
+    void defaultConfigurationSelectsTheMediamtxReplayFrameExtractor() {
+        assertInstanceOf(MediamtxReplayFrameExtractor.class, replayFrameExtractionPort);
     }
 }

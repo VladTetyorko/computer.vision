@@ -3,6 +3,7 @@ package com.drones.vision.api;
 import com.drones.vision.api.dto.CreateUserRequest;
 import com.drones.vision.api.dto.SetUserEnabledRequest;
 import com.drones.vision.api.dto.UserResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.UserService;
 import com.drones.vision.domain.model.UserId;
 import org.springframework.http.HttpStatus;

@@ -10,7 +10,6 @@
 }
 
 .capture-card,
-.export-card,
 .train-card {
   display: flex;
   flex-direction: column;
@@ -18,7 +17,6 @@
 }
 
 .capture-row,
-.export-row,
 .train-row {
   flex-wrap: wrap;
   gap: var(--space-8);
@@ -27,14 +25,6 @@
 .capture-row select {
   flex: 1;
   min-width: 12rem;
-}
-
-.export-result {
-  display: flex;
-  align-items: center;
-  gap: var(--space-16);
-  margin-top: var(--space-8);
-  flex-wrap: wrap;
 }
 
 /* Reuses `.form-grid`/`.span-2` from `datasets.css`'s own "New dataset" form — same shape, kept

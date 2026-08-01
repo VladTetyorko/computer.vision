@@ -2,9 +2,16 @@ package com.drones.vision.application;
 
 import com.drones.vision.domain.model.AuditEntry;
 import com.drones.vision.domain.model.AuditTargetType;
+import com.drones.vision.domain.model.DatasetId;
+import com.drones.vision.domain.model.DatasetUpload;
 import com.drones.vision.domain.model.JobState;
+import com.drones.vision.domain.model.SampleImage;
+import com.drones.vision.domain.model.SampleStatus;
+import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TrainingJobSpec;
 import com.drones.vision.domain.model.TrainingProgress;
+import com.drones.vision.domain.model.TrainingSample;
+import com.drones.vision.domain.model.TrainingSampleId;
 import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.TrainingPort;
@@ -14,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
@@ -29,30 +37,34 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests for {@link DefaultTrainingJobService}. {@link TrainingPort}/{@link AuditTrailPort}
- * are hand-rolled in-memory fakes (this module's dominant test style); the executor is a
- * same-thread {@link DirectExecutorService} so every scripted {@link TrainingProgress} sequence
- * lands deterministically, with no real background thread or sleep in most tests. A dedicated
- * real-thread test at the bottom exercises actual concurrency.
+ * Unit tests for {@link DefaultTrainingJobService}. {@link TrainingPort}/{@link LabelingService}/
+ * {@link AuditTrailPort} are hand-rolled in-memory fakes (this module's dominant test style); the
+ * executor is a same-thread {@link DirectExecutorService} so every scripted {@link
+ * TrainingProgress} sequence lands deterministically, with no real background thread or sleep in
+ * most tests. A dedicated real-thread test at the bottom exercises actual concurrency.
  */
 class DefaultTrainingJobServiceTest {
 
     private FakeTrainingPort trainingPort;
+    private FakeLabelingService labelingService;
     private FakeAuditTrailPort auditTrail;
     private MutableClock clock;
     private DefaultTrainingJobService service;
 
     private final UserId actor = UserId.random();
-    private final TrainingJobSpec spec = new TrainingJobSpec("yolo26n.pt", "dataset-1", 10);
+    private final DatasetId datasetId = DatasetId.random();
+    private final TrainingJobSpec spec = new TrainingJobSpec("yolo26n.pt", datasetId.value().toString(), 10);
     private final VisibilityScope managerScope = VisibilityScope.groups(Set.of());
     private final VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
 
     @BeforeEach
     void setUp() {
         trainingPort = new FakeTrainingPort();
+        labelingService = new FakeLabelingService();
         auditTrail = new FakeAuditTrailPort();
         clock = new MutableClock(Instant.parse("2026-08-01T00:00:00Z"));
-        service = new DefaultTrainingJobService(trainingPort, auditTrail, new DirectExecutorService(), clock);
+        service = new DefaultTrainingJobService(trainingPort, labelingService, auditTrail,
+                new DirectExecutorService(), clock);
     }
 
     // -- gate ---------------------------------------------------------------
@@ -64,37 +76,74 @@ class DefaultTrainingJobServiceTest {
         assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
 
         assertNull(trainingPort.lastSpec, "the port must never have been called");
+        assertNull(labelingService.lastUploadDatasetId, "the dataset pre-check must never have run");
 
         AuditEntry entry = onlyEntry();
         assertEquals(AuditTargetType.MODEL, entry.targetType());
         assertEquals("DENIED:out of scope", entry.details().get("result"));
         assertEquals("yolo26n.pt", entry.details().get("baseModel"));
-        assertEquals("dataset-1", entry.details().get("datasetId"));
+        assertEquals(datasetId.value().toString(), entry.details().get("datasetId"));
 
         // the denied job id (the audit's own target id) was never actually registered
         assertTrue(service.job(entry.targetId()).isEmpty());
         assertTrue(service.jobs().isEmpty());
     }
 
+    // -- synchronous dataset pre-check ---------------------------------------
+
+    @Test
+    void startThrowsNoSuchElementForAnUnknownDataset() {
+        labelingService.datasetKnown = false;
+
+        assertThrows(NoSuchElementException.class, () -> service.start(spec, actor, managerScope));
+
+        assertTrue(service.jobs().isEmpty(), "no job may be registered when the pre-check fails");
+        assertNull(trainingPort.lastSpec, "training must never be submitted when the pre-check fails");
+    }
+
+    @Test
+    void startThrowsAccessDeniedWhenTheDatasetIsOutOfScope() {
+        labelingService.datasetInScope = false;
+
+        assertThrows(AccessDeniedException.class, () -> service.start(spec, actor, managerScope));
+
+        assertTrue(service.jobs().isEmpty());
+        assertNull(trainingPort.lastSpec);
+    }
+
+    @Test
+    void startThrowsIllegalArgumentWhenTheDatasetHasNoLabeledSamples() {
+        labelingService.labeledCount = 0;
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> service.start(spec, actor, managerScope));
+        assertTrue(ex.getMessage().contains("has no LABELED samples to train on"));
+
+        assertTrue(service.jobs().isEmpty());
+        assertNull(trainingPort.lastSpec);
+    }
+
     // -- start / initial state -----------------------------------------------
 
     @Test
     void startReturnsAJobIdAndTheJobAppearsRunningBeforeAnyProgressArrives() {
-        // an empty script models a job that was submitted but has not yet reported any progress
+        // an empty script models a job that was submitted but has not yet reported any training progress
         String jobId = service.start(spec, actor, managerScope);
 
         assertFalse(jobId.isBlank());
         assertEquals(spec, trainingPort.lastSpec, "the job must actually have been submitted to the port");
+        assertEquals(datasetId, labelingService.lastUploadDatasetId, "the dataset must have been uploaded first");
 
         TrainingJobView job = service.job(jobId).orElseThrow();
         assertEquals(jobId, job.jobId());
         assertEquals("yolo26n.pt", job.baseModel());
-        assertEquals("dataset-1", job.datasetId());
+        assertEquals(datasetId.value().toString(), job.datasetId());
         assertEquals(10, job.epochs());
         assertEquals(0, job.epoch());
         assertEquals(0, job.totalEpochs());
         assertEquals(JobState.RUNNING, job.state());
-        assertEquals("", job.message());
+        // the empty training script leaves the last upload-phase note as the final message
+        assertEquals("Uploaded 3 sample(s), 12345 bytes; starting training…", job.message());
         assertEquals(clock.instant, job.startedAt());
 
         AuditEntry entry = onlyEntry();
@@ -180,6 +229,20 @@ class DefaultTrainingJobServiceTest {
         assertEquals("IllegalStateException", service.job(jobId).orElseThrow().message());
     }
 
+    // -- upload failure -------------------------------------------------------
+
+    @Test
+    void anUploadFailureInsideRunJobResultsInAFailedJob() {
+        labelingService.uploadFailure = new IllegalStateException("cv-service rejected the dataset upload: bad zip");
+
+        String jobId = service.start(spec, actor, managerScope); // must not throw -- the pre-check already passed
+
+        TrainingJobView job = service.job(jobId).orElseThrow();
+        assertEquals(JobState.FAILED, job.state());
+        assertEquals("cv-service rejected the dataset upload: bad zip", job.message());
+        assertNull(trainingPort.lastSpec, "training must never start when the upload itself failed");
+    }
+
     // -- retention ------------------------------------------------------------
 
     @Test
@@ -199,21 +262,26 @@ class DefaultTrainingJobServiceTest {
 
     @Test
     void concurrentJobsIsolateFromEachOthersState() {
+        DatasetId datasetA = DatasetId.random();
+        DatasetId datasetB = DatasetId.random();
+
         trainingPort.script = List.of(new TrainingProgress("w", 5, 20, 0.4, 0.5, JobState.RUNNING, ""));
-        String jobA = service.start(new TrainingJobSpec("yolo26n.pt", "dataset-A", 20), actor, managerScope);
+        String jobA = service.start(new TrainingJobSpec("yolo26n.pt", datasetA.value().toString(), 20), actor,
+                managerScope);
 
         trainingPort.script = List.of(new TrainingProgress("w", 8, 30, 0.2, 0.7, JobState.SUCCEEDED, "model-B"));
-        String jobB = service.start(new TrainingJobSpec("yolo11n.pt", "dataset-B", 30), actor, managerScope);
+        String jobB = service.start(new TrainingJobSpec("yolo11n.pt", datasetB.value().toString(), 30), actor,
+                managerScope);
 
         assertNotEquals(jobA, jobB);
         TrainingJobView viewA = service.job(jobA).orElseThrow();
         TrainingJobView viewB = service.job(jobB).orElseThrow();
 
-        assertEquals("dataset-A", viewA.datasetId());
+        assertEquals(datasetA.value().toString(), viewA.datasetId());
         assertEquals(5, viewA.epoch());
         assertEquals(JobState.RUNNING, viewA.state());
 
-        assertEquals("dataset-B", viewB.datasetId());
+        assertEquals(datasetB.value().toString(), viewB.datasetId());
         assertEquals(8, viewB.epoch());
         assertEquals(JobState.SUCCEEDED, viewB.state());
         assertEquals("model-B", viewB.message());
@@ -223,23 +291,27 @@ class DefaultTrainingJobServiceTest {
 
     @Test
     void concurrentJobsOnRealThreadsIsolateFromEachOther() throws InterruptedException {
+        DatasetId datasetA = DatasetId.random();
+        DatasetId datasetB = DatasetId.random();
         ExecutorService realExecutor = Executors.newCachedThreadPool();
-        DefaultTrainingJobService realService =
-                new DefaultTrainingJobService(new LatchedTrainingPort(), auditTrail, realExecutor, Instant::now);
+        DefaultTrainingJobService realService = new DefaultTrainingJobService(new LatchedTrainingPort(),
+                labelingService, auditTrail, realExecutor, Instant::now);
         try {
             // A real cached-thread-pool executor returns from execute() without waiting for the
             // task, so these two run genuinely concurrently on background threads.
-            String jobA = realService.start(new TrainingJobSpec("yolo26n.pt", "dataset-A", 5), actor, managerScope);
-            String jobB = realService.start(new TrainingJobSpec("yolo11n.pt", "dataset-B", 7), actor, managerScope);
+            String jobA = realService.start(new TrainingJobSpec("yolo26n.pt", datasetA.value().toString(), 5),
+                    actor, managerScope);
+            String jobB = realService.start(new TrainingJobSpec("yolo11n.pt", datasetB.value().toString(), 7),
+                    actor, managerScope);
 
             awaitTerminal(realService, jobA);
             awaitTerminal(realService, jobB);
 
             TrainingJobView viewA = realService.job(jobA).orElseThrow();
             TrainingJobView viewB = realService.job(jobB).orElseThrow();
-            assertEquals("dataset-A", viewA.datasetId());
+            assertEquals(datasetA.value().toString(), viewA.datasetId());
             assertEquals(JobState.SUCCEEDED, viewA.state());
-            assertEquals("dataset-B", viewB.datasetId());
+            assertEquals(datasetB.value().toString(), viewB.datasetId());
             assertEquals(JobState.SUCCEEDED, viewB.state());
             assertNotEquals(jobA, jobB);
         } finally {
@@ -263,16 +335,22 @@ class DefaultTrainingJobServiceTest {
 
     @Test
     void constructorsRejectNullCollaborators() {
-        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(null, auditTrail));
-        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, null));
         assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(null, auditTrail, new DirectExecutorService(), clock));
+                () -> new DefaultTrainingJobService(null, labelingService, auditTrail));
         assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(trainingPort, null, new DirectExecutorService(), clock));
+                () -> new DefaultTrainingJobService(trainingPort, null, auditTrail));
         assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(trainingPort, auditTrail, null, clock));
-        assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(trainingPort, auditTrail, new DirectExecutorService(), null));
+                () -> new DefaultTrainingJobService(trainingPort, labelingService, null));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(null, labelingService,
+                auditTrail, new DirectExecutorService(), clock));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, null,
+                auditTrail, new DirectExecutorService(), clock));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
+                null, new DirectExecutorService(), clock));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
+                auditTrail, null, clock));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
+                auditTrail, new DirectExecutorService(), null));
     }
 
     private AuditEntry onlyEntry() {
@@ -312,6 +390,65 @@ class DefaultTrainingJobServiceTest {
                     JobState.RUNNING, ""));
             onProgress.accept(new TrainingProgress("wire-" + spec.datasetId(), spec.epochs(), spec.epochs(), 0.1,
                     0.9, JobState.SUCCEEDED, "model-for-" + spec.datasetId()));
+        }
+    }
+
+    /**
+     * In-memory {@link LabelingService}: only {@link #samples} (the synchronous pre-check) and
+     * {@link #uploadForTraining} (the off-thread upload phase) are exercised by this suite; every
+     * other method throws since {@link DefaultTrainingJobService} never calls it.
+     */
+    private static final class FakeLabelingService implements LabelingService {
+        private boolean datasetKnown = true;
+        private boolean datasetInScope = true;
+        private int labeledCount = 1;
+        private RuntimeException uploadFailure;
+        private volatile DatasetId lastUploadDatasetId;
+
+        @Override
+        public TrainingSample capture(CaptureSpec spec, UserId actor, VisibilityScope scope) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+
+        @Override
+        public TrainingSample captureFromReplay(ReplayCaptureSpec spec, UserId actor, VisibilityScope scope) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+
+        @Override
+        public List<TrainingSample> samples(DatasetId id, SampleStatus statusOrNull, int limit, UserId actor,
+                                             VisibilityScope scope) {
+            if (!datasetKnown) {
+                throw new NoSuchElementException("Unknown dataset: " + id.value());
+            }
+            if (!datasetInScope) {
+                throw new AccessDeniedException("Dataset " + id.value() + " is outside your scope");
+            }
+            return labeledCount > 0 ? List.of(stubSample(id)) : List.of();
+        }
+
+        @Override
+        public SampleImage image(TrainingSampleId id, UserId actor, VisibilityScope scope) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+
+        @Override
+        public TrainingSample label(TrainingSampleId id, LabelSpec spec, UserId actor, VisibilityScope scope) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+
+        @Override
+        public DatasetUpload uploadForTraining(DatasetId id, UserId actor, VisibilityScope scope) {
+            lastUploadDatasetId = id;
+            if (uploadFailure != null) {
+                throw uploadFailure;
+            }
+            return new DatasetUpload(id, Instant.parse("2026-08-01T00:05:00Z"), 3, 12_345);
+        }
+
+        private static TrainingSample stubSample(DatasetId datasetId) {
+            return new TrainingSample(TrainingSampleId.random(), datasetId, StreamId.random(), null,
+                    Instant.parse("2026-08-01T00:00:00Z"), 640, 480, List.of(), SampleStatus.LABELED, null, null);
         }
     }
 

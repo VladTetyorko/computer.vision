@@ -1,21 +1,21 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.dto.CaptureFromReplayRequest;
 import com.drones.vision.api.dto.CaptureSampleRequest;
-import com.drones.vision.api.dto.DatasetExportResponse;
 import com.drones.vision.api.dto.LabelAnnotationsRequest;
 import com.drones.vision.api.dto.SampleResponse;
 import com.drones.vision.api.dto.SamplesResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.CaptureSpec;
-import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.LabelingService;
-import com.drones.vision.domain.model.DatasetExport;
+import com.drones.vision.application.ReplayCaptureSpec;
 import com.drones.vision.domain.model.DatasetId;
 import com.drones.vision.domain.model.SampleImage;
 import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TrainingSample;
 import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.port.out.DatasetExportPort;
+import com.drones.vision.domain.model.UsageId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -30,39 +30,34 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
- * Driving REST adapter for capture/labeling/export (docs/CV-TRAINING-PLAN.md §3's frozen wire
- * contract) — the operator-in-the-loop half of the CV model-improvement loop, over {@link
- * LabelingService}.
+ * Driving REST adapter for capture/labeling (docs/CV-TRAINING-PLAN.md §3's frozen wire contract,
+ * as delta'd by docs/CV-TRAINING-V2-PLAN.md §5) — the operator-in-the-loop half of the CV
+ * model-improvement loop, over {@link LabelingService}.
  *
  * <p>Gated by {@code vision.training.enabled} (default {@code false}), same as {@link
  * DatasetController} — see that class's own javadoc.
  *
- * <p>Also takes {@link DatasetService} and {@link DatasetExportPort} directly: {@link
- * #downloadExport} has no {@link LabelingService} method of its own to resolve a
- * previously-written export's bytes (only {@link LabelingService#export} produces a fresh one), so
- * it first re-runs {@link DatasetService#get} purely for its scope check (discarding the result) —
- * the same deliberate non-hiding 403 {@link DatasetController#get} surfaces — then resolves the
- * zip directly through the driven port, mirroring the "driving-port service plus a read-only
- * driven port" exception {@link DatasetController}'s own javadoc documents.
+ * <p>The manual export/download routes this controller used to carry
+ * (docs/CV-TRAINING-PLAN.md §3) are gone (docs/CV-TRAINING-V2-PLAN.md §A): dataset delivery to the
+ * training host is now an implicit part of {@code POST /api/datasets/{id}/train} ({@link
+ * TrainingJobController}), over a gRPC upload — see {@link LabelingService#uploadForTraining}. This
+ * controller's constructor dropped its {@code DatasetService}/{@code DatasetExportPort}
+ * collaborators along with those two handlers, since nothing else here ever needed them.
  *
  * <p>Error mapping is entirely {@link LabelingService}'s own exceptions surfacing through {@link
  * ApiExceptionHandler}: {@link com.drones.vision.application.AccessDeniedException} (a dataset, or
  * its resolvable source asset, outside the caller's scope) → 403; {@link
- * java.util.NoSuchElementException} (unknown dataset/sample, a stream with no frame published yet,
- * or an unresolvable export) → 404; {@link IllegalArgumentException} (an annotation label outside
- * the dataset's class vocabulary, an unrecognized {@code status}/annotation {@code source}, or a
- * malformed id) → 400.
+ * java.util.NoSuchElementException} (unknown dataset/sample/usage, a stream with no frame published
+ * yet, a usage with no recorded video stream, or no recorded frame at the requested replay instant)
+ * → 404; {@link IllegalArgumentException} (an annotation label outside the dataset's class
+ * vocabulary, an unrecognized {@code status}/annotation {@code source}, a malformed id, or a replay
+ * {@code atSeconds} past the usage's recorded window) → 400.
  */
 @RestController
 @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
@@ -72,15 +67,10 @@ public class LabelingController {
     private static final int DEFAULT_SAMPLES_LIMIT = 50;
 
     private final LabelingService labelingService;
-    private final DatasetService datasetService;
-    private final DatasetExportPort datasetExportPort;
     private final CurrentUser currentUser;
 
-    public LabelingController(LabelingService labelingService, DatasetService datasetService,
-                               DatasetExportPort datasetExportPort, CurrentUser currentUser) {
+    public LabelingController(LabelingService labelingService, CurrentUser currentUser) {
         this.labelingService = Objects.requireNonNull(labelingService, "labelingService must not be null");
-        this.datasetService = Objects.requireNonNull(datasetService, "datasetService must not be null");
-        this.datasetExportPort = Objects.requireNonNull(datasetExportPort, "datasetExportPort must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
@@ -97,6 +87,27 @@ public class LabelingController {
     public SampleResponse capture(@PathVariable String streamId, @RequestBody CaptureSampleRequest request) {
         CaptureSpec spec = new CaptureSpec(StreamId.of(streamId), request.toDatasetId());
         TrainingSample captured = labelingService.capture(spec, currentUser.userId(), currentUser.scope());
+        return SampleResponse.from(captured);
+    }
+
+    /**
+     * Captures a training sample from a finished usage's recorded replay at a specific instant —
+     * the replay counterpart to {@link #capture}'s live "Add to dataset" gesture
+     * (docs/CV-TRAINING-V2-PLAN.md §4/§5), invoked from the Replay page rather than a stream picker.
+     *
+     * @param usageId the finished usage to pull a recorded frame from, as a canonical UUID string
+     * @param request the target dataset and the replay offset (seconds past the usage's own {@code
+     *                startedAt}) to capture from
+     * @return the newly captured, {@code PENDING} sample — same wire shape {@link #capture} returns,
+     *         with suggested annotations pre-filled from the nearest stored detection
+     */
+    @PostMapping("/api/usages/{usageId}/samples")
+    @ResponseStatus(HttpStatus.CREATED)
+    public SampleResponse captureFromReplay(@PathVariable String usageId,
+                                             @RequestBody CaptureFromReplayRequest request) {
+        ReplayCaptureSpec spec =
+                new ReplayCaptureSpec(UsageId.of(usageId), request.toDatasetId(), request.atSeconds());
+        TrainingSample captured = labelingService.captureFromReplay(spec, currentUser.userId(), currentUser.scope());
         return SampleResponse.from(captured);
     }
 
@@ -147,47 +158,6 @@ public class LabelingController {
         TrainingSample updated = labelingService.label(TrainingSampleId.of(id), request.toSpec(),
                 currentUser.userId(), currentUser.scope());
         return SampleResponse.from(updated);
-    }
-
-    /**
-     * Exports every {@code LABELED} sample in a dataset as a YOLO-format zip.
-     *
-     * @param id the dataset id, as a canonical UUID string
-     * @return the completed export's manifest, including its download URL
-     */
-    @PostMapping("/api/datasets/{id}/export")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public DatasetExportResponse export(@PathVariable String id) {
-        DatasetExport export = labelingService.export(DatasetId.of(id), currentUser.userId(), currentUser.scope());
-        return DatasetExportResponse.from(export);
-    }
-
-    /**
-     * Downloads a previously completed export's zip archive.
-     *
-     * @param id       the dataset id, as a canonical UUID string
-     * @param exportId the export id, as returned by {@link #export}
-     * @return the zip bytes
-     * @throws java.util.NoSuchElementException if the dataset or the export is unknown (404)
-     */
-    @GetMapping(value = "/api/datasets/{id}/export/{exportId}", produces = "application/zip")
-    public ResponseEntity<byte[]> downloadExport(@PathVariable String id, @PathVariable String exportId) {
-        DatasetId datasetId = DatasetId.of(id);
-        // Scope check only -- DatasetService#get deliberately 403s (not hides) an out-of-scope
-        // dataset and 404s an unknown one; the returned Dataset itself is unused, since
-        // LabelingService has no by-exportId read of its own.
-        datasetService.get(datasetId, currentUser.userId(), currentUser.scope());
-        Path zipPath = datasetExportPort.resolve(datasetId, exportId)
-                .orElseThrow(() -> new NoSuchElementException("Unknown export: " + exportId));
-        return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/zip")).body(readBytes(zipPath));
-    }
-
-    private static byte[] readBytes(Path path) {
-        try {
-            return Files.readAllBytes(path);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read dataset export: " + path, e);
-        }
     }
 
     private static SampleStatus toStatusOrNull(String status) {

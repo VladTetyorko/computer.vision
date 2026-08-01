@@ -1,6 +1,7 @@
-package com.drones.vision.app;
+package com.drones.vision.app.config;
 
 import com.drones.vision.api.PrincipalResolver;
+import com.drones.vision.app.VisionUserDetails;
 import com.drones.vision.application.ScopeResolver;
 import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Ownership;

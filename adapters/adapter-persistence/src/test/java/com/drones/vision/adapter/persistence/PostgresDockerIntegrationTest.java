@@ -1113,7 +1113,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void findAllReturnsEverySavedDataset() {
             Dataset first = dataset(DatasetId.random(), DatasetStatus.OPEN);
-            Dataset second = dataset(DatasetId.random(), DatasetStatus.EXPORTING);
+            Dataset second = dataset(DatasetId.random(), DatasetStatus.ARCHIVED);
             repository.save(first);
             repository.save(second);
 

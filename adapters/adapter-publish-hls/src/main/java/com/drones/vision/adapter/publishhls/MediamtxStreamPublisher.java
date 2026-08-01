@@ -158,7 +158,6 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     private static final long MAX_BACKOFF_MS = 10_000L;
     private static final String HLS_PLAYLIST_SUFFIX = "/index.m3u8";
     private static final String WHEP_PATH_SUFFIX = "/whep";
-    private static final String PLAYBACK_GET_PATH = "/get";
     /**
      * docs/OPS-CORE-PLAN.md §R: port the {@link #MediamtxStreamPublisher(URI, URI, URI)}
      * convenience constructor derives a playback base at, when the caller hasn't configured one
@@ -393,8 +392,8 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         Objects.requireNonNull(start, "start must not be null");
         Objects.requireNonNull(duration, "duration must not be null");
         long durationSeconds = Math.round(duration.toMillis() / 1000.0);
-        return Optional.of(URI.create(withoutTrailingSlash(playbackViewBase.toString()) + PLAYBACK_GET_PATH
-                + "?path=" + id.value() + "&start=" + start + "&duration=" + durationSeconds));
+        return Optional.of(URI.create(
+                MediamtxPlaybackUrls.getUrl(playbackViewBase, id.value().toString(), start, durationSeconds)));
     }
 
     // -- publish machinery --------------------------------------------------

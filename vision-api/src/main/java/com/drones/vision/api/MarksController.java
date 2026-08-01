@@ -4,6 +4,7 @@ import com.drones.vision.api.dto.CreateMarkRequest;
 import com.drones.vision.api.dto.GeolocateMarkRequest;
 import com.drones.vision.api.dto.MarkResponse;
 import com.drones.vision.api.dto.PatchMarkRequest;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.MarkService;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;

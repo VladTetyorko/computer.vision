@@ -8,14 +8,10 @@ import com.drones.vision.domain.port.out.ModelRegistryPort;
 import com.drones.vision.domain.port.out.TrainingPort;
 import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
-import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,10 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  *
  * <p>The configured {@code vision.cv.endpoint} is never actually connected to (a {@code
  * ManagedChannel} only opens a real connection lazily, on first use) — same reasoning as {@link
- * CvEnabledWiringTest}. {@code vision.training.export-dir} is redirected to a fresh {@code
- * @TempDir}, same idiom as {@link TrainingEnabledWiringTest}. {@code vision.live.enabled=false}
- * isolates this test from the server-push feature's own {@code EventPublisherPort} decorator, same
- * reasoning as {@link CvEnabledWiringTest}.
+ * CvEnabledWiringTest}. {@code vision.live.enabled=false} isolates this test from the server-push
+ * feature's own {@code EventPublisherPort} decorator, same reasoning as {@link CvEnabledWiringTest}.
  */
 @SpringBootTest(properties = {
         "vision.publish.enabled=false",
@@ -53,14 +47,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
         "vision.live.enabled=false"
 })
 class CvAndTrainingSharedChannelWiringTest {
-
-    @TempDir
-    static Path exportDir;
-
-    @DynamicPropertySource
-    static void trainingProperties(DynamicPropertyRegistry registry) {
-        registry.add("vision.training.export-dir", () -> exportDir.toString());
-    }
 
     @Autowired
     private DetectionPort detectionPort;

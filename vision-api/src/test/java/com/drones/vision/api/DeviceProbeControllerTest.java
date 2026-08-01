@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.ProbeFailedException;
 import com.drones.vision.application.ProbeResult;
 import com.drones.vision.application.ProbeService;

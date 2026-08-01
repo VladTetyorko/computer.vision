@@ -14,17 +14,28 @@ contract (RUNNING per epoch -> terminal SUCCEEDED), the produced model landing
 in the model dir + showing in ListModels, a missing dataset yielding a
 reported FAILED (not a gRPC abort), a training exception yielding FAILED, and
 client cancellation stopping the run.
+
+`UploadDataset` tests (CV-TRAINING-V2 Wave W2, docs/CV-TRAINING-V2-PLAN.md §2)
+drive real tmp dirs and real (small, in-memory-built) zip archives -- no
+ultralytics/torch either. They cover the happy path incl. overwrite-of-a-
+previous-upload, protocol-level `dataset_id` problems (blank/mid-stream-
+changed/path-unsafe) aborting `INVALID_ARGUMENT`, content problems (corrupt
+zip, zip-slip entry, malformed extracted tree, zero chunks) reported as
+`ok:false` rather than aborted, and the size cap aborting `RESOURCE_EXHAUSTED`.
 """
 
 from __future__ import annotations
 
+import io
 import threading
+import zipfile
 from pathlib import Path
 
 import grpc
 import pytest
 from google.protobuf import empty_pb2
 
+from cv_service import server as server_module
 from cv_service import trainer
 from cv_service.registry import ModelRegistry
 from cv_service.server import TrainingServicer, cv_pb2
@@ -400,3 +411,201 @@ def test_marker_without_id_reads_as_none(tmp_path: Path):
     (tmp_path / ACTIVE_MODEL_MARKER).write_text('{"version": "v1"}', encoding="utf-8")
 
     assert read_active_model(tmp_path) is None
+
+
+# --- UploadDataset (cv_service.server, CV-TRAINING-V2 Wave W2) -------------
+
+
+def _zip_bytes(entries: dict) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in entries.items():
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+def _valid_dataset_entries(image_content: bytes = b"fake-jpeg-bytes") -> dict:
+    """A minimal valid archive body for the frozen §5 YOLO layout."""
+    return {
+        trainer.DATA_YAML_NAME: b"names: [building]\nnc: 1\ntrain: images\nval: images\n",
+        f"{trainer.IMAGES_DIRNAME}/frame1.jpg": image_content,
+        f"{trainer.LABELS_DIRNAME}/frame1.txt": b"0 0.5 0.5 0.2 0.2\n",
+    }
+
+
+def _chunks(dataset_id: str, data: bytes, chunk_size: int = 37) -> list:
+    """Split `data` into several small `DatasetChunk`s -- never one giant
+    message -- so tests exercise the streamed-reassembly path, not just a
+    single-shot upload."""
+    if not data:
+        return [cv_pb2.DatasetChunk(dataset_id=dataset_id, content=b"")]
+    return [
+        cv_pb2.DatasetChunk(dataset_id=dataset_id, content=data[i : i + chunk_size])
+        for i in range(0, len(data), chunk_size)
+    ]
+
+
+def _extracted_names(dataset_dir: Path) -> set:
+    return {str(p.relative_to(dataset_dir)).replace("\\", "/") for p in dataset_dir.rglob("*") if p.is_file()}
+
+
+def test_upload_dataset_happy_path(tmp_path: Path):
+    datasets_root = tmp_path / "datasets"
+    servicer = TrainingServicer(dataset_dir=datasets_root)
+    zip_bytes = _zip_bytes(_valid_dataset_entries())
+
+    ack = servicer.UploadDataset(iter(_chunks("ds-1", zip_bytes)), FakeContext())
+
+    assert ack.ok is True
+    assert ack.dataset_id == "ds-1"
+    assert ack.bytes_received == len(zip_bytes)
+    assert ack.file_count == 3
+    assert "ds-1" in ack.message
+    assert "ready" in ack.message
+
+    dataset_dir = datasets_root / "ds-1"
+    assert _extracted_names(dataset_dir) == {"data.yaml", "images/frame1.jpg", "labels/frame1.txt"}
+    # no leftover temp files/dirs beside the landed dataset.
+    assert list(datasets_root.iterdir()) == [dataset_dir]
+
+
+def test_upload_dataset_overwrite_replaces_previous_upload(tmp_path: Path):
+    """A re-upload of the same dataset_id fully supersedes the previous
+    one -- the idempotency the "label more, train again" loop needs."""
+    datasets_root = tmp_path / "datasets"
+    servicer = TrainingServicer(dataset_dir=datasets_root)
+
+    first = _zip_bytes(_valid_dataset_entries())
+    assert servicer.UploadDataset(iter(_chunks("ds-1", first)), FakeContext()).ok is True
+
+    second_entries = _valid_dataset_entries()
+    del second_entries[f"{trainer.IMAGES_DIRNAME}/frame1.jpg"]
+    second_entries[f"{trainer.IMAGES_DIRNAME}/frame2.jpg"] = b"new-jpeg-bytes"
+    second_entries[f"{trainer.LABELS_DIRNAME}/frame1.txt"] = b"REPLACED\n"
+    second = _zip_bytes(second_entries)
+
+    ack2 = servicer.UploadDataset(iter(_chunks("ds-1", second)), FakeContext())
+    assert ack2.ok is True
+
+    dataset_dir = datasets_root / "ds-1"
+    assert _extracted_names(dataset_dir) == {"data.yaml", "images/frame2.jpg", "labels/frame1.txt"}
+    assert (dataset_dir / trainer.LABELS_DIRNAME / "frame1.txt").read_bytes() == b"REPLACED\n"
+    # still exactly one dataset dir under the root -- no orphaned temp dirs.
+    assert list(datasets_root.iterdir()) == [dataset_dir]
+
+
+def test_upload_dataset_blank_id_aborts(tmp_path: Path):
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    context = FakeContext()
+
+    with pytest.raises(_AbortError):
+        servicer.UploadDataset(iter([cv_pb2.DatasetChunk(dataset_id="", content=b"x")]), context)
+
+    assert context.code == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_upload_dataset_mid_stream_id_change_aborts(tmp_path: Path):
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    context = FakeContext()
+    chunks = [
+        cv_pb2.DatasetChunk(dataset_id="ds-1", content=b"aa"),
+        cv_pb2.DatasetChunk(dataset_id="ds-2", content=b"bb"),
+    ]
+
+    with pytest.raises(_AbortError):
+        servicer.UploadDataset(iter(chunks), context)
+
+    assert context.code == grpc.StatusCode.INVALID_ARGUMENT
+
+
+@pytest.mark.parametrize("bad_id", ["../evil", "a/b", "a\\b", "..", ".", "  "])
+def test_upload_dataset_unsafe_id_aborts(tmp_path: Path, bad_id: str):
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    context = FakeContext()
+
+    with pytest.raises(_AbortError):
+        servicer.UploadDataset(iter([cv_pb2.DatasetChunk(dataset_id=bad_id, content=b"x")]), context)
+
+    assert context.code == grpc.StatusCode.INVALID_ARGUMENT
+    # nothing landed, no litter.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_upload_dataset_corrupt_zip_returns_ok_false(tmp_path: Path):
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    garbage = b"this is not a zip file, just garbage bytes" * 5
+
+    ack = servicer.UploadDataset(iter(_chunks("ds-1", garbage)), FakeContext())
+
+    assert ack.ok is False
+    assert ack.dataset_id == "ds-1"
+    assert ack.bytes_received == len(garbage)
+    assert "archive" in ack.message.lower()
+    assert not (tmp_path / "ds-1").exists()
+    assert list(tmp_path.iterdir()) == []  # no temp litter
+
+
+@pytest.mark.parametrize(
+    "bad_entry_name",
+    [
+        "../../etc/evil.txt",
+        "/etc/evil.txt",
+        "other/evil.txt",
+        "readme.txt",
+        "images/../../evil.txt",
+    ],
+)
+def test_upload_dataset_rejects_zip_slip_entries(tmp_path: Path, bad_entry_name: str):
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    entries = _valid_dataset_entries()
+    entries[bad_entry_name] = b"pwned"
+    zip_bytes = _zip_bytes(entries)
+
+    ack = servicer.UploadDataset(iter(_chunks("ds-1", zip_bytes)), FakeContext())
+
+    assert ack.ok is False
+    assert "unsafe entry" in ack.message
+    assert not (tmp_path / "ds-1").exists()
+    assert list(tmp_path.iterdir()) == []  # no temp litter, no partial extraction
+
+
+def test_upload_dataset_malformed_extracted_tree_returns_ok_false(tmp_path: Path):
+    """A zip that unzips fine but doesn't carry the full §5 layout (here:
+    only data.yaml, no images/labels) is rejected by `resolve_dataset_dir`,
+    unmodified -- reported, not aborted."""
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    zip_bytes = _zip_bytes({trainer.DATA_YAML_NAME: b"names: [x]\nnc: 1\n"})
+
+    ack = servicer.UploadDataset(iter(_chunks("ds-1", zip_bytes)), FakeContext())
+
+    assert ack.ok is False
+    assert "ds-1" in ack.message
+    assert not (tmp_path / "ds-1").exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_upload_dataset_zero_chunks_returns_ok_false(tmp_path: Path):
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+
+    ack = servicer.UploadDataset(iter([]), FakeContext())
+
+    assert ack.ok is False
+    assert ack.dataset_id == ""
+    assert "no dataset chunks" in ack.message.lower()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_upload_dataset_exceeds_size_cap_aborts(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(server_module, "_MAX_DATASET_UPLOAD_BYTES", 10)
+    servicer = TrainingServicer(dataset_dir=tmp_path)
+    context = FakeContext()
+    chunks = [
+        cv_pb2.DatasetChunk(dataset_id="ds-1", content=b"0123456789"),  # exactly the cap: ok
+        cv_pb2.DatasetChunk(dataset_id="ds-1", content=b"x"),  # tips it over
+    ]
+
+    with pytest.raises(_AbortError):
+        servicer.UploadDataset(iter(chunks), context)
+
+    assert context.code == grpc.StatusCode.RESOURCE_EXHAUSTED
+    assert list(tmp_path.iterdir()) == []  # temp file cleaned up even on abort

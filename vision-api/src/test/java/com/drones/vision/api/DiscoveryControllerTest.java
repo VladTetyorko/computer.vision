@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.DiscoveryService;
 import com.drones.vision.application.ScanRequest;
 import com.drones.vision.application.ScanResult;

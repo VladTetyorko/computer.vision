@@ -1,54 +1,10 @@
-package com.drones.vision.app;
+package com.drones.vision.app.config;
 
-import com.drones.vision.adapter.persistence.JpaAssetImageRepository;
-import com.drones.vision.adapter.persistence.JpaAssetRepository;
-import com.drones.vision.adapter.persistence.JpaAssetUsageRepository;
-import com.drones.vision.adapter.persistence.JpaAssignmentRepository;
-import com.drones.vision.adapter.persistence.JpaCategoryRepository;
-import com.drones.vision.adapter.persistence.JpaDatasetRepository;
-import com.drones.vision.adapter.persistence.JpaDetectionRepository;
-import com.drones.vision.adapter.persistence.JpaDeviceRepository;
-import com.drones.vision.adapter.persistence.JpaGeofenceRepository;
-import com.drones.vision.adapter.persistence.JpaGroupRepository;
-import com.drones.vision.adapter.persistence.JpaMarkRepository;
-import com.drones.vision.adapter.persistence.JpaSampleImageStore;
-import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
-import com.drones.vision.adapter.persistence.JpaTrainingSampleRepository;
-import com.drones.vision.adapter.persistence.JpaUserRepository;
-import com.drones.vision.adapter.persistence.PersistenceUnit;
-import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
-import com.drones.vision.app.devsupport.InMemoryAssetRepository;
-import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;
-import com.drones.vision.app.devsupport.InMemoryAssignmentRepository;
-import com.drones.vision.app.devsupport.InMemoryCategoryRepository;
-import com.drones.vision.app.devsupport.InMemoryDatasetRepository;
-import com.drones.vision.app.devsupport.InMemoryDetectionRepository;
-import com.drones.vision.app.devsupport.InMemoryDeviceRepository;
-import com.drones.vision.app.devsupport.InMemoryGeofenceRepository;
-import com.drones.vision.app.devsupport.InMemoryGroupRepository;
-import com.drones.vision.app.devsupport.InMemoryMarkRepository;
-import com.drones.vision.app.devsupport.InMemorySampleImageStore;
-import com.drones.vision.app.devsupport.InMemoryTelemetryRepository;
-import com.drones.vision.app.devsupport.InMemoryTrainingSampleRepository;
-import com.drones.vision.app.devsupport.InMemoryUserRepository;
-import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
-import com.drones.vision.domain.port.out.CategoryRepositoryPort;
-import com.drones.vision.domain.port.out.DatasetRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.DeviceRepositoryPort;
-import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
-import com.drones.vision.domain.port.out.GroupRepositoryPort;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
-import com.drones.vision.domain.port.out.SampleImageStorePort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
-import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
-import com.drones.vision.domain.port.out.UserRepositoryPort;
-
+import com.drones.vision.adapter.persistence.*;
+import com.drones.vision.app.VisionPersistenceProperties;
+import com.drones.vision.app.devsupport.*;
+import com.drones.vision.domain.port.out.*;
 import jakarta.persistence.EntityManagerFactory;
-
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -66,7 +22,7 @@ import org.springframework.context.annotation.Configuration;
  * here (rather than a plain if/else inside one method, {@code WiringConfiguration}'s usual
  * style, e.g. {@code detectionPort}): unlike a no-op fallback object, actually *constructing* an
  * {@link EntityManagerFactory} opens a real database connection and runs Flyway, so it must not
- * even be attempted when persistence is disabled — {@link org.springframework.boot.autoconfigure.condition.ConditionalOnProperty}
+ * even be attempted when persistence is disabled — {@link ConditionalOnProperty}
  * keeps the bean method itself from ever running in that case (same idiom {@code
  * DiscoveryWiringConfiguration} uses for its scanner beans). The twelve port beans below then
  * consume it through {@link ObjectProvider}, which tolerates the bean being entirely absent when

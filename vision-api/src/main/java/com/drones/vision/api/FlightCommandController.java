@@ -4,6 +4,7 @@ import com.drones.vision.api.dto.FlightCapabilitiesResponse;
 import com.drones.vision.api.dto.ForceCommandRequest;
 import com.drones.vision.api.dto.ReturnHomeResponse;
 import com.drones.vision.api.dto.SetModeRequest;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.FlightCommandService;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.CommandResult;

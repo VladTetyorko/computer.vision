@@ -1,6 +1,9 @@
 import { DestroyRef, Injectable, type Signal, computed, effect, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
+import { ToastService } from '../../core/toast.service';
+import { TrainingStore } from '../../core/training/training-store';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { deriveTrail, groupTelemetryByDevice, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { formatDuration } from '../../core/stream-info-logic';
@@ -17,6 +20,7 @@ import {
   parseDeepLinkOffsetMs,
   selectedClipWindow,
   trailPrefix,
+  videoOffsetSeconds,
   type DetectionDensityBucket,
   type PlaybackSpeed,
 } from './replay-logic';
@@ -36,8 +40,9 @@ export interface ReplayRouteInputs {
 /**
  * `ReplayPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — owns every read-model/command the page
  * used to own directly: the cached `timeline`/`asset`/`recording` fetch, every scrub-time `computed`
- * derivation (`replay-logic.ts`), the `requestAnimationFrame` playback clock, and clip export. Every
- * value/behavior here is byte-for-byte what `ReplayPage` owned before this refactor.
+ * derivation (`replay-logic.ts`), the `requestAnimationFrame` playback clock, clip export, and (new,
+ * docs/CV-TRAINING-V2-PLAN.md §8) the "Add to dataset" replay-capture action. Every value/behavior
+ * here is byte-for-byte what `ReplayPage` owned before this refactor.
  *
  * **What stays on the page instead** (docs/UI-ARCHITECTURE-PLAN.md's own "truly-ephemeral,
  * self-contained local view state" carve-out): the `<video>` element's own `viewChild` query and the
@@ -45,10 +50,26 @@ export interface ReplayRouteInputs {
  * `videoDrivenUpdate`) — both need direct access to the video DOM node, which only the component
  * itself can hold. This facade still owns every *value* that sync reads/writes (`atMs`,
  * `recordingStartMs`, `playing`) — only the DOM plumbing stays component-side.
+ *
+ * **"Add to dataset" (docs/CV-TRAINING-V2-PLAN.md §8) — a second capture entry point, alongside
+ * `DatasetDetailFacade`'s own live-stream capture.** `training` (`TrainingStore`, `providedIn:
+ * 'root'`) supplies the dataset picker's own list for free — the same store `features/labeling/**`
+ * already reads, refreshed here too (mirrors `DatasetsFacade`'s own unconditional
+ * `training.refresh()` on construction) since a viewer may land on `/replay` without ever having
+ * visited `/manage/training` first. `training.disabled()` (the store's own honest 404→"not enabled
+ * here" signal) hides the whole control in `replay.html`, exactly like `DatasetsPage`'s own
+ * `vision-empty` degrade — no second feature-flag probe. {@link addToDataset} reuses
+ * `videoOffsetSeconds(atMs(), recordingStartMs())` — the *exact* scrub→seconds conversion the
+ * `<video>` DOM sync already trusts — as the captured instant, so "the frame you're looking at" is
+ * genuinely the frame the server extracts.
  */
 @Injectable()
 export class ReplayFacade {
   private readonly api = inject(VisionApi);
+  private readonly toasts = inject(ToastService);
+  private readonly router = inject(Router);
+
+  readonly training = inject(TrainingStore);
 
   private assetIdSignal: Signal<string | undefined> = signal(undefined);
   private usageIdSignal: Signal<string | undefined> = signal(undefined);
@@ -99,6 +120,12 @@ export class ReplayFacade {
     const window = this.clipWindow();
     return url && window ? buildClipDownloadUrl(url, window) : undefined;
   });
+
+  // --- Add to dataset, from a replay frame (docs/CV-TRAINING-V2-PLAN.md §8) ---------------------
+
+  /** The "Add to dataset" picker's current selection — `''` = none chosen yet. */
+  readonly datasetId = signal('');
+  readonly capturing = signal(false);
 
   readonly fromMs = computed(() => (this.timeline() ? Date.parse(this.timeline()!.from) : 0));
   readonly toMs = computed(() => (this.timeline() ? Date.parse(this.timeline()!.to) : 0));
@@ -189,6 +216,11 @@ export class ReplayFacade {
       void this.load(this.effectiveAssetId(), this.effectiveUsageId());
     });
 
+    // Mirrors `DatasetsFacade`'s own unconditional `training.refresh()` on construction — a viewer
+    // may land on `/replay` without ever having visited `/manage/training` first, and `TrainingStore`
+    // is lazy (`providedIn: 'root'`, not self-initializing), so nothing else guarantees this runs.
+    void this.training.refresh();
+
     inject(DestroyRef).onDestroy(() => this.stopClock());
   }
 
@@ -222,6 +254,7 @@ export class ReplayFacade {
     this.videoErrored.set(false);
     this.clipSelectionStartMs.set(undefined);
     this.clipSelectionEndMs.set(undefined);
+    this.datasetId.set('');
     try {
       const [asset, timeline] = await Promise.all([
         assetId ? this.api.getAsset(assetId) : Promise.resolve(undefined),
@@ -276,6 +309,38 @@ export class ReplayFacade {
   clearClipSelection(): void {
     this.clipSelectionStartMs.set(undefined);
     this.clipSelectionEndMs.set(undefined);
+  }
+
+  // --- Add to dataset, from a replay frame (docs/CV-TRAINING-V2-PLAN.md §8) ---------------------
+
+  /**
+   * Captures the frame at the current scrub position into the selected dataset — the replay-driven
+   * twin of `DatasetDetailFacade.capture()`'s live-stream capture. `replay.html`'s own control
+   * already keeps this from rendering at all when `training.disabled()` or `!videoAvailable()`; the
+   * guards here just make a stray call (e.g. a double-submit racing the button's own `[disabled]`)
+   * a safe no-op rather than a duplicate request. Mirrors `DatasetDetailFacade.capture()`'s own
+   * try/toast/finally shape exactly — an honest error toast (`describeHttpError`) on failure, never
+   * a fabricated success.
+   */
+  async addToDataset(): Promise<void> {
+    const usageId = this.effectiveUsageId();
+    const datasetId = this.datasetId();
+    const recordingStartMs = this.recordingStartMs();
+    if (!usageId || !datasetId || recordingStartMs === undefined || this.capturing()) {
+      return;
+    }
+    this.capturing.set(true);
+    try {
+      const sample = await this.api.captureReplaySample(usageId, datasetId, videoOffsetSeconds(this.atMs(), recordingStartMs));
+      this.toasts.ok('Added this frame to the dataset.', {
+        label: 'Open dataset',
+        onClick: () => void this.router.navigate(['/manage/training', sample.datasetId]),
+      });
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.capturing.set(false);
+    }
   }
 
   // --- Playback controls -------------------------------------------------------------------

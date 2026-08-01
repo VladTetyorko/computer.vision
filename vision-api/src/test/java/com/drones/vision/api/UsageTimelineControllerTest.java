@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.ReplayService;
 import com.drones.vision.application.UsageRecording;
 import com.drones.vision.application.UsageTimeline;

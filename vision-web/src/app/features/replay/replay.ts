@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, viewChild } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ReplayMap } from './replay-map';
 import { ReplayFacade } from './replay-facade';
@@ -29,7 +30,7 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs } from './replay-l
  */
 @Component({
   selector: 'vision-replay',
-  imports: [RouterLink, ReplayMap],
+  imports: [FormsModule, RouterLink, ReplayMap],
   templateUrl: './replay.html',
   styleUrl: './replay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

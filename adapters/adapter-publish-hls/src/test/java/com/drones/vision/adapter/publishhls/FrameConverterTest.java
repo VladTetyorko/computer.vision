@@ -13,9 +13,11 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.time.Instant;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -143,6 +145,135 @@ class FrameConverterTest {
                 PixelFormat.YUV420P, ByteBuffer.wrap(new byte[6 * 4]));
 
         assertThrows(IllegalArgumentException.class, () -> FrameConverter.toFrame(videoFrame));
+    }
+
+    // -- copyBgr24 (Frame -> ByteBuffer, the MediamtxReplayFrameExtractor direction) -----------
+    // Mirrors adapter-rtsp's own FrameConverterTest for its twin method — same synthetic,
+    // hand-built Frame instances, no grabber/network/file I/O.
+
+    @Test
+    void copyBgr24CopiesTightlyPackedPixelDataStrippingRowPadding() {
+        int width = 4;
+        int height = 2;
+        int channels = 3;
+        int rowBytes = width * channels; // 12
+        int stride = rowBytes + 4;       // 4 bytes of row padding, as a real grabber might produce
+
+        byte[] raw = new byte[stride * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < rowBytes; x++) {
+                raw[y * stride + x] = (byte) (y * 100 + x);
+            }
+            for (int x = rowBytes; x < stride; x++) {
+                raw[y * stride + x] = (byte) 0xFF; // padding -- must never appear in the output
+            }
+        }
+
+        Frame frame = syntheticGrabberFrame(width, height, channels, stride, raw);
+
+        ByteBuffer result = FrameConverter.copyBgr24(frame);
+
+        assertEquals(rowBytes * height, result.remaining());
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < rowBytes; x++) {
+                byte expected = (byte) (y * 100 + x);
+                assertEquals(expected, result.get(y * rowBytes + x), "mismatch at row " + y + ", column " + x);
+            }
+        }
+    }
+
+    @Test
+    void copyBgr24CopiesContiguousDataWithNoPadding() {
+        int width = 2;
+        int height = 2;
+        int channels = 3;
+        byte[] raw = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+
+        Frame frame = syntheticGrabberFrame(width, height, channels, width * channels, raw);
+
+        ByteBuffer result = FrameConverter.copyBgr24(frame);
+
+        byte[] out = new byte[result.remaining()];
+        result.get(out);
+        assertArrayEquals(raw, out);
+    }
+
+    @Test
+    void copyBgr24ReturnedBufferIsIndependentOfTheSourceBuffer() {
+        byte[] raw = {10, 20, 30};
+        ByteBuffer source = ByteBuffer.wrap(raw);
+
+        Frame frame = new Frame();
+        frame.imageWidth = 1;
+        frame.imageHeight = 1;
+        frame.imageDepth = Frame.DEPTH_UBYTE;
+        frame.imageChannels = 3;
+        frame.imageStride = 3;
+        frame.image = new Buffer[] {source};
+
+        ByteBuffer result = FrameConverter.copyBgr24(frame);
+        // Mutate the "native" source buffer after copying, simulating the grabber reusing it
+        // for the next grabImage() call -- the previously returned copy must be unaffected.
+        source.put(0, (byte) 99);
+
+        assertEquals((byte) 10, result.get(0));
+    }
+
+    @Test
+    void copyBgr24RejectsNullFrame() {
+        assertThrows(IllegalArgumentException.class, () -> FrameConverter.copyBgr24(null));
+    }
+
+    @Test
+    void copyBgr24RejectsFrameWithoutImageData() {
+        Frame frame = new Frame();
+        frame.imageWidth = 4;
+        frame.imageHeight = 4;
+        // frame.image left null: an audio-only/data-only frame
+
+        assertThrows(IllegalArgumentException.class, () -> FrameConverter.copyBgr24(frame));
+    }
+
+    @Test
+    void copyBgr24RejectsFrameWithInvalidDimensions() {
+        Frame frame = new Frame();
+        frame.imageWidth = 0;
+        frame.imageHeight = 4;
+        frame.imageChannels = 3;
+        frame.imageStride = 0;
+        frame.image = new Buffer[] {ByteBuffer.wrap(new byte[0])};
+
+        assertThrows(IllegalArgumentException.class, () -> FrameConverter.copyBgr24(frame));
+    }
+
+    @Test
+    void copyBgr24RejectsNonThreeChannelFrame() {
+        Frame frame = syntheticGrabberFrame(2, 2, 1, 2, new byte[]{1, 2, 3, 4});
+
+        assertThrows(IllegalArgumentException.class, () -> FrameConverter.copyBgr24(frame));
+    }
+
+    @Test
+    void copyBgr24RejectsNonByteBackedImageBuffer() {
+        Frame frame = new Frame();
+        frame.imageWidth = 2;
+        frame.imageHeight = 1;
+        frame.imageChannels = 3;
+        frame.imageStride = 6;
+        frame.image = new Buffer[] {java.nio.FloatBuffer.allocate(6)};
+
+        assertThrows(IllegalArgumentException.class, () -> FrameConverter.copyBgr24(frame));
+    }
+
+    private static Frame syntheticGrabberFrame(int width, int height, int channels, int stride, byte[] raw) {
+        Frame frame = new Frame();
+        frame.imageWidth = width;
+        frame.imageHeight = height;
+        frame.imageDepth = Frame.DEPTH_UBYTE;
+        frame.imageChannels = channels;
+        frame.imageStride = stride;
+        frame.image = new Buffer[] {ByteBuffer.wrap(raw)};
+        return frame;
     }
 
     private static byte[] renderSolidJpeg(int width, int height, Color color) throws IOException {

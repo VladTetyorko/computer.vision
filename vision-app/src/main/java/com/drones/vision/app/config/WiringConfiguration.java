@@ -1,4 +1,4 @@
-package com.drones.vision.app;
+package com.drones.vision.app.config;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
@@ -8,6 +8,7 @@ import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mjpeg.MjpegFeedTransmitter;
 import com.drones.vision.adapter.mjpeg.MjpegVideoSource;
 import com.drones.vision.adapter.overlay.Java2DOverlayRenderer;
+import com.drones.vision.adapter.publishhls.MediamtxReplayFrameExtractor;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.rtsp.FfmpegVideoSource;
 import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
@@ -17,62 +18,10 @@ import com.drones.vision.adapter.v4l2.V4l2VideoSource;
 import com.drones.vision.api.HlsProxyController;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.api.live.LiveUpdateRegistry;
-import com.drones.vision.app.devsupport.InMemoryAuditTrail;
-import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;
-import com.drones.vision.app.devsupport.LoggingEventPublisher;
-import com.drones.vision.app.devsupport.NoopDetectionPort;
-import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
-import com.drones.vision.app.devsupport.NoopStreamPublisher;
-import com.drones.vision.application.AssetService;
-import com.drones.vision.application.AssetStatsService;
-import com.drones.vision.application.DefaultAssetService;
-import com.drones.vision.application.DefaultAssetStatsService;
-import com.drones.vision.application.DefaultCategoryService;
-import com.drones.vision.application.DefaultDeviceService;
-import com.drones.vision.application.DefaultFleetSummaryService;
-import com.drones.vision.application.DefaultFlightCommandService;
-import com.drones.vision.application.DefaultGeofenceService;
-import com.drones.vision.application.DefaultManualControlService;
-import com.drones.vision.application.DefaultMarkService;
-import com.drones.vision.application.DefaultProbeService;
-import com.drones.vision.application.DefaultReplayService;
-import com.drones.vision.application.DefaultSimulationService;
-import com.drones.vision.application.DefaultStreamService;
-import com.drones.vision.application.CategoryService;
-import com.drones.vision.application.DeviceService;
-import com.drones.vision.application.FeedTransmitterRegistry;
-import com.drones.vision.application.FleetSummaryService;
-import com.drones.vision.application.FlightCommandService;
-import com.drones.vision.application.GeofenceMonitor;
-import com.drones.vision.application.GeofenceService;
-import com.drones.vision.application.ManualControlService;
-import com.drones.vision.application.MarkService;
-import com.drones.vision.application.ProbeService;
-import com.drones.vision.application.ReplayService;
-import com.drones.vision.application.SimulationService;
-import com.drones.vision.application.StreamService;
-import com.drones.vision.application.UsageTracker;
-import com.drones.vision.application.VideoSourceRegistry;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.CategoryRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionPort;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.DeviceRepositoryPort;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.FeedTransmitterPort;
-import com.drones.vision.domain.port.out.FlightCommandPort;
-import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.ManualControlPort;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
-import com.drones.vision.domain.port.out.OverlayPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
-import com.drones.vision.domain.port.out.TelemetrySourcePort;
-import com.drones.vision.domain.port.out.VideoSourcePort;
+import com.drones.vision.app.*;
+import com.drones.vision.app.devsupport.*;
+import com.drones.vision.application.*;
+import com.drones.vision.domain.port.out.*;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.ObjectProvider;
@@ -108,7 +57,7 @@ import java.util.concurrent.TimeUnit;
  * is real as of Phase 1: {@link #streamPublisherPort(VisionPublishProperties)}
  * selects between the mediamtx-backed publisher and the no-op fallback based
  * on {@link VisionPublishProperties}. CV inference ({@link DetectionPort})
- * is real as of docs/MVP1-PLAN.md §C7: {@link #detectionPort(VisionCvProperties)}
+ * is real as of docs/MVP1-PLAN.md §C7:
  * selects between {@code GrpcDetectionPort} (adapter-cv-grpc) and the no-op
  * fallback based on {@link VisionCvProperties}; see {@link #eventPublisherPort}
  * for how the gRPC session's per-stream lifecycle is cleaned up, and how that
@@ -358,14 +307,41 @@ public class WiringConfiguration {
      * (docs/MVP2-PLAN.md §L) — unlike {@code hlsViewBase}, WHEP has no app-relative proxy
      * counterpart, so this must already be an address the viewer's browser can reach; see {@link
      * VisionPublishProperties}'s "WHEP has no third base" javadoc section.
+     *
+     * <p>{@code playbackViewBase} is {@link VisionPublishProperties.Mediamtx#playbackBase()},
+     * threaded through {@code MediamtxStreamPublisher}'s 4-arg constructor (docs/CV-TRAINING-V2-PLAN.md
+     * §7) rather than the 3-arg overload that used to *derive* a playback base by guessing at
+     * {@code whepBase}'s host — the property's own default reproduces that derived value exactly for
+     * a localhost deployment, so this closes the follow-up without changing default behavior; see
+     * {@link #replayFrameExtractionPort} for the same property's other consumer.
      */
     @Bean
     public StreamPublisherPort streamPublisherPort(VisionPublishProperties properties) {
         if (properties.enabled()) {
             VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
-            return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(), mediamtx.whepBase());
+            return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(), mediamtx.whepBase(),
+                    mediamtx.playbackBase());
         }
         return new NoopStreamPublisher();
+    }
+
+    /**
+     * Selects the {@link ReplayFrameExtractionPort} implementation per {@link
+     * VisionPublishProperties#enabled()} — the same if/else split {@link #streamPublisherPort}
+     * makes, since a replay frame can only ever come from a mediamtx recording that publishing
+     * itself produced (docs/CV-TRAINING-V2-PLAN.md §7): {@code true} wires {@code
+     * MediamtxReplayFrameExtractor} against {@link VisionPublishProperties.Mediamtx#playbackBase()};
+     * {@code false} falls back to {@link NoopReplayFrameExtractor} (always {@link
+     * java.util.Optional#empty()} — honest absence, not an error, matching {@link
+     * com.drones.vision.domain.port.out.DatasetUploadPort}'s and this port's own "no recording
+     * configured" contract).
+     */
+    @Bean
+    public ReplayFrameExtractionPort replayFrameExtractionPort(VisionPublishProperties properties) {
+        if (properties.enabled()) {
+            return new MediamtxReplayFrameExtractor(properties.mediamtx().playbackBase());
+        }
+        return new NoopReplayFrameExtractor();
     }
 
     /**
@@ -594,7 +570,7 @@ public class WiringConfiguration {
      *
      * <p>{@code liveUpdatePublisherPort} (docs/REALTIME-PLAN.md §4) is threaded through
      * unconditionally — it is always a real bean (either the SSE registry or {@link
-     * com.drones.vision.app.devsupport.NoopLiveUpdatePublisher}, see {@link
+     * NoopLiveUpdatePublisher}, see {@link
      * #liveUpdatePublisherPort}), so every appended telemetry sample is announced regardless of
      * {@link VisionLiveProperties#enabled()}; the no-op branch makes that announcement free.
      *

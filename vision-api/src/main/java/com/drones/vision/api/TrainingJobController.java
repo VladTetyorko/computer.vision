@@ -3,7 +3,9 @@ package com.drones.vision.api;
 import com.drones.vision.api.dto.StartTrainingJobRequest;
 import com.drones.vision.api.dto.TrainingJobResponse;
 import com.drones.vision.api.dto.TrainingJobsResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.TrainingJobService;
+import com.drones.vision.domain.model.DatasetId;
 import com.drones.vision.domain.model.TrainingJobSpec;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
@@ -32,17 +34,22 @@ import java.util.Objects;
  * <p>{@link #start} nests under {@code /api/datasets/{id}/train} (the dataset being trained on),
  * while {@link #job}/{@link #jobs} live under {@code /api/training/jobs} — a job outlives, and is
  * never re-scoped by, the dataset it started from, exactly the split docs/CV-TRAINING-PLAN.md §8
- * pins. {@code id} is threaded into the started {@link TrainingJobSpec} as a plain string, not
- * parsed/re-validated as a {@link com.drones.vision.domain.model.DatasetId} here — {@link
- * TrainingJobSpec#datasetId()}'s own javadoc explains why it stays a plain string all the way to
- * the gRPC boundary.
+ * pins. {@link #start} parses {@code id} into a {@link DatasetId} at the edge (docs/CV-TRAINING-V2-PLAN.md
+ * §5) — a malformed id is a synchronous {@code 400}, not a job that fails later — then threads its
+ * canonical string form into the started {@link TrainingJobSpec}, whose {@code datasetId} field
+ * itself stays a plain string all the way to the gRPC boundary ({@link
+ * TrainingJobSpec#datasetId()}'s own javadoc explains why).
  *
  * <p>Error mapping is entirely {@link TrainingJobService#start}'s own exceptions surfacing through
- * {@link ApiExceptionHandler}: {@link com.drones.vision.application.AccessDeniedException} (caller
- * may not manage the organization) → 403; {@link IllegalArgumentException} (a malformed spec —
- * blank {@code baseModel}/dataset id or non-positive {@code epochs}, {@link TrainingJobSpec}'s own
- * compact-constructor checks) → 400. A training run that fails mid-flight is <b>never</b> a thrown
- * exception — it is a polled {@link com.drones.vision.domain.model.JobState#FAILED} {@link
+ * {@link ApiExceptionHandler}, plus this controller's own edge parse: {@link
+ * com.drones.vision.application.AccessDeniedException} (caller may not manage the organization, or
+ * the dataset is outside their scope) → 403; {@link java.util.NoSuchElementException} (unknown
+ * dataset) → 404; {@link IllegalArgumentException} (a malformed dataset id; a malformed spec — blank
+ * {@code baseModel} or non-positive {@code epochs}, {@link TrainingJobSpec}'s own
+ * compact-constructor checks; or a dataset with no {@code LABELED} samples to train on,
+ * docs/CV-TRAINING-V2-PLAN.md §4's synchronous pre-check) → 400. A training run that fails
+ * mid-flight (including a rejected dataset upload, docs/CV-TRAINING-V2-PLAN.md §4) is <b>never</b>
+ * a thrown exception — it is a polled {@link com.drones.vision.domain.model.JobState#FAILED} {@link
  * TrainingJobResponse#state()}, so {@link #job}/{@link #jobs} never special-case it.
  */
 @RestController
@@ -58,10 +65,13 @@ public class TrainingJobController {
     }
 
     /**
-     * Starts a fine-tune job against a dataset.
+     * Starts a fine-tune job against a dataset — uploading it to the training host over gRPC and
+     * kicking off the run, all in {@link TrainingJobService#start}'s off-thread work
+     * (docs/CV-TRAINING-V2-PLAN.md §4).
      *
-     * @param id      the dataset id to train on, as a canonical UUID string, threaded verbatim into
-     *                the started job's {@link TrainingJobSpec#datasetId()}
+     * @param id      the dataset id to train on, as a canonical UUID string, parsed at this edge
+     *                (400 on a malformed id) before its canonical string form is threaded into the
+     *                started job's {@link TrainingJobSpec#datasetId()}
      * @param request the base model checkpoint and epoch count to run
      * @return the freshly started job's initial state — present immediately, per {@link
      *         TrainingJobService#start}'s own contract
@@ -69,7 +79,8 @@ public class TrainingJobController {
     @PostMapping("/api/datasets/{id}/train")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public TrainingJobResponse start(@PathVariable String id, @RequestBody StartTrainingJobRequest request) {
-        TrainingJobSpec spec = new TrainingJobSpec(request.baseModel(), id, request.epochs());
+        DatasetId datasetId = DatasetId.of(id);
+        TrainingJobSpec spec = new TrainingJobSpec(request.baseModel(), datasetId.value().toString(), request.epochs());
         String jobId = trainingJobService.start(spec, currentUser.userId(), currentUser.scope());
         return trainingJobService.job(jobId).map(TrainingJobResponse::from)
                 .orElseThrow(() -> new IllegalStateException("Training job vanished immediately after start: " + jobId));

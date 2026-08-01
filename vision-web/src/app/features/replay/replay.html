@@ -80,10 +80,42 @@
             @if (facade.downloadClipUrl(); as href) {
               <a class="btn small" [href]="href" download>Download clip</a>
             }
+            @if (!facade.training.disabled()) {
+              @if (facade.training.datasets().length > 0) {
+                <select
+                  class="dataset-picker"
+                  aria-label="Dataset to add this frame to"
+                  [ngModel]="facade.datasetId()"
+                  (ngModelChange)="facade.datasetId.set($event)"
+                >
+                  <option value="" disabled>Add to dataset…</option>
+                  @for (d of facade.training.datasets(); track d.id) {
+                    <option [value]="d.id">{{ d.name }}</option>
+                  }
+                </select>
+                <button
+                  type="button"
+                  class="btn secondary small"
+                  [disabled]="!facade.datasetId() || facade.capturing()"
+                  (click)="facade.addToDataset()"
+                >
+                  {{ facade.capturing() ? 'Adding…' : 'Add to dataset' }}
+                </button>
+              } @else {
+                <span class="faint">No training datasets yet — create one from Manage → Training.</span>
+              }
+            }
           </div>
           <p class="muted hint">
             {{ facade.hasClipSelection() ? 'Clip covers the marked start/end.' : 'No selection — clip covers the whole flight.' }}
           </p>
+          @if (!facade.training.disabled()) {
+            <p class="muted hint">
+              Replay frames come from the recorded stream. If detection overlay burn-in was on during
+              the flight, those boxes are baked into these pixels — turn burn-in off on streams you
+              plan to capture training frames from.
+            </p>
+          }
         } @else {
           <div class="empty-recording">
             <p class="muted">No recording for this flight.</p>

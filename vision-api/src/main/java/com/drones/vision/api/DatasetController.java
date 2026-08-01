@@ -3,6 +3,7 @@ package com.drones.vision.api;
 import com.drones.vision.api.dto.CreateDatasetRequest;
 import com.drones.vision.api.dto.DatasetResponse;
 import com.drones.vision.api.dto.DatasetsResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.domain.model.Dataset;
 import com.drones.vision.domain.model.DatasetId;

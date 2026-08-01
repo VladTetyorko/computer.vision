@@ -26,14 +26,23 @@ public interface TrainingJobService {
 
     /**
      * Starts a fine-tune job off-thread and returns immediately with the id a poller uses to track
-     * it — never blocks on the (potentially long-running, multi-epoch) training stream itself.
+     * it — never blocks on the (potentially long-running, multi-epoch) training stream itself. The
+     * job's dataset is uploaded to the training host as part of the off-thread run (docs/CV-TRAINING-V2-PLAN.md
+     * §4) — see {@link DefaultTrainingJobService}'s own javadoc for the upload-then-train sequence
+     * and its synchronous pre-check.
      *
      * @param spec  the job to run
      * @param actor who is starting it, for the audit trail
      * @param scope the acting user's visibility; must satisfy {@link VisibilityScope#canManageOrg()}
      * @return the locally generated job id; poll it via {@link #job(String)}
-     * @throws AccessDeniedException if {@code scope} may not manage the organization (audited as a
-     *                                denial before this method throws; the job is never started)
+     * @throws AccessDeniedException             if {@code scope} may not manage the organization
+     *                                             (audited as a denial before this method throws),
+     *                                             or the job's dataset is outside {@code scope}
+     * @throws java.util.NoSuchElementException  if the job's dataset is unknown
+     * @throws IllegalArgumentException          if the dataset id is malformed, or the dataset has
+     *                                             no {@link com.drones.vision.domain.model.SampleStatus#LABELED}
+     *                                             samples to train on — in every one of these cases
+     *                                             the job is never registered or started
      */
     String start(TrainingJobSpec spec, UserId actor, VisibilityScope scope);
 

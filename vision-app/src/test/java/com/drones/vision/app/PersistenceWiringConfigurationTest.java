@@ -12,6 +12,7 @@ import com.drones.vision.adapter.persistence.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.JpaTelemetryRepository;
 import com.drones.vision.adapter.persistence.JpaTrainingSampleRepository;
+import com.drones.vision.app.config.PersistenceWiringConfiguration;
 import com.drones.vision.app.devsupport.InMemoryAssetImageRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetRepository;
 import com.drones.vision.app.devsupport.InMemoryAssetUsageRepository;

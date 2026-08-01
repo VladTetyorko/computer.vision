@@ -24,13 +24,13 @@ import java.util.Objects;
  * vision.live.enabled} is {@code true}; with it disabled, the plain delegate is used directly and
  * this class is never constructed.
  */
-final class LiveUpdateDetectionEventRepository implements DetectionEventRepositoryPort {
+public final class LiveUpdateDetectionEventRepository implements DetectionEventRepositoryPort {
 
     private final DetectionEventRepositoryPort delegate;
     private final LiveUpdatePublisherPort liveUpdatePublisherPort;
 
-    LiveUpdateDetectionEventRepository(DetectionEventRepositoryPort delegate,
-                                        LiveUpdatePublisherPort liveUpdatePublisherPort) {
+    public LiveUpdateDetectionEventRepository(DetectionEventRepositoryPort delegate,
+                                              LiveUpdatePublisherPort liveUpdatePublisherPort) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
         this.liveUpdatePublisherPort =
                 Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");

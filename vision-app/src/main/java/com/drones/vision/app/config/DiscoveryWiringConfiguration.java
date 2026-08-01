@@ -1,10 +1,11 @@
-package com.drones.vision.app;
+package com.drones.vision.app.config;
 
 import com.drones.vision.adapter.discovery.mdns.MdnsScanner;
 import com.drones.vision.adapter.discovery.onvif.OnvifWsDiscoveryScanner;
 import com.drones.vision.adapter.discovery.v4l2.V4l2Scanner;
 import com.drones.vision.adapter.mavlink.MavlinkHeartbeatScanner;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
+import com.drones.vision.app.VisionDiscoveryProperties;
 import com.drones.vision.application.DefaultDiscoveryService;
 import com.drones.vision.application.DiscoveryService;
 import com.drones.vision.domain.port.out.DeviceDiscoveryPort;
@@ -50,7 +51,7 @@ import java.util.List;
  * {@link DiscoveryService}, so the bean must exist for the context to
  * start at all. {@code DiscoveryService} tolerates an empty {@code
  * List<DeviceDiscoveryPort>} by construction — see its javadoc and {@link
- * com.drones.vision.application.DiscoveryService#scan}: with no ports
+ * DiscoveryService#scan}: with no ports
  * registered, {@code ScanRequest.methods()} empty ("all methods") resolves
  * against an empty port registry, so the loop that fans out work simply has
  * nothing to iterate and {@code scan(...)} returns an empty {@code

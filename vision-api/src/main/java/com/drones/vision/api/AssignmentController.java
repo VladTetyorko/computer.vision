@@ -2,6 +2,7 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.AssignmentResponse;
 import com.drones.vision.api.dto.PilotResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssignmentService;
 import com.drones.vision.domain.model.AssetId;

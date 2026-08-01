@@ -3,7 +3,7 @@
 H.264 RTSP push to a mediamtx sidecar so browsers can watch live streams via mediamtx's HLS egress.
 
 **Depends on:** vision-domain, org.bytedeco:javacv, org.bytedeco:ffmpeg-platform-gpl · **Used by:** vision-app
-**Build/test:** `./mvnw -B -pl adapters/adapter-publish-hls test` — green.
+**Build/test:** `./mvnw -B -pl adapters/adapter-publish-hls test` — green (74 tests as of docs/CV-TRAINING-V2-PLAN.md Wave W4; use `-am` if the local `vision-domain` artifact predates a port this module now depends on, e.g. `ReplayFrameExtractionPort`).
 
 ## API surface
 ### `com.drones.vision.adapter.publishhls`
@@ -15,8 +15,10 @@ H.264 RTSP push to a mediamtx sidecar so browsers can watch live streams via med
   - Backoff: `INITIAL_BACKOFF_MS`=500, doubles every failure, capped at `MAX_BACKOFF_MS`=10_000.
   - **docs/MVP2-PLAN.md V-c: capture→encode lag measurement.** Every `writeFrame` (i.e. every actual `FFmpegFrameRecorder.record` call) measures `now - videoFrame.capturedAt()` (millis, primitive subtraction — no `Duration` allocation) and feeds it into the stream's `StreamState.lagTracker` (a `LagTracker`, see below). Logged at `DEBUG` per frame (lazy `System.Logger` supplier — free when DEBUG is disabled, the default) and at `INFO` as a p50/p95 summary at most once per `LAG_LOG_INTERVAL_MILLIS`=30s per stream (`StreamState.shouldLogLag`, mirrors the backoff fields' millis-epoch timing idiom — never fires on the very first call, which only establishes the baseline). See "V-c: latency measurement" below for the full design and how to read these logs together with the player's own behind-live estimate.
   - nested `private static final class StreamState` — per-stream mutable bookkeeping, intentionally not thread-safe (port contract guarantees no concurrent calls per `streamId`): lazy `volatile FFmpegFrameRecorder recorder`, cadence-measurement fields, outage/backoff fields, `final LagTracker lagTracker` (package-private, like `recorder` — no getter ceremony), `nextTimestampMicros(Instant, double): long` (PTS bookkeeping, see Gotchas).
-- `final class FrameConverter` (package-private, stateless) — `static Frame toFrame(VideoFrame) throws IOException` dispatches on `PixelFormat`; `static Frame bgr24ToFrame(VideoFrame)` (packed → JavaCV-padded-stride row copy); `static Frame jpegToFrame(VideoFrame) throws IOException` (`ImageIO` decode + repack as BGR). Only `BGR24` and `JPEG` are supported; anything else throws `IllegalArgumentException`.
+- `final class FrameConverter` (package-private, stateless) — two directions. **Into JavaCV** (for `MediamtxStreamPublisher`): `static Frame toFrame(VideoFrame) throws IOException` dispatches on `PixelFormat`; `static Frame bgr24ToFrame(VideoFrame)` (packed → JavaCV-padded-stride row copy); `static Frame jpegToFrame(VideoFrame) throws IOException` (`ImageIO` decode + repack as BGR). Only `BGR24` and `JPEG` are supported; anything else throws `IllegalArgumentException`. **Out of JavaCV** (for `MediamtxReplayFrameExtractor`, docs/CV-TRAINING-V2-PLAN.md §6): `static ByteBuffer copyBgr24(Frame): ByteBuffer` — a decoded grabber `Frame` → a tightly packed heap buffer (stride padding stripped), a near-verbatim duplicate of `adapter-rtsp`'s own `FrameConverter.copyBgr24` (deliberate, see "Replay frame extraction" below and this class's own javadoc — adapters must not depend on each other).
 - `final class LagTracker` (package-private, pure, no I/O) — docs/MVP2-PLAN.md V-c. `LagTracker(int capacity)`; `void record(long lagMillis)` (`O(1)`, no allocation — drop-oldest ring buffer); `long p50()`/`long p95()` (nearest-rank percentile over a sorted defensive copy — `O(n log n)`, only meant to be called occasionally, e.g. once per periodic summary log, never per-frame); `int sampleCount()`. Returns `0` for both percentiles when empty. Constructor rejects `capacity <= 0`.
+- `final class MediamtxPlaybackUrls` (package-private, stateless, pure string formatting) — the one place that knows mediamtx's playback `/get` query shape: `static String getUrl(URI playbackBase, String pathName, Instant start, long durationSeconds)` → `{playbackBase}/get?path={pathName}&start={start}&duration={durationSeconds}` (trailing-slash on `playbackBase` tolerated). Shared by `MediamtxStreamPublisher#playbackUrl` and `MediamtxReplayFrameExtractor#frameAt` — see "Replay frame extraction" below.
+- `final class MediamtxReplayFrameExtractor implements ReplayFrameExtractionPort` (public; docs/CV-TRAINING-V2-PLAN.md §6) — `MediamtxReplayFrameExtractor(URI playbackBase)`, `playbackBase` nullable (unconfigured playback ⇒ every call returns `Optional.empty()`). `frameAt(StreamId, Instant): Optional<VideoFrame>` pulls one decoded BGR24 frame out of a stream's mediamtx recording. See "Replay frame extraction" below for the full design.
 
 ## Conventions
 - Plain classes, no Spring — instantiated directly by `vision-app`'s wiring config.
@@ -101,9 +103,117 @@ H.264 RTSP push to a mediamtx sidecar so browsers can watch live streams via med
 
 **Recording finalization is not instantaneous — it happens on path unpublish, not on a fixed segment boundary.** mediamtx's own default `recordSegmentDuration` is 1 hour, so a short recording only becomes visible/servable once its *path* is unpublished (the RTSP push disconnects), which is exactly what `MediamtxStreamPublisher#streamEnded` does (`FFmpegFrameRecorder.stop()` closes the RTSP connection cleanly). Callers — and this module's own docker IT — must call `streamEnded` (or otherwise let the stream naturally end) before a just-published clip becomes fetchable via `playbackUrl`; this is a mediamtx behavior, not something this class works around.
 
-**Constructor change and the `vision-app` compatibility shim.** `playbackViewBase` was added as a 4th constructor argument. Per this class's own MODULE.md convention (see `whepViewBase`'s own note above), new-but-always-available config is normally added by updating every call site, not by overloading — but `vision-app`'s `WiringConfiguration`/`VisionPublishProperties` (the one production call site) was out of this task's file scope (`adapters/adapter-publish-hls/**` + root `docker-compose.yml` only) to edit. A 3-arg convenience constructor was kept instead (see API surface above) that derives a default playback base from `whepViewBase`'s host at port 19996, so `vision-app` compiles and runs unchanged, with recording playback already reachable against this stack's own compose file. **Follow-up**: a later task should add `vision.publish.mediamtx.playback-base` to `VisionPublishProperties.Mediamtx` (mirroring `rtspBase`/`hlsBase`/`whepBase`) and pass it explicitly from `WiringConfiguration#streamPublisherPort`, retiring the derived-default 3-arg overload's role as anything other than a plain convenience for tests.
+**Constructor change and the `vision-app` compatibility shim.** `playbackViewBase` was added as a 4th constructor argument. Per this class's own MODULE.md convention (see `whepViewBase`'s own note above), new-but-always-available config is normally added by updating every call site, not by overloading — but `vision-app`'s `WiringConfiguration`/`VisionPublishProperties` (the one production call site) was out of this task's file scope (`adapters/adapter-publish-hls/**` + root `docker-compose.yml` only) to edit. A 3-arg convenience constructor was kept instead (see API surface above) that derives a default playback base from `whepViewBase`'s host at port 19996, so `vision-app` compiles and runs unchanged, with recording playback already reachable against this stack's own compose file.
+
+**Follow-up status (docs/CV-TRAINING-V2-PLAN.md §6/§7 — partially closed, partially still open):** this module's own adapter-side surface is now complete for an explicitly-configured playback base — both `MediamtxStreamPublisher`'s 4-arg constructor (already existed) and the new `MediamtxReplayFrameExtractor(URI playbackBase)` (see "Replay frame extraction" below) take one directly, and `MediamtxReplayFrameExtractor` deliberately has **no** derived-default convenience overload the way `MediamtxStreamPublisher` does — there is no `whepViewBase`-shaped analog to guess a playback host from for a class that only ever takes the one argument, so a caller must supply a real base (or `null` for "unconfigured") explicitly. **What's still outstanding, and out of this module's scope**: `vision-app`'s `VisionPublishProperties.Mediamtx` still has no `playbackBase` field and `WiringConfiguration#streamPublisherPort` still calls the 3-arg convenience constructor — that wiring (add `@DefaultValue("http://localhost:19996") URI playbackBase` to `VisionPublishProperties.Mediamtx`, switch to the 4-arg publisher constructor, and add a `ReplayFrameExtractionPort` bean built from `MediamtxReplayFrameExtractor`) is docs/CV-TRAINING-V2-PLAN.md Wave W6's job, not this module's — `VisionPublishProperties` lives in `vision-app` (`vision-app/src/main/java/com/drones/vision/app/VisionPublishProperties.java`), a different module entirely.
 
 **Tests.** `MediamtxStreamPublisherTest` gained 8 new unit tests (`playbackUrl*`): URL construction against a configured base, trailing-slash tolerance, `null`-id → empty, unconfigured (`null` base) → empty, whole-second duration rounding (`1499ms→1`, `1500ms→2`, `2500ms→3`), path-name consistency with `viewUrl`/`whepUrl`, the 3-arg convenience constructor's host-derived default, and its `null`-when-no-host fallback. `MediamtxDockerIntegrationTest` gained `recordedStreamIsFetchableAsMp4ThroughPlaybackUrl` (docker-gated, pinned to `bluenviron/mediamtx:1.19.3` — the exact `docker-compose.yml`-pinned tag, not this class's other tests' `:latest` — since this test validates stack-specific record/playback config against the real version this app ships with): starts mediamtx with the same four record/playback env vars as `docker-compose.yml`, publishes a 4s synthetic feed through `MediamtxStreamPublisher`, calls `streamEnded`, polls `playbackUrl`'s own URL (up to 30s) until it returns a non-empty `200`, and asserts an `ftyp` box at byte offset 4.
+
+## Replay frame extraction (docs/CV-TRAINING-V2-PLAN.md §6, "W4")
+
+**What it's for.** CV-TRAINING-V2-PLAN's *"capture a training frame from a recorded replay"* feature
+(operator scrubs a finished usage's recording, taps "add to dataset") needs one decoded frame at an
+arbitrary instant out of mediamtx's recording — the new `ReplayFrameExtractionPort` (`vision-domain`,
+Wave W1). `MediamtxReplayFrameExtractor` implements it.
+
+**Seek is delegated to mediamtx, not to ffmpeg — this is the central design decision.** `frameAt`
+requests a **one-second window starting at `at`** from mediamtx's playback server —
+`MediamtxPlaybackUrls.getUrl(playbackBase, streamId.value(), at, 1)` → `{playbackBase}/get?path=
+{streamId}&start={at}&duration=1` — so the MP4 clip mediamtx returns already begins (at mediamtx's
+own segment granularity) where we want, and at most ~1s of video is ever decoded. This class never
+opens the whole recording and never performs an ffmpeg-side `setTimestamp` seek across a long file —
+seeking a large HTTP-served file via ffmpeg would mean either a slow linear scan or byte-range
+requests the mediamtx playback server may not even support for an in-progress-write file; asking
+mediamtx for a pre-cut window sidesteps the question entirely.
+
+**Shared URL helper.** `MediamtxPlaybackUrls` (new, package-private) is the one place that knows
+mediamtx's `/get` query shape. `MediamtxStreamPublisher#playbackUrl` was refactored to delegate to it
+(pure internal refactor — its own signature/external behavior is unchanged, still covered by its own
+pre-existing `playbackUrl*` tests) instead of building the query string itself. One caveat found
+during the refactor: `MediamtxPlaybackUrls.getUrl`'s `pathName` parameter is a `String`, but
+`StreamId#value()` returns `UUID` — string concatenation (what the old inline code used) auto-calls
+`toString()`, a method-argument context does not, so both call sites now say `id.value().toString()`
+explicitly.
+
+**Decode.** `new FFmpegFrameGrabber(url)`, `setFormat("mp4")` (skips format-sniffing probing — the
+URL has no `.mp4` extension for auto-detection to key off), `setPixelFormat(avutil.AV_PIX_FMT_BGR24)`,
+a 15s `rw_timeout` (see below), `start()`, then **`grabImage()`, not `grab()`** — same reasoning
+`adapter-rtsp`'s `FfmpegVideoSource` already documents for its own grab loop: `grab()` also returns
+audio/data frames, and mediamtx's mp4 clip could carry an audio track interleaved ahead of the first
+video packet, so `grabImage()` (which internally skips non-video packets) is what actually gets "the
+next video frame" reliably in one call, not `grab()`. `FrameConverter.copyBgr24(Frame)` (new,
+mirroring `adapter-rtsp`'s own method of the same name/signature almost verbatim — a deliberate
+duplicate, see that method's javadoc) copies the grabbed frame's pixels into a tightly packed
+`ByteBuffer`, honoring JavaCV's padded row stride. Returns `new VideoFrame(streamId, 0L, at, width,
+height, PixelFormat.BGR24, copy)` — sequence pinned to `0`, `capturedAt` pinned to the requested `at`
+verbatim, exactly `ReplayFrameExtractionPort`'s frozen contract (never `grabber.getTimestamp()` or
+`Instant.now()`).
+
+**Read timeout: `rw_timeout`, 15s, in microseconds (`"15000000"`), via `grabber.setOption("rw_timeout",
+...)`.** Same generic libavformat/`AVIOContext` option `adapter-rtsp`'s `FfmpegVideoSource` already
+uses for the identical "don't let a stalled connection hang the caller" purpose against its own RTSP
+sources — verified it isn't RTSP-specific, so it applies equally to this class's plain HTTP fetch
+against mediamtx's playback server. Bounds connect **and** read; there is no separate connect-only
+timeout option set here (unlike `MediamtxStreamPublisher`'s RTSP push, which sets a distinct
+`"timeout"` AVOption too — mediamtx's playback endpoint is a single HTTP GET, one timeout covers the
+whole exchange).
+
+**Resilience.** Mirrors `MediamtxStreamPublisher`'s own "never let FFmpeg take down the caller"
+posture: the entire grabber lifecycle (`setFormat`/`setPixelFormat`/`setOption`/`start`/`grabImage`)
+is inside one `try`; any `Exception` — mediamtx unreachable, a 404 (nothing recorded at that instant,
+surfaced by JavaCV as a grabber start failure), a truncated/undecodable clip, a `rw_timeout` firing —
+is caught, logged once at `WARNING` naming the request URL and the cause, and turned into
+`Optional.empty()`. The grabber is always `release()`d in a `finally`, success or failure (mirrors
+`MediamtxStreamPublisher.releaseQuietly`'s "just call release(), swallow anything it throws" idiom —
+`adapter-rtsp`'s own grabber cleanup does the same, no separate `stop()` call). `streamId`/`at`
+themselves are `Objects.requireNonNull`-checked (a caller passing `null` for either is a programmer
+error, not an absence to represent — mirrors this codebase's application-layer idiom, CLAUDE.md); a
+`null`/unconfigured `playbackBase` is the one honest-absence case that returns `Optional.empty()`
+without any I/O attempt at all, mirroring `MediamtxStreamPublisher#playbackUrl`'s own unconfigured-
+base posture.
+
+**Threading — the reason this is a separate class from `MediamtxStreamPublisher`, not a new method on
+it.** `StreamPublisherPort`'s contract (and `MediamtxStreamPublisher`'s own class javadoc) is
+explicitly per-stream, non-concurrent, stateful egress — `StreamState` is deliberately not
+thread-safe because the port guarantees serialized calls per `streamId`. `ReplayFrameExtractionPort`
+is the opposite: a request-thread, on-demand fetch that must be safe for unbounded concurrent use
+across the same or different streams. `MediamtxReplayFrameExtractor` has **no mutable state at all**
+beyond the immutable `playbackBase` field set at construction — one `FFmpegFrameGrabber` is created,
+used, and released within a single `frameAt` call, so there is nothing to guard.
+
+**Native log quieting reused, not tripled.** `MediamtxReplayFrameExtractor`'s constructor calls
+`MediamtxStreamPublisher.ensureQuietLogging()` (package-private, idempotent, synchronized) instead of
+carrying its own third copy of that ~5-line block — both classes live in this one package, so there
+is no adapters-must-not-depend-on-each-other concern in sharing it *within* this module, unlike the
+genuine cross-adapter duplication against `adapter-rtsp` (see that method's own javadoc).
+
+**Tests.** `MediamtxPlaybackUrlsTest` (new, 4 tests): path/start/duration formatting, trailing-slash
+tolerance, the fixed one-second-window shape `MediamtxReplayFrameExtractor` sends, and that `start`
+uses `Instant#toString()` verbatim including sub-second precision. `FrameConverterTest` gained 7
+`copyBgr24*` tests mirroring `adapter-rtsp`'s own `FrameConverterTest` for its twin method: padded-
+stride row copy, contiguous (no-padding) copy, returned buffer independence from the source (mutating
+the "native" buffer post-copy doesn't affect the already-copied result), and rejection of a null
+frame / no image data / invalid dimensions / non-3-channel / non-byte-backed image buffer.
+`MediamtxReplayFrameExtractorTest` (new, 5 tests, no docker needed): unconfigured (`null`) base →
+empty with no I/O attempt; an unreachable mediamtx (port 1 on loopback, same fast-refusal idiom
+`MediamtxStreamPublisherTest`'s own unreachable test uses) → empty, never throws; a malformed base
+(no host component) → empty, never throws; `null` `streamId`/`at` → `NullPointerException`.
+`MediamtxDockerIntegrationTest` gained `recordedStreamFrameIsExtractableViaMediamtxReplayFrameExtractor`
+(docker-gated, reuses the existing recording/playback container setup
+`recordedStreamIsFetchableAsMp4ThroughPlaybackUrl` already established): publishes+records a 4s
+synthetic stream, then polls `MediamtxReplayFrameExtractor#frameAt` (recording finalization is not
+instantaneous — same reason the raw-bytes playback test polls) until it returns a decoded frame, and
+asserts `streamId`/`sequence == 0`/`capturedAt == at`/`format == BGR24`/positive dimensions — this is
+what actually exercises the extractor's production URL-building → grab → convert path end-to-end
+against a real mediamtx, confirmed genuinely running (not skipped) in this environment.
+
+Config note for the next wave (docs/CV-TRAINING-V2-PLAN.md W6, `vision-app`): this module adds no new
+Spring/config surface of its own (plain classes, no `@ConfigurationProperties` here). The
+`playbackBase` value W6 needs to supply both `MediamtxReplayFrameExtractor`'s constructor and (via the
+already-existing 4-arg constructor) `MediamtxStreamPublisher` lives in `vision-app`'s
+`VisionPublishProperties.Mediamtx` — see "Follow-up status" above for the exact field/default to add
+there (`playbackBase`, default `http://localhost:19996`, matching the 3-arg overload's derived
+default byte-for-byte so the default deployment's behavior doesn't change).
 
 ## Status
 **Fully implemented and green.** `src/test/*` was migrated to the current `vision-domain` shapes after the domain refactor that deleted `DeviceType` and moved `Device`/`StreamId` to their present forms: `Device` is now constructed without a type argument (`new Device(DeviceId, String, Set<Capability>, StreamDescriptor)`), and `StreamId` fixed-value tests use `StreamId.of("<uuid>")` (a literal valid UUID) instead of the old free-form string constructor; other call sites use `StreamId.random()`/`DeviceId.random()`.
@@ -121,3 +231,5 @@ docs/MVP2-PLAN.md **V-a** (glass-to-glass latency: encoder + mediamtx LL-HLS + p
 docs/MVP2-PLAN.md **V-c** (capture→encode latency measurement — see the "V-c: latency measurement" section above for the full design): new `LagTracker` (pure ring-buffer/percentile class) wired into `MediamtxStreamPublisher.writeFrame`/`StreamState`; no change to `configureRecorder`, GOP, CRF, or any other V-a setting. `./mvnw -B -pl adapters/adapter-publish-hls clean test`, run twice consecutively: **47 tests, all green, 0 skipped**, both times — `FrameConverterTest` 6, `LagTrackerTest` 6 (new: empty/single-sample/within-capacity/wrap-drops-oldest/full-window percentile math, non-positive-capacity rejection), `StreamStateTest` 16 (12 pre-existing + 4 new: `shouldLogLag`'s baseline/gating/reset behavior, `lagTracker` accumulates samples), `MediamtxStreamPublisherTest` 16 (unchanged — lag recording is exercised only where a real successful `recorder.record()` call happens, which none of this class's own unit tests reach without a live mediamtx; see the docker IT below), `MediamtxDockerIntegrationTest` 3 (docker-gated, confirmed actually running against a real mediamtx container both runs — this is what actually exercises `writeFrame`'s lag-recording path end-to-end, since it publishes real frames through a real recorder; no test asserts on the log output itself, which would mean parsing `System.Logger` output — fragile and not requested, the pure math is what V-c's own brief asks to unit-test).
 
 docs/OPS-CORE-PLAN.md **R-a** (recording via mediamtx: `docker-compose.yml` record/playback config + `MediamtxStreamPublisher#playbackUrl` — see the "R-a: recording playback" section above for the full writeup, including the verified mediamtx env var names/sources and the `vision-app` compatibility-shim rationale): `StreamPublisherPort#playbackUrl` (added concurrently in `vision-domain` by another agent working in parallel, landed and built against as expected) is now implemented — 4th `playbackViewBase` constructor argument (nullable), 3-arg convenience overload deriving a default from `whepViewBase`'s host at port 19996 for zero-wiring-change compatibility with `vision-app`. `docker-compose.yml`'s `mediamtx` service gained `MTX_PATHDEFAULTS_RECORD=yes`, `MTX_PATHDEFAULTS_RECORDDELETEAFTER=72h`, `MTX_PLAYBACK=yes`, `MTX_PLAYBACKADDRESS=:9996` (host `19996`→container `9996`, same 1:1-but-renumbered style as `hls`/`whep`), and a new named volume `mediamtx-recordings` mounted at `/recordings` (not a repo bind mount — mediamtx's own default `recordPath` resolves there given the image's unset-`WORKDIR`/`/` cwd, confirmed via `docker inspect`). `./mvnw -B -pl adapters/adapter-publish-hls -am test`: **56 tests, all green, 0 skipped** — `FrameConverterTest` 6, `LagTrackerTest` 6, `StreamStateTest` 16, `MediamtxStreamPublisherTest` 24 (16 pre-existing + 8 new `playbackUrl*` tests), `MediamtxDockerIntegrationTest` 4 (3 pre-existing + 1 new `recordedStreamIsFetchableAsMp4ThroughPlaybackUrl`, docker-gated, confirmed actually running — not skipped — against a real pinned `bluenviron/mediamtx:1.19.3` container; whole docker-gated class ran in 14.81s, the new test alone in 5.6s when run in isolation). `docker compose config` validated clean against the updated compose file. Before writing any Java, the exact record→playback flow was manually verified end-to-end with a real `docker run bluenviron/mediamtx:1.19.3` (the four env vars above) and a plain `ffmpeg` RTSP push: a recorded `.mp4` segment appeared under `/recordings/<path>/` a few seconds after the source disconnected, and `GET :9996/get?path=&start=&duration=` returned `200 video/mp4` with an `ftyp` box at byte offset 4 — the same shape `playbackUrl`/the new docker IT exercise.
+
+docs/CV-TRAINING-V2-PLAN.md **Wave W4** (`MediamtxReplayFrameExtractor implements ReplayFrameExtractionPort`, the `MediamtxPlaybackUrls` shared helper, `FrameConverter#copyBgr24` — see "Replay frame extraction" above for the full design/rationale writeup): built against `vision-domain`'s `ReplayFrameExtractionPort` (Wave W1, landed concurrently by another agent — this module only ever compiled/tested against it via `-am`, since the local Maven repo's installed `vision-domain` jar predates that port and this task's file scope excludes installing/publishing artifacts). No new dependencies (this module already carried `javacv`/`ffmpeg-platform-gpl`) and no new config surface in this module (plain classes; the `playbackBase` property itself belongs to `vision-app`'s `VisionPublishProperties`, Wave W6's job — see "Follow-up status" above). `./mvnw -B -pl adapters/adapter-publish-hls -am test`, run twice consecutively: **74 tests, all green, 0 skipped**, both times — `FrameConverterTest` 14 (6 pre-existing + 8 new `copyBgr24*`), `LagTrackerTest` 6, `StreamStateTest` 16, `MediamtxStreamPublisherTest` 24 (unchanged — the `playbackUrl` refactor to delegate to `MediamtxPlaybackUrls` is byte-identical in behavior, verified by its own 8 pre-existing `playbackUrl*` tests staying green untouched), `MediamtxReplayFrameExtractorTest` 5 (new), `MediamtxPlaybackUrlsTest` 4 (new), `MediamtxDockerIntegrationTest` 5 (4 pre-existing + 1 new `recordedStreamFrameIsExtractableViaMediamtxReplayFrameExtractor`, confirmed actually running — not skipped — against a real mediamtx container both runs, ~20s for the whole docker-gated class). Note: a `clean` in the same Maven invocation as `-am` intermittently failed *inside `vision-domain`*'s own forked test JVM (`Unable to create test class ... DatasetUploadPortTest`) — unrelated to any change in this module (that class isn't touched here, and re-running the identical command without `clean` succeeded twice in a row); most plausibly transient contention from another agent's concurrent wave also building `vision-domain` at the same time. Plain (non-`clean`) `-pl adapters/adapter-publish-hls -am test` is what's proven green here.

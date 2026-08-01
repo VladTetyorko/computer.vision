@@ -4,6 +4,7 @@ import com.drones.vision.api.dto.DeviceResponse;
 import com.drones.vision.api.dto.RegisterDeviceRequest;
 import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.UpdateDeviceRequest;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.DeviceService;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;

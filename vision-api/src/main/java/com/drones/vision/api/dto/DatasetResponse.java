@@ -15,7 +15,7 @@ import java.util.Map;
  * @param targetCategory the target {@link com.drones.vision.domain.model.CategoryId} slug, absent
  *                        if this dataset is not tied to one category
  * @param classes        the ordered YOLO class list
- * @param status         {@code OPEN}/{@code EXPORTING}/{@code ARCHIVED}
+ * @param status         {@code OPEN}/{@code ARCHIVED}
  * @param createdAt      when this dataset was created
  * @param sampleCounts   this dataset's sample count broken down by {@code PENDING}/{@code
  *                       LABELED}/{@code DISCARDED} — every key always present, even at zero (not a

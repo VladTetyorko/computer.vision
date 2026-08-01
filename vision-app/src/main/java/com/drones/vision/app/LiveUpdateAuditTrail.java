@@ -27,12 +27,12 @@ import java.util.Objects;
  * {@code true}; with it disabled, the plain delegate is used directly and this class is never
  * constructed.
  */
-final class LiveUpdateAuditTrail implements AuditTrailPort {
+public final class LiveUpdateAuditTrail implements AuditTrailPort {
 
     private final AuditTrailPort delegate;
     private final LiveUpdatePublisherPort liveUpdatePublisherPort;
 
-    LiveUpdateAuditTrail(AuditTrailPort delegate, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+    public LiveUpdateAuditTrail(AuditTrailPort delegate, LiveUpdatePublisherPort liveUpdatePublisherPort) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
         this.liveUpdatePublisherPort =
                 Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");

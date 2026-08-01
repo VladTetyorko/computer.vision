@@ -1,4 +1,4 @@
-package com.drones.vision.api;
+package com.drones.vision.api.config;
 
 import java.io.IOException;
 import org.springframework.context.annotation.Configuration;

@@ -24,12 +24,12 @@ import java.util.Objects;
  * plus a one-line summary) — this class does not duplicate that logging, only decides whether to
  * call it at all.
  */
-final class SimulationResumeRunner implements ApplicationRunner {
+public final class SimulationResumeRunner implements ApplicationRunner {
 
     private final SimulationService simulationService;
     private final boolean enabled;
 
-    SimulationResumeRunner(SimulationService simulationService, boolean enabled) {
+    public SimulationResumeRunner(SimulationService simulationService, boolean enabled) {
         this.simulationService = Objects.requireNonNull(simulationService, "simulationService must not be null");
         this.enabled = enabled;
     }

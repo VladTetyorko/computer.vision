@@ -1,6 +1,7 @@
 package com.drones.vision.api;
 
 import com.drones.vision.api.dto.CvModelResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;

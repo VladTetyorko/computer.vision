@@ -1,6 +1,5 @@
 package com.drones.vision.app;
 
-import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.api.DatasetController;
 import com.drones.vision.api.LabelingController;
 import com.drones.vision.api.ModelRegistryController;
@@ -8,9 +7,10 @@ import com.drones.vision.api.TrainingJobController;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.LabelingService;
 import com.drones.vision.application.ModelRegistryService;
+import com.drones.vision.application.ReplaySources;
 import com.drones.vision.application.TrainingJobService;
 import com.drones.vision.application.TrainingStores;
-import com.drones.vision.domain.port.out.DatasetExportPort;
+import com.drones.vision.domain.port.out.DatasetUploadPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;
 import com.drones.vision.domain.port.out.TrainingPort;
 import io.grpc.ManagedChannel;
@@ -24,12 +24,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Context test for the <em>default</em> {@code vision.training.*} configuration (no override, per
  * {@link VisionTrainingProperties#enabled()}'s default of {@code false} — docs/CV-TRAINING-PLAN.md
- * §3/§G, Wave T4): asserts the context still loads cleanly with every training bean/controller
- * entirely absent — {@code GET/POST /api/datasets}[/{id}], {@code POST
- * /api/streams/{id}/samples}, {@code GET /api/samples/{id}/image}, {@code PUT
- * /api/samples/{id}/annotations}, and {@code /api/datasets/{id}/export}* all 404 like any other
- * unmapped route, exactly as before this feature existed — the guardrail docs/CV-TRAINING-PLAN.md
- * §G names explicitly. See {@link TrainingEnabledWiringTest} for the opposite (flag-on) counterpart.
+ * §3/§G, Wave T4, as delta'd by docs/CV-TRAINING-V2-PLAN.md §7): asserts the context still loads
+ * cleanly with every training bean/controller entirely absent — {@code GET/POST /api/datasets}[/{id}],
+ * {@code POST /api/streams/{id}/samples}, {@code POST /api/usages/{id}/samples}, {@code GET
+ * /api/samples/{id}/image}, {@code PUT /api/samples/{id}/annotations}, and {@code POST
+ * /api/datasets/{id}/train} all 404 like any other unmapped route, exactly as before this feature
+ * existed — the guardrail docs/CV-TRAINING-PLAN.md §G names explicitly. See {@link
+ * TrainingEnabledWiringTest} for the opposite (flag-on) counterpart.
  *
  * <p>Looks up every bean via {@link ApplicationContext#getBeansOfType} rather than {@code
  * @Autowired}, mirroring {@link LiveDisabledWiringTest}/{@link DiscoveryDisabledWiringTest}'s own
@@ -56,12 +57,12 @@ class TrainingDisabledWiringTest {
         assertTrue(applicationContext.getBeansOfType(DatasetService.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(LabelingService.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(TrainingStores.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(ReplaySources.class).isEmpty());
     }
 
     @Test
-    void noDatasetExportPortBeanExistsByDefault() {
-        assertTrue(applicationContext.getBeansOfType(DatasetExportPort.class).isEmpty());
-        assertTrue(applicationContext.getBeansOfType(FilesystemDatasetExport.class).isEmpty());
+    void noDatasetUploadPortBeanExistsByDefault() {
+        assertTrue(applicationContext.getBeansOfType(DatasetUploadPort.class).isEmpty());
     }
 
     /**

@@ -7,6 +7,7 @@ import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -318,6 +320,80 @@ class MediamtxDockerIntegrationTest {
         } finally {
             removeContainerQuietly(containerName);
         }
+    }
+
+    /**
+     * docs/CV-TRAINING-V2-PLAN.md §6 end-to-end check: {@link MediamtxReplayFrameExtractor} pulls a
+     * decoded frame back out of the same kind of recorded clip {@link
+     * #recordedStreamIsFetchableAsMp4ThroughPlaybackUrl} fetches as raw MP4 bytes — this test
+     * decodes it all the way to a {@link VideoFrame} instead of only checking the byte stream is a
+     * well-formed MP4, using the extractor's own production URL-building/grabbing path (not a
+     * hand-rolled fetch).
+     */
+    @Test
+    @Timeout(value = 120, unit = TimeUnit.SECONDS)
+    void recordedStreamFrameIsExtractableViaMediamtxReplayFrameExtractor() throws Exception {
+        String containerName = "vision-publish-hls-it-" + java.util.UUID.randomUUID();
+        try {
+            startContainerWithRecording(containerName);
+            int rtspPort = resolveHostPort(containerName, "8554/tcp");
+            int playbackPort = resolveHostPort(containerName, "9996/tcp");
+            awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
+            awaitTcpPortOpen(playbackPort, Duration.ofSeconds(10));
+
+            URI playbackBase = URI.create("http://localhost:" + playbackPort);
+            StreamPublisherPort publisher = new MediamtxStreamPublisher(
+                    URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"),
+                    URI.create("http://localhost:8889"), // HLS/WHEP not exercised by this recording-focused test
+                    playbackBase);
+            StreamId streamId = StreamId.random();
+            Device device = new Device(DeviceId.random(), "replay-extractor-it-camera",
+                    Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://replay-extractor-it"), Map.of()));
+
+            Instant recordingStart = Instant.now();
+            publisher.streamStarted(streamId, device);
+            AtomicBoolean keepPumping = new AtomicBoolean(true);
+            Thread pump = startFramePump(publisher, streamId, keepPumping);
+            Thread.sleep(Duration.ofSeconds(4).toMillis());
+            keepPumping.set(false);
+            pump.join(Duration.ofSeconds(5).toMillis());
+            // Same finalization requirement as the raw-bytes test above: streamEnded closes the
+            // RTSP push, which is what makes mediamtx unpublish the path and flush the segment.
+            publisher.streamEnded(streamId);
+
+            Instant at = recordingStart.plusSeconds(1);
+            ReplayFrameExtractionPort extractor = new MediamtxReplayFrameExtractor(playbackBase);
+
+            VideoFrame frame = pollForFrame(extractor, streamId, at, Duration.ofSeconds(30))
+                    .orElseThrow(() -> new AssertionError("expected a decoded replay frame at " + at));
+
+            assertEquals(streamId, frame.streamId());
+            assertEquals(0L, frame.sequence());
+            assertEquals(at, frame.capturedAt());
+            assertEquals(PixelFormat.BGR24, frame.format());
+            assertTrue(frame.width() > 0 && frame.height() > 0,
+                    "expected positive frame dimensions, got " + frame.width() + "x" + frame.height());
+        } finally {
+            removeContainerQuietly(containerName);
+        }
+    }
+
+    /**
+     * Polls {@link ReplayFrameExtractionPort#frameAt} until it returns a present frame (mediamtx's
+     * recording segment for the requested window isn't finalized/servable instantly, same reason
+     * {@link #pollForPlayableClip} polls) or {@code timeout} elapses.
+     */
+    private static Optional<VideoFrame> pollForFrame(ReplayFrameExtractionPort extractor, StreamId streamId,
+            Instant at, Duration timeout) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            Optional<VideoFrame> result = extractor.frameAt(streamId, at);
+            if (result.isPresent()) {
+                return result;
+            }
+            Thread.sleep(500);
+        }
+        return Optional.empty();
     }
 
     private static void startContainerWithRecording(String name) throws IOException, InterruptedException {

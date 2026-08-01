@@ -1,4 +1,6 @@
-package com.drones.vision.api;
+package com.drones.vision.api.exceptions;
+
+import com.drones.vision.api.AssetImageController;
 
 /**
  * Thrown by {@link AssetImageController} when an uploaded image body exceeds the configured

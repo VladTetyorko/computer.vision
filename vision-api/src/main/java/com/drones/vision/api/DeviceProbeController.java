@@ -2,6 +2,7 @@ package com.drones.vision.api;
 
 import com.drones.vision.api.dto.ProbeDeviceRequest;
 import com.drones.vision.api.dto.ProbeDeviceResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.ProbeResult;
 import com.drones.vision.application.ProbeService;
 import org.springframework.web.bind.annotation.PostMapping;

@@ -1,6 +1,7 @@
-package com.drones.vision.app;
+package com.drones.vision.app.config;
 
 import com.drones.vision.api.SessionAuthenticator;
+import com.drones.vision.app.VisionUserDetails;
 import com.drones.vision.application.AuthService;
 import com.drones.vision.domain.model.User;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,12 +27,12 @@ import java.util.Optional;
  * ({@link SecurityConfig}). Failed logins return {@link Optional#empty()} with no distinction of
  * cause, matching {@code AuthService}'s no-info-leak contract.
  */
-final class SecuritySessionAuthenticator implements SessionAuthenticator {
+public final class SecuritySessionAuthenticator implements SessionAuthenticator {
 
     private final AuthService authService;
     private final SecurityContextRepository securityContextRepository;
 
-    SecuritySessionAuthenticator(AuthService authService, SecurityContextRepository securityContextRepository) {
+    public SecuritySessionAuthenticator(AuthService authService, SecurityContextRepository securityContextRepository) {
         this.authService = Objects.requireNonNull(authService, "authService must not be null");
         this.securityContextRepository = Objects.requireNonNull(securityContextRepository,
                 "securityContextRepository must not be null");

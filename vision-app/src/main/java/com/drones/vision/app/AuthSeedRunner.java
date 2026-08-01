@@ -32,14 +32,14 @@ import java.util.Objects;
  * safe with a persistent store that already holds real users. Emptiness is judged by {@link
  * UserService#list()}, so a persistence-backed run that already seeded once simply skips.
  */
-final class AuthSeedRunner implements ApplicationRunner {
+public final class AuthSeedRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(AuthSeedRunner.class);
 
     private final UserService userService;
     private final GroupService groupService;
 
-    AuthSeedRunner(UserService userService, GroupService groupService) {
+    public AuthSeedRunner(UserService userService, GroupService groupService) {
         this.userService = Objects.requireNonNull(userService, "userService must not be null");
         this.groupService = Objects.requireNonNull(groupService, "groupService must not be null");
     }

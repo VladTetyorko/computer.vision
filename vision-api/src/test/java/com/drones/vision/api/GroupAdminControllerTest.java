@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.GroupService;
 import com.drones.vision.application.GroupSpec;
 import com.drones.vision.domain.model.Group;

@@ -5,13 +5,14 @@ import { Icon } from '../../shared/ui/icon';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { DatasetDetailFacade } from './dataset-detail-facade';
-import { formatBytes } from './dataset-detail-logic';
 import type { SampleStatus, TrainingSample } from '../../core/api/models';
 
 /**
- * `/manage/training/:datasetId` — one dataset's sample grid, capture flow, and export action
- * (docs/CV-TRAINING-PLAN.md Wave T5). The capture control here is the operator's "Add to dataset"
- * gesture: pick a currently-live stream, grab its current frame + detections as a `PENDING` sample.
+ * `/manage/training/:datasetId` — one dataset's sample grid, capture flow, and train action
+ * (docs/CV-TRAINING-PLAN.md Wave T5; the manual export step was deleted in
+ * docs/CV-TRAINING-V2-PLAN.md §8 — "Train a model" now uploads the dataset itself). The capture
+ * control here is the operator's "Add to dataset" gesture: pick a currently-live stream, grab its
+ * current frame + detections as a `PENDING` sample.
  *
  * Degrades honestly: an unknown or out-of-scope dataset (`DatasetDetailFacade.notFound`) renders a
  * `vision-empty`, never a blocked page; a background sample-list failure toasts and leaves the grid
@@ -32,7 +33,6 @@ export class DatasetDetailPage {
   protected readonly facade = inject(DatasetDetailFacade);
 
   protected readonly statuses: readonly SampleStatus[] = ['PENDING', 'LABELED', 'DISCARDED'];
-  protected readonly formatBytes = formatBytes;
 
   constructor() {
     effect(() => {

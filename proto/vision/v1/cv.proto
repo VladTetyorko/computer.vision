@@ -104,6 +104,22 @@ message Ack {
   string message = 2;
 }
 
+// One slice of an uploaded YOLO dataset archive (docs/CV-TRAINING-V2-PLAN.md §1). The
+// concatenation of every chunk's `content`, in stream order, is a ZIP file carrying exactly the
+// layout docs/CV-TRAINING-PLAN.md §5 freezes: `data.yaml`, `images/<name>`, `labels/<stem>.txt`.
+message DatasetChunk {
+  string dataset_id = 1;   // set on EVERY chunk; must be identical throughout the stream
+  bytes  content    = 2;   // next slice of the archive
+}
+
+message UploadAck {
+  bool   ok             = 1;
+  string message        = 2;
+  string dataset_id     = 3;
+  int64  bytes_received = 4;
+  int32  file_count     = 5;   // files extracted, incl. data.yaml
+}
+
 // Frame -> detections streaming inference.
 service Inference {
   rpc DetectStream(stream FrameRequest) returns (stream DetectionResponse);
@@ -112,6 +128,7 @@ service Inference {
 // Dataset training and model registry control plane.
 service Training {
   rpc StartTraining(TrainingJobSpec) returns (stream TrainingProgress);
+  rpc UploadDataset(stream DatasetChunk) returns (UploadAck);          // NEW
   rpc ListModels(google.protobuf.Empty) returns (ModelList);
   rpc PromoteModel(ModelRefMsg) returns (Ack);
 }

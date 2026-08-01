@@ -1,5 +1,6 @@
 package com.drones.vision.app;
 
+import com.drones.vision.app.config.WiringConfiguration;
 import com.drones.vision.application.SimulationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.ApplicationRunner;

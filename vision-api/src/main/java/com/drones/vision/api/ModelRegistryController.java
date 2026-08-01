@@ -3,6 +3,7 @@ package com.drones.vision.api;
 import com.drones.vision.api.dto.PromoteModelRequest;
 import com.drones.vision.api.dto.RegisteredModelResponse;
 import com.drones.vision.api.dto.RegisteredModelsResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.ModelRegistryService;
 import com.drones.vision.domain.model.ModelRef;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.DeviceEdit;
 import com.drones.vision.application.DeviceRegistration;
 import com.drones.vision.application.DeviceService;

@@ -21,6 +21,12 @@
   ``ListModels``/``PromoteModel`` loop can surface + promote it (see
   ``cv_service/trainer.py``). It is device-agnostic (CPU here -- slow -- or
   CUDA where present) and never auto-promotes.
+* ``Training.UploadDataset`` (client-streaming) receives a YOLO dataset
+  archive over gRPC and lands it at ``<CV_DATASET_DIR>/<dataset_id>/``,
+  atomically replacing any prior upload for the same id -- the delivery
+  mechanism `docs/CV-TRAINING-V2-PLAN.md` §2 adds in place of a manual rsync.
+  ``StartTraining``/``trainer.py`` are untouched by it: the landed directory
+  is byte-identical to what a manual rsync would have produced.
 
 Run with::
 
@@ -39,8 +45,10 @@ import queue
 import shutil
 import signal
 import sys
+import tempfile
 import threading
 import uuid
+import zipfile
 from concurrent import futures
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Iterator, Optional
@@ -520,6 +528,59 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         )
 
 
+# --- UploadDataset helpers (docs/CV-TRAINING-V2-PLAN.md §2) -----------------
+
+# Total content bytes accepted for one UploadDataset call before it aborts
+# RESOURCE_EXHAUSTED. A realistic dataset is low tens of MB (see the plan's
+# design decision D); 2 GiB is a generous, pinned safety cap, not a target.
+_MAX_DATASET_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+# The frozen §5 YOLO layout a dataset archive's entries must live under.
+_UPLOAD_ALLOWED_DIR_PREFIXES = (
+    f"{trainer.IMAGES_DIRNAME}/",
+    f"{trainer.LABELS_DIRNAME}/",
+)
+
+
+def _sanitize_dataset_id(dataset_id: str) -> str:
+    """Mirrors `trainer.output_model_id`'s filesystem-safe sanitize step, in
+    isolation (without the `-<epochs>e.pt` suffix that function appends).
+    Duplicated rather than imported piecewise so `trainer.py` stays untouched
+    (out of this RPC's scope) -- same "mirror, don't import" precedent as
+    `trainer._parse_imgsz` mirroring `inference._parse_imgsz`.
+    """
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in dataset_id)
+    return safe.strip("._") or "dataset"
+
+
+def _is_safe_dataset_id(dataset_id: str) -> bool:
+    """`UploadDataset`'s accept test for a `dataset_id`: anything
+    `_sanitize_dataset_id` would rewrite (blank, a path separator, `..`, ...)
+    is rejected outright rather than silently accepted under a different
+    name -- caller turns a `False` into `INVALID_ARGUMENT`.
+    """
+    return bool(dataset_id) and _sanitize_dataset_id(dataset_id) == dataset_id
+
+
+def _is_safe_zip_entry(name: str) -> bool:
+    """Zip-slip protection for one archive member's path: accepts only the
+    frozen §5 layout (`data.yaml`, `images/<name>`, `labels/<stem>.txt`),
+    rejecting an absolute path, a `..` path segment, or any other top-level
+    prefix outright.
+    """
+    if not name:
+        return False
+    normalized = name.replace("\\", "/")
+    if normalized.startswith("/") or ":" in normalized:
+        return False
+    parts = normalized.split("/")
+    if ".." in parts or any(part == "" for part in parts[:-1]):
+        return False
+    if normalized == trainer.DATA_YAML_NAME:
+        return True
+    return normalized.startswith(_UPLOAD_ALLOWED_DIR_PREFIXES)
+
+
 class TrainingServicer(cv_pb2_grpc.TrainingServicer):
     """Model-registry control plane over the shared `ModelRegistry`.
 
@@ -539,6 +600,13 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
     else CPU -- slow on this Intel appliance, logged once) and never
     auto-promotes: the operator promotes deliberately. See
     `cv_service/trainer.py` for the training core.
+
+    `UploadDataset` (client-streaming) is the delivery mechanism that lands a
+    dataset at `<CV_DATASET_DIR>/<dataset_id>/` over this same gRPC channel,
+    in place of a manual rsync (`docs/CV-TRAINING-V2-PLAN.md` §2). It never
+    touches `trainer.py`/`StartTraining` -- the directory it produces is
+    byte-identical to what a manual rsync would have produced, so
+    `resolve_dataset_dir` keeps validating both the same way.
     """
 
     def __init__(
@@ -706,6 +774,143 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
                 model_id,
             )
         return model_id
+
+    def UploadDataset(self, request_iterator, context):
+        """Receive a streamed YOLO dataset archive and land it at
+        `<CV_DATASET_DIR>/<dataset_id>/`, atomically replacing any prior
+        upload for the same id (docs/CV-TRAINING-V2-PLAN.md §2).
+
+        The concatenation of every `DatasetChunk.content`, in stream order,
+        must be a ZIP of the frozen §5 layout (`data.yaml`, `images/<name>`,
+        `labels/<stem>.txt`); `dataset_id` must be identical on every chunk.
+
+        Two distinct failure postures, deliberately:
+        - **Protocol-level `dataset_id` problems** (blank, changed mid-stream,
+          or path-unsafe -- see `_is_safe_dataset_id`) and an **oversize**
+          upload (> `_MAX_DATASET_UPLOAD_BYTES`) are `context.abort()`s
+          (`INVALID_ARGUMENT` / `RESOURCE_EXHAUSTED`) -- the caller sent a
+          request this servicer will never be able to honor.
+        - **Content problems** (zero chunks, a corrupt/unreadable zip, a
+          zip-slip entry, or an extracted tree `trainer.resolve_dataset_dir`
+          rejects) are *reported*, never aborted: `UploadAck{ok:false,
+          message}` -- the same posture `PromoteModel` already takes for an
+          unknown model id. The caller (a labeled dataset that failed to
+          compose correctly) can retry without the RPC itself looking broken.
+
+        `trainer.py`/`StartTraining` are never touched: after a successful
+        upload, `<CV_DATASET_DIR>/<dataset_id>/` is byte-identical to what a
+        manual rsync would have produced, so the manual path keeps working.
+        """
+        datasets_root = self._dataset_dir if self._dataset_dir is not None else _DATASET_SEARCH_DIR
+        datasets_root.mkdir(parents=True, exist_ok=True)
+
+        dataset_id: Optional[str] = None
+        bytes_received = 0
+        chunk_count = 0
+
+        tmp_fd, tmp_name = tempfile.mkstemp(prefix=".upload-", suffix=".zip", dir=datasets_root)
+        zip_path = Path(tmp_name)
+        try:
+            with os.fdopen(tmp_fd, "wb") as tmp_zip:
+                for chunk in request_iterator:
+                    if dataset_id is None:
+                        if not _is_safe_dataset_id(chunk.dataset_id):
+                            context.abort(
+                                grpc.StatusCode.INVALID_ARGUMENT,
+                                f"invalid dataset id {chunk.dataset_id!r}",
+                            )
+                        dataset_id = chunk.dataset_id
+                    elif chunk.dataset_id != dataset_id:
+                        context.abort(
+                            grpc.StatusCode.INVALID_ARGUMENT,
+                            f"dataset_id changed mid-stream ({dataset_id!r} -> {chunk.dataset_id!r})",
+                        )
+
+                    chunk_count += 1
+                    bytes_received += len(chunk.content)
+                    if bytes_received > _MAX_DATASET_UPLOAD_BYTES:
+                        context.abort(
+                            grpc.StatusCode.RESOURCE_EXHAUSTED,
+                            f"dataset upload exceeds the {_MAX_DATASET_UPLOAD_BYTES}-byte cap",
+                        )
+                    tmp_zip.write(chunk.content)
+
+            if chunk_count == 0:
+                return cv_pb2.UploadAck(ok=False, message="no dataset chunks received")
+
+            return self._land_dataset(zip_path, datasets_root, dataset_id, bytes_received)
+        finally:
+            zip_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _land_dataset(
+        zip_path: Path, datasets_root: Path, dataset_id: str, bytes_received: int
+    ) -> "cv_pb2.UploadAck":
+        """Validate + extract `zip_path` into a sibling temp dir under
+        `datasets_root`, then atomically replace `<datasets_root>/<dataset_id>/`
+        (remove-then-`os.replace`). Every failure from here on is a
+        *reported* `ok:false` -- see `UploadDataset`'s docstring.
+        """
+        temp_dir = datasets_root / f".upload-{dataset_id}-{uuid.uuid4().hex}"
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                bad_entry = zf.testzip()
+                if bad_entry is not None:
+                    return cv_pb2.UploadAck(
+                        ok=False,
+                        dataset_id=dataset_id,
+                        bytes_received=bytes_received,
+                        message=f"corrupt dataset archive (bad entry: {bad_entry!r})",
+                    )
+                members = [member for member in zf.infolist() if not member.is_dir()]
+                for member in members:
+                    if not _is_safe_zip_entry(member.filename):
+                        return cv_pb2.UploadAck(
+                            ok=False,
+                            dataset_id=dataset_id,
+                            bytes_received=bytes_received,
+                            message=f"dataset archive contains an unsafe entry: {member.filename!r}",
+                        )
+                temp_dir.mkdir()
+                zf.extractall(path=temp_dir, members=members)
+        except (zipfile.BadZipFile, OSError, EOFError) as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return cv_pb2.UploadAck(
+                ok=False,
+                dataset_id=dataset_id,
+                bytes_received=bytes_received,
+                message=f"corrupt or unreadable dataset archive: {exc}",
+            )
+
+        try:
+            trainer.resolve_dataset_dir(datasets_root, temp_dir.name)
+        except trainer.DatasetNotFoundError:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return cv_pb2.UploadAck(
+                ok=False,
+                dataset_id=dataset_id,
+                bytes_received=bytes_received,
+                message=(
+                    f"dataset {dataset_id!r} archive is malformed -- must contain "
+                    f"{trainer.DATA_YAML_NAME}, {trainer.IMAGES_DIRNAME}/, and "
+                    f"{trainer.LABELS_DIRNAME}/"
+                ),
+            )
+
+        file_count = sum(1 for path in temp_dir.rglob("*") if path.is_file())
+
+        final_dir = datasets_root / dataset_id
+        if final_dir.exists():
+            shutil.rmtree(final_dir)
+        os.replace(temp_dir, final_dir)
+
+        return cv_pb2.UploadAck(
+            ok=True,
+            dataset_id=dataset_id,
+            bytes_received=bytes_received,
+            file_count=file_count,
+            message=f"dataset {dataset_id!r} ready ({file_count} files)",
+        )
 
     def ListModels(self, request, context):
         """Report the registry roster as a `ModelList`.

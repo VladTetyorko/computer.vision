@@ -10,6 +10,7 @@ import com.drones.vision.api.dto.StartAssetStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateAssetRequest;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;

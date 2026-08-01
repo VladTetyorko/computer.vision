@@ -1,6 +1,7 @@
 package com.drones.vision.api;
 
 import com.drones.vision.api.dto.AssetStatsResponse;
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AssetService;
 import com.drones.vision.application.AssetStatsService;
 import com.drones.vision.domain.model.AssetId;

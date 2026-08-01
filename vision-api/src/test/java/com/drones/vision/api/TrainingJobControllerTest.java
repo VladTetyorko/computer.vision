@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AccessDeniedException;
 import com.drones.vision.application.TrainingJobService;
 import com.drones.vision.application.TrainingJobView;
@@ -107,6 +108,38 @@ class TrainingJobControllerTest {
         mockMvc.perform(post("/api/datasets/{id}/train", "11111111-1111-1111-1111-111111111111")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"baseModel\": \"yolo26n.pt\", \"epochs\": 0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void startReturns400ForAMalformedDatasetId() throws Exception {
+        mockMvc.perform(post("/api/datasets/{id}/train", "not-a-uuid").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"baseModel\": \"yolo26n.pt\", \"epochs\": 50}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void startReturns404ForAnUnknownDataset() throws Exception {
+        String datasetId = "11111111-1111-1111-1111-111111111111";
+        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new java.util.NoSuchElementException("Unknown dataset: " + datasetId));
+
+        mockMvc.perform(post("/api/datasets/{id}/train", datasetId).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"baseModel\": \"yolo26n.pt\", \"epochs\": 50}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void startReturns400WhenDatasetHasNoLabeledSamples() throws Exception {
+        String datasetId = "11111111-1111-1111-1111-111111111111";
+        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new IllegalArgumentException("Dataset " + datasetId + " has no LABELED samples to train on"));
+
+        mockMvc.perform(post("/api/datasets/{id}/train", datasetId).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"baseModel\": \"yolo26n.pt\", \"epochs\": 50}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }

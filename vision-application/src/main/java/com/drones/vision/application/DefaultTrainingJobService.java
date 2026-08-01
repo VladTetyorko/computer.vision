@@ -3,9 +3,13 @@ package com.drones.vision.application;
 import com.drones.vision.domain.model.AuditAction;
 import com.drones.vision.domain.model.AuditEntry;
 import com.drones.vision.domain.model.AuditTargetType;
+import com.drones.vision.domain.model.DatasetId;
+import com.drones.vision.domain.model.DatasetUpload;
 import com.drones.vision.domain.model.JobState;
+import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.TrainingJobSpec;
 import com.drones.vision.domain.model.TrainingProgress;
+import com.drones.vision.domain.model.TrainingSample;
 import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.TrainingPort;
@@ -31,6 +35,18 @@ import java.util.function.Supplier;
  * {@link #start} requires {@link VisibilityScope#canManageOrg()}, mirroring {@code
  * DefaultModelRegistryService#promote}'s manager/admin gate exactly.
  *
+ * <h2>Synchronous dataset pre-check (docs/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
+ * After the scope gate, {@link #start} runs one cheap, bounded {@link
+ * LabelingService#samples(DatasetId, com.drones.vision.domain.model.SampleStatus, int, UserId,
+ * VisibilityScope) LabelingService#samples} read (limit {@code 1}, filtered to {@code LABELED})
+ * before ever registering or submitting the job. This surfaces an unknown dataset ({@link
+ * java.util.NoSuchElementException}), an out-of-scope one ({@link AccessDeniedException}), and an
+ * empty one ({@link IllegalArgumentException}) as real synchronous failures on the calling thread —
+ * none of the three registers a job or touches {@code jobs}/{@code auditTrail}'s {@code STARTED}
+ * path; a scoped denial from this read is audited by {@link LabelingService} itself, against a
+ * {@code DATASET} target, not by this class. Only after this check passes does the existing
+ * scope-denial-or-STARTED audit/registration continue exactly as before.
+ *
  * <h2>Locally-generated job id vs. the wire job id</h2>
  * {@link TrainingPort#startTraining} <b>blocks</b> for the lifetime of the job, so this service
  * cannot wait for cv-service to assign its own {@link TrainingProgress#jobId()} before answering
@@ -43,16 +59,21 @@ import java.util.function.Supplier;
  * unrelated one); only the locally-generated id is ever exposed through this service's surface, so
  * a caller never needs to know the wire id exists at all.
  *
- * <h2>Off-thread run &amp; failure handling</h2>
- * The task submitted to {@code executor} calls {@link TrainingPort#startTraining} with a callback
- * that folds every {@link TrainingProgress} onto the tracked {@link TrainingJobView} ({@link
- * #updateJob}). Per {@link TrainingPort}'s own contract, an unrecoverable transport failure
- * surfaces as a thrown exception rather than a synthesized terminal message — so a thrown {@link
- * RuntimeException} is caught here ({@link #runJob}) and recorded as a terminal {@link
- * JobState#FAILED} job (message = the exception's own message, or its class's simple name if
- * none), ensuring a dropped connection surfaces to a poller instead of silently leaving a dead
- * background thread and a job stuck at {@code RUNNING} forever. The exception never escapes {@link
- * #runJob} itself, so it is never thrown back through {@code executor} to any caller.
+ * <h2>Off-thread run: upload, then train (docs/CV-TRAINING-V2-PLAN.md §4)</h2>
+ * The task submitted to {@code executor} ({@link #runJob}) first calls {@link
+ * LabelingService#uploadForTraining} — composing every {@code LABELED} sample into the frozen §5
+ * YOLO content and shipping it to the training host — noting the phase in the job's {@code message}
+ * field ({@link #note}) before and after, then calls {@link TrainingPort#startTraining} with a
+ * callback that folds every {@link TrainingProgress} onto the tracked {@link TrainingJobView}
+ * ({@link #updateJob}) exactly as before. No new {@link JobState} is invented for "uploading" — the
+ * job stays {@link JobState#RUNNING} from the moment {@link #start} returns, and {@code
+ * epoch}/{@code totalEpochs} stay {@code 0} until the first epoch arrives, same as before this
+ * upload phase existed. Either step's failure — an upload rejection or a training transport
+ * failure — surfaces identically: a thrown {@link RuntimeException} is caught here and recorded as
+ * a terminal {@link JobState#FAILED} job (message = the exception's own message, or its class's
+ * simple name if none), ensuring neither failure mode silently leaves a dead background thread and
+ * a job stuck at {@code RUNNING} forever. The exception never escapes {@link #runJob} itself, so it
+ * is never thrown back through {@code executor} to any caller.
  *
  * <h2>Concurrent jobs</h2>
  * Nothing here rejects a second {@link #start} while another job is still {@code RUNNING}: each
@@ -98,7 +119,11 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     private static final String DENIED_OUT_OF_SCOPE = "DENIED:out of scope";
     private static final String RESULT_STARTED = "STARTED";
 
+    /** Labeled-sample presence check's fetch bound — one row is enough to prove non-emptiness. */
+    private static final int PRESENCE_CHECK_LIMIT = 1;
+
     private final TrainingPort trainingPort;
+    private final LabelingService labelingService;
     private final AuditTrailPort auditTrail;
     private final ExecutorService executor;
     private final Supplier<Instant> clock;
@@ -107,14 +132,16 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     private final ConcurrentLinkedDeque<String> finishedOrder = new ConcurrentLinkedDeque<>();
 
     /** Production convenience ctor: a cached daemon-thread pool, {@link Instant#now()}. */
-    public DefaultTrainingJobService(TrainingPort trainingPort, AuditTrailPort auditTrail) {
-        this(trainingPort, auditTrail, defaultExecutor(), Instant::now);
+    public DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService,
+                                      AuditTrailPort auditTrail) {
+        this(trainingPort, labelingService, auditTrail, defaultExecutor(), Instant::now);
     }
 
     /** Test/wiring seam: an explicit executor (e.g. a same-thread one) and clock. */
-    DefaultTrainingJobService(TrainingPort trainingPort, AuditTrailPort auditTrail, ExecutorService executor,
-                               Supplier<Instant> clock) {
+    DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService, AuditTrailPort auditTrail,
+                               ExecutorService executor, Supplier<Instant> clock) {
         this.trainingPort = Objects.requireNonNull(trainingPort, "trainingPort must not be null");
+        this.labelingService = Objects.requireNonNull(labelingService, "labelingService must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
         this.executor = Objects.requireNonNull(executor, "executor must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
@@ -141,11 +168,19 @@ public final class DefaultTrainingJobService implements TrainingJobService {
             throw new AccessDeniedException("Not permitted to start training jobs");
         }
 
+        DatasetId datasetId = DatasetId.of(spec.datasetId());
+        List<TrainingSample> labeledPreview =
+                labelingService.samples(datasetId, SampleStatus.LABELED, PRESENCE_CHECK_LIMIT, actor, scope);
+        if (labeledPreview.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Dataset " + spec.datasetId() + " has no LABELED samples to train on");
+        }
+
         jobs.put(jobId, new TrainingJobView(jobId, spec.baseModel(), spec.datasetId(), spec.epochs(),
                 0, 0, 0.0, 0.0, JobState.RUNNING, "", clock.get()));
         audit(actor, jobId, spec, RESULT_STARTED);
 
-        executor.execute(() -> runJob(jobId, spec));
+        executor.execute(() -> runJob(jobId, spec, datasetId, actor, scope));
         return jobId;
     }
 
@@ -161,12 +196,24 @@ public final class DefaultTrainingJobService implements TrainingJobService {
         return Optional.ofNullable(jobs.get(jobId));
     }
 
-    private void runJob(String jobId, TrainingJobSpec spec) {
+    private void runJob(String jobId, TrainingJobSpec spec, DatasetId datasetId, UserId actor,
+                         VisibilityScope scope) {
         try {
+            note(jobId, "Uploading dataset…");
+            DatasetUpload upload = labelingService.uploadForTraining(datasetId, actor, scope);
+            note(jobId, "Uploaded " + upload.sampleCount() + " sample(s), " + upload.sizeBytes()
+                    + " bytes; starting training…");
             trainingPort.startTraining(spec, progress -> updateJob(jobId, progress));
         } catch (RuntimeException e) {
             recordFailure(jobId, e);
         }
+    }
+
+    /** Replaces only the tracked view's {@code message} field — same replace-never-mutate idiom as {@link #updateJob}. */
+    private void note(String jobId, String message) {
+        jobs.computeIfPresent(jobId, (id, current) -> new TrainingJobView(current.jobId(), current.baseModel(),
+                current.datasetId(), current.epochs(), current.epoch(), current.totalEpochs(), current.loss(),
+                current.map50(), current.state(), message, current.startedAt()));
     }
 
     private void updateJob(String jobId, TrainingProgress progress) {

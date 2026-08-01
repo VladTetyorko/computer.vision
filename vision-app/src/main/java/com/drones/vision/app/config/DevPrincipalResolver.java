@@ -1,4 +1,4 @@
-package com.drones.vision.app;
+package com.drones.vision.app.config;
 
 import com.drones.vision.api.PrincipalResolver;
 import com.drones.vision.app.devsupport.DevPrincipal;
@@ -16,7 +16,7 @@ import com.drones.vision.domain.model.UserId;
  * (docs/U-SCOPE-PLAN.md): with auth off, every scoped read/command sees everything, so the
  * default-off build behaves exactly as it does today.
  */
-final class DevPrincipalResolver implements PrincipalResolver {
+public final class DevPrincipalResolver implements PrincipalResolver {
 
     @Override
     public UserId userId() {

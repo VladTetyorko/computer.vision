@@ -1,7 +1,7 @@
 package com.drones.vision.application;
 
-import com.drones.vision.domain.model.DatasetExport;
 import com.drones.vision.domain.model.DatasetId;
+import com.drones.vision.domain.model.DatasetUpload;
 import com.drones.vision.domain.model.SampleImage;
 import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.TrainingSample;
@@ -56,6 +56,35 @@ public interface LabelingService {
     TrainingSample capture(CaptureSpec spec, UserId actor, VisibilityScope scope);
 
     /**
+     * Captures a training sample from a finished usage's <b>recorded</b> replay at a specific
+     * instant (docs/CV-TRAINING-V2-PLAN.md §4) — the replay counterpart to {@link #capture}'s live
+     * path. Pulls one decoded frame via {@link ReplaySources#frames()} at {@code
+     * usage.startedAt() + spec.atSeconds()}, and pre-fills suggested annotations from the nearest
+     * stored {@link com.drones.vision.domain.model.DetectionResult} within a ±2s window (server-side
+     * lookup — see {@link DefaultLabelingService}'s own javadoc for why), mapped to {@link
+     * com.drones.vision.domain.model.AnnotationSource#MODEL} annotations; nothing in the window
+     * yields an empty (never fabricated) annotation list. Saves a new {@link
+     * com.drones.vision.domain.model.SampleStatus#PENDING} sample (+ its JPEG image) into {@code
+     * spec}'s dataset — identical shape to what {@link #capture} produces, so the existing sample
+     * editor/labeling/upload path needs no changes.
+     *
+     * @param spec   the usage/instant to capture from and the dataset to add the sample to
+     * @param actor  who is capturing, for the audit trail
+     * @param scope  the acting user's visibility
+     * @return the newly captured, persisted sample
+     * @throws java.util.NoSuchElementException if the dataset or usage is unknown, the usage has no
+     *                                            recorded video stream, or no frame is recorded at
+     *                                            the requested instant
+     * @throws AccessDeniedException             if the dataset, or the usage's asset, is outside
+     *                                            {@code scope} — unlike {@link #capture}, the
+     *                                            usage's asset is never unresolvable, so this gate
+     *                                            always applies
+     * @throws IllegalArgumentException          if {@code spec.atSeconds()} resolves to an instant
+     *                                            after the usage's recorded window
+     */
+    TrainingSample captureFromReplay(ReplayCaptureSpec spec, UserId actor, VisibilityScope scope);
+
+    /**
      * Lists one dataset's samples.
      *
      * @param id           the dataset to list samples for
@@ -107,19 +136,26 @@ public interface LabelingService {
     TrainingSample label(TrainingSampleId id, LabelSpec spec, UserId actor, VisibilityScope scope);
 
     /**
-     * Exports every {@link SampleStatus#LABELED} sample in a dataset as a YOLO-format dataset
-     * (docs/CV-TRAINING-PLAN.md §5) via {@link com.drones.vision.domain.port.out.DatasetExportPort}.
-     * {@link SampleStatus#PENDING}/{@link SampleStatus#DISCARDED} samples are skipped.
+     * Composes every {@link SampleStatus#LABELED} sample in a dataset into the frozen §5 YOLO
+     * content (docs/CV-TRAINING-PLAN.md §5: {@code data.yaml} + per-sample image/label entries) and
+     * ships it to the training host via {@link com.drones.vision.domain.port.out.DatasetUploadPort}
+     * (docs/CV-TRAINING-V2-PLAN.md §4) — the replacement for the deleted manual export step.
+     * {@link SampleStatus#PENDING}/{@link SampleStatus#DISCARDED} samples are skipped. Uploading the
+     * same dataset again replaces whatever the training host had before (idempotent — "label more,
+     * train again" just works).
      *
-     * @param id    the dataset to export
-     * @param actor who is exporting, for the audit trail
+     * <p>Not REST-exposed — the training kickoff ({@code TrainingJobService#start}, by way of
+     * {@code DefaultTrainingJobService#runJob}) is this method's only caller.
+     *
+     * @param id    the dataset to upload
+     * @param actor who is uploading, for the audit trail
      * @param scope the acting user's visibility
-     * @return the completed export's manifest
+     * @return the completed upload's receipt
      * @throws java.util.NoSuchElementException if the dataset is unknown
      * @throws AccessDeniedException             if the dataset is outside {@code scope}
      * @throws IllegalStateException             if a {@code LABELED} sample has no stored image (a
      *                                            data-integrity condition that should never occur
      *                                            in a well-formed system)
      */
-    DatasetExport export(DatasetId id, UserId actor, VisibilityScope scope);
+    DatasetUpload uploadForTraining(DatasetId id, UserId actor, VisibilityScope scope);
 }

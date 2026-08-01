@@ -10,7 +10,7 @@ import java.util.UUID;
  * Constant dev principal that owns every asset created while the platform
  * has no real identity/accounts phase (ARCHITECTURE.md §6) — a fixed,
  * well-known {@link UserId}/{@link GroupId} pair, applied only here in the
- * app-layer wiring ({@link com.drones.vision.app.WiringConfiguration}
+ * app-layer wiring ({@link com.drones.vision.app.config.WiringConfiguration}
  * constructs {@code AssetService} with {@link #OWNERSHIP}) and never
  * hard-coded in the domain or application layers, per
  * docs/ASSET-MODEL-PLAN.md §0.3/§4.

@@ -19,7 +19,6 @@ import type {
   CreateUserRequest,
   CvModelsResponse,
   Dataset,
-  DatasetExport,
   DatasetsResponse,
   DetectionEvent,
   DetectionResult,
@@ -796,15 +795,16 @@ export class VisionApi {
     );
   }
 
-  /**
-   * Exports every `LABELED` sample as a YOLO-format zip (`PENDING`/`DISCARDED` skipped). Despite the
-   * `202` status the response body is already the complete manifest (`DatasetExport#downloadUrl` is
-   * immediately fetchable) — this is a synchronous export, not a job to poll, per the frozen
-   * contract; `features/labeling/dataset-detail.ts` renders `downloadUrl` as a plain download link
-   * the moment this promise resolves.
-   */
-  exportDataset(datasetId: string): Promise<DatasetExport> {
-    return firstValueFrom(this.http.post<DatasetExport>(`/api/datasets/${encodeURIComponent(datasetId)}/export`, {}));
+  /** Captures a frame from a finished usage's recording at `atSeconds` past its start, with the
+   *  nearest stored detections pre-filled as MODEL annotations. 404 = unknown usage / no recorded
+   *  stream / nothing recorded at that instant; 403 = dataset or asset out of scope. */
+  captureReplaySample(usageId: string, datasetId: string, atSeconds: number): Promise<TrainingSample> {
+    return firstValueFrom(
+      this.http.post<TrainingSample>(`/api/usages/${encodeURIComponent(usageId)}/samples`, {
+        datasetId,
+        atSeconds,
+      }),
+    );
   }
 
   // --- CV model registry (docs/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) — the dynamic registry

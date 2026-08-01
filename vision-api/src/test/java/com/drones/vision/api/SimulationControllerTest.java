@@ -1,5 +1,6 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.RouteMode;
 import com.drones.vision.application.SimulatedAsset;
 import com.drones.vision.application.SimulationService;

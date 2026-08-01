@@ -201,7 +201,14 @@
 .clip-actions {
     margin-top: var(--space-8);
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-8);
+}
+
+/* ---- "Add to dataset" (docs/CV-TRAINING-V2-PLAN.md §8) — a dataset picker sharing the clip-actions row */
+
+.dataset-picker {
+    min-width: 12rem;
 }
 
 .empty-recording {

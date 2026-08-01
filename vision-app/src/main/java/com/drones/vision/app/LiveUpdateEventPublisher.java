@@ -25,7 +25,7 @@ import java.util.Set;
  * <p>Only wired ({@link WiringConfiguration#eventPublisherPort}) when {@code vision.live.enabled}
  * is {@code true}; with it disabled, this class is never constructed.
  */
-final class LiveUpdateEventPublisher implements EventPublisherPort {
+public final class LiveUpdateEventPublisher implements EventPublisherPort {
 
     /** Event types that also represent a fleet-level lifecycle change, not just a notable occurrence. */
     private static final Set<EventType> FLEET_LIFECYCLE_EVENTS =
@@ -35,7 +35,7 @@ final class LiveUpdateEventPublisher implements EventPublisherPort {
     private final EventPublisherPort delegate;
     private final LiveUpdatePublisherPort liveUpdatePublisherPort;
 
-    LiveUpdateEventPublisher(EventPublisherPort delegate, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+    public LiveUpdateEventPublisher(EventPublisherPort delegate, LiveUpdatePublisherPort liveUpdatePublisherPort) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
         this.liveUpdatePublisherPort =
                 Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");

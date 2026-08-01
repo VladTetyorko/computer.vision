@@ -1365,7 +1365,7 @@ export interface TrainingSample {
   readonly annotations: readonly Annotation[];
 }
 
-export type DatasetStatus = 'OPEN' | 'EXPORTING' | 'ARCHIVED';
+export type DatasetStatus = 'OPEN' | 'ARCHIVED';
 
 /**
  * Mirrors `dto.DatasetResponse`. `targetCategory` is genuinely absent (`NON_NULL`) when the dataset
@@ -1411,18 +1411,6 @@ export interface CaptureSampleRequest {
 export interface LabelAnnotationsRequest {
   readonly status: 'LABELED' | 'DISCARDED';
   readonly annotations: readonly Annotation[];
-}
-
-/** Mirrors `dto.DatasetExportResponse`. `downloadUrl` is a same-origin path
- *  (`/api/datasets/<id>/export/<exportId>`), safe to bind straight to an `<a href>`. */
-export interface DatasetExport {
-  readonly datasetId: string;
-  readonly exportId: string;
-  readonly exportedAt: string;
-  readonly classes: readonly string[];
-  readonly sampleCount: number;
-  readonly sizeBytes: number;
-  readonly downloadUrl: string;
 }
 
 // --- CV model registry (docs/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) -------------------------

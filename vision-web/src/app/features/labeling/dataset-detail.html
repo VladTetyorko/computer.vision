@@ -98,41 +98,14 @@
         </div>
       }
 
-      <div class="card export-card">
-        <header>
-          <h2>Export</h2>
-        </header>
-        <p class="muted">
-          Exports every labeled sample as a YOLO-format dataset (images + labels + <span class="mono">data.yaml</span>).
-          Pending and discarded samples are skipped.
-        </p>
-        <div class="row export-row">
-          <button type="button" class="btn" [disabled]="!facade.canExport() || facade.exporting()" (click)="facade.exportDataset()">
-            <vision-icon name="archive" [size]="14" />
-            {{ facade.exporting() ? 'Exporting…' : 'Export dataset' }}
-          </button>
-          @if (!facade.canExport()) {
-            <span class="faint">Label at least one sample first.</span>
-          }
-        </div>
-        @if (facade.lastExport(); as exportResult) {
-          <div class="export-result">
-            <a class="btn secondary small" [href]="exportResult.downloadUrl" download>
-              <vision-icon name="archive" [size]="14" />
-              Download zip ({{ formatBytes(exportResult.sizeBytes) }})
-            </a>
-            <span class="muted">{{ exportResult.sampleCount }} sample(s), {{ exportResult.classes.length }} class(es)</span>
-          </div>
-        }
-      </div>
-
       @if (facade.canManage()) {
         <div class="card train-card">
           <header>
             <h2>Train a model</h2>
           </header>
           <p class="muted">
-            Fine-tunes a YOLO model against this dataset's labeled samples on a separate training host.
+            Uploads every labeled sample straight to the training host and fine-tunes a YOLO model
+            against them — no separate export step. Pending and discarded samples are skipped.
             You'll watch its progress once it starts.
           </p>
           @if (!facade.canStartTraining()) {

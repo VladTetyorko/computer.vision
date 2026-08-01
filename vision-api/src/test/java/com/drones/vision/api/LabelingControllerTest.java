@@ -1,19 +1,17 @@
 package com.drones.vision.api;
 
+import com.drones.vision.api.exceptions.ApiExceptionHandler;
 import com.drones.vision.application.AccessDeniedException;
 import com.drones.vision.application.CaptureSpec;
-import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.LabelSpec;
 import com.drones.vision.application.LabelingService;
+import com.drones.vision.application.ReplayCaptureSpec;
 import com.drones.vision.application.VisibilityScope;
 import com.drones.vision.domain.model.Annotation;
 import com.drones.vision.domain.model.AnnotationSource;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetExport;
 import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetStatus;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.SampleImage;
@@ -21,22 +19,18 @@ import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TrainingSample;
 import com.drones.vision.domain.model.TrainingSampleId;
+import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.DatasetExportPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,16 +50,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * MockMvc tests for {@link LabelingController} (docs/CV-TRAINING-PLAN.md §3's frozen wire
- * contract), mirroring {@link DatasetControllerTest}/{@link MarksControllerTest}'s style: a
- * standalone {@code MockMvc} over mocked {@link LabelingService}/{@link DatasetService}/{@link
- * DatasetExportPort} collaborators, with {@link ApiExceptionHandler} attached so error mapping is
- * exercised exactly as it runs in production.
+ * contract, as delta'd by docs/CV-TRAINING-V2-PLAN.md §5), mirroring {@link
+ * DatasetControllerTest}/{@link MarksControllerTest}'s style: a standalone {@code MockMvc} over a
+ * mocked {@link LabelingService} collaborator, with {@link ApiExceptionHandler} attached so error
+ * mapping is exercised exactly as it runs in production.
  */
 class LabelingControllerTest {
 
     private LabelingService labelingService;
-    private DatasetService datasetService;
-    private DatasetExportPort datasetExportPort;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -75,10 +67,8 @@ class LabelingControllerTest {
     @BeforeEach
     void setUp() {
         labelingService = mock(LabelingService.class);
-        datasetService = mock(DatasetService.class);
-        datasetExportPort = mock(DatasetExportPort.class);
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new LabelingController(labelingService, datasetService, datasetExportPort, currentUser))
+                .standaloneSetup(new LabelingController(labelingService, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -153,6 +143,135 @@ class LabelingControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    // ---- POST /api/usages/{usageId}/samples ----
+
+    @Test
+    void captureFromReplayReturns201WithModelAnnotationsAndThreadsUsageDatasetAndOffset() throws Exception {
+        UsageId usageId = UsageId.random();
+        DatasetId datasetId = DatasetId.random();
+        StreamId streamId = StreamId.random();
+        TrainingSampleId sampleId = TrainingSampleId.random();
+        Annotation modelAnnotation =
+                new Annotation("building", new BoundingBox(0.10, 0.20, 0.30, 0.25), AnnotationSource.MODEL);
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenReturn(sample(sampleId, datasetId, streamId, List.of(modelAnnotation), SampleStatus.PENDING));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", usageId.value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + datasetId.value() + "\", \"atSeconds\": 412.5}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(sampleId.value().toString()))
+                .andExpect(jsonPath("$.datasetId").value(datasetId.value().toString()))
+                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.annotations", hasSize(1)))
+                .andExpect(jsonPath("$.annotations[0].source").value("MODEL"));
+
+        ArgumentCaptor<ReplayCaptureSpec> captor = ArgumentCaptor.forClass(ReplayCaptureSpec.class);
+        verify(labelingService).captureFromReplay(captor.capture(), eq(ownerId), eq(currentUser.scope()));
+        assertEquals(usageId, captor.getValue().usageId());
+        assertEquals(datasetId, captor.getValue().datasetId());
+        assertEquals(412.5, captor.getValue().atSeconds());
+    }
+
+    @Test
+    void captureFromReplayReturns400ForAMalformedUsageId() throws Exception {
+        mockMvc.perform(post("/api/usages/{usageId}/samples", "not-a-uuid")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 1.0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void captureFromReplayReturns400ForABlankDatasetId() throws Exception {
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"atSeconds\": 1.0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void captureFromReplayReturns400ForANegativeAtSeconds() throws Exception {
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": -5}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void captureFromReplayReturns400WhenAtSecondsIsPastTheUsageWindow() throws Exception {
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new IllegalArgumentException("atSeconds 9999.0 is past usage's recorded window"));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 9999}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void captureFromReplayReturns403WhenDatasetOrUsageAssetOutsideScope() throws Exception {
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new AccessDeniedException("outside your scope"));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 1.0}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
+    void captureFromReplayReturns404ForAnUnknownUsage() throws Exception {
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new NoSuchElementException("Unknown usage"));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 1.0}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void captureFromReplayReturns404WhenUsageHasNoRecordedVideoStream() throws Exception {
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new NoSuchElementException("Usage has no recorded video stream"));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 1.0}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void captureFromReplayReturns404ForAnUnknownDataset() throws Exception {
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new NoSuchElementException("Unknown dataset"));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 1.0}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    @Test
+    void captureFromReplayReturns404WhenNoFrameIsRecordedAtThatInstant() throws Exception {
+        when(labelingService.captureFromReplay(any(ReplayCaptureSpec.class), eq(ownerId), any(VisibilityScope.class)))
+                .thenThrow(new NoSuchElementException("No recorded frame at that instant"));
+
+        mockMvc.perform(post("/api/usages/{usageId}/samples", UsageId.random().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetId\": \"" + DatasetId.random().value() + "\", \"atSeconds\": 1.0}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
     }
 
     // ---- GET /api/datasets/{id}/samples ----
@@ -299,76 +418,17 @@ class LabelingControllerTest {
                 .andExpect(jsonPath("$.error").value("NOT_FOUND"));
     }
 
-    // ---- POST /api/datasets/{id}/export ----
+    // ---- Removed export routes now 404 (docs/CV-TRAINING-V2-PLAN.md §A: deleted, not hidden) ----
 
     @Test
-    void exportReturns202WithManifestAndDownloadUrl() throws Exception {
-        DatasetId datasetId = DatasetId.random();
-        DatasetExport export = new DatasetExport(datasetId, "export-1", Instant.parse("2026-08-01T10:05:00Z"),
-                List.of("building", "tower"), 40, 18234123L, "/tmp/export-1.zip");
-        when(labelingService.export(eq(datasetId), eq(ownerId), any(VisibilityScope.class))).thenReturn(export);
-
-        mockMvc.perform(post("/api/datasets/{id}/export", datasetId.value()))
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.datasetId").value(datasetId.value().toString()))
-                .andExpect(jsonPath("$.exportId").value("export-1"))
-                .andExpect(jsonPath("$.sampleCount").value(40))
-                .andExpect(jsonPath("$.sizeBytes").value(18234123))
-                .andExpect(jsonPath("$.downloadUrl")
-                        .value("/api/datasets/" + datasetId.value() + "/export/export-1"));
+    void exportRouteNoLongerExists() throws Exception {
+        mockMvc.perform(post("/api/datasets/{id}/export", DatasetId.random().value()))
+                .andExpect(status().isNotFound());
     }
 
     @Test
-    void exportReturns404ForUnknownDataset() throws Exception {
-        DatasetId datasetId = DatasetId.random();
-        when(labelingService.export(eq(datasetId), eq(ownerId), any()))
-                .thenThrow(new NoSuchElementException("Unknown dataset: " + datasetId.value()));
-
-        mockMvc.perform(post("/api/datasets/{id}/export", datasetId.value()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
-    }
-
-    // ---- GET /api/datasets/{id}/export/{exportId} ----
-
-    @Test
-    void downloadExportReturns200WithZipBytesAfterValidatingScope(@TempDir Path tempDir) throws Exception {
-        DatasetId datasetId = DatasetId.random();
-        Dataset dataset = new Dataset(datasetId, "Buildings", null, List.of(), ownership, DatasetStatus.OPEN,
-                Instant.now());
-        Path zipPath = tempDir.resolve("export.zip");
-        Files.write(zipPath, new byte[] {80, 75, 3, 4});
-        when(datasetService.get(eq(datasetId), eq(ownerId), any(VisibilityScope.class))).thenReturn(dataset);
-        when(datasetExportPort.resolve(datasetId, "export-1")).thenReturn(Optional.of(zipPath));
-
-        mockMvc.perform(get("/api/datasets/{id}/export/{exportId}", datasetId.value(), "export-1"))
-                .andExpect(status().isOk())
-                .andExpect(content().bytes(Files.readAllBytes(zipPath)));
-
-        verify(datasetService).get(datasetId, ownerId, currentUser.scope());
-    }
-
-    @Test
-    void downloadExportReturns404ForAnUnknownExportId() throws Exception {
-        DatasetId datasetId = DatasetId.random();
-        Dataset dataset = new Dataset(datasetId, "Buildings", null, List.of(), ownership, DatasetStatus.OPEN,
-                Instant.now());
-        when(datasetService.get(eq(datasetId), eq(ownerId), any(VisibilityScope.class))).thenReturn(dataset);
-        when(datasetExportPort.resolve(eq(datasetId), any())).thenReturn(Optional.empty());
-
-        mockMvc.perform(get("/api/datasets/{id}/export/{exportId}", datasetId.value(), "unknown-export"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
-    }
-
-    @Test
-    void downloadExportReturns403ForADatasetOutsideCallersScope() throws Exception {
-        DatasetId datasetId = DatasetId.random();
-        when(datasetService.get(eq(datasetId), eq(ownerId), any(VisibilityScope.class)))
-                .thenThrow(new AccessDeniedException("Dataset " + datasetId.value() + " is outside your scope"));
-
-        mockMvc.perform(get("/api/datasets/{id}/export/{exportId}", datasetId.value(), "export-1"))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    void downloadExportRouteNoLongerExists() throws Exception {
+        mockMvc.perform(get("/api/datasets/{id}/export/{exportId}", DatasetId.random().value(), "export-1"))
+                .andExpect(status().isNotFound());
     }
 }
