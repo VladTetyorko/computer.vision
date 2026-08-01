@@ -1,6 +1,9 @@
 # RC-CONTROL-PHASE1-PLAN — SITL relay (transmitter → backend → ArduPilot SITL)
 
-Status: **draft for review** (2026-07-31). Owner: RC relay. Freezes Phase 1 of
+Status: **IMPLEMENTED** (committed 2b65ceb, 2026-08-01) — all 5 waves (R1 domain · R2 application ·
+R3 adapter-mavlink · R4 WebSocket transport · R5 web) green; cross-module Java build green, web suite
+1416 green. **Remaining: live SITL verification** (§SITL verification below) — the operator's step;
+no SITL/transmitter in CI. Owner: RC relay. Freezes Phase 1 of
 [`RC-CONTROL-PLAN.md`](RC-CONTROL-PLAN.md) into an implementable contract. **SITL ONLY** — no real
 airframe. Builds directly on the shipped Phase 0 (`core/rc/**`, `features/fly/rc-monitor.ts`).
 

@@ -1,6 +1,9 @@
 # RC-CONTROL-PLAN — piloting the drone from a plugged-in RC transmitter
 
-Status: **Phase 0 in progress** (started 2026-07-31). Owner: RC relay.
+Status: **Phase 0 DONE** (committed c1cf9fe) · **Phase 1 IMPLEMENTED** (committed 2b65ceb — all
+5 waves green, cross-module build green; live SITL fly + latency/watchdog tuning is the operator's
+step, see docs/RC-CONTROL-PHASE1-PLAN.md §SITL verification). **Phase 2 (real airframe) remains
+gated on explicit user go.** Owner: RC relay.
 
 Goal: let an operator plug a physical RC transmitter (a RadioMaster, 12 channels, EdgeTX) into the
 machine running the Fly cockpit and have its sticks + switches **relayed to the drone** over the
