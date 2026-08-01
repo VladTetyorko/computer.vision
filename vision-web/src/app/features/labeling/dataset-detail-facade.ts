@@ -1,11 +1,21 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import type { Dataset, DatasetExport, SampleStatus, TrainingSample } from '../../core/api/models';
-import { canExportDataset, streamCaptureLabel } from './dataset-detail-logic';
+import { AuthStore } from '../../core/auth/auth-store';
+import { canManageOrg } from '../../core/org/org-logic';
+import type { Dataset, DatasetExport, SampleStatus, TrainingJobResponse, TrainingSample } from '../../core/api/models';
+import {
+  DEFAULT_BASE_MODEL,
+  DEFAULT_TRAINING_EPOCHS,
+  canExportDataset,
+  canStartTrainingDataset,
+  canSubmitTrainingRequest,
+  streamCaptureLabel,
+} from './dataset-detail-logic';
 
 /** Stable per-file console tag, mirroring every other store/facade in this app. */
 const LOG_PREFIX = '[labeling]';
@@ -24,11 +34,27 @@ const LOG_PREFIX = '[labeling]';
  * active stream to capture from right here, inside the dataset they're building, rather than a
  * scattered "Add to dataset" button on every video surface. One coherent place to do the whole
  * capture → correct → export loop, and zero risk of touching a file another task owns.
+ *
+ * **"Train a model" (docs/CV-TRAINING-PLAN.md Phase 2's last web wave) lives here too, not a
+ * separate page of its own** — starting a fine-tune is one more action against *this* dataset, the
+ * same footing as capture/export. `TrainingJobController#start` requires `canManageOrg` (a `403`
+ * otherwise, mirroring `ModelRegistryController#promote`'s own gate — starting a training run is a
+ * privileged control-plane action), so {@link canManage} hides the whole "Train a model" card for a
+ * PILOT, unlike capture/export which stay open to anyone who can see the dataset. On success,
+ * {@link startTraining} navigates straight to the freshly started job's own progress page
+ * (`/manage/training/jobs/:jobId`, `features/training-jobs/**`) — the operator lands on the run
+ * they just started rather than a static confirmation. {@link recentJobs} is a best-effort,
+ * point-in-time list (this dataset's own jobs from `GET /api/training/jobs`, filtered client-side —
+ * the endpoint is unscoped/global) so a returning operator can find a run they started earlier
+ * without memorizing its URL; it does not poll itself (the dedicated job page already does that),
+ * refreshed only on {@link load}.
  */
 @Injectable()
 export class DatasetDetailFacade {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
+  private readonly router = inject(Router);
+  private readonly auth = inject(AuthStore);
 
   readonly fleet = inject(FleetStore);
 
@@ -49,7 +75,31 @@ export class DatasetDetailFacade {
 
   readonly canExport = computed(() => canExportDataset(this.dataset()));
 
+  /** `TrainingJobController#start`'s own manager gate, mirrored client-side — see this class's own doc comment. */
+  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+
+  readonly baseModel = signal(DEFAULT_BASE_MODEL);
+  /** `number | null` because that's what an emptied `type="number"` `ngModel` actually produces. */
+  readonly epochs = signal<number | null>(DEFAULT_TRAINING_EPOCHS);
+  readonly starting = signal(false);
+  private readonly baseModelOptionsSignal = signal<readonly string[]>([]);
+  /** Suggestions for the base-model field's `<datalist>` — every id the CV registry currently
+   *  reports (`GET /api/cv/registry/models`), best-effort (see {@link loadBaseModelOptions}). */
+  readonly baseModelOptions = this.baseModelOptionsSignal.asReadonly();
+
+  /** Whether "Train a model" is meaningful for this dataset right now — see `canStartTrainingDataset`'s own doc comment. */
+  readonly canStartTraining = computed(() => canStartTrainingDataset(this.dataset()));
+  /** The "Start training" button's own form-validity gate — independent of {@link canStartTraining} so the template can explain *why* it's disabled (no labeled samples vs. an invalid form) without conflating the two. */
+  readonly canSubmitTraining = computed(() => canSubmitTrainingRequest(this.baseModel(), this.epochs(), this.starting()));
+
+  private readonly recentJobsSignal = signal<readonly TrainingJobResponse[]>([]);
+  readonly recentJobs = this.recentJobsSignal.asReadonly();
+
   private currentDatasetId = '';
+
+  constructor() {
+    void this.loadBaseModelOptions();
+  }
 
   streamLabel(stream: { readonly streamId: string; readonly deviceId: string }): string {
     return streamCaptureLabel(stream, this.fleet.devices());
@@ -67,6 +117,7 @@ export class DatasetDetailFacade {
     this.statusFilter.set('PENDING');
     void this.fetchDataset(datasetId);
     void this.fetchSamples(datasetId, 'PENDING');
+    void this.loadRecentJobs(datasetId);
   }
 
   setStatusFilter(status: SampleStatus): void {
@@ -127,6 +178,30 @@ export class DatasetDetailFacade {
     await this.fetchDataset(this.currentDatasetId);
   }
 
+  /**
+   * Starts a fine-tune run against this dataset, then navigates to its own progress page. Guarded
+   * by the same predicates the "Start training" button's `[disabled]` binding reads, so a stray
+   * call (e.g. a double-submit racing the navigation) is a safe no-op rather than a duplicate
+   * request.
+   */
+  async startTraining(): Promise<void> {
+    const dataset = this.dataset();
+    const epochs = this.epochs();
+    if (!dataset || epochs === null || !this.canStartTraining() || !this.canSubmitTraining()) {
+      return;
+    }
+    this.starting.set(true);
+    try {
+      const job = await this.api.startTrainingJob(dataset.id, { baseModel: this.baseModel().trim(), epochs });
+      this.toasts.ok('Training started — watching progress…');
+      await this.router.navigate(['/manage/training/jobs', job.jobId]);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.starting.set(false);
+    }
+  }
+
   private async fetchDataset(datasetId: string): Promise<void> {
     this.loading.set(true);
     this.notFound.set(false);
@@ -154,6 +229,30 @@ export class DatasetDetailFacade {
       this.toasts.error(describeHttpError(error));
     } finally {
       this.samplesLoading.set(false);
+    }
+  }
+
+  /** Best-effort — the base-model field just falls back to free text with no suggestions on
+   *  failure; never blocks the page (mirrors `DatasetsFacade#loadCategories`'s own posture). Fetched
+   *  once per page instance, not per `datasetId`, since the registry is dataset-independent. */
+  private async loadBaseModelOptions(): Promise<void> {
+    try {
+      const response = await this.api.registryModels();
+      this.baseModelOptionsSignal.set(response.models.map((model) => model.id));
+    } catch {
+      // Left at [] — see this method's own doc comment.
+    }
+  }
+
+  /** Best-effort — the "Training jobs" card just doesn't render on failure; never blocks the page.
+   *  `GET /api/training/jobs` is unscoped/global, so this filters to the dataset actually being
+   *  viewed client-side. Not polled — see this class's own doc comment for why. */
+  private async loadRecentJobs(datasetId: string): Promise<void> {
+    try {
+      const response = await this.api.trainingJobs();
+      this.recentJobsSignal.set(response.jobs.filter((job) => job.datasetId === datasetId));
+    } catch {
+      this.recentJobsSignal.set([]);
     }
   }
 }

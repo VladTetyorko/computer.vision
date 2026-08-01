@@ -1,0 +1,54 @@
+package com.drones.vision.application;
+
+import com.drones.vision.domain.model.TrainingJobSpec;
+import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.port.out.TrainingPort;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Starts a CV model fine-tune job and holds its pollable state (docs/CV-TRAINING-PLAN.md §6/§7,
+ * Phase 2). One interface, one implementation ({@link DefaultTrainingJobService}) — {@link
+ * TrainingPort} itself is the substitutable boundary (a GPU-training-host gRPC client, or a
+ * refusing offline default); this service adds the manager gate/audit, the off-thread run, the
+ * locally-generated job id, and the in-memory pollable registry on top.
+ *
+ * <h2>Scope</h2>
+ * {@link #start} requires {@link VisibilityScope#canManageOrg()} — any manager/admin, mirroring
+ * {@code DefaultModelRegistryService#promote}'s gate exactly (starting a training run is a
+ * privileged control-plane action, the same footing as promoting a model). {@link #jobs()}/{@link
+ * #job(String)} are unscoped, unaudited reads — any authenticated caller may poll a job's
+ * progress, mirroring {@code ModelRegistryService#models()}'s "any authenticated caller may read"
+ * precedent.
+ */
+public interface TrainingJobService {
+
+    /**
+     * Starts a fine-tune job off-thread and returns immediately with the id a poller uses to track
+     * it — never blocks on the (potentially long-running, multi-epoch) training stream itself.
+     *
+     * @param spec  the job to run
+     * @param actor who is starting it, for the audit trail
+     * @param scope the acting user's visibility; must satisfy {@link VisibilityScope#canManageOrg()}
+     * @return the locally generated job id; poll it via {@link #job(String)}
+     * @throws AccessDeniedException if {@code scope} may not manage the organization (audited as a
+     *                                denial before this method throws; the job is never started)
+     */
+    String start(TrainingJobSpec spec, UserId actor, VisibilityScope scope);
+
+    /**
+     * Every tracked job, newest-first by {@link TrainingJobView#startedAt()}. Bounded — see {@link
+     * DefaultTrainingJobService}'s own javadoc for the finished-job retention policy.
+     */
+    List<TrainingJobView> jobs();
+
+    /**
+     * One tracked job's current state.
+     *
+     * @param jobId the id {@link #start} returned
+     * @return the job's latest known state, or {@link Optional#empty()} if unknown — never
+     *         started, or a finished job evicted under the retention policy
+     */
+    Optional<TrainingJobView> job(String jobId);
+}

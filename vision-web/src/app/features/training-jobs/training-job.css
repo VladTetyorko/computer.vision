@@ -1,0 +1,96 @@
+/* Reuses `.page`/`.card`/`.chip`/`.dot`/`.btn`/`.mono`/`.faint`/`.muted`/`.notice` from
+   `src/styles.css` — no new colors. `.job-osd`/`.item`/`.label`/`.value` mirror
+   `features/live/telemetry-osd.ts`'s own mono-readout pattern, kept component-local here — the same
+   "repeated rather than shared" convention `reports.css`'s own bar rules already document. */
+
+.back-link {
+  display: inline-flex;
+  margin-bottom: var(--space-16);
+}
+
+.state-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
+/* Thin, rounded, single-hue track — the `dataviz` skill's own bar-list mark spec
+   (`features/reports/reports.css`'s own `.cat-bar-track`/`.cat-bar-fill`), sized up here since
+   this is the page's one hero measurement rather than one row among many. */
+.progress-track {
+  flex: 1;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* Default fill is the in-progress tone (`--color-info`, this app's one accent) — no separate
+   ".running" class needed, only the two settled outcomes below override it. */
+.progress-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-info);
+  transition: width 0.4s ease;
+}
+
+.progress-fill.succeeded {
+  background: var(--color-success);
+}
+
+.progress-fill.failed {
+  background: var(--color-danger);
+}
+
+.progress-label {
+  min-width: 6ch;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.job-osd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-24);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+a.value {
+  text-decoration: none;
+}
+
+a.value:hover {
+  text-decoration: underline;
+}
+
+.poll-hint {
+  margin-top: var(--space-8);
+  font-size: 0.78rem;
+}

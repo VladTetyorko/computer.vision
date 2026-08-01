@@ -10,14 +10,16 @@
 }
 
 .capture-card,
-.export-card {
+.export-card,
+.train-card {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
 .capture-row,
-.export-row {
+.export-row,
+.train-row {
   flex-wrap: wrap;
   gap: var(--space-8);
 }
@@ -33,6 +35,62 @@
   gap: var(--space-16);
   margin-top: var(--space-8);
   flex-wrap: wrap;
+}
+
+/* Reuses `.form-grid`/`.span-2` from `datasets.css`'s own "New dataset" form — same shape, kept
+   component-local here too rather than promoted to a shared class (this app's own "repeated rather
+   than shared" convention for a two-field grid used in exactly two places so far). */
+.train-card .form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-16);
+  margin-bottom: var(--space-8);
+}
+
+.train-card .form-grid label {
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .train-card .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- "Training jobs" — a point-in-time list of this dataset's own runs, each linking to its
+   own live progress page (`features/training-jobs/**`). ---- */
+
+.jobs-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  padding: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+}
+
+.job-row:hover {
+  border-color: var(--border-strong);
 }
 
 .sample-grid {

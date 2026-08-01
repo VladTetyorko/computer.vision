@@ -4,12 +4,15 @@ import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.api.DatasetController;
 import com.drones.vision.api.LabelingController;
 import com.drones.vision.api.ModelRegistryController;
+import com.drones.vision.api.TrainingJobController;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.LabelingService;
 import com.drones.vision.application.ModelRegistryService;
+import com.drones.vision.application.TrainingJobService;
 import com.drones.vision.application.TrainingStores;
 import com.drones.vision.domain.port.out.DatasetExportPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;
+import com.drones.vision.domain.port.out.TrainingPort;
 import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,6 +75,18 @@ class TrainingDisabledWiringTest {
         assertTrue(applicationContext.getBeansOfType(ModelRegistryController.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(ModelRegistryService.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(ModelRegistryPort.class).isEmpty());
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave: the training-job flow's
+     * beans/controller are absent by default too, same "absent entirely" guardrail as {@link
+     * #noModelRegistryBeansExistByDefault()} above.
+     */
+    @Test
+    void noTrainingJobBeansExistByDefault() {
+        assertTrue(applicationContext.getBeansOfType(TrainingJobController.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(TrainingJobService.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(TrainingPort.class).isEmpty());
     }
 
     /**

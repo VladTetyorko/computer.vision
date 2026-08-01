@@ -7,19 +7,25 @@ so they need the `cv` extra (registry.py imports `cv_service.inference`) but
 never load real weights. The marker helpers (`cv_service.training`) are
 stdlib-only and tested directly.
 
-`StartTraining` stays UNIMPLEMENTED by design (training runs offline on a
-GPU host; this box is Intel-only / no CUDA) -- asserted here so the gate is
-regression-protected.
+`StartTraining` runs a real Ultralytics fine-tune in production, but these
+tests inject a FAKE trainer (`train_fn`) so they are fast and hardware-free --
+no ultralytics/torch, no real multi-epoch train. They cover the streaming
+contract (RUNNING per epoch -> terminal SUCCEEDED), the produced model landing
+in the model dir + showing in ListModels, a missing dataset yielding a
+reported FAILED (not a gRPC abort), a training exception yielding FAILED, and
+client cancellation stopping the run.
 """
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import grpc
 import pytest
 from google.protobuf import empty_pb2
 
+from cv_service import trainer
 from cv_service.registry import ModelRegistry
 from cv_service.server import TrainingServicer, cv_pb2
 from cv_service.training import (
@@ -156,21 +162,219 @@ def test_promote_no_registry_returns_ok_false():
     assert ack.ok is False
 
 
-# --- StartTraining (still gated) -------------------------------------------
+# --- StartTraining (real fine-tune, faked trainer) -------------------------
 
 
-def test_start_training_still_unimplemented_and_points_at_offline_flow():
-    servicer = TrainingServicer(registry=_registry(), model_dir=None)
+def _write_dataset(datasets_root: Path, dataset_id: str) -> Path:
+    """Create a minimal valid exported-YOLO dataset dir (Phase 1 layout)."""
+    dataset_dir = datasets_root / dataset_id
+    (dataset_dir / trainer.IMAGES_DIRNAME).mkdir(parents=True)
+    (dataset_dir / trainer.LABELS_DIRNAME).mkdir(parents=True)
+    (dataset_dir / trainer.DATA_YAML_NAME).write_text(
+        "names: [building]\nnc: 1\ntrain: images\nval: images\n", encoding="utf-8"
+    )
+    return dataset_dir
+
+
+class CancelContext:
+    """Fake gRPC context whose `is_active()` flips to False after N polls,
+    standing in for a client that disconnects mid-training."""
+
+    def __init__(self, active_polls: int):
+        self._remaining = active_polls
+        self._callbacks: list = []
+
+    def is_active(self) -> bool:
+        if self._remaining <= 0:
+            return False
+        self._remaining -= 1
+        return True
+
+    def add_callback(self, callback) -> None:
+        self._callbacks.append(callback)
+
+
+def _fake_trainer_reporting(epochs: int, best_src: Path):
+    """A `train_fn` that reports `epochs` epochs then returns `best_src`,
+    without touching ultralytics."""
+
+    def train_fn(spec, *, on_epoch, is_cancelled):
+        for i in range(1, epochs + 1):
+            if is_cancelled():
+                raise trainer.TrainingCancelled("cancelled")
+            on_epoch(
+                trainer.EpochProgress(
+                    epoch=i, total_epochs=epochs, loss=1.0 / i, map50=0.1 * i
+                )
+            )
+        return best_src
+
+    return train_fn
+
+
+def test_start_training_streams_epochs_then_succeeds_and_publishes_model(tmp_path: Path):
+    datasets_root = tmp_path / "datasets"
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    _write_dataset(datasets_root, "ds-1")
+
+    # A stand-in produced `best.pt` the fake trainer "returns".
+    best_src = tmp_path / "best.pt"
+    best_src.write_bytes(b"fake-weights")
+
+    registry = _registry(default_id="yolo26n.pt")
+    servicer = TrainingServicer(
+        registry=registry,
+        model_dir=model_dir,
+        dataset_dir=datasets_root,
+        train_fn=_fake_trainer_reporting(epochs=3, best_src=best_src),
+    )
+
+    updates = list(
+        servicer.StartTraining(
+            cv_pb2.TrainingJobSpec(base_model="yolo26n.pt", dataset_id="ds-1", epochs=3),
+            FakeContext(),
+        )
+    )
+
+    # 3 RUNNING (one per epoch) + 1 terminal SUCCEEDED.
+    running = [u for u in updates if u.state == cv_pb2.JobState.RUNNING]
+    terminal = updates[-1]
+    assert len(running) == 3
+    assert [u.epoch for u in running] == [1, 2, 3]
+    assert all(u.total_epochs == 3 for u in running)
+    assert terminal.state == cv_pb2.JobState.SUCCEEDED
+    # one job_id rides every message of the call.
+    assert len({u.job_id for u in updates}) == 1
+    assert updates[0].job_id
+
+    # produced artifact landed in the model dir under the documented scheme.
+    model_id = "ds-1-3e.pt"
+    assert (model_dir / model_id).is_file()
+    assert (model_dir / model_id).read_bytes() == b"fake-weights"
+    assert model_id in terminal.message
+
+    # ...and shows in ListModels (registered live, no restart), NOT promoted.
+    listed = {m.id: m for m in servicer.ListModels(empty_pb2.Empty(), FakeContext()).models}
+    assert model_id in listed
+    assert listed[model_id].stage == "available"
+    assert registry.default_id == "yolo26n.pt"  # not auto-promoted
+
+
+def test_start_training_missing_dataset_yields_failed_not_abort(tmp_path: Path):
+    servicer = TrainingServicer(
+        registry=_registry(),
+        model_dir=tmp_path,
+        dataset_dir=tmp_path / "datasets",  # nothing under here
+        train_fn=_fake_trainer_reporting(epochs=1, best_src=tmp_path / "nope.pt"),
+    )
     context = FakeContext()
 
-    with pytest.raises(_AbortError):
-        servicer.StartTraining(cv_pb2.TrainingJobSpec(base_model="yolo26n.pt", epochs=10), context)
+    updates = list(
+        servicer.StartTraining(
+            cv_pb2.TrainingJobSpec(base_model="yolo26n.pt", dataset_id="ghost", epochs=1),
+            context,
+        )
+    )
 
-    assert context.code == grpc.StatusCode.UNIMPLEMENTED
-    # message points at the offline train -> rsync -> promote flow, not "Phase 3".
-    assert "offline" in context.details.lower()
-    assert "promotemodel" in context.details.lower()
-    assert "phase 3" not in context.details.lower()
+    # exactly one terminal FAILED message, no gRPC abort.
+    assert context.code is None  # never aborted
+    assert len(updates) == 1
+    assert updates[0].state == cv_pb2.JobState.FAILED
+    assert "ghost" in updates[0].message
+    assert "copy it in" in updates[0].message.lower()
+
+
+def test_start_training_exception_yields_failed(tmp_path: Path):
+    datasets_root = tmp_path / "datasets"
+    _write_dataset(datasets_root, "ds-x")
+
+    def boom(spec, *, on_epoch, is_cancelled):
+        on_epoch(trainer.EpochProgress(epoch=1, total_epochs=2, loss=0.5, map50=0.2))
+        raise RuntimeError("cuda blew up")
+
+    servicer = TrainingServicer(
+        registry=_registry(), model_dir=tmp_path, dataset_dir=datasets_root, train_fn=boom
+    )
+
+    updates = list(
+        servicer.StartTraining(
+            cv_pb2.TrainingJobSpec(base_model="yolo26n.pt", dataset_id="ds-x", epochs=2),
+            FakeContext(),
+        )
+    )
+
+    assert updates[0].state == cv_pb2.JobState.RUNNING
+    assert updates[-1].state == cv_pb2.JobState.FAILED
+    assert "cuda blew up" in updates[-1].message
+
+
+def test_start_training_client_cancel_stops_training(tmp_path: Path):
+    datasets_root = tmp_path / "datasets"
+    _write_dataset(datasets_root, "ds-c")
+
+    started = threading.Event()
+    observed_cancel = threading.Event()
+
+    def blocking_trainer(spec, *, on_epoch, is_cancelled):
+        started.set()
+        # Emulate a long train that keeps checking for cancellation.
+        for _ in range(1000):
+            if is_cancelled():
+                observed_cancel.set()
+                raise trainer.TrainingCancelled("cancelled")
+            threading.Event().wait(0.01)
+        return tmp_path / "best.pt"
+
+    servicer = TrainingServicer(
+        registry=_registry(),
+        model_dir=tmp_path,
+        dataset_dir=datasets_root,
+        train_fn=blocking_trainer,
+    )
+    # is_active() returns True a couple of polls, then False (client gone).
+    context = CancelContext(active_polls=2)
+
+    updates = list(
+        servicer.StartTraining(
+            cv_pb2.TrainingJobSpec(base_model="yolo26n.pt", dataset_id="ds-c", epochs=100),
+            context,
+        )
+    )
+
+    # The generator returned (client gone) and the worker observed cancellation
+    # and stopped rather than running all 100 "epochs".
+    assert started.is_set()
+    assert observed_cancel.wait(timeout=5)
+    # No SUCCEEDED emitted (it was cancelled before finishing).
+    assert all(u.state != cv_pb2.JobState.SUCCEEDED for u in updates)
+
+
+# --- dataset resolution (cv_service.trainer) -------------------------------
+
+
+def test_resolve_dataset_dir_accepts_valid_layout(tmp_path: Path):
+    _write_dataset(tmp_path, "good")
+    resolved = trainer.resolve_dataset_dir(tmp_path, "good")
+    assert resolved == tmp_path / "good"
+
+
+def test_resolve_dataset_dir_rejects_missing(tmp_path: Path):
+    with pytest.raises(trainer.DatasetNotFoundError):
+        trainer.resolve_dataset_dir(tmp_path, "absent")
+
+
+def test_resolve_dataset_dir_rejects_malformed(tmp_path: Path):
+    # dir exists but has no data.yaml/images/labels.
+    (tmp_path / "half").mkdir()
+    with pytest.raises(trainer.DatasetNotFoundError):
+        trainer.resolve_dataset_dir(tmp_path, "half")
+
+
+def test_output_model_id_scheme():
+    assert trainer.output_model_id("ds-1", 3) == "ds-1-3e.pt"
+    # path separators can never escape the model dir.
+    assert "/" not in trainer.output_model_id("a/b", 5)
 
 
 # --- marker persistence (cv_service.training) ------------------------------

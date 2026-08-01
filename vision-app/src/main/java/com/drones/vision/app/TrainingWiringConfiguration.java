@@ -1,14 +1,17 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
+import com.drones.vision.adapter.cvgrpc.GrpcTrainingPort;
 import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.DefaultDatasetService;
 import com.drones.vision.application.DefaultLabelingService;
 import com.drones.vision.application.DefaultModelRegistryService;
+import com.drones.vision.application.DefaultTrainingJobService;
 import com.drones.vision.application.LabelingService;
 import com.drones.vision.application.ModelRegistryService;
 import com.drones.vision.application.StreamService;
+import com.drones.vision.application.TrainingJobService;
 import com.drones.vision.application.TrainingStores;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
@@ -16,6 +19,7 @@ import com.drones.vision.domain.port.out.DatasetExportPort;
 import com.drones.vision.domain.port.out.DatasetRepositoryPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;
 import com.drones.vision.domain.port.out.SampleImageStorePort;
+import com.drones.vision.domain.port.out.TrainingPort;
 import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 import io.grpc.ManagedChannel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -43,6 +47,15 @@ import java.nio.file.Path;
  * ModelRegistryPort}'s history: dormant since docs/CV-CONTROL-PLAN.md §D noted "not the dormant
  * {@code ModelRegistryPort}" for the detection-model roster ({@code CvModelsController}'s static
  * config-backed picker) — this task is the port's first real wiring.
+ *
+ * <p><strong>Training-job flow (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2, last backend wave)</strong>:
+ * {@link #trainingPort}/{@link #trainingJobService} behind {@code TrainingJobController}
+ * (vision-api, component-scanned) — {@code POST /api/datasets/{id}/train} and {@code GET
+ * /api/training/jobs}[/{jobId}]. {@link #trainingPort} shares {@link #modelRegistryPort}'s exact
+ * same {@link ManagedChannel} bean (see that bean's own javadoc, "Channel reuse", for why); {@link
+ * #trainingJobService}'s blocking {@code TrainingPort#startTraining} call runs on {@link
+ * DefaultTrainingJobService}'s own internal executor, never a request thread, so nothing extra is
+ * configured here for that.
  *
  * <p>Split into its own {@code @Configuration} class rather than added to {@link
  * WiringConfiguration} — same "split out by concern" precedent as {@link
@@ -143,5 +156,37 @@ public class TrainingWiringConfiguration {
     public ModelRegistryService modelRegistryService(ModelRegistryPort modelRegistryPort,
                                                        AuditTrailPort auditTrailPort) {
         return new DefaultModelRegistryService(modelRegistryPort, auditTrailPort);
+    }
+
+    /**
+     * The training-run gRPC client (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 — the last backend
+     * wave) — {@code Training/StartTraining} over {@link WiringConfiguration#cvGrpcChannel}, the
+     * <em>same</em> shared channel {@link #modelRegistryPort} and {@code GrpcDetectionPort}
+     * already use (see {@link GrpcModelRegistryPort}'s own javadoc, "Channel reuse"). Taking the
+     * channel as a plain, unconditional parameter (not an {@link
+     * org.springframework.beans.factory.ObjectProvider}) is safe for the same reason {@link
+     * #modelRegistryPort} does: this bean's own {@code @ConditionalOnProperty} on {@code
+     * vision.training.enabled} already guarantees {@code cvGrpcChannel}'s {@code
+     * @ConditionalOnExpression} matches too. Behind {@code TrainingJobController} (vision-api,
+     * component-scanned) via {@link #trainingJobService} below.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+    public TrainingPort trainingPort(ManagedChannel cvGrpcChannel) {
+        return new GrpcTrainingPort(cvGrpcChannel);
+    }
+
+    /**
+     * Starts fine-tune jobs and holds their pollable state (docs/CV-TRAINING-PLAN.md §7/§8, Phase
+     * 2) behind {@code TrainingJobController} (vision-api, component-scanned) — a one-line
+     * assembly, mirroring {@link #modelRegistryService}'s shape. {@link
+     * DefaultTrainingJobService}'s own production constructor submits each run to its own internal
+     * cached daemon-thread executor, so {@link TrainingPort#startTraining}'s blocking, potentially
+     * many-epoch call never holds a request thread — nothing extra to wire here for that.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+    public TrainingJobService trainingJobService(TrainingPort trainingPort, AuditTrailPort auditTrailPort) {
+        return new DefaultTrainingJobService(trainingPort, auditTrailPort);
     }
 }

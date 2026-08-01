@@ -125,6 +125,86 @@
           </div>
         }
       </div>
+
+      @if (facade.canManage()) {
+        <div class="card train-card">
+          <header>
+            <h2>Train a model</h2>
+          </header>
+          <p class="muted">
+            Fine-tunes a YOLO model against this dataset's labeled samples on a separate training host.
+            You'll watch its progress once it starts.
+          </p>
+          @if (!facade.canStartTraining()) {
+            <p class="disabled-reason">Label at least one sample before training.</p>
+          }
+          <div class="form-grid">
+            <label>
+              <span class="label">Base model</span>
+              <input
+                type="text"
+                list="base-model-options"
+                [ngModel]="facade.baseModel()"
+                (ngModelChange)="facade.baseModel.set($event)"
+                placeholder="e.g. yolo26n.pt"
+              />
+              <datalist id="base-model-options">
+                @for (id of facade.baseModelOptions(); track id) {
+                  <option [value]="id"></option>
+                }
+              </datalist>
+            </label>
+            <label>
+              <span class="label">Epochs</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                [ngModel]="facade.epochs()"
+                (ngModelChange)="facade.epochs.set($event)"
+              />
+            </label>
+          </div>
+          <div class="row train-row">
+            <button
+              type="button"
+              class="btn"
+              [disabled]="!facade.canStartTraining() || !facade.canSubmitTraining()"
+              (click)="facade.startTraining()"
+            >
+              <vision-icon name="chip" [size]="14" />
+              {{ facade.starting() ? 'Starting…' : 'Start training' }}
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (facade.recentJobs().length > 0) {
+        <div class="card jobs-card">
+          <header>
+            <h2>Training jobs</h2>
+          </header>
+          <ul class="job-list">
+            @for (j of facade.recentJobs(); track j.jobId) {
+              <li>
+                <a class="job-row" [routerLink]="['/manage/training/jobs', j.jobId]">
+                  <span
+                    class="chip"
+                    [class.accent]="j.state === 'RUNNING'"
+                    [class.ok]="j.state === 'SUCCEEDED'"
+                    [class.danger]="j.state === 'FAILED'"
+                  >
+                    <span class="dot" [class.live]="j.state === 'RUNNING'" [class.ok]="j.state === 'SUCCEEDED'" [class.danger]="j.state === 'FAILED'"></span>
+                    {{ j.state === 'RUNNING' ? 'Training…' : j.state === 'SUCCEEDED' ? 'Trained' : 'Failed' }}
+                  </span>
+                  <span class="mono faint">{{ j.baseModel }}</span>
+                  <span class="faint">{{ formatWhen(j.startedAt) }}</span>
+                </a>
+              </li>
+            }
+          </ul>
+        </div>
+      }
     }
   }
 </div>

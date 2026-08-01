@@ -1455,3 +1455,49 @@ export interface RegisteredModelsResponse {
 export interface PromoteModelRequest {
   readonly version: string;
 }
+
+// --- CV training-job flow (docs/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) -------------
+// Starting a fine-tune run against a dataset and polling its progress — the run in between
+// `DatasetController`/`LabelingController` (build the dataset) and `ModelRegistryController`
+// (promote the result). Gated by the same `vision.training.enabled` flag as every other CV-training
+// endpoint above; `features/training-jobs/**` is the one consumer, reached from
+// `features/labeling/dataset-detail.ts`'s own "Train a model" card.
+
+/** Mirrors domain `JobState`. `RUNNING` is the only state a poller keeps chasing —
+ *  `SUCCEEDED`/`FAILED` are settled. A training *failure* is reported here, never as an HTTP error
+ *  (`TrainingJobController`'s own javadoc, vision-api/MODULE.md). */
+export type TrainingJobState = 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+
+/** Mirrors `dto.StartTrainingJobRequest` — the body of `POST /api/datasets/{id}/train`. Both fields
+ *  are re-validated server-side (`TrainingJobSpec`'s own compact constructor: non-blank `baseModel`,
+ *  positive `epochs`), surfaced as a 400. */
+export interface StartTrainingJobRequest {
+  readonly baseModel: string;
+  readonly epochs: number;
+}
+
+/**
+ * Mirrors `dto.TrainingJobResponse` — the flattened, pollable state of one CV fine-tune job. No
+ * optional fields (no `@JsonInclude(NON_NULL)` server-side, the same "no nullable fields" posture
+ * `RegisteredModelResponse` takes): `epoch`/`totalEpochs`/`loss`/`map50` are `0`/`0.0` and `message`
+ * is `""` before the first progress message arrives; `message` becomes the produced model's registry
+ * id on `SUCCEEDED`, the failure reason on `FAILED`.
+ */
+export interface TrainingJobResponse {
+  readonly jobId: string;
+  readonly baseModel: string;
+  readonly datasetId: string;
+  readonly epochs: number;
+  readonly epoch: number;
+  readonly totalEpochs: number;
+  readonly loss: number;
+  readonly map50: number;
+  readonly state: TrainingJobState;
+  readonly message: string;
+  readonly startedAt: string;
+}
+
+/** Mirrors `dto.TrainingJobsResponse` — `GET /api/training/jobs`'s wrapper shape, the same `{"jobs":[...]}` precedent `DatasetsResponse`/`RegisteredModelsResponse` set. Every tracked job, newest-first by `startedAt`. */
+export interface TrainingJobsResponse {
+  readonly jobs: readonly TrainingJobResponse[];
+}

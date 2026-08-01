@@ -91,6 +91,9 @@ REST driving adapter: asset-first + device/stream/discovery endpoints over the d
 | LabelingController | GET | `/api/datasets/{id}/export/{exportId}` | 200 `application/zip` bytes | 404 unknown dataset or export id, 403 dataset outside scope (scope-checked via `DatasetService#get`, then the zip resolved directly through `DatasetExportPort` — `LabelingService` has no by-exportId read of its own) |
 | ModelRegistryController | GET | `/api/cv/registry/models` | 200 `RegisteredModelsResponse` (`{models:[{id,version,active}]}}`) | — (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9; gated by `vision.training.enabled`, default `false` — absent entirely when off; unscoped/unaudited read, any authenticated caller may see it, mirroring `CvModelsController`'s own "any caller may read the roster" precedent — **not** the same roster as `GET /api/cv/models`, which is a static, config-backed picker; this one is the dynamic registry sourced live over gRPC, see the controller's own javadoc) |
 | ModelRegistryController | POST | `/api/cv/registry/models/{id}/promote` | 200 `RegisteredModelResponse` (`{id,version,active:true}`) | 403 caller may not manage the organization, 409 cv-service refuses the promotion (unknown model id — rsync the artifact first — or no registry reachable at all), 400 blank `version` (`ModelRef`'s own compact-constructor check) (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9; body `{version}` required — the path `{id}` alone doesn't resolve a `ModelRef`; response is constructed directly from the now-promoted reference rather than re-querying the registry, since `ModelRegistryService#promote` returns `void`) |
+| TrainingJobController | POST | `/api/datasets/{id}/train` | 202 `TrainingJobResponse` body: `{baseModel, epochs}` | 403 caller may not manage the organization, 400 blank `baseModel`/non-positive `epochs` (`TrainingJobSpec`'s own compact-constructor check) (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave; gated by `vision.training.enabled`, default `false`; `{id}` (the dataset) is threaded verbatim into `TrainingJobSpec#datasetId()` as a plain string, never parsed/re-validated as a `DatasetId` — no existence check against the dataset repository either, matching the frozen contract; the response is the freshly started job's initial state, read back via `TrainingJobService#job` immediately after `start` returns) |
+| TrainingJobController | GET | `/api/training/jobs/{jobId}` | 200 `TrainingJobResponse` | 404 unknown `jobId` (never started, or evicted under `TrainingJobService`'s finished-job retention policy) (docs/CV-TRAINING-PLAN.md §7/§8; a training **failure** is reported here as `state:"FAILED"` — never a thrown exception) |
+| TrainingJobController | GET | `/api/training/jobs` | 200 `TrainingJobsResponse` (`{jobs:[...]}}`) | — (docs/CV-TRAINING-PLAN.md §7/§8; every tracked job, newest-first by `startedAt`, unscoped/unaudited read — any authenticated caller may poll, mirroring `ModelRegistryController#models`'s own "any caller may read" precedent) |
 
 `ApiExceptionHandler` (`@RestControllerAdvice`) mapping table (body `{"error","message"}`):
 
@@ -235,6 +238,19 @@ Both `@RestController @ConditionalOnProperty(prefix="vision.training", name="ena
 **Not the same roster as `CvModelsController`**: that controller's `GET /api/cv/models` is a static, config-backed picker for the Fly cockpit's model dropdown (`cvModelRoster`, a plain `vision-app` bean, deliberately not backed by `ModelRegistryPort` — see that controller's own javadoc). `ModelRegistryController` is the dynamic registry — every model reference cv-service's own `Training/ListModels` RPC actually reports, live — and the one place a model gets promoted.
 
 **Error mapping**: `AccessDeniedException` → 403 (caller may not manage the organization — `promote` only, `models()` never throws); `IllegalStateException` → 409 (cv-service refuses the promotion — an unknown model id, "rsync the artifact first," or no registry reachable at all); `IllegalArgumentException` → 400 (blank `id`/`version`). All three via the pre-existing, unmodified `ApiExceptionHandler`.
+
+### `TrainingJobController` — CV training-job flow (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave)
+
+`@RestController @ConditionalOnProperty(prefix="vision.training", name="enabled", havingValue="true")` — same gating property as every other training-loop controller, no new flag. Sits behind `TrainingJobService` (`vision-application`, `DefaultTrainingJobService`), which itself sits behind `TrainingPort`, wired to `GrpcTrainingPort` (adapter-cv-grpc) sharing the same gRPC `ManagedChannel` `GrpcDetectionPort`/`GrpcModelRegistryPort` already use — see vision-app/MODULE.md's "CV training loop wiring" for the wiring itself; nothing about that sharing is visible from this module. The last piece of the training loop: `DatasetController`/`LabelingController` build the dataset, this controller runs the fine-tune, `ModelRegistryController` promotes the result.
+
+- **`start()`** (`POST /api/datasets/{id}/train`) builds a `TrainingJobSpec` directly from the path `{id}` (threaded through **unparsed**, as a plain string — `TrainingJobSpec#datasetId()`'s own javadoc explains why it stays a string all the way to the gRPC boundary; unlike every other `{id}` path variable in this module, this one is **not** run through `DatasetId.of(...)`, so a malformed dataset id is not itself a 400 here) plus the request body's `baseModel`/`epochs`, threads `currentUser.userId()`/`currentUser.scope()` into `trainingJobService.start(...)`, then immediately reads the fresh job back via `trainingJobService.job(jobId)` — guaranteed present per that method's own contract, so a missing read here would mean an internal invariant broke, not a normal 404 (an `IllegalStateException` guards it, never expected to trigger in practice).
+- **`job()`** (`GET /api/training/jobs/{jobId}`) / **`jobs()`** (`GET /api/training/jobs`) are both unscoped, unaudited reads — like `ModelRegistryController#models`, any authenticated caller may poll job progress (`TrainingJobService`'s own javadoc, "Scope"). Neither takes `CurrentUser` for that reason.
+
+**Wire shapes** (`com.drones.vision.api.dto`): `StartTrainingJobRequest(baseModel, epochs)` — no validation of its own, relying entirely on `TrainingJobSpec`'s compact constructor (a missing/absent `epochs` field deserializes to the primitive default `0`, which that same compact constructor already rejects as non-positive). `TrainingJobResponse(jobId, baseModel, datasetId, epochs, epoch, totalEpochs, loss, map50, state, message, startedAt)` — the flattened `TrainingJobView` (no `@JsonInclude(NON_NULL)`, every field always present, `state` is `JobState#name()` verbatim), with a `from(TrainingJobView)` mapper. `TrainingJobsResponse(jobs:[...])` — a wrapper object, same `{"models":[...]}}`-shaped precedent `RegisteredModelsResponse`/`CvModelsResponse` already set.
+
+**A training run that fails mid-flight is never an HTTP error.** `DefaultTrainingJobService` catches every transport/runtime failure internally and records it as a terminal `JobState.FAILED` job — so `job()`/`jobs()` report it as `state:"FAILED"` with `message` carrying the failure reason, exactly like a normal `SUCCEEDED` completion. Nothing in this controller special-cases it.
+
+**Error mapping**: `AccessDeniedException` → 403 (`start` only — caller may not manage the organization, mirroring `ModelRegistryController#promote`'s manager/admin gate exactly); `IllegalArgumentException` → 400 (`start` only — blank `baseModel` or non-positive `epochs`, `TrainingJobSpec`'s own compact-constructor checks); `NoSuchElementException` → 404 (`job` only — unknown `jobId`). All three via the pre-existing, unmodified `ApiExceptionHandler`.
 
 ### Auth seams + DTOs (docs/U-AUTH-PLAN.md wave 3)
 
@@ -639,3 +655,38 @@ the just-promoted `ModelRef` (`active: true` hardcoded) rather than re-querying 
 `ModelRegistryService#promote` returns `void` — cheaper than a round trip, always consistent with
 what just happened, and the one other model whose `active` flag silently flips to `false` in the
 same instant is a non-issue for a client that already knows only one model is ever active.
+
+## docs/CV-TRAINING-PLAN.md Phase 2 done (CV training-job flow, REST surface — last backend wave)
+
+`TrainingJobController` plus its `com.drones.vision.api.dto` types (see its own subsection above)
+exposing the already-green `TrainingJobService`/`DefaultTrainingJobService` (`vision-application`)
+and `GrpcTrainingPort` (`adapter-cv-grpc`) layers over HTTP — gated by the same
+`vision.training.enabled` (default `false`) every other training-loop controller uses. Like T9, the
+load-bearing half of this task was on the `vision-app` side (adding `GrpcTrainingPort` as a third
+consumer of the shared gRPC channel `GrpcDetectionPort`/`GrpcModelRegistryPort` already share) — see
+vision-app/MODULE.md's own "docs/CV-TRAINING-PLAN.md Phase 2 done" entry for that decision record;
+nothing about it is visible from this module. This closes the training loop's backend: capture
+(T4) → correct (T4) → export (T4) → **train (this wave)** → promote (T9).
+
+New: `TrainingJobController`, `dto/{StartTrainingJobRequest, TrainingJobResponse,
+TrainingJobsResponse}`. **No change to `ApiExceptionHandler`, `CurrentUser`, `PrincipalResolver`, or
+any pre-existing controller/DTO** — the frozen exception→status mapping already covered every case
+this task needed (`AccessDeniedException`→403, `NoSuchElementException`→404,
+`IllegalArgumentException`→400).
+
+New tests: `TrainingJobControllerTest` (9) — MockMvc standalone setup over a mocked
+`TrainingJobService`, `ApiExceptionHandler` attached, mirroring `ModelRegistryControllerTest`'s
+style exactly (constructor injection, per-endpoint 2xx/4xx cases including a `FAILED`-state poll
+asserting 200 not an error, `ArgumentCaptor` verification of the `TrainingJobSpec` threaded down).
+
+`./mvnw -B -pl vision-domain,vision-application,adapters/adapter-cv-grpc install -DskipTests` then
+`./mvnw -B -pl vision-api test -DskipWeb`: **420/420 green** (was 411, +9 — see above). No
+pre-existing test was modified or broken.
+
+**Deviations from the brief / judgment calls**: none against the frozen contract text. One judgment
+call, flagged in the subsection above: `POST /api/datasets/{id}/train`'s path `{id}` is threaded
+into `TrainingJobSpec` as a raw, unparsed string — not run through `DatasetId.of(...)` the way every
+other `{id}` path variable in this module is — matching `TrainingJobSpec#datasetId()`'s own
+plain-string javadoc and the frozen contract's silence on a dataset-existence check for this
+endpoint; a malformed dataset id therefore surfaces however the training host eventually reports it
+(not a 400 from this controller).

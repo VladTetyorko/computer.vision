@@ -1,0 +1,87 @@
+<div class="page">
+  @if (facade.notFound()) {
+    <a routerLink="/manage/training" class="btn secondary small back-link">Back to datasets</a>
+    <vision-empty
+      icon="alert"
+      title="Training job not found"
+      message="It may have finished long enough ago to be cleared from the server's memory, or the link is wrong."
+    />
+  } @else if (facade.loading() && !facade.job()) {
+    <p class="muted">Loading…</p>
+  } @else if (facade.job(); as job) {
+    <vision-section-header
+      eyebrow="Training job"
+      [title]="'Fine-tuning from ' + job.baseModel"
+      [subtitle]="'Started ' + formatWhen(job.startedAt)"
+    >
+      <div actions>
+        <a [routerLink]="['/manage/training', job.datasetId]" class="btn secondary small">Back to dataset</a>
+        <a routerLink="/manage/training/models" class="btn secondary small">Models</a>
+      </div>
+    </vision-section-header>
+
+    <div class="card">
+      <div class="state-row">
+        @switch (job.state) {
+          @case ('RUNNING') {
+            <span class="chip accent"><span class="dot live"></span>{{ jobStateLabel(job.state) }}</span>
+          }
+          @case ('SUCCEEDED') {
+            <span class="chip ok"><span class="dot ok"></span>{{ jobStateLabel(job.state) }}</span>
+          }
+          @case ('FAILED') {
+            <span class="chip danger"><span class="dot danger"></span>{{ jobStateLabel(job.state) }}</span>
+          }
+        }
+        <span class="muted">{{ job.epochs }} epoch{{ job.epochs === 1 ? '' : 's' }} requested</span>
+      </div>
+
+      <div class="progress-row">
+        <div class="progress-track">
+          <div
+            class="progress-fill"
+            [class.succeeded]="job.state === 'SUCCEEDED'"
+            [class.failed]="job.state === 'FAILED'"
+            [style.width.%]="facade.progressPercent()"
+          ></div>
+        </div>
+        <span class="progress-label mono">{{ job.epoch }} / {{ job.totalEpochs || job.epochs }}</span>
+      </div>
+
+      <div class="job-osd">
+        <div class="item">
+          <span class="label">Loss</span>
+          <span class="value mono">{{ hasReportedProgress(job) ? formatMetric(job.loss) : '—' }}</span>
+        </div>
+        <div class="item">
+          <span class="label">mAP@50</span>
+          <span class="value mono">{{ hasReportedProgress(job) ? formatMetric(job.map50) : '—' }}</span>
+        </div>
+        <div class="item">
+          <span class="label">Dataset</span>
+          <a class="value mono" [routerLink]="['/manage/training', job.datasetId]">{{ job.datasetId.slice(0, 8) }}</a>
+        </div>
+      </div>
+    </div>
+
+    @if (producedModelId(job); as modelId) {
+      <vision-notice variant="ok" icon="target">
+        Your model is trained — <span class="mono">"{{ modelId }}"</span> is ready.
+        <a routerLink="/manage/training/models">Promote it live</a> to make it the default for new detections.
+      </vision-notice>
+    } @else if (job.state === 'SUCCEEDED') {
+      <vision-notice variant="ok" icon="target">
+        Your model is trained —
+        <a routerLink="/manage/training/models">promote it live</a> to make it the default for new detections.
+      </vision-notice>
+    }
+
+    @if (failureMessage(job); as message) {
+      <vision-notice variant="danger" icon="alert">{{ message }}</vision-notice>
+    }
+
+    @if (job.state === 'RUNNING') {
+      <p class="faint poll-hint">Updates automatically every few seconds — no need to refresh.</p>
+    }
+  }
+</div>

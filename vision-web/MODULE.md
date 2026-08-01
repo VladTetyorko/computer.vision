@@ -4593,3 +4593,193 @@ constraints): `core/api/models.ts` (three new DTOs), `core/api/vision-api.ts` (t
 `features/command/**`, every shared marks file, every other file under `features/labeling/**`,
 `features/hubs/nav-entries.ts` (no new Manage tile — see Placement above), vision-api/vision-domain/
 vision-app/cv-service (backend; T6-T9's own concurrent work in this same tree, left untouched).
+
+## CV-TRAINING-PLAN Phase 2 — the training-job flow: start-train + live progress (last web wave)
+
+The last piece of the CV-TRAINING loop: `/manage/training` (Phase 1 T5) builds the dataset,
+`/manage/training/models` (Phase 2 T10, above) promotes the result — this wave is the run in
+between. Built against the already-shipped, frozen `TrainingJobController` (vision-api/MODULE.md's
+own subsection): `POST /api/datasets/{id}/train` → `202 TrainingJobResponse`, `GET
+/api/training/jobs/{jobId}` → `200 | 404`, `GET /api/training/jobs` → `{jobs:[...]}`. No backend,
+`features/fly/**`, `features/command/**`, or marks files touched.
+
+### Placement — "Train a model" lives on `DatasetDetailPage` itself; progress gets its own route
+
+**Start-train is one more card on `/manage/training/:datasetId`** (`features/labeling/dataset-detail.*`),
+not a separate page — starting a fine-tune is one more action against *this* dataset, the same
+footing as its existing Capture/Export cards. This also keeps the whole capture → correct → export →
+train loop in one feature (`features/labeling/**`), matching that page's own precedent for why
+capture lives there rather than in Fly/Live/Replay.
+
+**Live progress is its own routed page, `/manage/training/jobs/:jobId`** (new `features/training-jobs/**`,
+mirroring `features/models/**`'s own "one focused feature folder per training-loop step" shape) rather
+than inline on the dataset page — a job outlives, and isn't re-scoped by, the dataset it started
+from (`TrainingJobController`'s own javadoc makes exactly this point about the backend's own route
+split: `job`/`jobs` live under `/api/training/jobs`, never nested under a dataset). Starting a run
+(`DatasetDetailFacade.startTraining`) navigates straight there via `Router.navigate` — the operator
+lands on the run they just started, not a static confirmation — the same "save then navigate"
+`SampleEditorFacade.save` already established.
+
+**A "Training jobs" list on `DatasetDetailPage` too** (the task brief's own "a running-jobs list is a
+nice touch if low-cost") — a point-in-time snapshot of this dataset's own jobs from `GET
+/api/training/jobs` (unscoped/global; filtered client-side by `datasetId`), each row linking into its
+own live progress page. Deliberately **not polled itself** — the dedicated job page already does
+that — so this list costs exactly one extra fetch on `DatasetDetailPage.load()`, refreshed whenever
+the operator returns to the dataset (including navigating "Back to dataset" from the job page,
+which fully re-mounts `DatasetDetailPage`). No new `/manage/training/jobs` (bare, no id) list route
+was added — the per-dataset list already covers "find a run I started earlier" without a second
+top-level door, and a bare list route would need the same route-ordering care `MODELS_ROUTES`
+documents for `manage/training/models` (see the route file's own doc comment for why
+`manage/training/jobs/:jobId` specifically needs no such care: a 4-segment path never collides with
+`LABELING_ROUTES`'s 3- or 5-segment entries, regardless of array order).
+
+### Types + API client (`core/api/models.ts`, `core/api/vision-api.ts`)
+
+New DTOs mirroring `com.drones.vision.api.dto` 1:1: `TrainingJobState = 'RUNNING'|'SUCCEEDED'|'FAILED'`;
+`StartTrainingJobRequest {baseModel, epochs}`; `TrainingJobResponse {jobId, baseModel, datasetId,
+epochs, epoch, totalEpochs, loss, map50, state, message, startedAt}` (no optional fields — every
+`TrainingJobView` field is always present, `0`/`0.0`/`""` before the first progress message arrives,
+per that record's own javadoc); `TrainingJobsResponse {jobs}` (the same `{"jobs":[...]}` wrapper
+precedent `DatasetsResponse`/`RegisteredModelsResponse` set). `VisionApi` gained three methods:
+`startTrainingJob(datasetId, request)` (`POST /api/datasets/{id}/train`), `trainingJob(jobId)` (`GET
+/api/training/jobs/{jobId}`), `trainingJobs()` (`GET /api/training/jobs`) — all gated server-side by
+`vision.training.enabled`, same as every other CV-training method already in this class. **A training
+failure is reported here as `state: 'FAILED'`, never a rejected promise** — only a genuine
+transport/server failure rejects `trainingJob`/`trainingJobs`, mirrored exactly in
+`TrainingJobFacade`'s own polling (see below).
+
+### `features/training-jobs/**` — one routed page, its facade, and pure logic
+
+`TrainingJobPage` (`/manage/training/jobs/:jobId`) injects only `TrainingJobFacade` (the
+architecture guard's own invariant). Renders: a state chip (`chip accent`+`dot live` while
+`RUNNING`, the pulsing dot — an in-progress metric, `vision-stat`'s own `live` convention; `chip
+ok`+`dot ok` static once `SUCCEEDED`, mirroring `ModelsPage`'s own "a settled state, not currently
+streaming" reasoning for its Live badge; `chip danger`+`dot danger` on `FAILED`); a **progress bar**
+(`epoch/totalEpochs`, the `dataviz` skill's own thin/rounded/single-hue bar-list mark spec —
+`features/reports/reports.css`'s own `.cat-bar-track`/`.cat-bar-fill` precedent, sized up as this
+page's one hero measurement, tone-shifted to `--color-success`/`--color-danger` once settled); and
+`loss`/`map50` in the **mono/telemetry register** (`features/live/telemetry-osd.ts`'s own
+`.label`/`.value.mono` readout pattern, kept component-local here — this app's "repeated rather than
+shared" convention for a two-place pattern), rendered as `—` (never a misleading literal `0.000`)
+until `hasReportedProgress` confirms at least one epoch has actually arrived.
+
+**`SUCCEEDED`** renders a `vision-notice variant="ok"` naming the produced model's registry id when
+the backend reports one (`TrainingJobResponse#message`'s own doc comment: "the produced model id on
+SUCCEEDED") with a link to `/manage/training/models` — "promote it live" is the very next thing an
+operator does once a run finishes. **`FAILED`** renders the backend's own plain-language reason
+(`message`) in a `vision-notice variant="danger"` (e.g. the dataset-not-on-host case), falling back
+to one plain sentence if the backend ever reports a blank message.
+
+Pure logic in `training-job-logic.ts` (unit-tested, `training-job-logic.spec.ts`, 15 cases):
+`isTerminalJobState`, `jobProgressPercent` (clamped `0..100`, `0%` before the first message rather
+than `NaN`), `hasReportedProgress`, `jobStateLabel`, `producedModelId`, `failureMessage`,
+`formatMetric` (fixed 3 decimals). Two small additions to the existing
+`features/labeling/dataset-detail-logic.ts` (unit-tested alongside its own spec file, 4 new cases):
+`canStartTrainingDataset` (an explicitly-named alias of `canExportDataset` — same ≥1-`LABELED`-sample
+gate, kept separate so the template never reads "canExport" for an unrelated Train button) and
+`canSubmitTrainingRequest` (non-blank base model + positive integer epochs + not already submitting,
+mirroring `canSubmitDataset`'s own shape).
+
+**Polling** — `TrainingJobFacade` registers one `PollScheduler.schedule(3_000ms, …)` task for the
+page's whole lifetime (mirroring `AssetDetailFacade`'s multi-poll shape: register once in the
+constructor, `DestroyRef.onDestroy` unsubscribes). It **stops itself, not just on destroy**: the poll
+callback no-ops the moment the last known job is terminal (`isTerminalJobState`) or unknown
+(`notFound`), without tearing down the registration — so navigating to a *different* job id on the
+same page instance (via `load()`, called from the page's own route-input `effect()`, the
+`DatasetDetailPage` precedent) resumes polling for free if the new job is still running. A background
+poll failure (not a 404) stays silent — the page keeps showing the last known state rather than
+toast-spamming on every failed tick, the same convention `AssetDetailFacade`'s own stream-events poll
+already uses.
+
+### The "Train a model" card (`features/labeling/dataset-detail.*`)
+
+Base model (free-text `<input>` + a `<datalist>` populated from `GET /api/cv/registry/models`,
+best-effort/silently-degrading like `DatasetsFacade#loadCategories` — free text rather than a rigid
+`<select>` per the task brief's own "or a plain text/default input if simpler," since the registry
+may be empty and a base checkpoint like the prefilled default `yolo26n.pt` need not already be a
+registered model) defaulting to `yolo26n.pt`, and epochs (`type="number"`, default `50`) — both
+`docs/CV-TRAINING-PLAN.md`'s own frozen wire-contract example values. "Start training" is disabled
+whenever `!canStartTraining()` (no `LABELED` sample yet — a `<p class="disabled-reason">` names this,
+the same poka-yoke idiom the rest of this app uses) or `!canSubmitTraining()` (an invalid form); on
+success it toasts and navigates to the fresh job's own progress page (see Placement above).
+
+### Degrade / role-gate / dev-parity notes
+
+- **Feature-off degrade**: `vision.training.enabled=false` removes `TrainingJobController` from the
+  app entirely — `POST .../train`/`GET .../jobs`/`GET .../jobs/{id}` all 404 like any unmapped path.
+  `DatasetDetailPage` already renders its own `vision-empty` "not found" state whenever
+  `getDataset` 404s for any reason (Wave T5's own established behavior, unchanged), so the "Train a
+  model" card simply never renders when the feature is off — no new disabled-state plumbing needed.
+  `TrainingJobFacade`'s own `notFound` (a `GET /api/training/jobs/{jobId}` 404) covers the same case
+  for a direct/bookmarked link to a job page on a deployment where the feature was flipped off (or
+  the job was evicted under the backend's own finished-job retention policy) — a `vision-empty`,
+  never a blocked page. The base-model registry fetch and the "Training jobs" list are both
+  best-effort enrichments that silently leave their own UI absent/empty on any failure, training's
+  own 404 included — never blocking the page.
+- **Role-gating mirrors the backend exactly**: `TrainingJobService#start` requires
+  `VisibilityScope#canManageOrg()` (a `403` otherwise, mirroring `ModelRegistryController#promote`'s
+  own gate — starting a training run is a privileged control-plane action). `DatasetDetailFacade.canManage`
+  (`canManageOrg`, the same predicate `DatasetsFacade`/`ModelsFacade`/`org-guard.ts`/`identity-chip.ts`
+  already use) **hides the whole "Train a model" card** for a PILOT, never a visible-but-disabled
+  button that would only ever 403 — the same posture `DatasetsFacade` already takes for create/delete.
+  Polling a job's progress (`job()`/`jobs()`) is unscoped/unaudited server-side (any signed-in caller
+  may read it, `TrainingJobService`'s own javadoc), so `TrainingJobPage` carries no route guard —
+  a PILOT can watch a run a manager started, just never start one themself. The "Training jobs" list
+  on `DatasetDetailPage` is likewise visible to any signed-in user regardless of role.
+- **Dev parity**: `vision.auth.enabled=false`'s dev principal resolves to `ADMIN`/unbounded scope, so
+  `canManageOrg` is `true` and "Train a model" behaves exactly as it does for a real admin — no
+  separate code path.
+
+### Tests
+
+New: `features/training-jobs/training-job-logic.spec.ts` (15 cases — `isTerminalJobState`,
+`jobProgressPercent`'s null/pre-first-message/plain/clamped-overshoot cases, `hasReportedProgress`,
+`jobStateLabel`, `producedModelId`'s null/trimmed/blank cases, `failureMessage`'s same shape,
+`formatMetric`). `features/labeling/dataset-detail-logic.spec.ts` gained 4 cases
+(`canStartTrainingDataset`, `canSubmitTrainingRequest`'s validity/in-flight cases). No
+`training-job-facade.spec.ts`/`dataset-detail-facade.spec.ts` — this app's own established
+convention (favor pure-logic vitest over component/facade specs; neither `DatasetDetailFacade` nor
+`ModelsFacade` has one either). `core/ui/architecture.spec.ts`'s `ROUTED_PAGES` gained
+`'training-jobs/training-job'` — the guard passes: `TrainingJobPage` injects only
+`TrainingJobFacade`, holds no bare overlay `signal()`.
+
+**`npm run test:ci`: 96 spec files / 1581 tests, all green.** `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, measured via a scoped `git stash`
+of this task's own tracked edits + temporarily relocating the new, untracked `features/training-jobs/`
+directory out of the tree** (the shared tree carries other agents' own concurrent, uncommitted
+backend-only changes throughout — cv-service/vision-api/vision-app/vision-application/vision-domain/
+adapter-cv-grpc, confirmed via `git status` to touch no other `vision-web/**` path — so a stash/pop
+of exactly this task's own files gives a clean before/after with no conflation risk, the same
+precedent T10's own entry above established).
+
+Baseline (this task's edits stashed, `features/training-jobs/` moved aside): initial bundle **367.46 kB
+raw / 104.75 kB transfer** (byte-for-byte T10's own recorded "after" figure — confirms a clean
+baseline); `dataset-detail` chunk 11.19 kB / 3.59 kB; `sample-editor`/`datasets`/`models` unchanged
+from T10's own figures; no `training-job` chunk (doesn't exist yet).
+
+After (this task's edits restored): initial bundle **367.86 kB raw / 104.82 kB transfer** (+0.40 kB /
++0.07 kB — `vision-api.ts`'s three new eager methods + `app.routes.ts`'s one new import/spread;
+`models.ts`'s new interfaces are type-only, zero runtime bytes); **`dataset-detail` chunk 16.23 kB /
+4.74 kB (+5.04 kB / +1.15 kB — the new "Train a model" card + "Training jobs" list + facade
+additions)**; `sample-editor`/`datasets`/`models` chunks **byte-for-byte unchanged**, confirming
+neither was touched; **new `training-job` lazy chunk: 7.57 kB raw / 2.62 kB transfer** — this task's
+entire new page + facade + logic + template + styles, cleanly isolated.
+
+### Files touched
+
+New: `features/training-jobs/{training-jobs.routes.ts, training-job.ts, training-job.html,
+training-job.css, training-job-facade.ts, training-job-logic.ts, training-job-logic.spec.ts}`.
+Edited (minimal wiring only, per this task's own hard constraints): `core/api/models.ts` (four new
+DTOs), `core/api/vision-api.ts` (three new methods), `app.routes.ts` (one import + one spread),
+`core/ui/architecture.spec.ts` (one `ROUTED_PAGES` entry), `features/labeling/dataset-detail-logic.ts`
+(+`.spec.ts`, two new pure functions + two constants), `features/labeling/dataset-detail-facade.ts`
+(the Train form/`startTraining`/recent-jobs state), `features/labeling/dataset-detail.html`/`.css`
+(the "Train a model" card + "Training jobs" list), and this file. Untouched (verified via `git status`
+before/after): `features/fly/**`, `features/command/**`, every shared marks file, `features/models/**`,
+every other file under `features/labeling/**` (`datasets.*`, `sample-editor.*`), vision-api/
+vision-domain/vision-application/vision-app/adapter-cv-grpc/cv-service (backend; other agents' own
+concurrent work in this same tree, left untouched).

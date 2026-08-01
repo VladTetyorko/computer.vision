@@ -2,8 +2,10 @@ package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
+import com.drones.vision.adapter.cvgrpc.GrpcTrainingPort;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;
+import com.drones.vision.domain.port.out.TrainingPort;
 import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -26,13 +28,15 @@ import static org.junit.jupiter.api.Assertions.assertSame;
  * scenario that actually exercises channel <em>sharing</em> — {@link CvEnabledWiringTest} and
  * {@link TrainingEnabledWiringTest} each only enable one flag at a time.
  *
- * <p>Asserts exactly one {@link ManagedChannel} bean exists in the context and that both {@code
- * detectionPort} (a {@link GrpcDetectionPort}) and {@code modelRegistryPort} (a {@link
- * GrpcModelRegistryPort}) were constructed successfully against it — by Spring singleton-bean
- * semantics, a single {@code @Bean} method invoked exactly once (there being only one candidate
- * bean of type {@link ManagedChannel} in the whole context, verified below) is necessarily the
- * same instance handed to both consumers, so there is no separate "same identity" check to make
- * beyond counting the bean and confirming both consumers resolved.
+ * <p>Asserts exactly one {@link ManagedChannel} bean exists in the context and that {@code
+ * detectionPort} (a {@link GrpcDetectionPort}), {@code modelRegistryPort} (a {@link
+ * GrpcModelRegistryPort}), and {@code trainingPort} (a {@link GrpcTrainingPort},
+ * docs/CV-TRAINING-PLAN.md §7/§8 Phase 2's last backend wave) were all constructed successfully
+ * against it — by Spring singleton-bean semantics, a single {@code @Bean} method invoked exactly
+ * once (there being only one candidate bean of type {@link ManagedChannel} in the whole context,
+ * verified below) is necessarily the same instance handed to all three consumers, so there is no
+ * separate "same identity" check to make beyond counting the bean and confirming every consumer
+ * resolved.
  *
  * <p>The configured {@code vision.cv.endpoint} is never actually connected to (a {@code
  * ManagedChannel} only opens a real connection lazily, on first use) — same reasoning as {@link
@@ -65,6 +69,9 @@ class CvAndTrainingSharedChannelWiringTest {
     private ModelRegistryPort modelRegistryPort;
 
     @Autowired
+    private TrainingPort trainingPort;
+
+    @Autowired
     private ManagedChannel cvGrpcChannel;
 
     @Autowired
@@ -77,18 +84,20 @@ class CvAndTrainingSharedChannelWiringTest {
     }
 
     @Test
-    void bothPortsResolveToTheirGrpcImplementations() {
+    void allThreePortsResolveToTheirGrpcImplementations() {
         assertInstanceOf(GrpcDetectionPort.class, detectionPort);
         assertInstanceOf(GrpcModelRegistryPort.class, modelRegistryPort);
+        assertInstanceOf(GrpcTrainingPort.class, trainingPort);
     }
 
     /**
      * The load-bearing proof: {@link WiringConfiguration#cvGrpcChannel} resolved by direct
      * autowiring here is the exact same singleton instance {@link WiringConfiguration#detectionPort}
-     * and {@link TrainingWiringConfiguration#modelRegistryPort} each received as a constructor
-     * argument — Spring never constructs a second {@link ManagedChannel} for a plain (non-{@code
-     * @Scope("prototype")}) {@code @Bean} method, and {@link #exactlyOneSharedChannelBeanExists()}
-     * above already confirms there is only the one bean definition to begin with.
+     * and {@link TrainingWiringConfiguration#modelRegistryPort}/{@code trainingPort} each received
+     * as a constructor argument — Spring never constructs a second {@link ManagedChannel} for a
+     * plain (non-{@code @Scope("prototype")}) {@code @Bean} method, and {@link
+     * #exactlyOneSharedChannelBeanExists()} above already confirms there is only the one bean
+     * definition to begin with.
      */
     @Test
     void theAutowiredChannelIsTheSameSingletonBothPortsWereBuiltWith() {

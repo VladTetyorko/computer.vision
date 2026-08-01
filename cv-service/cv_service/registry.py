@@ -146,6 +146,24 @@ class ModelRegistry:
         LOGGER.info("registry default promoted to model_id=%r", model_id)
         return True
 
+    def register(self, model_id: str, load_path: str) -> None:
+        """Add (or re-point) a roster entry for a newly-produced artifact.
+
+        Used by ``Training.StartTraining``: once a fine-tune writes its
+        ``best.pt`` into the model directory, the id is registered here so a
+        subsequent ``ListModels`` surfaces it and ``PromoteModel`` can
+        activate it *without* a service restart (on restart, ``discover_roster``
+        re-finds it on disk anyway). Idempotent: registering an existing id
+        just updates its load path and clears any prior "unavailable" mark and
+        cached detector so a rebuilt artifact is reloaded fresh on next use.
+        Does NOT promote it -- the operator promotes deliberately.
+        """
+        with self._lock:
+            self._roster[model_id] = load_path
+            self._unavailable_ids.discard(model_id)
+            self._detectors.pop(model_id, None)
+        LOGGER.info("registry registered model_id=%r (%s)", model_id, load_path)
+
     def loaded_ids(self) -> list[str]:
         """Ids actually loaded (lazily) so far -- for tests/diagnostics."""
         with self._lock:

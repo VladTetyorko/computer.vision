@@ -25,6 +25,39 @@ export function canExportDataset(dataset: Pick<Dataset, 'sampleCounts'> | null):
   return (dataset?.sampleCounts.LABELED ?? 0) > 0;
 }
 
+/** A sane starting point for the "Train a model" form's base-model field — a small, fast-to-fine-
+ *  tune YOLO checkpoint (docs/CV-TRAINING-PLAN.md's own frozen wire-contract example). Prefilled,
+ *  not forced — the field stays free text (with a `<datalist>` of whatever the CV registry already
+ *  knows about) so an operator can fine-tune from an existing custom model just as easily as a
+ *  stock checkpoint. */
+export const DEFAULT_BASE_MODEL = 'yolo26n.pt';
+
+/** A sane default epoch count for the same form — matches docs/CV-TRAINING-PLAN.md's own frozen
+ *  wire-contract example. */
+export const DEFAULT_TRAINING_EPOCHS = 50;
+
+/** Whether "Train a model" is meaningful right now — the same ≥1-`LABELED`-sample gate
+ *  {@link canExportDataset} already encodes (a fine-tune has nothing to learn from an
+ *  all-`PENDING`/`DISCARDED` dataset either, matching `LabelingService#export`'s own filter that a
+ *  training run would ultimately consume). Kept as its own named predicate so
+ *  `DatasetDetailFacade`/`dataset-detail.html` can gate the Train card without reading "canExport"
+ *  for an unrelated action. */
+export function canStartTrainingDataset(dataset: Pick<Dataset, 'sampleCounts'> | null): boolean {
+  return canExportDataset(dataset);
+}
+
+/**
+ * The "Start training" button's enabled predicate — mirrors `canSubmitDataset`'s own shape: a
+ * non-blank base-model checkpoint and a positive integer epoch count are both required
+ * (`TrainingJobSpec`'s own compact-constructor checks, mirrored client-side so the button is
+ * disabled before the request ever goes out), and never while a previous start is still in flight.
+ * `epochs` is `number | null` because that's what an emptied `type="number"` `ngModel` actually
+ * produces — treated the same as any other invalid value, not a special case.
+ */
+export function canSubmitTrainingRequest(baseModel: string, epochs: number | null, starting: boolean): boolean {
+  return !starting && baseModel.trim().length > 0 && epochs !== null && Number.isInteger(epochs) && epochs >= 1;
+}
+
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB'] as const;
 
 /** A human-readable size for `DatasetExport#sizeBytes` (e.g. "2.3 MB") — one decimal place above bytes themselves, base-1024. */

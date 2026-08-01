@@ -28,3 +28,9 @@ dist/
 # Active-model marker written by Training.PromoteModel (cv_service/training.py)
 # -- runtime state recording the operator's promoted default, not source.
 active_model.json
+
+# Exported YOLO datasets rsync'd onto the training host for Training.StartTraining
+# (CV_DATASET_DIR, default <cv-service>/datasets/<dataset_id>/) and the
+# ultralytics training run outputs -- runtime data, never source.
+datasets/
+runs/

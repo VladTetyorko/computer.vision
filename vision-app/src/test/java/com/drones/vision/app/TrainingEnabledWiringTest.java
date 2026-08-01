@@ -1,19 +1,24 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
+import com.drones.vision.adapter.cvgrpc.GrpcTrainingPort;
 import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.api.DatasetController;
 import com.drones.vision.api.LabelingController;
 import com.drones.vision.api.ModelRegistryController;
+import com.drones.vision.api.TrainingJobController;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.DefaultDatasetService;
 import com.drones.vision.application.DefaultLabelingService;
 import com.drones.vision.application.DefaultModelRegistryService;
+import com.drones.vision.application.DefaultTrainingJobService;
 import com.drones.vision.application.LabelingService;
 import com.drones.vision.application.ModelRegistryService;
+import com.drones.vision.application.TrainingJobService;
 import com.drones.vision.application.TrainingStores;
 import com.drones.vision.domain.port.out.DatasetExportPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;
+import com.drones.vision.domain.port.out.TrainingPort;
 import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -53,6 +58,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * training-only deployment doesn't need detection wired too. See {@link
  * CvAndTrainingSharedChannelWiringTest} for the both-enabled case that actually proves channel
  * <em>sharing</em>.
+ *
+ * <p>And the training-job flow (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave):
+ * {@code trainingPort}/{@code trainingJobService}/{@code TrainingJobController} all resolve on the
+ * same {@code vision.training.enabled=true} switch, {@code trainingPort} sharing the identical
+ * {@link WiringConfiguration#cvGrpcChannel} bean {@code modelRegistryPort} already does.
  */
 @SpringBootTest(properties = {"vision.publish.enabled=false", "vision.training.enabled=true"})
 class TrainingEnabledWiringTest {
@@ -95,6 +105,15 @@ class TrainingEnabledWiringTest {
     @Autowired
     private ManagedChannel cvGrpcChannel;
 
+    @Autowired
+    private TrainingPort trainingPort;
+
+    @Autowired
+    private TrainingJobService trainingJobService;
+
+    @Autowired
+    private TrainingJobController trainingJobController;
+
     @Test
     void datasetServiceResolvesToTheRealImplementation() {
         assertInstanceOf(DefaultDatasetService.class, datasetService);
@@ -135,5 +154,21 @@ class TrainingEnabledWiringTest {
     @Test
     void modelRegistryControllerResolves() {
         assertNotNull(modelRegistryController);
+    }
+
+    @Test
+    void trainingPortResolvesToTheGrpcImplementationOverTheSharedChannel() {
+        assertInstanceOf(GrpcTrainingPort.class, trainingPort);
+        assertNotNull(cvGrpcChannel);
+    }
+
+    @Test
+    void trainingJobServiceResolvesToTheRealImplementation() {
+        assertInstanceOf(DefaultTrainingJobService.class, trainingJobService);
+    }
+
+    @Test
+    void trainingJobControllerResolves() {
+        assertNotNull(trainingJobController);
     }
 }

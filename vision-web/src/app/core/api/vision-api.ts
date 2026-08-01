@@ -54,8 +54,11 @@ import type {
   StartSimulationRequest,
   StartStreamRequest,
   StartStreamResult,
+  StartTrainingJobRequest,
   SystemNetworkResponse,
   TelemetrySample,
+  TrainingJobResponse,
+  TrainingJobsResponse,
   TrainingSample,
   UpdateLiveTopicsRequest,
   UpdateStreamConfigRequest,
@@ -826,5 +829,37 @@ export class VisionApi {
     return firstValueFrom(
       this.http.post<RegisteredModel>(`/api/cv/registry/models/${encodeURIComponent(id)}/promote`, request),
     );
+  }
+
+  // --- CV training-job flow (docs/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) — starting a
+  // fine-tune run against a dataset and polling its progress. Gated by the same
+  // `vision.training.enabled` flag as every method above; `features/training-jobs/**` is the one
+  // consumer.
+
+  /**
+   * Starts a fine-tune job against `datasetId`. `403` when the caller may not manage the
+   * organization (starting a training run is a privileged control-plane action, the same footing as
+   * promoting a model); `400` a blank `baseModel` or non-positive `epochs`
+   * (`TrainingJobSpec`'s own compact-constructor checks). The response is the freshly started job's
+   * initial state — present immediately, poll it via {@link trainingJob}.
+   */
+  startTrainingJob(datasetId: string, request: StartTrainingJobRequest): Promise<TrainingJobResponse> {
+    return firstValueFrom(
+      this.http.post<TrainingJobResponse>(`/api/datasets/${encodeURIComponent(datasetId)}/train`, request),
+    );
+  }
+
+  /**
+   * Polls one job's latest known state. `404` when `jobId` is unknown — never started, or evicted
+   * under the backend's own finished-job retention policy. A training *failure* is reported here as
+   * `state: 'FAILED'`, never as a rejected promise — only a genuine transport/server failure rejects.
+   */
+  trainingJob(jobId: string): Promise<TrainingJobResponse> {
+    return firstValueFrom(this.http.get<TrainingJobResponse>(`/api/training/jobs/${encodeURIComponent(jobId)}`));
+  }
+
+  /** Every tracked job, newest-first by `startedAt` (`TrainingJobsResponse#jobs`). Unscoped/unaudited — any signed-in caller may poll progress. */
+  trainingJobs(): Promise<TrainingJobsResponse> {
+    return firstValueFrom(this.http.get<TrainingJobsResponse>('/api/training/jobs'));
   }
 }

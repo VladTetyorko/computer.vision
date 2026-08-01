@@ -15,8 +15,12 @@
   the rest); ``PromoteModel`` re-points the default and persists the choice
   (``cv_service.training`` marker) so it survives a restart -- matching the
   offline-train -> rsync-in -> promote operational loop. ``StartTraining``
-  stays ``UNIMPLEMENTED``: training runs offline (this host is Intel-only /
-  no CUDA, an inference appliance), the artifact is rsync'd in and promoted.
+  runs a real Ultralytics YOLO fine-tune on an exported dataset (rsync'd onto
+  the host under ``CV_DATASET_DIR``), streams ``TrainingProgress`` per epoch,
+  and writes the produced model into the model dir so this same
+  ``ListModels``/``PromoteModel`` loop can surface + promote it (see
+  ``cv_service/trainer.py``). It is device-agnostic (CPU here -- slow -- or
+  CUDA where present) and never auto-promotes.
 
 Run with::
 
@@ -31,15 +35,19 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
+import shutil
 import signal
 import sys
 import threading
+import uuid
 from concurrent import futures
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Iterator, Optional
 
 import grpc
 
+from cv_service import trainer
 from cv_service.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
 from cv_service.training import read_active_model, write_active_model
 
@@ -138,6 +146,16 @@ def _build_default_detector() -> Optional["YoloDetector"]:
 # independent of the directory the process happens to be launched from.
 _MODEL_SEARCH_DIR = Path(__file__).resolve().parent.parent
 
+# Root directory `Training.StartTraining` resolves `dataset_id` under: an
+# exported YOLO dataset lives at `<datasets>/<dataset_id>/` (data.yaml +
+# images/ + labels/, Phase 1's FilesystemDatasetExport layout). Configured by
+# `CV_DATASET_DIR` (following the module's env-config idiom, e.g. `CV_MODEL`),
+# defaulting to `<cv-service>/datasets` -- the same rsync-in operating model
+# the model artifacts use (MEMORY: gb4005-inference-box). Resolved once here.
+_DATASET_SEARCH_DIR = Path(
+    os.environ.get("CV_DATASET_DIR", str(_MODEL_SEARCH_DIR / trainer.DATASET_DIRNAME))
+)
+
 
 def _build_default_registry() -> Optional["ModelRegistry"]:
     """Try to build the default `ModelRegistry`; `None` if unavailable.
@@ -201,6 +219,22 @@ def _build_default_registry() -> Optional["ModelRegistry"]:
         active_id,
     )
     return registry
+
+
+def _context_active(context: object) -> bool:
+    """Whether the gRPC call is still live (client hasn't cancelled/disconnected).
+
+    `grpc.ServicerContext.is_active()` reports this; guarded with `hasattr`
+    so a lightweight fake context in tests (without `is_active`) is treated as
+    always-active rather than crashing the stream.
+    """
+    is_active = getattr(context, "is_active", None)
+    if is_active is None:
+        return True
+    try:
+        return bool(is_active())
+    except Exception:  # noqa: BLE001 - a context probe failure shouldn't kill the stream
+        return True
 
 
 class _StreamReader:
@@ -497,30 +531,181 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
     effect for subsequent default-model resolution immediately -- there is no
     second source of truth.
 
-    `StartTraining` stays `UNIMPLEMENTED`: in-platform training is out of
-    scope here. This host is Intel-only / no CUDA -- an inference appliance,
-    not a trainer. Training runs offline (GPU box / cloud); the produced
-    artifact is rsync'd into the model directory and promoted via
-    `PromoteModel`. See the plan's §"The constraint that shapes everything".
+    `StartTraining` runs a real Ultralytics YOLO fine-tune on an exported
+    dataset that was rsync'd onto this host (`<CV_DATASET_DIR>/<dataset_id>/`),
+    streams per-epoch progress, and writes the produced `best.pt` into the
+    model directory under a new id so this same `ListModels`/`PromoteModel`
+    loop can surface + promote it. It is device-agnostic (CUDA if present,
+    else CPU -- slow on this Intel appliance, logged once) and never
+    auto-promotes: the operator promotes deliberately. See
+    `cv_service/trainer.py` for the training core.
     """
 
-    def __init__(self, *, registry: object = None, model_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        *,
+        registry: object = None,
+        model_dir: Optional[Path] = None,
+        dataset_dir: Optional[Path] = None,
+        train_fn: Optional[trainer.TrainFn] = None,
+    ) -> None:
         # `registry` may be a `ModelRegistry` or `None` (echo mode / no model
         # loaded) -- kept as `object` to avoid importing `ModelRegistry` at
         # module scope (it needs the `cv` extra; this servicer must not).
         self._registry = registry
-        # Directory the active-model marker is persisted into -- the same
-        # `_MODEL_SEARCH_DIR` the roster is discovered from.
+        # Directory the active-model marker is persisted into AND where a
+        # produced training artifact is written -- the same `_MODEL_SEARCH_DIR`
+        # the roster is discovered from.
         self._model_dir = model_dir
+        # Root under which `dataset_id` resolves to an exported YOLO dataset.
+        self._dataset_dir = dataset_dir
+        # Injectable trainer seam: default is the real (lazy-ultralytics)
+        # `trainer.ultralytics_train`; tests inject a fast fake. Resolved lazily
+        # in `StartTraining` so importing this module never touches ultralytics.
+        self._train_fn = train_fn
 
     def StartTraining(self, request, context):
-        context.abort(
-            grpc.StatusCode.UNIMPLEMENTED,
-            "in-platform training is not run on this host (Intel-only / no CUDA -- an "
-            "inference appliance). Train offline on a GPU box/cloud, rsync the produced "
-            "model artifact into the cv-service model directory, then call "
-            "Training.PromoteModel to make it the live default.",
-        )
+        """Fine-tune `base_model` on `dataset_id` for `epochs`, streaming progress.
+
+        Server-streaming contract (`TrainingProgress`):
+        - a `job_id` (assigned here) rides every message of this call;
+        - one `RUNNING` update per training epoch (`epoch`/`total_epochs`/
+          `loss`/`map50` from Ultralytics' `on_fit_epoch_end` hook);
+        - then exactly one terminal message: `SUCCEEDED` (with the produced
+          model id in `message`) or `FAILED` (with the failure/`message`).
+
+        A missing/malformed dataset is a **normal reported outcome**: one
+        terminal `FAILED` message, stream ends -- NOT a gRPC abort. Client
+        (or `context`) cancellation stops the underlying training.
+        """
+        job_id = uuid.uuid4().hex
+        base_model = request.base_model
+        dataset_id = request.dataset_id
+        epochs = request.epochs
+
+        # --- resolve + validate the dataset (a miss is a reported FAILED) ---
+        try:
+            spec = trainer.build_spec(
+                job_id=job_id,
+                base_model=base_model,
+                dataset_id=dataset_id,
+                epochs=epochs,
+                datasets_root=self._dataset_dir if self._dataset_dir is not None else _DATASET_SEARCH_DIR,
+                output_dir=self._model_dir if self._model_dir is not None else _MODEL_SEARCH_DIR,
+            )
+        except trainer.DatasetNotFoundError as exc:
+            LOGGER.warning("StartTraining job=%s: %s", job_id, exc)
+            yield cv_pb2.TrainingProgress(
+                job_id=job_id, state=cv_pb2.JobState.FAILED, message=str(exc)
+            )
+            return
+
+        # --- run the actual training OFF this gRPC thread (mirrors how
+        # DetectStream keeps its long-lived work on a background thread): the
+        # blocking `.train()` runs in `worker`, progress flows back through a
+        # queue, and this generator thread only polls + yields, so it stays
+        # responsive to client cancellation and never wedges compute onto the
+        # server's stream thread. -------------------------------------------
+        events: "queue.Queue[tuple[str, object]]" = queue.Queue()
+        cancel_event = threading.Event()
+        train_fn = self._train_fn if self._train_fn is not None else trainer.ultralytics_train
+
+        def worker() -> None:
+            try:
+                best = train_fn(
+                    spec,
+                    on_epoch=lambda progress: events.put(("epoch", progress)),
+                    is_cancelled=cancel_event.is_set,
+                )
+                events.put(("done", best))
+            except trainer.TrainingCancelled:
+                events.put(("cancelled", None))
+            except Exception as exc:  # noqa: BLE001 - reported to the client as FAILED
+                LOGGER.exception("StartTraining job=%s failed", job_id)
+                events.put(("error", exc))
+
+        thread = threading.Thread(target=worker, name=f"cv-training-{job_id[:8]}", daemon=True)
+        thread.start()
+
+        # Promptly signal cancellation when the client disconnects, on top of
+        # the polling `context.is_active()` check below (belt and braces).
+        if hasattr(context, "add_callback"):
+            context.add_callback(cancel_event.set)
+
+        last: Optional[trainer.EpochProgress] = None
+        try:
+            while True:
+                if not _context_active(context):
+                    cancel_event.set()
+                    return
+                try:
+                    kind, payload = events.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                if kind == "epoch":
+                    last = payload  # type: ignore[assignment]
+                    yield cv_pb2.TrainingProgress(
+                        job_id=job_id,
+                        epoch=payload.epoch,
+                        total_epochs=payload.total_epochs,
+                        loss=payload.loss,
+                        map50=payload.map50,
+                        state=cv_pb2.JobState.RUNNING,
+                    )
+                elif kind == "done":
+                    model_id = self._publish_artifact(payload, spec)  # type: ignore[arg-type]
+                    yield cv_pb2.TrainingProgress(
+                        job_id=job_id,
+                        epoch=spec.epochs,
+                        total_epochs=spec.epochs,
+                        loss=last.loss if last else 0.0,
+                        map50=last.map50 if last else 0.0,
+                        state=cv_pb2.JobState.SUCCEEDED,
+                        message=(
+                            f"trained model saved as {model_id!r}; it now shows in ListModels -- "
+                            f"promote it via PromoteModel to make it the live default"
+                        ),
+                    )
+                    return
+                elif kind == "cancelled":
+                    LOGGER.info("StartTraining job=%s cancelled", job_id)
+                    return
+                elif kind == "error":
+                    yield cv_pb2.TrainingProgress(
+                        job_id=job_id,
+                        total_epochs=spec.epochs,
+                        state=cv_pb2.JobState.FAILED,
+                        message=f"training failed: {payload}",
+                    )
+                    return
+        finally:
+            # Whatever ends this generator (return, client cancel, exception),
+            # make sure the worker is told to stop and reaped best-effort.
+            cancel_event.set()
+            thread.join(timeout=5)
+
+    def _publish_artifact(self, best_weights: Path, spec: "trainer.TrainingSpec") -> str:
+        """Copy the produced `best.pt` into the model dir under a new id and
+        register it so `ListModels`/`PromoteModel` see it immediately.
+
+        NOT auto-promoted -- the operator promotes deliberately. On restart
+        `discover_roster` re-finds the file on disk anyway; `register()` just
+        avoids needing a restart.
+        """
+        model_id = trainer.output_model_id(spec.dataset_id, spec.epochs)
+        model_dir = self._model_dir if self._model_dir is not None else _MODEL_SEARCH_DIR
+        destination = Path(model_dir) / model_id
+        shutil.copyfile(best_weights, destination)
+        LOGGER.info("StartTraining job=%s wrote artifact %s", spec.job_id, destination)
+        if self._registry is not None and hasattr(self._registry, "register"):
+            self._registry.register(model_id, str(destination))
+        else:
+            LOGGER.info(
+                "no registry to register %r into; it will be discovered on the next restart",
+                model_id,
+            )
+        return model_id
 
     def ListModels(self, request, context):
         """Report the registry roster as a `ModelList`.
@@ -606,7 +791,10 @@ def serve(port: int = DEFAULT_PORT) -> grpc.Server:
     registry = _build_default_registry()
     cv_pb2_grpc.add_InferenceServicer_to_server(InferenceServicer(registry=registry), server)
     cv_pb2_grpc.add_TrainingServicer_to_server(
-        TrainingServicer(registry=registry, model_dir=_MODEL_SEARCH_DIR), server
+        TrainingServicer(
+            registry=registry, model_dir=_MODEL_SEARCH_DIR, dataset_dir=_DATASET_SEARCH_DIR
+        ),
+        server,
     )
     server.add_insecure_port(f"[::]:{port}")
     server.start()

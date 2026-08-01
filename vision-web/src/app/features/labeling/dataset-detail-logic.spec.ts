@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { canExportDataset, formatBytes, streamCaptureLabel } from './dataset-detail-logic';
+import {
+  canExportDataset,
+  canStartTrainingDataset,
+  canSubmitTrainingRequest,
+  formatBytes,
+  streamCaptureLabel,
+} from './dataset-detail-logic';
 
 describe('streamCaptureLabel', () => {
   const stream = { streamId: 'stream-1234567890', deviceId: 'dev-1' };
@@ -24,6 +30,32 @@ describe('canExportDataset', () => {
 
   it('is false for a null dataset (not yet loaded)', () => {
     expect(canExportDataset(null)).toBe(false);
+  });
+});
+
+describe('canStartTrainingDataset', () => {
+  it('mirrors canExportDataset — false with no labeled samples, true once one exists', () => {
+    expect(canStartTrainingDataset({ sampleCounts: { PENDING: 3, LABELED: 0, DISCARDED: 1 } })).toBe(false);
+    expect(canStartTrainingDataset({ sampleCounts: { PENDING: 3, LABELED: 1, DISCARDED: 1 } })).toBe(true);
+  });
+
+  it('is false for a null dataset (not yet loaded)', () => {
+    expect(canStartTrainingDataset(null)).toBe(false);
+  });
+});
+
+describe('canSubmitTrainingRequest', () => {
+  it('requires a non-blank base model and a positive integer epoch count', () => {
+    expect(canSubmitTrainingRequest('yolo26n.pt', 50, false)).toBe(true);
+    expect(canSubmitTrainingRequest('  ', 50, false)).toBe(false);
+    expect(canSubmitTrainingRequest('yolo26n.pt', 0, false)).toBe(false);
+    expect(canSubmitTrainingRequest('yolo26n.pt', -1, false)).toBe(false);
+    expect(canSubmitTrainingRequest('yolo26n.pt', 1.5, false)).toBe(false);
+    expect(canSubmitTrainingRequest('yolo26n.pt', null, false)).toBe(false);
+  });
+
+  it('is false while a previous start is still in flight', () => {
+    expect(canSubmitTrainingRequest('yolo26n.pt', 50, true)).toBe(false);
   });
 });
 

@@ -437,16 +437,20 @@ public class WiringConfiguration {
     /**
      * The shared gRPC connection to cv-service (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): one
      * {@link ManagedChannel} for both {@link #detectionPort}'s {@code GrpcDetectionPort} ({@code
-     * Inference/DetectStream}, the per-frame hot path) and {@link
-     * TrainingWiringConfiguration}'s {@code modelRegistryPort} bean's {@code GrpcModelRegistryPort}
-     * ({@code Training/ListModels}/{@code Training/PromoteModel}, control-plane) — see {@code
-     * GrpcModelRegistryPort}'s own javadoc, "Channel reuse", for why sharing one connection matters
-     * more than independently configuring two.
+     * Inference/DetectStream}, the per-frame hot path), {@link TrainingWiringConfiguration}'s
+     * {@code modelRegistryPort} bean's {@code GrpcModelRegistryPort} ({@code
+     * Training/ListModels}/{@code Training/PromoteModel}, control-plane), and that same class's
+     * {@code trainingPort} bean's {@code GrpcTrainingPort} ({@code Training/StartTraining}, the
+     * long-lived training-run stream, docs/CV-TRAINING-PLAN.md §7/§8 Phase 2's last wave) — see
+     * {@code GrpcModelRegistryPort}'s own javadoc, "Channel reuse", for why sharing one connection
+     * matters more than independently configuring three.
      *
-     * <p>Present whenever either consumer needs it: {@link VisionCvProperties#enabled()} (live
-     * detection) <strong>or</strong> {@code VisionTrainingProperties#enabled()} (the model
-     * registry) — so a training-only deployment (detection off) still gets a channel for {@code
-     * GrpcModelRegistryPort}, and a detection-only one (training off) is unaffected. With both off
+     * <p>Present whenever either property enables a consumer: {@link VisionCvProperties#enabled()}
+     * (live detection) <strong>or</strong> {@code VisionTrainingProperties#enabled()} (the model
+     * registry <em>and</em> {@code trainingPort} — both training-side consumers share the one
+     * property, so there is no third expression term to add) — so a training-only deployment
+     * (detection off) still gets a channel for {@code GrpcModelRegistryPort}/{@code
+     * GrpcTrainingPort}, and a detection-only one (training off) is unaffected. With both off
      * (the default), no channel is built at all — the opt-in guardrail: no extra gRPC
      * executor/transport overhead beyond today's behavior. Built with the exact same plaintext +
      * HTTP/2 keepalive tuning {@code GrpcDetectionPort}'s host/port constructor used to build
