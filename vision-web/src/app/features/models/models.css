@@ -1,0 +1,15 @@
+/* Reuses `.page`/`.card`/`.chip`/`.dot`/`.empty`/`.btn`/`.mono`/`.faint`/`.muted`/`table` from
+   `src/styles.css` — no new colors, mirroring `features/categories/categories.css`'s own
+   "no new colors" posture. */
+
+/* Horizontal scroll on a narrow viewport rather than crushing the columns (mirrors
+   `categories.css`'s own copy of this rule — each page defines it locally, no shared class exists
+   for it yet). */
+.table-scroll {
+  overflow-x: auto;
+}
+
+td.actions {
+  text-align: right;
+  white-space: nowrap;
+}

@@ -1424,3 +1424,34 @@ export interface DatasetExport {
   readonly sizeBytes: number;
   readonly downloadUrl: string;
 }
+
+// --- CV model registry (docs/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) -------------------------
+// The dynamic model registry — every model reference cv-service's own `Training/ListModels` RPC
+// actually reports, live, and the one place a model gets promoted to production. **Not** the same
+// roster as `CvModelsResponse`/`GET /api/cv/models` above (a static, config-backed picker for the
+// Fly cockpit's model dropdown) — see `ModelRegistryController`'s own javadoc (vision-api/MODULE.md,
+// "Not the same roster as `CvModelsController`"). Gated by the same `vision.training.enabled` flag
+// as the dataset/labeling endpoints above; `features/models/**` (Phase 2 T10) is the one consumer.
+
+/**
+ * Mirrors `dto.RegisteredModelResponse` — one row of `GET /api/cv/registry/models`. No optional
+ * fields (no `@JsonInclude(NON_NULL)` server-side, mirroring `CvModelResponse`'s own posture) —
+ * `version` is routinely `""` today, since cv-service's registry tracks no per-model version data
+ * yet (`cv_service/server.py#ListModels`'s own doc comment). See
+ * `features/models/models-logic.ts#resolvePromoteVersion` for why that matters when promoting.
+ */
+export interface RegisteredModel {
+  readonly id: string;
+  readonly version: string;
+  readonly active: boolean;
+}
+
+/** Mirrors `dto.RegisteredModelsResponse` — `GET /api/cv/registry/models`'s wrapper shape, the same `{"models":[...]}` precedent `CvModelsResponse`/`DatasetsResponse` set. */
+export interface RegisteredModelsResponse {
+  readonly models: readonly RegisteredModel[];
+}
+
+/** Mirrors `dto.PromoteModelRequest` — the body of `POST /api/cv/registry/models/{id}/promote`. `version` must be non-blank server-side (`ModelRef`'s own compact-constructor check, surfaced as a 400). */
+export interface PromoteModelRequest {
+  readonly version: string;
+}

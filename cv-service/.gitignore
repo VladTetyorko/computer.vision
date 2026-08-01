@@ -24,3 +24,7 @@ dist/
 # -- Docker-only by convention, but ignore it in case anyone runs the export
 # locally by hand.
 *_openvino_model/
+
+# Active-model marker written by Training.PromoteModel (cv_service/training.py)
+# -- runtime state recording the operator's promoted default, not source.
+active_model.json

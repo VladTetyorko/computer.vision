@@ -9,8 +9,14 @@
   ``DetectionResponse`` with the same stream_id / sequence / timestamp_millis
   / model_id / model_version and an empty ``detections`` list. Either way the
   service never crash-loops for lack of a model.
-* ``Training`` rpcs (StartTraining, ListModels, PromoteModel) are not
-  implemented yet and reply with ``UNIMPLEMENTED`` (Phase 3).
+* ``Training.ListModels`` / ``Training.PromoteModel`` are implemented against
+  the same ``ModelRegistry`` the inference path uses: ``ListModels`` reports
+  the roster (``stage="active"`` for the current default, ``"available"`` for
+  the rest); ``PromoteModel`` re-points the default and persists the choice
+  (``cv_service.training`` marker) so it survives a restart -- matching the
+  offline-train -> rsync-in -> promote operational loop. ``StartTraining``
+  stays ``UNIMPLEMENTED``: training runs offline (this host is Intel-only /
+  no CUDA, an inference appliance), the artifact is rsync'd in and promoted.
 
 Run with::
 
@@ -35,10 +41,18 @@ from typing import TYPE_CHECKING, Iterable, Iterator, Optional
 import grpc
 
 from cv_service.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
+from cv_service.training import read_active_model, write_active_model
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance, see _build_default_detector
     from cv_service.inference import YoloDetector
     from cv_service.registry import ModelRegistry
+
+# Sentinel distinguishing "no `registry` argument passed" (auto-build the
+# default registry -- the production `InferenceServicer()` path and every
+# pre-registry test) from an explicit `registry=None` (echo mode, no model:
+# `serve()` passes the already-built shared registry, which may be `None`,
+# and must NOT trigger a second, wasteful build).
+_UNSET_REGISTRY: object = object()
 
 # `protoc`'s Python codegen emits imports rooted at the proto package path
 # (e.g. `from vision.v1 import cv_pb2`), not at `cv_service.gen...`. So the
@@ -149,7 +163,28 @@ def _build_default_registry() -> Optional["ModelRegistry"]:
 
     default_model = os.environ.get("CV_MODEL", DEFAULT_MODEL)
     roster = discover_roster(_MODEL_SEARCH_DIR, default_model)
-    registry = ModelRegistry(roster=roster, default_id=default_model)
+
+    # Apply a persisted promotion (`Training.PromoteModel`) if one is
+    # recorded AND still names a roster id -- so the last live promotion
+    # survives this restart. A marker naming an id that is no longer present
+    # (artifact removed) or no marker at all falls back to the env/DEFAULT
+    # model, never an error.
+    promoted = read_active_model(_MODEL_SEARCH_DIR)
+    if promoted is not None and promoted in roster:
+        active_id = promoted
+        LOGGER.info("cv-service applying persisted promoted model_id=%r as default", promoted)
+    else:
+        if promoted is not None:
+            LOGGER.warning(
+                "persisted promoted model_id=%r is not in the current roster %s; "
+                "falling back to default %r",
+                promoted,
+                sorted(roster),
+                default_model,
+            )
+        active_id = default_model
+
+    registry = ModelRegistry(roster=roster, default_id=active_id)
 
     if registry.default_detector() is None:
         LOGGER.warning(
@@ -163,7 +198,7 @@ def _build_default_registry() -> Optional["ModelRegistry"]:
     LOGGER.info(
         "cv-service model registry roster: %s (default=%r)",
         sorted(registry.roster),
-        default_model,
+        active_id,
     )
     return registry
 
@@ -291,7 +326,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         detector: Optional["YoloDetector"] = None,
         *,
         inference_gate: Optional[InferenceGate] = None,
-        registry: Optional["ModelRegistry"] = None,
+        registry: object = _UNSET_REGISTRY,
     ) -> None:
         self._inference_gate = inference_gate if inference_gate is not None else process_gate()
         self._warned_model_ids: set[str] = set()
@@ -302,7 +337,14 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             self._registry = None
         else:
             self._detector = None
-            self._registry = registry if registry is not None else _build_default_registry()
+            # `registry` omitted -> auto-build the default (production path +
+            # every pre-registry test). An explicit `registry=` (including
+            # `None`, which `serve()` may pass in echo mode) is used as-is,
+            # never rebuilt -- see `_UNSET_REGISTRY`.
+            if registry is _UNSET_REGISTRY:
+                self._registry = _build_default_registry()
+            else:
+                self._registry = registry
 
     def DetectStream(
         self,
@@ -445,16 +487,106 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
 
 
 class TrainingServicer(cv_pb2_grpc.TrainingServicer):
-    """Training / model-registry control plane - not implemented until Phase 3."""
+    """Model-registry control plane over the shared `ModelRegistry`.
+
+    `ListModels`/`PromoteModel` are the "unblocked half" of CV-TRAINING
+    Phase 2 (`docs/CV-TRAINING-PLAN.md` §6): a model rsync'd onto the host
+    becomes selectable, and the operator promotes it live. Both read/write
+    the *same* `ModelRegistry` instance the inference `DetectStream` path
+    routes against (wired identically in `serve()`), so a promotion takes
+    effect for subsequent default-model resolution immediately -- there is no
+    second source of truth.
+
+    `StartTraining` stays `UNIMPLEMENTED`: in-platform training is out of
+    scope here. This host is Intel-only / no CUDA -- an inference appliance,
+    not a trainer. Training runs offline (GPU box / cloud); the produced
+    artifact is rsync'd into the model directory and promoted via
+    `PromoteModel`. See the plan's §"The constraint that shapes everything".
+    """
+
+    def __init__(self, *, registry: object = None, model_dir: Optional[Path] = None) -> None:
+        # `registry` may be a `ModelRegistry` or `None` (echo mode / no model
+        # loaded) -- kept as `object` to avoid importing `ModelRegistry` at
+        # module scope (it needs the `cv` extra; this servicer must not).
+        self._registry = registry
+        # Directory the active-model marker is persisted into -- the same
+        # `_MODEL_SEARCH_DIR` the roster is discovered from.
+        self._model_dir = model_dir
 
     def StartTraining(self, request, context):
-        context.abort(grpc.StatusCode.UNIMPLEMENTED, "training is not implemented yet (Phase 3)")
+        context.abort(
+            grpc.StatusCode.UNIMPLEMENTED,
+            "in-platform training is not run on this host (Intel-only / no CUDA -- an "
+            "inference appliance). Train offline on a GPU box/cloud, rsync the produced "
+            "model artifact into the cv-service model directory, then call "
+            "Training.PromoteModel to make it the live default.",
+        )
 
     def ListModels(self, request, context):
-        context.abort(grpc.StatusCode.UNIMPLEMENTED, "model registry is not implemented yet (Phase 3)")
+        """Report the registry roster as a `ModelList`.
+
+        One `ModelInfo` per known model id: ``stage="active"`` for the
+        current default (the promoted/routed-to-by-default model),
+        ``"available"`` for the rest; ``version`` empty (the registry tracks
+        no per-model version today); ``metrics`` empty. Returns an empty list
+        (never aborts) when no registry is configured (echo mode / no model).
+        """
+        if self._registry is None:
+            return cv_pb2.ModelList()
+
+        active_id = self._registry.default_id
+        models = [
+            cv_pb2.ModelInfo(
+                id=model_id,
+                version="",
+                stage="active" if model_id == active_id else "available",
+            )
+            for model_id in sorted(self._registry.roster)
+        ]
+        return cv_pb2.ModelList(models=models)
 
     def PromoteModel(self, request, context):
-        context.abort(grpc.StatusCode.UNIMPLEMENTED, "model registry is not implemented yet (Phase 3)")
+        """Make `request.id` the registry's active/default model + persist it.
+
+        On success re-points the shared registry default (so subsequent
+        `DetectStream` default-model resolution uses it) and writes the
+        active-model marker so the choice survives a restart, returning
+        ``Ack{ok:true}``. An unknown id -- one the registry roster does not
+        know -- is a normal, reported outcome: ``Ack{ok:false, message}``,
+        NOT an abort. A missing registry is likewise reported, not aborted.
+        """
+        model_id = request.id
+        if self._registry is None:
+            return cv_pb2.Ack(
+                ok=False, message="no model registry configured (no model loaded on this host)"
+            )
+        if not model_id:
+            return cv_pb2.Ack(ok=False, message="model id must not be empty")
+
+        if not self._registry.promote(model_id):
+            return cv_pb2.Ack(
+                ok=False,
+                message=(
+                    f"unknown model id {model_id!r}; not in the registry roster "
+                    f"{sorted(self._registry.roster)} -- rsync the model artifact into the "
+                    f"cv-service model directory first"
+                ),
+            )
+
+        if self._model_dir is not None:
+            try:
+                write_active_model(self._model_dir, model_id, request.version)
+            except OSError as exc:  # pragma: no cover - unusual FS error
+                # The in-memory promotion already took effect; only the
+                # restart-survival guarantee is lost. Report it honestly
+                # rather than pretend it fully succeeded.
+                LOGGER.warning("promoted %r in memory but could not persist marker (%s)", model_id, exc)
+                return cv_pb2.Ack(
+                    ok=True,
+                    message=f"promoted {model_id!r} (WARNING: not persisted, will not survive restart: {exc})",
+                )
+
+        return cv_pb2.Ack(ok=True, message=f"promoted {model_id!r} to the active/default model")
 
 
 def serve(port: int = DEFAULT_PORT) -> grpc.Server:
@@ -466,8 +598,16 @@ def serve(port: int = DEFAULT_PORT) -> grpc.Server:
     stream thread parked indefinitely.
     """
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), options=_KEEPALIVE_SERVER_OPTIONS)
-    cv_pb2_grpc.add_InferenceServicer_to_server(InferenceServicer(), server)
-    cv_pb2_grpc.add_TrainingServicer_to_server(TrainingServicer(), server)
+    # Build the registry ONCE and share it between both servicers, so
+    # `Training.PromoteModel` re-points the very registry the inference
+    # `DetectStream` path routes against -- one source of truth. `None`
+    # (no model loaded) is passed through explicitly: `InferenceServicer`
+    # degrades to echo, `TrainingServicer` reports an empty roster.
+    registry = _build_default_registry()
+    cv_pb2_grpc.add_InferenceServicer_to_server(InferenceServicer(registry=registry), server)
+    cv_pb2_grpc.add_TrainingServicer_to_server(
+        TrainingServicer(registry=registry, model_dir=_MODEL_SEARCH_DIR), server
+    )
     server.add_insecure_port(f"[::]:{port}")
     server.start()
     LOGGER.info("cv-service gRPC server listening on :%d", port)

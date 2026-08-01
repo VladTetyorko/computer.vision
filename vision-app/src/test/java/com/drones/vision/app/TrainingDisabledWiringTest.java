@@ -3,10 +3,14 @@ package com.drones.vision.app;
 import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.api.DatasetController;
 import com.drones.vision.api.LabelingController;
+import com.drones.vision.api.ModelRegistryController;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.LabelingService;
+import com.drones.vision.application.ModelRegistryService;
 import com.drones.vision.application.TrainingStores;
 import com.drones.vision.domain.port.out.DatasetExportPort;
+import com.drones.vision.domain.port.out.ModelRegistryPort;
+import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -55,5 +59,30 @@ class TrainingDisabledWiringTest {
     void noDatasetExportPortBeanExistsByDefault() {
         assertTrue(applicationContext.getBeansOfType(DatasetExportPort.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(FilesystemDatasetExport.class).isEmpty());
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9: with both {@code vision.cv.enabled} and {@code
+     * vision.training.enabled} at their default {@code false}, the model registry controller/
+     * service/port are all absent too — same "absent entirely" guardrail as the other three tests
+     * above, extended to the new beans this task added.
+     */
+    @Test
+    void noModelRegistryBeansExistByDefault() {
+        assertTrue(applicationContext.getBeansOfType(ModelRegistryController.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(ModelRegistryService.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(ModelRegistryPort.class).isEmpty());
+    }
+
+    /**
+     * The opt-in guardrail at its most literal: with neither {@code vision.cv.enabled} nor {@code
+     * vision.training.enabled} set, {@link WiringConfiguration#cvGrpcChannel} — the bean shared by
+     * {@code GrpcDetectionPort} and {@code GrpcModelRegistryPort} — isn't built at all, so this
+     * task adds no gRPC channel/executor overhead to the default-config context beyond what
+     * existed before it.
+     */
+    @Test
+    void noSharedCvGrpcChannelBeanExistsByDefault() {
+        assertTrue(applicationContext.getBeansOfType(ManagedChannel.class).isEmpty());
     }
 }

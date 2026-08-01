@@ -1,0 +1,85 @@
+<div class="page">
+  <vision-section-header
+    eyebrow="Manage"
+    title="CV model registry"
+    subtitle="Every model cv-service currently knows about. Promote one to make it the live default for new detections."
+  >
+    <div actions>
+      <a routerLink="/manage/training" class="btn secondary small">Datasets</a>
+      <a routerLink="/manage" class="btn secondary small">Back to Manage</a>
+    </div>
+  </vision-section-header>
+
+  @if (facade.disabled()) {
+    <vision-empty
+      icon="alert"
+      title="Training tools aren't enabled here"
+      message="This deployment hasn't turned on the CV training feature yet. Ask an administrator to enable vision.training.enabled if you need to promote a model."
+    />
+  } @else {
+    @if (facade.promoteError(); as promoteError) {
+      <vision-notice variant="warn" icon="alert">{{ promoteError }}</vision-notice>
+    }
+
+    <div class="card">
+      @if (facade.loading() && !facade.loaded()) {
+        <p class="muted">Loading the model registry…</p>
+      } @else if (facade.models().length === 0) {
+        <vision-empty
+          icon="target"
+          title="No models in the registry"
+          message="cv-service hasn't reported any models yet — check that the registry is reachable, or rsync a trained model artifact into its model directory."
+        />
+      } @else {
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Version</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (model of facade.models(); track model.id) {
+                <tr>
+                  <td class="mono">{{ model.id }}</td>
+                  <td>
+                    @if (model.version) {
+                      <span class="mono faint">{{ model.version }}</span>
+                    } @else {
+                      <span class="faint">—</span>
+                    }
+                  </td>
+                  <td>
+                    @if (model.active) {
+                      <span class="chip ok"><span class="dot ok"></span>Live</span>
+                    } @else {
+                      <span class="muted">Available</span>
+                    }
+                  </td>
+                  <td class="actions">
+                    @if (model.active) {
+                      <span class="faint">Currently live</span>
+                    } @else if (facade.canManage()) {
+                      <button
+                        type="button"
+                        class="btn secondary small"
+                        [disabled]="!facade.canPromote(model)"
+                        (click)="facade.promote(model)"
+                      >
+                        <vision-icon name="chevron-up" [size]="14" />
+                        {{ facade.promotingId() === model.id ? 'Promoting…' : 'Promote' }}
+                      </button>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  }
+</div>

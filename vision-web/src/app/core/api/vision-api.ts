@@ -40,7 +40,10 @@ import type {
   PatchStreamConfigResponse,
   ProbeDeviceRequest,
   ProbeDeviceResult,
+  PromoteModelRequest,
   RegisterDeviceRequest,
+  RegisteredModel,
+  RegisteredModelsResponse,
   ReturnHomeResponse,
   SampleStatus,
   SamplesResponse,
@@ -799,5 +802,29 @@ export class VisionApi {
    */
   exportDataset(datasetId: string): Promise<DatasetExport> {
     return firstValueFrom(this.http.post<DatasetExport>(`/api/datasets/${encodeURIComponent(datasetId)}/export`, {}));
+  }
+
+  // --- CV model registry (docs/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) — the dynamic registry
+  // behind `features/models/**`'s "list + promote" page. Gated by the same `vision.training.enabled`
+  // flag as the dataset/labeling methods above; `ModelsFacade.refresh()` treats a 404 on
+  // `registryModels()` the same way `TrainingStore.refresh()` treats one on `listDatasets()` — the
+  // only call here that can only mean "the controller is absent".
+
+  /** Every model reference cv-service's registry currently knows about, and which one (if any) is live (`RegisteredModelsResponse#models`). Unscoped/unaudited — any signed-in caller may read it. */
+  registryModels(): Promise<RegisteredModelsResponse> {
+    return firstValueFrom(this.http.get<RegisteredModelsResponse>('/api/cv/registry/models'));
+  }
+
+  /**
+   * Promotes `id` to the registry's live/default model. `403` when the caller may not manage the
+   * organization; `409` when cv-service refuses (an unknown id — the artifact hasn't been rsync'd
+   * into its model directory yet); `400` a malformed `version` (`ModelRef`'s own compact-constructor
+   * check — see `features/models/models-logic.ts#resolvePromoteVersion` for why the caller never
+   * sends the registry's own often-blank `version` verbatim).
+   */
+  promoteModel(id: string, request: PromoteModelRequest): Promise<RegisteredModel> {
+    return firstValueFrom(
+      this.http.post<RegisteredModel>(`/api/cv/registry/models/${encodeURIComponent(id)}/promote`, request),
+    );
   }
 }

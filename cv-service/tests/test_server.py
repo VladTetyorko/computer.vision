@@ -363,8 +363,13 @@ def test_serve_passes_keepalive_options_to_grpc_server(monkeypatch):
         return _FakeServer()
 
     monkeypatch.setattr(server_module.grpc, "server", fake_grpc_server)
-    monkeypatch.setattr(server_module, "InferenceServicer", lambda: object())
-    monkeypatch.setattr(server_module, "TrainingServicer", lambda: object())
+    # `serve()` now builds one shared registry and passes it to both
+    # servicers (so PromoteModel re-points the same registry inference
+    # routes against) -- fake the build (a real one loads a model, slow and
+    # environment-dependent) and accept the kwargs both servicers now take.
+    monkeypatch.setattr(server_module, "_build_default_registry", lambda: None)
+    monkeypatch.setattr(server_module, "InferenceServicer", lambda **kwargs: object())
+    monkeypatch.setattr(server_module, "TrainingServicer", lambda **kwargs: object())
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_InferenceServicer_to_server", lambda servicer, srv: None)
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_TrainingServicer_to_server", lambda servicer, srv: None)
 

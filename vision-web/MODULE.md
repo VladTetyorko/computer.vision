@@ -4435,3 +4435,161 @@ class doc comment), `features/hubs/manage-hub.ts` (grouping/role-scoping logic +
 `features/warehouse/warehouse.spec.ts`. Untouched (verified, not just assumed): `app/app.routes.ts`
 (no edit needed — see F2 above), `app/app.ts`/`app.html` (the known top-bar-dropdown gap, see F3
 above), `features/fly/**`, `features/command/**`, `features/devices/**`, every shared marks file.
+
+## CV-TRAINING-PLAN Phase 2 T10 — model registry UI: list, Live badge, one-click promote (docs/CV-TRAINING-PLAN.md)
+
+The final step of the CV-TRAINING loop this plan builds toward: dataset export (Phase 1 T5, above) →
+fine-tune offline → rsync the produced `.pt` into cv-service's model directory → **this page lists it
+and promotes it live**. Built against T9's already-shipped, frozen `ModelRegistryController`
+(vision-api/MODULE.md's own subsection) — no `StartTraining`/training-job UI, per the task brief
+(training itself runs offline; this page only ingests the result). New `features/models/**`, a new
+`/manage/training/models` route, and minimal wiring — no backend, `features/fly/**`,
+`features/command/**`, or marks files touched.
+
+### Placement — `/manage/training/models`, reached via a "Models" tab on the dataset list
+
+Chose the dedicated-route option the task brief offered (over a tab-*inside* `DatasetsPage`) so the
+registry gets its own facade/lazy chunk, matching every other routed page in this app — but reached
+exactly like a tab: `DatasetsPage`'s own section-header actions gained one new link, **"Models"**,
+alongside its existing "Back to Manage" (`features/labeling/datasets.html`, the only edit to that
+feature); `ModelsPage`'s own header links back with "Datasets" + "Back to Manage". No new
+`features/hubs/nav-entries.ts` tile — the task's own "put it inside the existing training/manage
+area" reads as "reachable from where CV training already lives", not "a new top-level Manage door",
+and a `/manage/training/models` route is already one click from `/manage/training`.
+
+**Route-ordering gotcha, handled deliberately**: `features/labeling/labeling.routes.ts` already
+registers `manage/training/:datasetId` (a param route) under the same `/manage/training` prefix.
+Angular matches routes in array order, first match wins — a param segment matches the literal string
+`models` just as happily as a real dataset id, so `MODELS_ROUTES` must be spread **before**
+`LABELING_ROUTES` in `app.routes.ts`'s children array (done, with a one-line comment at the spread
+site explaining why) or `/manage/training/models` would silently resolve as
+`DatasetDetailPage`'s own "dataset not found" empty state instead of the registry page. Verified by
+navigating to `/manage/training/models` in the built app and confirming `ModelsPage` renders, not
+`DatasetDetailPage`.
+
+### `core/api/models.ts` + `core/api/vision-api.ts` — the two DTOs + client methods
+
+New types, mirroring `com.drones.vision.api.dto` 1:1: `RegisteredModel {id, version, active}`
+(`dto.RegisteredModelResponse`, no optional fields), `RegisteredModelsResponse {models}`
+(`dto.RegisteredModelsResponse`, the same `{"models":[...]}` wrapper precedent
+`CvModelsResponse`/`DatasetsResponse` already set), `PromoteModelRequest {version}`
+(`dto.PromoteModelRequest`). `VisionApi` gained two methods: `registryModels()` (`GET
+/api/cv/registry/models`) and `promoteModel(id, request)` (`POST
+/api/cv/registry/models/{id}/promote`) — both gated server-side by `vision.training.enabled`, same as
+every other CV-training method already in this class.
+
+### `features/models/**` — one routed page, its facade, and pure logic
+
+`ModelsPage` (`/manage/training/models`) injects only `ModelsFacade` (the architecture guard's own
+invariant) — a table of every model the registry reports, a green **Live** badge
+(`chip ok` + `dot ok`, reusing `categories.html`'s exact "streaming" chip idiom, deliberately the
+*static* `dot ok` rather than the pulsing `dot live` — a promoted model isn't "currently streaming",
+it's a settled state) on the active row, and a **Promote** button on every other row.
+
+`ModelsFacade` injects `VisionApi` directly rather than growing a shared store (the same
+`DatasetDetailFacade`/`CategoriesFacade` "page-local, single-consumer state" shape — no other page
+reads the registry): `models` (computed, sorted live-first-then-alphabetical), `loading`/`loaded`,
+`disabled` (the 404-means-"feature off" signal), `canManage`, `promotingId`, `promoteError`, plus
+`refresh()`/`canPromote(model)`/`promote(model)`. **Promote re-fetches rather than optimistically
+flipping** — `promote()` calls `registryModels()` again on success so the Live badge always reflects
+server truth (mirrors `TrainingStore`'s own mutate-then-`refresh()` shape) rather than hand-rolling a
+local flip that could drift.
+
+Pure logic in `features/models/models-logic.ts` (unit-tested, `models-logic.spec.ts`, 15 cases):
+`canPromoteModel(model, canManage, promotingId)` — the row-level Promote-enabled predicate (false for
+a non-manager, the already-active model, or while any row is in flight); `sortModelsForDisplay` —
+live model first, then alphabetical by id, stable, non-mutating; and
+**`resolvePromoteVersion(model)`** — see the deviation below, this is the one genuinely load-bearing
+piece of logic in this wave.
+
+### Deviation from the task brief, with reason: the promote request never echoes the registry's own blank `version`
+
+Read closely, not assumed: `GET /api/cv/registry/models` reports **every** model's `version` as `""`
+today — `cv_service/server.py#ListModels`'s own doc comment says so outright ("the registry tracks no
+per-model version today"), confirmed live in this same tree's own concurrent T6 changes. But
+`ModelRegistryController#promote` (vision-api) builds a domain `ModelRef(id, request.version())`
+server-side, and `ModelRef`'s compact constructor (`vision-domain`) rejects a **blank** version with
+an `IllegalArgumentException` → 400 — so a client that echoes the registry's own `version` straight
+back on every promote call (which is what the task brief's own inline JSON example literally shows,
+`{"version": ""}`) would 400 **unconditionally, for every model, every time**, against the real
+backend. This is a genuine seam mismatch between T9's REST layer and T6's registry, not a UI bug to
+route around silently — cv-service's own `PromoteModel` handler never actually validates this string
+(`training.py#write_active_model` just persists it as the restart-survival marker), so
+`resolvePromoteVersion` substitutes the real, already-established sentinel this exact app already uses
+elsewhere for "no specific version": `'latest'` (`StartAssetStreamRequest#model`'s own default,
+vision-api/MODULE.md). A model that does carry a real, non-blank version (a future cv-service
+revision) is sent verbatim, untouched — this only ever fires on today's routine blank case. Flagged
+here, not fixed in vision-api/vision-domain/cv-service (out of this task's own file scope — web-only).
+Whoever picks up per-model version tracking in cv-service should reconsider whether
+`ModelRef.version` blank-rejection is still the right call once the registry can report a real one.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Feature-off degrade** (no dedicated "is it enabled" endpoint, mirroring `TrainingStore`'s own
+  doc comment): `vision.training.enabled=false` removes `ModelRegistryController` from the app
+  entirely, so `GET /api/cv/registry/models` 404s exactly like any unmapped path — the only call this
+  facade makes that can mean that. `ModelsFacade.refresh()` turns that specific 404 into `disabled`,
+  read by `ModelsPage` to render the identical `vision-empty` "Training tools aren't enabled here"
+  state `DatasetsPage` already uses, never a blocked page or a fabricated model list.
+- **Role-gating mirrors the backend exactly**: `ModelRegistryController#promote` requires "may manage
+  the organization" (403 otherwise). `ModelsFacade.canManage` (`canManageOrg`, the same predicate
+  `DatasetsFacade`/`org-guard.ts`/`identity-chip.ts` already use) **hides** every row's Promote button
+  entirely for a non-manager — never a visible-but-disabled button that would only ever 403. The
+  registry read itself (`models()`) is unscoped/unaudited server-side (any signed-in caller may read
+  it, per `ModelRegistryController`'s own javadoc), so `ModelsPage` carries no route guard, matching
+  `DatasetsPage`'s own openness.
+- **409 on promote** — cv-service's own "unknown model id … rsync the model artifact into the
+  cv-service model directory first" message is folded into `ModelsFacade.promoteError`, rendered as
+  one plain-language `vision-notice`: `"<id>" isn't on the server yet — copy its file into cv-service
+  first, then try again.` Every other failure (network down, a genuine 5xx, a malformed-version 400)
+  still toasts via `describeHttpError`, same as everywhere else in this app.
+- **Dev parity**: `vision.auth.enabled=false`'s dev principal resolves to `ADMIN`/unbounded scope, so
+  `canManageOrg` is `true` and Promote behaves exactly as it does for a real admin — no separate code
+  path.
+
+### Tests
+
+New: `features/models/models-logic.spec.ts` (15 cases — `canPromoteModel`'s four gates,
+`resolvePromoteVersion`'s blank/whitespace/real-version cases, `sortModelsForDisplay`'s ordering +
+non-mutation). No `models-facade.spec.ts` — this app's own established convention (favor pure-logic
+vitest over component/facade specs; `DatasetDetailFacade`/`SampleEditorFacade`/`CategoriesFacade` have
+none either). `core/ui/architecture.spec.ts`'s `ROUTED_PAGES` gained `'models/models'` — the guard
+passes: `ModelsPage` injects only `ModelsFacade`, holds no bare overlay `signal()` (no
+mutually-exclusive overlay on this page at all — no menus/dialogs/editors).
+
+**`npm run test:ci`: 95 spec files / 1559 tests, all green** (up from T5's 95/1535 — the delta
+includes this task's 15 plus other cycles' additions since). `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds, no new warnings. **Bundle delta measured via a
+`git stash` of this task's own tracked edits (+ temporarily relocating the new, untracked
+`features/models/` directory out of the tree) around the build** — the shared tree carries other
+agents' concurrent, uncommitted backend-only changes throughout (T6-T9's cv-service/vision-api/
+vision-domain/adapter-cv-grpc files, confirmed via `git status` to touch no `vision-web/**` path), so
+a stash/pop of exactly this task's own files gives a clean before/after with no conflation risk.
+
+Baseline (this task's edits stashed, `features/models/` moved aside): initial bundle **367.13 kB raw
+/ 104.68 kB transfer**; `datasets` chunk 10.15 kB / 3.24 kB; `dataset-detail` 11.19 kB / 3.59 kB;
+`sample-editor` 18.29 kB / 5.79 kB; no `models` chunk (doesn't exist yet).
+
+After (this task's edits restored): initial bundle **367.46 kB raw / 104.75 kB transfer** (+0.33 kB /
++0.07 kB — `vision-api.ts`'s two new eager methods + `app.routes.ts`'s one import/spread;
+`models.ts`'s new interfaces are type-only, zero runtime bytes); `datasets` chunk 10.25 kB / 3.27 kB
+(+0.10 kB / +0.03 kB — the one new "Models" link in its template); `dataset-detail` and
+`sample-editor` **unchanged** (11.19 kB / 3.59 kB, 18.29 kB / 5.79 kB — confirms neither was touched);
+**new `models` lazy chunk: 6.07 kB raw / 2.20 kB transfer** — this task's entire new page + facade +
+logic + template + styles, cleanly isolated.
+
+### Files touched
+
+New: `features/models/{models.routes.ts, models.ts, models.html, models.css, models-facade.ts,
+models-logic.ts, models-logic.spec.ts}`. Edited (minimal wiring only, per this task's own hard
+constraints): `core/api/models.ts` (three new DTOs), `core/api/vision-api.ts` (two new methods),
+`app.routes.ts` (one import + one spread, ordered ahead of `LABELING_ROUTES` — see Placement above),
+`core/ui/architecture.spec.ts` (one `ROUTED_PAGES` entry), `features/labeling/datasets.html` (one new
+"Models" link), and this file. Untouched (verified via `git status` before/after): `features/fly/**`,
+`features/command/**`, every shared marks file, every other file under `features/labeling/**`,
+`features/hubs/nav-entries.ts` (no new Manage tile — see Placement above), vision-api/vision-domain/
+vision-app/cv-service (backend; T6-T9's own concurrent work in this same tree, left untouched).

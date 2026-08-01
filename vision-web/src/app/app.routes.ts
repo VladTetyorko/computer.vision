@@ -22,6 +22,7 @@ import { ROSTER_ROUTES } from './features/roster/roster.routes';
 import { CATEGORIES_ROUTES } from './features/categories/categories.routes';
 import { REPORTS_ROUTES } from './features/reports/reports.routes';
 import { LABELING_ROUTES } from './features/labeling/labeling.routes';
+import { MODELS_ROUTES } from './features/models/models.routes';
 import { authGuard } from './core/auth/auth-guard';
 
 /**
@@ -58,6 +59,9 @@ export const routes: Routes = [
       ...ROSTER_ROUTES,
       ...CATEGORIES_ROUTES,
       ...REPORTS_ROUTES,
+      // MODELS_ROUTES' static 'manage/training/models' must precede LABELING_ROUTES' param route
+      // 'manage/training/:datasetId' — see MODELS_ROUTES' own doc comment.
+      ...MODELS_ROUTES,
       ...LABELING_ROUTES,
       ...FLY_ROUTES,
       ...COMMAND_ROUTES,

@@ -3,6 +3,7 @@ package com.drones.vision.domain.port.out;
 import com.drones.vision.domain.model.ModelRef;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Driven port: query and promote CV models.
@@ -24,6 +25,12 @@ import java.util.List;
  *       that subsequently the version becomes discoverable as the default
  *       for that model id. Rollback is simply promoting an earlier
  *       version.</li>
+ *   <li>{@link #active()} is the one reference currently promoted/live (the
+ *       default the pipeline resolves an unqualified model id to), or empty
+ *       when the registry has no model at all — the "which is live" flag a
+ *       promote UI renders, kept off {@link ModelRef} itself since being the
+ *       active default is a registry fact, not a property of a reference used
+ *       throughout detection/pipeline config.</li>
  * </ul>
  *
  * <h2>Threading</h2>
@@ -41,6 +48,14 @@ public interface ModelRegistryPort {
      * @return all known model references
      */
     List<ModelRef> models();
+
+    /**
+     * The model reference currently promoted/live (the registry's default), or empty when the
+     * registry has no model.
+     *
+     * @return the active model reference, or {@link Optional#empty()} if none
+     */
+    Optional<ModelRef> active();
 
     /**
      * Promotes the given model reference (e.g. to production).

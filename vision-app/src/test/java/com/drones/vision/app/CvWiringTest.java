@@ -4,11 +4,14 @@ import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Context test for the <em>default</em> {@code vision.cv.*} configuration (no override, per
@@ -36,6 +39,9 @@ class CvWiringTest {
     @Autowired
     private EventPublisherPort eventPublisherPort;
 
+    @Autowired
+    private ApplicationContext applicationContext;
+
     @Test
     void defaultConfigurationKeepsNoopDetectionPort() {
         assertInstanceOf(NoopDetectionPort.class, detectionPort);
@@ -44,5 +50,17 @@ class CvWiringTest {
     @Test
     void defaultConfigurationKeepsPlainLoggingEventPublisher() {
         assertInstanceOf(LoggingEventPublisher.class, eventPublisherPort);
+    }
+
+    /**
+     * docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9: with CV disabled (and {@code
+     * vision.training.enabled} left at its default {@code false} too), {@link
+     * WiringConfiguration#cvGrpcChannel} isn't built at all — no gRPC channel/executor overhead
+     * beyond today's behavior. See {@link TrainingDisabledWiringTest} for the same assertion from
+     * the training-flag's own perspective.
+     */
+    @Test
+    void defaultConfigurationBuildsNoSharedCvGrpcChannel() {
+        assertTrue(applicationContext.getBeansOfType(ManagedChannel.class).isEmpty());
     }
 }

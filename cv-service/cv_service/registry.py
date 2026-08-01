@@ -126,6 +126,26 @@ class ModelRegistry:
     def default_id(self) -> str:
         return self._default_id
 
+    def promote(self, model_id: str) -> bool:
+        """Re-point the registry default at `model_id` (the "promote" action).
+
+        The roster already routes any request to any known id per-frame;
+        "promotion" only changes which id is the *default* -- the one served
+        when a request names no model (or an unknown one), and the one
+        `ListModels` reports as ``"active"``. Returns ``True`` on success;
+        ``False`` (a no-op) if `model_id` is not a known roster id -- an
+        unknown id is a normal, reported outcome (`Training.PromoteModel`
+        turns it into ``Ack{ok:false}``), not an error. Does NOT force the
+        model to load: like `default_id` at construction, the detector is
+        still built lazily on first use.
+        """
+        with self._lock:
+            if model_id not in self._roster:
+                return False
+            self._default_id = model_id
+        LOGGER.info("registry default promoted to model_id=%r", model_id)
+        return True
+
     def loaded_ids(self) -> list[str]:
         """Ids actually loaded (lazily) so far -- for tests/diagnostics."""
         with self._lock:

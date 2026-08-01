@@ -1,13 +1,19 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
+import com.drones.vision.api.ModelRegistryController;
+import com.drones.vision.application.ModelRegistryService;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.domain.port.out.ModelRegistryPort;
+import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Context test for {@code vision.cv.enabled=true}: asserts {@link WiringConfiguration} resolves
@@ -35,6 +41,15 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
  * either (they only affect wire behavior, asserted directly in adapter-cv-grpc's own {@code
  * GrpcDetectionPortTest}), so a successful context load plus the {@code GrpcDetectionPort}
  * {@code instanceof} check below is the full extent of what this class can observe.
+ *
+ * <p>Also proves the detection-only half of the shared-channel wiring (docs/CV-TRAINING-PLAN.md
+ * §7/§8, Phase 2 T9): with {@code vision.training.enabled} left at its default {@code false},
+ * {@link WiringConfiguration#cvGrpcChannel} is still built (its {@code @ConditionalOnExpression}
+ * matches on {@code vision.cv.enabled} alone), but the model registry controller/service/port stay
+ * entirely absent — a CV-only deployment doesn't accidentally light up the training endpoints. See
+ * {@link TrainingEnabledWiringTest} for the training-only mirror and {@link
+ * CvAndTrainingSharedChannelWiringTest} for the both-enabled case that actually proves the channel
+ * is the <em>same instance</em> both ports consume.
  */
 @SpringBootTest(properties = {
         "vision.publish.enabled=false",
@@ -52,6 +67,12 @@ class CvEnabledWiringTest {
     @Autowired
     private EventPublisherPort eventPublisherPort;
 
+    @Autowired
+    private ManagedChannel cvGrpcChannel;
+
+    @Autowired
+    private ApplicationContext applicationContext;
+
     @Test
     void enabledConfigurationSelectsGrpcDetectionPort() {
         assertInstanceOf(GrpcDetectionPort.class, detectionPort);
@@ -60,5 +81,17 @@ class CvEnabledWiringTest {
     @Test
     void enabledConfigurationWrapsEventPublisherWithSessionCleanupDecorator() {
         assertInstanceOf(DetectionSessionCleanupEventPublisher.class, eventPublisherPort);
+    }
+
+    @Test
+    void cvOnlyConfigurationStillBuildsTheSharedChannel() {
+        assertInstanceOf(ManagedChannel.class, cvGrpcChannel);
+    }
+
+    @Test
+    void cvOnlyConfigurationDoesNotWireTheModelRegistry() {
+        assertTrue(applicationContext.getBeansOfType(ModelRegistryController.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(ModelRegistryService.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(ModelRegistryPort.class).isEmpty());
     }
 }

@@ -73,8 +73,11 @@ import com.drones.vision.domain.port.out.StreamPublisherPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
 import com.drones.vision.domain.port.out.VideoSourcePort;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -84,6 +87,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Wires the framework-free domain/application layer to adapters.
@@ -109,6 +113,14 @@ import java.util.concurrent.ScheduledExecutorService;
  * fallback based on {@link VisionCvProperties}; see {@link #eventPublisherPort}
  * for how the gRPC session's per-stream lifecycle is cleaned up, and how that
  * same bean is further wrapped for the server-push data plane below.
+ *
+ * <p>The CV model registry (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) reuses the exact same
+ * gRPC connection {@code GrpcDetectionPort} makes: {@link #cvGrpcChannel(VisionCvProperties)}
+ * builds one shared {@link ManagedChannel}, present whenever {@link VisionCvProperties#enabled()}
+ * or {@code VisionTrainingProperties#enabled()} is {@code true}, and both {@link #detectionPort}
+ * and {@link TrainingWiringConfiguration}'s {@code modelRegistryPort} bean consume it — so the
+ * platform holds one connection to cv-service, not two independently configured ones. See {@link
+ * #cvGrpcChannel(VisionCvProperties)}'s own javadoc for the shutdown-ownership reasoning.
  *
  * <p>Fleet persistence (docs/MVP2-PLAN.md P-a: {@code CategoryRepositoryPort}/{@code
  * DeviceRepositoryPort}/{@code AssetRepositoryPort}) and history persistence (docs/MVP2-PLAN.md
@@ -410,27 +422,83 @@ public class WiringConfiguration {
     }
 
     /**
+     * HTTP/2 keepalive PING interval for {@link #cvGrpcChannel}, mirroring {@code
+     * GrpcDetectionPort}'s own host/port convenience constructor tuning exactly (see that class's
+     * javadoc, "Threading"/keepalive fields) — duplicated here as a plain constant rather than
+     * referenced, since {@code GrpcDetectionPort.KEEPALIVE_TIME_SECONDS} is package-private to
+     * {@code adapter-cv-grpc} and this task's file scope (docs/CV-TRAINING-PLAN.md §8, T9) is
+     * vision-api/vision-app only.
+     */
+    private static final long CV_KEEPALIVE_TIME_SECONDS = 20;
+
+    /** Mirrors {@code GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS} — see {@link #CV_KEEPALIVE_TIME_SECONDS}. */
+    private static final long CV_KEEPALIVE_TIMEOUT_SECONDS = 5;
+
+    /**
+     * The shared gRPC connection to cv-service (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): one
+     * {@link ManagedChannel} for both {@link #detectionPort}'s {@code GrpcDetectionPort} ({@code
+     * Inference/DetectStream}, the per-frame hot path) and {@link
+     * TrainingWiringConfiguration}'s {@code modelRegistryPort} bean's {@code GrpcModelRegistryPort}
+     * ({@code Training/ListModels}/{@code Training/PromoteModel}, control-plane) — see {@code
+     * GrpcModelRegistryPort}'s own javadoc, "Channel reuse", for why sharing one connection matters
+     * more than independently configuring two.
+     *
+     * <p>Present whenever either consumer needs it: {@link VisionCvProperties#enabled()} (live
+     * detection) <strong>or</strong> {@code VisionTrainingProperties#enabled()} (the model
+     * registry) — so a training-only deployment (detection off) still gets a channel for {@code
+     * GrpcModelRegistryPort}, and a detection-only one (training off) is unaffected. With both off
+     * (the default), no channel is built at all — the opt-in guardrail: no extra gRPC
+     * executor/transport overhead beyond today's behavior. Built with the exact same plaintext +
+     * HTTP/2 keepalive tuning {@code GrpcDetectionPort}'s host/port constructor used to build
+     * internally (see {@link #CV_KEEPALIVE_TIME_SECONDS}).
+     *
+     * <h2>Shutdown ownership</h2>
+     * This bean — not either port — owns the channel's lifecycle ({@code destroyMethod =
+     * "shutdown"}). {@link #detectionPort} disables {@code GrpcDetectionPort}'s own inferred
+     * {@code close()} destroy call via an explicit empty {@code destroyMethod}: left at the
+     * default, Spring's destroy-method inference would call {@code GrpcDetectionPort#close()} at
+     * context shutdown, which unconditionally shuts its channel down (see that class's own
+     * javadoc, "Stream lifecycle") — exactly the shared channel {@code GrpcModelRegistryPort} may
+     * still be using. {@code GrpcModelRegistryPort} itself never had a close method to begin with
+     * (see its own javadoc), so it needs no equivalent guard.
+     */
+    @Bean(destroyMethod = "shutdown")
+    @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false}")
+    public ManagedChannel cvGrpcChannel(VisionCvProperties cvProperties) {
+        return ManagedChannelBuilder.forAddress(cvProperties.host(), cvProperties.port())
+                .usePlaintext()
+                .keepAliveTime(CV_KEEPALIVE_TIME_SECONDS, TimeUnit.SECONDS)
+                .keepAliveTimeout(CV_KEEPALIVE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(true)
+                .build();
+    }
+
+    /**
      * Selects the {@link DetectionPort} implementation per {@link VisionCvProperties#enabled()}
      * (docs/MVP1-PLAN.md §C7 bullet 4): {@code true} wires {@code GrpcDetectionPort}
-     * (adapter-cv-grpc) against {@link VisionCvProperties#host()}/{@link
-     * VisionCvProperties#port()}, with its wire-tuning knobs from {@link
-     * VisionCvProperties#detectWidth()}/{@link VisionCvProperties#jpegQuality()}
+     * (adapter-cv-grpc) against the shared {@link #cvGrpcChannel}, with its wire-tuning knobs from
+     * {@link VisionCvProperties#detectWidth()}/{@link VisionCvProperties#jpegQuality()}
      * (docs/REMOTE-CV-PLAN.md P1 item 5 — e.g. a narrower {@code detectWidth} over a slow VPN
      * link needs no rebuild); {@code false} (the default) keeps today's {@link
-     * NoopDetectionPort}. No explicit {@code destroyMethod} is declared here — {@code @Bean}'s
-     * default {@code "(inferred)"} destroy method already detects and calls a public no-arg
-     * {@code close()}/{@code shutdown()} on whichever concrete type the bean actually is at
-     * shutdown, so {@code GrpcDetectionPort#close()} (which shuts its gRPC channel down) still
-     * runs on context close without needing an explicit name — unlike an <em>explicit</em> {@code
-     * destroyMethod = "close"}, which this Spring version validates eagerly at bean-creation time
-     * and fails hard with {@code BeanDefinitionValidationException} for the branch where the bean
-     * is a {@link NoopDetectionPort} (no such method at all).
+     * NoopDetectionPort}. {@code cvGrpcChannel} is obtained via {@link ObjectProvider} — same
+     * idiom {@link PersistenceWiringConfiguration}'s repository-port beans use for a conditionally
+     * absent bean — and {@code getObject()} is only ever called on the branch where {@link
+     * VisionCvProperties#enabled()} guarantees {@link #cvGrpcChannel}'s own {@code
+     * @ConditionalOnExpression} matches too.
+     *
+     * <p><strong>{@code destroyMethod = ""}, deliberately</strong> — this disables {@code @Bean}'s
+     * default {@code "(inferred)"} destroy-method detection (which would otherwise find and call
+     * {@code GrpcDetectionPort#close()} at context shutdown, unconditionally shutting the
+     * <em>shared</em> channel down — see {@link #cvGrpcChannel}'s own javadoc, "Shutdown
+     * ownership"). An empty string is Spring's own documented way to opt a bean out of destroy
+     * inference entirely, and is safe for the {@link NoopDetectionPort} branch too (which never had
+     * a destroy method to infer in the first place).
      */
-    @Bean
-    public DetectionPort detectionPort(VisionCvProperties cvProperties) {
+    @Bean(destroyMethod = "")
+    public DetectionPort detectionPort(VisionCvProperties cvProperties, ObjectProvider<ManagedChannel> cvGrpcChannel) {
         if (cvProperties.enabled()) {
-            return new GrpcDetectionPort(cvProperties.host(), cvProperties.port(),
-                    cvProperties.detectWidth(), cvProperties.jpegQuality());
+            return new GrpcDetectionPort(cvGrpcChannel.getObject(), cvProperties.detectWidth(),
+                    cvProperties.jpegQuality());
         }
         return new NoopDetectionPort();
     }

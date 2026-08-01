@@ -149,6 +149,32 @@ def test_registry_lazily_constructs_and_caches_detectors():
     assert registry.loaded_ids() == ["a.pt"]
 
 
+def test_registry_promote_changes_default_for_known_id():
+    fake_a = FakeDetector("a.pt")
+    fake_b = FakeDetector("b.pt")
+    registry = ModelRegistry(
+        roster={"a.pt": "a.pt", "b.pt": "b.pt"},
+        default_id="a.pt",
+        detector_factory=_factory_returning({"a.pt": fake_a, "b.pt": fake_b}),
+    )
+
+    assert registry.promote("b.pt") is True
+    assert registry.default_id == "b.pt"
+    # subsequent default resolution now routes to the promoted model.
+    assert registry.default_detector() is fake_b
+    assert registry.resolve("") == [("b.pt", fake_b)]
+
+
+def test_registry_promote_unknown_id_is_a_reported_noop():
+    fake_a = FakeDetector("a.pt")
+    registry = ModelRegistry(
+        roster={"a.pt": "a.pt"}, default_id="a.pt", detector_factory=_factory_returning({"a.pt": fake_a})
+    )
+
+    assert registry.promote("nope.pt") is False
+    assert registry.default_id == "a.pt"  # unchanged
+
+
 def test_registry_roster_property_is_a_copy():
     registry = ModelRegistry(roster={"a.pt": "a.pt"}, default_id="a.pt", detector_factory=_booming_factory)
 

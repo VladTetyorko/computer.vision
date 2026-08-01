@@ -1,0 +1,14 @@
+package com.drones.vision.api.dto;
+
+import com.drones.vision.domain.model.ModelRef;
+
+/**
+ * Request body for {@code POST /api/cv/registry/models/{id}/promote} (docs/CV-TRAINING-PLAN.md
+ * §8) — the {@code id} itself comes from the path; a {@link ModelRef} needs both {@code id} and
+ * {@code version} to resolve one specific model, so {@code version} travels in the body.
+ *
+ * @param version the model version to promote; must not be blank ({@link ModelRef}'s own compact
+ *                constructor check, surfaced as {@code 400} via {@code ApiExceptionHandler})
+ */
+public record PromoteModelRequest(String version) {
+}

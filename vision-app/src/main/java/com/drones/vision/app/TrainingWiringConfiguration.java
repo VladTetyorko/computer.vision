@@ -1,18 +1,23 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
 import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.DefaultDatasetService;
 import com.drones.vision.application.DefaultLabelingService;
+import com.drones.vision.application.DefaultModelRegistryService;
 import com.drones.vision.application.LabelingService;
+import com.drones.vision.application.ModelRegistryService;
 import com.drones.vision.application.StreamService;
 import com.drones.vision.application.TrainingStores;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.DatasetExportPort;
 import com.drones.vision.domain.port.out.DatasetRepositoryPort;
+import com.drones.vision.domain.port.out.ModelRegistryPort;
 import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
+import io.grpc.ManagedChannel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -24,6 +29,20 @@ import java.nio.file.Path;
  * Wires the CV model-improvement training loop (docs/CV-TRAINING-PLAN.md §3, Wave T4) — {@link
  * DatasetService}/{@link LabelingService} plus their {@code adapter-persistence}-backed {@link
  * DatasetExportPort} — behind {@link VisionTrainingProperties#enabled()} (default {@code false}).
+ *
+ * <p>Also wires the model registry control plane (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9):
+ * {@link #modelRegistryPort}/{@link #modelRegistryService} behind {@code ModelRegistryController}
+ * (vision-api, component-scanned), gated by the same {@link VisionTrainingProperties#enabled()}
+ * property. {@link #modelRegistryPort} consumes {@link WiringConfiguration}'s shared {@link
+ * ManagedChannel} bean directly (not via {@link org.springframework.beans.factory.ObjectProvider})
+ * — safe because that channel bean's own {@code @ConditionalOnExpression} matches whenever this
+ * property is {@code true}, the exact same guarantee that lets {@link #trainingStores} below take
+ * its port arguments as plain, unconditional parameters.
+ *
+ * <p>{@code
+ * ModelRegistryPort}'s history: dormant since docs/CV-CONTROL-PLAN.md §D noted "not the dormant
+ * {@code ModelRegistryPort}" for the detection-model roster ({@code CvModelsController}'s static
+ * config-backed picker) — this task is the port's first real wiring.
  *
  * <p>Split into its own {@code @Configuration} class rather than added to {@link
  * WiringConfiguration} — same "split out by concern" precedent as {@link
@@ -98,5 +117,31 @@ public class TrainingWiringConfiguration {
     public LabelingService labelingService(TrainingStores trainingStores, StreamService streamService,
                                             AssetRepositoryPort assetRepositoryPort, AuditTrailPort auditTrailPort) {
         return new DefaultLabelingService(trainingStores, streamService, assetRepositoryPort, auditTrailPort);
+    }
+
+    /**
+     * The CV model registry's gRPC client (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) —
+     * {@code Training/ListModels}/{@code Training/PromoteModel} over {@link WiringConfiguration
+     * #cvGrpcChannel}, the exact same channel {@code GrpcDetectionPort} uses for {@code
+     * Inference/DetectStream} when {@code vision.cv.enabled=true} too (see that bean's own javadoc,
+     * "Shutdown ownership", for why this class never closes it). Behind {@code
+     * ModelRegistryController} (vision-api, component-scanned).
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+    public ModelRegistryPort modelRegistryPort(ManagedChannel cvGrpcChannel) {
+        return new GrpcModelRegistryPort(cvGrpcChannel);
+    }
+
+    /**
+     * Model list/promote (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) behind {@code
+     * ModelRegistryController} (vision-api, component-scanned) — a one-line assembly, mirroring
+     * {@link #datasetService}'s shape.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+    public ModelRegistryService modelRegistryService(ModelRegistryPort modelRegistryPort,
+                                                       AuditTrailPort auditTrailPort) {
+        return new DefaultModelRegistryService(modelRegistryPort, auditTrailPort);
     }
 }

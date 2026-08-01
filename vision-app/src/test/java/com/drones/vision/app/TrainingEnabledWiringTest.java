@@ -1,14 +1,20 @@
 package com.drones.vision.app;
 
+import com.drones.vision.adapter.cvgrpc.GrpcModelRegistryPort;
 import com.drones.vision.adapter.persistence.FilesystemDatasetExport;
 import com.drones.vision.api.DatasetController;
 import com.drones.vision.api.LabelingController;
+import com.drones.vision.api.ModelRegistryController;
 import com.drones.vision.application.DatasetService;
 import com.drones.vision.application.DefaultDatasetService;
 import com.drones.vision.application.DefaultLabelingService;
+import com.drones.vision.application.DefaultModelRegistryService;
 import com.drones.vision.application.LabelingService;
+import com.drones.vision.application.ModelRegistryService;
 import com.drones.vision.application.TrainingStores;
 import com.drones.vision.domain.port.out.DatasetExportPort;
+import com.drones.vision.domain.port.out.ModelRegistryPort;
+import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +43,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  *
  * <p>{@code vision.publish.enabled=false} for the same determinism reasons as {@link
  * CvWiringTest}/{@link AssetWiringTest}.
+ *
+ * <p>Also covers the model registry control plane this class's own {@link
+ * TrainingWiringConfiguration} gained (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): with {@code
+ * vision.cv.enabled} left at its default {@code false} (detection stays off), {@code
+ * vision.training.enabled=true} alone is enough to build {@link WiringConfiguration#cvGrpcChannel}
+ * (its {@code @ConditionalOnExpression} matches on training alone) and resolve {@code
+ * modelRegistryPort}/{@code modelRegistryService}/{@code ModelRegistryController} — proving a
+ * training-only deployment doesn't need detection wired too. See {@link
+ * CvAndTrainingSharedChannelWiringTest} for the both-enabled case that actually proves channel
+ * <em>sharing</em>.
  */
 @SpringBootTest(properties = {"vision.publish.enabled=false", "vision.training.enabled=true"})
 class TrainingEnabledWiringTest {
@@ -67,6 +83,18 @@ class TrainingEnabledWiringTest {
     @Autowired
     private LabelingController labelingController;
 
+    @Autowired
+    private ModelRegistryPort modelRegistryPort;
+
+    @Autowired
+    private ModelRegistryService modelRegistryService;
+
+    @Autowired
+    private ModelRegistryController modelRegistryController;
+
+    @Autowired
+    private ManagedChannel cvGrpcChannel;
+
     @Test
     void datasetServiceResolvesToTheRealImplementation() {
         assertInstanceOf(DefaultDatasetService.class, datasetService);
@@ -91,5 +119,21 @@ class TrainingEnabledWiringTest {
     void datasetAndLabelingControllersBothResolve() {
         assertNotNull(datasetController);
         assertNotNull(labelingController);
+    }
+
+    @Test
+    void modelRegistryPortResolvesToTheGrpcImplementationOverTheSharedChannel() {
+        assertInstanceOf(GrpcModelRegistryPort.class, modelRegistryPort);
+        assertNotNull(cvGrpcChannel);
+    }
+
+    @Test
+    void modelRegistryServiceResolvesToTheRealImplementation() {
+        assertInstanceOf(DefaultModelRegistryService.class, modelRegistryService);
+    }
+
+    @Test
+    void modelRegistryControllerResolves() {
+        assertNotNull(modelRegistryController);
     }
 }

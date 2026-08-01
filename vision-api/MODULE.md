@@ -89,6 +89,8 @@ REST driving adapter: asset-first + device/stream/discovery endpoints over the d
 | LabelingController | PUT | `/api/samples/{id}/annotations` | 200 `SampleResponse` (confirm/correct) | 404 unknown sample, 403 dataset/asset outside scope, 400 unrecognized `status`/annotation `source`, or an annotation label outside the dataset's class vocabulary |
 | LabelingController | POST | `/api/datasets/{id}/export` | 202 `DatasetExportResponse` | 404 unknown dataset, 403 dataset outside scope (exports every `LABELED` sample as a YOLO zip via `DatasetExportPort`; `PENDING`/`DISCARDED` skipped) |
 | LabelingController | GET | `/api/datasets/{id}/export/{exportId}` | 200 `application/zip` bytes | 404 unknown dataset or export id, 403 dataset outside scope (scope-checked via `DatasetService#get`, then the zip resolved directly through `DatasetExportPort` — `LabelingService` has no by-exportId read of its own) |
+| ModelRegistryController | GET | `/api/cv/registry/models` | 200 `RegisteredModelsResponse` (`{models:[{id,version,active}]}}`) | — (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9; gated by `vision.training.enabled`, default `false` — absent entirely when off; unscoped/unaudited read, any authenticated caller may see it, mirroring `CvModelsController`'s own "any caller may read the roster" precedent — **not** the same roster as `GET /api/cv/models`, which is a static, config-backed picker; this one is the dynamic registry sourced live over gRPC, see the controller's own javadoc) |
+| ModelRegistryController | POST | `/api/cv/registry/models/{id}/promote` | 200 `RegisteredModelResponse` (`{id,version,active:true}`) | 403 caller may not manage the organization, 409 cv-service refuses the promotion (unknown model id — rsync the artifact first — or no registry reachable at all), 400 blank `version` (`ModelRef`'s own compact-constructor check) (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9; body `{version}` required — the path `{id}` alone doesn't resolve a `ModelRef`; response is constructed directly from the now-promoted reference rather than re-querying the registry, since `ModelRegistryService#promote` returns `void`) |
 
 `ApiExceptionHandler` (`@RestControllerAdvice`) mapping table (body `{"error","message"}`):
 
@@ -220,6 +222,19 @@ Both `@RestController @ConditionalOnProperty(prefix="vision.training", name="ena
 **Wire shapes** (`com.drones.vision.api.dto`): `CreateDatasetRequest(name, targetCategory?, classes?)` → `toSpec(): DatasetSpec` (absent `classes` defaults `[]`); `DatasetResponse(id, name, targetCategory?, classes, status, createdAt, sampleCounts)` (`@JsonInclude(NON_NULL)` — `targetCategory` genuinely absent when the dataset isn't tied to one category); `DatasetsResponse(datasets:[...])`/`SamplesResponse(samples:[...])` — wrapper objects (not bare arrays), mirroring `CvModelsResponse`'s `{"models":[...]}` shape rather than this codebase's more common bare-`List<T>` list-endpoint convention, per the plan's own distinct `DatasetsResponse`/`SamplesResponse` type names (a judgment call — see this file's own Status/T4 entry). `CaptureSampleRequest(datasetId)` → `toDatasetId()` (blank/malformed → 400). `AnnotationResponse(label, source, box:BoundingBoxResponse)`/`AnnotationRequest(label, source, box:BoundingBoxRequest)` (the latter's `toAnnotation()` matches `source` case-insensitively against `AnnotationSource` names, same `CapabilityParsing`/`SetLifecycleStateRequest` idiom); `BoundingBoxRequest(x, y, width, height)` — the request-side mirror of `BoundingBoxResponse`, new since every other bounding box in this module was response-only until now. `SampleResponse(id, datasetId, streamId, assetId?, capturedAt, width, height, status, labeledBy?, labeledAt?, annotations)` (`@JsonInclude(NON_NULL)` — `assetId`/`labeledBy`/`labeledAt` genuinely absent when unresolved/unreviewed, per this module's own DTO convention; the plan's own frozen-contract JSON example instead shows `labeledBy`/`labeledAt` serialized as literal `null` — a deliberate deviation, flagged in this file's own Status/T4 entry, not a miss). `LabelAnnotationsRequest(status, annotations?)` → `toSpec(): LabelSpec` (`status` matched case-insensitively, `LabelSpec`'s own compact ctor backstops `LABELED`/`DISCARDED`-only; absent `annotations` defaults `[]`). `DatasetExportResponse(datasetId, exportId, exportedAt, classes, sampleCount, sizeBytes, downloadUrl)` — `downloadUrl` (`/api/datasets/<id>/export/<exportId>`) is composed here, not part of the domain `DatasetExport`, since only this module knows its own route.
 
 **Error mapping is entirely `DatasetService`/`LabelingService`'s own exceptions surfacing through `ApiExceptionHandler`** — no controller-side translation beyond the DTO-boundary `IllegalArgumentException`s above: `AccessDeniedException` → 403 (used for *every* out-of-scope case on both controllers, including `DatasetService#get`'s deliberate non-hiding 403); `NoSuchElementException` → 404; `IllegalStateException` → 409 (unused by either controller today — no method here can currently throw it, but the mapping applies uniformly regardless); `IllegalArgumentException` → 400.
+
+### `ModelRegistryController` — CV model registry (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9)
+
+`@RestController @ConditionalOnProperty(prefix="vision.training", name="enabled", havingValue="true")` — same gating property as `DatasetController`/`LabelingController` above, no new flag. Sits behind `ModelRegistryService` (`vision-application`), which itself sits behind `ModelRegistryPort`, wired to `GrpcModelRegistryPort` (adapter-cv-grpc) sharing the same gRPC `ManagedChannel` `GrpcDetectionPort` uses — see vision-app/MODULE.md's "CV inference wiring"/"CV training loop wiring" for the wiring itself; nothing about that sharing is visible from this module, which only ever sees the `ModelRegistryService` interface.
+
+- **`models()`** (`GET /api/cv/registry/models`) takes no `CurrentUser` argument at all — `ModelRegistryService#models()` itself takes no `userId`/`scope` (an unscoped, unaudited read, per that interface's own javadoc, "Scope") — so this is the one training-loop endpoint that doesn't thread the acting user down.
+- **`promote()`** (`POST /api/cv/registry/models/{id}/promote`) builds a `ModelRef` directly from the path `{id}` plus the request body's `version` (`new ModelRef(id, request.version())` — blank either → `IllegalArgumentException` → 400, `ModelRef`'s own compact-constructor check, no controller-side validation needed) and threads `currentUser.userId()`/`currentUser.scope()` into `modelRegistryService.promote(...)`, exactly like `DatasetController#create`. Since `ModelRegistryService#promote` returns `void`, the response is built directly from the reference just promoted (`active` hardcoded `true`) rather than re-querying the registry — see this file's own Status/T9 entry for that judgment call.
+
+**Wire shapes** (`com.drones.vision.api.dto`): `RegisteredModelResponse(id, version, active)` (no `@JsonInclude(NON_NULL)` — every field always present, mirroring `CvModelResponse`'s own "no nullable fields" posture) with a `from(RegisteredModel)` mapper; `RegisteredModelsResponse(models:[...])` — a wrapper object, same `{"models":[...]}` precedent `CvModelsResponse` set; `PromoteModelRequest(version)` — no validation of its own, relying entirely on `ModelRef`'s compact constructor.
+
+**Not the same roster as `CvModelsController`**: that controller's `GET /api/cv/models` is a static, config-backed picker for the Fly cockpit's model dropdown (`cvModelRoster`, a plain `vision-app` bean, deliberately not backed by `ModelRegistryPort` — see that controller's own javadoc). `ModelRegistryController` is the dynamic registry — every model reference cv-service's own `Training/ListModels` RPC actually reports, live — and the one place a model gets promoted.
+
+**Error mapping**: `AccessDeniedException` → 403 (caller may not manage the organization — `promote` only, `models()` never throws); `IllegalStateException` → 409 (cv-service refuses the promotion — an unknown model id, "rsync the artifact first," or no registry reachable at all); `IllegalArgumentException` → 400 (blank `id`/`version`). All three via the pre-existing, unmodified `ApiExceptionHandler`.
 
 ### Auth seams + DTOs (docs/U-AUTH-PLAN.md wave 3)
 
@@ -591,3 +606,36 @@ mirroring `CvModelsResponse`'s own wrapped-list precedent. `SampleResponse`'s nu
 (`assetId`/`labeledBy`/`labeledAt`) are omitted-when-absent (`@JsonInclude(NON_NULL)`, this module's
 own DTO convention) rather than the plan's illustrative JSON example's literal `null`s. Otherwise
 none — endpoint paths, status codes, and DTO field names match the frozen §3 contract exactly.
+
+## docs/CV-TRAINING-PLAN.md Phase 2 T9 done (CV model registry, REST surface)
+
+T9: `ModelRegistryController` plus its `com.drones.vision.api.dto` types (see its own subsection
+above) exposing the already-green `ModelRegistryService`/`DefaultModelRegistryService`
+(`vision-application`) and `GrpcModelRegistryPort` (`adapter-cv-grpc`) layers over HTTP — gated by
+the same `vision.training.enabled` (default `false`) `DatasetController`/`LabelingController`
+already use. The load-bearing half of this task was entirely on the `vision-app` side (the shared
+gRPC channel `GrpcDetectionPort`/`GrpcModelRegistryPort` now both consume, and who owns its
+shutdown) — see vision-app/MODULE.md's own "docs/CV-TRAINING-PLAN.md Phase 2 T9 done" entry for
+that decision record; nothing about it is visible from this module.
+
+New: `ModelRegistryController`, `dto/{RegisteredModelResponse, RegisteredModelsResponse,
+PromoteModelRequest}`. **No change to `ApiExceptionHandler`, `CurrentUser`, `PrincipalResolver`,
+`CvModelsController`, or any pre-existing controller/DTO** — the frozen exception→status mapping
+already covered every case this task needed (`AccessDeniedException`→403,
+`IllegalStateException`→409, `IllegalArgumentException`→400).
+
+New tests: `ModelRegistryControllerTest` (7) — MockMvc standalone setup over a mocked
+`ModelRegistryService`, `ApiExceptionHandler` attached, mirroring `DatasetControllerTest`'s style
+exactly.
+
+`./mvnw -B -pl vision-domain,vision-application,adapters/adapter-cv-grpc install -DskipTests` then
+`./mvnw -B -pl vision-api test -DskipWeb`: **411/411 green** (was 404, +7 — see above). No
+pre-existing test was modified or broken.
+
+**Deviations from the brief / judgment calls**: none against the frozen contract text (the brief
+specified the two routes and their request/response shapes at a high level, not exact field names).
+One judgment call, flagged in the subsection above: `promote`'s 200 response is built directly from
+the just-promoted `ModelRef` (`active: true` hardcoded) rather than re-querying the registry, since
+`ModelRegistryService#promote` returns `void` — cheaper than a round trip, always consistent with
+what just happened, and the one other model whose `active` flag silently flips to `false` in the
+same instant is a non-issue for a client that already knows only one model is ever active.
