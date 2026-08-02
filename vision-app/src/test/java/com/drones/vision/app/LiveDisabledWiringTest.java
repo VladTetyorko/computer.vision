@@ -1,6 +1,6 @@
 package com.drones.vision.app;
 
-import com.drones.vision.api.LiveController;
+import com.drones.vision.api.controller.LiveController;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.devsupport.InMemoryAuditTrail;
 import com.drones.vision.app.devsupport.InMemoryDetectionEventRepository;

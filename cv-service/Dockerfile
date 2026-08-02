@@ -42,15 +42,16 @@ RUN pip install --no-cache-dir --retries 15 --timeout 120 \
     && ./scripts/gen_proto.sh
 
 # Default model: download the PyTorch weights, then export to OpenVINO IR
-# (~2-3x faster CPU inference than plain PyTorch -- see cv_service/inference.py
-# CP-a). `yolo export` writes the IR to `<stem>_openvino_model/` in the
-# current directory (same download-to-cwd behavior as the plain YOLO() load
-# below); CV_MODEL then points at that directory, which `ultralytics.YOLO(...)`
-# loads transparently, same call shape as a `.pt` path.
+# (~2-3x faster CPU inference than plain PyTorch -- see
+# cv_service/inference/detector.py CP-a). `yolo export` writes the IR to
+# `<stem>_openvino_model/` in the current directory (same download-to-cwd
+# behavior as the plain YOLO() load below); CV_MODEL then points at that
+# directory, which `ultralytics.YOLO(...)` loads transparently, same call
+# shape as a `.pt` path.
 #
 # COUPLING (must not drift): an OpenVINO-exported model has a FIXED input
 # size baked in at export time. The `imgsz` passed to `yolo export` below
-# MUST equal the runtime CV_IMGSZ (cv_service/inference.py's DEFAULT_IMGSZ,
+# MUST equal the runtime CV_IMGSZ (cv_service/config.py's DEFAULT_IMGSZ,
 # currently 416) -- if you change one, change both, or inference silently
 # runs against the wrong size. Local/dev (non-Docker) keeps the plain `.pt`
 # weights, which have no such fixed-size constraint.
@@ -65,15 +66,16 @@ RUN python -c "import os; from ultralytics import YOLO; YOLO('yolo11n.pt')" \
     && yolo export model=yolo11n.pt format=openvino imgsz=${CV_IMGSZ} \
     && test -d yolo11n_openvino_model
 ENV CV_MODEL=yolo11n_openvino_model
-# CV_DEVICE selects the explicit inference device (see cv_service/inference.py,
-# DEFAULT_DEVICE) -- left unset here on purpose: this image runs OpenVINO CPU
-# inference, and OpenVINO's own device strings ("CPU"/"GPU"/"AUTO") aren't
-# the same namespace as PyTorch/Ultralytics CUDA device strings ("cuda:0"),
-# so setting one here would be misleading, not just redundant. For a
-# CUDA-capable deployment (plain PyTorch `.pt` weights, not this image --
-# see cv-service/DEPLOY-GPU.md), uncomment and set e.g.:
+# CV_DEVICE selects the explicit inference device (see cv_service/config.py's
+# Settings.device / cv_service/inference/detector.py's YoloDetector) -- left
+# unset here on purpose: this image runs OpenVINO CPU inference, and
+# OpenVINO's own device strings ("CPU"/"GPU"/"AUTO") aren't the same
+# namespace as PyTorch/Ultralytics CUDA device strings ("cuda:0"), so setting
+# one here would be misleading, not just redundant. For a CUDA-capable
+# deployment (plain PyTorch `.pt` weights, not this image -- see
+# cv-service/DEPLOY-GPU.md), uncomment and set e.g.:
 # ENV CV_DEVICE=cuda:0
 
 EXPOSE 50051
 
-CMD ["python", "-m", "cv_service.server"]
+CMD ["python", "-m", "cv_service.grpc.server"]

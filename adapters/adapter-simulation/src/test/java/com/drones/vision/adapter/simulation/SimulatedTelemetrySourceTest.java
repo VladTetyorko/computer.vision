@@ -149,7 +149,7 @@ class SimulatedTelemetrySourceTest {
             // race SimulatedVideoSourceTest tolerates by not asserting on frame #0 specifically), every
             // point on the track must sit ~TRACK_RADIUS_METERS from the configured center.
             double distanceFromCenter = approxDistanceMeters(sample.latitude(), sample.longitude(), 10.0, 20.0);
-            assertEquals(SimulatedTelemetrySource.TRACK_RADIUS_METERS, distanceFromCenter, 5.0);
+            assertEquals(TelemetrySettings.DEFAULT_TRACK_RADIUS_METERS, distanceFromCenter, 5.0);
         } finally {
             source.close(device.id());
         }
@@ -307,7 +307,7 @@ class SimulatedTelemetrySourceTest {
             assertTrue(firstSample.await(5, TimeUnit.SECONDS));
             Telemetry sample = collected.get(0);
             double distanceFromCenter = approxDistanceMeters(sample.latitude(), sample.longitude(), 10.0, 20.0);
-            assertEquals(SimulatedTelemetrySource.TRACK_RADIUS_METERS, distanceFromCenter, 5.0);
+            assertEquals(TelemetrySettings.DEFAULT_TRACK_RADIUS_METERS, distanceFromCenter, 5.0);
         } finally {
             source.close(device.id());
         }
@@ -455,17 +455,17 @@ class SimulatedTelemetrySourceTest {
             for (Telemetry sample : nominal) {
                 FlightState flightState = sample.flightState();
                 assertNotNull(flightState, "every sample must carry a FlightState");
-                assertEquals(SimulatedTelemetrySource.FLIGHT_STATE_FIRMWARE, flightState.firmware());
-                assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_LOITER, flightState.mode());
+                assertEquals(SyntheticFlightState.FLIGHT_STATE_FIRMWARE, flightState.firmware());
+                assertEquals(SyntheticFlightState.FLIGHT_MODE_LOITER, flightState.mode());
                 assertTrue(flightState.armed());
                 assertFalse(flightState.failsafe());
                 assertEquals(3, flightState.gpsFixType());
-                assertTrue(flightState.satellites() >= SimulatedTelemetrySource.NOMINAL_SATELLITES - 1
-                                && flightState.satellites() <= SimulatedTelemetrySource.NOMINAL_SATELLITES + 1,
+                assertTrue(flightState.satellites() >= SyntheticFlightState.NOMINAL_SATELLITES - 1
+                                && flightState.satellites() <= SyntheticFlightState.NOMINAL_SATELLITES + 1,
                         "satellites must stay within +/-1 of the nominal count");
-                assertEquals(SimulatedTelemetrySource.NOMINAL_HDOP, flightState.hdop(), 0.15);
-                assertTrue(flightState.rssiPercent() >= SimulatedTelemetrySource.NOMINAL_RSSI_PERCENT - 5
-                                && flightState.rssiPercent() <= SimulatedTelemetrySource.NOMINAL_RSSI_PERCENT + 5,
+                assertEquals(SyntheticFlightState.NOMINAL_HDOP, flightState.hdop(), 0.15);
+                assertTrue(flightState.rssiPercent() >= SyntheticFlightState.NOMINAL_RSSI_PERCENT - 5
+                                && flightState.rssiPercent() <= SyntheticFlightState.NOMINAL_RSSI_PERCENT + 5,
                         "rssiPercent must stay close to the nominal value");
                 assertTrue(flightState.armingBlockers().isEmpty());
             }
@@ -481,14 +481,14 @@ class SimulatedTelemetrySourceTest {
 
         try {
             List<Telemetry> snapshot =
-                    collectSamples(source.open(device), (int) SimulatedTelemetrySource.STARTUP_DISARMED_TICKS + 10);
+                    collectSamples(source.open(device), (int) SyntheticFlightState.STARTUP_DISARMED_TICKS + 10);
 
             // Same latent subscribe race as above -- look for the disarmed startup state among the
             // earliest observed samples rather than pinning it to sample #0.
             boolean sawDisarmedStartup = snapshot.stream().limit(3).anyMatch(sample -> {
                 FlightState flightState = sample.flightState();
                 return Boolean.FALSE.equals(flightState.armed())
-                        && flightState.armingBlockers().contains(SimulatedTelemetrySource.STARTUP_ARMING_BLOCKER);
+                        && flightState.armingBlockers().contains(SyntheticFlightState.STARTUP_ARMING_BLOCKER);
             });
             assertTrue(sawDisarmedStartup, "expected a disarmed sample with the synthetic arming blocker early on");
 
@@ -522,18 +522,18 @@ class SimulatedTelemetrySourceTest {
                 FlightState flightState = sample.flightState();
                 assertNotNull(flightState);
                 double batteryPercent = sample.batteryPercent();
-                if (batteryPercent < SimulatedTelemetrySource.LAND_BATTERY_PERCENT_THRESHOLD) {
-                    assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_LAND, flightState.mode());
+                if (batteryPercent < SyntheticFlightState.LAND_BATTERY_PERCENT_THRESHOLD) {
+                    assertEquals(SyntheticFlightState.FLIGHT_MODE_LAND, flightState.mode());
                     assertTrue(flightState.failsafe());
                     assertTrue(flightState.armed());
                     sawLand = true;
-                } else if (batteryPercent < SimulatedTelemetrySource.RTL_BATTERY_PERCENT_THRESHOLD) {
-                    assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_RTL, flightState.mode());
+                } else if (batteryPercent < SyntheticFlightState.RTL_BATTERY_PERCENT_THRESHOLD) {
+                    assertEquals(SyntheticFlightState.FLIGHT_MODE_RTL, flightState.mode());
                     assertTrue(flightState.failsafe());
                     assertTrue(flightState.armed());
                     sawRtl = true;
                 } else if (Boolean.TRUE.equals(flightState.armed())) {
-                    assertEquals(SimulatedTelemetrySource.FLIGHT_MODE_LOITER, flightState.mode());
+                    assertEquals(SyntheticFlightState.FLIGHT_MODE_LOITER, flightState.mode());
                     assertFalse(flightState.failsafe());
                 }
             }
@@ -560,8 +560,8 @@ class SimulatedTelemetrySourceTest {
             // The two runs race subscribe() independently, so they may observe different numbers of
             // leading ticks (same latent race as elsewhere in this class) and can't be compared from
             // index 0. But the sample where `armed` first flips to true is, by construction, always
-            // real tick STARTUP_DISARMED_TICKS (flightStateFor only reports armed=false while
-            // n < STARTUP_DISARMED_TICKS) -- an anchor independent of how each run happened to start,
+            // real tick STARTUP_DISARMED_TICKS (SyntheticFlightState.at() only reports armed=false
+            // while n < STARTUP_DISARMED_TICKS) -- an anchor independent of how each run happened to start,
             // so aligning both runs there and comparing from there on directly tests determinism.
             int armedAtA = firstArmedIndex(runA);
             int armedAtB = firstArmedIndex(runB);

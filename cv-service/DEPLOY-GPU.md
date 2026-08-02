@@ -76,7 +76,7 @@ scp orion12l.pt gpu-box:~/vision/cv-service/
 from a third-party repo at build time, rejected as an untrusted-code vector;
 this repo never fetches model weights over the network).
 
-Also copy whichever checkpoint `cv_service/inference.py`'s `DEFAULT_MODEL`
+Also copy whichever checkpoint `cv_service/config.py`'s `DEFAULT_MODEL`
 constant (or your own `CV_MODEL` override) currently names — check that
 constant in the checkout you cloned, since it's a code default and can
 change independently of this doc. If it names a well-known Ultralytics
@@ -92,7 +92,7 @@ routable via `model_id`.
 ## 3. Run
 
 ```bash
-CV_DEVICE=cuda:0 python -m cv_service.server
+CV_DEVICE=cuda:0 python -m cv_service.grpc.server
 ```
 
 Other env knobs (all documented in `cv-service/MODULE.md`'s API surface —
@@ -101,7 +101,7 @@ none of these are new, `CV_DEVICE` is the only one this deployment adds):
 | Var | Purpose | Default |
 |---|---|---|
 | `CV_DEVICE` | Inference device passed to `predict()`. Unset/blank = ultralytics auto-selects (would normally pick CUDA here anyway; set it explicitly so it's *observable* in logs and `nvidia-smi`, not just assumed). | unset (auto) |
-| `CV_MODEL` | Default model id/path if `FrameRequest.model_id` doesn't name a known one. | `yolo11n.pt` |
+| `CV_MODEL` | Default model id/path if `FrameRequest.model_id` doesn't name a known one. | `yolo26n.pt` |
 | `CV_IMGSZ` | Square inference input size in pixels (must be a multiple of 32 by Ultralytics convention). | `416` |
 | `CV_MAX_CONCURRENT_INFERENCES` | Process-wide cap on concurrent `detect()` calls across streams (`InferenceGate`). Raise this on a GPU box once measured — the CPU-tuned default (`min(2, cpu_count // 2)`) is a CPU-contention number, not a GPU one. | `min(2, cpu_count // 2)`, floored at 1 |
 

@@ -1,13 +1,14 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.api.exceptions.ApiExceptionHandler;
-import com.drones.vision.application.GeofenceZoneSpec;
+import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.application.geofence.GeofenceZoneSpec;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.ZoneKind;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import com.drones.vision.api.support.CapabilityParsing;
 
 /**
  * Request body for {@code POST /api/geofences} and {@code PUT /api/geofences/{id}}

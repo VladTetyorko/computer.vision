@@ -59,7 +59,7 @@ class GrpcDatasetUploadPortTest {
         servers.add(server);
         ManagedChannel channel = InProcessChannelBuilder.forName(name).build();
         channels.add(channel);
-        return new GrpcDatasetUploadPort(channel);
+        return new GrpcDatasetUploadPort(channel, GrpcCvSettings.defaults());
     }
 
     @Test
@@ -73,7 +73,7 @@ class GrpcDatasetUploadPortTest {
         // Random (not patterned) bytes so the zip's DEFLATE compression can't shrink it back
         // under one chunk.
         byte[] smallImage = "small-jpeg-bytes".getBytes(StandardCharsets.UTF_8);
-        byte[] bigImage = new byte[GrpcDatasetUploadPort.CHUNK_BYTES * 3 + 12_345];
+        byte[] bigImage = new byte[GrpcCvSettings.CHUNK_BYTES * 3 + 12_345];
         new java.util.Random(42).nextBytes(bigImage);
         List<ExportEntry> entries = List.of(
                 new ExportEntry("frame-001.jpg", smallImage, "0 0.5 0.5 0.2 0.2\n"),
@@ -85,7 +85,7 @@ class GrpcDatasetUploadPortTest {
         assertEquals(1, servicer.callCount.get(), "one RPC per upload() call");
         assertEquals(1, servicer.receivedArchives.size());
         assertTrue(servicer.chunkCount.get() > 1,
-                "the big entry alone should span more than one " + GrpcDatasetUploadPort.CHUNK_BYTES
+                "the big entry alone should span more than one " + GrpcCvSettings.CHUNK_BYTES
                         + "-byte chunk; sent " + servicer.chunkCount.get());
         for (String seenDatasetId : servicer.seenDatasetIds) {
             assertEquals(datasetId.value().toString(), seenDatasetId, "dataset_id must be identical on every chunk");
@@ -143,7 +143,17 @@ class GrpcDatasetUploadPortTest {
 
     @Test
     void constructorRejectsNullChannel() {
-        assertThrows(NullPointerException.class, () -> new GrpcDatasetUploadPort(null));
+        assertThrows(NullPointerException.class, () -> new GrpcDatasetUploadPort(null, GrpcCvSettings.defaults()));
+    }
+
+    @Test
+    void constructorRejectsNullSettings() {
+        ManagedChannel channel = InProcessChannelBuilder.forName(InProcessServerBuilder.generateName()).build();
+        try {
+            assertThrows(NullPointerException.class, () -> new GrpcDatasetUploadPort(channel, null));
+        } finally {
+            channel.shutdownNow();
+        }
     }
 
     @Test

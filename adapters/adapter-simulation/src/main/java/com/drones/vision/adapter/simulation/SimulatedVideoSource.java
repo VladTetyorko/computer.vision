@@ -25,11 +25,12 @@ import java.util.concurrent.Flow;
  * platform is testable and demo-able without a camera or drone attached.
  *
  * <p>Supports {@link StreamDescriptor#protocol()} {@code "sim"}. Recognized
- * {@link StreamDescriptor#options()} keys (all optional):
+ * {@link StreamDescriptor#options()} keys (all optional, falling back to this
+ * instance's {@link VideoSettings} when absent):
  * <ul>
- *   <li>{@code width} — frame width in pixels, default {@value #DEFAULT_WIDTH}</li>
- *   <li>{@code height} — frame height in pixels, default {@value #DEFAULT_HEIGHT}</li>
- *   <li>{@code fps} — target frames per second, default {@value #DEFAULT_FPS}</li>
+ *   <li>{@code width} — frame width in pixels</li>
+ *   <li>{@code height} — frame height in pixels</li>
+ *   <li>{@code fps} — target frames per second</li>
  * </ul>
  *
  * <p>Each {@link #open(StreamId, StreamDescriptor)} call starts a dedicated,
@@ -46,11 +47,27 @@ import java.util.concurrent.Flow;
 public final class SimulatedVideoSource implements VideoSourcePort {
 
     private static final String PROTOCOL = "sim";
-    static final int DEFAULT_WIDTH = 640;
-    static final int DEFAULT_HEIGHT = 480;
-    static final int DEFAULT_FPS = 15;
+
+    private final int defaultWidth;
+    private final int defaultHeight;
+    private final int defaultFps;
 
     private final Map<StreamId, StreamRuntime> runtimes = new ConcurrentHashMap<>();
+
+    /** Uses {@link VideoSettings#defaults()} (640x480 @15fps) — unchanged pre-extraction behavior. */
+    public SimulatedVideoSource() {
+        this(VideoSettings.defaults());
+    }
+
+    /**
+     * @param settings default width/height/fps used whenever a {@link StreamDescriptor}'s own
+     *                 {@code width}/{@code height}/{@code fps} options are absent
+     */
+    public SimulatedVideoSource(VideoSettings settings) {
+        this.defaultWidth = settings.width();
+        this.defaultHeight = settings.height();
+        this.defaultFps = settings.fps();
+    }
 
     @Override
     public boolean supports(StreamDescriptor descriptor) {
@@ -63,9 +80,9 @@ public final class SimulatedVideoSource implements VideoSourcePort {
             throw new IllegalArgumentException(
                     "SimulatedVideoSource does not support descriptor: " + descriptor);
         }
-        int width = intOption(descriptor, "width", DEFAULT_WIDTH);
-        int height = intOption(descriptor, "height", DEFAULT_HEIGHT);
-        int fps = intOption(descriptor, "fps", DEFAULT_FPS);
+        int width = intOption(descriptor, "width", defaultWidth);
+        int height = intOption(descriptor, "height", defaultHeight);
+        int fps = intOption(descriptor, "fps", defaultFps);
 
         StreamRuntime runtime = new StreamRuntime(id, width, height, fps);
         StreamRuntime previous = runtimes.put(id, runtime);

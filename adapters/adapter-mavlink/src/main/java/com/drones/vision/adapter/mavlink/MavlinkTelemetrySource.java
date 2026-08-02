@@ -11,8 +11,10 @@ import io.dronefleet.mavlink.common.CommandAck;
 
 import java.net.DatagramSocket;
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
@@ -76,19 +78,31 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     private static final int MIN_SYSID = 1;
     private static final int MAX_SYSID = 255;
 
-    private static final long DEFAULT_SILENCE_WINDOW_MILLIS = 30_000L;
-
-    private final long silenceWindowMillis;
+    private final String defaultBindHost;
+    private final MavlinkSettings settings;
     private final Map<String, MavlinkSocketHub> hubs = new ConcurrentHashMap<>();
     private final Map<DeviceId, DeviceRuntime> runtimes = new ConcurrentHashMap<>();
 
     public MavlinkTelemetrySource() {
-        this(DEFAULT_SILENCE_WINDOW_MILLIS);
+        this(MavlinkSettings.defaults());
+    }
+
+    /**
+     * @param settings this module's {@code vision.mavlink.*} tunables (docs/LAYERING-REFACTOR-PLAN.md
+     *                 wave F2) — supplies the local bind-host fallback, the unpinned re-election
+     *                 silence window, the shared hub's close-join timeout, and the bounded
+     *                 unclaimed-vehicle registry cap, all threaded into each {@link MavlinkSocketHub}
+     *                 this instance creates.
+     */
+    public MavlinkTelemetrySource(MavlinkSettings settings) {
+        this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.defaultBindHost = settings.bindHost();
     }
 
     /** Test-only hook: a shorter unpinned re-election silence window than the production 30s default. */
     MavlinkTelemetrySource(long silenceWindowMillis) {
-        this.silenceWindowMillis = silenceWindowMillis;
+        this.settings = MavlinkSettings.defaults().withSilenceWindow(Duration.ofMillis(silenceWindowMillis));
+        this.defaultBindHost = settings.bindHost();
     }
 
     @Override
@@ -116,10 +130,10 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         Integer pinnedSysid = pinnedSysidOption(device.stream().options());
 
         SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
-        MavlinkSocketHub.VehicleRegistration[] registrationHolder = new MavlinkSocketHub.VehicleRegistration[1];
+        VehicleRegistration[] registrationHolder = new VehicleRegistration[1];
         hubs.compute(bindKey, (key, existing) -> {
             MavlinkSocketHub hub = existing == null || existing.isClosed()
-                    ? new MavlinkSocketHub(host, port, silenceWindowMillis)
+                    ? new MavlinkSocketHub(host, port, settings)
                     : existing;
             registrationHolder[0] = hub.register(device.id(), pinnedSysid, publisher);
             return hub;
@@ -239,9 +253,9 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         });
     }
 
-    private static String bindHost(URI uri) {
+    private String bindHost(URI uri) {
         String host = uri.getHost();
-        return host == null || host.isBlank() ? DEFAULT_BIND_HOST : host;
+        return host == null || host.isBlank() ? defaultBindHost : host;
     }
 
     /** The key {@link MavlinkSocketHub}s are shared under: one hub per distinct bind address. */
@@ -264,6 +278,6 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /** This device's share of a {@link MavlinkSocketHub}: which hub, and its registration within it. */
-    private record DeviceRuntime(String bindKey, MavlinkSocketHub.VehicleRegistration registration) {
+    private record DeviceRuntime(String bindKey, VehicleRegistration registration) {
     }
 }

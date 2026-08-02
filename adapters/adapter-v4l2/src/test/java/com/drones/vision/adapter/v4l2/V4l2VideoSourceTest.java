@@ -101,4 +101,25 @@ class V4l2VideoSourceTest {
                 () -> source.openAny(null, URI.create("file:/dev/video0"), Map.of()));
         assertThrows(IllegalArgumentException.class, () -> source.openAny(StreamId.random(), null, Map.of()));
     }
+
+    @Test
+    void constructorAcceptsExplicitBufferCapacityAndCloseJoinTimeout() {
+        assertDoesNotThrow(() -> new V4l2VideoSource(1, 1L));
+    }
+
+    @Test
+    void constructorRejectsANonPositiveBufferCapacity() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new V4l2VideoSource(0, V4l2VideoSource.CLOSE_JOIN_TIMEOUT_MILLIS));
+        assertTrue(ex.getMessage().contains("publisherBufferCapacity"),
+                "message should mention publisherBufferCapacity: " + ex.getMessage());
+    }
+
+    @Test
+    void constructorRejectsANonPositiveCloseJoinTimeout() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new V4l2VideoSource(V4l2VideoSource.PUBLISHER_BUFFER_CAPACITY, 0L));
+        assertTrue(ex.getMessage().contains("closeJoinTimeoutMillis"),
+                "message should mention closeJoinTimeoutMillis: " + ex.getMessage());
+    }
 }

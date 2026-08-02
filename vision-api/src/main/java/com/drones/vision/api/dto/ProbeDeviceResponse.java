@@ -1,10 +1,12 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.ProbeResult;
+import com.drones.vision.application.device.ProbeResult;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.Base64;
 import java.util.List;
+import com.drones.vision.api.controller.DeviceProbeController;
+import com.drones.vision.api.support.SnapshotJpegEncoder;
 
 /**
  * Response body for {@code POST /api/devices/probe} — CONTRACT 1 (docs/UX-REWORK-PLAN.md §U-d
@@ -12,7 +14,7 @@ import java.util.List;
  * (differently-shaped) error body without inspecting the HTTP status alone.
  *
  * @param ok                always {@code true} — a failed probe never reaches this type, it
- *                          throws instead (see {@link com.drones.vision.api.DeviceProbeController})
+ *                          throws instead (see {@link com.drones.vision.api.controller.DeviceProbeController})
  * @param widthPx           the grabbed frame's width, in pixels
  * @param heightPx          the grabbed frame's height, in pixels
  * @param codec             best-effort codec label, or absent when not knowable from a single

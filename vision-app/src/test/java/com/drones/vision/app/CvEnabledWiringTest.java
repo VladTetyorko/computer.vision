@@ -1,8 +1,9 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
-import com.drones.vision.api.ModelRegistryController;
-import com.drones.vision.application.ModelRegistryService;
+import com.drones.vision.api.controller.ModelRegistryController;
+import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
+import com.drones.vision.application.training.ModelRegistryService;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;

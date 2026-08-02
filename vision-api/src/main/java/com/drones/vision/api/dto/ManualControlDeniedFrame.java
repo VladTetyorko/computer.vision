@@ -1,5 +1,7 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.api.ws.ManualControlWebSocketHandler;
+
 /**
  * Server&rarr;client {@code /ws/manual-control} frame refusing an {@code engage} request, or
  * flagging a malformed inbound frame (docs/RC-CONTROL-PHASE1-PLAN.md §4).

@@ -1,8 +1,8 @@
 package com.drones.vision.app;
 
-import com.drones.vision.application.AssetService;
-import com.drones.vision.application.AssetSpec;
-import com.drones.vision.application.DeviceRegistration;
+import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.asset.AssetSpec;
+import com.drones.vision.application.device.DeviceRegistration;
 import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetUsage;

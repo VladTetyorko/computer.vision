@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.MarkPatch;
+import com.drones.vision.application.mark.MarkPatch;
 import com.drones.vision.domain.model.MarkKind;
 import com.drones.vision.domain.model.MarkStatus;
 

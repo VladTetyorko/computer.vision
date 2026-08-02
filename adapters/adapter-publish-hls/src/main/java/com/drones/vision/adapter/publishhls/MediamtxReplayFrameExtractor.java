@@ -11,6 +11,7 @@ import org.bytedeco.javacv.Frame;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -52,14 +53,15 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
     private static final System.Logger LOG = System.getLogger(MediamtxReplayFrameExtractor.class.getName());
 
     /**
-     * Window length requested from mediamtx per {@link #frameAt} call. Seeking is mediamtx's job
-     * (see class javadoc); this process only ever decodes the first video frame of a ~1s clip.
+     * Default window length requested from mediamtx per {@link #frameAt} call. Seeking is
+     * mediamtx's job (see class javadoc); this process only ever decodes the first video frame of a
+     * ~1s clip.
      */
     private static final long WINDOW_DURATION_SECONDS = 1L;
 
     /**
-     * Bounds the grabber's I/O (connect + read) so a stalled mediamtx response can't hang a
-     * caller's request thread forever. {@code rw_timeout} is a generic libavformat/AVIOContext
+     * Default bound on the grabber's I/O (connect + read) so a stalled mediamtx response can't hang
+     * a caller's request thread forever. {@code rw_timeout} is a generic libavformat/AVIOContext
      * option — not RTSP-specific — already used for the identical purpose by {@code adapter-rtsp}'s
      * {@code FfmpegVideoSource} against its own RTSP sources; it applies just as well to the plain
      * HTTP fetch this class performs against mediamtx's playback server. 15s, in microseconds.
@@ -67,6 +69,8 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
     static final String READ_TIMEOUT_MICROS = "15000000";
 
     private final URI playbackBase;
+    private final long windowDurationSeconds;
+    private final String readTimeoutMicros;
 
     /**
      * @param playbackBase base URL of mediamtx's playback HTTP server, e.g. {@code
@@ -76,6 +80,17 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
      *                      MediamtxStreamPublisher#playbackUrl}'s own unconfigured-base posture.
      */
     public MediamtxReplayFrameExtractor(URI playbackBase) {
+        this(playbackBase, Duration.ofSeconds(WINDOW_DURATION_SECONDS), Duration.ofMillis(15_000L));
+    }
+
+    /**
+     * @param window      length of the clip window requested from mediamtx per {@link #frameAt}
+     *                    call — {@code vision.publish.replay.window} (docs/LAYERING-REFACTOR-PLAN.md
+     *                    wave F3), replacing this class's own {@link #WINDOW_DURATION_SECONDS} constant
+     * @param readTimeout bounds the grabber's connect+read I/O — {@code vision.publish.replay.read-timeout},
+     *                    replacing this class's own {@link #READ_TIMEOUT_MICROS} constant
+     */
+    public MediamtxReplayFrameExtractor(URI playbackBase, Duration window, Duration readTimeout) {
         // Idempotent, shared with MediamtxStreamPublisher (same package): both classes create
         // FFmpeg objects, so both route through the one native-log-quieting entry point instead
         // of each carrying their own copy — see MediamtxStreamPublisher's own javadoc for why the
@@ -83,6 +98,9 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
         // this one.
         MediamtxStreamPublisher.ensureQuietLogging();
         this.playbackBase = playbackBase;
+        this.windowDurationSeconds = Objects.requireNonNull(window, "window must not be null").toSeconds();
+        this.readTimeoutMicros =
+                Long.toString(Objects.requireNonNull(readTimeout, "readTimeout must not be null").toNanos() / 1000L);
     }
 
     @Override
@@ -93,12 +111,12 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
             return Optional.empty();
         }
 
-        String url = MediamtxPlaybackUrls.getUrl(playbackBase, streamId.value().toString(), at, WINDOW_DURATION_SECONDS);
+        String url = MediamtxPlaybackUrls.getUrl(playbackBase, streamId.value().toString(), at, windowDurationSeconds);
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(url);
         try {
             grabber.setFormat("mp4");
             grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
-            grabber.setOption("rw_timeout", READ_TIMEOUT_MICROS);
+            grabber.setOption("rw_timeout", readTimeoutMicros);
             grabber.start();
 
             // grabImage(), not grab(): grab() also returns audio/data frames, and this class only

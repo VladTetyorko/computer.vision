@@ -1,5 +1,7 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.api.ws.ManualControlWebSocketHandler;
+
 /**
  * One entry of the {@code channelMap} array on the {@code /ws/manual-control} {@code engaged}
  * frame (docs/RC-CONTROL-PHASE1-PLAN.md §4) — which gamepad axis/button drives which RC channel,

@@ -1,7 +1,10 @@
 package com.drones.vision.app;
 
-import com.drones.vision.api.LiveController;
+import com.drones.vision.api.controller.LiveController;
 import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.app.events.LiveUpdateAuditTrail;
+import com.drones.vision.app.events.LiveUpdateDetectionEventRepository;
+import com.drones.vision.app.events.LiveUpdateEventPublisher;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.EventPublisherPort;

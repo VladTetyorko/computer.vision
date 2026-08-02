@@ -6,18 +6,12 @@ import com.drones.vision.domain.model.Telemetry;
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.common.CommandAck;
-import io.dronefleet.mavlink.minimal.Heartbeat;
 
 import java.io.OutputStream;
 import java.net.DatagramSocket;
 import java.net.InetSocketAddress;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -57,7 +51,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       re-elect to a different, still-unclaimed sysid — fixing the pre-I-a "no re-adoption"
  *       gotcha. The check is entirely lazy: there is no timer, only a comparison made against
  *       the current wall clock the next time a message from some other unclaimed sysid arrives
- *       (see {@link #claim}) — no threads beyond the one read loop.</li>
+ *       (see {@link VehicleClaimRegistry#resolve}) — no threads beyond the one read loop.</li>
  *   <li><b>Unclaimed</b> — a sysid heard on this socket that no registration (pinned or unpinned)
  *       currently wants is recorded in a small bounded registry (see {@link
  *       #unclaimedVehicles()}) instead of silently dropped, for docs/DRONE-INFRA-PLAN.md I-b's
@@ -88,38 +82,42 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * #commandTarget(DeviceId)}/{@link #awaitAck}/{@link #cancelAckWait} are called from whatever
  * thread calls {@link MavlinkTelemetrySource#open}/{@code close}/{@code commandTarget}/the flight
  * commander; message routing and claim/re-election decisions happen only on this hub's own
- * dedicated read thread. All mutable state shared between them ({@code registrations}, {@code
- * claimsBySysid}, {@code unclaimed}, {@code ackWaiters}) is guarded by one monitor ({@link
- * #lock}) — no concurrent collections, no volatile fields beyond the socket/thread handles {@link
- * #unregister} must reach from a caller thread to shut down (also read by {@link #socket()} for
- * command TX, for the same reason).
+ * dedicated read thread. All mutable claim/registration state lives in {@link
+ * VehicleClaimRegistry}, guarded by its own monitor; all pending-ack state lives in {@link
+ * CommandAckRegistry}, guarded by a separate monitor — the two never need to be atomic with each
+ * other (docs/LAYERING-REFACTOR-PLAN.md E2 split this hub's original single lock into those two
+ * collaborators' own locks for exactly that reason). This class's own fields are limited to the
+ * socket/thread handles {@link #unregister} must reach from a caller thread to shut down (also
+ * read by {@link #socket()} for command TX, for the same reason).
  *
  * <p>Not a domain/port type — package-private, owned entirely by {@link MavlinkTelemetrySource},
  * the only class that constructs, registers with, or queries one.
  */
 final class MavlinkSocketHub {
 
-    private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 5_000L;
-    static final int MAX_UNCLAIMED_VEHICLES = 32;
-
     private final String bindHost;
     private final int port;
-    private final long silenceWindowMillis;
-
-    private final Object lock = new Object();
-    private final List<VehicleRegistration> registrations = new ArrayList<>();
-    private final Map<Integer, VehicleRegistration> claimsBySysid = new HashMap<>();
-    private final LinkedHashMap<Integer, UnclaimedVehicle> unclaimed = new LinkedHashMap<>();
-    private final Map<AckKey, CompletableFuture<CommandAck>> ackWaiters = new HashMap<>();
+    private final long closeJoinTimeoutMillis;
+    private final VehicleClaimRegistry claimRegistry;
+    private final CommandAckRegistry ackRegistry = new CommandAckRegistry();
 
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private volatile Thread readThread;
     private volatile DatagramSocket socket;
 
-    MavlinkSocketHub(String bindHost, int port, long silenceWindowMillis) {
+    /**
+     * @param settings supplies {@link MavlinkSettings#silenceWindow()} (unpinned re-election
+     *                 window), {@link MavlinkSettings#maxUnclaimedVehicles()} (bounded unclaimed
+     *                 registry cap), and {@link MavlinkSettings#closeJoinTimeout()} (how long
+     *                 {@link #shutdown()} awaits the read thread) — passed as one object rather
+     *                 than three primitives (docs/LAYERING-REFACTOR-PLAN.md §1.3 rule 3), safe
+     *                 since {@link MavlinkSettings} already lives in this same package.
+     */
+    MavlinkSocketHub(String bindHost, int port, MavlinkSettings settings) {
         this.bindHost = bindHost;
         this.port = port;
-        this.silenceWindowMillis = silenceWindowMillis;
+        this.closeJoinTimeoutMillis = settings.closeJoinTimeout().toMillis();
+        this.claimRegistry = new VehicleClaimRegistry(settings.silenceWindow().toMillis(), settings.maxUnclaimedVehicles());
     }
 
     /** Once closed (last registration released, or the read loop hit an unrecoverable error), never reused. */
@@ -134,12 +132,7 @@ final class MavlinkSocketHub {
      */
     VehicleRegistration register(DeviceId deviceId, Integer pinnedSysid, SubmissionPublisher<Telemetry> publisher) {
         VehicleRegistration registration = new VehicleRegistration(deviceId, pinnedSysid, publisher);
-        boolean first;
-        synchronized (lock) {
-            first = registrations.isEmpty();
-            registrations.add(registration);
-        }
-        if (first) {
+        if (claimRegistry.add(registration)) {
             readThread = new Thread(this::runReadLoop, "mavlink-telemetry-hub-" + bindHost + "-" + port);
             readThread.setDaemon(true);
             readThread.start();
@@ -156,25 +149,16 @@ final class MavlinkSocketHub {
      *         this bind address builds a fresh hub
      */
     boolean unregister(VehicleRegistration registration) {
-        int remaining;
-        synchronized (lock) {
-            registrations.remove(registration);
-            if (registration.claimedSysid != null) {
-                claimsBySysid.remove(registration.claimedSysid, registration);
-            }
-            remaining = registrations.size();
-        }
-        if (remaining == 0) {
+        boolean empty = claimRegistry.remove(registration);
+        if (empty) {
             shutdown();
         }
-        return remaining == 0;
+        return empty;
     }
 
     /** Vehicles heard on this socket that no registration currently claims (docs/DRONE-INFRA-PLAN.md I-b). */
     List<UnclaimedVehicle> unclaimedVehicles() {
-        synchronized (lock) {
-            return List.copyOf(unclaimed.values());
-        }
+        return claimRegistry.unclaimedVehicles();
     }
 
     /**
@@ -185,16 +169,7 @@ final class MavlinkSocketHub {
      * #unclaimedVehicles()} already follows).
      */
     List<ClaimedVehicle> claimedVehicles() {
-        synchronized (lock) {
-            List<ClaimedVehicle> result = new ArrayList<>(registrations.size());
-            for (VehicleRegistration r : registrations) {
-                if (r.claimedSysid != null) {
-                    result.add(new ClaimedVehicle(
-                            r.claimedSysid, r.deviceId, r.firmware, r.mavType, Instant.ofEpochMilli(r.lastHeardMillis)));
-                }
-            }
-            return List.copyOf(result);
-        }
+        return claimRegistry.claimedVehicles();
     }
 
     /**
@@ -214,14 +189,7 @@ final class MavlinkSocketHub {
      * opened here, pinned to a sysid never yet heard, or an unpinned claim re-elected away).
      */
     CommandTarget commandTarget(DeviceId deviceId) {
-        synchronized (lock) {
-            for (VehicleRegistration r : registrations) {
-                if (r.deviceId.equals(deviceId) && r.claimedSysid != null) {
-                    return new CommandTarget(r.claimedSysid, r.firmware, r.mavType, r.lastSourceAddress);
-                }
-            }
-            return null;
-        }
+        return claimRegistry.commandTarget(deviceId);
     }
 
     /**
@@ -234,11 +202,7 @@ final class MavlinkSocketHub {
      * finally} block to avoid leaking a waiter nothing will ever complete.
      */
     CompletableFuture<CommandAck> awaitAck(int sysid, int commandId) {
-        CompletableFuture<CommandAck> future = new CompletableFuture<>();
-        synchronized (lock) {
-            ackWaiters.put(new AckKey(sysid, commandId), future);
-        }
-        return future;
+        return ackRegistry.await(sysid, commandId);
     }
 
     /**
@@ -247,9 +211,7 @@ final class MavlinkSocketHub {
      * pending (e.g. this hub shut down first).
      */
     void cancelAckWait(int sysid, int commandId) {
-        synchronized (lock) {
-            ackWaiters.remove(new AckKey(sysid, commandId));
-        }
+        ackRegistry.cancel(sysid, commandId);
     }
 
     private void runReadLoop() {
@@ -277,14 +239,14 @@ final class MavlinkSocketHub {
                 // per TelemetrySourcePort's onError contract (generalized from the single-device
                 // idiom to every registration this hub currently serves).
                 errored = true;
-                for (VehicleRegistration registration : snapshotRegistrations()) {
+                for (VehicleRegistration registration : claimRegistry.snapshot()) {
                     registration.publisher.closeExceptionally(e);
                 }
             }
         } finally {
             closeQuietly(sock);
             if (!errored) {
-                for (VehicleRegistration registration : snapshotRegistrations()) {
+                for (VehicleRegistration registration : claimRegistry.snapshot()) {
                     registration.publisher.close();
                 }
             }
@@ -294,104 +256,21 @@ final class MavlinkSocketHub {
     private void routeMessage(MavlinkMessage<?> message, InetSocketAddress sourceAddress) {
         int sysid = message.getOriginSystemId();
         long now = System.currentTimeMillis();
-        VehicleRegistration owner;
-        CommandAck ack = message.getPayload() instanceof CommandAck a ? a : null;
-        CompletableFuture<CommandAck> ackWaiter = null;
-        synchronized (lock) {
-            owner = claimsBySysid.get(sysid);
-            if (owner != null) {
-                owner.lastHeardMillis = now;
-            } else {
-                owner = claim(sysid, now);
-            }
-            if (owner != null) {
-                owner.lastSourceAddress = sourceAddress;
-                captureHeartbeatInfo(owner, message);
-            } else {
-                recordUnclaimed(sysid, message, now);
-            }
-            if (ack != null) {
-                ackWaiter = ackWaiters.remove(new AckKey(sysid, ack.command().value()));
+
+        VehicleRegistration owner = claimRegistry.resolve(sysid, message, sourceAddress, now);
+
+        if (message.getPayload() instanceof CommandAck ack) {
+            CompletableFuture<CommandAck> ackWaiter = ackRegistry.claimWaiter(sysid, ack);
+            if (ackWaiter != null) {
+                ackWaiter.complete(ack);
             }
         }
-        if (ackWaiter != null) {
-            ackWaiter.complete(ack);
-        }
+
         if (owner != null) {
             Telemetry sample = owner.decoder.accept(message);
             if (sample != null) {
                 owner.publisher.submit(sample);
             }
-        }
-    }
-
-    /**
-     * Must be called while holding {@link #lock}. Refreshes a claimed registration's firmware/
-     * mavType label from a {@code HEARTBEAT} (docs/DRONE-INFRA-PLAN.md I-b: lets {@link
-     * #claimedVehicles()} label a claimed vehicle the same way {@link #recordUnclaimed} already
-     * labels an unclaimed one) — a no-op for every other message type.
-     */
-    private static void captureHeartbeatInfo(VehicleRegistration r, MavlinkMessage<?> message) {
-        if (message.getPayload() instanceof Heartbeat heartbeat) {
-            r.firmware = MavlinkTelemetryDecoder.firmwareLabel(heartbeat.autopilot().value());
-            r.mavType = heartbeat.type().value();
-        }
-    }
-
-    /** Must be called while holding {@link #lock}. Assigns {@code sysid} to a waiting registration, if any. */
-    private VehicleRegistration claim(int sysid, long now) {
-        for (VehicleRegistration r : registrations) {
-            if (r.pinnedSysid != null && r.pinnedSysid == sysid && r.claimedSysid == null) {
-                assignClaim(r, sysid, now);
-                return r;
-            }
-        }
-        for (VehicleRegistration r : registrations) {
-            if (r.pinnedSysid != null) {
-                continue;
-            }
-            if (r.claimedSysid == null) {
-                assignClaim(r, sysid, now);
-                return r;
-            }
-            if (now - r.lastHeardMillis > silenceWindowMillis) {
-                claimsBySysid.remove(r.claimedSysid, r); // re-election: release the stale claim first
-                assignClaim(r, sysid, now);
-                return r;
-            }
-        }
-        return null;
-    }
-
-    /** Must be called while holding {@link #lock}. */
-    private void assignClaim(VehicleRegistration r, int sysid, long now) {
-        r.claimedSysid = sysid;
-        r.lastHeardMillis = now;
-        r.decoder = new MavlinkTelemetryDecoder(r.deviceId); // fresh state -- see class javadoc
-        claimsBySysid.put(sysid, r);
-        unclaimed.remove(sysid);
-    }
-
-    /** Must be called while holding {@link #lock}. */
-    private void recordUnclaimed(int sysid, MavlinkMessage<?> message, long nowMillis) {
-        UnclaimedVehicle previous = unclaimed.remove(sysid); // remove-then-put refreshes recency order
-        String firmware = previous == null ? null : previous.firmware();
-        Integer mavType = previous == null ? null : previous.mavType();
-        if (message.getPayload() instanceof Heartbeat heartbeat) {
-            firmware = MavlinkTelemetryDecoder.firmwareLabel(heartbeat.autopilot().value());
-            mavType = heartbeat.type().value();
-        }
-        if (unclaimed.size() >= MAX_UNCLAIMED_VEHICLES) {
-            Iterator<Integer> oldest = unclaimed.keySet().iterator();
-            oldest.next();
-            oldest.remove();
-        }
-        unclaimed.put(sysid, new UnclaimedVehicle(sysid, firmware, mavType, Instant.ofEpochMilli(nowMillis)));
-    }
-
-    private List<VehicleRegistration> snapshotRegistrations() {
-        synchronized (lock) {
-            return List.copyOf(registrations);
         }
     }
 
@@ -405,7 +284,7 @@ final class MavlinkSocketHub {
         if (thread != null && thread != Thread.currentThread()) {
             thread.interrupt(); // best-effort; a blocked receive() may not respond to this alone
             try {
-                thread.join(CLOSE_JOIN_TIMEOUT_MILLIS);
+                thread.join(closeJoinTimeoutMillis);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -416,30 +295,6 @@ final class MavlinkSocketHub {
     private static void closeQuietly(DatagramSocket socket) {
         if (socket != null && !socket.isClosed()) {
             socket.close();
-        }
-    }
-
-    /** One device's interest in this hub's socket: a possible sysid pin, and the resolved claim/decoder state. */
-    static final class VehicleRegistration {
-        private final DeviceId deviceId;
-        private final Integer pinnedSysid;
-        private final SubmissionPublisher<Telemetry> publisher;
-
-        // Mutated only on the hub's own read thread, always under MavlinkSocketHub#lock; read from a
-        // caller thread only under that same lock (in unregister()/claimedVehicles()) -- see
-        // MavlinkSocketHub's own "Threading" javadoc section for why plain fields (no volatile) are
-        // sufficient here.
-        private Integer claimedSysid;
-        private long lastHeardMillis;
-        private MavlinkTelemetryDecoder decoder;
-        private String firmware; // docs/DRONE-INFRA-PLAN.md I-b -- from the most recent HEARTBEAT, null until one arrives
-        private Integer mavType; // ditto
-        private InetSocketAddress lastSourceAddress; // docs/DRONE-INFRA-PLAN.md I-e Stage 1 -- null until this claim has actually been heard from
-
-        private VehicleRegistration(DeviceId deviceId, Integer pinnedSysid, SubmissionPublisher<Telemetry> publisher) {
-            this.deviceId = deviceId;
-            this.pinnedSysid = pinnedSysid;
-            this.publisher = publisher;
         }
     }
 
@@ -459,9 +314,5 @@ final class MavlinkSocketHub {
      * the unreachable case of a claim with no traffic behind it at all — see {@link #commandTarget}).
      */
     record CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress) {
-    }
-
-    /** Key a pending {@link #awaitAck} waiter is registered/matched under: which vehicle, which command. */
-    private record AckKey(int sysid, int commandId) {
     }
 }

@@ -74,15 +74,19 @@ class GrpcDetectionPortTest {
     }
 
     private GrpcDetectionPort newPort(BindableService service) throws Exception {
-        return newPort(service, GrpcDetectionPort.MAX_DETECT_WIDTH, GrpcDetectionPort.JPEG_QUALITY);
+        return newPort(service, GrpcCvSettings.defaults());
     }
 
     private GrpcDetectionPort newPort(BindableService service, int detectWidth, float jpegQuality) throws Exception {
+        return newPort(service, GrpcCvSettings.defaults().withDetectWidth(detectWidth).withJpegQuality(jpegQuality));
+    }
+
+    private GrpcDetectionPort newPort(BindableService service, GrpcCvSettings settings) throws Exception {
         String name = InProcessServerBuilder.generateName();
         Server server = InProcessServerBuilder.forName(name).addService(service).build().start();
         servers.add(server);
         ManagedChannel channel = InProcessChannelBuilder.forName(name).build();
-        GrpcDetectionPort port = new GrpcDetectionPort(channel, detectWidth, jpegQuality);
+        GrpcDetectionPort port = new GrpcDetectionPort(channel, settings);
         ports.add(port);
         return port;
     }
@@ -180,7 +184,7 @@ class GrpcDetectionPortTest {
                 () -> first.toCompletableFuture().get(1, TimeUnit.SECONDS));
         assertInstanceOf(StatusRuntimeException.class, ex.getCause());
         long elapsedMillis = Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
-        assertTrue(elapsedMillis < TimeUnit.SECONDS.toMillis(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS),
+        assertTrue(elapsedMillis < TimeUnit.SECONDS.toMillis(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS),
                 "onError should fail the future promptly, not via the timeout; took " + elapsedMillis + "ms");
 
         // The dropped stream entry means this next call transparently reopens a fresh gRPC call.
@@ -197,12 +201,12 @@ class GrpcDetectionPortTest {
         CompletionStage<DetectionResult> stage =
                 port.detect(frame(StreamId.random(), 0, PixelFormat.BGR24), PipelineConfig.defaults());
         ExecutionException ex = assertThrows(ExecutionException.class,
-                () -> stage.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+                () -> stage.toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
         assertInstanceOf(TimeoutException.class, ex.getCause());
 
         long elapsedSeconds = Duration.ofNanos(System.nanoTime() - startNanos).toSeconds();
-        assertTrue(elapsedSeconds >= GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS,
-                "expected a timeout after ~" + GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + "s, took " + elapsedSeconds + "s");
+        assertTrue(elapsedSeconds >= GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS,
+                "expected a timeout after ~" + GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + "s, took " + elapsedSeconds + "s");
     }
 
     @Test
@@ -214,13 +218,13 @@ class GrpcDetectionPortTest {
         // RESPONSE_TIMEOUT_SECONDS timeout, with no transport onError ever delivered at all). Whichever
         // way it fails, it must fail -- not hang past this bound.
         int tcpPort = findFreeTcpPort();
-        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort);
+        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort, GrpcCvSettings.defaults());
         ports.add(grpcPort);
 
         CompletionStage<DetectionResult> stage =
                 grpcPort.detect(frame(StreamId.random(), 0, PixelFormat.BGR24), PipelineConfig.defaults());
         assertThrows(ExecutionException.class,
-                () -> stage.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+                () -> stage.toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
     }
 
     @Test
@@ -232,7 +236,7 @@ class GrpcDetectionPortTest {
         // both resolve to 1.64.0, no "version managed from" skew), a real TCP connect failure no
         // longer hits the NoSuchMethodError that used to wedge the channel in CONNECTING forever.
         int tcpPort = findFreeTcpPort();
-        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort);
+        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort, GrpcCvSettings.defaults());
         ports.add(grpcPort);
         StreamId streamId = StreamId.random();
         PipelineConfig config = PipelineConfig.defaults();
@@ -241,7 +245,7 @@ class GrpcDetectionPortTest {
         // response timeout, either is acceptable), not hang.
         CompletionStage<DetectionResult> first = grpcPort.detect(frame(streamId, 0, PixelFormat.BGR24), config);
         assertThrows(ExecutionException.class,
-                () -> first.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 10, TimeUnit.SECONDS));
+                () -> first.toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 10, TimeUnit.SECONDS));
 
         // Now start a real server on that exact port and prove the *same* GrpcDetectionPort/channel
         // recovers, exactly like a cv-service coming up after the laptop already tried to reach it.
@@ -259,7 +263,7 @@ class GrpcDetectionPortTest {
         for (int attempt = 1; attempt <= 10 && recovered == null; attempt++) {
             try {
                 recovered = grpcPort.detect(frame(streamId, attempt, PixelFormat.BGR24), config)
-                        .toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS);
+                        .toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS);
             } catch (ExecutionException e) {
                 lastFailure = e.getCause();
             }
@@ -299,14 +303,14 @@ class GrpcDetectionPortTest {
         SilentThenEchoServicer servicer = new SilentThenEchoServicer();
         Server server = ServerBuilder.forPort(tcpPort).addService(servicer).build().start();
         servers.add(server);
-        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort);
+        GrpcDetectionPort grpcPort = new GrpcDetectionPort("localhost", tcpPort, GrpcCvSettings.defaults());
         ports.add(grpcPort);
         StreamId streamId = StreamId.random();
         PipelineConfig config = PipelineConfig.defaults();
 
         CompletionStage<DetectionResult> first = grpcPort.detect(frame(streamId, 0, PixelFormat.BGR24), config);
         assertThrows(ExecutionException.class,
-                () -> first.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
+                () -> first.toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 5, TimeUnit.SECONDS));
 
         // Emulates StreamPipeline's outage-recovery probes: a handful of attempts with short waits.
         // Before the fix this keeps reusing the same dead session and every attempt fails; after the
@@ -317,7 +321,7 @@ class GrpcDetectionPortTest {
         for (int attempt = 1; attempt <= 3 && recovered == null; attempt++) {
             try {
                 recovered = grpcPort.detect(frame(streamId, attempt, PixelFormat.BGR24), config)
-                        .toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS);
+                        .toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS);
             } catch (ExecutionException e) {
                 lastFailure = e.getCause();
             }
@@ -344,14 +348,14 @@ class GrpcDetectionPortTest {
         CompletionStage<DetectionResult> second = port.detect(frame(streamId, 1, PixelFormat.BGR24), config);
 
         assertThrows(ExecutionException.class,
-                () -> first.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS));
+                () -> first.toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS));
         assertThrows(ExecutionException.class,
-                () -> second.toCompletableFuture().get(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS));
+                () -> second.toCompletableFuture().get(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + 3, TimeUnit.SECONDS));
 
         long secondElapsedMillis = Duration.ofNanos(System.nanoTime() - secondSubmittedNanos).toMillis();
-        assertTrue(secondElapsedMillis < TimeUnit.SECONDS.toMillis(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS),
+        assertTrue(secondElapsedMillis < TimeUnit.SECONDS.toMillis(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS),
                 "sibling frame should fail once the session is torn down, not by waiting out its own "
-                        + GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS + "s timeout; took " + secondElapsedMillis + "ms");
+                        + GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS + "s timeout; took " + secondElapsedMillis + "ms");
 
         // Torn down exactly once despite the timeout/transport-error race (no exception escaped
         // above): the next detect() opens a brand-new call and completes normally.
@@ -447,13 +451,13 @@ class GrpcDetectionPortTest {
         port.detect(frame, PipelineConfig.defaults()).toCompletableFuture().get(5, TimeUnit.SECONDS);
 
         FrameRequest sent = servicer.received.get(0L);
-        int expectedHeight = Math.round((float) height * GrpcDetectionPort.MAX_DETECT_WIDTH / width);
+        int expectedHeight = Math.round((float) height * GrpcCvSettings.MAX_DETECT_WIDTH / width);
         assertEquals(ImageEncoding.IMAGE_ENCODING_JPEG, sent.getEncoding());
-        assertEquals(GrpcDetectionPort.MAX_DETECT_WIDTH, sent.getWidth());
+        assertEquals(GrpcCvSettings.MAX_DETECT_WIDTH, sent.getWidth());
         assertEquals(expectedHeight, sent.getHeight());
 
         BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(sent.getData().toByteArray()));
-        assertEquals(GrpcDetectionPort.MAX_DETECT_WIDTH, decoded.getWidth(), "captured JPEG must decode to the scaled width");
+        assertEquals(GrpcCvSettings.MAX_DETECT_WIDTH, decoded.getWidth(), "captured JPEG must decode to the scaled width");
         assertEquals(expectedHeight, decoded.getHeight(), "captured JPEG must decode to the scaled height");
     }
 
@@ -462,7 +466,7 @@ class GrpcDetectionPortTest {
         CapturingServicer servicer = new CapturingServicer();
         GrpcDetectionPort port = newPort(servicer);
         StreamId streamId = StreamId.random();
-        int width = GrpcDetectionPort.MAX_DETECT_WIDTH; // exactly at the threshold -- not downscaled (only ">" triggers it)
+        int width = GrpcCvSettings.MAX_DETECT_WIDTH; // exactly at the threshold -- not downscaled (only ">" triggers it)
         int height = 480;
         byte[] pixels = new byte[width * height * 3];
         new Random(2).nextBytes(pixels);
@@ -484,7 +488,7 @@ class GrpcDetectionPortTest {
         // the downscale threshold/target width, not just the default MAX_DETECT_WIDTH constant.
         int configuredDetectWidth = 320;
         CapturingServicer servicer = new CapturingServicer();
-        GrpcDetectionPort port = newPort(servicer, configuredDetectWidth, GrpcDetectionPort.JPEG_QUALITY);
+        GrpcDetectionPort port = newPort(servicer, configuredDetectWidth, GrpcCvSettings.JPEG_QUALITY);
         StreamId streamId = StreamId.random();
         int width = 640; // wider than configuredDetectWidth, narrower than the default MAX_DETECT_WIDTH
         int height = 360;
@@ -502,105 +506,31 @@ class GrpcDetectionPortTest {
         assertEquals(expectedHeight, sent.getHeight());
     }
 
-    @Test
-    void constructorRejectsDetectWidthBelowMinimum() {
-        ManagedChannel channel = InProcessChannelBuilder.forName(InProcessServerBuilder.generateName()).build();
-        try {
-            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> new GrpcDetectionPort(channel, GrpcDetectionPort.MIN_DETECT_WIDTH - 1, 0.5f));
-            assertTrue(ex.getMessage().contains("detectWidth"), "message should mention detectWidth: " + ex.getMessage());
-        } finally {
-            channel.shutdownNow();
-        }
-    }
+    // Boundary-rejection tests for detectWidth/jpegQuality (constructorRejectsDetectWidthBelowMinimum,
+    // constructorRejectsNonPositiveJpegQuality, constructorRejectsJpegQualityAboveOne), the keepalive
+    // constant sanity check (keepaliveConstantsAreSaneForAFlakyLink), and
+    // hostPortConstructorWithTuningKnobsDelegatesValidationToCanonicalConstructor moved to
+    // GrpcCvSettingsTest: that record now owns detectWidth/jpegQuality validation and the keepalive
+    // defaults, and a settings object can no longer be constructed invalid in the first place, which
+    // is what the old "host/port ctor delegates validation to the canonical one" test proved -- there
+    // is only one place left to validate. The two "accepts the boundary value" tests below stay here,
+    // proving the *port* still works end-to-end at each boundary once GrpcCvSettings accepts it.
 
     @Test
     void constructorAcceptsDetectWidthAtMinimum() throws Exception {
-        String name = InProcessServerBuilder.generateName();
-        Server server = InProcessServerBuilder.forName(name).addService(new EchoServicer()).build().start();
-        servers.add(server);
-        ManagedChannel channel = InProcessChannelBuilder.forName(name).build();
-        GrpcDetectionPort port = new GrpcDetectionPort(channel, GrpcDetectionPort.MIN_DETECT_WIDTH, 0.5f);
-        ports.add(port);
+        GrpcDetectionPort port = newPort(new EchoServicer(),
+                GrpcCvSettings.defaults().withDetectWidth(GrpcCvSettings.MIN_DETECT_WIDTH));
 
         assertDoesNotThrow(() -> port.detect(frame(StreamId.random(), 0, PixelFormat.JPEG), PipelineConfig.defaults())
                 .toCompletableFuture().get(5, TimeUnit.SECONDS));
-    }
-
-    @Test
-    void constructorRejectsNonPositiveJpegQuality() {
-        ManagedChannel channel = InProcessChannelBuilder.forName(InProcessServerBuilder.generateName()).build();
-        try {
-            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> new GrpcDetectionPort(channel, GrpcDetectionPort.MAX_DETECT_WIDTH, 0f));
-            assertTrue(ex.getMessage().contains("jpegQuality"), "message should mention jpegQuality: " + ex.getMessage());
-        } finally {
-            channel.shutdownNow();
-        }
-    }
-
-    @Test
-    void constructorRejectsJpegQualityAboveOne() {
-        ManagedChannel channel = InProcessChannelBuilder.forName(InProcessServerBuilder.generateName()).build();
-        try {
-            IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> new GrpcDetectionPort(channel, GrpcDetectionPort.MAX_DETECT_WIDTH, 1.01f));
-            assertTrue(ex.getMessage().contains("jpegQuality"), "message should mention jpegQuality: " + ex.getMessage());
-        } finally {
-            channel.shutdownNow();
-        }
     }
 
     @Test
     void constructorAcceptsJpegQualityAtUpperBound() throws Exception {
-        String name = InProcessServerBuilder.generateName();
-        Server server = InProcessServerBuilder.forName(name).addService(new EchoServicer()).build().start();
-        servers.add(server);
-        ManagedChannel channel = InProcessChannelBuilder.forName(name).build();
-        GrpcDetectionPort port = new GrpcDetectionPort(channel, GrpcDetectionPort.MAX_DETECT_WIDTH, 1.0f);
-        ports.add(port);
+        GrpcDetectionPort port = newPort(new EchoServicer(), GrpcCvSettings.defaults().withJpegQuality(1.0f));
 
         assertDoesNotThrow(() -> port.detect(frame(StreamId.random(), 0, PixelFormat.JPEG), PipelineConfig.defaults())
                 .toCompletableFuture().get(5, TimeUnit.SECONDS));
-    }
-
-    @Test
-    void hostPortConstructorWithTuningKnobsDelegatesValidationToCanonicalConstructor() {
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> new GrpcDetectionPort("localhost", 50051, 10, 0.5f));
-        assertTrue(ex.getMessage().contains("detectWidth"), "message should mention detectWidth: " + ex.getMessage());
-    }
-
-    /**
-     * docs/REMOTE-CV-PLAN.md "Transport decisions" P1: HTTP/2 keepalive on a
-     * real-TCP channel must ping often enough (and confirm loss fast enough)
-     * to catch a half-open connection within seconds, not app-level-timeout
-     * later. Actually proving a dropped connection is detected within N
-     * seconds needs a real flaky-network harness (out of unit-test reach,
-     * and exactly what the task calls out as not worth making flaky here) --
-     * this asserts the constants themselves are sane and wired: a timeout
-     * comfortably shorter than the ping interval, and both well under the
-     * per-frame {@link GrpcDetectionPort#RESPONSE_TIMEOUT_SECONDS} response
-     * timeout so keepalive detects loss before the app-level path would. The
-     * real-TCP tests elsewhere in this class (e.g. {@link
-     * #detectRecoversAfterRealConnectFailureOnceServerStarts}) already build
-     * a {@code GrpcDetectionPort} via the host/port constructor these values
-     * are applied on, so a misconfigured {@code ManagedChannelBuilder} call
-     * (e.g. a bad time unit) would fail the whole suite, not just this test.
-     */
-    @Test
-    void keepaliveConstantsAreSaneForAFlakyLink() {
-        assertTrue(GrpcDetectionPort.KEEPALIVE_TIME_SECONDS > 0,
-                "keepalive ping interval must be positive");
-        assertTrue(GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS > 0,
-                "keepalive ack timeout must be positive");
-        assertTrue(GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS < GrpcDetectionPort.KEEPALIVE_TIME_SECONDS,
-                "keepalive ack timeout should be well under the ping interval, not stacked on top of it");
-        assertTrue(GrpcDetectionPort.KEEPALIVE_TIME_SECONDS + GrpcDetectionPort.KEEPALIVE_TIMEOUT_SECONDS
-                        < TimeUnit.MINUTES.toSeconds(1),
-                "a half-open connection should be caught within about a minute, not lingering for many");
-        assertTrue(GrpcDetectionPort.KEEPALIVE_WITHOUT_CALLS,
-                "an idle stream (no in-flight detect() calls) is exactly the case that needs probing");
     }
 
     @Test
@@ -626,9 +556,9 @@ class GrpcDetectionPortTest {
         PipelineConfig config = PipelineConfig.defaults();
 
         // Wide enough to trigger the downscale path, but with far too little data to fill
-        // width*height*3 bytes -- wrapBgr24's bulk ByteBuffer#get(byte[]) throws
-        // BufferUnderflowException, which buildRequest's catch turns into a failed frame stage
-        // *before* any StreamSession is created for this stream.
+        // width*height*3 bytes -- DetectionFrameCodec.wrapBgr24's bulk ByteBuffer#get(byte[]) throws
+        // BufferUnderflowException, which GrpcDetectionPort#detect's catch turns into a failed frame
+        // stage *before* any DetectionStreamSession is created for this stream.
         VideoFrame badFrame = new VideoFrame(streamId, 0, Instant.now().truncatedTo(ChronoUnit.MILLIS),
                 1280, 720, PixelFormat.BGR24, ByteBuffer.wrap(new byte[]{1, 2, 3, 4}));
 
@@ -909,7 +839,7 @@ class GrpcDetectionPortTest {
                         if (racerScheduled.compareAndSet(false, true)) {
                             Thread racer = new Thread(() -> {
                                 try {
-                                    Thread.sleep(TimeUnit.SECONDS.toMillis(GrpcDetectionPort.RESPONSE_TIMEOUT_SECONDS));
+                                    Thread.sleep(TimeUnit.SECONDS.toMillis(GrpcCvSettings.RESPONSE_TIMEOUT_SECONDS));
                                 } catch (InterruptedException e) {
                                     Thread.currentThread().interrupt();
                                     return;

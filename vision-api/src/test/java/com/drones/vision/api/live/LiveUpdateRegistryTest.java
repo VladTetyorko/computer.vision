@@ -2,12 +2,12 @@ package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MarkPayload;
-import com.drones.vision.application.ActiveStream;
-import com.drones.vision.application.AssetService;
-import com.drones.vision.application.AssetStatus;
-import com.drones.vision.application.AssetSummary;
-import com.drones.vision.application.DeviceService;
-import com.drones.vision.application.StreamService;
+import com.drones.vision.application.stream.ActiveStream;
+import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.asset.AssetStatus;
+import com.drones.vision.application.asset.AssetSummary;
+import com.drones.vision.application.device.DeviceService;
+import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.BoundingBox;

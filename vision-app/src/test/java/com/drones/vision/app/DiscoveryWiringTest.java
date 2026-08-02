@@ -1,6 +1,6 @@
 package com.drones.vision.app;
 
-import com.drones.vision.api.SystemNetworkController;
+import com.drones.vision.api.controller.SystemNetworkController;
 import com.drones.vision.domain.port.out.DeviceDiscoveryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

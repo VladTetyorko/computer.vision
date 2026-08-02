@@ -1,8 +1,8 @@
 package com.drones.vision.app;
 
-import com.drones.vision.application.DiscoveryService;
-import com.drones.vision.application.ScanRequest;
-import com.drones.vision.application.ScanResult;
+import com.drones.vision.application.discovery.DiscoveryService;
+import com.drones.vision.application.discovery.DiscoveryScanSpec;
+import com.drones.vision.application.discovery.DiscoveryScanResult;
 import com.drones.vision.domain.port.out.DeviceDiscoveryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,7 +49,7 @@ class DiscoveryDisabledWiringTest {
 
     @Test
     void scanGracefullyReturnsEmptyResultWithNoRegisteredPorts() {
-        ScanResult result = discoveryService.scan(ScanRequest.defaults());
+        DiscoveryScanResult result = discoveryService.scan(DiscoveryScanSpec.defaults());
 
         assertTrue(result.devices().isEmpty());
         assertTrue(result.failedMethods().isEmpty());

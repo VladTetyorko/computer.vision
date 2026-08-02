@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.AssetSpec;
-import com.drones.vision.application.DeviceRegistration;
+import com.drones.vision.application.asset.AssetSpec;
+import com.drones.vision.application.device.DeviceRegistration;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;
 import com.drones.vision.domain.model.DeviceId;
@@ -10,6 +10,7 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import com.drones.vision.api.support.CapabilityParsing;
 
 /**
  * Request body for {@code POST /api/assets}.

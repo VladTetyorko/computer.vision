@@ -1,7 +1,7 @@
 package com.drones.vision.api.config;
 
-import com.drones.vision.api.ManualControlHandshakeInterceptor;
-import com.drones.vision.api.ManualControlWebSocketHandler;
+import com.drones.vision.api.ws.ManualControlHandshakeInterceptor;
+import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;

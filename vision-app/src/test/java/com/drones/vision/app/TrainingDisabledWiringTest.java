@@ -1,15 +1,15 @@
 package com.drones.vision.app;
 
-import com.drones.vision.api.DatasetController;
-import com.drones.vision.api.LabelingController;
-import com.drones.vision.api.ModelRegistryController;
-import com.drones.vision.api.TrainingJobController;
-import com.drones.vision.application.DatasetService;
-import com.drones.vision.application.LabelingService;
-import com.drones.vision.application.ModelRegistryService;
-import com.drones.vision.application.ReplaySources;
-import com.drones.vision.application.TrainingJobService;
-import com.drones.vision.application.TrainingStores;
+import com.drones.vision.api.controller.DatasetController;
+import com.drones.vision.api.controller.LabelingController;
+import com.drones.vision.api.controller.ModelRegistryController;
+import com.drones.vision.api.controller.TrainingJobController;
+import com.drones.vision.application.training.DatasetService;
+import com.drones.vision.application.training.LabelingService;
+import com.drones.vision.application.training.ModelRegistryService;
+import com.drones.vision.application.replay.ReplaySources;
+import com.drones.vision.application.training.TrainingJobService;
+import com.drones.vision.application.training.TrainingStores;
 import com.drones.vision.domain.port.out.DatasetUploadPort;
 import com.drones.vision.domain.port.out.ModelRegistryPort;
 import com.drones.vision.domain.port.out.TrainingPort;

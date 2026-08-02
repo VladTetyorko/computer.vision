@@ -57,7 +57,8 @@ class MavlinkManualControlSenderTest {
 
     @Test
     void constructorRejectsANullTelemetrySource() {
-        assertThrows(NullPointerException.class, () -> new MavlinkManualControlSender(null));
+        assertThrows(NullPointerException.class,
+                () -> new MavlinkManualControlSender(null, MavlinkSettings.Rc.defaults()));
     }
 
     @Test

@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.RegisteredModel;
+import com.drones.vision.application.training.RegisteredModel;
 
 /**
  * Wire representation of one {@link RegisteredModel} row (docs/CV-TRAINING-PLAN.md §8) — a known

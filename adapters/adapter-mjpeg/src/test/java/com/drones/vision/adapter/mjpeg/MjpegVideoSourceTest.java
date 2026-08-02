@@ -20,6 +20,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -230,6 +231,59 @@ class MjpegVideoSourceTest {
         try {
             assertTrue(terminal.await(AWAIT_SECONDS, TimeUnit.SECONDS), "expected a terminal signal within " + AWAIT_SECONDS + "s");
             assertNotNull(errorRef.get(), "an unreachable host must surface as onError");
+        } finally {
+            assertDoesNotThrow(() -> source.close(streamId));
+        }
+    }
+
+    @Test
+    void openFallsBackToTheReadTimeoutFromSettingsWhenNoPerDescriptorOptionIsGiven() throws Exception {
+        // Same unroutable-host rationale as openSignalsOnErrorWhenTheHostIsUnreachable, but with
+        // no "timeout" option in the descriptor at all, so this exercises MjpegSettings.readTimeout()
+        // as the connect-timeout fallback rather than the per-call option override.
+        StreamDescriptor descriptor = new StreamDescriptor("mjpeg", URI.create("http://192.0.2.1:9999/stream"), Map.of());
+        MjpegSettings fastTimeoutSettings = new MjpegSettings(Duration.ofMillis(500L),
+                MjpegSettings.defaults().publisherBufferCapacity(), MjpegSettings.defaults().closeJoinTimeout(),
+                MjpegSettings.Transmit.defaults());
+
+        MjpegVideoSource source = new MjpegVideoSource(fastTimeoutSettings);
+        StreamId streamId = StreamId.random();
+        CountDownLatch terminal = new CountDownLatch(1);
+        AtomicReference<Throwable> errorRef = new AtomicReference<>();
+
+        long start = System.nanoTime();
+        Flow.Publisher<VideoFrame> publisher = source.open(streamId, descriptor);
+        publisher.subscribe(new Flow.Subscriber<>() {
+            @Override
+            public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+            }
+
+            @Override
+            public void onNext(VideoFrame item) {
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                errorRef.set(throwable);
+                terminal.countDown();
+            }
+
+            @Override
+            public void onComplete() {
+                terminal.countDown();
+            }
+        });
+
+        try {
+            // A generous bound (well under the module's own 5s literal default) that would still
+            // fail if the 500ms settings value were silently ignored in favor of the old constant.
+            assertTrue(terminal.await(4, TimeUnit.SECONDS),
+                    "expected the 500ms settings readTimeout to fail fast, not fall back to the 5s default");
+            long elapsedMillis = (System.nanoTime() - start) / 1_000_000L;
+            assertNotNull(errorRef.get(), "an unreachable host must surface as onError");
+            assertTrue(elapsedMillis < 4_000L,
+                    "expected the connect attempt to time out near the 500ms settings value, took " + elapsedMillis + "ms");
         } finally {
             assertDoesNotThrow(() -> source.close(streamId));
         }

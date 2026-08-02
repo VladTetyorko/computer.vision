@@ -83,7 +83,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * release) and is idempotent.
  *
  * <p>Plain class with no framework dependency — instantiated directly by
- * {@code vision-app}'s wiring configuration.
+ * {@code vision-app}'s wiring configuration. The no-arg constructor uses
+ * {@link #PUBLISHER_BUFFER_CAPACITY}/{@link #CLOSE_JOIN_TIMEOUT_MILLIS} as
+ * defaults; the two-arg constructor lets a caller (e.g. {@code vision-app},
+ * bound from {@code vision.v4l2.*} properties) override either. Only two
+ * tunables exist today, so — per {@code docs/LAYERING-REFACTOR-PLAN.md}
+ * §1.3 rule 4 — this class takes them as plain constructor parameters
+ * rather than a settings record.
  */
 public final class V4l2VideoSource implements VideoSourcePort {
 
@@ -95,12 +101,53 @@ public final class V4l2VideoSource implements VideoSourcePort {
     static final String OPTION_FRAMERATE = "framerate";
     static final String OPTION_INPUT_FORMAT = "input_format";
 
-    private static final int PUBLISHER_BUFFER_CAPACITY = 4;
-    private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
+    /**
+     * Default {@code SubmissionPublisher} buffer capacity for every opened
+     * stream's drop-newest backpressure (see class javadoc). Overridable per
+     * instance via the {@code publisherBufferCapacity} constructor parameter
+     * (e.g. {@code vision.v4l2.publisher-buffer-capacity}, vision-app).
+     */
+    static final int PUBLISHER_BUFFER_CAPACITY = 4;
+
+    /**
+     * Default upper bound on how long {@link #close(StreamId)} waits for the
+     * grab thread to join after being interrupted, before giving up and
+     * releasing the grabber anyway. Overridable per instance via the {@code
+     * closeJoinTimeoutMillis} constructor parameter (e.g. {@code
+     * vision.v4l2.close-join-timeout}, vision-app).
+     */
+    static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
 
     private final Map<StreamId, StreamRuntime> runtimes = new ConcurrentHashMap<>();
+    private final int publisherBufferCapacity;
+    private final long closeJoinTimeoutMillis;
 
     public V4l2VideoSource() {
+        this(PUBLISHER_BUFFER_CAPACITY, CLOSE_JOIN_TIMEOUT_MILLIS);
+    }
+
+    /**
+     * Canonical constructor: bring your own buffer capacity / close-join
+     * timeout (see the two fields' javadoc for what each controls).
+     *
+     * @param publisherBufferCapacity per-stream {@code SubmissionPublisher}
+     *                                buffer capacity; must be {@code >= 1}
+     * @param closeJoinTimeoutMillis  how long {@link #close(StreamId)} waits
+     *                                for the grab thread to join; must be
+     *                                {@code > 0}
+     * @throws IllegalArgumentException if either parameter is out of range
+     */
+    public V4l2VideoSource(int publisherBufferCapacity, long closeJoinTimeoutMillis) {
+        if (publisherBufferCapacity < 1) {
+            throw new IllegalArgumentException(
+                    "publisherBufferCapacity must be >= 1, was " + publisherBufferCapacity);
+        }
+        if (closeJoinTimeoutMillis <= 0) {
+            throw new IllegalArgumentException(
+                    "closeJoinTimeoutMillis must be > 0, was " + closeJoinTimeoutMillis);
+        }
+        this.publisherBufferCapacity = publisherBufferCapacity;
+        this.closeJoinTimeoutMillis = closeJoinTimeoutMillis;
         ensureQuietLogging();
     }
 
@@ -162,7 +209,8 @@ public final class V4l2VideoSource implements VideoSourcePort {
             throw new IllegalArgumentException("uri must not be null");
         }
         Map<String, String> effectiveOptions = options == null ? Map.of() : options;
-        StreamRuntime runtime = new StreamRuntime(id, resolveDevicePath(uri), effectiveOptions);
+        StreamRuntime runtime = new StreamRuntime(id, resolveDevicePath(uri), effectiveOptions,
+                publisherBufferCapacity, closeJoinTimeoutMillis);
         StreamRuntime previous = runtimes.put(id, runtime);
         if (previous != null) {
             previous.close(); // defensive: an id must not have two live runtimes
@@ -188,17 +236,20 @@ public final class V4l2VideoSource implements VideoSourcePort {
         private final StreamId streamId;
         private final String devicePath;
         private final Map<String, String> options;
-        private final SubmissionPublisher<VideoFrame> publisher =
-                new SubmissionPublisher<>(ForkJoinPool.commonPool(), PUBLISHER_BUFFER_CAPACITY);
+        private final long closeJoinTimeoutMillis;
+        private final SubmissionPublisher<VideoFrame> publisher;
         private final AtomicLong sequence = new AtomicLong();
         private final AtomicBoolean stopRequested = new AtomicBoolean(false);
         private final AtomicBoolean closed = new AtomicBoolean(false);
         private volatile Thread grabThread;
 
-        StreamRuntime(StreamId streamId, String devicePath, Map<String, String> options) {
+        StreamRuntime(StreamId streamId, String devicePath, Map<String, String> options,
+                int publisherBufferCapacity, long closeJoinTimeoutMillis) {
             this.streamId = streamId;
             this.devicePath = devicePath;
             this.options = options;
+            this.closeJoinTimeoutMillis = closeJoinTimeoutMillis;
+            this.publisher = new SubmissionPublisher<>(ForkJoinPool.commonPool(), publisherBufferCapacity);
         }
 
         void start() {
@@ -271,7 +322,7 @@ public final class V4l2VideoSource implements VideoSourcePort {
                 if (thread != null && thread != Thread.currentThread()) {
                     thread.interrupt(); // best-effort; native grab() may not respond to this
                     try {
-                        thread.join(CLOSE_JOIN_TIMEOUT_MILLIS);
+                        thread.join(closeJoinTimeoutMillis);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }

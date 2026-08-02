@@ -33,8 +33,9 @@ import java.util.function.Consumer;
  * long-lived streaming call — a short (or even a generous fixed) deadline would kill every real
  * job partway through. {@link #startTraining} therefore issues the RPC with no deadline at all and
  * instead relies entirely on the shared channel's own HTTP/2 keepalive tuning ({@link
- * GrpcDetectionPort}'s {@code KEEPALIVE_TIME_SECONDS}/{@code KEEPALIVE_TIMEOUT_SECONDS}/{@code
- * KEEPALIVE_WITHOUT_CALLS}, set on the host/port constructor that builds the shared channel) to
+ * GrpcCvSettings}'s {@code KEEPALIVE_TIME_SECONDS}/{@code KEEPALIVE_TIMEOUT_SECONDS}/{@code
+ * KEEPALIVE_WITHOUT_CALLS}, applied by {@link GrpcDetectionPort}'s host/port constructor that builds
+ * the shared channel) to
  * detect a genuinely dead connection — a real server crash or network partition ends the call via
  * a transport error within roughly one keepalive cycle, while a merely slow epoch never trips a
  * deadline that was never armed.

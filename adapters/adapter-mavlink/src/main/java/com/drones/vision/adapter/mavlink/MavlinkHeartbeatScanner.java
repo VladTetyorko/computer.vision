@@ -107,16 +107,12 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
     private static final Set<String> AIRBORNE_KINDS =
             Set.of("quadcopter", "hexacopter", "octocopter", "tricopter", "helicopter", "fixed-wing");
 
-    /** How many times the hub-borrow path samples the claimed/unclaimed registries across the scan timeout. */
-    private static final int ACTIVE_HUB_POLL_COUNT = 5;
-    private static final long ACTIVE_HUB_MIN_POLL_INTERVAL_MILLIS = 20L;
-
-    /** Self-bind path: {@code SO_TIMEOUT} so the blocking read loop can re-check the deadline without busy-spinning. */
-    private static final long SELF_BIND_MIN_READ_TIMEOUT_MILLIS = 20L;
-    private static final long SELF_BIND_MAX_READ_TIMEOUT_MILLIS = 200L;
-
     private final MavlinkTelemetrySource telemetrySource;
     private final int port;
+    private final int activeHubPollCount;
+    private final long activeHubMinPollIntervalMillis;
+    private final long selfBindMinReadTimeoutMillis;
+    private final long selfBindMaxReadTimeoutMillis;
 
     /**
      * @param telemetrySource the same instance {@code vision-app} wires as the real {@code
@@ -126,11 +122,27 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
      *                        default, 14550); this class makes no assumption about which port it is
      */
     public MavlinkHeartbeatScanner(MavlinkTelemetrySource telemetrySource, int port) {
+        this(telemetrySource, port, MavlinkSettings.Scan.defaults());
+    }
+
+    /**
+     * @param scan this module's {@code vision.mavlink.scan.*} poll/self-bind-timeout budget
+     *             (docs/LAYERING-REFACTOR-PLAN.md wave F2) — replaces this class's own
+     *             {@code ACTIVE_HUB_POLL_COUNT}/{@code ACTIVE_HUB_MIN_POLL_INTERVAL_MILLIS}/
+     *             {@code SELF_BIND_MIN_READ_TIMEOUT_MILLIS}/{@code SELF_BIND_MAX_READ_TIMEOUT_MILLIS}
+     *             constants
+     */
+    public MavlinkHeartbeatScanner(MavlinkTelemetrySource telemetrySource, int port, MavlinkSettings.Scan scan) {
         this.telemetrySource = Objects.requireNonNull(telemetrySource, "telemetrySource must not be null");
+        Objects.requireNonNull(scan, "scan must not be null");
         if (port <= 0 || port > 65_535) {
             throw new IllegalArgumentException("port must be in [1,65535], got " + port);
         }
         this.port = port;
+        this.activeHubPollCount = scan.activeHubPollCount();
+        this.activeHubMinPollIntervalMillis = scan.activeHubMinPollInterval().toMillis();
+        this.selfBindMinReadTimeoutMillis = scan.selfBindMinReadTimeout().toMillis();
+        this.selfBindMaxReadTimeoutMillis = scan.selfBindMaxReadTimeout().toMillis();
     }
 
     @Override
@@ -153,7 +165,7 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
      */
     private List<DiscoveredDevice> scanActiveHub(String bindKey, Duration timeout) {
         long timeoutMillis = Math.max(0L, timeout.toMillis());
-        long intervalMillis = Math.max(ACTIVE_HUB_MIN_POLL_INTERVAL_MILLIS, timeoutMillis / ACTIVE_HUB_POLL_COUNT);
+        long intervalMillis = Math.max(activeHubMinPollIntervalMillis, timeoutMillis / activeHubPollCount);
         long deadlineNanos = System.nanoTime() + timeoutMillis * 1_000_000L;
 
         Map<Integer, MavlinkSocketHub.ClaimedVehicle> claimed = new LinkedHashMap<>();
@@ -197,8 +209,8 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
             socket = new DatagramSocket(null);
             socket.setReuseAddress(true);
             socket.bind(new InetSocketAddress(MavlinkTelemetrySource.DEFAULT_BIND_HOST, port));
-            int readTimeoutMillis = (int) Math.max(SELF_BIND_MIN_READ_TIMEOUT_MILLIS,
-                    Math.min(SELF_BIND_MAX_READ_TIMEOUT_MILLIS, Math.max(1L, timeoutMillis)));
+            int readTimeoutMillis = (int) Math.max(selfBindMinReadTimeoutMillis,
+                    Math.min(selfBindMaxReadTimeoutMillis, Math.max(1L, timeoutMillis)));
             socket.setSoTimeout(readTimeoutMillis);
         } catch (IOException e) {
             LOG.log(System.Logger.Level.WARNING, () -> "MAVLink heartbeat scan could not bind udp://"

@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.TrainingJobView;
+import com.drones.vision.application.training.TrainingJobView;
 
 import java.time.Instant;
 

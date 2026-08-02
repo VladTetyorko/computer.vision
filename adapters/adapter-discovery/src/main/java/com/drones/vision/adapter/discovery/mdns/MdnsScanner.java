@@ -67,49 +67,50 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
 
     private static final Pattern ESP32_HINT = Pattern.compile("esp32|espressif|esp-cam", Pattern.CASE_INSENSITIVE);
 
-    /**
-     * Cushion carved <em>out of</em> the concurrent {@code list()} calls'
-     * window -- not added on top of the requested timeout -- so the browsing
-     * threads have a realistic chance of having finished by the time {@link
-     * #joinQuietly} is asked to wait on them, without the wait itself ever
-     * needing to run past the scan's overall deadline. See {@link
-     * #listWindowMillis(long, long)}.
-     */
-    private static final long JOIN_GRACE_MILLIS = 150L;
-
-    /**
-     * Further cushion carved out of the {@code list()} window, on top of
-     * {@link #JOIN_GRACE_MILLIS}, to absorb scheduling/JIT jitter and any
-     * measurement error in the {@link #createJmDns()} setup-time accounting.
-     */
-    private static final long SAFETY_MARGIN_MILLIS = 50L;
-
-    /**
-     * Floor for the {@code list()} window so an already very tight timeout
-     * (mostly or entirely consumed by {@link #createJmDns()} setup) still
-     * gives the browse a minimal chance to run, rather than a zero/negative
-     * one. {@link #scan(Duration)} still returns by its deadline regardless
-     * -- see {@link #remainingMillis(long)} -- this floor only affects how
-     * long the now-background browsing threads keep running afterward.
-     */
-    private static final long MIN_LIST_WINDOW_MILLIS = 50L;
-
     private final InetAddress bindAddress;
+    private final ScanBudget budget;
 
-    /** Binds jmdns to the platform's default interface/address selection. */
+    /**
+     * Binds jmdns to the platform's default interface/address selection,
+     * using {@link ScanBudget#defaults()}.
+     */
     public MdnsScanner() {
-        this(null);
+        this(null, ScanBudget.defaults());
     }
 
     /**
      * Test seam: binds jmdns to a specific address (e.g. loopback), letting
      * tests exercise real registration/discovery without depending on the
-     * host's real network interfaces.
+     * host's real network interfaces. Uses {@link ScanBudget#defaults()}.
      *
      * @param bindAddress address to bind jmdns to, or {@code null} for the platform default
      */
     public MdnsScanner(InetAddress bindAddress) {
+        this(bindAddress, ScanBudget.defaults());
+    }
+
+    /**
+     * Config seam: binds to the platform's default interface/address
+     * selection but with a caller-supplied {@link ScanBudget} — the shape
+     * {@code vision-app}'s wiring uses once {@code vision.discovery.mdns.*}
+     * is bound (a later wave).
+     *
+     * @param budget timeout-budget cushions; see {@link ScanBudget}
+     */
+    public MdnsScanner(ScanBudget budget) {
+        this(null, budget);
+    }
+
+    /**
+     * Full constructor: both the bind-address test seam and a
+     * caller-supplied {@link ScanBudget}.
+     *
+     * @param bindAddress address to bind jmdns to, or {@code null} for the platform default
+     * @param budget timeout-budget cushions; see {@link ScanBudget}
+     */
+    public MdnsScanner(InetAddress bindAddress, ScanBudget budget) {
         this.bindAddress = bindAddress;
+        this.budget = Objects.requireNonNull(budget, "budget must not be null");
     }
 
     @Override
@@ -186,16 +187,17 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
      * Budgets how long the two concurrent {@code list()} calls should each
      * run for, so that {@code createJmDns()} setup time (already spent by
      * the time this is called, measured against {@code startNanos}) plus
-     * this window plus {@link #JOIN_GRACE_MILLIS} plus {@link
-     * #SAFETY_MARGIN_MILLIS} fits inside {@code timeoutMillis} as a whole --
-     * unlike the pre-fix behaviour, none of that cushion is added <em>on top
-     * of</em> the timeout. Clamped to {@link #MIN_LIST_WINDOW_MILLIS}.
+     * this window plus {@link ScanBudget#joinGrace()} plus {@link
+     * ScanBudget#safetyMargin()} fits inside {@code timeoutMillis} as a
+     * whole -- unlike the pre-fix behaviour, none of that cushion is added
+     * <em>on top of</em> the timeout. Clamped to {@link
+     * ScanBudget#minListWindow()}.
      */
-    private static long listWindowMillis(long startNanos, long timeoutMillis) {
+    private long listWindowMillis(long startNanos, long timeoutMillis) {
         long setupElapsedMillis = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
         long remainingAfterSetupMillis = timeoutMillis - setupElapsedMillis;
-        long budgetedMillis = remainingAfterSetupMillis - JOIN_GRACE_MILLIS - SAFETY_MARGIN_MILLIS;
-        return Math.max(MIN_LIST_WINDOW_MILLIS, budgetedMillis);
+        long budgetedMillis = remainingAfterSetupMillis - budget.joinGraceMillis() - budget.safetyMarginMillis();
+        return Math.max(budget.minListWindowMillis(), budgetedMillis);
     }
 
     /**
@@ -203,7 +205,7 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
      * 1ms: {@link Thread#join(long)} treats {@code 0} as "wait forever",
      * which would defeat the whole point of bounding the wait, and this is
      * what actually keeps {@link #scan(Duration)} inside its overall
-     * deadline even in the {@link #MIN_LIST_WINDOW_MILLIS}-floored edge
+     * deadline even in the {@link ScanBudget#minListWindow()}-floored edge
      * case, since the browsing threads may still be running when this
      * returns.
      */

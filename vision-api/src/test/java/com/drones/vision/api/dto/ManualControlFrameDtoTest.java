@@ -4,13 +4,14 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.util.List;
+import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * (De)serialization of the {@code /ws/manual-control} frame DTOs against the exact JSON shapes
- * docs/RC-CONTROL-PHASE1-PLAN.md §4 freezes. {@link com.drones.vision.api.ManualControlWebSocketHandler}
+ * docs/RC-CONTROL-PHASE1-PLAN.md §4 freezes. {@link com.drones.vision.api.ws.ManualControlWebSocketHandler}
  * itself parses inbound frames via a raw {@code JsonNode} tree rather than these typed request
  * records (a discriminated union needs the {@code "type"} field read before the concrete shape is
  * known — see that class's own javadoc), so {@link ManualControlEngageRequest}/{@link

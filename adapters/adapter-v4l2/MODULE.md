@@ -10,8 +10,8 @@ adapter for real is a real device node (see "v4l2loopback test recipe" below).
 **Depends on:** vision-domain, org.bytedeco:javacv, org.bytedeco:ffmpeg-platform-gpl (same managed
 versions as `adapter-rtsp`: `${javacv.version}`=1.5.10, `${ffmpeg.version}`=6.1.1-1.5.10, already
 pinned in the root pom) · **Used by:** vision-app
-**Build/test:** `./mvnw -B -pl adapters/adapter-v4l2 test` — 19 tests across 3 classes:
-`V4l2VideoSourceTest` 10 (`supports()` matrix + construction/validation, no device I/O),
+**Build/test:** `./mvnw -B -pl adapters/adapter-v4l2 test` — 22 tests across 3 classes:
+`V4l2VideoSourceTest` 13 (`supports()` matrix + construction/validation, no device I/O),
 `V4l2FrameConverterTest` 8 (synthetic-frame unit tests, no device I/O),
 `V4l2LoopbackIntegrationTest` 1 (real-device ingest, assumption-checked — see below). Verified via
 a live run: 0 failures, 0 skipped **in this environment**, because a real, readable `/dev/video0`
@@ -50,6 +50,17 @@ scan never has to choose between them for the same descriptor.
 - `final class V4l2VideoSource implements VideoSourcePort` — supports protocol `"v4l2"` with any
   `file:`-scheme URI. `supports(StreamDescriptor)`, `open(StreamId, StreamDescriptor):
   Flow.Publisher<VideoFrame>`, `close(StreamId)`.
+  - `public V4l2VideoSource()` — defaults (`PUBLISHER_BUFFER_CAPACITY=4`,
+    `CLOSE_JOIN_TIMEOUT_MILLIS=20_000L`).
+  - `public V4l2VideoSource(int publisherBufferCapacity, long closeJoinTimeoutMillis)` — canonical
+    constructor; validates `publisherBufferCapacity >= 1` and `closeJoinTimeoutMillis > 0`
+    (`IllegalArgumentException` otherwise). Only two tunables exist, so per
+    `docs/LAYERING-REFACTOR-PLAN.md` §1.3 rule 4 this class takes them as plain constructor
+    parameters rather than a settings record (the plan itself names `adapter-v4l2` alongside
+    `adapter-overlay`/`adapter-discovery` as a ≤2-tunable module). A later wave (F1, after
+    `vision-app`'s wiring split) adds `VisionV4l2Properties` bound from `vision.v4l2.*` and passes
+    these two through; this module does not depend on that type itself (adapters never import a
+    `Vision*Properties`).
   - package-private test seam: `Flow.Publisher<VideoFrame> openAny(StreamId id, URI uri,
     Map<String,String> options)` — runs the exact production grab loop against any `file:` URI
     naming a device path, skipping the protocol check (mirrors `FfmpegVideoSource`'s own seam).
@@ -62,13 +73,23 @@ scan never has to choose between them for the same descriptor.
     - `input_format` — raw capture pixel format requested from the driver, e.g. `"mjpeg"`,
       `"yuyv422"` — independent of the `BGR24` format this class always decodes *to* before
       publishing (see Conventions).
+
+    `docs/LAYERING-REFACTOR-PLAN.md` §2.2's `vision.v4l2` row also lists
+    `default-video-size`/`default-framerate`/`default-input-format` keys, each documented there as
+    "absent = driver default" — i.e. today's actual behavior above, verbatim. There is no
+    corresponding literal in this class to extract: nothing here falls back to an operator-set
+    default when a descriptor omits an option. Whatever wave wires those three keys will need to
+    decide *where* a configured fallback gets applied (most naturally at the point a
+    `StreamDescriptor`'s options are assembled, e.g. in registration/wiring — not by widening this
+    class's constructor), which is why this E-phase task does not touch them.
   - **No `timeout`/`rw_timeout` option**, unlike `adapter-rtsp`'s `rtsp` protocol — see Gotchas for
     why.
   - nested `private static final class StreamRuntime` — one dedicated platform thread
     (`v4l2-video-<id>`, not virtual — decoding is CPU-bound) per open, running a blocking
     `FFmpegFrameGrabber` loop (format `"v4l2"`, filename = the device path resolved from the
-    descriptor's `file:` URI); feeds a `SubmissionPublisher<VideoFrame>` built with buffer capacity
-    4 and `publisher.offer(frame, (subscriber, dropped) -> true)` for drop-newest backpressure —
+    descriptor's `file:` URI); feeds a `SubmissionPublisher<VideoFrame>` built with the owning
+    `V4l2VideoSource`'s `publisherBufferCapacity` (default 4) and
+    `publisher.offer(frame, (subscriber, dropped) -> true)` for drop-newest backpressure —
     identical shape to `FfmpegVideoSource`'s `StreamRuntime`, minus pacing/looping (neither applies
     to a live local device).
 - `final class V4l2FrameConverter` (package-private, stateless) — `static ByteBuffer
@@ -86,7 +107,8 @@ scan never has to choose between them for the same descriptor.
   and copied via `V4l2FrameConverter.copyBgr24` before being wrapped in an immutable `VideoFrame` —
   the grabber reuses its native image buffers across `grab()` calls, so the raw buffer must never
   be handed out directly (same mandatory-copy rule as `adapter-rtsp`).
-- `close()`: sets `stopRequested`, interrupts the grab thread (best-effort), joins up to 20s,
+- `close()`: sets `stopRequested`, interrupts the grab thread (best-effort), joins up to
+  `closeJoinTimeoutMillis` (default 20s),
   releases the grabber, closes the publisher. Idempotent via `AtomicBoolean closed`.
 - Native FFmpeg log level pinned to `AV_LOG_ERROR` once per JVM (`ensureQuietLogging()`), same
   idiom and same reasoning as `adapter-rtsp`'s `FfmpegVideoSource`/`adapter-publish-hls`'s
@@ -177,10 +199,26 @@ elevation, no udev rule management); a permission-denied device simply fails the
 Fully implemented per docs/MVP2-PLAN.md X-b: `V4l2VideoSource` (RX only, no TX half — see the
 module's own opening paragraph for why), wired into `vision-app`
 (`WiringConfiguration#v4l2VideoSource`, joining `videoSourceRegistry`'s `List<VideoSourcePort>`).
-19 tests, all passing (`./mvnw -B -pl adapters/adapter-v4l2 test`).
+22 tests, all passing (`./mvnw -B -pl adapters/adapter-v4l2 test`).
 
 **Deviation from the brief, corrected in `docs/MVP2-PLAN.md`'s own X-b row**: protocol `"v4l2"`
 with a `file:`-scheme URI (matching `adapter-discovery`'s real `V4l2Scanner` emission), not the
 brief's originally-proposed `"usb"`/`v4l2://` shape — see "Deviation from the plan's brief" above
 for the full writeup and why matching discovery, not the brief's guess, is what actually makes
 "Discover → register → stream" work.
+
+**docs/LAYERING-REFACTOR-PLAN.md E-phase (E1, config-extraction only, no class splits — this
+module was already "Healthy" per the plan's §5.1 table):** `V4l2VideoSource`'s two literals
+(`PUBLISHER_BUFFER_CAPACITY=4`, `CLOSE_JOIN_TIMEOUT_MILLIS=20_000L`) are now validated constructor
+parameters instead of `private static final` constants; the no-arg constructor still uses the
+same two values as defaults, so `vision-app`'s current no-arg
+`WiringConfiguration#v4l2VideoSource` call keeps compiling and behaving identically. No settings
+record: per §1.3 rule 4 the plan itself names `adapter-v4l2` (with `adapter-overlay`/
+`adapter-discovery`) as a ≤2-tunable module that takes plain constructor params instead. The
+plan's `default-video-size`/`default-framerate`/`default-input-format` property keys are
+deliberately **not** implemented by this task — there is no existing literal to extract for them
+(today's behavior is simply "absent = driver default", already true, nothing to change), and
+deciding where a configured fallback would apply is a design question for whichever wave adds
+`VisionV4l2Properties`, not a mechanical extraction. This module is not touched by, and does not
+depend on, that later wave — `vision-app` and `Vision*Properties` remain untouched here, per the
+plan's own rule that adapters never import a `Vision*Properties` type.

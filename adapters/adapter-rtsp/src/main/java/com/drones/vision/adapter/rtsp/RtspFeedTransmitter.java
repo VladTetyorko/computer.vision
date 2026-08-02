@@ -17,7 +17,6 @@ import java.nio.file.Paths;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.bytedeco.ffmpeg.global.avcodec.AV_CODEC_ID_H264;
@@ -60,10 +59,12 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * caller opening the returned descriptor immediately should retry/poll
  * rather than assume instant readiness.
  *
- * <p><b>Real-time pacing:</b> duplicates {@link FfmpegVideoSource}'s
- * timestamp-delta pacing approach (deliberately not shared — see that
- * class's javadoc for the identical rationale) so the file is pushed at its
- * own native frame rate rather than as fast as disk I/O allows.
+ * <p><b>Real-time pacing:</b> shares {@link RealtimePacer} with {@link
+ * FfmpegGrabLoop}'s own {@code file}-scheme pacing (docs/LAYERING-REFACTOR-PLAN.md
+ * §5.1 — the identical timestamp-delta pacing logic was duplicated verbatim
+ * between the two before that extraction) so the file is pushed at its own
+ * native frame rate rather than as fast as disk I/O allows. Sharing is
+ * intra-module, not cross-adapter — both call sites live in this one module.
  *
  * <p><b>Encoder settings</b> (format/codec/preset/tune/pixel format) are
  * deliberately duplicated from {@code adapter-publish-hls}'s {@code
@@ -71,8 +72,8 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * integration test — rather than shared, per {@code CLAUDE.md}'s rule that
  * adapters never depend on each other. The one deviation: frame rate/GOP are
  * derived from the source file's own reported frame rate (falling back to
- * {@value #FALLBACK_FRAME_RATE_FPS} fps if the source doesn't report a
- * usable one) rather than a fixed value, because unlike {@code
+ * {@link FfmpegSettings.Transmit#fallbackFps()} if the source doesn't report
+ * a usable one) rather than a fixed value, because unlike {@code
  * MediamtxStreamPublisher} (which re-encodes an arbitrary, bursty upstream
  * cadence and so pins a nominal rate plus PTS-collision bookkeeping), this
  * class's frames are already paced to the source's real cadence and are
@@ -90,7 +91,11 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * <p>Plain class with no framework dependency — instantiated directly by
  * {@code vision-app}'s wiring configuration, constructor-injected with the
  * RTSP target base (e.g. {@code rtsp://localhost:8554}), the same pattern
- * {@code MediamtxStreamPublisher} uses for its mediamtx base URLs.
+ * {@code MediamtxStreamPublisher} uses for its mediamtx base URLs. Every
+ * environment/tuning literal (encoder settings, timeouts) lives in {@link
+ * FfmpegSettings}, injectable via the {@link #RtspFeedTransmitter(URI,
+ * FfmpegSettings)} constructor — see that record's {@code Transmit} nested
+ * type for this class's own tunables.
  */
 public final class RtspFeedTransmitter implements FeedTransmitterPort {
 
@@ -103,28 +108,31 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
     static final String OPTION_LOOP = "loop";
     static final boolean DEFAULT_LOOP = true; // see class javadoc: opposite default of FfmpegVideoSource, intentionally
 
-    private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
-
-    // -- encoder settings, duplicated from adapter-publish-hls's MediamtxStreamPublisher --
-    // (adapters must not depend on each other per CLAUDE.md; see class javadoc for the one
-    // deviation, frame rate/GOP derived from the source instead of a fixed value).
-    private static final String CONNECT_TIMEOUT_MICROS = "5000000"; // 5s, matches MediamtxStreamPublisher
-    private static final int GOP_SECONDS = 2;
-    static final double FALLBACK_FRAME_RATE_FPS = 15.0; // matches MediamtxStreamPublisher's fixed default
-
     private final URI rtspTargetBase;
+    private final FfmpegSettings settings;
     private final Map<FeedId, FeedRuntime> runtimes = new ConcurrentHashMap<>();
 
     /**
+     * Uses {@link FfmpegSettings#defaults()} — the byte-identical defaults this class always had.
+     *
      * @param rtspTargetBase base RTSP URL to push feeds to, e.g. {@code rtsp://localhost:8554}; must not be {@code null}
      */
     public RtspFeedTransmitter(URI rtspTargetBase) {
+        this(rtspTargetBase, FfmpegSettings.defaults());
+    }
+
+    /**
+     * @param rtspTargetBase base RTSP URL to push feeds to, e.g. {@code rtsp://localhost:8554}; must not be {@code null}
+     * @param settings       encoder/timeout tunables for every feed this instance starts; see {@link FfmpegSettings}
+     */
+    public RtspFeedTransmitter(URI rtspTargetBase, FfmpegSettings settings) {
         // Intra-module reuse, not a cross-adapter dependency: FfmpegVideoSource lives in this
         // same module/package, so its idempotent native-log-quieting guard is shared directly
         // rather than duplicated a third time (the ensureQuietLogging duplication precedent in
         // FfmpegVideoSource/MediamtxStreamPublisher applies across *different* adapter modules).
         FfmpegVideoSource.ensureQuietLogging();
         this.rtspTargetBase = Objects.requireNonNull(rtspTargetBase, "rtspTargetBase must not be null");
+        this.settings = Objects.requireNonNull(settings, "settings must not be null");
     }
 
     @Override
@@ -154,7 +162,7 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
         }
 
         URI targetUri = targetUri(id);
-        FeedRuntime runtime = new FeedRuntime(id, sourcePath, targetUri, spec.options());
+        FeedRuntime runtime = new FeedRuntime(id, sourcePath, targetUri, spec.options(), settings);
         FeedRuntime previous = runtimes.put(id, runtime);
         if (previous != null) {
             previous.close(); // defensive: an id must not have two live feeds
@@ -183,15 +191,18 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
         private final Path sourcePath;
         private final URI targetUri;
         private final boolean loop;
+        private final FfmpegSettings settings;
         private final AtomicBoolean stopRequested = new AtomicBoolean(false);
         private final AtomicBoolean closed = new AtomicBoolean(false);
+        private final RealtimePacer pacer = new RealtimePacer();
         private volatile Thread transmitThread;
 
-        FeedRuntime(FeedId feedId, Path sourcePath, URI targetUri, Map<String, String> options) {
+        FeedRuntime(FeedId feedId, Path sourcePath, URI targetUri, Map<String, String> options, FfmpegSettings settings) {
             this.feedId = feedId;
             this.sourcePath = sourcePath;
             this.targetUri = targetUri;
             this.loop = booleanOption(options, OPTION_LOOP, DEFAULT_LOOP);
+            this.settings = settings;
         }
 
         void start() {
@@ -208,30 +219,25 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
                 grabber.setPixelFormat(avutil.AV_PIX_FMT_BGR24);
                 grabber.start();
 
+                FfmpegSettings.Transmit transmit = settings.transmit();
                 double sourceFrameRate = grabber.getFrameRate();
-                double frameRate = sourceFrameRate > 0 ? sourceFrameRate : FALLBACK_FRAME_RATE_FPS;
+                double frameRate = sourceFrameRate > 0 ? sourceFrameRate : transmit.fallbackFps();
 
                 recorder = new FFmpegFrameRecorder(targetUri.toString(), grabber.getImageWidth(), grabber.getImageHeight());
                 recorder.setFormat("rtsp");
-                recorder.setOption("rtsp_transport", "tcp");
-                recorder.setOption("timeout", CONNECT_TIMEOUT_MICROS);
+                recorder.setOption("rtsp_transport", settings.transport());
+                recorder.setOption("timeout", FfmpegSettings.microsOption(transmit.connectTimeout()));
                 recorder.setVideoCodec(AV_CODEC_ID_H264);
                 recorder.setVideoCodecName("libx264");
-                recorder.setVideoOption("preset", "ultrafast");
-                recorder.setVideoOption("tune", "zerolatency");
+                recorder.setVideoOption("preset", transmit.preset());
+                recorder.setVideoOption("tune", transmit.tune());
                 recorder.setFrameRate(frameRate);
-                recorder.setGopSize((int) Math.round(frameRate * GOP_SECONDS));
+                recorder.setGopSize((int) Math.round(frameRate * transmit.gopSeconds()));
                 recorder.setPixelFormat(AV_PIX_FMT_YUV420P);
                 recorder.start();
 
                 LOG.log(System.Logger.Level.INFO, () -> "Transmitting " + sourcePath + " to " + targetUri);
 
-                // Real-time pacing (duplicated from FfmpegVideoSource, see class javadoc):
-                // -1 means "no previous frame yet" -- the next grabbed frame sets the baseline
-                // without sleeping, whether that is the very first frame or the first frame
-                // after a loop restart.
-                long pacingBaselineTimestampMicros = -1;
-                long pacingBaselineWallNanos = 0;
                 while (!stopRequested.get()) {
                     // grabImage(), not grab(): audio frames' look-ahead timestamps would
                     // stall the pacing sleep (see FfmpegVideoSource's grab loop comment).
@@ -239,19 +245,14 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
                     if (frame == null) {
                         if (loop && !stopRequested.get()) {
                             grabber.restart(); // stop() + start(): reopens the file from the beginning
-                            pacingBaselineTimestampMicros = -1; // reset pacing baseline across the loop restart
+                            pacer.reset(); // reset pacing baseline across the loop restart
                             continue;
                         }
                         break; // end of stream and not looping -- graceful completion
                     }
-                    long timestampMicros = grabber.getTimestamp();
-                    if (pacingBaselineTimestampMicros >= 0) {
-                        long targetDeltaMicros = timestampMicros - pacingBaselineTimestampMicros;
-                        long elapsedMicros = (System.nanoTime() - pacingBaselineWallNanos) / 1_000L;
-                        sleepMicros(targetDeltaMicros - elapsedMicros);
-                    }
-                    pacingBaselineTimestampMicros = timestampMicros;
-                    pacingBaselineWallNanos = System.nanoTime();
+                    // Real-time pacing (RealtimePacer, shared with FfmpegGrabLoop's file-source
+                    // pacing -- see that class's javadoc for the identical rationale).
+                    pacer.paceTo(grabber.getTimestamp());
 
                     if (frame.image == null || frame.image.length == 0) {
                         continue; // audio/data-only frame: nothing to push
@@ -282,7 +283,7 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
                 if (thread != null && thread != Thread.currentThread()) {
                     thread.interrupt(); // best-effort; native grab()/record() may not respond to this
                     try {
-                        thread.join(CLOSE_JOIN_TIMEOUT_MILLIS);
+                        thread.join(settings.closeJoinTimeout().toMillis());
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -315,18 +316,6 @@ public final class RtspFeedTransmitter implements FeedTransmitterPort {
                 grabber.release();
             } catch (Exception ignored) {
                 // best-effort cleanup; nothing more actionable if release fails
-            }
-        }
-
-        /** Sleeps the given microsecond duration; clamps negative/zero to a no-op. */
-        private static void sleepMicros(long micros) {
-            if (micros <= 0) {
-                return;
-            }
-            try {
-                TimeUnit.MICROSECONDS.sleep(micros);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
             }
         }
 

@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.AssetAttention;
+import com.drones.vision.application.asset.AssetAttention;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**

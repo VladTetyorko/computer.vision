@@ -1,6 +1,7 @@
 package com.drones.vision.api.dto;
 
 import java.util.List;
+import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 /**
  * Server&rarr;client {@code /ws/manual-control} frame confirming an {@code engage} request

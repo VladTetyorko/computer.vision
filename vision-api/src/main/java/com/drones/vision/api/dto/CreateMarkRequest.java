@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.api.exceptions.ApiExceptionHandler;
-import com.drones.vision.application.MarkSpec;
+import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.application.mark.MarkSpec;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.MarkKind;
 

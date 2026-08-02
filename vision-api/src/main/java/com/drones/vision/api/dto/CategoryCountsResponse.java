@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.CategoryCounts;
+import com.drones.vision.application.category.CategoryCounts;
 
 /**
  * One row of {@code GET /api/fleet/summary}'s {@code categories} array (docs/MVP3-PLAN.md C-a) —

@@ -53,7 +53,7 @@ Then open [http://localhost:8080](http://localhost:8080) (the Wall tab).
 
 1. **`./mvnw -B package`** builds `vision-app/target/vision-app-*.jar` — both `docker compose`'s `vision-app` image (`./Dockerfile`, repo root) and the host-run alternative below need it built first; this repo doesn't run Maven inside the image.
 2. **`docker compose up -d`** brings up postgres, mediamtx, `cv-service` (real YOLO11n inference), and `vision-app` (`vision.cv.enabled=true`, pointed at `cv-service:50051`). First run builds both `cv-service` (pulls torch/ultralytics — several GB, be patient) and `vision-app` images.
-   - **Host-run alternative** (skip the app/cv-service containers): `docker compose up -d mediamtx` + `cd cv-service && python -m cv_service.server` (own venv, `pip install -e '.[cv]'` first) + `./mvnw spring-boot:run -pl vision-app` — the app's default properties already point at `localhost:8554`/`localhost:18888`/`localhost:50051`, matching this mode.
+   - **Host-run alternative** (skip the app/cv-service containers): `docker compose up -d mediamtx` + `cd cv-service && python -m cv_service.grpc.server` (own venv, `pip install -e '.[cv]'` first) + `./mvnw spring-boot:run -pl vision-app` — the app's default properties already point at `localhost:8554`/`localhost:18888`/`localhost:50051`, matching this mode.
 3. **`scripts/demo.sh <clip>`** creates the demo sources over the REST API and prints every URL to open (Wall/Map/Live, per source) — see the script's own header comment for the full option list and `--stop` to tear everything down again.
 
 ### Picking a clip

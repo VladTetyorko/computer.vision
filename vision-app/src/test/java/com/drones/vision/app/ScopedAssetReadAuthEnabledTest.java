@@ -1,13 +1,13 @@
 package com.drones.vision.app;
 
-import com.drones.vision.application.AssetService;
-import com.drones.vision.application.AssetSpec;
-import com.drones.vision.application.AssignmentService;
-import com.drones.vision.application.DeviceRegistration;
-import com.drones.vision.application.GroupService;
-import com.drones.vision.application.GroupSpec;
-import com.drones.vision.application.UserService;
-import com.drones.vision.application.VisibilityScope;
+import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.asset.AssetSpec;
+import com.drones.vision.application.identity.AssignmentService;
+import com.drones.vision.application.device.DeviceRegistration;
+import com.drones.vision.application.identity.GroupService;
+import com.drones.vision.application.identity.GroupSpec;
+import com.drones.vision.application.identity.UserService;
+import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.CategoryId;

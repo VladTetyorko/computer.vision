@@ -17,6 +17,7 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ForkJoinPool;
@@ -33,9 +34,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>Recognized {@link StreamDescriptor#options()} keys:
  * <ul>
- *   <li>{@code timeout} — connect timeout in milliseconds, default {@value
- *       #DEFAULT_TIMEOUT_MILLIS} (lenient parse: missing/blank/malformed
- *       values fall back to the default, same idiom as {@code adapter-rtsp}).
+ *   <li>{@code timeout} — connect timeout in milliseconds, default {@link
+ *       MjpegSettings#readTimeout()} (lenient parse: missing/blank/malformed
+ *       values fall back to that default, same idiom as {@code adapter-rtsp}).
  *       Only bounds the initial TCP connect — once the streaming GET is
  *       under way, the connection is expected to stay open indefinitely, so
  *       nothing times out the body read itself.</li>
@@ -73,12 +74,17 @@ public final class MjpegVideoSource implements VideoSourcePort {
     private static final String SCHEME_HTTPS = "https";
 
     static final String OPTION_TIMEOUT_MILLIS = "timeout";
-    static final long DEFAULT_TIMEOUT_MILLIS = 5_000L;
 
-    private static final int PUBLISHER_BUFFER_CAPACITY = 4;
-    private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 20_000L;
-
+    private final MjpegSettings settings;
     private final Map<StreamId, StreamRuntime> runtimes = new ConcurrentHashMap<>();
+
+    public MjpegVideoSource() {
+        this(MjpegSettings.defaults());
+    }
+
+    public MjpegVideoSource(MjpegSettings settings) {
+        this.settings = Objects.requireNonNull(settings, "settings must not be null");
+    }
 
     @Override
     public boolean supports(StreamDescriptor descriptor) {
@@ -98,7 +104,7 @@ public final class MjpegVideoSource implements VideoSourcePort {
         if (!supports(descriptor)) {
             throw new IllegalArgumentException("MjpegVideoSource does not support descriptor: " + descriptor);
         }
-        StreamRuntime runtime = new StreamRuntime(id, descriptor.uri(), descriptor.options());
+        StreamRuntime runtime = new StreamRuntime(id, descriptor.uri(), descriptor.options(), settings);
         StreamRuntime previous = runtimes.put(id, runtime);
         if (previous != null) {
             previous.close(); // defensive: an id must not have two live runtimes
@@ -120,8 +126,8 @@ public final class MjpegVideoSource implements VideoSourcePort {
         private final StreamId streamId;
         private final URI uri;
         private final long timeoutMillis;
-        private final SubmissionPublisher<VideoFrame> publisher =
-                new SubmissionPublisher<>(ForkJoinPool.commonPool(), PUBLISHER_BUFFER_CAPACITY);
+        private final long closeJoinTimeoutMillis;
+        private final SubmissionPublisher<VideoFrame> publisher;
         private final AtomicLong sequence = new AtomicLong();
         private final AtomicBoolean stopRequested = new AtomicBoolean(false);
         private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -129,10 +135,12 @@ public final class MjpegVideoSource implements VideoSourcePort {
         /** The live response body, if a connection is currently open; closing it unblocks a pending read. */
         private volatile InputStream currentBody;
 
-        StreamRuntime(StreamId streamId, URI uri, Map<String, String> options) {
+        StreamRuntime(StreamId streamId, URI uri, Map<String, String> options, MjpegSettings settings) {
             this.streamId = streamId;
             this.uri = uri;
-            this.timeoutMillis = longOption(options, OPTION_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_MILLIS);
+            this.timeoutMillis = longOption(options, OPTION_TIMEOUT_MILLIS, settings.readTimeout().toMillis());
+            this.closeJoinTimeoutMillis = settings.closeJoinTimeout().toMillis();
+            this.publisher = new SubmissionPublisher<>(ForkJoinPool.commonPool(), settings.publisherBufferCapacity());
         }
 
         void start() {
@@ -197,7 +205,7 @@ public final class MjpegVideoSource implements VideoSourcePort {
                 if (thread != null && thread != Thread.currentThread()) {
                     thread.interrupt(); // best-effort; a blocked socket read may not respond to this alone
                     try {
-                        thread.join(CLOSE_JOIN_TIMEOUT_MILLIS);
+                        thread.join(closeJoinTimeoutMillis);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }

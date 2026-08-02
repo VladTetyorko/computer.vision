@@ -60,10 +60,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <h2>Release</h2>
  * {@link #release(ManualControlLink)} writes {@link RcChannels#released(int)} for {@value
  * #CHANNEL_COUNT} channels into the mailbox, gives the sender thread a short window to actually
- * transmit that burst ({@value #ENV_RELEASE_FRAMES}, default {@value #DEFAULT_RELEASE_FRAMES}
- * ticks — UDP is lossy, so "a burst" rather than "one frame" is the whole point), then stops the
- * thread with the same CAS/interrupt/bounded-join shutdown every runtime in this module uses.
- * Idempotent: a second {@link #release} on an already-released link is a no-op.
+ * transmit that burst ({@link MavlinkSettings.Rc#releaseFrames()} ticks, default 3 — UDP is lossy,
+ * so "a burst" rather than "one frame" is the whole point), then stops the thread with the same
+ * CAS/interrupt/bounded-join shutdown every runtime in this module uses. Idempotent: a second
+ * {@link #release} on an already-released link is a no-op.
  *
  * <h2>v1 scope: channels 1..8 only</h2>
  * Every frame sets {@code chan1Raw}..{@code chan8Raw} from the mailbox (unset entries — a shorter
@@ -72,15 +72,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ChannelMap.defaultMap()}'s own ch1..8 scope (docs/RC-CONTROL-PHASE1-PLAN.md §5) and sidestepping
  * the ambiguous extension release sentinel for channels 9..18 (the plan's Open Questions §4).
  *
- * <h2>Env knobs</h2>
- * Read once per instance (system property, falling back to the identically-named environment
- * variable), defaulted and clamped, exactly as docs/RC-CONTROL-PHASE1-PLAN.md §3 pins them:
- * <ul>
- *   <li>{@value #ENV_OVERRIDE_HZ} — the fixed send rate, default {@value #DEFAULT_OVERRIDE_HZ}Hz,
- *       clamped to [{@value #MIN_OVERRIDE_HZ}, {@value #MAX_OVERRIDE_HZ}].</li>
- *   <li>{@value #ENV_RELEASE_FRAMES} — release-burst tick count, default {@value
- *       #DEFAULT_RELEASE_FRAMES}, any positive value accepted.</li>
- * </ul>
+ * <h2>Cadence settings (docs/LAYERING-REFACTOR-PLAN.md E2)</h2>
+ * The fixed send rate and release-burst tick count come from a {@link MavlinkSettings.Rc},
+ * defaulted and clamped exactly as docs/RC-CONTROL-PHASE1-PLAN.md §3 pins them: {@code overrideHz}
+ * (default 33Hz, see {@link MavlinkSettings.Rc#defaults()}, clamped to {@code [minOverrideHz,
+ * maxOverrideHz]} — default 10/50 — via {@link MavlinkSettings.Rc#clampedOverrideHz()}) and {@code
+ * releaseFrames} (default 3, any positive value accepted). This replaces the {@code
+ * VISION_RC_OVERRIDE_HZ}/{@code VISION_RC_RELEASE_FRAMES} environment variables this class used to
+ * read directly at construction — the one place in the repo that bypassed Spring config;
+ * {@code vision-app}'s own wiring (a later wave) binds {@code vision.rc.*} into the {@link
+ * MavlinkSettings.Rc} passed here.
  *
  * <p>Plain class with no framework dependency — instantiated directly by {@code vision-app}'s
  * wiring configuration, given the same {@link MavlinkTelemetrySource} instance used for real
@@ -90,16 +91,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class MavlinkManualControlSender implements ManualControlPort {
 
     private static final System.Logger LOG = System.getLogger(MavlinkManualControlSender.class.getName());
-
-    /** System property / env var name for the fixed send rate (Hz), clamped to [{@link #MIN_OVERRIDE_HZ}, {@link #MAX_OVERRIDE_HZ}]. */
-    static final String ENV_OVERRIDE_HZ = "VISION_RC_OVERRIDE_HZ";
-    /** System property / env var name for the release-burst tick count. */
-    static final String ENV_RELEASE_FRAMES = "VISION_RC_RELEASE_FRAMES";
-
-    static final int DEFAULT_OVERRIDE_HZ = 33;
-    static final int MIN_OVERRIDE_HZ = 10;
-    static final int MAX_OVERRIDE_HZ = 50;
-    static final int DEFAULT_RELEASE_FRAMES = 3;
 
     /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/RC-CONTROL-PHASE1-PLAN.md §5). */
     static final int CHANNEL_COUNT = 8;
@@ -113,11 +104,11 @@ public final class MavlinkManualControlSender implements ManualControlPort {
     private final long tickPeriodMillis;
     private final int releaseFrameCount;
 
-    public MavlinkManualControlSender(MavlinkTelemetrySource telemetrySource) {
-        this(telemetrySource, tickPeriodMillisFromEnv(), releaseFrameCountFromEnv());
+    public MavlinkManualControlSender(MavlinkTelemetrySource telemetrySource, MavlinkSettings.Rc rc) {
+        this(telemetrySource, tickPeriodMillisFromRc(Objects.requireNonNull(rc, "rc must not be null")), rc.releaseFrames());
     }
 
-    /** Test-only seam: inject the tick period / release-burst count directly, bypassing env parsing. */
+    /** Test-only seam: inject the tick period / release-burst count directly, bypassing settings. */
     MavlinkManualControlSender(MavlinkTelemetrySource telemetrySource, long tickPeriodMillis, int releaseFrameCount) {
         this.telemetrySource = Objects.requireNonNull(telemetrySource, "telemetrySource must not be null");
         if (tickPeriodMillis < 1) {
@@ -180,39 +171,9 @@ public final class MavlinkManualControlSender implements ManualControlPort {
         return runtime;
     }
 
-    private static long tickPeriodMillisFromEnv() {
-        int hz = clampedIntConfig(ENV_OVERRIDE_HZ, DEFAULT_OVERRIDE_HZ, MIN_OVERRIDE_HZ, MAX_OVERRIDE_HZ);
-        return Math.max(1L, Math.round(1000.0 / hz));
-    }
-
-    private static int releaseFrameCountFromEnv() {
-        return positiveIntConfig(ENV_RELEASE_FRAMES, DEFAULT_RELEASE_FRAMES);
-    }
-
-    private static int clampedIntConfig(String name, int defaultValue, int min, int max) {
-        Integer parsed = intConfig(name);
-        return parsed == null ? defaultValue : Math.max(min, Math.min(max, parsed));
-    }
-
-    private static int positiveIntConfig(String name, int defaultValue) {
-        Integer parsed = intConfig(name);
-        return parsed != null && parsed > 0 ? parsed : defaultValue;
-    }
-
-    /** Lenient like every other option in this module: missing/blank/unparseable -> {@code null} (caller defaults). */
-    private static Integer intConfig(String name) {
-        String raw = System.getProperty(name);
-        if (raw == null || raw.isBlank()) {
-            raw = System.getenv(name);
-        }
-        if (raw == null || raw.isBlank()) {
-            return null;
-        }
-        try {
-            return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
+    /** Converts the settings' clamped Hz into a tick period, mirroring the env-var-era conversion. */
+    private static long tickPeriodMillisFromRc(MavlinkSettings.Rc rc) {
+        return Math.max(1L, Math.round(1000.0 / rc.clampedOverrideHz()));
     }
 
     /**

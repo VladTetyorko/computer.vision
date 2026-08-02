@@ -11,6 +11,7 @@ import com.google.protobuf.Empty;
 import io.grpc.ManagedChannel;
 import io.grpc.StatusRuntimeException;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,7 +38,7 @@ import java.util.concurrent.TimeUnit;
  * <h2>Failure semantics</h2>
  * Both RPCs here are blocking unary calls issued with a {@value
  * #CALL_TIMEOUT_SECONDS}s deadline (control-plane operations, not per-frame —
- * so a looser bound than {@link GrpcDetectionPort#RESPONSE_TIMEOUT_SECONDS}
+ * so a looser bound than {@link GrpcCvSettings#RESPONSE_TIMEOUT_SECONDS}
  * is fine) so an unreachable or hung cv-service fails the calling thread
  * within a bounded time instead of blocking it indefinitely.
  * <ul>
@@ -86,13 +87,14 @@ public final class GrpcModelRegistryPort implements ModelRegistryPort {
      * Per-call deadline for both RPCs. Registry queries/promotions are
      * infrequent control-plane operations (not the per-frame detection hot
      * path), so this is looser than {@link
-     * GrpcDetectionPort#RESPONSE_TIMEOUT_SECONDS} — the point is only to
+     * GrpcCvSettings#RESPONSE_TIMEOUT_SECONDS} — the point is only to
      * guarantee the calling thread is never blocked indefinitely by an
      * unreachable or hung cv-service.
      */
     static final long CALL_TIMEOUT_SECONDS = 10;
 
     private final TrainingGrpc.TrainingBlockingStub stub;
+    private final long callTimeoutSeconds;
 
     /**
      * @param channel a channel to cv-service, typically the same one {@link
@@ -100,7 +102,17 @@ public final class GrpcModelRegistryPort implements ModelRegistryPort {
      *                reuse"). Never closed by this class.
      */
     public GrpcModelRegistryPort(ManagedChannel channel) {
+        this(channel, Duration.ofSeconds(CALL_TIMEOUT_SECONDS));
+    }
+
+    /**
+     * @param callTimeout per-call deadline for both RPCs — {@code vision.cv.registry.call-timeout}
+     *                    (docs/LAYERING-REFACTOR-PLAN.md wave F4), replacing this class's own {@link
+     *                    #CALL_TIMEOUT_SECONDS} constant as the actual value used.
+     */
+    public GrpcModelRegistryPort(ManagedChannel channel, Duration callTimeout) {
         Objects.requireNonNull(channel, "channel must not be null");
+        this.callTimeoutSeconds = Objects.requireNonNull(callTimeout, "callTimeout must not be null").toSeconds();
         this.stub = TrainingGrpc.newBlockingStub(channel);
     }
 
@@ -161,7 +173,7 @@ public final class GrpcModelRegistryPort implements ModelRegistryPort {
     }
 
     private TrainingGrpc.TrainingBlockingStub blockingStub() {
-        return stub.withDeadlineAfter(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        return stub.withDeadlineAfter(callTimeoutSeconds, TimeUnit.SECONDS);
     }
 
     private static ModelRef toModelRef(ModelInfo info) {

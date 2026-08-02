@@ -6,26 +6,13 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
 
 import io.dronefleet.mavlink.MavlinkConnection;
-import io.dronefleet.mavlink.common.GlobalPositionInt;
-import io.dronefleet.mavlink.common.GpsFixType;
-import io.dronefleet.mavlink.common.GpsRawInt;
-import io.dronefleet.mavlink.common.MavSysStatusSensor;
-import io.dronefleet.mavlink.common.MavSysStatusSensorExtended;
-import io.dronefleet.mavlink.common.SysStatus;
-import io.dronefleet.mavlink.minimal.Heartbeat;
-import io.dronefleet.mavlink.minimal.MavAutopilot;
-import io.dronefleet.mavlink.minimal.MavModeFlag;
-import io.dronefleet.mavlink.minimal.MavState;
-import io.dronefleet.mavlink.minimal.MavType;
-import io.dronefleet.mavlink.util.EnumValue;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigInteger;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.URI;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -54,11 +41,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Every {@code HEARTBEAT} reports {@code autopilot} ARDUPILOTMEGA, {@code type} QUADROTOR, and
  * {@code base_mode} armed + custom-mode-enabled, so the RX side always resolves a firmware/mode
  * pair. While the simulated battery (see {@code batteryDrainPerSecond}) stays at/above the new
- * {@code failsafeBatteryPercent} option, {@code custom_mode} is {@value #CUSTOM_MODE_LOITER}
- * (ArduPilot copter "Loiter") and {@code system_status} is {@code ACTIVE}; once it drains below
- * that threshold, {@code custom_mode} switches to {@value #CUSTOM_MODE_RTL} ("RTL") and {@code
- * system_status} switches to {@code CRITICAL} — a scripted, deterministic failsafe trigger for
- * exercising the RX side's failsafe reporting without hardware.
+ * {@code failsafeBatteryPercent} option, {@code custom_mode} is {@value
+ * SimulatedVehicleMessages#CUSTOM_MODE_LOITER} (ArduPilot copter "Loiter") and {@code
+ * system_status} is {@code ACTIVE}; once it drains below that threshold, {@code custom_mode}
+ * switches to {@value SimulatedVehicleMessages#CUSTOM_MODE_RTL} ("RTL") and {@code system_status}
+ * switches to {@code CRITICAL} — a scripted, deterministic failsafe trigger for exercising the RX
+ * side's failsafe reporting without hardware. See {@link SimulatedVehicleMessages} for the actual
+ * message builders; this class owns pacing, threading, and the option surface.
  *
  * <h2>Recognized {@link FeedSpec#options()}</h2>
  * <ul>
@@ -119,24 +108,42 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
     static final double DEFAULT_POSITION_RATE_HZ = 5.0;
     static final double DEFAULT_FAILSAFE_BATTERY_PERCENT = 15.0;
 
-    /** ArduPilot copter custom_mode for "Loiter" — the nominal (non-failsafe) heartbeat mode. */
-    static final long CUSTOM_MODE_LOITER = 5L;
-    /** ArduPilot copter custom_mode for "RTL" — the mode reported once failsafe triggers. */
-    static final long CUSTOM_MODE_RTL = 6L;
-
-    private static final int GPS_SATELLITES_VISIBLE = 12;
-    private static final int GPS_EPH_CENTIUNITS = 90; // eph x100 -> hdop 0.9
-
-    private static final long HEARTBEAT_PERIOD_MILLIS = 1000L;
-    private static final long TICK_MILLIS = 50L;
-    private static final long CLOSE_JOIN_TIMEOUT_MILLIS = 5_000L;
-
     static final int DEFAULT_MAV_SYSTEM_ID = 1;
     static final int MAV_COMPONENT_ID = 1;
     private static final int MIN_SYSID = 1;
     private static final int MAX_SYSID = 255;
 
     private final Map<FeedId, FeedRuntime> feeds = new ConcurrentHashMap<>();
+    private final long heartbeatPeriodMillis;
+    private final long tickMillis;
+    private final double defaultSpeedMps;
+    private final double defaultPositionRateHz;
+    private final double defaultFailsafeBatteryPercent;
+    private final int defaultMavSystemId;
+    private final long closeJoinTimeoutMillis;
+
+    public MavlinkFeedTransmitter() {
+        this(MavlinkSettings.defaults());
+    }
+
+    /**
+     * @param settings this module's {@code vision.mavlink.*} tunables (docs/LAYERING-REFACTOR-PLAN.md
+     *                 wave F2) — {@link MavlinkSettings#transmit()} supplies this feed's cadence
+     *                 (tick/heartbeat period) and per-option defaults (speed/position-rate/
+     *                 failsafe-battery/sysid); {@link MavlinkSettings#closeJoinTimeout()} bounds how
+     *                 long {@link FeedRuntime#close()} awaits its transmit thread.
+     */
+    public MavlinkFeedTransmitter(MavlinkSettings settings) {
+        Objects.requireNonNull(settings, "settings must not be null");
+        MavlinkSettings.Transmit transmit = settings.transmit();
+        this.heartbeatPeriodMillis = transmit.heartbeatPeriod().toMillis();
+        this.tickMillis = transmit.tick().toMillis();
+        this.defaultSpeedMps = transmit.defaultSpeedMps();
+        this.defaultPositionRateHz = transmit.defaultPositionRateHz();
+        this.defaultFailsafeBatteryPercent = transmit.defaultFailsafeBatteryPercent();
+        this.defaultMavSystemId = transmit.defaultSysid();
+        this.closeJoinTimeoutMillis = settings.closeJoinTimeout().toMillis();
+    }
 
     @Override
     public boolean supports(FeedSpec spec) {
@@ -164,17 +171,18 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                     + "(lat,lon[,altM];lat,lon[,altM];... with at least 2 points), got: "
                     + spec.options().get(OPTION_ROUTE));
         }
-        double speedMps = positiveDoubleOption(spec.options(), OPTION_SPEED_MPS, DEFAULT_SPEED_MPS);
+        double speedMps = positiveDoubleOption(spec.options(), OPTION_SPEED_MPS, defaultSpeedMps);
         double batteryDrainPercentPerSecond = doubleOption(
                 spec.options(), OPTION_BATTERY_DRAIN_PERCENT_PER_SECOND, DEFAULT_BATTERY_DRAIN_PERCENT_PER_SECOND);
         double positionRateHz =
-                positiveDoubleOption(spec.options(), OPTION_POSITION_RATE_HZ, DEFAULT_POSITION_RATE_HZ);
+                positiveDoubleOption(spec.options(), OPTION_POSITION_RATE_HZ, defaultPositionRateHz);
         double failsafeBatteryPercent = doubleOption(
-                spec.options(), OPTION_FAILSAFE_BATTERY_PERCENT, DEFAULT_FAILSAFE_BATTERY_PERCENT);
+                spec.options(), OPTION_FAILSAFE_BATTERY_PERCENT, defaultFailsafeBatteryPercent);
         int sysid = sysidOption(spec.options());
 
         FeedRuntime runtime = new FeedRuntime(id, spec.source().getHost(), spec.source().getPort(),
-                route, speedMps, batteryDrainPercentPerSecond, positionRateHz, failsafeBatteryPercent, sysid);
+                route, speedMps, batteryDrainPercentPerSecond, positionRateHz, failsafeBatteryPercent, sysid,
+                heartbeatPeriodMillis, tickMillis, closeJoinTimeoutMillis);
         FeedRuntime previous = feeds.put(id, runtime);
         if (previous != null) {
             previous.close(); // defensive: an id must not have two live feeds
@@ -212,17 +220,17 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
         return parsed > 0 ? parsed : defaultValue;
     }
 
-    /** Lenient like every other option here: missing/blank/unparseable/out of 1-255 -> {@value #DEFAULT_MAV_SYSTEM_ID}. */
-    private static int sysidOption(Map<String, String> options) {
+    /** Lenient like every other option here: missing/blank/unparseable/out of 1-255 -> {@link #defaultMavSystemId}. */
+    private int sysidOption(Map<String, String> options) {
         String raw = options.get(OPTION_SYSID);
         if (raw == null || raw.isBlank()) {
-            return DEFAULT_MAV_SYSTEM_ID;
+            return defaultMavSystemId;
         }
         try {
             int value = Integer.parseInt(raw.trim());
-            return value >= MIN_SYSID && value <= MAX_SYSID ? value : DEFAULT_MAV_SYSTEM_ID;
+            return value >= MIN_SYSID && value <= MAX_SYSID ? value : defaultMavSystemId;
         } catch (NumberFormatException e) {
-            return DEFAULT_MAV_SYSTEM_ID;
+            return defaultMavSystemId;
         }
     }
 
@@ -240,6 +248,9 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
         private final long positionPeriodMillis;
         private final double failsafeBatteryPercent;
         private final int sysid;
+        private final long heartbeatPeriodMillis;
+        private final long tickMillis;
+        private final long closeJoinTimeoutMillis;
         private final AtomicBoolean stopRequested = new AtomicBoolean(false);
         private final AtomicBoolean closed = new AtomicBoolean(false);
         private volatile Thread transmitThread;
@@ -247,7 +258,7 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
 
         FeedRuntime(FeedId feedId, String targetHost, int targetPort, MavlinkRoute route, double speedMps,
                     double batteryDrainPercentPerSecond, double positionRateHz, double failsafeBatteryPercent,
-                    int sysid) {
+                    int sysid, long heartbeatPeriodMillis, long tickMillis, long closeJoinTimeoutMillis) {
             this.feedId = feedId;
             this.targetHost = targetHost;
             this.targetPort = targetPort;
@@ -257,6 +268,9 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
             this.positionPeriodMillis = Math.max(1L, Math.round(1000.0 / positionRateHz));
             this.failsafeBatteryPercent = failsafeBatteryPercent;
             this.sysid = sysid;
+            this.heartbeatPeriodMillis = heartbeatPeriodMillis;
+            this.tickMillis = tickMillis;
+            this.closeJoinTimeoutMillis = closeJoinTimeoutMillis;
         }
 
         void start() {
@@ -275,7 +289,7 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                         InputStream.nullInputStream(), new MavlinkUdpOutputStream(sock, address, targetPort));
 
                 long startNanos = System.nanoTime();
-                long heartbeatPeriodNanos = TimeUnit.MILLISECONDS.toNanos(HEARTBEAT_PERIOD_MILLIS);
+                long heartbeatPeriodNanos = TimeUnit.MILLISECONDS.toNanos(heartbeatPeriodMillis);
                 long positionPeriodNanos = TimeUnit.MILLISECONDS.toNanos(positionPeriodMillis);
                 long nextHeartbeatNanos = startNanos;
                 long nextPositionNanos = startNanos;
@@ -292,9 +306,10 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                         int batteryPercent = (int) Math.round(
                                 Math.max(0.0, 100.0 - batteryDrainPercentPerSecond * elapsedSeconds));
                         boolean failsafeTriggered = batteryPercent < failsafeBatteryPercent;
-                        sendHeartbeat(connection, failsafeTriggered);
-                        sendSysStatus(connection, batteryPercent);
-                        sendGpsRawInt(connection, route.positionAt(distanceMeters));
+                        connection.send2(sysid, MAV_COMPONENT_ID, SimulatedVehicleMessages.heartbeat(failsafeTriggered));
+                        connection.send2(sysid, MAV_COMPONENT_ID, SimulatedVehicleMessages.sysStatus(batteryPercent));
+                        connection.send2(sysid, MAV_COMPONENT_ID,
+                                SimulatedVehicleMessages.gpsRawInt(route.positionAt(distanceMeters)));
                         nextHeartbeatNanos += heartbeatPeriodNanos;
                     }
                     if (now >= nextPositionNanos) {
@@ -303,10 +318,11 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                         distanceMeters += speedMps * tickSeconds;
                         MavlinkRoute.Position position = route.positionAt(distanceMeters);
                         long elapsedMillis = (now - startNanos) / 1_000_000L;
-                        sendGlobalPositionInt(connection, position, elapsedMillis);
+                        connection.send2(sysid, MAV_COMPONENT_ID,
+                                SimulatedVehicleMessages.globalPositionInt(position, elapsedMillis, speedMps));
                         nextPositionNanos += positionPeriodNanos;
                     }
-                    sleepMillis(TICK_MILLIS);
+                    sleepMillis(tickMillis);
                 }
             } catch (Exception e) {
                 if (!stopRequested.get()) {
@@ -319,88 +335,6 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
             }
         }
 
-        /**
-         * @param failsafeTriggered {@code true} once the drained battery has fallen below {@code
-         *                          failsafeBatteryPercent} — switches {@code custom_mode} to RTL
-         *                          and {@code system_status} to CRITICAL (docs/FC-INTEGRATIONS-PLAN.md F-a)
-         */
-        private void sendHeartbeat(MavlinkConnection connection, boolean failsafeTriggered) throws IOException {
-            Heartbeat heartbeat = Heartbeat.builder()
-                    .type(MavType.MAV_TYPE_QUADROTOR)
-                    .autopilot(MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA)
-                    .baseMode(MavModeFlag.MAV_MODE_FLAG_SAFETY_ARMED, MavModeFlag.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED)
-                    .customMode(failsafeTriggered ? CUSTOM_MODE_RTL : CUSTOM_MODE_LOITER)
-                    .systemStatus(failsafeTriggered ? MavState.MAV_STATE_CRITICAL : MavState.MAV_STATE_ACTIVE)
-                    .mavlinkVersion(3)
-                    .build();
-            connection.send2(sysid, MAV_COMPONENT_ID, heartbeat);
-        }
-
-        /** Fixed 3D fix, {@value #GPS_SATELLITES_VISIBLE} satellites, {@value #GPS_EPH_CENTIUNITS} eph (hdop 0.9). */
-        private void sendGpsRawInt(MavlinkConnection connection, MavlinkRoute.Position position) throws IOException {
-            int altMillimeters =
-                    position.altitudeMeters() == null ? 0 : (int) Math.round(position.altitudeMeters() * 1000.0);
-            GpsRawInt gpsRawInt = GpsRawInt.builder()
-                    .timeUsec(BigInteger.ZERO)
-                    .fixType(GpsFixType.GPS_FIX_TYPE_3D_FIX)
-                    .lat((int) Math.round(position.latitude() * 1e7))
-                    .lon((int) Math.round(position.longitude() * 1e7))
-                    .alt(altMillimeters)
-                    .eph(GPS_EPH_CENTIUNITS)
-                    .epv(0)
-                    .vel(0)
-                    .cog(0)
-                    .satellitesVisible(GPS_SATELLITES_VISIBLE)
-                    .build();
-            connection.send2(sysid, MAV_COMPONENT_ID, gpsRawInt);
-        }
-
-        private void sendSysStatus(MavlinkConnection connection, int batteryPercent) throws IOException {
-            SysStatus sysStatus = SysStatus.builder()
-                    .onboardControlSensorsPresent(EnumValue.<MavSysStatusSensor>create(0))
-                    .onboardControlSensorsEnabled(EnumValue.<MavSysStatusSensor>create(0))
-                    .onboardControlSensorsHealth(EnumValue.<MavSysStatusSensor>create(0))
-                    .load(0)
-                    .voltageBattery(0)
-                    .currentBattery(-1)
-                    .batteryRemaining(batteryPercent)
-                    .dropRateComm(0)
-                    .errorsComm(0)
-                    .errorsCount1(0)
-                    .errorsCount2(0)
-                    .errorsCount3(0)
-                    .errorsCount4(0)
-                    .onboardControlSensorsPresentExtended(EnumValue.<MavSysStatusSensorExtended>create(0))
-                    .onboardControlSensorsEnabledExtended(EnumValue.<MavSysStatusSensorExtended>create(0))
-                    .onboardControlSensorsHealthExtended(EnumValue.<MavSysStatusSensorExtended>create(0))
-                    .build();
-            connection.send2(sysid, MAV_COMPONENT_ID, sysStatus);
-        }
-
-        private void sendGlobalPositionInt(MavlinkConnection connection, MavlinkRoute.Position position,
-                                            long elapsedMillis) throws IOException {
-            double headingRadians = Math.toRadians(position.headingDegrees());
-            int vxCmS = (int) Math.round(speedMps * Math.cos(headingRadians) * 100.0);
-            int vyCmS = (int) Math.round(speedMps * Math.sin(headingRadians) * 100.0);
-            int altMillimeters = position.altitudeMeters() == null
-                    ? 0 : (int) Math.round(position.altitudeMeters() * 1000.0);
-            int headingCentidegrees =
-                    ((int) Math.round(position.headingDegrees() * 100.0) % 36000 + 36000) % 36000;
-
-            GlobalPositionInt message = GlobalPositionInt.builder()
-                    .timeBootMs(elapsedMillis)
-                    .lat((int) Math.round(position.latitude() * 1e7))
-                    .lon((int) Math.round(position.longitude() * 1e7))
-                    .alt(altMillimeters)
-                    .relativeAlt(altMillimeters)
-                    .vx(vxCmS)
-                    .vy(vyCmS)
-                    .vz(0)
-                    .hdg(headingCentidegrees)
-                    .build();
-            connection.send2(sysid, MAV_COMPONENT_ID, message);
-        }
-
         void close() {
             if (closed.compareAndSet(false, true)) {
                 stopRequested.set(true);
@@ -409,7 +343,7 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
                 if (thread != null && thread != Thread.currentThread()) {
                     thread.interrupt();
                     try {
-                        thread.join(CLOSE_JOIN_TIMEOUT_MILLIS);
+                        thread.join(closeJoinTimeoutMillis);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }

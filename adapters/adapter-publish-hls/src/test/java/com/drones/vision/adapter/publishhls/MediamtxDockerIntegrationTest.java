@@ -83,7 +83,7 @@ class MediamtxDockerIntegrationTest {
 
             StreamPublisherPort publisher = new MediamtxStreamPublisher(
                     URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:" + hlsPort),
-                    URI.create("http://localhost:8889")); // WHEP not exercised by this HLS-focused test
+                    URI.create("http://localhost:8889"), null); // WHEP/playback not exercised by this HLS-focused test
             StreamId streamId = StreamId.random();
             Device device = new Device(DeviceId.random(), "docker-it-camera",
                     Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://docker-it"), Map.of()));
@@ -156,7 +156,7 @@ class MediamtxDockerIntegrationTest {
 
             StreamPublisherPort publisher = new MediamtxStreamPublisher(
                     URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"),
-                    URI.create("http://localhost:8889")); // WHEP not exercised by this HLS-focused test
+                    URI.create("http://localhost:8889"), null); // WHEP/playback not exercised by this HLS-focused test
             StreamId streamId = StreamId.random();
             Device device = new Device(DeviceId.random(), "bursty-it-camera",
                     Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://bursty-it"), Map.of()));
@@ -218,7 +218,7 @@ class MediamtxDockerIntegrationTest {
 
             StreamPublisherPort publisher = new MediamtxStreamPublisher(
                     URI.create("rtsp://localhost:" + rtspPort), URI.create("http://localhost:8888"),
-                    URI.create("http://localhost:8889")); // WHEP not exercised by this HLS-focused test
+                    URI.create("http://localhost:8889"), null); // WHEP/playback not exercised by this HLS-focused test
             StreamId streamId = StreamId.random();
             Device device = new Device(DeviceId.random(), "wallclock-it-camera",
                     Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://wallclock-it"), Map.of()));

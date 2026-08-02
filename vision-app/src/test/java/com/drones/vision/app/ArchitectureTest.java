@@ -6,7 +6,10 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.web.bind.annotation.RestController;
 
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
 
@@ -67,6 +70,52 @@ class ArchitectureTest {
     void domainAndApplicationAreSpringAnnotationFree() {
         ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..application..")
                 .should().dependOnClassesThat().resideInAPackage("org.springframework..");
+        rule.check(classes);
+    }
+
+    // --- docs/LAYERING-REFACTOR-PLAN.md §7 wave H: package-shape rules ---
+    //
+    // Note on the plan's fourth proposed rule ("no adapter package may depend on another
+    // adapter package"): it is not repeated here because `adaptersDoNotDependOnEachOther`
+    // above already expresses exactly that check, generically, via
+    // `slices().matching("com.drones.vision.adapter.(*)..")` — it covers every adapter
+    // slice (rtsp, mjpeg, mavlink, v4l2, publishhls, overlay, cvgrpc, discovery,
+    // persistence, simulation) pairwise. Adding a second rule with the same meaning would
+    // be redundant, not additive, and that rule is one of the five left unmodified per §6.4.
+
+    @Test
+    void restControllersLiveOnlyInApiControllerOrProxyPackage() {
+        // `com.drones.vision.api.proxy` is the one documented exception (plan §3's
+        // template: "proxy/ pass-through edges that own no application service
+        // (HlsProxyController)"). `HlsProxyController` is a genuine `@RestController` that
+        // intentionally lives outside `controller/` because it proxies HLS bytes rather
+        // than fronting an application service — not a leftover violation.
+        ArchRule rule = classes().that().areAnnotatedWith(RestController.class)
+                .should().resideInAnyPackage("com.drones.vision.api.controller", "com.drones.vision.api.proxy");
+        rule.check(classes);
+    }
+
+    @Test
+    void configurationPropertiesClassesLiveOnlyInAppConfigPropertiesPackage() {
+        ArchRule rule = classes().that().areAnnotatedWith(ConfigurationProperties.class)
+                .should().resideInAPackage("com.drones.vision.app.config.properties");
+        rule.check(classes);
+    }
+
+    @Test
+    void applicationHasNoClassesLooseAtItsRootPackage() {
+        // Non-recursive on purpose: "com.drones.vision.application" (no trailing "..")
+        // matches only classes declared directly in that package, not its feature/pipeline/
+        // scope/exception subpackages, which is exactly what Wave A's split is supposed to
+        // leave empty.
+        ArchRule rule = noClasses().should().resideInAPackage("com.drones.vision.application");
+        rule.check(classes);
+    }
+
+    @Test
+    void onlyAppMayDependOnConfigPropertiesTypes() {
+        ArchRule rule = noClasses().that().resideOutsideOfPackages("..app..")
+                .should().dependOnClassesThat().resideInAPackage("..app.config.properties..");
         rule.check(classes);
     }
 }

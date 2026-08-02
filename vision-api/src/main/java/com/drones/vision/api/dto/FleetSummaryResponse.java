@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.FleetSummary;
+import com.drones.vision.application.fleet.FleetSummary;
 
 import java.util.List;
 

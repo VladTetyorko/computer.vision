@@ -1,12 +1,14 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.UserSpec;
+import com.drones.vision.application.identity.UserSpec;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Membership;
 import com.drones.vision.domain.model.Role;
 
 import java.util.List;
 import java.util.Locale;
+import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.support.CapabilityParsing;
 
 /**
  * Request body for {@code POST /api/users} (docs/U-SCOPE-PLAN.md, U-e slice 2) — create/invite a

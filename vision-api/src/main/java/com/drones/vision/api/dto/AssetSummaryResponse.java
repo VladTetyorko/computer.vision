@@ -1,10 +1,11 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.AssetSummary;
+import com.drones.vision.application.asset.AssetSummary;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
 import java.util.Map;
+import com.drones.vision.api.controller.AssetController;
 
 /**
  * Response body element for {@code GET /api/assets}, and the shared field
@@ -45,7 +46,7 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
      * @param summary  the summary to map
      * @param hasImage whether an image is stored for this asset (a separate lookup — {@link
      *                 AssetSummary} carries no notion of one; see {@code
-     *                 com.drones.vision.api.AssetController})
+     *                 com.drones.vision.api.controller.AssetController})
      * @return the response body element for {@code summary}
      */
     public static AssetSummaryResponse from(AssetSummary summary, boolean hasImage) {

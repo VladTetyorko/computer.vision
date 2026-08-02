@@ -51,12 +51,12 @@ import java.util.zip.ZipOutputStream;
  * <h2>Framing — the archive is never fully materialized</h2>
  * {@link #upload} builds a {@link ZipOutputStream} directly over a small internal {@link
  * ChunkingOutputStream} that buffers writes and emits one {@link DatasetChunk} — carrying the
- * dataset id and up to {@value #CHUNK_BYTES} bytes of the growing zip — every time that many bytes
- * accumulate, plus one final (possibly smaller) chunk when the zip is closed. The archive's bytes
- * exist only as this one rolling buffer; nothing is ever staged whole in memory or on disk, matching
- * the design decision docs/CV-TRAINING-V2-PLAN.md &sect;D makes explicit (streaming small chunks,
- * not a message-size bump). Zip entries are written in this exact order, matching the byte-for-byte
- * layout the platform's old filesystem-zip export step used:
+ * dataset id and up to {@link GrpcCvSettings#uploadChunkBytes()} bytes of the growing zip — every
+ * time that many bytes accumulate, plus one final (possibly smaller) chunk when the zip is closed.
+ * The archive's bytes exist only as this one rolling buffer; nothing is ever staged whole in memory
+ * or on disk, matching the design decision docs/CV-TRAINING-V2-PLAN.md &sect;D makes explicit
+ * (streaming small chunks, not a message-size bump). Zip entries are written in this exact order,
+ * matching the byte-for-byte layout the platform's old filesystem-zip export step used:
  * <ol>
  *   <li>{@code data.yaml} — the caller's {@code dataYaml} string, UTF-8.</li>
  *   <li>For each {@link DatasetUploadPort.ExportEntry}, in list order: {@code images/<imageName>}
@@ -66,9 +66,9 @@ import java.util.zip.ZipOutputStream;
  * </ol>
  *
  * <h2>Deadline</h2>
- * The whole upload — archive framing plus the round trip — is bounded by a {@value
- * #UPLOAD_TIMEOUT_SECONDS}s deadline ({@code AbstractStub#withDeadlineAfter}), the same idiom
- * {@link GrpcModelRegistryPort#CALL_TIMEOUT_SECONDS} uses for its control-plane calls. Unlike {@link
+ * The whole upload — archive framing plus the round trip — is bounded by {@link
+ * GrpcCvSettings#uploadTimeout()} ({@code AbstractStub#withDeadlineAfter}), the same idiom {@link
+ * GrpcModelRegistryPort#CALL_TIMEOUT_SECONDS} uses for its control-plane calls. Unlike {@link
  * GrpcTrainingPort#startTraining}, which deliberately arms no deadline because a training job's
  * length is unbounded, an upload is genuinely bounded work (framing and sending some tens of MB), so
  * a fixed deadline is safe and appropriate here.
@@ -100,25 +100,25 @@ public final class GrpcDatasetUploadPort implements DatasetUploadPort {
 
     private static final System.Logger LOG = System.getLogger(GrpcDatasetUploadPort.class.getName());
 
-    /** Per-call deadline covering archive framing plus the whole upload round trip. */
-    static final long UPLOAD_TIMEOUT_SECONDS = 300;
-
-    /** Target size of each {@link DatasetChunk#getContent()} slice — 256 KiB. */
-    static final int CHUNK_BYTES = 262_144;
-
     private static final String DATA_YAML_ENTRY = "data.yaml";
     private static final String IMAGES_PREFIX = "images/";
     private static final String LABELS_PREFIX = "labels/";
 
     private final TrainingGrpc.TrainingStub stub;
+    private final GrpcCvSettings settings;
 
     /**
-     * @param channel a channel to a training host, typically the same one {@link
-     *                GrpcDetectionPort}/{@link GrpcModelRegistryPort}/{@link GrpcTrainingPort} use
-     *                (see class javadoc's "Channel reuse"). Never closed by this class.
+     * @param channel  a channel to a training host, typically the same one {@link
+     *                 GrpcDetectionPort}/{@link GrpcModelRegistryPort}/{@link GrpcTrainingPort} use
+     *                 (see class javadoc's "Channel reuse"). Never closed by this class.
+     * @param settings supplies {@link GrpcCvSettings#uploadTimeout()} (this class's per-call
+     *                 deadline) and {@link GrpcCvSettings#uploadChunkBytes()} (the zip-chunk framing
+     *                 size) — the same settings object {@link GrpcDetectionPort} uses for its own
+     *                 {@code vision.cv.*} tunables.
      */
-    public GrpcDatasetUploadPort(ManagedChannel channel) {
+    public GrpcDatasetUploadPort(ManagedChannel channel, GrpcCvSettings settings) {
         Objects.requireNonNull(channel, "channel must not be null");
+        this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.stub = TrainingGrpc.newStub(channel);
     }
 
@@ -134,10 +134,10 @@ public final class GrpcDatasetUploadPort implements DatasetUploadPort {
 
         UploadAckObserver responseObserver = new UploadAckObserver(id);
         StreamObserver<DatasetChunk> requestObserver = stub
-                .withDeadlineAfter(UPLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .withDeadlineAfter(settings.uploadTimeout().toMillis(), TimeUnit.MILLISECONDS)
                 .uploadDataset(responseObserver);
 
-        try (ChunkingOutputStream chunker = new ChunkingOutputStream(id, requestObserver);
+        try (ChunkingOutputStream chunker = new ChunkingOutputStream(id, requestObserver, settings.uploadChunkBytes());
              ZipOutputStream zip = new ZipOutputStream(chunker)) {
             writeEntry(zip, DATA_YAML_ENTRY, dataYaml.getBytes(StandardCharsets.UTF_8));
             for (ExportEntry entry : entries) {
@@ -211,8 +211,8 @@ public final class GrpcDatasetUploadPort implements DatasetUploadPort {
 
         /**
          * Blocks until the terminal signal arrives, then either returns a successful {@link
-         * UploadAck} ({@code ok=true}) or throws. No wait-timeout is applied here beyond the
-         * {@value #UPLOAD_TIMEOUT_SECONDS}s call deadline already armed on the RPC (see class
+         * UploadAck} ({@code ok=true}) or throws. No wait-timeout is applied here beyond {@link
+         * GrpcCvSettings#uploadTimeout()}'s call deadline already armed on the RPC (see class
          * javadoc "Deadline") — that deadline guarantees this latch is eventually released one way
          * or another, so a second timeout here would be redundant.
          *
@@ -255,22 +255,23 @@ public final class GrpcDatasetUploadPort implements DatasetUploadPort {
     }
 
     /**
-     * Batches {@link OutputStream#write} calls into a {@value #CHUNK_BYTES}-byte buffer and emits
-     * one {@link DatasetChunk} onto the request observer every time it fills, plus a final
-     * (possibly smaller) chunk on {@link #close()} — so the archive being built is never held whole
-     * in memory, only this one rolling buffer. Not thread-safe; used only by the single thread
+     * Batches {@link OutputStream#write} calls into a {@link GrpcCvSettings#uploadChunkBytes()}-byte
+     * buffer and emits one {@link DatasetChunk} onto the request observer every time it fills, plus a
+     * final (possibly smaller) chunk on {@link #close()} — so the archive being built is never held
+     * whole in memory, only this one rolling buffer. Not thread-safe; used only by the single thread
      * running {@link #upload} while it drives the {@link ZipOutputStream} wrapping this stream.
      */
     private static final class ChunkingOutputStream extends OutputStream {
 
         private final String datasetId;
         private final StreamObserver<DatasetChunk> requestObserver;
-        private final byte[] buffer = new byte[CHUNK_BYTES];
+        private final byte[] buffer;
         private int length;
 
-        ChunkingOutputStream(String datasetId, StreamObserver<DatasetChunk> requestObserver) {
+        ChunkingOutputStream(String datasetId, StreamObserver<DatasetChunk> requestObserver, int chunkBytes) {
             this.datasetId = datasetId;
             this.requestObserver = requestObserver;
+            this.buffer = new byte[chunkBytes];
         }
 
         @Override

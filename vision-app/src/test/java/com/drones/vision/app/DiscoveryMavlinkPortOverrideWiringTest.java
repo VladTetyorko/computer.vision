@@ -1,6 +1,7 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.mavlink.MavlinkHeartbeatScanner;
+import com.drones.vision.app.config.properties.VisionDiscoveryProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

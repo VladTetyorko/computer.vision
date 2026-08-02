@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.DatagramSocket;
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -92,7 +93,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private static final float ARM_DISARM_FORCE = 21196.0f;
     private static final float ARM_DISARM_NO_FORCE = 0.0f;
 
-    /** How long to wait for a {@code COMMAND_ACK} before reporting {@link CommandResult#NO_ACK}. */
+    /** Default duration to wait for a {@code COMMAND_ACK} before reporting {@link CommandResult#NO_ACK}. */
     static final long ACK_TIMEOUT_MILLIS = 2_000L;
 
     /** MAVLink's conventional ground-control-station system id. */
@@ -108,9 +109,21 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private static final String RTL_MODE_NAME = "RTL";
 
     private final MavlinkTelemetrySource telemetrySource;
+    private final long ackTimeoutMillis;
 
     public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource) {
+        this(telemetrySource, Duration.ofMillis(ACK_TIMEOUT_MILLIS));
+    }
+
+    /**
+     * @param ackTimeout how long to wait for a {@code COMMAND_ACK} before reporting {@link
+     *                   CommandResult#NO_ACK} — {@code vision.mavlink.ack-timeout}
+     *                   (docs/LAYERING-REFACTOR-PLAN.md wave F2), replacing this class's own
+     *                   {@link #ACK_TIMEOUT_MILLIS} constant as the actual value used
+     */
+    public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource, Duration ackTimeout) {
         this.telemetrySource = Objects.requireNonNull(telemetrySource, "telemetrySource must not be null");
+        this.ackTimeoutMillis = Objects.requireNonNull(ackTimeout, "ackTimeout must not be null").toMillis();
     }
 
     @Override
@@ -243,7 +256,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
             LOG.log(System.Logger.Level.INFO,
                     () -> "Sent " + description + " to MAVLink sysid " + sysid + " at " + target.sourceAddress());
 
-            CommandAck ack = ackFuture.get(ACK_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS);
+            CommandAck ack = ackFuture.get(ackTimeoutMillis, TimeUnit.MILLISECONDS);
             MavResult result = ack.result().entry();
             if (result == MavResult.MAV_RESULT_ACCEPTED) {
                 return CommandResult.ACCEPTED;
@@ -253,7 +266,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
             throw new IllegalStateException("Vehicle sysid " + sysid + " refused " + description + ": " + resultName);
         } catch (TimeoutException e) {
             LOG.log(System.Logger.Level.WARNING, "No COMMAND_ACK from MAVLink sysid " + sysid
-                    + " for " + description + " within " + ACK_TIMEOUT_MILLIS + "ms");
+                    + " for " + description + " within " + ackTimeoutMillis + "ms");
             return CommandResult.NO_ACK;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to send " + description + " command to MAVLink sysid " + sysid, e);

@@ -61,6 +61,23 @@ import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 import com.drones.vision.domain.port.out.UserRepositoryPort;
 
+import com.drones.vision.adapter.persistence.config.PersistenceUnit;
+import com.drones.vision.adapter.persistence.repository.JpaAssetImageRepository;
+import com.drones.vision.adapter.persistence.repository.JpaAssetRepository;
+import com.drones.vision.adapter.persistence.repository.JpaAssetUsageRepository;
+import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
+import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
+import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
+import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
+import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
+import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
+import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
+import com.drones.vision.adapter.persistence.repository.JpaTrainingSampleRepository;
+import com.drones.vision.adapter.persistence.repository.JpaUserRepository;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 

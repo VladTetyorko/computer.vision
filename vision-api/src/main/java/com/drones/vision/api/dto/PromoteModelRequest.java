@@ -1,6 +1,7 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.domain.model.ModelRef;
+import com.drones.vision.api.exception.ApiExceptionHandler;
 
 /**
  * Request body for {@code POST /api/cv/registry/models/{id}/promote} (docs/CV-TRAINING-PLAN.md

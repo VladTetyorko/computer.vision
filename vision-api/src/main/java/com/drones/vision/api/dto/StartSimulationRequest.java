@@ -1,15 +1,16 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.RouteMode;
-import com.drones.vision.application.SimulationSpec;
-import com.drones.vision.application.SimulationTransport;
-import com.drones.vision.application.TelemetryPlan;
-import com.drones.vision.application.TelemetryTransport;
-import com.drones.vision.application.Waypoint;
+import com.drones.vision.application.simulation.RouteMode;
+import com.drones.vision.application.simulation.SimulationSpec;
+import com.drones.vision.application.simulation.SimulationTransport;
+import com.drones.vision.application.simulation.TelemetryPlan;
+import com.drones.vision.application.simulation.TelemetryTransport;
+import com.drones.vision.application.simulation.Waypoint;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
+import com.drones.vision.api.support.CapabilityParsing;
 
 /**
  * Request body for {@code POST /api/simulations} — the one-call, zero-hardware simulation entry

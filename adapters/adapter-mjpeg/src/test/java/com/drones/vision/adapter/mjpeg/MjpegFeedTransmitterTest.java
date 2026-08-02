@@ -9,11 +9,17 @@ import org.bytedeco.javacv.Frame;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.InputStream;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Map;
+import java.util.OptionalInt;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -107,6 +113,41 @@ class MjpegFeedTransmitterTest {
 
             assertEquals(first.uri().getPort(), second.uri().getPort(), "both feeds must share one HTTP server/port");
             assertFalse(first.uri().getPath().equals(second.uri().getPath()), "each feed must get a distinct context path");
+        } finally {
+            transmitter.close();
+        }
+    }
+
+    @Test
+    void maxViewerThreadsSettingBoundsThePoolButStillServesThatManyConcurrentViewers(@TempDir Path tempDir) throws Exception {
+        Path videoFile = createTestVideo(tempDir, 64, 48, 5, 25);
+        MjpegSettings settings = new MjpegSettings(
+                MjpegSettings.defaults().readTimeout(),
+                MjpegSettings.defaults().publisherBufferCapacity(),
+                MjpegSettings.defaults().closeJoinTimeout(),
+                new MjpegSettings.Transmit("127.0.0.1", OptionalInt.of(2), 0.75f, true, Duration.ofMillis(5_000L)));
+
+        MjpegFeedTransmitter transmitter = new MjpegFeedTransmitter(settings);
+        try {
+            FeedId id = FeedId.random();
+            StreamDescriptor descriptor = transmitter.start(id, new FeedSpec("mjpeg", videoFile.toUri(), Map.of()));
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder(descriptor.uri()).GET().build();
+            // send() (not sendAsync()) returns once headers are received -- the response is
+            // chunked (length unknown up front), so both viewers' grab loops are still running
+            // concurrently server-side by the time this second call returns.
+            HttpResponse<InputStream> first = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> second = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try {
+                assertEquals(200, first.statusCode());
+                assertEquals(200, second.statusCode());
+                assertTrue(first.body().read() >= 0, "expected the first of 2 viewers (pool cap 2) to receive data");
+                assertTrue(second.body().read() >= 0, "expected the second of 2 viewers (pool cap 2) to receive data");
+            } finally {
+                first.body().close();
+                second.body().close();
+            }
         } finally {
             transmitter.close();
         }

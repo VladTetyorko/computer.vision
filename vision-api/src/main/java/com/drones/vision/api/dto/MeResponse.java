@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import com.drones.vision.api.security.CurrentUser;
 
 /**
  * Response body for {@code GET /api/auth/me}, {@code POST /api/auth/login} (docs/U-AUTH-PLAN.md,

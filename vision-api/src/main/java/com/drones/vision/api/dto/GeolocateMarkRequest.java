@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.GeolocateSpec;
+import com.drones.vision.application.mark.GeolocateSpec;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GeoProjection;
 import com.drones.vision.domain.model.MarkKind;

@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.DatasetSpec;
+import com.drones.vision.application.training.DatasetSpec;
 import com.drones.vision.domain.model.CategoryId;
 
 import java.util.List;
@@ -21,7 +21,7 @@ public record CreateDatasetRequest(String name, String targetCategory, List<Stri
     /**
      * Maps this request to a {@link DatasetSpec}.
      *
-     * @return the command record for {@link com.drones.vision.application.DatasetService#create}
+     * @return the command record for {@link com.drones.vision.application.training.DatasetService#create}
      * @throws IllegalArgumentException if {@link #name()} is blank ({@link DatasetSpec}'s own
      *                                   check), or {@link #targetCategory()} is present but not a
      *                                   valid lower-case-kebab slug ({@link CategoryId}'s own

@@ -36,8 +36,13 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 
 ## API surface
 
-### `com.drones.vision.adapter.persistence`
-- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password)`: migrates the schema with Flyway (`classpath:db/migration`) then opens a Hibernate-native `EntityManagerFactory` mapping all six entities below (see "Bootstrap" below). The one public entry point vision-app's wiring needs.
+**Package layout** (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C, Wave C): `repository/` (the 15
+`Jpa*Repository`/`Jpa*Store` port implementations), `mapper/` (14 entity↔domain mapper classes,
+one per aggregate — extracted out of the repositories that used to inline `toEntity`/`toDomain` as
+private static methods), `config/` (`PersistenceUnit`, `JpaOperations`), `entity/` (unchanged, see
+below). This module gets no `controller/`, `dto/`, or `service/` package — it is a driven adapter.
+
+### `com.drones.vision.adapter.persistence.repository`
 - `final class JpaCategoryRepository implements CategoryRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaDeviceRepository implements DeviceRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaAssetRepository implements AssetRepositoryPort` — constructor `(EntityManagerFactory)`.
@@ -48,15 +53,52 @@ Spring Boot dependency at the versions this repo already runs (Spring Boot 4.1.0
 - `final class JpaGeofenceRepository implements GeofenceRepositoryPort` — constructor `(EntityManagerFactory)`. docs/OPS-CORE-PLAN.md §G, G-b — geofence zones; `save` is merge-by-id (upsert), `deleteById` a real hard delete (zones have no soft-delete concept — a disabled zone is just `enabled=false`, not a lifecycle state).
 - `final class JpaUserRepository implements UserRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-AUTH-PLAN.md wave 3 — the identity aggregate; `save` is merge-by-id (upsert). `findByUsername` lower-cases its lookup key (`Locale.ROOT`) then exact-matches `users.username` (the domain already stores it lower-cased, so this *is* the case-insensitive lookup; a `NoResultException` from the single-result query maps to empty `Optional`). Memberships ride on the row as jsonb (see `UserEntity`).
 - `final class JpaGroupRepository implements GroupRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-AUTH-PLAN.md wave 3 — org-chart nodes; `save` is merge-by-id (upsert); `parentGroupId` maps straight through as a nullable `UUID`.
-- `final class JpaAssignmentRepository implements AssignmentRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-SCOPE-PLAN.md slice 2 — the pilot→asset join; `assign` is an idempotent upsert via `merge` on the composite (pilot, asset) key (no duplicate row, no error), `unassign` a delete-if-present (idempotent); `assetsForPilot`/`pilotsForAsset` are indexed JPQL queries returning `UUID`s mapped to `AssetId`/`UserId`, `isAssigned` a composite-PK `find`. Matches `InMemoryAssignmentRepository`'s set-semantics exactly.
+- `final class JpaAssignmentRepository implements AssignmentRepositoryPort` — constructor `(EntityManagerFactory)`. docs/U-SCOPE-PLAN.md slice 2 — the pilot→asset join; `assign` is an idempotent upsert via `merge` on the composite (pilot, asset) key (no duplicate row, no error), `unassign` a delete-if-present (idempotent); `assetsForPilot`/`pilotsForAsset` are indexed JPQL queries returning `UUID`s mapped to `AssetId`/`UserId`, `isAssigned` a composite-PK `find`. Matches `InMemoryAssignmentRepository`'s set-semantics exactly. **No mapper class** (see `mapper` package note below) — there is no domain aggregate to map to/from, only inline `UUID`↔id-wrapper conversions.
 - `final class JpaMarkRepository implements MarkRepositoryPort` — constructor `(EntityManagerFactory)`. docs/TACTICAL-MARKS-PLAN.md §3/M2 — tactical marks (the shared operational picture); `save` is merge-by-id (upsert), `deleteById` a real hard delete (idempotent) — same shape as `JpaGeofenceRepository`, `Mark`'s own template.
 - `final class JpaDatasetRepository implements DatasetRepositoryPort` — constructor `(EntityManagerFactory)`. docs/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets; `save` is merge-by-id (upsert), `delete` a real hard delete (idempotent), same shape as `JpaGeofenceRepository`/`JpaMarkRepository`. `targetCategory` maps a nullable `CategoryId` to/from a plain nullable varchar.
 - `final class JpaTrainingSampleRepository implements TrainingSampleRepositoryPort` — constructor `(EntityManagerFactory)`. docs/CV-TRAINING-PLAN.md §1, Wave T3 — captured frames + their evolving annotations; `save` is merge-by-id (upsert — a sample mutates over its own review lifecycle, unlike `JpaDetectionRepository`'s append-only rows). `findByDataset`/`countByDataset` share one JPQL-with-optional-clause shape for the `(datasetId, statusOrNull)` filter `idx_training_samples_dataset_status` indexes; `findByDataset` orders newest-captured-first before bounding to `limit`.
 - `final class JpaSampleImageStore implements SampleImageStorePort` — constructor `(EntityManagerFactory)`. docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the `JpaAssetImageRepository` shape, verbatim, reused for training-sample frames; `save` is merge-by-`sampleId` (upsert).
-- package-private `final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas).
+
+Every repository above composes a `com.drones.vision.adapter.persistence.config.JpaOperations`
+(one constructor argument, the module's `EntityManagerFactory`) and, except
+`JpaAssignmentRepository`, calls its aggregate's mapper (`com.drones.vision.adapter.persistence.mapper`,
+below) for entity↔domain conversion instead of inlining `toEntity`/`toDomain` as private methods —
+the mapping logic moved out (docs/LAYERING-REFACTOR-PLAN.md Wave C), the query/transaction logic
+did not.
+
+### `com.drones.vision.adapter.persistence.mapper`
+
+One mapper class per aggregate, each a `public final class` with a private constructor and two
+`public static` methods (`toEntity`/`toDomain`) — extracted verbatim from the private static
+methods every `Jpa*Repository` used to carry inline (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C;
+this was the module's one piece of genuine "light work" per the plan's own §0 verdict, not
+ceremony: 12 of the 15 repositories had real multi-line `toEntity`/`toDomain` logic — nested-record
+flattening, nullable sub-object handling, synthetic-id generation — worth separating from the
+JPA/transaction plumbing that stayed in `repository`).
+
+`CategoryMapper`, `DeviceMapper`, `AssetMapper`, `AssetUsageMapper`, `TelemetryMapper`,
+`DetectionResultMapper`, `AssetImageMapper`, `GeofenceZoneMapper`, `UserMapper`, `GroupMapper`,
+`MarkMapper`, `DatasetMapper`, `TrainingSampleMapper`, `SampleImageMapper` — 14 mappers, one per
+aggregate the module's 15 repositories cover. `TelemetryMapper#toEntity`/`DetectionResultMapper#toEntity`
+take the extra argument (`UsageId`, or none) their entities' synthetic id generation needs;
+`AssetImageMapper#toEntity`/`SampleImageMapper#toEntity` each take the owning id (`AssetId`/
+`TrainingSampleId`) plus the domain value object, matching the shape `JpaAssetImageRepository`/
+`JpaSampleImageStore`'s `save(id, value)` port methods already have.
+
+**No `AssignmentMapper`** — the fifteenth repository, `JpaAssignmentRepository`, is deliberately
+excluded. `AssignmentEntity` is a bare join row with no corresponding domain aggregate (there is no
+`Assignment` record — the port deals directly in `UserId`/`AssetId` sets and booleans), so every
+conversion is already a one-line `UUID`↔id-wrapper wrap inlined at its call site (e.g. `AssetId::new`
+in `assetsForPilot`). A same-shaped `AssignmentMapper` would be a file with two one-line methods and
+no logic behind them — exactly the "empty ceremony" the plan's own guardrail warns against
+creating. Flagged here rather than silently decided, per this wave's brief.
+
+### `com.drones.vision.adapter.persistence.config`
+- `final class PersistenceUnit` — `static EntityManagerFactory start(String jdbcUrl, String username, String password)`: migrates the schema with Flyway (`classpath:db/migration`) then opens a Hibernate-native `EntityManagerFactory` mapping all fifteen entities below (see "Bootstrap" below). The one public entry point vision-app's wiring needs.
+- `public final class JpaOperations` — the `write(Function<EntityManager,T>)`/`read(Function<EntityManager,T>)` transaction-boilerplate helper every `Jpa*Repository` composes rather than extends (each opens/commits/closes its own short-lived `EntityManager` per call — see Gotchas). **Public, not package-private** (widened from the pre-refactor package-private): the `repository` package it now serves lives in a sibling package, so cross-package visibility is required — see Gotchas for the full visibility-widening note.
 
 ### `com.drones.vision.adapter.persistence.entity`
-- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity`, `AssignmentEntity`, `MarkEntity`, `DatasetEntity`, `TrainingSampleEntity`, `SampleImageEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module; each `Jpa*Repository` owns its entity↔domain mapping as private static `toEntity`/`toDomain` methods, so the mapping logic lives right next to the port it serves rather than in separate mapper classes (each mapper is used by exactly one class — per `.claude/skills/java-clean-code/SKILL.md`, a dedicated `Mapper` type for a 1:1 relationship is unneeded ceremony).
+- `CategoryEntity`, `DeviceEntity`, `AssetEntity`, `AssetUsageEntity`, `TelemetrySampleEntity`, `DetectionResultEntity`, `AssetImageEntity`, `GeofenceZoneEntity`, `UserEntity`, `GroupEntity`, `AssignmentEntity`, `MarkEntity`, `DatasetEntity`, `TrainingSampleEntity`, `SampleImageEntity` — plain JPA entities, field-annotated (protected no-arg ctor for JPA, a public all-args ctor and no-prefix accessors — e.g. `id()`, `name()` — for symmetry with the domain records they mirror). Never referenced outside this module. Entity↔domain mapping now lives one package over, in `mapper` (see above) — not inlined per repository as it was before docs/LAYERING-REFACTOR-PLAN.md Wave C.
 - `TelemetrySampleEntity`/`DetectionResultEntity` have a synthetic UUID `id` the adapter invents at save time (`UUID.randomUUID()` in each repository's `toEntity`) — `Telemetry`/`DetectionResult` themselves carry no identity of their own (append-only samples/results, not aggregates), so there is nothing domain-side to derive a primary key from; the id never surfaces back through the ports.
 - `TelemetrySampleEntity#flightState` (docs/FC-INTEGRATIONS-PLAN.md F-b, `V6__telemetry_flight_state.sql`) is a nullable `FlightState` field, `@JdbcTypeCode(SqlTypes.JSON)`/`columnDefinition = "jsonb"` — the domain record stored **directly**, exactly the `DetectionResultEntity#detections` precedent noted in Conventions below (a plain immutable record tree, no persistence-local wrapper type needed). `null` covers both "sample pre-dates this column" and "device reported no flight-controller state at all"; both round-trip as `Telemetry#flightState() == null`, the same nullable-9th-component contract the domain record itself defines — there is no way to tell the two cases apart from this column alone, and nothing needs to.
 - `AssetUsageEntity#streamId` (docs/MVP2-PLAN.md R-a2, `V4__usage_stream_id.sql`) is a nullable `UUID` column, mapped straight through by `JpaAssetUsageRepository` (`streamId == null ? null : streamId.value()` / `new StreamId(...)`) exactly like every other nullable field on this entity — no special-casing beyond the null check.
@@ -240,6 +282,7 @@ filesystem) deleted — dataset delivery to the training host is now a gRPC uplo
 - **Hibernate logs two startup warnings that are expected, not bugs**: `HHH10001002: Using built-in connection pool (not intended for production use)` (see "Bootstrap") and `HHH90000025: PostgreSQLDialect does not need to be specified explicitly` (this module sets `hibernate.dialect` explicitly anyway, to skip Hibernate's own connection-metadata-based auto-detection round trip at startup — a minor, deliberate speed/explicitness tradeoff, not an oversight).
 - **A native query's `?N` positional parameters must be re-supplied per occurrence, not per distinct value** — `JpaTelemetryRepository`/`JpaDetectionRepository`'s prune queries reference `?1` (the grouping key) twice in the SQL text (once in the outer `WHERE`, once in the subquery's `WHERE`) but call `setParameter(1, value)` only **once**; Hibernate's native-query parameter binder resolves every occurrence of a given positional index from the same single `setParameter` call (unlike raw JDBC `?` placeholders, which are positional *per occurrence* and would need the value bound twice) — this is standard JPA `Query#setParameter(int, Object)` behavior, not something either class over-thinks with parameter-index bookkeeping.
 - **`EntityManager#setParameter(int, UUID)` on a native query binds correctly as `uuid`, not `varchar`/`bytea`**, with no `stringtype=unspecified` JDBC-URL trick and no `PGobject` wrapping needed — Hibernate infers the correct JDBC type from the Java parameter's runtime class (`UUID.class` → `StandardBasicTypes.UUID` → Postgres `uuid`) the same way it does for typed JPQL/Criteria parameters, even though the query text itself is opaque native SQL to Hibernate.
+- **Two unavoidable visibility widenings from docs/LAYERING-REFACTOR-PLAN.md Wave C's package split**, both mechanical consequences of `repository`/`config` being sibling packages rather than one flat package (§1.4's "package-private wherever the split allows it" — this split doesn't allow it here): `JpaOperations` and its `write`/`read` methods went from package-private to `public` (every `Jpa*Repository` composing it now lives one package over); every mapper's `toEntity`/`toDomain` went from `private static` (on the repository itself) to `public static` (on its own class in `mapper`), for the same cross-package reason. Nothing else in the module widened — `JpaOperations`'s constructor and the mapper classes' own constructors stay `private`/package-scoped where nothing outside needs them.
 
 ## Status
 
@@ -448,3 +491,71 @@ instead — the test's actual intent ("two datasets with different statuses both
 above), run against a real `postgres:16` Testcontainers instance (docker reachable, not skipped).
 
 **Deviations from the brief**: none.
+
+## docs/LAYERING-REFACTOR-PLAN.md Wave C done (package split: repository/mapper/config/entity)
+
+Pure structural refactor, no behavior change: the module's flat root package (15 `Jpa*Repository`/
+`Jpa*Store` classes + `PersistenceUnit` + `JpaOperations`, plus the pre-existing `entity/`) is now
+`repository/` + `mapper/` + `config/` + `entity/`, matching docs/LAYERING-REFACTOR-PLAN.md §3's
+template (b) for `adapter-persistence`. See "API surface" above for the per-package inventory; this
+section records what moved, the one judgment call, and the "no magic values to extract" finding.
+
+**What moved:**
+- `repository/` — all 15 `Jpa*Repository`/`Jpa*Store` classes, package declaration changed, no
+  logic changed. Each now imports its aggregate's mapper from `mapper` and `JpaOperations` from
+  `config` instead of declaring private static `toEntity`/`toDomain` methods inline.
+- `mapper/` — 14 new classes (`CategoryMapper` … `SampleImageMapper`, see "API surface" above),
+  each holding the exact `toEntity`/`toDomain` method bodies lifted verbatim out of its repository
+  — no logic rewritten, only relocated and widened from `private static` to `public static`.
+- `config/` — `PersistenceUnit` (unchanged except package + FQN entity imports) and `JpaOperations`
+  (unchanged except package + widened from package-private to `public`, see Gotchas).
+- `entity/` — untouched, per the brief (already correctly placed).
+
+**The one judgment call**: whether `JpaAssignmentRepository` gets an `AssignmentMapper`. It does
+not — see the `mapper` package note in "API surface" above for the reasoning (no domain aggregate
+to map to/from, only inline `UUID`↔id-wrapper wraps). Flagging it explicitly here rather than
+silently either extracting a no-op mapper or silently skipping the question.
+
+**`PersistenceUnit`'s Hibernate settings: no magic values found to extract** (the brief's item 5).
+Every literal `PersistenceUnit#start` sets is either a caller-supplied argument (`jdbcUrl`/
+`username`/`password`, sourced from vision-app's `VisionPersistenceProperties`, itself backed by
+Spring datasource-shaped config) or a fixed protocol/correctness constant with no legitimate
+per-environment variation: the JDBC driver class name, the Postgres dialect class name, and
+`hibernate.hbm2ddl.auto=validate` (a design invariant — "Flyway owns the schema, Hibernate only
+validates" — not a tuning knob). There is no connection-pool sizing, batch size, fetch size, or
+timeout hardcoded anywhere in this class to externalize into a plain settings record; inventing one
+would be exactly the "empty ceremony" the plan's own guardrail warns against. (The retention caps in
+`JpaTelemetryRepository`/`JpaDetectionRepository`, `DEFAULT_RETENTION_LIMIT_PER_USAGE`/`_PER_STREAM`
+= 100,000, are a separate, already-documented, deliberately-deferred gap — see "Honest gaps" above
+under docs/CV-TRAINING-PLAN.md's entry — and out of this wave's scope, which named only
+`PersistenceUnit`.)
+
+**Two unavoidable visibility widenings** (documented in Gotchas above): `JpaOperations` and its
+`write`/`read` methods, package-private → `public`; every mapper's `toEntity`/`toDomain`,
+`private static` → `public static`. Both are mechanical consequences of the package split — nothing
+widened that didn't have to.
+
+**Downstream mechanical import fix** (docs/LAYERING-REFACTOR-PLAN.md's cross-module rule: the wave
+that moves a type owns the mechanical import fix in every downstream module, nothing else there):
+`vision-app`'s `PersistenceWiringConfiguration` (wildcard-imported `com.drones.vision.adapter.persistence.*`,
+now `com.drones.vision.adapter.persistence.config.PersistenceUnit` +
+`com.drones.vision.adapter.persistence.repository.*`) and `PersistenceWiringConfigurationTest`
+(explicit per-class imports, same package rename) both had their imports updated — no other line in
+either file touched. **Not verified to compile**: `vision-app` is currently red for reasons entirely
+outside this wave's scope (a parallel adapter track changed constructor signatures
+`WiringConfiguration` hasn't caught up with yet, per this task's own brief) — a later consolidated
+wave (docs/LAYERING-REFACTOR-PLAN.md Wave D) fixes that and will need to confirm these two files
+compile once it does.
+
+**Test changes**: none deleted or weakened. `PostgresDockerIntegrationTest` stayed in the root test
+package `com.drones.vision.adapter.persistence` (it is one whole-module integration test spanning
+every repository + `PersistenceUnit`, not a per-class unit test — there is nothing to "move" as a
+separate file per class) and gained import statements for the now-cross-package `repository`/
+`config` classes it references by simple name. No assertion changed.
+
+`./mvnw -B -pl adapters/adapter-persistence test`: **97/97 green (unchanged)** — same test count as
+before this wave, run against a real `postgres:16` Testcontainers instance (docker reachable, not
+skipped), proving the package split changed no behavior.
+
+**Deviations from the brief**: none. Ambiguity flagged rather than resolved silently: the
+`AssignmentMapper` non-extraction and the `PersistenceUnit` no-magic-values finding, both above.

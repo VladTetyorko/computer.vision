@@ -2,7 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.adapter.publishhls.MediamtxReplayFrameExtractor;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
-import com.drones.vision.api.HlsProxyController;
+import com.drones.vision.api.proxy.HlsProxyController;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;

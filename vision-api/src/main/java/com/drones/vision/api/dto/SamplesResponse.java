@@ -8,7 +8,7 @@ import java.util.List;
  * DatasetsResponse}.
  *
  * @param samples a snapshot of matching samples, in {@link
- *                com.drones.vision.application.LabelingService#samples}'s own order
+ *                com.drones.vision.application.training.LabelingService#samples}'s own order
  */
 public record SamplesResponse(List<SampleResponse> samples) {
 }

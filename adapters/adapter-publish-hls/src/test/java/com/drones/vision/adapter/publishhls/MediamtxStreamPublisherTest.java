@@ -8,7 +8,6 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.VideoFrame;
 
-import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -35,7 +34,7 @@ class MediamtxStreamPublisherTest {
     void viewUrlFormatsHlsPlaylistUrl() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
         StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
 
         Optional<URI> viewUrl = publisher.viewUrl(id);
@@ -47,7 +46,7 @@ class MediamtxStreamPublisherTest {
     void viewUrlToleratesTrailingSlashOnHlsBase() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888/"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
         StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
 
         Optional<URI> viewUrl = publisher.viewUrl(id);
@@ -69,7 +68,7 @@ class MediamtxStreamPublisherTest {
     @Test
     void viewUrlSupportsRelativeHlsViewBaseForAppProxiedUrls() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
-                URI.create("rtsp://localhost:8554"), URI.create("/hls"), URI.create("http://localhost:8889"));
+                URI.create("rtsp://localhost:8554"), URI.create("/hls"), URI.create("http://localhost:8889"), null);
         StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
 
         Optional<URI> viewUrl = publisher.viewUrl(id);
@@ -81,7 +80,7 @@ class MediamtxStreamPublisherTest {
     void viewUrlReturnsEmptyForNullStreamId() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
 
         assertEquals(Optional.empty(), publisher.viewUrl(null));
     }
@@ -92,7 +91,7 @@ class MediamtxStreamPublisherTest {
     void whepUrlFormatsWhepEndpointUrl() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
         StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
 
         Optional<URI> whepUrl = publisher.whepUrl(id);
@@ -104,7 +103,7 @@ class MediamtxStreamPublisherTest {
     void whepUrlToleratesTrailingSlashOnWhepBase() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889/"));
+                URI.create("http://localhost:8889/"), null);
         StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
 
         Optional<URI> whepUrl = publisher.whepUrl(id);
@@ -122,7 +121,7 @@ class MediamtxStreamPublisherTest {
     void whepUrlIsAlwaysAnAbsoluteMediamtxOriginUrl() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://mediamtx.local:8889"));
+                URI.create("http://mediamtx.local:8889"), null);
         StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
 
         Optional<URI> whepUrl = publisher.whepUrl(id);
@@ -134,7 +133,7 @@ class MediamtxStreamPublisherTest {
     void whepUrlReturnsEmptyForNullStreamId() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
 
         assertEquals(Optional.empty(), publisher.whepUrl(null));
     }
@@ -182,10 +181,10 @@ class MediamtxStreamPublisherTest {
     }
 
     /**
-     * The 4-arg constructor's {@code playbackViewBase} is genuinely optional (unlike the other
-     * three bases) — a publisher constructed without one (explicit {@code null}) must return
-     * {@link Optional#empty()} rather than build a URL against a nonexistent base, since not every
-     * deployment has recording/playback configured (docs/OPS-CORE-PLAN.md §R).
+     * {@code playbackViewBase} is genuinely optional (unlike the other three bases) — a publisher
+     * constructed without one (explicit {@code null}) must return {@link Optional#empty()} rather
+     * than build a URL against a nonexistent base, since not every deployment has
+     * recording/playback configured (docs/OPS-CORE-PLAN.md §R).
      */
     @Test
     void playbackUrlReturnsEmptyWhenPlaybackBaseUnconfigured() {
@@ -243,43 +242,6 @@ class MediamtxStreamPublisherTest {
         assertTrue(playbackQuery.contains("path=" + id.value()));
     }
 
-    /**
-     * The 3-arg constructor is a convenience overload for callers (currently {@code vision-app})
-     * that don't configure a playback base explicitly — it derives one from {@code whepViewBase}'s
-     * own host at the compose-mapped playback port (docs/OPS-CORE-PLAN.md §R), so recording
-     * playback works out of the box against this stack's own docker-compose.yml without any
-     * wiring change.
-     */
-    @Test
-    void playbackUrlIsDerivedFromWhepBaseHostViaConvenienceConstructor() {
-        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
-                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
-        StreamId id = StreamId.of("11111111-1111-1111-1111-111111111111");
-        Instant start = Instant.parse("2026-01-15T10:00:00Z");
-
-        Optional<URI> playbackUrl = publisher.playbackUrl(id, start, Duration.ofSeconds(30));
-
-        assertEquals(Optional.of(URI.create("http://localhost:19996/get"
-                        + "?path=11111111-1111-1111-1111-111111111111&start=2026-01-15T10:00:00Z&duration=30")),
-                playbackUrl);
-    }
-
-    /**
-     * If {@code whepViewBase} has no host component to copy (malformed input — in production it's
-     * always an absolute mediamtx origin, see {@code whepViewBase}'s javadoc), the convenience
-     * constructor leaves playback unconfigured rather than building a broken guess: {@code
-     * playbackUrl} then honestly reports "no recording available" instead of throwing.
-     */
-    @Test
-    void playbackUrlIsEmptyViaConvenienceConstructorWhenWhepBaseHasNoHost() {
-        MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
-                URI.create("rtsp://localhost:8554"), URI.create("http://localhost:8888"), URI.create("/whep"));
-
-        assertEquals(Optional.empty(),
-                publisher.playbackUrl(StreamId.random(), Instant.parse("2026-01-15T10:00:00Z"), Duration.ofSeconds(30)));
-    }
-
     // -- resilience ------------------------------------------------------------
 
     /**
@@ -293,7 +255,7 @@ class MediamtxStreamPublisherTest {
     void publishNeverThrowsWhenMediamtxIsUnreachableAndStreamEndedStillCleansUp() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://127.0.0.1:1"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
         StreamId id = StreamId.random();
         Device device = testDevice();
 
@@ -315,7 +277,7 @@ class MediamtxStreamPublisherTest {
     void publishToleratesUnknownStreamNeverStartedAndNullArguments() {
         MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                 URI.create("rtsp://127.0.0.1:1"), URI.create("http://localhost:8888"),
-                URI.create("http://localhost:8889"));
+                URI.create("http://localhost:8889"), null);
         StreamId neverStarted = StreamId.random();
 
         assertDoesNotThrow(() -> publisher.publish(neverStarted, bgr24Frame(neverStarted, 0, Instant.now())));
@@ -354,7 +316,7 @@ class MediamtxStreamPublisherTest {
 
             MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                     URI.create("rtsp://localhost:" + blackHole.getLocalPort()), URI.create("http://localhost:8888"),
-                    URI.create("http://localhost:8889"));
+                    URI.create("http://localhost:8889"), null);
             StreamId id = StreamId.random();
             publisher.streamStarted(id, testDevice());
 
@@ -404,13 +366,13 @@ class MediamtxStreamPublisherTest {
 
             MediamtxStreamPublisher publisher = new MediamtxStreamPublisher(
                     URI.create("rtsp://localhost:" + blackHole.getLocalPort()), URI.create("http://localhost:8888"),
-                    URI.create("http://localhost:8889"));
+                    URI.create("http://localhost:8889"), null);
             StreamId id = StreamId.random();
             publisher.streamStarted(id, testDevice());
 
             Instant base = Instant.now();
             long thirtyFpsGapMillis = 33L;
-            int measurementFrames = MediamtxStreamPublisher.CADENCE_MEASUREMENT_FRAMES;
+            int measurementFrames = CadenceEstimator.CADENCE_MEASUREMENT_FRAMES;
 
             for (int i = 0; i < measurementFrames - 1; i++) {
                 publisher.publish(id, bgr24Frame(id, i, base.plusMillis(i * thirtyFpsGapMillis)));
@@ -425,87 +387,6 @@ class MediamtxStreamPublisherTest {
 
             publisher.streamEnded(id);
         }
-    }
-
-    /**
-     * Unit-level check of the {@code configureRecorder} seam: whatever fps
-     * the pre-start cadence measurement produces must reach both {@code
-     * setFrameRate} and a proportionally-sized GOP (not the old fixed 15fps).
-     * Constructing an {@link FFmpegFrameRecorder} only assigns fields — no
-     * network I/O happens until {@code start()}, which this test never calls
-     * — so this needs neither a live mediamtx nor even a reachable socket.
-     */
-    @Test
-    void configureRecorderAppliesMeasuredFrameRateAndProportionalGop() {
-        FFmpegFrameRecorder recorder = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
-
-        MediamtxStreamPublisher.configureRecorder(recorder, 30.0);
-
-        assertEquals(30.0, recorder.getFrameRate());
-        // GOP_SECONDS(1, docs/MVP2-PLAN.md V-a: was 2) * measured fps -- a 1s
-        // keyframe interval matches mediamtx's own 1s hlsSegmentDuration, so
-        // an HLS segment is never coarser than 1s regardless of the source's
-        // measured cadence.
-        assertEquals(30, recorder.getGopSize());
-    }
-
-    /**
-     * Regression guard for the pixelation bug: without an explicit rate
-     * control, {@link FFmpegFrameRecorder} encodes at its ~400 kbps default,
-     * which macroblocks 720p footage (and the detection boxes burned into
-     * it). CRF mode plus a VBV cap must reach the encoder's option map.
-     */
-    @Test
-    void configureRecorderUsesCrfRateControlNotTheDefault400kbps() {
-        FFmpegFrameRecorder recorder = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
-
-        MediamtxStreamPublisher.configureRecorder(recorder, 30.0);
-
-        assertEquals(MediamtxStreamPublisher.X264_CRF, recorder.getVideoOption("crf"));
-        assertEquals(MediamtxStreamPublisher.X264_MAXRATE_BITS_PER_SECOND, recorder.getVideoOption("maxrate"));
-        assertEquals(MediamtxStreamPublisher.X264_BUFSIZE_BITS, recorder.getVideoOption("bufsize"));
-        assertEquals("veryfast", recorder.getVideoOption("preset"));
-    }
-
-    /**
-     * docs/MVP2-PLAN.md V-a latency audit: {@code tune=zerolatency} (which
-     * x264 itself expands to {@code --bframes 0 --no-mbtree --sync-lookahead
-     * 0 --rc-lookahead 0 --force-cfr}, verified against x264's own source —
-     * see {@code MediamtxStreamPublisher.configureRecorder}'s javadoc) is
-     * the single option responsible for zero B-frame reordering delay and
-     * zero rate-control lookahead buffering; {@code setMaxBFrames(0)} and
-     * {@code sc_threshold=0} are this task's redundant-but-explicit,
-     * independently testable reinforcements of the same intent (closed,
-     * strictly periodic GOPs with no frame reordering) rather than new
-     * behavior on their own.
-     */
-    @Test
-    void configureRecorderMinimizesLatencyWithZerolatencyTuneNoBFramesAndClosedGop() {
-        FFmpegFrameRecorder recorder = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
-
-        MediamtxStreamPublisher.configureRecorder(recorder, 30.0);
-
-        assertEquals("zerolatency", recorder.getVideoOption("tune"));
-        assertEquals(0, recorder.getMaxBFrames());
-        assertEquals(MediamtxStreamPublisher.X264_SCENECUT_THRESHOLD, recorder.getVideoOption("sc_threshold"));
-    }
-
-    /**
-     * The keyframe interval an HLS segment is cut on can never be shorter
-     * than the GOP itself (docs/MVP2-PLAN.md V-a) — this asserts the actual
-     * wall-clock duration a GOP spans at a slow, real-world-plausible source
-     * cadence is close to 1s (mediamtx's own configured {@code
-     * hlsSegmentDuration}, see docker-compose.yml), not the old 2s.
-     */
-    @Test
-    void configureRecorderGopSpansApproximatelyOneSecondAtTypicalFrameRates() {
-        FFmpegFrameRecorder recorder15 = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
-        MediamtxStreamPublisher.configureRecorder(recorder15, 15.0);
-        assertEquals(15, recorder15.getGopSize());
-
-        FFmpegFrameRecorder recorder24 = new FFmpegFrameRecorder("rtsp://127.0.0.1:1/ignored", 64, 48);
-        MediamtxStreamPublisher.configureRecorder(recorder24, 24.0);
-        assertEquals(24, recorder24.getGopSize());
     }
 
     private static VideoFrame bgr24Frame(StreamId id, long sequence, Instant capturedAt) {

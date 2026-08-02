@@ -4506,7 +4506,7 @@ piece of logic in this wave.
 ### Deviation from the task brief, with reason: the promote request never echoes the registry's own blank `version`
 
 Read closely, not assumed: `GET /api/cv/registry/models` reports **every** model's `version` as `""`
-today — `cv_service/server.py#ListModels`'s own doc comment says so outright ("the registry tracks no
+today — `cv_service/grpc/servicers.py#ListModels`'s own doc comment says so outright ("the registry tracks no
 per-model version today"), confirmed live in this same tree's own concurrent T6 changes. But
 `ModelRegistryController#promote` (vision-api) builds a domain `ModelRef(id, request.version())`
 server-side, and `ModelRef`'s compact constructor (`vision-domain`) rejects a **blank** version with

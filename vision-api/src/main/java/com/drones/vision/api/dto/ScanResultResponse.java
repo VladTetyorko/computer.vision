@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.ScanResult;
+import com.drones.vision.application.discovery.DiscoveryScanResult;
 
 import java.util.List;
 import java.util.Set;
@@ -14,12 +14,12 @@ import java.util.Set;
 public record ScanResultResponse(List<DiscoveredDeviceResponse> devices, Set<String> failedMethods) {
 
     /**
-     * Maps a {@link ScanResult} to its wire representation.
+     * Maps a {@link DiscoveryScanResult} to its wire representation.
      *
      * @param result the scan result to map
      * @return the response body for {@code result}
      */
-    public static ScanResultResponse from(ScanResult result) {
+    public static ScanResultResponse from(DiscoveryScanResult result) {
         return new ScanResultResponse(
                 result.devices().stream().map(DiscoveredDeviceResponse::from).toList(),
                 result.failedMethods());

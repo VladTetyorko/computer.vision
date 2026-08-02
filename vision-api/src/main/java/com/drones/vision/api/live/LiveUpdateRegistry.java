@@ -14,9 +14,9 @@ import com.drones.vision.api.dto.MarkPayload;
 import com.drones.vision.api.dto.MarkResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
-import com.drones.vision.application.AssetService;
-import com.drones.vision.application.DeviceService;
-import com.drones.vision.application.StreamService;
+import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.device.DeviceService;
+import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
@@ -49,6 +49,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import com.drones.vision.api.controller.AssetController;
+import com.drones.vision.api.controller.EventController;
+import com.drones.vision.api.controller.StreamController;
 
 /**
  * The {@code /api/live} connection registry (docs/REALTIME-PLAN.md §4) — the one {@link

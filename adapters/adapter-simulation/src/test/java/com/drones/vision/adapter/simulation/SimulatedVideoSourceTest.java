@@ -72,8 +72,8 @@ class SimulatedVideoSourceTest {
             for (int i = 0; i < snapshot.size(); i++) {
                 VideoFrame frame = snapshot.get(i);
                 assertEquals(streamId, frame.streamId());
-                assertEquals(SimulatedVideoSource.DEFAULT_WIDTH, frame.width());
-                assertEquals(SimulatedVideoSource.DEFAULT_HEIGHT, frame.height());
+                assertEquals(VideoSettings.DEFAULT_WIDTH, frame.width());
+                assertEquals(VideoSettings.DEFAULT_HEIGHT, frame.height());
                 assertEquals(PixelFormat.JPEG, frame.format());
                 assertTrue(frame.data().remaining() > 0, "frame payload must not be empty");
                 if (i > 0) {

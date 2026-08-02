@@ -22,7 +22,7 @@ pip install -e '.[cv]' \
   --extra-index-url https://download.pytorch.org/whl/cpu   # + real YOLO inference (CPU torch)
 ```
 
-The default model is `yolo11n.pt` (overridable via the `CV_MODEL` env var).
+The default model is `yolo26n.pt` (overridable via the `CV_MODEL` env var).
 Ultralytics downloads it to the current working directory on first use if
 not already present there.
 
@@ -42,12 +42,12 @@ stubs to `cv_service/gen/vision/v1/` (`cv_pb2.py`, `cv_pb2_grpc.py`,
 ## Run the server
 
 ```bash
-python -m cv_service.server
+python -m cv_service.grpc.server
 ```
 
-Starts a gRPC server on `:50051`. Shuts down gracefully on `SIGTERM`/`SIGINT`.
-If you see a `ModuleNotFoundError` mentioning `cv_service.gen`, run
-`scripts/gen_proto.sh` first.
+Starts a gRPC server on `:50051` (overridable via `CV_PORT`). Shuts down
+gracefully on `SIGTERM`/`SIGINT`. If you see a `ModuleNotFoundError`
+mentioning `cv_service.gen`, run `scripts/gen_proto.sh` first.
 
 ## Tests
 

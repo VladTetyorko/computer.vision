@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.PipelineConfigPatch;
+import com.drones.vision.application.stream.PipelineConfigPatch;
 
 import java.util.List;
 import java.util.Set;
