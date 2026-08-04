@@ -211,7 +211,7 @@
 }
 
 /* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·
-   marks · layers · help, each a `vision-icon-button` toggling `panels` (fly.ts). Grouped by job
+   marks · help, each a `vision-icon-button` toggling `panels` (fly.ts). Grouped by job
    (docs/UX-SIMPLIFY-REVIEW.md F4 — see fly.html's own comment above `.grid-rail` for the full
    grouping rationale); this rule now spaces `.rail-group`s apart, each group handling its own
    tighter inner gap. */

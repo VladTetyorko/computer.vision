@@ -4,6 +4,7 @@ import { SettingsStore, type PipelineSettings } from '../../core/settings/settin
 import { ToastService } from '../../core/toast.service';
 import { SidePanel } from '../../shared/ui/side-panel';
 import type { DetectionResult } from '../../core/api/models';
+import type { BoxesMode } from '../../shared/player/player';
 import {
   addLabel,
   applyPreset,
@@ -11,13 +12,15 @@ import {
   buildModelChangePatch,
   chipCandidates,
   debounce,
+  filterLabelsByQuery,
   findModel,
+  hasExactLabelMatch,
   isLabelChecked,
   observedLabels,
   perfHint,
   reArmHint,
-  removeLabel,
   seedLabelFilterForModel,
+  sortSelectedFirst,
   toggleLabelChip,
 } from './cv-control-panel-logic';
 
@@ -28,7 +31,11 @@ const HOT_KNOB_DEBOUNCE_MS = 400;
 
 /**
  * The Fly cockpit's live CV control panel (docs/CV-CONTROL-PLAN.md Wave E) — model picker,
- * confidence/inference-rate sliders, a class-filter chip checklist, and a detection on/off toggle.
+ * confidence/inference-rate sliders, a class-filter chip checklist, a detection on/off toggle, and
+ * (per direct user request) the detection-boxes rendering-mode control formerly owned by its own
+ * standalone `layers` drawer — see {@link boxesMode}/{@link boxesModeChange} and this component's own
+ * "Boxes rendering" section (`cv-control-panel.html`); `fly-logic.ts`'s `ToolRailPanelId` no longer
+ * carries `layers` at all.
  * Migrated into the shared `vision-side-panel` drawer shell (docs/UI-REDESIGN-PLAN.md Wave 2, D-E):
  * this component used to own its own toggle button + hand-rolled `.cv-toggle`/`.cv-drawer`/
  * `.cv-drawer-head` chrome and a self-persisted `cvPanelOpen` flag; both are gone now — the tool-rail
@@ -73,6 +80,15 @@ export class CvControlPanel {
    * observed-label half; `[]` before a stream has produced any detections yet. */
   readonly detectionResults = input<readonly DetectionResult[]>([]);
 
+  /** The detection-boxes rendering mode (`FlyPage`'s own `facade.boxesMode`, formerly the standalone
+   * `layers` drawer's only control) — a client-side rendering preference, not part of
+   * `PipelineSettings`/the wire contract, so it round-trips via a plain input/output pair rather than
+   * `SettingsStore`. */
+  readonly boxesMode = input<BoxesMode>('overlay');
+  /** Emitted when the operator picks a different boxes rendering mode — the host (`fly.ts`/`fly.html`)
+   * owns the actual signal and writes it back via `facade.boxesMode.set($event)`. */
+  readonly boxesModeChange = output<BoxesMode>();
+
   /** Whether the drawer is open — driven by the host's `PanelState` (`fly.ts`'s `panels`), not this
    * component's own state (docs/UI-REDESIGN-PLAN.md D-E). */
   readonly open = input<boolean>(false);
@@ -84,7 +100,9 @@ export class CvControlPanel {
   protected readonly settings = inject(SettingsStore);
   private readonly toasts = inject(ToastService);
 
-  protected readonly newLabelText = signal('');
+  /** Text in the Classes search box — filters {@link chips} live and, once nothing in that filtered
+   * checklist matches, doubles as the "add a class not seen yet" free-text input. */
+  protected readonly classQuery = signal('');
   protected readonly modelBusy = signal(false);
 
   protected readonly models = computed(() => this.fleet.models());
@@ -94,6 +112,17 @@ export class CvControlPanel {
 
   protected readonly chips = computed(() =>
     chipCandidates(this.settings.effective().labelFilter, observedLabels(this.detectionResults())),
+  );
+  /** {@link chips}, narrowed by {@link classQuery} and selected-first sorted — what the checklist
+   * actually renders (see `sortSelectedFirst`'s own doc comment for why selected-first). */
+  protected readonly filteredChips = computed(() =>
+    sortSelectedFirst(filterLabelsByQuery(this.chips(), this.classQuery()), this.settings.effective().labelFilter),
+  );
+  /** Whether the search box should offer "Add <query>" — only once a non-blank query matches nothing
+   * already in {@link chips}, so typing an existing class's name filters to it instead of offering a
+   * redundant duplicate add. */
+  protected readonly showAddClass = computed(
+    () => this.classQuery().trim().length > 0 && !hasExactLabelMatch(this.chips(), this.classQuery()),
   );
 
   private readonly hotKnobPatch = debounce((patch: ReturnType<typeof buildHotKnobPatch>) => {
@@ -125,23 +154,34 @@ export class CvControlPanel {
     this.applyHotKnob({ detectionEnabled: checked });
   }
 
+  /** Toggles one chip's checked state — bound to both the chip body (click anywhere to flip it) and
+   * a checked chip's own "×" remove button, which is just this same action under a more explicit
+   * affordance (`removeLabel`'s naive "filter it out" would silently no-op while `labelFilter` is
+   * still `[]`/"all" — `toggleLabelChip` is the one function that handles that edge case correctly,
+   * see its own doc comment). */
   protected toggleChip(label: string): void {
     const current = this.settings.effective().labelFilter;
     this.applyHotKnob({ labelFilter: toggleLabelChip(current, label, this.chips()) });
   }
 
+  /** Adds {@link classQuery}'s text as a new class — only ever called once {@link showAddClass} is
+   * true (i.e. the query matched nothing already in the checklist to toggle instead). */
   protected addClass(): void {
-    const label = this.newLabelText();
+    const label = this.classQuery();
     const current = this.settings.effective().labelFilter;
     const next = addLabel(current, label);
-    this.newLabelText.set('');
+    this.classQuery.set('');
     if (next !== current) {
       this.applyHotKnob({ labelFilter: next });
     }
   }
 
-  protected removeClass(label: string): void {
-    this.applyHotKnob({ labelFilter: removeLabel(this.settings.effective().labelFilter, label) });
+  /** Enter in the search box only acts when it would add a brand-new class (see {@link addClass}'s
+   * own doc comment) — filtering down to an existing match is a click on that chip, not Enter. */
+  protected onClassQueryEnter(): void {
+    if (this.showAddClass()) {
+      this.addClass();
+    }
   }
 
   protected clearLabelFilter(): void {

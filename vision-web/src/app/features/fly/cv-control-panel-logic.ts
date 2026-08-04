@@ -106,7 +106,7 @@ export function toggleLabelChip(
     : [...labelFilter, label];
 }
 
-// --- Free-text add/remove (for a class not yet observed at all) ------------------------------
+// --- Free-text add (for a class not yet observed at all) -------------------------------------
 
 /** Adds `label` (trimmed) to the filter if it isn't blank/already present — a no-op returns the
  * identical array reference so callers can skip a redundant patch. Naturally narrows `[]` ("all")
@@ -120,8 +120,48 @@ export function addLabel(current: readonly string[], label: string): readonly st
   return [...current, trimmed];
 }
 
-export function removeLabel(current: readonly string[], label: string): readonly string[] {
-  return current.includes(label) ? current.filter((entry) => entry !== label) : current;
+// --- Search box (filters the chip checklist; doubles as the free-text "add" gate) -------------
+
+/** Case-insensitive substring filter over the chip checklist for the panel's own search box —
+ * returns `candidates` unchanged (same reference) for a blank query, so an empty search never
+ * triggers a redundant re-render of the checklist. */
+export function filterLabelsByQuery(candidates: readonly string[], query: string): readonly string[] {
+  const trimmed = query.trim().toLowerCase();
+  if (trimmed.length === 0) {
+    return candidates;
+  }
+  return candidates.filter((candidate) => candidate.toLowerCase().includes(trimmed));
+}
+
+/** Whether `query` (trimmed, case-insensitive) exactly matches one of `candidates` — the search box
+ * only offers "Add" once nothing already in the checklist matches; a blank query never matches, so
+ * the empty checklist state doesn't also offer to "add" nothing. */
+export function hasExactLabelMatch(candidates: readonly string[], query: string): boolean {
+  const trimmed = query.trim().toLowerCase();
+  return trimmed.length > 0 && candidates.some((candidate) => candidate.toLowerCase() === trimmed);
+}
+
+/**
+ * Reorders `candidates` so entries already in `labelFilter` sort first (each half keeping its own
+ * incoming order) — surfaces "what's already selected, ready to remove" at the top of the checklist
+ * the moment the operator opens the panel, without a second, duplicated list. A UX fix: the
+ * checklist used to interleave selected/unselected alphabetically, so finding what to remove from a
+ * short, narrowed filter meant scanning past every unselected class first.
+ *
+ * A deliberate no-op (identical order) while `labelFilter` is `[]` ("all") — every candidate reads
+ * as selected then (`isLabelChecked`), so there is nothing to promote and alphabetical stays the
+ * more scannable order for "browse everything, uncheck a few".
+ */
+export function sortSelectedFirst(
+  candidates: readonly string[],
+  labelFilter: readonly string[],
+): readonly string[] {
+  if (labelFilter.length === 0) {
+    return candidates;
+  }
+  const selected = candidates.filter((candidate) => labelFilter.includes(candidate));
+  const unselected = candidates.filter((candidate) => !labelFilter.includes(candidate));
+  return [...selected, ...unselected];
 }
 
 // --- Opt-in convenience preset (docs/CV-CONTROL-PLAN.md Wave E, coordinator amendment) --------

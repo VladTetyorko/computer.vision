@@ -184,7 +184,9 @@ export class WallTile {
   protected readonly visible = signal(true);
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
-  protected readonly boxesMode = signal<BoxesMode>('overlay');
+  /** Defaults to `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s
+   * own `boxesMode` input default matches for the same reason). */
+  protected readonly boxesMode = signal<BoxesMode>('burned');
 
   private readonly hasTelemetryCapability = computed(() =>
     (this.device()?.capabilities ?? []).includes('TELEMETRY'),

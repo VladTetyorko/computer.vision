@@ -498,8 +498,12 @@ export class Player {
   /** Recent detection batches (newest first) to draw as a vector overlay — see class doc. */
   readonly detections = input<readonly DetectionResult[]>([]);
 
-  /** `'overlay'` (draw boxes), `'burned'`/`'off'` (draw nothing — see `shouldDrawOverlay`'s doc). */
-  readonly boxesMode = input<BoxesMode>('overlay');
+  /** `'overlay'` (draw boxes), `'burned'`/`'off'` (draw nothing — see `shouldDrawOverlay`'s doc).
+   * Defaults to `'burned'` (per direct user request) for a caller that never binds this input at
+   * all — every page that offers a boxes-mode control of its own (Fly/Live/Wall) seeds its own
+   * signal to `'burned'` too, so this default only matters for the callers that don't (asset-detail,
+   * Command's asset panel, replay). */
+  readonly boxesMode = input<BoxesMode>('burned');
 
   /** Emits the measured seconds-behind-live on every sample, `null` while unknown/not playing. */
   readonly latencyChanged = output<number | null>();

@@ -1,5 +1,5 @@
 @if (open()) {
-  <vision-side-panel title="Detection" icon="scan" subtitle="Model · classes · confidence" (close)="close.emit()">
+  <vision-side-panel title="Detection" icon="scan" subtitle="Model · classes · confidence · boxes" (close)="close.emit()">
     <p class="muted hint cv-scope-hint">
       @if (streamId()) {
         Changes below apply live to the running stream.
@@ -38,16 +38,18 @@
       }
     </section>
 
-    <!-- ---- Classes: a checklist built from what the model is really seeing ----------------- -->
+    <!-- ---- Classes: a checklist built from what the model is really seeing -----------------------
+         Flow (per direct user request — "what does the person see first, how do they show/hide
+         something"): 1) current state, in one line; 2) the fast path (a one-click preset + a way
+         back to "everything") right where the eye lands next; 3) search + individual toggle/remove
+         for fine control, once the quick actions above don't cover it. -->
     <section class="cv-section" [class.emphasized]="isOpenVocab()">
-      <div class="row spread">
-        <span class="label">
-          Classes
-          @if (isOpenVocab()) {
-            <span class="chip warn">Primary control for this model</span>
-          }
-        </span>
-      </div>
+      <span class="label">
+        Classes
+        @if (isOpenVocab()) {
+          <span class="chip warn">Primary control for this model</span>
+        }
+      </span>
 
       @if (settings.effective().labelFilter.length === 0) {
         <p class="muted hint">Showing every class this model detects.</p>
@@ -57,51 +59,66 @@
         </p>
       }
 
-      @if (chips().length > 0) {
+      <div class="chip-action-row">
+        <button type="button" class="btn small" (click)="fillPreset()" title="Fill in a common starting set — stays fully editable afterward">
+          + People, vehicles &amp; buildings
+        </button>
+        @if (settings.effective().labelFilter.length > 0) {
+          <button type="button" class="btn secondary small" (click)="clearLabelFilter()" title="Show every class again">
+            Clear all
+          </button>
+        }
+      </div>
+
+      <div class="chip-search-row">
+        <input
+          [value]="classQuery()"
+          (input)="classQuery.set($any($event.target).value)"
+          (keydown.enter)="onClassQueryEnter()"
+          placeholder="Search to show or hide one class…"
+          aria-label="Search or add a class"
+        />
+      </div>
+
+      @if (filteredChips().length > 0) {
         <div class="chip-checklist" role="group" aria-label="Classes seen">
-          @for (label of chips(); track label) {
-            <button
-              type="button"
-              class="class-chip"
-              [class.checked]="isChecked(label)"
-              [attr.aria-pressed]="isChecked(label)"
-              (click)="toggleChip(label)"
-              [title]="isChecked(label) ? 'Showing — click to hide' : 'Hidden — click to show'"
-            >
-              <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
-              {{ label }}
-            </button>
+          @for (label of filteredChips(); track label) {
+            <span class="class-chip" [class.checked]="isChecked(label)">
+              <button
+                type="button"
+                class="chip-label"
+                [attr.aria-pressed]="isChecked(label)"
+                (click)="toggleChip(label)"
+                [title]="isChecked(label) ? 'Showing — click to hide' : 'Hidden — click to show'"
+              >
+                <span class="chip-check" aria-hidden="true">{{ isChecked(label) ? '✓' : '' }}</span>
+                {{ label }}
+              </button>
+              @if (isChecked(label)) {
+                <button
+                  type="button"
+                  class="chip-remove"
+                  [attr.aria-label]="'Remove ' + label"
+                  title="Remove"
+                  (click)="toggleChip(label)"
+                >
+                  ×
+                </button>
+              }
+            </span>
           }
         </div>
+      } @else if (classQuery().trim().length > 0) {
+        <p class="muted hint">No class matches "{{ classQuery().trim() }}".</p>
       } @else {
         <p class="muted hint">No classes observed yet — waiting for the first detections.</p>
       }
 
-      <div class="chip-add-row">
-        <input
-          [value]="newLabelText()"
-          (input)="newLabelText.set($any($event.target).value)"
-          (keydown.enter)="addClass()"
-          placeholder="Add a class not seen yet (e.g. airplane)"
-          aria-label="Add a class to the filter"
-        />
-        <button type="button" class="btn secondary small" (click)="addClass()" [disabled]="!newLabelText().trim()">
-          Add
+      @if (showAddClass()) {
+        <button type="button" class="btn secondary small chip-add-button" (click)="addClass()">
+          Add "{{ classQuery().trim() }}"
         </button>
-      </div>
-
-      <div class="chip-action-row">
-        <button type="button" class="btn secondary small" (click)="fillPreset()">
-          + People, vehicles &amp; buildings
-        </button>
-        @if (settings.effective().labelFilter.length > 0) {
-          <button type="button" class="btn secondary small" (click)="clearLabelFilter()">Show all</button>
-        }
-      </div>
-      <p class="muted hint">
-        The preset button fills in a common starting set — it never applies on its own, and every
-        chip above stays editable afterward.
-      </p>
+      }
     </section>
 
     <!-- ---- Confidence / inference rate ------------------------------------------------------ -->
@@ -131,6 +148,29 @@
       />
 
       <p class="muted hint">{{ perfHintText() }}</p>
+    </section>
+
+    <!-- ---- Boxes rendering — merged in from the former standalone `layers` drawer (per direct user
+         request); a client-side rendering preference (`FlyPage`'s `facade.boxesMode`), not part of
+         the `PipelineSettings` wire contract, so it round-trips via {@link boxesMode}/
+         {@link boxesModeChange} rather than `SettingsStore`. -->
+    <section class="cv-section">
+      <span class="label">Boxes (shortcut: B)</span>
+      <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
+        <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesModeChange.emit('overlay')">
+          Overlay
+        </button>
+        <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesModeChange.emit('burned')">
+          Burned in
+        </button>
+        <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesModeChange.emit('off')">
+          Off
+        </button>
+      </div>
+      <p class="muted hint">
+        Overlay draws boxes on top of the video; burned-in draws them into the picture itself; off
+        hides them entirely. Detection still runs the same either way.
+      </p>
     </section>
 
     <!-- ---- Detection on/off ------------------------------------------------------------------ -->

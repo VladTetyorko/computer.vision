@@ -212,11 +212,17 @@
       />
 
       <!-- Detection (CV) console — migrated into the shared drawer shell (D-E); hidden entirely in
-           watch mode, same "viewer, not controller" gate as Start/Stop below. -->
+           watch mode, same "viewer, not controller" gate as Start/Stop below. Also carries (per
+           direct user request) the former standalone `layers` drawer's own content — the
+           detection-boxes rendering-mode control (`cv-control-panel.html`'s own "Boxes rendering"
+           section) — since both drawers govern how detection results are surfaced; there is no
+           longer a separate `layers` drawer or rail button (`ToolRailPanelId`, `fly-logic.ts`). -->
       @if (!facade.watchMode()) {
         <vision-cv-control-panel
           [streamId]="facade.stream()?.streamId"
           [detectionResults]="facade.detections.results()"
+          [boxesMode]="facade.boxesMode()"
+          (boxesModeChange)="facade.boxesMode.set($event)"
           [open]="isPanelOpen('cv')"
           (close)="panels.close()"
         />
@@ -253,32 +259,6 @@
         [open]="isPanelOpen('marks')"
         (close)="panels.close()"
       />
-
-      <!-- Layers — a UI for the detection-boxes overlay mode (docs/UI-REDESIGN-PLAN.md Wave 2 item
-           5's "map controls… become… layers": the boxes-rendering layer over the video is the
-           Fly-specific "layer" control this cockpit actually has; the geographic map's own layer
-           picker lives inside `<vision-live-map>` itself, unchanged). Gives the `B` shortcut a
-           discoverable UI for the first time — `B` itself still cycles the same three states. -->
-      @if (isPanelOpen('layers')) {
-        <vision-side-panel title="Layers" icon="layers" subtitle="Detection box rendering" (close)="panels.close()">
-          <span class="label">Boxes (shortcut: B)</span>
-          <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
-            <button type="button" role="tab" class="btn" [class.active]="facade.boxesMode() === 'overlay'" [attr.aria-selected]="facade.boxesMode() === 'overlay'" (click)="facade.boxesMode.set('overlay')">
-              Overlay
-            </button>
-            <button type="button" role="tab" class="btn" [class.active]="facade.boxesMode() === 'burned'" [attr.aria-selected]="facade.boxesMode() === 'burned'" (click)="facade.boxesMode.set('burned')">
-              Burned in
-            </button>
-            <button type="button" role="tab" class="btn" [class.active]="facade.boxesMode() === 'off'" [attr.aria-selected]="facade.boxesMode() === 'off'" (click)="facade.boxesMode.set('off')">
-              Off
-            </button>
-          </div>
-          <p class="muted hint">
-            Overlay draws boxes on top of the video; burned-in draws them into the picture itself;
-            off hides them entirely. Detection still runs the same either way.
-          </p>
-        </vision-side-panel>
-      }
 
       <!-- Help — the old `.hud-shortcuts` modal's content, unchanged copy, now a drawer. -->
       @if (isPanelOpen('help')) {
@@ -317,15 +297,18 @@
 
 
     <!-- ---- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D; grouped by job per
-         docs/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit")
-         — frozen ids (fly-logic.ts's own `ToolRailPanelId`): flight · rc · cv · detections · marks ·
-         layers · help; unchanged gates/behavior, only visual grouping + order. Every button stays
-         always-visible (no "more" overflow — F4 explicitly rules that out on a safety-of-flight
-         screen); a thin `--hairline` divider between `.rail-group`s stands in for a text label,
-         which does not read clean at this rail's ~2.25rem button width (F4: "if it crowds, use just
-         the divider"). Groups, top to bottom:
+         docs/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit";
+         `layers` folded into `cv` per direct user request — the detection-boxes rendering mode is
+         now a control inside the `cv` (Detection) drawer, not its own drawer/button, so the rail is
+         down to 6) — frozen ids (fly-logic.ts's own `ToolRailPanelId`): flight · rc · cv ·
+         detections · marks · help; unchanged gates/behavior, only visual grouping + order. Every
+         button stays always-visible (no "more" overflow — F4 explicitly rules that out on a
+         safety-of-flight screen); a thin `--hairline` divider between `.rail-group`s stands in for a
+         text label, which does not read clean at this rail's ~2.25rem button width (F4: "if it
+         crowds, use just the divider"). Groups, top to bottom:
            Control      — flight, rc (what an operator commands the aircraft with)
-           Vision       — cv, detections, layers (what the aircraft sees / how it's rendered)
+           Vision       — cv, detections (what the aircraft sees / how it's rendered, including the
+                           boxes rendering-mode control merged into the `cv` drawer)
            Situational  — marks (the shared tactical picture)
            Help         — pinned to the rail's bottom via `.rail-group-help`'s `margin-top: auto`,
                            deliberately last and separated — it's reference, not a flying tool. -->
@@ -375,13 +358,6 @@
             (activated)="togglePanel('detections')"
           />
         }
-        <vision-icon-button
-          icon="layers"
-          label="Layers"
-          variant="hud"
-          [active]="isPanelOpen('layers')"
-          (activated)="togglePanel('layers')"
-        />
       </div>
 
       <div class="rail-group" role="group" aria-label="Situational">

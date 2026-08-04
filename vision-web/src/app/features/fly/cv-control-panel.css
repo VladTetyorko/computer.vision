@@ -98,22 +98,18 @@
   margin-bottom: var(--space-8);
 }
 
+/* A chip is a `<span>` shell around two buttons — a `.chip-label` (toggles checked/hidden, the whole
+   chip's main job) and, only while checked, a trailing `.chip-remove` "×" (the same toggle, under a
+   more explicit affordance — nested `<button>`s aren't valid HTML, hence the shell). */
 .class-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
   background: var(--panel-raised);
   border: 1px solid var(--border-strong);
   color: var(--text-muted);
   font-size: 0.76rem;
-  cursor: pointer;
   min-height: 1.9rem;
-}
-
-.class-chip:hover {
-  border-color: var(--color-info);
 }
 
 .class-chip.checked {
@@ -128,7 +124,58 @@
   text-align: center;
 }
 
-.chip-add-row,
+.chip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+}
+
+.chip-label:hover {
+  text-decoration: underline;
+}
+
+.chip-label:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: -2px;
+}
+
+.chip-remove {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0 var(--space-4) 0 0;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.chip-remove:hover {
+  opacity: 1;
+  background: var(--color-info);
+  color: var(--panel-raised);
+}
+
+.chip-remove:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 1px;
+}
+
+.chip-search-row,
 .chip-action-row {
   display: flex;
   align-items: center;
@@ -137,10 +184,13 @@
   margin-bottom: var(--space-8);
 }
 
-.chip-add-row input {
+.chip-search-row input {
   flex: 1;
-  min-width: 8rem;
-  width: auto;
+  width: 100%;
+}
+
+.chip-add-button {
+  margin-bottom: var(--space-8);
 }
 
 /* ---- Detection on/off toggle ------------------------------------------------------------------ */

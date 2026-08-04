@@ -57,8 +57,10 @@ export class LiveFacade {
   /** The player's own live transport (docs/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
   readonly transport = signal<Transport>('hls');
 
-  /** Per-tile "boxes: overlay/burned/off" toggle (docs/CYCLES-PLAN.md §11 item 6) — defaults to overlay. */
-  readonly boxesMode = signal<BoxesMode>('overlay');
+  /** Per-tile "boxes: overlay/burned/off" toggle (docs/CYCLES-PLAN.md §11 item 6) — defaults to
+   * `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s own
+   * `boxesMode` input default matches for the same reason). */
+  readonly boxesMode = signal<BoxesMode>('burned');
 
   readonly device = computed(() => {
     const deviceId = this.deviceIdSignal();

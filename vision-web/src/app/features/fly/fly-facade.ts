@@ -255,7 +255,9 @@ export class FlyFacade {
 
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
-  readonly boxesMode = signal<BoxesMode>('overlay');
+  /** Defaults to `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s
+   * own `boxesMode` input default matches for the same reason). */
+  readonly boxesMode = signal<BoxesMode>('burned');
 
   /** Persisted, non-mutually-exclusive toggle (docs/UI-ARCHITECTURE-PLAN.md) — see this class's own
    * doc comment above `MAP_VISIBLE_KEY`. */

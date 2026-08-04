@@ -7,7 +7,7 @@ import type { IconName } from './icon-registry';
  * `vision-side-panel` — the shared drawer shell (docs/UI-REDESIGN-PLAN.md Frozen contract F3),
  * generalizing `features/command/asset-panel.html`'s own panel-shell markup (unchanged by this wave
  * — out of scope: `src/app/features/**`) into a component every later wave's drawers can share:
- * Fly's flight/CV/detections/layers/help tool-rail drawers (Wave 2), and asset-detail's full-
+ * Fly's flight/CV/detections/marks/help tool-rail drawers (Wave 2), and asset-detail's full-
  * telemetry/usage-history/hardware/attributes/pilots drill-ins (Wave 3).
  *
  * **Mounting is the host's job, not this component's**: a host page renders `@if

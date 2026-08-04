@@ -9,13 +9,15 @@ import {
   buildModelChangePatch,
   chipCandidates,
   debounce,
+  filterLabelsByQuery,
   findModel,
+  hasExactLabelMatch,
   isLabelChecked,
   observedLabels,
   perfHint,
   reArmHint,
-  removeLabel,
   seedLabelFilterForModel,
+  sortSelectedFirst,
   toggleLabelChip,
 } from './cv-control-panel-logic';
 
@@ -136,7 +138,7 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  describe('addLabel / removeLabel', () => {
+  describe('addLabel', () => {
     it('adds a trimmed label', () => {
       expect(addLabel(['person'], '  car  ')).toEqual(['person', 'car']);
     });
@@ -154,14 +156,50 @@ describe('cv-control-panel-logic', () => {
     it('narrows [] ("all") down to just the added label', () => {
       expect(addLabel([], 'airplane')).toEqual(['airplane']);
     });
+  });
 
-    it('removes a present label', () => {
-      expect(removeLabel(['person', 'car'], 'car')).toEqual(['person']);
+  describe('filterLabelsByQuery', () => {
+    it('filters case-insensitively by substring', () => {
+      expect(filterLabelsByQuery(['person', 'car', 'bicycle'], 'CAR')).toEqual(['car']);
     });
 
-    it('is a no-op (same reference) removing an absent label', () => {
-      const current = ['person'];
-      expect(removeLabel(current, 'car')).toBe(current);
+    it('returns the identical reference for a blank query', () => {
+      const candidates = ['person', 'car'];
+      expect(filterLabelsByQuery(candidates, '   ')).toBe(candidates);
+    });
+
+    it('returns [] when nothing matches', () => {
+      expect(filterLabelsByQuery(['person', 'car'], 'airplane')).toEqual([]);
+    });
+  });
+
+  describe('hasExactLabelMatch', () => {
+    it('matches case-insensitively, trimmed', () => {
+      expect(hasExactLabelMatch(['person', 'car'], '  Car  ')).toBe(true);
+    });
+
+    it('is false for a substring-only match', () => {
+      expect(hasExactLabelMatch(['bicycle'], 'bi')).toBe(false);
+    });
+
+    it('is false for a blank query', () => {
+      expect(hasExactLabelMatch(['person'], '   ')).toBe(false);
+    });
+  });
+
+  describe('sortSelectedFirst', () => {
+    it('promotes selected candidates ahead of unselected ones, keeping each half\'s own order', () => {
+      expect(sortSelectedFirst(['airplane', 'bicycle', 'car', 'person'], ['person', 'car'])).toEqual([
+        'car',
+        'person',
+        'airplane',
+        'bicycle',
+      ]);
+    });
+
+    it('is a no-op while the filter is [] ("all") — nothing to promote', () => {
+      const candidates = ['airplane', 'bicycle', 'car'];
+      expect(sortSelectedFirst(candidates, [])).toBe(candidates);
     });
   });
 

@@ -24,7 +24,9 @@ import { lastSeenLabel, nextCollapseAction, positionLabel, streamStateLabel, typ
 import type { AssetSummary } from '../../core/api/models';
 
 /** `UiStore`'s own storage key for this page's tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) —
- * one key for all six drawers (`flight`/`rc`/`cv`/`detections`/`layers`/`help`). Unchanged from the
+ * one key for all six drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`help`; the former `layers`
+ * drawer was folded into `detections` per direct user request — see `fly-logic.ts`'s own
+ * `ToolRailPanelId` doc comment). Unchanged from the
  * pre-`UiStore` `PanelState` key — `UiStore` round-trips the same `localStorage` shape
  * (docs/UI-ARCHITECTURE-PLAN.md: "API-compatible with `PanelState`"), so an already-open drawer
  * survives this refactor across a reload. */
@@ -118,7 +120,7 @@ export class FlyPage {
    * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/UI-REDESIGN-PLAN.md
    * Wave 2, D-D/F3; migrated from `PanelState` to `UiStore` by docs/UI-ARCHITECTURE-PLAN.md wave
    * W1 — API-compatible, same persisted `ACTIVE_PANEL_KEY` shape). Frozen rail ids
-   * (`ToolRailPanelId`): `flight`, `rc`, `cv`, `detections`, `layers`, `help`.
+   * (`ToolRailPanelId`): `flight`, `rc`, `cv`, `detections`, `marks`, `help`.
    */
   protected readonly panels = new UiStore(ACTIVE_PANEL_KEY);
 

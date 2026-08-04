@@ -93,10 +93,12 @@ export const TICKER_MAX_EVENTS = 4;
  * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/TACTICAL-MARKS-PLAN.md M5
  * — the shared tactical-marks operational picture). This union's own declaration order is no longer
  * the rail's visual order: docs/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
- * rc), Vision (cv, detections, layers), Situational (marks), Help (pinned last, separated) — see
- * fly.html's own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is
- * unchanged; only where each button sits in the rail moved. */
-export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'layers' | 'help';
+ * rc), Vision (cv, detections), Situational (marks), Help (pinned last, separated) — see fly.html's
+ * own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is unchanged;
+ * only where each button sits in the rail moved. **`layers` was removed** (per direct user request)
+ * — the detection-boxes rendering-mode control it used to hold its own drawer for now lives inside
+ * the `cv` (Detection) drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section). */
+export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'help';
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/UI-REDESIGN-PLAN.md D-D: "Esc calls
