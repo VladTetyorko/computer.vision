@@ -1,0 +1,40 @@
+<button
+  type="button"
+  class="event-row"
+  [class.dense]="dense()"
+  [class.open]="event().state === 'OPEN'"
+  [class.selected]="selected()"
+  [disabled]="!clickable()"
+  (click)="activated.emit()"
+>
+  @if (dense()) {
+    <!-- docs/design/08-alerts.md: severity dot · label · confidence · asset · relative time, one
+         line, ~32px tall. No action affordance — this row selects, it never navigates. -->
+    <span class="event-dot" [class.open]="event().state === 'OPEN'"></span>
+    @if (event().state === 'OPEN') {
+      <span class="chip event-state ok"><span class="dot live"></span>OPEN</span>
+    }
+    <span class="event-label">{{ event().label }}</span>
+    <span class="event-confidence mono">{{ formatConfidence(event().peakConfidence) }}</span>
+    <span class="event-source truncate" [title]="sourceLabel()">{{ sourceLabel() }}</span>
+    <span class="event-time faint mono">{{ relativeTime() }}</span>
+  } @else {
+    <!-- The rail/bell's own two-line layout — byte-for-byte the pre-extraction markup, just fed by
+         inputs instead of reading `EventsRail`'s own fields directly. -->
+    <span class="event-row-top">
+      <span class="event-dot" [class.open]="event().state === 'OPEN'"></span>
+      @if (event().state === 'OPEN') {
+        <span class="chip event-state ok"><span class="dot live"></span>OPEN</span>
+      }
+      <span class="event-label">{{ event().label }}</span>
+      <span class="event-time faint">{{ relativeTime() }}</span>
+      @if (actionLabel(); as action) {
+        <span class="event-affordance faint">{{ action }} ›</span>
+      }
+    </span>
+    <span class="event-meta muted">
+      <span class="event-source truncate" [title]="sourceLabel()">{{ sourceLabel() }}</span>
+      <span class="event-confidence">· {{ formatConfidence(event().peakConfidence) }}</span>
+    </span>
+  }
+</button>

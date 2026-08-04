@@ -3,6 +3,7 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { describeEventSource, distinctLabels, filterEvents, relativeTimeLabel, resolveEventTarget } from '../../core/events/events-logic';
+import { EventRow } from './event-row';
 import type { DetectionEvent } from '../../core/api/models';
 
 /** How many rows the rail shows at once — a "recent activity" feed, not the full retained history. */
@@ -34,10 +35,19 @@ const CLOCK_TICK_MS = 1_000;
  * (`WallPage`/`CommandPage` each call `activate()`/`release()` once in their own constructor,
  * exactly as before); a page that renders both this rail and the fleet map only needs to own the
  * refcount once, not per consumer.
+ *
+ * **Row markup extracted to `vision-event-row`** (docs/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3,
+ * docs/design/08-alerts.md's own refactor list item 1) — this component still owns filters, the cap,
+ * and every derivation (`sourceLabel`/`relativeTime`/`eventClickable`/`eventActionLabel` below), it
+ * just no longer hand-rolls the row's own DOM; `/monitor/alerts` (which used to embed this whole
+ * component to get the identical row look) now renders `vision-event-row` directly instead, in its
+ * own `dense` variant — see that component's own doc comment for why the two hosts get different
+ * density rather than one shape forced onto both.
  */
 @Component({
   selector: 'vision-events-rail',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [EventRow],
   templateUrl: './events-rail.html',
   styleUrl: './events-rail.css',
 })

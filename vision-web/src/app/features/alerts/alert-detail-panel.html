@@ -1,0 +1,54 @@
+<div class="alert-detail">
+  <div class="alert-detail-head">
+    <span class="event-dot" [class.open]="event().state === 'OPEN'"></span>
+    @if (event().state === 'OPEN') {
+      <span class="chip event-state ok"><span class="dot live"></span>OPEN</span>
+    }
+    <h3 class="alert-detail-label">{{ event().label }}</h3>
+  </div>
+
+  <dl class="facts">
+    <div class="fact">
+      <dt>Confidence</dt>
+      <dd class="mono">{{ formatConfidence(event().peakConfidence) }}</dd>
+    </div>
+    <div class="fact">
+      <dt>Source</dt>
+      <dd class="truncate" [title]="sourceLabel()">{{ sourceLabel() }}</dd>
+    </div>
+    <div class="fact">
+      <dt>First seen</dt>
+      <dd class="mono">{{ absoluteTime(event().firstSeen) }}</dd>
+    </div>
+    <div class="fact">
+      <dt>Last seen</dt>
+      <dd class="mono">{{ absoluteTime(event().lastSeen) }}</dd>
+    </div>
+    @if (event().position; as position) {
+      <div class="fact span-2">
+        <dt>Position</dt>
+        <dd class="mono">{{ position.latitude.toFixed(5) }}, {{ position.longitude.toFixed(5) }}</dd>
+      </div>
+    }
+  </dl>
+
+  <!-- Honest gap, not a fabricated image (see this component's own class doc comment for why no
+       frame/box render exists here). -->
+  <vision-empty
+    icon="eye"
+    title="No captured frame available"
+    message="This event carries no stored frame or bounding box — only the label, confidence and time above. See the asset directly instead:"
+  >
+    <div class="alert-detail-actions">
+      @if (canOpenCockpit()) {
+        <button type="button" class="btn" (click)="openCockpit.emit()">Open cockpit</button>
+      }
+      @if (canJumpToReplay()) {
+        <button type="button" class="btn secondary" (click)="jumpToReplay.emit()">Jump to replay</button>
+      }
+      @if (!canOpenCockpit() && !canJumpToReplay()) {
+        <p class="muted">No live stream or asset resolved for this event.</p>
+      }
+    </div>
+  </vision-empty>
+</div>

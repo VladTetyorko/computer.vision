@@ -30,6 +30,14 @@
     background: transparent;
 }
 
+/* `.segmented`/`.btn` themselves are global primitives (src/styles.css); only the icon's own color
+   needs a per-page override so it inherits the active/inactive text color instead of the SVG
+   default — same one-line rule `features/devices/devices.css` used for its own (now-removed)
+   List/Grid toggle. */
+.segmented vision-icon {
+    color: currentColor;
+}
+
 /* ---- Assets: the "N of M" line (docs/design/04-assets.md problem 6 — fixed pluralisation,
    `pluralize()` shared with the page bar) --------------------------------------------------------- */
 
@@ -38,7 +46,82 @@
     font-size: 0.85rem;
 }
 
-/* ---- Assets: the card grid -------------------------------------------------------------------- */
+/* ---- Assets: the dense list (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) —
+   default view. Plain `<table>` reusing the global `table`/`th`/`td` rules (src/styles.css); only the
+   row-selection state and the name cell's status dot need page-local rules. ------------------------ */
+
+/* Tighter than the global `td { padding: var(--space-8) }` (src/styles.css) — the design doc's own
+   row-height target is ~36px so ~20 assets fit a 1080p screen without scrolling; the full 8px
+   top/bottom padding plus a chip's own height overshoots that. Horizontal padding is untouched. */
+table td {
+    padding-top: var(--space-4);
+    padding-bottom: var(--space-4);
+}
+
+/* Contained horizontal scroll — see `features/devices/devices.css`'s identical rule for why: the
+   browser's auto table layout can squeeze Name illegibly once the two-pane panel narrows the
+   available width; this wrapper scrolls instead of the page. `min-width` gives every column a floor. */
+.table-scroll {
+    overflow-x: auto;
+}
+
+table {
+    min-width: 44rem;
+}
+
+td:first-child {
+    min-width: 12rem;
+}
+
+.name-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+}
+
+.name-cell .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Every data row is clickable + keyboard-operable (F6 — selecting opens the detail panel, never
+   navigates); `cursor: pointer` and the hover/selected treatment below are what make that legible.
+   The selected look reuses `features/command/command.css`'s own `.rail-row.selected` language
+   (raised background + a `--color-info` accent) rather than inventing a second "this is chosen"
+   idiom — `box-shadow: inset` stands in for that file's `border-left` since `border-collapse` on a
+   `<table>` won't reliably render a per-cell left border. */
+tbody tr.row-selectable {
+    cursor: pointer;
+}
+
+tbody tr.row-selectable:hover {
+    background: var(--panel-hover);
+}
+
+tbody tr.row-selectable:focus-visible {
+    outline: 2px solid var(--color-info);
+    outline-offset: -2px;
+}
+
+tbody tr.row-selectable.selected {
+    background: var(--panel-raised);
+    box-shadow: inset 3px 0 0 0 var(--color-info);
+}
+
+tbody tr.row-selectable.archived {
+    opacity: 0.6;
+}
+
+.row-kebab-cell {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+/* ---- Assets: the card grid (opt-in, docs/design/04-assets.md) ---------------------------------- */
 
 .asset-card-grid {
     display: grid;
@@ -54,11 +137,22 @@
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .asset-card:hover {
     background: var(--panel-hover);
+}
+
+.asset-card:focus-visible {
+    outline: 2px solid var(--color-info);
+    outline-offset: -2px;
+}
+
+.asset-card.selected {
+    outline: 1px solid var(--color-info);
+    outline-offset: -1px;
 }
 
 .asset-card.archived {
@@ -80,6 +174,13 @@
     white-space: nowrap;
 }
 
+.asset-card-kebab {
+    /* Isolated from the card's own click-to-select handler (`(click)="$event.stopPropagation()"` in
+       the template) — a real interactive `<details>` menu nested inside a clickable card, same
+       trade-off the dense list's `.row-kebab-cell` makes. */
+    display: inline-flex;
+}
+
 .asset-card-chips {
     display: flex;
     align-items: center;
@@ -91,14 +192,65 @@
     font-size: 0.78rem;
 }
 
-.asset-card-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    margin-top: auto;
-    padding-top: var(--space-4);
-}
-
 /* Per-row kebab (⋯) menu — `.kebab`/`.kebab-trigger`/`.kebab-menu`/`.kebab-item`/`.kebab-divider`/
    `.kebab-reason`/`.danger-action` are a shared global primitive (src/styles.css) — see
    `features/devices/devices.css`'s identical note. */
+
+/* ---- Assets: the detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) ---
+   Content projected into `vision-two-pane`'s `[twoPaneDetail]` slot — the pane's own chrome (header,
+   close button, docked/overlay layout) lives in that shared, frozen component; only the body's own
+   layout is this page's concern. --------------------------------------------------------------- */
+
+.detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-8);
+    margin-bottom: var(--space-16);
+}
+
+.detail-section {
+    margin-bottom: var(--space-16);
+}
+
+.detail-heading {
+    margin: 0 0 var(--space-8);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.detail-empty {
+    font-size: 0.85rem;
+}
+
+.detail-device-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.detail-device-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+    font-size: 0.85rem;
+}
+
+.detail-device-row .truncate {
+    min-width: 0;
+}
+
+.detail-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}

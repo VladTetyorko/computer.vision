@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssignedPilot, UserSummary } from '../../core/api/models';
-import { buildRosterRows, searchRosterRows, sortAssetsByName } from './roster-logic';
+import { buildRosterRows, countAssetsWithoutPilot, searchRosterRows, sortAssetsByName } from './roster-logic';
 
 function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
   return {
@@ -92,5 +92,30 @@ describe('searchRosterRows', () => {
 
   it('matches nothing for an unrelated query', () => {
     expect(searchRosterRows(rows, 'nope')).toEqual([]);
+  });
+});
+
+describe('countAssetsWithoutPilot', () => {
+  it('counts rows with zero assigned pilots', () => {
+    const rows = buildRosterRows(
+      [asset({ assetId: 'a-1' }), asset({ assetId: 'a-2' })],
+      new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
+      [user({ userId: 'u-1' })],
+    );
+    expect(countAssetsWithoutPilot(rows)).toBe(1);
+  });
+
+  it('counts against every row, not a filtered subset — the caller is responsible for passing the unfiltered list', () => {
+    const rows = buildRosterRows([asset({ assetId: 'a-1' }), asset({ assetId: 'a-2' })], new Map(), []);
+    expect(countAssetsWithoutPilot(rows)).toBe(2);
+  });
+
+  it('is zero when every asset has ≥1 pilot', () => {
+    const rows = buildRosterRows(
+      [asset({ assetId: 'a-1' })],
+      new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
+      [user({ userId: 'u-1' })],
+    );
+    expect(countAssetsWithoutPilot(rows)).toBe(0);
   });
 });

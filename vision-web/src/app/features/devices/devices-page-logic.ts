@@ -136,6 +136,21 @@ export function searchWarehouseRowsByQuery(
 }
 
 /**
+ * Resolves the two-pane detail panel's row from `?sel=<deviceId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4,
+ * docs/design/06-devices.md) — looked up against **every** loaded row, not the search-narrowed
+ * `warehouseRows()`, so typing into the search box never silently evicts an already-open selection.
+ * Returns `undefined` for a missing/blank id and equally for one matching no currently-loaded row (a
+ * device archived by someone else since the link was shared) — the caller (`DevicesFacade#selectedRow`)
+ * treats both identically: the panel just doesn't open, never a crash or a blank panel.
+ */
+export function findWarehouseRowById(rows: readonly WarehouseRow[], id: string | undefined): WarehouseRow | undefined {
+  if (!id) {
+    return undefined;
+  }
+  return rows.find((row) => row.device.id === id);
+}
+
+/**
  * Builds the `POST /api/assets` body for "Promote to asset…" (docs/UX-QUICKWINS-PLAN.md QF-2's
  * orphaned-device quick fix, renamed to its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3): assigns
  * `device` — the existing, already-registered device, by id — to the new asset via `deviceIds`.

@@ -1,0 +1,34 @@
+<vision-section-header [title]="displayName()" subtitle="Assets this pilot may fly" />
+
+<div class="pilots-add">
+  <select
+    aria-label="Assign to an asset"
+    [ngModel]="pickAssetId()"
+    (ngModelChange)="pickAssetId.set($event)"
+    [disabled]="busy() || assignableAssets().length === 0"
+  >
+    <option value="">{{ assignableAssets().length === 0 ? 'No more assets to add' : 'Choose an asset…' }}</option>
+    @for (asset of assignableAssets(); track asset.assetId) {
+      <option [value]="asset.assetId">{{ asset.displayName }}</option>
+    }
+  </select>
+  <button type="button" class="btn" (click)="emitAssign()" [disabled]="busy() || !pickAssetId()">Assign</button>
+</div>
+
+@if (assignments().length === 0) {
+  <vision-empty
+    title="No assets assigned"
+    message="Assign this pilot to an asset above so they can fly it from their cockpit."
+  />
+} @else {
+  <ul class="pilots-list">
+    @for (assignment of assignments(); track assignment.assetId) {
+      <li class="pilots-row">
+        <span class="pilots-name truncate">{{ assignment.displayName }}</span>
+        <button type="button" class="btn danger small" (click)="unassign.emit(assignment.assetId)" [disabled]="busy()">
+          Unassign
+        </button>
+      </li>
+    }
+  </ul>
+}

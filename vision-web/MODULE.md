@@ -210,6 +210,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
   - **Unchanged**: the "Show archived" toggle, every device kebab action (rename/activate/deactivate/archive/restore/assign/unassign, reasoned per `core/fleet/warehouse-logic.ts`), the Simulated chip + Stop simulation action, Start/Stop/Watch stream actions, and "Promote to asset…" (`createAssetFor` panel) for an orphaned device — all byte-for-byte the same logic as before the split, just without the Assets section stacked above them and without a collapse/disclosure wrapper around them.
   - **Dropped**: CDK virtual scroll (`@angular/cdk/scrolling`) — that lived on the old Assets section only (never on this page's own device table), so it left with the split; this page's table/grid still uses a plain `@for`, unchanged from before.
   - **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2" Status entry near the bottom of this file). Both old subtitle sentences deleted outright (the second was stale Assets/Devices-split migration signage). Search, the List/Grid toggle, and "Show archived" now project into the bar's `[pageBarFilters]` slot; "+ Add source"/"Refresh" into `[pageBarActions]`. The `Registered devices`/`N device(s)` card header is gone — the bar's own `[count]`/`countNoun="device"` carries that number now, correctly pluralised.
+  - **Wave 3 (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md — see the dated "Wave 3" Status entry near the bottom of this file for the full writeup)**: the List/Grid toggle and `viewMode` are gone outright (a raw-device grid had no use case the table didn't already serve better); the table wraps in `shared/ui/two-pane` with `?sel=<deviceId>`-addressable selection (`DevicesFacade#selectedId`/`selectedRow`/`selectRow`/`clearSelection`); each row drops its own UUID line and collapses to **one** primary action (Watch live/Start stream) + a kebab holding everything else, including the two actions (`Stop stream`, `Stop simulation`) that used to be separate full-size buttons; the detail panel repeats the full action set plus the full source URI, the device UUID (both with a `copyToClipboard` button), and a link to the owning asset.
 
 ### `src/app/features/assets/**` — the asset-first grid: search, filter, cards (new this cycle — split out of the old combined Devices page)
 
@@ -223,6 +224,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
   - **Dropped CDK virtual scroll** (deliberate trade-off, documented not silently lost): the old asset-first list used `@angular/cdk/scrolling` for `O(visible rows)` rendering toward a "thousands of assets" posture (docs/CYCLES-PLAN.md §11 item 4). A responsive multi-column card grid needs viewport-aware/autosize virtual scroll to do the same, which this cycle's scope (search/filter/grid split) didn't take on — `assetRows()` renders via a plain `@for` now, `O(total filtered rows)`. The underlying *fetch* (`refreshAssets()`, one `getAsset()` per asset) was already `O(total assets)` even before this cycle (the list's own documented ceiling), so this trade-off narrows an already-partial scalability guarantee rather than removing a whole-page one; revisiting virtualization for the grid is a named follow-up, not solved here.
   - **`?category=<slug>`** (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's readiness-tile drill-down target, unchanged mechanism, moved from `/devices?category=` to `/assets?category=`) seeds the category filter reactively (an `effect`, so a second drill-down click while already on this page still re-narrows).
   - **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2" Status entry near the bottom of this file). The subtitle and its `/devices` prose link are deleted outright (F7 — Devices is a sidebar entry now). The `.asset-toolbar` filter card is gone; search/category/status/streaming/archived all project into `[pageBarFilters]`, sized to content (not the global `width:100%` an unstyled `<select>`/`<input>` would otherwise take); "+ Add source"/"Refresh" into `[pageBarActions]`. `AssetsFacade`'s Undo-toast/toast strings and the per-card `N device(s)` line now call `pluralize()` (`shared/ui/page-bar/page-bar.ts`) instead of hand-rolled `(s)` text.
+  - **Wave 3 (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md — see the dated "Wave 3" Status entry near the bottom of this file for the full writeup)**: a dense `<table>` list (F5) is now the default view; the card grid survives as an opt-in `▤ ▦` toggle (`AssetsPage#viewMode`, persisted via `core/panel-state.ts#readPersistedString` under `vision.assets.viewMode`), both reading the one `facade.assetRows()` projection — `AssetListRow#asset` is now typed `AssetDetails` (was `AssetSummary`) so the detail panel can read `asset.devices`. Both views wrap in `shared/ui/two-pane`; selecting a row/card no longer navigates (F6) — it opens the detail panel via `?sel=<assetId>` (`AssetsFacade#selectedId`/`selectedRow`/`selectRow`/`clearSelection`, plus `findAssetRowById` in `assets-logic.ts`). `/assets/:id` survives only as the panel's "Open full ›" link; a new `AssetsFacade#openCockpitFor` mirrors `asset-detail-facade.ts#openCockpit` for the panel's "Open cockpit" action.
 
 ### `src/app/features/warehouse/**` — **deleted** (docs/UX-SIMPLIFY-REVIEW.md F2, 2026-08-01)
 
@@ -5865,3 +5867,194 @@ Edited: `features/fly/{fly.ts,fly.html,fly-facade.ts}`, `features/wall/{wall.ts,
 `fly.css` (no `.page-head` rule existed there to remove), `fly.routes.ts`/`wall.routes.ts`/
 `replay.routes.ts` (already modified by an earlier wave before this task started; this task never wrote to
 them), every other `features/**` path.
+
+## Status — Wave 3, Assets + Devices two-pane (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/{04-assets,06-devices}.md) — 2026-08-04
+
+File scope exactly `features/{assets,devices}/**`, against the frozen `shared/ui/two-pane/**` (built ahead
+of this fan-out, not touched by this task). See the two `### src/app/features/{assets,devices}/**`
+sections above for the per-file specifics; this entry is the cross-cutting summary.
+
+**Assets** — dense `<table>` list is now the default view (F5); the card grid survives as an opt-in
+`▤ ▦` toggle, persisted (`core/panel-state.ts`), both reading one `facade.assetRows()` projection.
+**Devices** — the List/Grid toggle is deleted outright (nothing else in the app read `viewMode`, verified
+by grep); each row collapses to one primary action (Watch live/Start stream) + a kebab holding
+everything else, so every row is single-line again. Both pages: selecting a row/card opens
+`vision-two-pane`'s detail panel via `?sel=<id>` instead of navigating (F6) — read via a route-bound
+`sel` input (`withComponentInputBinding()`, the same mechanism `category`/`addSource` already used),
+forwarded into the facade by a constructor `effect()`, and looked up against every loaded row (not the
+search/filter-narrowed list) so narrowing a filter or typing a search query never evicts an open
+selection. A `?sel=` matching no loaded row (`findAssetRowById`/`findWarehouseRowById`, both pure and
+unit-tested) degrades to "no selection" — never a crash or a blank panel. Devices' panel adds a
+`copyToClipboard` affordance (`navigator.clipboard`, mirroring `shared/player/stream-info-panel.ts`'s own
+one other use of it) for the full source URI and the device UUID, both of which the row itself no longer
+shows in full.
+
+**Responsive fix found live, not in review**: removing the device row's UUID line (per docs/design/06-
+devices.md's own instruction) removed the only thing that had been giving the table's Name column a
+natural minimum width — the browser's auto table layout then squeezed it to ~56px (2-3 wrapped lines)
+the moment the panel narrowed the list below ~1300px, with the whole `.page` scrolling horizontally to
+compensate. Fixed by wrapping both pages' `<table>` in a `.table-scroll` (`overflow-x: auto`, contained
+— never the page) with a `min-width` floor on the table and on the Name/State columns specifically
+(`assets.css`/`devices.css`); caught only by measuring `getBoundingClientRect()` at 1280px, exactly the
+kind of thing `ng test`/`tsc` have no opinion on.
+
+**Degrade/role-gate/dev-parity**: no backend surface changed — every facade injection, HTTP call, and
+loading/error/empty state is unchanged; `vision.auth.enabled=false` dev-parity is unaffected (neither
+page has a role gate to begin with). **Verified live** (localhost:4200, admin session, viewports from
+900×900 to 1920×1080, `getBoundingClientRect()` measurements, a dedicated browser tab once a concurrent
+sibling task's automation turned out to share this session's default tab): selecting a row updates
+`?sel=` without navigating and highlights the row (`box-shadow: inset` + raised background, mirroring
+`command.css`'s `.rail-row.selected`); the panel docks beside the list with a measured 16px gap ≥1200px
+and right-overlays with a `position:fixed` scrim <1200px; a hard refresh with `?sel=` set restores the
+panel; a stale `?sel=` renders the plain list with no panel and no error; the `▤ ▦` toggle persists
+across a reload (`localStorage['vision.assets.viewMode']`); Devices' full-URI/UUID copy buttons produce
+a "Copied source URI."/"Copied device ID." toast via `navigator.clipboard`; every row is single-line at
+1280px after the responsive fix above (Name and the primary State chip pair both hold a floor width;
+only the rarer third "Simulated" chip may still wrap to its own line — a decorative badge, not the
+row's own identifying data, and not what docs/design/06-devices.md's own row-collapse problem was
+about).
+
+**Tests**: extended `assets-logic.spec.ts` (`findAssetRowById`, `parseAssetViewMode`) and
+`devices-page-logic.spec.ts` (`findWarehouseRowById`) — this codebase's own precedent of pure-logic
+vitest over component specs; the `?sel=`/localStorage round-trip itself is covered by the live
+verification above instead, not a new component spec. `npx ng test --watch=false`: **100 spec files /
+1678 tests, green** (baseline 97/1634 — the ~40-test, 3-file gap is this task's own new cases plus a
+concurrent sibling wave's Alerts/Activity/Roster work in the same run, not a regression in either
+direction). `npx tsc --noEmit` clean on both configs. `ng build --configuration production` succeeds;
+lazy-chunk deltas against the pre-Wave-3 commit (`git worktree`, isolated build, this task's own two
+files only — `assets` 14.06 kB → 22.95 kB raw / 4.12 kB → 5.71 kB transfer, the new dense-list table +
+detail panel added on top of the kept card grid; `devices` essentially flat, 28.72 kB → 28.61 kB raw /
+6.15 kB → 6.72 kB transfer, the detail panel's markup roughly offsetting the deleted grid view). The
+initial/main bundle (379.65 kB raw / 105.60 kB transfer, was 375.45/103.64) is **not** an isolated
+number — the working tree also carried a concurrent sibling wave's uncommitted changes during this
+build, so that delta isn't attributable to this task alone.
+
+## Status — Wave 3, Alerts + Activity + Roster (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/{08-alerts,09-activity,13-roster}.md) — 2026-08-04
+
+File scope `features/{alerts,activity,roster}/**` plus sole edit rights on `shared/ui/events-rail.*` this
+wave, against the frozen `shared/ui/two-pane/**` (built ahead of this fan-out, not touched here). Ran
+concurrently with the sibling Wave 3 agent covering Assets/Devices (immediately above).
+
+- **`shared/ui/event-row.{ts,html,css}`, new** — the row markup extracted out of `events-rail.*`
+  (byte-for-byte behavior preserved for its two existing hosts, the Wall rail and the header bell's
+  dropdown), plus a new `dense` variant (single line, ~32px, no action text) for Alerts' own list.
+  `events-rail.ts`/`.html` now consume it instead of hand-rolling the row; `events-rail.css` lost every
+  row-level rule (moved with the markup) and kept only card/filter/list chrome. **The always-on `CLOSED`
+  text chip is gone everywhere** (not just Alerts) — a small always-visible severity dot replaced it, the
+  `OPEN` chip renders only when true (signal, not the old 100%-of-rows noise). 7 cases in
+  `event-row.spec.ts`.
+- **`/monitor/alerts`** — no longer embeds `<vision-events-rail>` wholesale (that component's own 20-row
+  cap is right for a sidebar, wrong for this page's job as the full triage list); `AlertsFacade` now
+  re-derives the identical label/asset filtering directly and renders its own `vision-event-row[dense]`
+  list inside `vision-two-pane`, `?sel=<eventId>` resolved against the **full** retained feed (a
+  filter change never evicts an open selection). Row click selects, never navigates — `Details ›` is
+  gone. The detail pane (`alert-detail-panel.ts`, new) shows the event's full metadata (confidence,
+  source, first/last seen, position when available) plus `Open cockpit`/`Jump to replay` — **no frame or
+  bounding-box render**: `DetectionEvent` (mirroring `dto.DetectionEventResponse`) carries no frame
+  reference or stored box at all, and the only image endpoint that exists (`VisionApi.snapshotUrl`)
+  returns a stream's *current* frame, which would misrepresent a closed (or even a several-second-old
+  open) event — rendering it as "the event's frame" would be exactly the fabricated value this codebase's
+  own degrade-honestly rule forbids. Flagged here as a genuine gap (a real per-event frame/box endpoint
+  would need a backend change), not a silently invented one — see `alert-detail-panel.ts`'s own class doc
+  comment for the full reasoning.
+- **`/activity`** — day-grouped under `TODAY`/`YESTERDAY`/date headers (`core/activity/activity-logic.ts`,
+  new, pure, `groupActivityByDay`/`dayLabel`, 8 cases), absolute time in a left gutter with the old
+  relative time now a `title` tooltip. The per-row verb chip is gone, replaced by a left accent border
+  (`activityAccentTone`, 6 cases) — the design doc names four verbs/colors, the real `AuditAction` enum
+  has six; see that function's own doc comment for the CREATED/UPDATED/DEACTIVATED/DELETED direct
+  mapping and the ACTIVATED/RESTORED extension reasoning. **No `Mine | Everyone` scope toggle** — checked
+  and omitted, not silently skipped: `GET /api/me/activity` (`ActivityController`/`ActivityService`) only
+  ever reads the caller's own `userId`, and `ActivityService`'s own doc comment states the scoping is
+  "intentionally minimal… a manager-sees-their-team's-activity view is deferred." Building the toggle
+  would have shipped a control that silently showed the same rows regardless of its state.
+- **`/manage/roster`** — the accordion is deleted; every row shows its assignments inline. A
+  `By asset | By pilot` pivot (`?by=`) reads the same `(assets, pilotsByAsset, users)` triple either
+  direction — `features/roster/roster-logic.ts` (unchanged, by-asset) and the new
+  `core/roster/roster-pivot-logic.ts` (`buildPilotRows`, 4 cases — every user appears, including ones with
+  zero assignments, which the accordion could never answer). A fleet-level `⚠ N assets have no pilot`
+  chip (`countAssetsWithoutPilot`, added to the existing `roster-logic.ts`) sits in the page bar. Both
+  pivots wrap in `vision-two-pane`; the "By asset" detail pane reuses `<vision-pilots-card>` verbatim
+  (unchanged since before this task); "By pilot" gets a new sibling, `pilot-assignments-panel.ts` — dumb,
+  fed the already-loaded assignment list as inputs rather than re-fetching per pilot, with
+  `RosterFacade.assignPilotToAsset`/`unassignPilotFromAsset` (both call the exact same
+  `VisionApi.assignPilot`/`unassignPilot` `<vision-pilots-card>` already uses) as the only two write call
+  sites for either pivot — "one assignment service, two entry points," not a third implementation.
+  Switching pivot clears `?sel=` (an asset id and a user id are never comparable).
+- **A real bug, found only by live measurement, not by the test suite**: `<div twoPaneDetail>` guarded by
+  two *nested* `@if`s (pivot, then row) silently failed to project into `vision-two-pane`'s detail slot at
+  all — `.two-pane-detail-body` rendered completely empty in the browser, with no compiler warning either
+  (Ivy's static content-projection resolution does not see through a second level of control-flow
+  nesting; a single level, as Alerts' own detail pane uses, works fine). Fixed by wrapping the whole
+  conditional tree in one unconditional `<ng-container twoPaneDetail>` — the same fix already needed for
+  the page bar's own multi-node `@if` filter group (an `NG8011` compiler warning, that one caught at build
+  time). Confirms this wave's own instruction to measure the rendered DOM, not just the compiler/test
+  output.
+
+### Degrade / role-gate / dev-parity
+
+No backend surface changed — every facade/store injection, HTTP call, and existing role gate (Roster's
+own `orgGuard`, Alerts'/Activity's own no-role-gate) is unchanged. Loading/error/empty states on all three
+pages are still each facade's own signals feeding `<vision-empty>`. `vision.auth.enabled=false` dev-parity
+is unaffected — none of these three pages' gates were touched, and the live verification below ran the
+whole time as the dev admin (ADMIN/unbounded).
+
+### Tests
+
+New: `event-row.spec.ts` (7), `core/activity/activity-logic.spec.ts` (11), `core/roster/roster-pivot-logic
+.spec.ts` (11); extended `features/roster/roster-logic.spec.ts` (+3, `countAssetsWithoutPilot`). No new
+component specs beyond `event-row` itself (a genuinely new shared visual primitive, matching this
+codebase's own precedent of testing `shared/ui/*` components directly, e.g. `stat.spec.ts`/
+`icon-button.spec.ts`) — every page-level facade change routes through these pure functions, this
+codebase's own established "logic, not components" preference. **100 spec files / 1678 tests green**
+(`npx ng test --watch=false`; stated starting baseline was 97/1634, the sibling Wave 3 agent's own
+concurrent Assets/Devices work landed in the same count). `npx tsc --noEmit` clean on both configs.
+
+### Build
+
+`ng build --configuration production` succeeds. Bundle delta isolated via a scoped `git stash push -u --
+<this task's own ~29 files>` / rebuild / `git stash pop` round-trip (baseline = every sibling agent's
+concurrent change, minus only this task's own):
+
+| Lazy chunk | Before | After | Δ raw |
+|---|---|---|---|
+| `alerts` | 1.96 kB / 926 B | 11.05 kB / 3.46 kB | +9.09 kB |
+| `roster` | 6.73 kB / 2.40 kB | 15.68 kB / 4.40 kB | +8.95 kB |
+| `activity` | 4.10 kB / 1.58 kB | 5.99 kB / 2.15 kB | +1.89 kB |
+| Initial (shared) | 375.62 kB / 103.83 kB | 379.65 kB / 105.60 kB | +4.03 kB |
+
+Alerts/Roster grew the most (two-pane + a new detail-pane component each); Activity is a template/CSS
+rewrite over existing data, no new component. The Initial bundle grew because `EventRow` (new) is now
+reachable eagerly through `NotificationBell` → `EventsRail`, which is mounted in `app.html` for the whole
+session — not a lazy-route cost.
+
+### Verified live (`ng serve`/backend on `:8080`, ADMIN session; real backend data plus synthetic
+`DetectionEvent`s injected into the running `EventsStore` singleton via `window.ng.getComponent` — this
+sandbox's cv-service isn't running, so no real detections ever fire; this is the same store real polls
+would feed, exercised directly rather than left unverified)
+
+- **Alerts row height measured 31.99px** (`getBoundingClientRect()`), **26 rows fit an 1080px-tall
+  viewport without scrolling** (computed from the measured first-row offset and row+gap height — ≥20
+  required).
+- **Selecting a row does not navigate**: URL went from `/monitor/alerts` to `/monitor/alerts?sel=<id>`
+  only; clicking "Open cockpit" from the detail pane (a separate, explicit action) navigated to
+  `/fly?asset=<id>` correctly.
+- **Refresh restores selection**: a hard reload at `?sel=<id>` with zero events loaded rendered the plain
+  empty list (no crash, no broken panel); re-populating the store with the same id then auto-opened the
+  detail pane with no click, purely from the URL.
+- **`/wall`'s events rail renders correctly post-extraction**: populated with 12 synthetic events,
+  confirmed the two-line layout, the conditional `OPEN` chip/border, the `Details ›` affordance text, and
+  the label/asset filters all intact.
+- **Roster round-trip**: `By pilot` surfaced a real zero-assignment user ("Manager") the `By asset` view
+  never showed; assigning Rover-1 to them updated the row inline, the gap chip (2 → 1), and — switched
+  back — the `By asset` view's own "Manager" chip, all without a reload; unassigning reverted all three.
+
+### Files touched
+
+Edited: `shared/ui/events-rail.{ts,html,css}`, `features/alerts/{alerts.ts,alerts.html,alerts.css,
+alerts-facade.ts}`, `features/activity/{activity.ts,activity.html,activity.css,activity-facade.ts}`,
+`features/roster/{roster.ts,roster.html,roster.css,roster-facade.ts,roster-logic.ts,
+roster-logic.spec.ts}`, and this file. New: `shared/ui/event-row.{ts,html,css,spec.ts}`,
+`features/alerts/alert-detail-panel.{ts,html,css}`, `features/roster/pilot-assignments-panel.{ts,html,
+css}`, `core/activity/activity-logic.{ts,spec.ts}`, `core/roster/roster-pivot-logic.{ts,spec.ts}`.
+Untouched (verified via `git diff --name-only` against this task's own scope): `shared/ui/two-pane/**`,
+`shared/ui/page-bar/**`, `app.*`, `styles.css`, every other `features/**` path.

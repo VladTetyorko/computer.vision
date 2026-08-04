@@ -4,39 +4,39 @@ import { RouterLink } from '@angular/router';
 import { Icon } from '../../shared/ui/icon';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { PilotsCard } from '../asset-detail/pilots-card';
+import { PilotAssignmentsPanel } from './pilot-assignments-panel';
 import { RosterFacade } from './roster-facade';
-import type { RosterRow } from './roster-logic';
 
 /**
- * `/manage/roster` — the fleet-wide pilot roster (docs/UI-REDESIGN-PLAN.md Wave 4, Manage's
- * **FUNCTIONAL-NOW** "Pilots / roster" tile — `AssignmentController`/`PilotResponse`/`OrgStore` were
- * all already live, this is the first dedicated frontend surface for them; previously the tile's
- * only route was the `ComingSoon` scaffold pointing at each asset's own Pilots card).
+ * `/manage/roster` — the fleet-wide pilot roster (docs/UI-REDESIGN-PLAN.md Wave 4's original
+ * accordion build; reworked into a two-pane matrix by docs/NAV-IA-REDESIGN-PLAN.md Wave 3, §2.4,
+ * docs/design/13-roster.md).
  *
  * Route-guarded (`core/org/org-guard.ts`, the same guard `/org` uses) — only ADMIN/MANAGER reach
- * this page; a PILOT following the Manage hub's tile is redirected to `/fly` before this component
- * ever mounts, mirroring `OrgSettingsPage`'s own belt (route guard) with no second in-component
- * suspenders needed (`pilots-card.ts`'s own `canManage()` check exists because *it* is mounted on a
- * page pilots themselves can reach — this page isn't).
+ * this page; a PILOT following the Manage sidebar's entry is redirected to `/fly` before this
+ * component ever mounts.
  *
- * Every asset, alphabetical, each row naming its currently-assigned pilots as chips (collapsed) and
- * expanding (a native `<details>`, no extra JS state beyond `RosterFacade.isExpanded`) to the exact
- * same `<vision-pilots-card>` the asset detail page's own Pilots drawer uses — add/remove is
- * byte-for-byte that component's existing logic, not reimplemented here. Honest states: distinct
- * loading / "couldn't load" (with retry) / no assets yet / no assets match the search.
+ * **The accordion is gone.** Assignments render inline in the row — `RosterFacade.rows`/`pilotRows`
+ * already carry the pilot names/asset names each row needs, so the disclosure that used to hide them
+ * behind a click (docs/design/13-roster.md's own named problem: "40 assets is 40 clicks to read")
+ * had nothing left to earn its place. A `By asset | By pilot` pivot (`?by=`) reads the identical
+ * source data either direction — "By pilot" is what answers "what does Pilot A fly", which the
+ * accordion could not answer without expanding every row. Both pivots wrap in `vision-two-pane`
+ * (`?sel=`); the detail pane does the actual assign/unassign editing — `<vision-pilots-card>`
+ * (unchanged, reused wholesale) for `By asset`, the new `<vision-pilot-assignments-panel>` for
+ * `By pilot` — see `RosterFacade`'s own class doc comment for why there are still only two REST call
+ * sites behind both.
  *
- * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/13-roster.md):
- * the subtitle carries real instruction (the accordion's expand-to-edit interaction isn't obvious
- * from the title), so it moves to the bar's `hint` rather than being deleted. The search input moves
- * into `[pageBarFilters]`. The count chip is new — this page previously showed no number anywhere —
- * and reads the same `rows()` the accordion renders, not a fleet-level pilot/gap summary
- * (docs/design/13-roster.md's `By asset | By pilot` pivot and "N asset(s) with no pilot" indicator
- * are the Wave 3 rewrite this task explicitly leaves alone).
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, Wave 2, committed) — the
+ * subtitle carries real instruction, so it stays a `hint`; the count chip and search live in the bar
+ * as before, joined this wave by the pivot toggle (`[pageBarFilters]`) and a fleet-level gap
+ * indicator next to it.
  */
 @Component({
   selector: 'vision-roster',
-  imports: [FormsModule, RouterLink, PageBar, Icon, EmptyState, PilotsCard],
+  imports: [FormsModule, RouterLink, PageBar, Icon, EmptyState, TwoPane, PilotsCard, PilotAssignmentsPanel],
   templateUrl: './roster.html',
   styleUrl: './roster.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -44,8 +44,4 @@ import type { RosterRow } from './roster-logic';
 })
 export class RosterPage {
   protected readonly facade = inject(RosterFacade);
-
-  protected onToggle(row: RosterRow, event: Event): void {
-    this.facade.setExpanded(row.asset.assetId, (event.target as HTMLDetailsElement).open);
-  }
 }

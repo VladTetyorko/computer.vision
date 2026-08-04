@@ -1,0 +1,100 @@
+/* See `two-pane.ts` for why this docks rather than overlays, and why selection lives in the URL. */
+:host {
+  --two-pane-detail-w: 24rem;
+  --two-pane-bp: 1200px;
+
+  display: grid;
+  /* The detail track is `auto`, not a fixed width: with the pane closed there is no second grid
+     item at all, so the track collapses to zero and the list is exactly as wide as it would be
+     without this wrapper. No `@if`-dependent class juggling needed. */
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  gap: var(--space-16);
+  /* Both panes scroll independently rather than the page scrolling as one. `min-height: 0` is what
+     actually permits that inside a grid item — without it the automatic minimum size wins and the
+     taller pane sets the height for both. */
+  min-height: 0;
+}
+
+.two-pane-list {
+  min-width: 0;
+  min-height: 0;
+}
+
+.two-pane-detail {
+  width: var(--two-pane-detail-w);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  /* Sticks alongside a long list instead of scrolling away from it — the pane describes whatever row
+     is selected, so it has to stay in view while the user keeps scanning. `--space-64` clears the
+     sticky page bar (48px + its own padding, `page-bar.css`). */
+  position: sticky;
+  top: var(--space-64);
+  max-height: calc(100dvh - var(--space-64) - var(--space-32));
+}
+
+.two-pane-detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-8) var(--space-8) var(--space-16);
+  border-bottom: 1px solid var(--border);
+}
+
+.two-pane-detail-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.two-pane-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-16);
+}
+
+/* Scrim is desktop-inert; see the template's own comment. */
+.two-pane-scrim {
+  display: none;
+}
+
+/* Below --two-pane-bp a 24rem pane beside a list stops being readable, so the detail right-docks as
+   an overlay instead. Deliberately CSS-only: no `matchMedia` listener, no JS breakpoint state to
+   drift out of sync with these rules (same approach as `app-sidebar.css`'s three tiers). */
+@media (max-width: 1200px) {
+  :host {
+    display: block;
+  }
+
+  .two-pane-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 119;
+    background: var(--scrim);
+  }
+
+  .two-pane-detail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    /* Above the scrim and level with `side-panel.css`'s own drawer, still below a confirm dialog
+       (150) so a confirm raised from inside the pane wins — the same z-ladder that file documents. */
+    z-index: 120;
+    width: min(24rem, 92vw);
+    max-height: none;
+    border-radius: 0;
+    border-width: 0 0 0 1px;
+  }
+}

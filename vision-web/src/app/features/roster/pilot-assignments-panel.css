@@ -1,0 +1,51 @@
+/* Mirrors `features/asset-detail/pilots-card.css` byte-for-byte (same visual language, transposed
+   direction — see this component's own class doc comment) — Angular's emulated view encapsulation
+   scopes that file's rules to `PilotsCard` alone, so this sibling component needs its own copy. */
+:host {
+  display: block;
+}
+
+.pilots-add {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  margin: var(--space-16) 0;
+}
+
+.pilots-add select {
+  flex: 1 1 12rem;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.pilots-add .btn {
+  min-height: 40px;
+  flex: none;
+}
+
+.pilots-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.pilots-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-8);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pilots-name {
+  min-width: 0;
+  font-weight: 500;
+  color: var(--text);
+}

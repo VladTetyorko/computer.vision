@@ -53,3 +53,13 @@ export function searchRosterRows(rows: readonly RosterRow[], query: string): rea
       row.pilotNames.some((name) => name.toLowerCase().includes(q)),
   );
 }
+
+/**
+ * The fleet-level gap indicator (docs/design/13-roster.md: "⚠ N assets have no pilot" — "makes the
+ * page answer a real management question at a glance"). Counts against **every** row this facade
+ * loaded, not the search-filtered subset — the gap is a fleet fact, not something a typed query
+ * should be able to hide.
+ */
+export function countAssetsWithoutPilot(rows: readonly RosterRow[]): number {
+  return rows.filter((row) => row.pilotNames.length === 0).length;
+}

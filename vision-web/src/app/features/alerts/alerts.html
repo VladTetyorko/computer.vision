@@ -1,13 +1,92 @@
 <div class="page">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/08-alerts.md: `page-head` is gone. The
-       label/asset filters and "N events" header stay inside `<vision-events-rail>` — see this
-       page's own class doc comment for why they aren't relocated into the bar this wave. -->
-  <vision-page-bar title="Alerts center" icon="alert" [count]="facade.events.events().length" countNoun="event" />
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 (Wave 2, committed) / §2.4 (this wave): `page-head` stays
+       gone. Label/asset filters move into the bar's own `[pageBarFilters]` slot now that this page
+       no longer embeds `<vision-events-rail>` (which used to own them) — the identical projection
+       idiom `/assets`, `/devices` and `/manage/roster` already use, not a change to the bar
+       component itself. -->
+  <vision-page-bar title="Alerts center" icon="alert" [count]="facade.filteredEvents().length" countNoun="event">
+    <!-- Two independent top-level `@if`s, not one wrapping both selects — a single `@if` with more
+         than one root node breaks `[pageBarFilters]` content projection (NG8011: the projector can't
+         tell which of an `@if`'s several root nodes to match against the slot's own selector). -->
+    @if (facade.availableLabels().length > 0) {
+      <select
+        pageBarFilters
+        name="alertsLabelFilter"
+        class="alerts-filter"
+        aria-label="Filter by label"
+        [ngModel]="facade.labelFilter()"
+        (ngModelChange)="facade.labelFilter.set($event)"
+      >
+        <option value="">All labels</option>
+        @for (label of facade.availableLabels(); track label) {
+          <option [value]="label">{{ label }}</option>
+        }
+      </select>
+    }
+    @if (facade.availableAssets().length > 0) {
+      <select
+        pageBarFilters
+        name="alertsAssetFilter"
+        class="alerts-filter"
+        aria-label="Filter by asset"
+        [ngModel]="facade.assetFilter()"
+        (ngModelChange)="facade.assetFilter.set($event)"
+      >
+        <option value="">All assets</option>
+        @for (asset of facade.availableAssets(); track asset.id) {
+          <option [value]="asset.id">{{ asset.name }}</option>
+        }
+      </select>
+    }
+  </vision-page-bar>
 
   <vision-notice icon="help">
     Saved alert thresholds and acknowledgement are coming — this feed already streams live via the
     header bell and Wall.
   </vision-notice>
 
-  <vision-events-rail class="alerts-rail" (open)="facade.openEvent($event)" />
+  <vision-two-pane
+    [detailOpen]="!!facade.selectedEvent()"
+    [detailLabel]="facade.selectedEventLabel()"
+    (detailClose)="facade.clearSelection()"
+  >
+    <div twoPaneList>
+      @if (facade.events.events().length === 0) {
+        <vision-empty
+          icon="alert"
+          title="No detection events yet"
+          message="One opens once a configured label (person/car by default) is seen for a few consecutive frames."
+        />
+      } @else if (facade.filteredEvents().length === 0) {
+        <vision-empty icon="alert" title="No events match this filter" />
+      } @else {
+        <ul class="alerts-list">
+          @for (event of facade.filteredEvents(); track event.id) {
+            <li>
+              <vision-event-row
+                [dense]="true"
+                [event]="event"
+                [sourceLabel]="facade.sourceLabel(event)"
+                [relativeTime]="facade.relativeTime(event)"
+                [selected]="event.id === facade.selectedId()"
+                (activated)="facade.select(event.id)"
+              />
+            </li>
+          }
+        </ul>
+      }
+    </div>
+    @if (facade.selectedEvent(); as event) {
+      <div twoPaneDetail>
+        <vision-alert-detail-panel
+          [event]="event"
+          [sourceLabel]="facade.sourceLabel(event)"
+          [canOpenCockpit]="facade.canOpenCockpit(event)"
+          [canJumpToReplay]="facade.canJumpToReplay(event)"
+          (openCockpit)="facade.openCockpit(event)"
+          (jumpToReplay)="facade.jumpToReplay(event)"
+        />
+      </div>
+    }
+  </vision-two-pane>
 </div>

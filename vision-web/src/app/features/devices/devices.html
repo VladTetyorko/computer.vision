@@ -1,8 +1,9 @@
 <div class="page">
   <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/06-devices.md: `page-head` and its own
-       toolbar row are gone — search, the List/Grid toggle, and the archived toggle project into
-       `[pageBarFilters]`; `+ Add source`/`Refresh` into `[pageBarActions]`. Both subtitle sentences
-       are deleted (see this file's own class doc comment for why). -->
+       toolbar row are gone — search and the archived toggle project into `[pageBarFilters]`;
+       `+ Add source`/`Refresh` into `[pageBarActions]`. Both subtitle sentences are deleted (see
+       this file's own class doc comment for why). The `List | Grid` toggle that used to sit here is
+       gone outright (Wave 3, §2.4) — see the class doc comment. -->
   <vision-page-bar title="Devices" icon="chip" [count]="facade.warehouseRows().length" countNoun="device">
     <input
       pageBarFilters
@@ -14,28 +15,6 @@
       [ngModel]="facade.searchQuery()"
       (ngModelChange)="facade.searchQuery.set($event)"
     />
-    <div class="segmented" pageBarFilters role="group" aria-label="View">
-      <button
-        type="button"
-        class="btn secondary small"
-        [class.active]="viewMode() === 'list'"
-        [attr.aria-pressed]="viewMode() === 'list'"
-        (click)="setViewMode('list')"
-      >
-        <vision-icon name="list" [size]="16" />
-        List
-      </button>
-      <button
-        type="button"
-        class="btn secondary small"
-        [class.active]="viewMode() === 'grid'"
-        [attr.aria-pressed]="viewMode() === 'grid'"
-        (click)="setViewMode('grid')"
-      >
-        <vision-icon name="grid" [size]="16" />
-        Grid
-      </button>
-    </div>
     <label class="row toggle" pageBarFilters>
       <input
         type="checkbox"
@@ -58,380 +37,349 @@
     </button>
   </vision-page-bar>
 
-  <section class="card">
-    @if (facade.warehouseRows().length === 0) {
-      @if (facade.hasAnyDevices()) {
-        <vision-empty title="No devices match" message="Nothing currently matches this search.">
-          <button type="button" class="btn secondary" (click)="clearSearch()">Clear search</button>
-        </vision-empty>
+  <!-- ---- Devices: table + detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)
+       `vision-two-pane` docks the detail beside the table ≥1200px and overlays it below that — see
+       that component's own doc comment. Selection lives in `?sel=<deviceId>` via the facade. -->
+  <vision-two-pane
+    [detailOpen]="!!facade.selectedRow()"
+    [detailLabel]="facade.selectedRow()?.device?.name ?? 'Details'"
+    (detailClose)="facade.clearSelection()"
+  >
+    <section class="card" twoPaneList>
+      @if (facade.warehouseRows().length === 0) {
+        @if (facade.hasAnyDevices()) {
+          <vision-empty title="No devices match" message="Nothing currently matches this search.">
+            <button type="button" class="btn secondary" (click)="clearSearch()">Clear search</button>
+          </vision-empty>
+        } @else {
+          <vision-empty
+            title="No devices yet"
+            message='Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.'
+          />
+        }
       } @else {
-        <vision-empty
-          title="No devices yet"
-          message='Use "+ Add source" above to bring one in — by hand, by scan, or with no hardware at all.'
-        />
-      }
-    } @else if (viewMode() === 'list') {
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Source</th>
-            <th>Capabilities</th>
-            <th>State</th>
-            <th>Owner</th>
-            <th aria-label="Actions"></th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (row of facade.warehouseRows(); track row.device.id) {
-            <tr [class.archived]="row.archived">
-              <td>
-                <div class="name">{{ row.device.name }}</div>
-                <div class="mono faint">{{ row.device.id }}</div>
-              </td>
-              <td class="source">
-                <span class="chip">{{ row.device.protocol }}</span>
-                <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
-              </td>
-              <td>
-                @for (capability of row.device.capabilities; track capability) {
-                  <span class="chip">{{ capability }}</span>
-                }
-              </td>
-              <td>
-                <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                  {{ lifecycleLabel(row.lifecycle) }}
-                </span>
-                @if (!row.archived) {
-                  @if (row.streaming) {
-                    <span class="chip ok"><span class="dot live"></span>Live</span>
-                  } @else {
-                    <span class="chip">Stopped</span>
-                  }
-                }
-                @if (simulatedInfo(row.device); as simInfo) {
-                  <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">
-                    Simulated
-                  </span>
-                }
-              </td>
-              <td>
-                @if (row.owner; as owner) {
-                  <span class="mono muted truncate" [title]="owner.assetName">{{ owner.assetName }}</span>
-                } @else {
-                  <span class="faint">unassigned</span>
-                }
-              </td>
-              <td class="actions">
-                @if (!row.archived) {
-                  @if (row.streaming) {
-                    <button type="button" class="btn small" (click)="facade.watch(row.device)">Watch live</button>
-                    <button
-                      type="button"
-                      class="btn danger small"
-                      (click)="facade.stop(row.device)"
-                      [disabled]="facade.busyDeviceId() === row.device.id"
-                    >
-                      Stop stream
-                    </button>
-                  } @else {
-                    <button
-                      type="button"
-                      class="btn small"
-                      (click)="facade.start(row.device)"
-                      [disabled]="facade.busyDeviceId() === row.device.id"
-                    >
-                      {{ facade.busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
-                    </button>
-                  }
-                }
-                @if (simulatedInfo(row.device); as simInfo) {
-                  <button
-                    type="button"
-                    class="btn danger small"
-                    (click)="facade.stopSimulatedAsset(simInfo)"
-                    [disabled]="facade.busySimulatedAssetId() === simInfo.assetId"
-                  >
-                    {{ facade.busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
-                  </button>
-                }
-                <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): rename/lifecycle/assign
-                     actions, labeled verb+object, reasoned (§U-a2 item 3a) — destructive (Archive)
-                     lives at the bottom, behind a divider, in danger-action. -->
-                <vision-kebab-menu [label]="'More actions for ' + row.device.name">
-                  @if (!row.archived && !row.owner) {
-                    <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
-                  }
-                  @for (entry of deviceActionsFor(row); track entry.action) {
-                    @if (entry.action !== 'archive') {
-                      <div class="kebab-item">
-                        <button
-                          type="button"
-                          [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
-                          [title]="entry.reason ?? ''"
-                          (click)="onDeviceAction(row, entry.action)"
-                        >
-                          {{ deviceActionLabel(entry.action) }}
-                        </button>
-                        @if (!entry.available && entry.reason) {
-                          <span class="kebab-reason">{{ entry.reason }}</span>
-                        }
-                      </div>
-                    }
-                  }
-                  <div class="kebab-divider" role="separator"></div>
-                  @for (entry of deviceActionsFor(row); track entry.action) {
-                    @if (entry.action === 'archive') {
-                      <div class="kebab-item">
-                        <button
-                          type="button"
-                          class="danger-action"
-                          [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
-                          [title]="entry.reason ?? ''"
-                          (click)="onDeviceAction(row, entry.action)"
-                        >
-                          {{ deviceActionLabel(entry.action) }}
-                        </button>
-                        @if (!entry.available && entry.reason) {
-                          <span class="kebab-reason">{{ entry.reason }}</span>
-                        }
-                      </div>
-                    }
-                  }
-                </vision-kebab-menu>
-              </td>
+        <!-- Contained horizontal scroll (docs/NAV-IA-REDESIGN-PLAN.md §2.4's own "responsive by
+             default" bar) — `table { min-width }` below keeps every column, especially Name, from
+             being squeezed illegible by the browser's auto table layout once the two-pane detail
+             opens or the viewport narrows; this wrapper scrolls instead of the page. -->
+        <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Source</th>
+              <th>Capabilities</th>
+              <th>State</th>
+              <th>Owner</th>
+              <th aria-label="Actions"></th>
             </tr>
-            @if (rowActionMode(row.device.id); as mode) {
-              <tr class="inline-row">
-                <td colspan="6">
-                  @switch (mode) {
-                    @case ('rename') {
-                      <div class="inline-form">
-                        <input
-                          name="renameDraft"
-                          [ngModel]="renameDraft()"
-                          (ngModelChange)="renameDraft.set($event)"
-                          placeholder="device name"
-                          aria-label="New device name"
-                        />
-                        <button type="button" class="btn small" (click)="confirmRename(row.device)">
-                          Save
-                        </button>
-                        <button type="button" class="btn secondary small" (click)="cancelRowAction()">
-                          Cancel
-                        </button>
-                      </div>
-                    }
-                    @case ('assign') {
-                      <div class="inline-form">
-                        <select
-                          name="assignDraft"
-                          [ngModel]="assignDraft()"
-                          (ngModelChange)="assignDraft.set($event)"
-                          aria-label="Choose an asset to assign this device to"
-                        >
-                          <option value="" disabled>Choose an asset…</option>
-                          @for (asset of facade.assignableAssets(); track asset.assetId) {
-                            <option [value]="asset.assetId">{{ asset.displayName }}</option>
-                          }
-                        </select>
-                        <button
-                          type="button"
-                          class="btn small"
-                          [disabled]="!assignDraft()"
-                          (click)="confirmAssign(row.device)"
-                        >
-                          Assign
-                        </button>
-                        <button type="button" class="btn secondary small" (click)="cancelRowAction()">
-                          Cancel
-                        </button>
-                      </div>
-                    }
+          </thead>
+          <tbody>
+            @for (row of facade.warehouseRows(); track row.device.id) {
+              <!-- Wave 3 (docs/design/06-devices.md): the row is clickable + keyboard-operable
+                   (F6 — selecting opens the detail panel, never navigates), same
+                   tabindex/role="button"/Enter·Space idiom `features/assets/assets.html`'s own dense
+                   list uses. The primary-action button and the kebab cell both stop propagation so
+                   clicking them doesn't also select the row underneath. -->
+              <tr
+                class="row-selectable"
+                [class.selected]="row.device.id === facade.selectedId()"
+                [class.archived]="row.archived"
+                tabindex="0"
+                role="button"
+                [attr.aria-pressed]="row.device.id === facade.selectedId()"
+                [attr.aria-label]="'View details for ' + row.device.name"
+                (click)="facade.selectRow(row.device.id)"
+                (keydown.enter)="facade.selectRow(row.device.id)"
+                (keydown.space)="$event.preventDefault(); facade.selectRow(row.device.id)"
+              >
+                <td>
+                  <div class="name">{{ row.device.name }}</div>
+                </td>
+                <td class="source">
+                  <span class="chip">{{ row.device.protocol }}</span>
+                  <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
+                </td>
+                <td>
+                  @for (capability of row.device.capabilities; track capability) {
+                    <span class="chip">{{ capability }}</span>
                   }
                 </td>
-              </tr>
-            }
-          }
-        </tbody>
-      </table>
-    } @else {
-      <!-- ---- Grid: device cards (new this cycle) -------------------------------------------- -->
-      <div class="device-card-grid">
-        @for (row of facade.warehouseRows(); track row.device.id) {
-          <article class="device-card" [class.archived]="row.archived">
-            <header class="device-card-head">
-              <div class="device-card-name">
-                <div class="name truncate" [title]="row.device.name">{{ row.device.name }}</div>
-                <div class="mono faint truncate">{{ row.device.id }}</div>
-              </div>
-              <vision-kebab-menu [label]="'More actions for ' + row.device.name">
-                @if (!row.archived && !row.owner) {
-                  <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
-                }
-                @for (entry of deviceActionsFor(row); track entry.action) {
-                  @if (entry.action !== 'archive') {
-                    <div class="kebab-item">
-                      <button
-                        type="button"
-                        [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
-                        [title]="entry.reason ?? ''"
-                        (click)="onDeviceAction(row, entry.action)"
-                      >
-                        {{ deviceActionLabel(entry.action) }}
-                      </button>
-                      @if (!entry.available && entry.reason) {
-                        <span class="kebab-reason">{{ entry.reason }}</span>
-                      }
-                    </div>
+                <td>
+                  <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                    {{ lifecycleLabel(row.lifecycle) }}
+                  </span>
+                  @if (!row.archived) {
+                    @if (row.streaming) {
+                      <span class="chip ok"><span class="dot live"></span>Live</span>
+                    } @else {
+                      <span class="chip">Stopped</span>
+                    }
                   }
-                }
-                <div class="kebab-divider" role="separator"></div>
-                @for (entry of deviceActionsFor(row); track entry.action) {
-                  @if (entry.action === 'archive') {
-                    <div class="kebab-item">
-                      <button
-                        type="button"
-                        class="danger-action"
-                        [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
-                        [title]="entry.reason ?? ''"
-                        (click)="onDeviceAction(row, entry.action)"
-                      >
-                        {{ deviceActionLabel(entry.action) }}
-                      </button>
-                      @if (!entry.available && entry.reason) {
-                        <span class="kebab-reason">{{ entry.reason }}</span>
-                      }
-                    </div>
+                  @if (simulatedInfo(row.device); as simInfo) {
+                    <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">
+                      Simulated
+                    </span>
                   }
-                }
-              </vision-kebab-menu>
-            </header>
-
-            <div class="device-card-source">
-              <span class="chip">{{ row.device.protocol }}</span>
-              <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
-            </div>
-
-            <div class="device-card-chips">
-              @for (capability of row.device.capabilities; track capability) {
-                <span class="chip">{{ capability }}</span>
-              }
-              <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                {{ lifecycleLabel(row.lifecycle) }}
-              </span>
-              @if (!row.archived) {
-                @if (row.streaming) {
-                  <span class="chip ok"><span class="dot live"></span>Live</span>
-                } @else {
-                  <span class="chip">Stopped</span>
-                }
-              }
-              @if (simulatedInfo(row.device); as simInfo) {
-                <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">Simulated</span>
-              }
-            </div>
-
-            <div class="device-card-meta muted truncate">
-              @if (row.owner; as owner) {
-                Owned by <span [title]="owner.assetName">{{ owner.assetName }}</span>
-              } @else {
-                Unassigned
-              }
-            </div>
-
-            <div class="device-card-actions">
-              @if (!row.archived) {
-                @if (row.streaming) {
-                  <button type="button" class="btn small" (click)="facade.watch(row.device)">Watch live</button>
-                  <button
-                    type="button"
-                    class="btn danger small"
-                    (click)="facade.stop(row.device)"
-                    [disabled]="facade.busyDeviceId() === row.device.id"
-                  >
-                    Stop stream
-                  </button>
-                } @else {
-                  <button
-                    type="button"
-                    class="btn small"
-                    (click)="facade.start(row.device)"
-                    [disabled]="facade.busyDeviceId() === row.device.id"
-                  >
-                    {{ facade.busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
-                  </button>
-                }
-              }
-              @if (simulatedInfo(row.device); as simInfo) {
-                <button
-                  type="button"
-                  class="btn danger small"
-                  (click)="facade.stopSimulatedAsset(simInfo)"
-                  [disabled]="facade.busySimulatedAssetId() === simInfo.assetId"
-                >
-                  {{ facade.busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
-                </button>
-              }
-            </div>
-
-            @if (rowActionMode(row.device.id); as mode) {
-              @switch (mode) {
-                @case ('rename') {
-                  <div class="inline-form column">
-                    <input
-                      name="renameDraftGrid"
-                      [ngModel]="renameDraft()"
-                      (ngModelChange)="renameDraft.set($event)"
-                      placeholder="device name"
-                      aria-label="New device name"
-                    />
-                    <div class="row">
-                      <button type="button" class="btn small" (click)="confirmRename(row.device)">Save</button>
-                      <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
-                    </div>
-                  </div>
-                }
-                @case ('assign') {
-                  <div class="inline-form column">
-                    <select
-                      name="assignDraftGrid"
-                      [ngModel]="assignDraft()"
-                      (ngModelChange)="assignDraft.set($event)"
-                      aria-label="Choose an asset to assign this device to"
-                    >
-                      <option value="" disabled>Choose an asset…</option>
-                      @for (asset of facade.assignableAssets(); track asset.assetId) {
-                        <option [value]="asset.assetId">{{ asset.displayName }}</option>
-                      }
-                    </select>
-                    <div class="row">
+                </td>
+                <td>
+                  @if (row.owner; as owner) {
+                    <span class="mono muted truncate" [title]="owner.assetName">{{ owner.assetName }}</span>
+                  } @else {
+                    <span class="faint">unassigned</span>
+                  }
+                </td>
+                <!-- One primary verb per row (Watch live / Start stream, whichever applies) + the
+                     kebab — everything else (Stop stream/simulation, rename, lifecycle, assign,
+                     Promote to asset…) lives in the kebab and is repeated as full-size buttons in the
+                     detail panel below, so nothing that used to be one click away became two. -->
+                <td class="actions" (click)="$event.stopPropagation()">
+                  @if (!row.archived) {
+                    @if (row.streaming) {
+                      <button type="button" class="btn small" (click)="facade.watch(row.device)">Watch live</button>
+                    } @else {
                       <button
                         type="button"
                         class="btn small"
-                        [disabled]="!assignDraft()"
-                        (click)="confirmAssign(row.device)"
+                        (click)="facade.start(row.device)"
+                        [disabled]="facade.busyDeviceId() === row.device.id"
                       >
-                        Assign
+                        {{ facade.busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
                       </button>
-                      <button type="button" class="btn secondary small" (click)="cancelRowAction()">Cancel</button>
-                    </div>
-                  </div>
-                }
+                    }
+                  }
+                  <vision-kebab-menu [label]="'More actions for ' + row.device.name">
+                    @if (!row.archived && !row.owner) {
+                      <button type="button" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+                    }
+                    @if (!row.archived && row.streaming) {
+                      <button type="button" [disabled]="facade.busyDeviceId() === row.device.id" (click)="facade.stop(row.device)">
+                        Stop stream
+                      </button>
+                    }
+                    @if (simulatedInfo(row.device); as simInfo) {
+                      <button
+                        type="button"
+                        [disabled]="facade.busySimulatedAssetId() === simInfo.assetId"
+                        (click)="facade.stopSimulatedAsset(simInfo)"
+                      >
+                        {{ facade.busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
+                      </button>
+                    }
+                    @for (entry of deviceActionsFor(row); track entry.action) {
+                      @if (entry.action !== 'archive') {
+                        <div class="kebab-item">
+                          <button
+                            type="button"
+                            [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
+                            [title]="entry.reason ?? ''"
+                            (click)="onDeviceAction(row, entry.action)"
+                          >
+                            {{ deviceActionLabel(entry.action) }}
+                          </button>
+                          @if (!entry.available && entry.reason) {
+                            <span class="kebab-reason">{{ entry.reason }}</span>
+                          }
+                        </div>
+                      }
+                    }
+                    <div class="kebab-divider" role="separator"></div>
+                    @for (entry of deviceActionsFor(row); track entry.action) {
+                      @if (entry.action === 'archive') {
+                        <div class="kebab-item">
+                          <button
+                            type="button"
+                            class="danger-action"
+                            [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
+                            [title]="entry.reason ?? ''"
+                            (click)="onDeviceAction(row, entry.action)"
+                          >
+                            {{ deviceActionLabel(entry.action) }}
+                          </button>
+                          @if (!entry.available && entry.reason) {
+                            <span class="kebab-reason">{{ entry.reason }}</span>
+                          }
+                        </div>
+                      }
+                    }
+                  </vision-kebab-menu>
+                </td>
+              </tr>
+              @if (rowActionMode(row.device.id); as mode) {
+                <tr class="inline-row">
+                  <td colspan="6">
+                    @switch (mode) {
+                      @case ('rename') {
+                        <div class="inline-form">
+                          <input
+                            name="renameDraft"
+                            [ngModel]="renameDraft()"
+                            (ngModelChange)="renameDraft.set($event)"
+                            placeholder="device name"
+                            aria-label="New device name"
+                          />
+                          <button type="button" class="btn small" (click)="confirmRename(row.device)">
+                            Save
+                          </button>
+                          <button type="button" class="btn secondary small" (click)="cancelRowAction()">
+                            Cancel
+                          </button>
+                        </div>
+                      }
+                      @case ('assign') {
+                        <div class="inline-form">
+                          <select
+                            name="assignDraft"
+                            [ngModel]="assignDraft()"
+                            (ngModelChange)="assignDraft.set($event)"
+                            aria-label="Choose an asset to assign this device to"
+                          >
+                            <option value="" disabled>Choose an asset…</option>
+                            @for (asset of facade.assignableAssets(); track asset.assetId) {
+                              <option [value]="asset.assetId">{{ asset.displayName }}</option>
+                            }
+                          </select>
+                          <button
+                            type="button"
+                            class="btn small"
+                            [disabled]="!assignDraft()"
+                            (click)="confirmAssign(row.device)"
+                          >
+                            Assign
+                          </button>
+                          <button type="button" class="btn secondary small" (click)="cancelRowAction()">
+                            Cancel
+                          </button>
+                        </div>
+                      }
+                    }
+                  </td>
+                </tr>
               }
             }
-          </article>
-        }
+          </tbody>
+        </table>
+        </div>
+      }
+    </section>
+
+    <!-- ---- Detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md): what the
+         row truncates — the full source URI, the device UUID (both with a copy button), the owning
+         asset — plus the full action set, so every action stays reachable once a row is open, without
+         reopening the kebab. -->
+    @if (facade.selectedRow(); as row) {
+      <div twoPaneDetail>
+        <div class="detail-chips">
+          @for (capability of row.device.capabilities; track capability) {
+            <span class="chip">{{ capability }}</span>
+          }
+          <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+            {{ lifecycleLabel(row.lifecycle) }}
+          </span>
+          @if (!row.archived) {
+            @if (row.streaming) {
+              <span class="chip ok"><span class="dot live"></span>Live</span>
+            } @else {
+              <span class="chip">Stopped</span>
+            }
+          }
+          @if (simulatedInfo(row.device); as simInfo) {
+            <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">Simulated</span>
+          }
+        </div>
+
+        <dl class="detail-fields">
+          <div class="detail-field">
+            <dt>Source</dt>
+            <dd>
+              <span class="chip">{{ row.device.protocol }}</span>
+              <div class="detail-copy-row">
+                <span class="mono detail-uri" [title]="row.device.uri">{{ row.device.uri }}</span>
+                <button type="button" class="btn secondary small" (click)="copyDeviceUri(row.device)">Copy</button>
+              </div>
+            </dd>
+          </div>
+          <div class="detail-field">
+            <dt>Device ID</dt>
+            <dd class="detail-copy-row">
+              <span class="mono">{{ row.device.id }}</span>
+              <button type="button" class="btn secondary small" (click)="copyDeviceId(row.device)">Copy</button>
+            </dd>
+          </div>
+          <div class="detail-field">
+            <dt>Owner</dt>
+            <dd>
+              @if (row.owner; as owner) {
+                <a [routerLink]="['/assets', owner.assetId]">{{ owner.assetName }}</a>
+              } @else {
+                <span class="faint">Unassigned</span>
+              }
+            </dd>
+          </div>
+        </dl>
+
+        <!-- Full action set — every action this device offers, repeated here so the panel is a
+             complete stop, not just a longer look. Rename/Assign open the exact same inline table
+             row as the kebab's own entries (`rowAction`, `devices.ts`) — no second editing UX. -->
+        <div class="detail-actions">
+          @if (!row.archived) {
+            @if (row.streaming) {
+              <button type="button" class="btn" (click)="facade.watch(row.device)">Watch live</button>
+              <button type="button" class="btn danger" [disabled]="facade.busyDeviceId() === row.device.id" (click)="facade.stop(row.device)">
+                Stop stream
+              </button>
+            } @else {
+              <button
+                type="button"
+                class="btn"
+                [disabled]="facade.busyDeviceId() === row.device.id"
+                (click)="facade.start(row.device)"
+              >
+                {{ facade.busyDeviceId() === row.device.id ? 'Starting…' : 'Start stream' }}
+              </button>
+            }
+          }
+          @if (simulatedInfo(row.device); as simInfo) {
+            <button
+              type="button"
+              class="btn danger"
+              [disabled]="facade.busySimulatedAssetId() === simInfo.assetId"
+              (click)="facade.stopSimulatedAsset(simInfo)"
+            >
+              {{ facade.busySimulatedAssetId() === simInfo.assetId ? 'Stopping…' : 'Stop simulation' }}
+            </button>
+          }
+          @if (!row.archived && !row.owner) {
+            <button type="button" class="btn secondary" (click)="openCreateAssetFor(row.device)">{{ promoteToAssetLabel }}</button>
+          }
+          @for (entry of deviceActionsFor(row); track entry.action) {
+            <div class="detail-action-item">
+              <button
+                type="button"
+                class="btn secondary"
+                [class.danger]="entry.action === 'archive'"
+                [disabled]="!entry.available || facade.busyDeviceId() === row.device.id"
+                [title]="entry.reason ?? ''"
+                (click)="onDeviceAction(row, entry.action)"
+              >
+                {{ deviceActionLabel(entry.action) }}
+              </button>
+              @if (!entry.available && entry.reason) {
+                <span class="kebab-reason">{{ entry.reason }}</span>
+              }
+            </div>
+          }
+        </div>
       </div>
     }
-  </section>
+  </vision-two-pane>
 
   <!-- ---- Promote to asset (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix; renamed to
        its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3; switched to the deviceIds contract per
        docs/REALTIME-PLAN.md §4's backend follow-up batch — no more duplicate-device workaround). -->
-  <!-- Reached from any row's kebab whose owner is unassigned — surgery for an already-existing
-       orphaned device (docs/UX-REWORK-PLAN.md §U-d); a brand-new source goes through the onboarding
-       wizard instead, which never produces an orphan in the first place. -->
+  <!-- Reached from any row's kebab or detail panel whose owner is unassigned — surgery for an
+       already-existing orphaned device (docs/UX-REWORK-PLAN.md §U-d); a brand-new source goes through
+       the onboarding wizard instead, which never produces an orphan in the first place. -->
   @if (createAssetFor(); as createDevice) {
     <section class="card create-asset-panel">
       <header>

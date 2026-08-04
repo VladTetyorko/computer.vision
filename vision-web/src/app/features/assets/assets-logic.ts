@@ -1,4 +1,4 @@
-import type { AssetDetails, AssetSummary, LifecycleState } from '../../core/api/models';
+import type { AssetDetails, LifecycleState } from '../../core/api/models';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 
 /**
@@ -19,9 +19,16 @@ import { findVideoDevice } from '../../core/fleet/device-logic';
  * no VIDEO-capable device at all, in which case the card hides its Watch button), `deviceCount`/
  * `streaming` are the card's status decoration. Built from `AssetDetails` (not just `AssetSummary`)
  * because `deviceCount` needs the resolved device list.
+ *
+ * `asset` is typed `AssetDetails`, not `AssetSummary` (docs/NAV-IA-REDESIGN-PLAN.md §2.4 Wave 3) —
+ * widened from the pre-two-pane version, which only ever exposed the `AssetSummary` field subset
+ * even though `buildAssetListRows` has always been handed full `AssetDetails`. The two-pane detail
+ * panel needs `asset.devices` (the per-device chip list, docs/design/04-assets.md's own mockup) and
+ * this row is the panel's only data source, so the field is widened rather than threading a second
+ * `AssetDetails` lookup through the facade for the one row currently selected.
  */
 export interface AssetListRow {
-  readonly asset: AssetSummary;
+  readonly asset: AssetDetails;
   readonly lifecycle: LifecycleState;
   readonly archived: boolean;
   readonly deviceCount: number;
@@ -104,4 +111,35 @@ export function searchAssetListRowsByName(
 ): readonly AssetListRow[] {
   const q = query.trim().toLowerCase();
   return q ? rows.filter((row) => row.asset.displayName.toLowerCase().includes(q)) : rows;
+}
+
+/**
+ * Resolves the two-pane detail panel's row from `?sel=<assetId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4,
+ * docs/design/04-assets.md) — looked up against **every** loaded row, not the search/filter-narrowed
+ * `assetRows()`, so narrowing the filters never silently evicts an already-open selection out from
+ * under the user. Returns `undefined` for a missing/blank id and equally for one that matches no
+ * currently-loaded row (an asset archived or deleted by someone else since the link was shared) — the
+ * caller (`AssetsFacade#selectedRow`) treats both identically: the pane just doesn't open, never a
+ * crash or a blank panel (F6's own "degrade honestly" rule, restated for a stale deep link).
+ */
+export function findAssetRowById(rows: readonly AssetListRow[], id: string | undefined): AssetListRow | undefined {
+  if (!id) {
+    return undefined;
+  }
+  return rows.find((row) => row.asset.assetId === id);
+}
+
+/** The `▤ ▦` list/card view toggle (docs/design/04-assets.md's suggested design) — persisted per user
+ *  via `core/panel-state.ts#readPersistedString`/`writePersistedString`, the same idiom
+ *  `features/command/command.ts`'s `railOpen`/`panelOpen` already use for their own collapse state. */
+export type AssetViewMode = 'list' | 'card';
+
+/**
+ * Defends the persisted view-mode read against a corrupted/hand-edited `localStorage` value —
+ * `readPersistedString` returns whatever string was last written (or `null`), with no type-level
+ * guarantee it is still `'list' | 'card'`. Anything else falls back to `'list'`, the dense default
+ * docs/design/04-assets.md calls for (F5 — a card grid is the wrong default for record browsing).
+ */
+export function parseAssetViewMode(raw: string | null): AssetViewMode {
+  return raw === 'card' ? 'card' : 'list';
 }
