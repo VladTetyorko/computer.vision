@@ -110,14 +110,14 @@ class DemoScenarioTest {
             return List.<User>of();
         });
         when(fleet.seed(anyInt(), any(), any(), any())).thenAnswer(invocation -> {
-            invocation.getArgument(3, Consumer.class).accept("asset Demo 01: no such category");
+            invocation.getArgument(3, Consumer.class).accept("asset FPV Pis-UN: no such category");
             return List.<DemoAsset>of();
         });
         when(fleet.videosUsed(any())).thenReturn(List.of());
 
         DemoSeedReport report = scenario.seed(DemoPlan.DEFAULT);
 
-        assertEquals(List.of("user demo.falcon: taken", "asset Demo 01: no such category"), report.problems());
+        assertEquals(List.of("user demo.falcon: taken", "asset FPV Pis-UN: no such category"), report.problems());
     }
 
     private static List<User> users(int count) {
@@ -129,7 +129,7 @@ class DemoScenarioTest {
 
     private static List<DemoAsset> assets(int count) {
         return IntStream.range(0, count)
-                .mapToObj(index -> new DemoAsset(AssetId.random(), "Demo 0" + (index + 1), "drone.mp4"))
+                .mapToObj(index -> new DemoAsset(AssetId.random(), "Airframe " + (index + 1), "drone.mp4"))
                 .toList();
     }
 }

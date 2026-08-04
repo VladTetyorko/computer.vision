@@ -75,7 +75,7 @@ describe('ToastService', () => {
     expect(service.toasts()).toEqual([{ id: expect.any(Number), kind: 'warning', text: 'no acknowledgement', action: undefined }]);
   });
 
-  it('auto-dismisses each kind after its own duration, ok/info/notification/warning/error shortest to longest', () => {
+  it('auto-dismisses every kind after the same 5s, none lingering longer than another', () => {
     const service = create();
     service.ok('a');
     service.info('b');
@@ -84,19 +84,23 @@ describe('ToastService', () => {
     service.error('d');
     expect(service.toasts()).toHaveLength(5);
 
-    vi.advanceTimersByTime(4_000);
-    expect(service.toasts().map((t) => t.kind)).toEqual(['info', 'notification', 'warning', 'error']);
+    vi.advanceTimersByTime(4_999);
+    expect(service.toasts()).toHaveLength(5);
 
-    vi.advanceTimersByTime(1_000); // 5s total
-    expect(service.toasts().map((t) => t.kind)).toEqual(['notification', 'warning', 'error']);
+    vi.advanceTimersByTime(1); // 5s total
+    expect(service.toasts()).toEqual([]);
+  });
 
-    vi.advanceTimersByTime(1_000); // 6s total
-    expect(service.toasts().map((t) => t.kind)).toEqual(['warning', 'error']);
+  it('starts each toast\'s own 5s clock when it is pushed, not when the first one was', () => {
+    const service = create();
+    service.error('first');
+    vi.advanceTimersByTime(3_000);
+    service.error('second');
 
-    vi.advanceTimersByTime(1_000); // 7s total
-    expect(service.toasts().map((t) => t.kind)).toEqual(['error']);
+    vi.advanceTimersByTime(2_000); // first is 5s old, second only 2s
+    expect(service.toasts().map((t) => t.text)).toEqual(['second']);
 
-    vi.advanceTimersByTime(2_000); // 9s total
+    vi.advanceTimersByTime(3_000);
     expect(service.toasts()).toEqual([]);
   });
 });

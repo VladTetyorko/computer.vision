@@ -18,7 +18,7 @@ public record DemoPlan(int assets, int users, int startStreams) {
     public static final int MAX = 50;
 
     /** What the green button asks for when the request carries no numbers of its own. */
-    public static final DemoPlan DEFAULT = new DemoPlan(10, 10, 3);
+    public static final DemoPlan DEFAULT = new DemoPlan(4, 4, 2);
 
     public DemoPlan {
         assets = clamp(assets);

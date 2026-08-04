@@ -16,11 +16,12 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * The aircraft half of the demo scenario: simulated assets flying their own routes, each backed by
@@ -59,9 +60,20 @@ public class DemoFleet {
     /** Cruise altitudes cycled across the fleet, metres AGL. */
     private static final double[] ALTITUDES_METERS = {80.0, 110.0, 140.0, 170.0};
 
-    /** Call-sign shape, and the pattern {@link #nextCallSignNumber()} reads back out of it. */
-    private static final String CALL_SIGN_FORMAT = "Demo %02d";
-    private static final Pattern CALL_SIGN = Pattern.compile("Demo (\\d+)");
+    /**
+     * Airframes the demo fleet is named after, in the order they are handed out — real types rather
+     * than {@code Demo 01}, so a demo reads like a fleet someone actually flies. Cycled with a
+     * numeric suffix once exhausted, the same shape {@link DemoPeople}'s own call-sign
+     * roster uses; {@link #nextCallSigns(int)} does the cycling here, because unlike a person's call sign
+     * an asset name has to dodge what is already registered.
+     *
+     * <p>Mixed deliberately — fixed-wing recon, strike, and FPV/bomber quads — so the demo map shows
+     * a plausible mixed fleet rather than ten of one thing.
+     */
+    private static final List<String> CALL_SIGNS = List.of(
+            "FPV Pis-UN", "FPV Vyriy", "Skyfall Vampire", "Bayraktar TB2", "Leleka-100",
+            "Furia", "Shark", "PD-2", "Poseidon H10", "Punisher",
+            "RAM II", "Warmate", "Backfire", "Gor");
 
     private final SimulationService simulations;
     private final AssetService assets;
@@ -91,11 +103,11 @@ public class DemoFleet {
         }
 
         List<Path> library = videos.videos();
-        int firstNumber = nextCallSignNumber();
+        List<String> callSigns = nextCallSigns(count);
         List<DemoAsset> created = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
             Path video = library.isEmpty() ? null : library.get(index % library.size());
-            String displayName = String.format(CALL_SIGN_FORMAT, firstNumber + index);
+            String displayName = callSigns.get(index);
             try {
                 SimulatedAsset simulated =
                         simulations.simulate(spec(displayName, video, index, count), ownership, actor);
@@ -132,23 +144,51 @@ public class DemoFleet {
     }
 
     /**
-     * Where this press's call signs start: one past the highest {@code Demo NN} already registered,
-     * so a second press extends the fleet ({@code Demo 11}, {@code Demo 12}…) instead of minting a
-     * second {@code Demo 01}. Asset names are not unique keys — nothing rejects a duplicate — so
-     * this is a readability guarantee, not an invariant.
+     * The next {@code count} free call signs, in hand-out order.
+     *
+     * <p>Replaces the old "one past the highest {@code Demo NN}" scan: with a fixed roster the
+     * sequence number is no longer *in* the name, so there is nothing to parse back out. Instead
+     * each candidate is checked against the names already registered, and the roster is cycled with
+     * a numeric suffix ({@code Furia}, then {@code Furia 2}…) once exhausted — so a second press
+     * extends the fleet rather than minting a duplicate of the first one.
+     *
+     * <p>Asset names are not unique keys — nothing rejects a duplicate — so this is a readability
+     * guarantee, not an invariant. {@code taken} is also added to as names are chosen, which is what
+     * keeps this batch free of duplicates among itself.
      */
-    private int nextCallSignNumber() {
+    private List<String> nextCallSigns(int count) {
+        Set<String> taken = registeredNames();
+        List<String> chosen = new ArrayList<>(count);
+        // Terminates because CALL_SIGNS is a non-empty constant: every lap adds a distinct suffix,
+        // so each lap contributes at least one name that `taken` cannot already hold.
+        for (int lap = 0; chosen.size() < count; lap++) {
+            for (String base : CALL_SIGNS) {
+                if (chosen.size() == count) {
+                    break;
+                }
+                String candidate = lap == 0 ? base : base + " " + (lap + 1);
+                if (taken.add(candidate)) {
+                    chosen.add(candidate);
+                }
+            }
+        }
+        return chosen;
+    }
+
+    /**
+     * Display names already registered, so a call sign is not handed out twice.
+     *
+     * <p>includeDeleted: a soft-deleted {@code Furia} is still in the archive view, so reusing the
+     * name would put two of them side by side there. Degrades to "nothing is taken" if the lookup
+     * fails — a demo press that names an asset twice is better than one that refuses to seed.
+     */
+    private Set<String> registeredNames() {
         try {
-            // includeDeleted: a soft-deleted "Demo 03" is still in the archive view, so reusing its
-            // number would put two of them side by side there.
             return assets.assets(true).stream()
-                    .map(summary -> CALL_SIGN.matcher(summary.asset().displayName()))
-                    .filter(Matcher::matches)
-                    .mapToInt(matcher -> Integer.parseInt(matcher.group(1)))
-                    .max()
-                    .orElse(0) + 1;
+                    .map(summary -> summary.asset().displayName())
+                    .collect(Collectors.toCollection(HashSet::new));
         } catch (RuntimeException e) {
-            return 1;
+            return new HashSet<>();
         }
     }
 

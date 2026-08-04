@@ -64,7 +64,7 @@ class DemoControllerTest {
                 .andExpect(jsonPath("$.users").value(1))
                 .andExpect(jsonPath("$.assignments").value(3))
                 .andExpect(jsonPath("$.streamsStarted").value(1))
-                .andExpect(jsonPath("$.assetNames[0]").value("Demo 01"))
+                .andExpect(jsonPath("$.assetNames[0]").value("FPV Pis-UN"))
                 .andExpect(jsonPath("$.usernames[0]").value("demo.falcon"))
                 .andExpect(jsonPath("$.password").value("demo"))
                 .andExpect(jsonPath("$.videosUsed[0]").value("drone.mp4"))
@@ -105,16 +105,16 @@ class DemoControllerTest {
 
     @Test
     void problemsFromAPartiallyFailedSeedTravelOnTheResponseNotAsAnError() throws Exception {
-        when(scenario.seed(any())).thenReturn(new DemoSeedReport(List.of("Demo 01"), List.of(), 0, 0, 0, 0,
-                List.of(), List.of("stream Demo 01: publisher unreachable")));
+        when(scenario.seed(any())).thenReturn(new DemoSeedReport(List.of("FPV Pis-UN"), List.of(), 0, 0, 0, 0,
+                List.of(), List.of("stream FPV Pis-UN: publisher unreachable")));
 
         mockMvc.perform(post("/api/demo/seed"))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.problems[0]").value("stream Demo 01: publisher unreachable"));
+                .andExpect(jsonPath("$.problems[0]").value("stream FPV Pis-UN: publisher unreachable"));
     }
 
     private static DemoSeedReport report() {
-        return new DemoSeedReport(List.of("Demo 01", "Demo 02"), List.of("demo.falcon"), 3, 2, 5, 1,
+        return new DemoSeedReport(List.of("FPV Pis-UN", "FPV Vyriy"), List.of("demo.falcon"), 3, 2, 5, 1,
                 List.of("drone.mp4"), List.of());
     }
 }

@@ -94,13 +94,41 @@ class DemoFleetTest {
     }
 
     @Test
-    void callSignsContinuePastTheDemoAssetsAlreadyRegistered() {
-        when(assets.assets(anyBoolean())).thenReturn(List.of(summary("Demo 01"), summary("Demo 07"),
+    void callSignsSkipTheAirframesAlreadyRegistered() {
+        // "Shark" is unrelated to the demo roster's own order — the point is that a name in use is
+        // stepped over wherever it sits, not that allocation resumes after some highest number.
+        when(assets.assets(anyBoolean())).thenReturn(List.of(summary("FPV Pis-UN"), summary("Shark"),
                 summary("Falcon-2")));
+
+        List<DemoAsset> created = fleet().seed(3, ownership, ownership.ownerId(), problem -> { });
+
+        assertEquals(List.of("FPV Vyriy", "Skyfall Vampire", "Bayraktar TB2"),
+                created.stream().map(DemoAsset::displayName).toList());
+    }
+
+    @Test
+    void callSignsCycleWithASuffixOnceTheRosterIsExhausted() {
+        when(assets.assets(anyBoolean())).thenReturn(List.of());
+
+        // 15 = one full roster (14) plus one, so the sixteenth press has to lap.
+        List<DemoAsset> created = fleet().seed(15, ownership, ownership.ownerId(), problem -> { });
+
+        List<String> names = created.stream().map(DemoAsset::displayName).toList();
+        assertEquals("FPV Pis-UN", names.get(0));
+        assertEquals("FPV Pis-UN 2", names.get(14), "laps the roster rather than repeating a name");
+        assertEquals(15, names.stream().distinct().count(), "no duplicates within one press");
+    }
+
+    @Test
+    void aSecondPressExtendsTheFleetInsteadOfMintingDuplicates() {
+        // Everything the first press would have used is already registered, including a soft-deleted
+        // one — `assets(true)` is why the archive view cannot end up with two of the same name.
+        when(assets.assets(anyBoolean())).thenReturn(List.of(summary("FPV Pis-UN"), summary("FPV Vyriy")));
 
         List<DemoAsset> created = fleet().seed(2, ownership, ownership.ownerId(), problem -> { });
 
-        assertEquals(List.of("Demo 08", "Demo 09"), created.stream().map(DemoAsset::displayName).toList());
+        assertEquals(List.of("Skyfall Vampire", "Bayraktar TB2"),
+                created.stream().map(DemoAsset::displayName).toList());
     }
 
     @Test
@@ -113,7 +141,7 @@ class DemoFleetTest {
         List<DemoAsset> created = fleet().seed(2, ownership, ownership.ownerId(), problems::add);
 
         assertEquals(1, created.size());
-        assertEquals(List.of("asset Demo 01: simulated category not seeded"), problems);
+        assertEquals(List.of("asset FPV Pis-UN: simulated category not seeded"), problems);
     }
 
     @Test

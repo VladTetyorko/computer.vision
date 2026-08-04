@@ -115,6 +115,15 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* A classic 15px scrollbar is laid out *inside* this element's padding box, so it takes its width
+     out of the rows, not out of the sidebar's own chrome. Measured live on the 56px rail: rows came
+     out 32px wide inside a 47px content box, centring their icons on x≈20 while the head's brand
+     mark and the foot's controls sat on the rail's real axis (x≈27.5) — a visible 8px zig-zag down
+     the whole rail. `thin` keeps a genuine scroll affordance in the 240px expanded panel (an ADMIN
+     session's nav really is ~926px tall and really does overflow a short viewport); the collapsed
+     rail drops the scrollbar outright below, where there is no width to spend on chrome. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
   padding: var(--space-16) var(--space-8);
   display: flex;
   flex-direction: column;
@@ -158,16 +167,16 @@
 }
 
 .nav-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-8);
   min-height: 2.25rem;
   padding: 0 var(--space-8);
-  border-left: 2px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: 0.85rem;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .nav-row:hover {
@@ -180,9 +189,28 @@
    assistive tech, not just visually. */
 .nav-row.active {
   background: var(--panel-raised);
-  border-left-color: var(--color-info);
   color: var(--text);
   font-weight: 600;
+}
+
+/* The accent bar is an out-of-flow pseudo-element, **not** a `border-left: 2px` on `.nav-row`
+   itself. A real border sits inside the row's box and pushes its icon 2px right of every other
+   glyph in the sidebar: measured live, the brand mark, the group-label icons and the disclosure
+   chevrons all landed on x=16 while the nav icons — the most numerous, most obviously-a-column
+   glyphs in the whole panel — landed on x=18. (The transparent border was carried by *every* row,
+   active or not, precisely so activating one wouldn't jog its text; that fixed the jitter but moved
+   the entire column instead.) Out of flow, the bar paints in exactly the same place while owning
+   none of the row's inline space, so the icon column is straight in both states and the collapsed
+   rail's centred icons stay on the rail's own axis rather than 1px right of it. */
+.nav-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--space-4);
+  bottom: var(--space-4);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--color-info);
 }
 
 .nav-row-text {
@@ -256,19 +284,33 @@
 /* ---- Foot: identity chip, notification bell, live/online status (moved verbatim in behaviour
    from the old header's `.status` block — see this file's own doc comment) ------------------------- */
 
+/* Padding mirrors `.sidebar-body`'s own `var(--space-16) var(--space-8)` exactly, so the foot's
+   three blocks (demo button, identity chip, status row) start on the same x as a nav row's box
+   (8px) instead of the 16px they used to — and, with the two inner-padding corrections below, their
+   glyphs land on the same x=16 axis as every icon above them. */
 .sidebar-foot {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
-  padding: var(--space-8) var(--space-8) var(--space-16);
+  padding: var(--space-16) var(--space-8);
   border-top: 1px solid var(--border);
 }
 
+/* Left inset only. `var(--space-8)` puts the dot/chips on the shared x=16 glyph axis; a *zero*
+   right inset lets the bell's own `margin-left: auto` below carry it out to the same right edge the
+   demo button already occupies, so the foot's two full-width rows share one. Measured before this:
+   `padding: 0 var(--space-2)` with no `gap` left the status chips and the bell touching at exactly
+   x=158.5 with ~34px of dead space trailing the bell. */
 .status-row {
   display: flex;
   align-items: center;
-  padding: 0 var(--space-2);
+  gap: var(--space-8);
+  padding: 0 0 0 var(--space-8);
+}
+
+.status-row vision-notification-bell {
+  margin-left: auto;
 }
 
 .status-compact {
@@ -301,6 +343,15 @@
    file) opens them rightward instead, bottom-anchored to their own trigger — see this file's own
    class doc for why `::ng-deep` is the right tool here, matching `fly.css`'s established precedent
    for adapting a shared component's DOM to one specific host. */
+/* `identity-trigger`'s own `padding-left: var(--space-2)` is a header-era pill inset; against this
+   sidebar's `var(--space-8)` foot padding it put the avatar on x=10 while every nav icon above it
+   sits on x=16. Nudging just the left inset (same `::ng-deep` licence as the two dropdown overrides
+   below — the component's own file stays untouched) lands the avatar on the shared axis without
+   changing the pill's shape anywhere else it is used. */
+:host ::ng-deep .sidebar-foot .identity-trigger {
+  padding-left: var(--space-8);
+}
+
 :host ::ng-deep .sidebar-foot .identity-menu,
 :host ::ng-deep .sidebar-foot .bell-dropdown {
   top: auto;
@@ -346,30 +397,70 @@
    its value here would silently change what all of those already mean without touching any of
    them. See `styles.css`'s own `--sidebar-bp` doc comment for the full reasoning. */
 
+/* ---- Rail geometry, stated once here and mirrored verbatim into the 641–1024px block below ------
+
+   The rail is `--sidebar-w-rail` (56px) *including* `.sidebar`'s own 1px right border, so its
+   interior is 55px and its centre axis — the line every icon in it must sit on — is x=27.5. Both
+   blocks below are kept rule-for-rule identical on purpose: the two ways into the rail (the user's
+   own `collapsed` preference at any width ≥641px, and the forced tablet range) must look the same,
+   and a divergence between them is exactly how the `.group-divider` bug fixed here survived — the
+   divider is a `<span>`, so `.group-label > span { display: none }` (specificity 0,3,1) beat the
+   `.group-divider { display: block }` rule (0,3,0) sitting three lines under it and the rail's
+   group separators never rendered at all, in either block. The text span now carries its own
+   `.group-label-text` class (`app-sidebar.html`) so the two selectors can no longer overlap. */
+
 @media (min-width: 641px) {
   .sidebar.collapsed {
     width: var(--sidebar-w-rail);
   }
 
+  /* Zero horizontal padding with a 4px gap is the only arrangement that fits the 16px brand mark
+     *and* the 28px collapse toggle in the 55px interior with symmetric slack: 16 + 4 + 28 = 48,
+     leaving 3.5px either side. `.brand` must also drop its expanded `flex: 1` here — measured live,
+     that grow factor gave the link an 11px box which its own `flex: none` 16px mark then overflowed
+     by 5px, swallowing the gap and shoving the mark under the toggle (the head's min-content is
+     60px, i.e. wider than the rail, so there is no arrangement that fits with `--space-8` gaps). */
   .sidebar.collapsed .sidebar-head {
-    padding: 0 var(--space-4);
+    padding: 0;
+    gap: var(--space-4);
     justify-content: center;
+  }
+
+  .sidebar.collapsed .brand {
+    flex: none;
   }
 
   .sidebar.collapsed .sidebar-body {
     padding: var(--space-16) var(--space-4);
+    /* No scrollbar at all in the rail — see `.sidebar-body`'s own comment: a classic 15px scrollbar
+       eats a third of the 47px content box and shifts every centred icon ~8px off the axis. */
+    scrollbar-width: none;
   }
 
   .sidebar.collapsed .sidebar-foot {
     align-items: center;
-    padding: var(--space-8) var(--space-4) var(--space-16);
+    padding: var(--space-16) var(--space-4);
   }
 
   .sidebar.collapsed .brand-name,
   .sidebar.collapsed .group-label > vision-icon,
-  .sidebar.collapsed .group-label > span,
+  .sidebar.collapsed .group-label-text,
   .sidebar.collapsed .nav-row-text,
   .sidebar.collapsed .disclosure summary > span {
+    display: none;
+  }
+
+  /* With its icon and text gone the label *is* the hairline, so it has to be laid out as one: its
+     expanded `height: 1.5rem` + `padding: 0 var(--space-8)` is a text row's box, which left a 24px
+     empty band and inset the (then invisible) rule to a stub. `var(--space-4)` matches the rail
+     body's own inset, so the divider spans the full 40px icon column. The first group's divider is
+     dropped outright — the head's `border-bottom` is already the line directly above it. */
+  .sidebar.collapsed .group-label {
+    height: auto;
+    padding: 0 var(--space-4);
+  }
+
+  .sidebar.collapsed .nav-group:first-child .group-label {
     display: none;
   }
 
@@ -382,9 +473,30 @@
     padding: 0;
   }
 
+  /* An `Upcoming` row's `soon` chip is 44px of text in a 40px icon column and `flex: none` keeps it
+     from shrinking, so it overflowed straight through the rail's right edge and was clipped
+     mid-word. The row's own `.dimmed` colour plus its `title`/`aria-label` ("… (coming soon)")
+     already carry the state here. */
+  .sidebar.collapsed .nav-row .chip {
+    display: none;
+  }
+
   .sidebar.collapsed .disclosure summary {
     justify-content: center;
     padding: 0;
+  }
+
+  /* Stacked, not inline: as a row the 8px status dot and the 30px bell were centred *as a pair*, so
+     neither one landed on the axis (dot centre x=12.3, bell centre x=31.5) while the demo icon and
+     the avatar above them sat at 27.5 and 24.5. One per line puts all four on the same axis. */
+  .sidebar.collapsed .status-row {
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: 0;
+  }
+
+  .sidebar.collapsed .status-row vision-notification-bell {
+    margin-left: 0;
   }
 
   .sidebar.collapsed .status-compact {
@@ -403,8 +515,20 @@
   :host ::ng-deep .sidebar.collapsed .identity-role {
     display: none;
   }
+
+  /* Replaces both the expanded left-inset correction above *and* the component's own asymmetric
+     `var(--space-2) var(--space-8) var(--space-2) var(--space-2)`. In the rail the trigger shrinks
+     to fit its avatar and is centred as a box by `align-items: center`, so any left/right asymmetry
+     moves the avatar off the axis while the pill around it stays on it — measured at 24.5 against
+     the rail's own 27.5 with the component's native padding, the one glyph in the whole rail still
+     out of line. Equal insets put the avatar back on the axis. */
+  :host ::ng-deep .sidebar.collapsed .sidebar-foot .identity-trigger {
+    padding: var(--space-2);
+  }
 }
 
+/* Rule-for-rule mirror of the `.sidebar.collapsed` block above — see its own header comment for the
+   reasoning behind each value, and for why the two blocks must not drift apart. */
 @media (min-width: 641px) and (max-width: 1024px) {
   /* --sidebar-bp */
   .sidebar {
@@ -412,24 +536,39 @@
   }
 
   .sidebar-head {
-    padding: 0 var(--space-4);
+    padding: 0;
+    gap: var(--space-4);
     justify-content: center;
+  }
+
+  .brand {
+    flex: none;
   }
 
   .sidebar-body {
     padding: var(--space-16) var(--space-4);
+    scrollbar-width: none;
   }
 
   .sidebar-foot {
     align-items: center;
-    padding: var(--space-8) var(--space-4) var(--space-16);
+    padding: var(--space-16) var(--space-4);
   }
 
   .brand-name,
   .group-label > vision-icon,
-  .group-label > span,
+  .group-label-text,
   .nav-row-text,
   .disclosure summary > span {
+    display: none;
+  }
+
+  .group-label {
+    height: auto;
+    padding: 0 var(--space-4);
+  }
+
+  .nav-group:first-child .group-label {
     display: none;
   }
 
@@ -442,9 +581,23 @@
     padding: 0;
   }
 
+  .nav-row .chip {
+    display: none;
+  }
+
   .disclosure summary {
     justify-content: center;
     padding: 0;
+  }
+
+  .status-row {
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: 0;
+  }
+
+  .status-row vision-notification-bell {
+    margin-left: 0;
   }
 
   .status-compact {
@@ -458,6 +611,10 @@
   :host ::ng-deep .identity-name,
   :host ::ng-deep .identity-role {
     display: none;
+  }
+
+  :host ::ng-deep .sidebar-foot .identity-trigger {
+    padding: var(--space-2);
   }
 }
 

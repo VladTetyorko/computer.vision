@@ -14,7 +14,7 @@ const RESULT = {
   zones: 2,
   marks: 5,
   streamsStarted: 3,
-  assetNames: ['Demo 01'],
+  assetNames: ['FPV Pis-UN'],
   usernames: ['demo.falcon'],
   password: 'demo',
   videosUsed: ['drone.mp4'],
@@ -91,7 +91,7 @@ describe('DemoButton', () => {
 
     fixture.nativeElement.querySelector('.demo-button').click();
     http.expectOne({ method: 'POST', url: '/api/demo/seed' })
-      .flush({ ...RESULT, problems: ['stream Demo 01: publisher unreachable'] });
+      .flush({ ...RESULT, problems: ['stream FPV Pis-UN: publisher unreachable'] });
     await fixture.whenStable();
     fixture.detectChanges();
 

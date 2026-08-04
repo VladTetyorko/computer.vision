@@ -16,20 +16,21 @@ export interface Toast {
 }
 
 /**
- * Errors linger long enough to read; confirmations get out of the way. `notification` (docs/UX-REWORK-PLAN.md
- * §U-c: "new events arrive as transient toasts") sits between `ok`/`info` — a background event the
- * operator didn't ask for, worth slightly longer than a confirmation they *did* trigger, but this
- * app has no reason to make it linger as long as an `error`. `warning` (docs/DRONE-INFRA-PLAN.md I-e
- * Stage 1, new — the "Bring home" button's own `NO_ACK` outcome: sent, but not acknowledged) sits
- * just past `notification` — not a failure (the command genuinely went out), but worth noticeably
- * longer than a plain confirmation to actually read and act on.
+ * One dwell time for every kind (user decision, 2026-08-04): a toast leaves after 5 seconds, whatever
+ * it says. This replaces the earlier severity-staggered ladder (ok 4s → info 5s → notification 6s →
+ * warning 7s → error 9s), where each kind lingered in proportion to how much the operator was
+ * expected to need to read it. Kind still drives *appearance* (`shared/ui/toast-host.ts`'s per-kind
+ * colors) and whether an `action` button is offered — just no longer duration. Anything an operator
+ * genuinely must not miss should therefore not rely on a toast outliving its siblings: it belongs in
+ * durable chrome (the notification bell's own dropdown, an inline error on the control that failed),
+ * not in a slightly slower fade.
  */
 const DISMISS_AFTER_MS: Record<ToastKind, number> = {
-  ok: 4_000,
+  ok: 5_000,
   info: 5_000,
-  notification: 6_000,
-  warning: 7_000,
-  error: 9_000,
+  notification: 5_000,
+  warning: 5_000,
+  error: 5_000,
 };
 
 @Injectable({ providedIn: 'root' })

@@ -28,10 +28,15 @@
              true, and CSS alone cannot restore an element the template never created, which is
              exactly the mobile off-canvas sheet's own situation (open, full width, yet possibly
              still "collapsed" per the user's *desktop* preference). -->
+        <!-- `.group-label-text` is a real class, not decoration: the collapsed rail hides the label
+             text with a selector of its own, and while that selector was the bare `.group-label >
+             span` it also matched `.group-divider` (a `<span>` too) at a *higher* specificity than
+             the `.group-divider { display: block }` rule meant to reveal it — so the rail's group
+             separators silently never rendered. See `app-sidebar.css`'s own rail-block header. -->
         <div class="group-label">
           <span class="group-divider" aria-hidden="true"></span>
           <vision-icon [name]="mode.icon" [size]="14" />
-          <span>{{ mode.label }}</span>
+          <span class="group-label-text">{{ mode.label }}</span>
         </div>
 
         @for (entry of tiersFor(mode.entries).primary; track entry.to) {
@@ -52,7 +57,10 @@
 
         @if (tiersFor(mode.entries).advanced.length > 0) {
           <details class="disclosure" [open]="sidebar.advancedOpen()" (toggle)="onAdvancedToggle($event)">
-            <summary [attr.aria-label]="effectiveCollapsed() ? 'Advanced' : null">
+            <!-- `title` unconditionally, unlike the `aria-label` beside it: collapsed to the rail
+                 this summary is a bare 12px chevron with its word hidden, so hovering it is the
+                 only way to find out which section it opens. -->
+            <summary title="Advanced" [attr.aria-label]="effectiveCollapsed() ? 'Advanced' : null">
               <vision-icon name="chevron-right" [size]="12" class="chevron" />
               <span>Advanced</span>
             </summary>
@@ -76,7 +84,7 @@
 
         @if (tiersFor(mode.entries).upcoming.length > 0) {
           <details class="disclosure" [open]="sidebar.upcomingOpen()" (toggle)="onUpcomingToggle($event)">
-            <summary [attr.aria-label]="effectiveCollapsed() ? 'Upcoming' : null">
+            <summary title="Upcoming" [attr.aria-label]="effectiveCollapsed() ? 'Upcoming' : null">
               <vision-icon name="chevron-right" [size]="12" class="chevron" />
               <span>Upcoming</span>
             </summary>
@@ -107,7 +115,6 @@
          (`vision.demo.enabled`, default on) — see `features/demo/demo-button/demo-button.ts`. -->
     <vision-demo-button />
     <vision-identity-chip />
-    <vision-notification-bell />
     <!-- Live-stream count / online status (moved verbatim in behaviour from the old header's
          `.status` block — see this file's own class doc). Both the compact (dot-only) and full
          (text chip) forms always render; `app-sidebar.css` shows exactly one via CSS, same
@@ -123,6 +130,7 @@
           {{ offline() ? 'OFFLINE' : 'ONLINE' }}
         </span>
       </span>
+      <vision-notification-bell />
     </div>
   </div>
 </aside>
