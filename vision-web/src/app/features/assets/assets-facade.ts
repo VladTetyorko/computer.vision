@@ -8,6 +8,7 @@ import { describeHttpError } from '../../core/api-error';
 import { buildSyntheticRegisterRequest } from '../../core/fleet/simulation-logic';
 import { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 import { RESTORE_TARGET_STATE } from '../../core/fleet/warehouse-logic';
+import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import type { AssetDetails } from '../../core/api/models';
 import {
   buildAssetListRows,
@@ -151,8 +152,8 @@ export class AssetsFacade {
     try {
       const result = await this.api.deleteAsset(assetId);
       this.undoToast.showUndo(
-        `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
-          `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
+        `Archived "${result.displayName}" — ${pluralize(result.devicesDeleted, 'device')} archived, ` +
+          `${pluralize(result.usagesRetained, 'usage')} retained, ${pluralize(result.streamsStopped, 'stream')} stopped.`,
         () => void this.undoArchiveAsset(assetId, result.displayName, result.devicesDeleted),
       );
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshAssets()]);
@@ -218,11 +219,11 @@ export class AssetsFacade {
     if (devicesFailed > 0) {
       const succeeded = devicesRestored > 0 ? ` (${devicesRestored} succeeded)` : '';
       this.toasts.error(
-        `Restored "${displayName}", but ${devicesFailed} of its ${devicesArchived} device(s) failed to ` +
+        `Restored "${displayName}", but ${devicesFailed} of its ${pluralize(devicesArchived, 'device')} failed to ` +
           `restore${succeeded} — retry from Devices.`,
       );
     } else if (devicesRestored > 0) {
-      this.toasts.ok(`Restored "${displayName}" and ${devicesRestored} device(s).`);
+      this.toasts.ok(`Restored "${displayName}" and ${pluralize(devicesRestored, 'device')}.`);
     } else {
       this.toasts.ok(`Restored "${displayName}".`);
     }

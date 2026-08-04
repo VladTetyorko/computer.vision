@@ -1,0 +1,18 @@
+:host {
+  display: block;
+}
+
+/* `display: flex` + `justify-content: center`, NOT `display: block` + `margin: 0 auto`.
+   `<vision-icon>` is a component host, so as a block it stretches to the full width of `.empty`
+   (measured 1724px on `/manage/training` at a 2060px viewport) — and `margin: 0 auto` on an element
+   that is already full-width centres nothing. The icon's own `<svg>` then sat at the container's
+   left edge while the heading and message were text-centred, so every empty state in the app
+   rendered as two disconnected fragments ~850px apart, reading as broken markup rather than one
+   message (docs/design/16-training.md's "icon renders far left while the text is centered").
+   Centring the *inner* svg via flex is independent of how wide the host happens to be. */
+.empty-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--space-8);
+  color: var(--text-faint);
+}

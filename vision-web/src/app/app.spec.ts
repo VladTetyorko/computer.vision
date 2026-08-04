@@ -1,27 +1,27 @@
+import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
-import { App } from './app';
+import { App, type RouteDataNode, routeTreeHasFullBleed } from './app';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
 import { AuthStore } from './core/auth/auth-store';
 import { EventsStore } from './core/events/events-store';
 import { LiveStore } from './core/live/live-store';
 import { VisionApi } from './core/api/vision-api';
-import { NAV_MODES } from './features/hubs/nav-entries';
+import { SidebarStore } from './core/shell/sidebar-store';
 
 /**
- * The Wave 1 "shell renders three modes; dropdowns open/close" spec (docs/UI-REDESIGN-PLAN.md
- * Wave 1's own Verify bullet). `App` pulls in `IdentityChip`/`NotificationBell`, each with their own
- * deep store graph (`AuthStore`, `FleetStore`, `EventsStore`, `LiveStore`, `VisionApi`) — every one
- * of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling, no real
- * `PollScheduler`) purely so the shell can mount at all; none of their own behavior is under test in
- * this file (see each store's own spec for that). `ToastService`/`UndoToastService` are left real —
- * both are self-contained `signal()`-only state with no injected dependencies of their own, so
- * there's nothing to fake.
+ * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
+ * their own deep store graph (`AuthStore`, `FleetStore`, `EventsStore`, `LiveStore`, `VisionApi`) —
+ * every one of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling,
+ * no real `EventSource`) purely so the shell can mount at all; none of their own behavior is under
+ * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
+ * the sidebar's own tiering/role-gate/collapse behavior). `ToastService`/`UndoToastService` are left
+ * real — both are self-contained `signal()`-only state with no injected dependencies of their own.
  */
-function fakeFleetStore() {
-  return { streams: () => [] as unknown[], reachable: () => true };
+function fakeFleetStore(reachable: boolean | undefined = true) {
+  return { streams: () => [] as unknown[], reachable: () => reachable };
 }
 
 function fakeEventsStore() {
@@ -39,13 +39,19 @@ function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
   };
 }
 
-function render(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
+@Component({ selector: 'vision-test-stub-page', template: '' })
+class StubPage {}
+
+function render(options: { topRole?: 'ADMIN' | 'MANAGER' | 'PILOT'; reachable?: boolean } = {}) {
   TestBed.configureTestingModule({
     providers: [
-      provideRouter([]),
-      { provide: FleetStore, useValue: fakeFleetStore() },
+      provideRouter([
+        { path: 'fly', component: StubPage, data: { fullBleed: true } },
+        { path: 'assets', component: StubPage },
+      ]),
+      { provide: FleetStore, useValue: fakeFleetStore(options.reachable) },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
-      { provide: AuthStore, useValue: fakeAuthStore(topRole) },
+      { provide: AuthStore, useValue: fakeAuthStore(options.topRole) },
       { provide: EventsStore, useValue: fakeEventsStore() },
       { provide: LiveStore, useValue: fakeLiveStore() },
       { provide: VisionApi, useValue: {} },
@@ -56,97 +62,156 @@ function render(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
   return fixture;
 }
 
-describe('App shell — hub-and-spoke mode nav', () => {
-  it('renders exactly the three frozen modes as a hub routerLink + a details dropdown each', () => {
-    const fixture = render();
-    const root = fixture.nativeElement as HTMLElement;
+describe('routeTreeHasFullBleed (pure)', () => {
+  function node(data: Record<string, unknown>, firstChild: RouteDataNode | null = null): RouteDataNode {
+    return { data, firstChild };
+  }
 
-    const modeLinks = Array.from(root.querySelectorAll('.modes-wide .mode-link')) as HTMLAnchorElement[];
-    expect(modeLinks.map((a) => a.getAttribute('href'))).toEqual(NAV_MODES.map((mode) => mode.hubRoute));
-    expect(modeLinks.map((a) => a.textContent?.trim())).toEqual(NAV_MODES.map((mode) => mode.label));
-
-    expect(root.querySelectorAll('.modes-wide .mode-more').length).toBe(3);
+  it('is false for a root with no data anywhere', () => {
+    expect(routeTreeHasFullBleed(node({}))).toBe(false);
   });
 
-  it("each mode's dropdown lists that mode's entries a non-manager may see, in order (docs/UX-SIMPLIFY-REVIEW.md F3)", () => {
-    // Default fake = null user (a plain operator): `managerOnly` entries are filtered out, so the
-    // header dropdowns role-scope in lockstep with the /manage hub page.
-    const fixture = render();
-    const root = fixture.nativeElement as HTMLElement;
-    const modeEls = root.querySelectorAll('.modes-wide .mode');
-
-    NAV_MODES.forEach((mode, i) => {
-      const visible = mode.entries.filter((entry) => !entry.managerOnly);
-      const links = Array.from(modeEls[i].querySelectorAll('.mode-more-menu a')) as HTMLAnchorElement[];
-      expect(links.map((a) => a.getAttribute('href')), mode.id).toEqual(visible.map((entry) => entry.to));
-      const names = links.map((a) => a.querySelector('.entry-name')?.textContent?.trim());
-      expect(names, mode.id).toEqual(visible.map((entry) => entry.name));
-    });
+  it('is false for null (no route resolved yet)', () => {
+    expect(routeTreeHasFullBleed(null)).toBe(false);
   });
 
-  it("shows a mode's managerOnly entries to an ADMIN/MANAGER (role-scoped header, F3)", () => {
-    const fixture = render('ADMIN');
-    const root = fixture.nativeElement as HTMLElement;
-    const modeEls = root.querySelectorAll('.modes-wide .mode');
-
-    NAV_MODES.forEach((mode, i) => {
-      const links = Array.from(modeEls[i].querySelectorAll('.mode-more-menu a')) as HTMLAnchorElement[];
-      // a manager sees the full, unfiltered set for every mode
-      expect(links.map((a) => a.getAttribute('href')), mode.id).toEqual(mode.entries.map((entry) => entry.to));
-    });
+  it('is true when the root itself carries fullBleed', () => {
+    expect(routeTreeHasFullBleed(node({ fullBleed: true }))).toBe(true);
   });
 
-  it('a scaffold entry renders its "soon" badge inside the dropdown', () => {
-    const fixture = render();
-    const root = fixture.nativeElement as HTMLElement;
-
-    const chips = Array.from(root.querySelectorAll('.modes-wide .mode-more-menu .chip')) as HTMLElement[];
-    expect(chips.length).toBeGreaterThan(0);
-    for (const chip of chips) {
-      expect(chip.textContent?.trim()).toBe('soon');
-    }
+  it('is true when a nested child carries it — the authGuard wrapper route sits above every real page', () => {
+    const tree = node({}, node({}, node({ fullBleed: true })));
+    expect(routeTreeHasFullBleed(tree)).toBe(true);
   });
 
-  it("clicking inside a mode's dropdown menu closes it (existing .tab-more idiom, click delegated at the menu container)", () => {
+  it('is false when fullBleed is present but not exactly true (e.g. omitted/falsy)', () => {
+    expect(routeTreeHasFullBleed(node({ fullBleed: false }))).toBe(false);
+    expect(routeTreeHasFullBleed(node({ preload: false }))).toBe(false);
+  });
+});
+
+describe('App shell', () => {
+  it('hides the sidebar entirely while unauthenticated (no session yet / login)', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
-    const details = root.querySelector('.modes-wide .mode-more') as HTMLDetailsElement;
+    expect(root.querySelector('vision-app-sidebar')).toBeNull();
+  });
 
-    details.open = true;
+  it('shows the sidebar once a session resolves', () => {
+    const fixture = render({ topRole: 'PILOT' });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('vision-app-sidebar')).not.toBeNull();
+  });
+
+  it('dev parity: the dev ADMIN principal (authEnabled=false) also shows the sidebar', () => {
+    const fixture = render({ topRole: 'ADMIN' });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('vision-app-sidebar')).not.toBeNull();
+  });
+
+  it('shows the offline banner only when the fleet is unreachable', () => {
+    const online = render({ topRole: 'PILOT', reachable: true });
+    expect((online.nativeElement as HTMLElement).querySelector('.offline-banner')).toBeNull();
+
+    // A fresh testing module — TestBed refuses `configureTestingModule` again once a previous call's
+    // component has already been instantiated (mirrors `features/hubs/hub-pages.spec.ts`'s own
+    // `renderManageHub` precedent for the identical situation).
+    TestBed.resetTestingModule();
+    const offline = render({ topRole: 'PILOT', reachable: false });
+    expect((offline.nativeElement as HTMLElement).querySelector('.offline-banner')).not.toBeNull();
+  });
+
+  it('preserves the toast host and undo toast', () => {
+    const fixture = render({ topRole: 'PILOT' });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('vision-toast-host')).not.toBeNull();
+    expect(root.querySelector('vision-undo-toast')).not.toBeNull();
+  });
+
+  it('feeds the resolved route\'s fullBleed flag into the sidebar, which then auto-collapses (checked through the DOM, not a protected field — `fullBleed` is `App`\'s own internal state)', async () => {
+    localStorage.clear();
+    const fixture = render({ topRole: 'PILOT' });
+    const router = TestBed.inject(Router);
+    const sidebarEl = () => (fixture.nativeElement as HTMLElement).querySelector('.sidebar')!;
+
+    await router.navigateByUrl('/assets');
     fixture.detectChanges();
-    expect(details.open).toBe(true);
+    expect(sidebarEl().classList.contains('collapsed')).toBe(false);
 
-    // Dispatched on the menu container itself, not the anchor — this exercises the same
-    // `(click)="modeMenu.open = false"` delegation `app.html` binds on `.mode-more-menu` (mirroring
-    // `.tab-more-menu`/`identity-chip`'s own idiom) without also invoking `RouterLink`'s real
-    // navigation, which `provideRouter([])`'s empty route table can't resolve.
-    const menu = details.querySelector('.mode-more-menu') as HTMLElement;
-    menu.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await router.navigateByUrl('/fly');
     fixture.detectChanges();
-
-    expect(details.open).toBe(false);
+    expect(sidebarEl().classList.contains('collapsed')).toBe(true);
   });
 
-  it('the narrow "Menu" disclosure groups every mode + its entries, labeled (no icon-only reduction)', () => {
-    const fixture = render();
-    const root = fixture.nativeElement as HTMLElement;
-    const groups = root.querySelectorAll('.modes-narrow-group');
+  describe('the "[" shortcut', () => {
+    it('toggles SidebarStore.collapsed', () => {
+      localStorage.clear();
+      render({ topRole: 'PILOT' });
+      const sidebar = TestBed.inject(SidebarStore);
+      expect(sidebar.collapsed()).toBe(false);
 
-    expect(groups.length).toBe(3);
-    NAV_MODES.forEach((mode, i) => {
-      expect(groups[i].querySelector('.modes-narrow-mode')?.textContent).toContain(mode.label);
-      const entries = groups[i].querySelectorAll('.modes-narrow-entry');
-      // default fake = non-manager: managerOnly entries filtered (F3), same as the wide dropdown
-      expect(entries.length).toBe(mode.entries.filter((entry) => !entry.managerOnly).length);
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
+      expect(sidebar.collapsed()).toBe(true);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
+      expect(sidebar.collapsed()).toBe(false);
     });
-  });
 
-  it('preserves the existing status chips + notification bell + identity chip', () => {
-    const fixture = render();
-    const root = fixture.nativeElement as HTMLElement;
+    it('is ignored while focus is inside a text input', () => {
+      localStorage.clear();
+      render({ topRole: 'PILOT' });
+      const sidebar = TestBed.inject(SidebarStore);
 
-    expect(root.querySelector('vision-notification-bell')).not.toBeNull();
-    expect(root.querySelector('vision-identity-chip')).not.toBeNull();
-    expect(root.querySelector('.status .chip')?.textContent).toContain('ONLINE');
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      input.focus();
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true }));
+      expect(sidebar.collapsed()).toBe(false);
+      input.remove();
+    });
+
+    it('is ignored while focus is inside a contenteditable region', () => {
+      localStorage.clear();
+      render({ topRole: 'PILOT' });
+      const sidebar = TestBed.inject(SidebarStore);
+
+      const div = document.createElement('div');
+      // `setAttribute`, not the `.contentEditable` IDL property — see `app.ts#isEditableRegion`'s
+      // own doc comment for why (jsdom doesn't reliably reflect the property to the attribute).
+      div.setAttribute('contenteditable', 'true');
+      document.body.appendChild(div);
+      div.focus();
+      div.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true }));
+      expect(sidebar.collapsed()).toBe(false);
+      div.remove();
+    });
+
+    it('is ignored when a modifier key is held', () => {
+      localStorage.clear();
+      render({ topRole: 'PILOT' });
+      const sidebar = TestBed.inject(SidebarStore);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true }));
+      expect(sidebar.collapsed()).toBe(false);
+    });
+
+    it('is ignored while on a full-bleed route — mirrors AppSidebar#onToggleClick\'s own guard, closing the same "silently flips a preference with no visible effect here" bug for the keyboard path', async () => {
+      localStorage.clear();
+      const fixture = render({ topRole: 'PILOT' });
+      const router = TestBed.inject(Router);
+      const sidebar = TestBed.inject(SidebarStore);
+
+      await router.navigateByUrl('/fly');
+      fixture.detectChanges();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
+      expect(sidebar.collapsed()).toBe(false);
+
+      // Off the full-bleed route, the exact same shortcut works normally again.
+      await router.navigateByUrl('/assets');
+      fixture.detectChanges();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
+      expect(sidebar.collapsed()).toBe(true);
+    });
   });
 });

@@ -5,6 +5,7 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
+import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { EventsStore } from '../../core/events/events-store';
@@ -360,8 +361,12 @@ export class AssetDetailFacade {
   }
 
   /**
-   * The header's one lifecycle action (docs/UX-REWORK-PLAN.md §U-a2 item 2's Archive/Restore pair).
-   * Archive executes immediately, no confirm dialog (item 3b — "Undo over confirm"). Bypasses
+   * The header's one destructive lifecycle action (docs/UX-REWORK-PLAN.md §U-a2 item 2's
+   * Archive/Restore pair). **Callers must confirm first** — `asset-detail.ts#requestArchiveAsset`
+   * gates this behind `<vision-confirm-dialog>` (docs/design/05-asset-detail.md's own acceptance
+   * criterion), a departure from this method's original "Undo over confirm, fires immediately"
+   * design (item 3b) now that Archive lives behind a kebab rather than a plain header button — the
+   * Undo toast below stays too, so a mistaken confirm is still one click from reversed. Bypasses
    * `FleetStore.deleteAsset`/`setAssetState` the same way `features/devices/devices.ts#archiveAssetNow`
    * does — `core/fleet/fleet-store.ts` isn't touched this batch, so this page attaches its own Undo
    * action to its own toast instead of `FleetStore`'s plain one.
@@ -375,8 +380,8 @@ export class AssetDetailFacade {
     try {
       const result = await this.api.deleteAsset(asset.assetId);
       this.undoToast.showUndo(
-        `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
-          `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
+        `Archived "${result.displayName}" — ${pluralize(result.devicesDeleted, 'device')} archived, ` +
+          `${pluralize(result.usagesRetained, 'usage')} retained, ${pluralize(result.streamsStopped, 'stream')} stopped.`,
         () => void this.restoreAssetNow(),
       );
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refresh()]);
@@ -519,10 +524,10 @@ export class AssetDetailFacade {
 
   // --- Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3 — GET image URL as img src, graceful 404) -
   // Pure URL construction (no HTTP call itself — the browser's own `<img src>` fetch is what
-  // actually hits the network); exposed so the component's `imageLoadFailed`/`assetImageSrc`
-  // (local view state around the `<img>` tag's error event) don't need their own `VisionApi`
-  // injection just for this one string-builder.
-
+  // actually hits the network); exposed so the page doesn't need its own `VisionApi` injection just
+  // for this one string-builder. The 404-degrade that used to live in the page as an
+  // `imageLoadFailed` signal now lives in `shared/ui/page-bar`'s own `showAvatar`, since the photo
+  // renders as the bar's avatar — see that component's `avatarSrc` doc comment.
   imageUrl(assetId: string): string {
     return this.api.assetImageUrl(assetId);
   }

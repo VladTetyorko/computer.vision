@@ -1,16 +1,16 @@
 <div class="page">
   @if (facade.device(); as d) {
-    <div class="page-head">
-      <div>
-        <h1>{{ d.name }}</h1>
-        <p>
-          <span class="chip">{{ d.protocol }}</span>
-          @for (capability of d.capabilities; track capability) {
-            <span class="chip">{{ capability }}</span>
-          }
-        </p>
+    <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 — `page-head` becomes the bar; the protocol/capability
+         chips (real device facts, not prose) ride `[pageBarFilters]`, Start/Stop + "All devices"
+         ride `[pageBarActions]`. No description existed here to prune or turn into a `?` hint. -->
+    <vision-page-bar [title]="d.name">
+      <div pageBarFilters class="row device-chips">
+        <span class="chip">{{ d.protocol }}</span>
+        @for (capability of d.capabilities; track capability) {
+          <span class="chip">{{ capability }}</span>
+        }
       </div>
-      <div class="row">
+      <div pageBarActions class="row">
         <a class="btn secondary" routerLink="/devices">All devices</a>
         @if (facade.live()) {
           <button type="button" class="btn danger" (click)="facade.stop()" [disabled]="facade.busy()">Stop stream</button>
@@ -20,7 +20,7 @@
           </button>
         }
       </div>
-    </div>
+    </vision-page-bar>
 
     <!-- Video-first (docs/CYCLES-PLAN.md §9, CU-b item 4): the player dominates; OSD, detections
          and settings all moved into the collapsible right rail below — nothing sits on top of the

@@ -1,10 +1,13 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>My activity</h1>
-      <p>The changes you've made recently, newest first.</p>
-    </div>
-  </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/09-activity.md: `page-head` is gone — "My
+       activity" needs no subtitle now the sidebar marks the active page. -->
+  <vision-page-bar
+    title="My activity"
+    icon="history"
+    [count]="facade.rows().length"
+    countNoun="entry"
+    countNounPlural="entries"
+  />
 
   <section class="card">
     @if (facade.loading()) {

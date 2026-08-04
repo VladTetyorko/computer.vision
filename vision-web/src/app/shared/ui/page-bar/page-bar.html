@@ -1,0 +1,44 @@
+@if (crumb(); as back) {
+  <a class="page-bar-crumb" [routerLink]="back.to">
+    <vision-icon name="chevron-left" [size]="14" />
+    {{ back.label }}
+  </a>
+}
+
+<h1 class="page-bar-title">
+  @if (showAvatar()) {
+    <img class="page-bar-avatar" [src]="avatarSrc()" (error)="onAvatarError()" alt="" />
+  }
+  @if (icon(); as name) {
+    <vision-icon [name]="name" [size]="18" />
+  }
+  <span class="page-bar-name">{{ title() }}</span>
+  @if (countText(); as text) {
+    <span class="page-bar-count">{{ text }}</span>
+  }
+</h1>
+
+@if (hint(); as text) {
+  <span class="page-bar-hint">
+    <button
+      type="button"
+      class="page-bar-hint-trigger"
+      [attr.aria-expanded]="hintOpen()"
+      aria-label="About this page"
+      (click)="toggleHint()"
+    >
+      <vision-icon name="help" [size]="14" />
+    </button>
+    @if (hintOpen()) {
+      <span class="page-bar-hint-body" role="note">{{ text }}</span>
+    }
+  </span>
+}
+
+<div class="page-bar-filters">
+  <ng-content select="[pageBarFilters]" />
+</div>
+
+<div class="page-bar-actions">
+  <ng-content select="[pageBarActions]" />
+</div>

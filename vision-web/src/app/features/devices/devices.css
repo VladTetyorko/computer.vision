@@ -28,19 +28,12 @@ td.actions {
     border-radius: 4px;
 }
 
-/* ---- Toolbar: search + list/grid toggle (new this cycle) ------------------------------------ */
-
-.toolbar-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-16);
-    margin-bottom: var(--space-16);
-}
+/* ---- Page-bar filters: search + list/grid toggle (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — both now
+   project into `<vision-page-bar>`'s `[pageBarFilters]` slot; the search box gets an explicit width
+   so the global `input { width: 100% }` rule (src/styles.css) can't stretch it across the bar. */
 
 .device-search {
-    flex: 1 1 16rem;
-    min-width: 12rem;
+    width: 18rem;
 }
 
 .segmented vision-icon {

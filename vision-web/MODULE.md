@@ -75,6 +75,8 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
 
 The app's default landing page and the operator persona's one job: *flies ONE drone at a time; everything else is noise* — video dominant, safety numbers glanceable without leaving the picture, position/events/controls all on the one page, nothing behind a second click. Deliberately thin: `fly.ts` composes existing pieces (`<vision-player>`, `<vision-live-map>`, `<vision-detections-strip>`, `TelemetryStore`/`DetectionsStore`/`EventsStore`) behind a cockpit-layout CSS layer; the only genuinely new component is `<vision-fly-osd>` (see its own doc comment in `features/fly/fly-osd.ts`).
 
+**Picker header — `page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2, operational + detail pages" Status entry near the bottom of this file): only the drone-chooser state's header changed — `title="Fly" icon="cockpit" [count]="… ?? null" countNoun="drone"`, the old "Pick a drone…" paragraph moved to `hint` (it's genuine instruction — the remember-and-redirect behavior — not restated title). **The cockpit itself (`.cockpit`, everything below `facade.showPicker()`'s `@else if`) is untouched** — it is not a `.page`/`page-head` page at all (own full-bleed grid, `data: {fullBleed:true}`), out of this task's scope by the plan's own explicit warning.
+
 - `fly-logic.ts` (+`.spec.ts`, 20 cases) — pure, unit-tested, mirrors every other page's own `*-logic.ts` split: `sortAssetsForPicker` (streaming-first, then alphabetical, case-insensitive), `resolveActiveAssetId(assets, requestedAssetId, rememberedAssetId)` (a requested `?asset=` id wins over the remembered `SettingsStore.flyAssetId`; either only counts if still present in the fetched fleet — an archived/deleted remembered id falls back to `undefined`, the picker, never a broken cockpit), `latestFinishedUsage` ("Replay last flight" — mirrors the asset detail page's own "Replay only for a finished usage" rule), `isWatchMode(param)` (`?watch=1` **exactly** — no other truthy-looking string counts), `cycleBoxesMode` (the `B` shortcut's overlay→burned→off→overlay cycle, same order as the mouse buttons), `TICKER_MAX_EVENTS`, **`trackingIdChanged(nextId, lastActedOnId)`** (docs/REALTIME-PLAN.md Phase R-a item 2, new — see the O(N) fix below).
 - **`fly.ts`/`.html`/`.css` — `FlyPage`.** Lists `TelemetryStore`/`DetectionsStore` in its own `providers` (one poller-set per route activation, identical convention to `LivePage`/`AssetDetailPage`); activates/releases the shared `EventsStore` singleton like `WallPage`/`MapPage`/`AssetDetailPage` (one more of the handful of pages keeping the global 5s events poll alive while mounted).
   - **First visit vs. remembered**: `initPicker()` (constructor, one-shot) fetches `listAssets()` once, resolves `resolveActiveAssetId(...)` against `requestedAssetId()`/`SettingsStore.flyAssetId()`, and — if resolved — calls `selectAsset()` straight away, skipping the picker. A 5s `PollScheduler` poll (`refreshPoll`) re-fetches the asset list (keeps the header switcher's options and, while the picker is still showing, its cards fresh) and, when an asset is active, re-fetches its `AssetDetails` too — mirrors `AssetDetailPage`'s own 5s asset poll. The picker's own selection logic runs exactly once (in `initPicker`), never inside the periodic poll — a later query-param change while already on `/fly` (not reachable from anywhere in this app yet, but a plausible future Command drill-down while already mid-flight) deliberately does **not** silently override an operator's own subsequent manual switcher pick; only a fresh navigation to the route re-constructs the component and re-resolves.
@@ -176,7 +178,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
 - **`core/org/org-guard.ts`** — `orgGuard: CanActivateFn`, role-gates `/org`. Sits **alongside** `auth-guard.ts` (the org route is inside that guard's children wrapper, so a signed-out user hits `/login` first); this guard adds only the role check — awaits `AuthStore.ready`, then `canManageOrg(user?.topRole)` else redirects to `/fly`. **Dev parity**: `authEnabled=false` → dev admin is ADMIN → reachable exactly as before.
 - **`features/org-settings/`** — `OrgSettingsPage` (`<vision-org-settings>`, `/org`, own lazy chunk, `org-settings.routes.ts`/`ORG_ROUTES`, `canActivate: [orgGuard]`). A segmented-tab (`styles.css#.segmented`) surface: **Users** (an invite form — username/displayName/email/temporary-password + optional group + role-in-group + a "can sign in immediately" checkbox; and a list naming each user's name/username/email, membership chips, top-role badge, an Enabled/Disabled status chip and an enable/disable toggle) and **Groups** (a create form — name + optional parent select — and the hierarchy rendered from `flattenGroupTree`, indented by depth). Dumb by convention: every fetch/mutation lives in `OrgStore`, every derivation in `org-logic.ts`. Responsive: a single scrolling column of cards; the invite form is an `auto-fit`/`minmax` grid that collapses to one column on a phone with no media query; every list row wraps rather than overflows.
 - **`features/asset-detail/pilots-card.ts`/`.html`/`.css`** — `<vision-pilots-card [assetId]>`, mounted in `asset-detail.html`'s detail grid (`:host{display:contents}` so its inner `.card.span-2` is the real grid child). **Role-gated inside the component** — renders **nothing** unless `canManageOrg(topRole)`, so the host mounts it unconditionally and a pilot viewing an asset simply never sees a roster card. Owns its own state keyed off the `assetId` input (this asset's pilots via `listAssetPilots` + the full user list via `listUsers`, for the picker and to resolve pilot display names); add picks an un-assigned enabled user, remove unassigns. **403/404 handled explicitly** (not a generic `run()`): a `403` on assign/unassign → an "outside your scope" toast; a `404` on the pilots read → the empty state (don't reveal existence), on a mutation → a "no longer exists" toast. Assignment is idempotent server-side, so no optimistic bookkeeping — each mutation just re-`load()`s.
-- **`features/activity/`** — `ActivityPage` (`<vision-activity>`, `/activity`, own lazy chunk, `activity.routes.ts`/`ACTIVITY_ROUTES`). Inside `authGuard`'s group but with **no role gate** — every signed-in user reads their own activity (`myActivity(100)`; the backend scopes it to the session's actor, so no user id is ever passed). Honest states: distinct loading / "couldn't load" (with the reason + retry) / empty invitation / the list (each row `formatActivity`'d — action chip, target, summary, relative time, and a details band). Newest first (backend order). Responsive: rows wrap on a narrow viewport.
+- **`features/activity/`** — `ActivityPage` (`<vision-activity>`, `/activity`, own lazy chunk, `activity.routes.ts`/`ACTIVITY_ROUTES`). Inside `authGuard`'s group but with **no role gate** — every signed-in user reads their own activity (`myActivity(100)`; the backend scopes it to the session's actor, so no user id is ever passed). Honest states: distinct loading / "couldn't load" (with the reason + retry) / empty invitation / the list (each row `formatActivity`'d — action chip, target, summary, relative time, and a details band). Newest first (backend order). Responsive: rows wrap on a narrow viewport. **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2" Status entry near the bottom of this file): subtitle deleted outright ("My activity" needs no explanation); `[count]`/`countNoun="entry"`/`countNounPlural="entries"` is new — this page previously showed no number anywhere. The `Mine | Everyone` scope toggle and type/date filters docs/design/09-activity.md proposes are not built (Wave 3).
 - **Role-gated nav** — the links into these surfaces live in the **identity-chip menu** (`shared/ui/identity-chip.ts`/`.html`/`.css`), not a top-level tab: **My activity** always (any user), **Organization** only when `canManageOrg(topRole)` — so a pilot never sees the org door, not just a bounced click (the same gate the route guard enforces). The two links sit in their own `.identity-links` band between the name/role and Log out.
 - **No visibility change in dev (`vision.auth.enabled=false`)** — the dev principal resolves to ADMIN/unbounded, so org-settings is reachable, the pilots card shows, and activity works, exactly as the app behaved before this slice (docs/U-SCOPE-PLAN.md's own guardrail). **Pilot experience is driven by the *backend's* scoped asset list**, not any UI assumption: because slice-2's `AssetService`/fleet reads already filter by scope, a pilot logging in sees only their assigned assets in Fly/warehouse automatically — nothing in this app assumes an unscoped list, and `myAssignments()` exists (`VisionApi`) but isn't wired into Fly's picker this slice (the scoped list already does the job; a future "assigned to me" affordance can read it if wanted).
 
@@ -207,6 +209,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
   - **List/grid view toggle** (`viewMode: signal<'list'|'grid'>`, default `'list'`) — a `.segmented` control (`vision-icon` `list`/`grid`) reading the exact same `warehouseRows()`: **list** is the pre-existing table (unchanged markup); **grid** is a new `.device-card-grid` of `.device-card`s carrying the identical per-row data and the identical kebab menu/inline rename-assign forms, just laid out as cards (`repeat(auto-fill, minmax(17rem, 1fr))`, no breakpoints needed — inherently responsive).
   - **Unchanged**: the "Show archived" toggle, every device kebab action (rename/activate/deactivate/archive/restore/assign/unassign, reasoned per `core/fleet/warehouse-logic.ts`), the Simulated chip + Stop simulation action, Start/Stop/Watch stream actions, and "Promote to asset…" (`createAssetFor` panel) for an orphaned device — all byte-for-byte the same logic as before the split, just without the Assets section stacked above them and without a collapse/disclosure wrapper around them.
   - **Dropped**: CDK virtual scroll (`@angular/cdk/scrolling`) — that lived on the old Assets section only (never on this page's own device table), so it left with the split; this page's table/grid still uses a plain `@for`, unchanged from before.
+  - **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2" Status entry near the bottom of this file). Both old subtitle sentences deleted outright (the second was stale Assets/Devices-split migration signage). Search, the List/Grid toggle, and "Show archived" now project into the bar's `[pageBarFilters]` slot; "+ Add source"/"Refresh" into `[pageBarActions]`. The `Registered devices`/`N device(s)` card header is gone — the bar's own `[count]`/`countNoun="device"` carries that number now, correctly pluralised.
 
 ### `src/app/features/assets/**` — the asset-first grid: search, filter, cards (new this cycle — split out of the old combined Devices page)
 
@@ -219,6 +222,7 @@ The user-scoped management surfaces on top of slice 1's identity. Built against 
   - **Cards, not a table**: `.asset-card-grid` (`repeat(auto-fill, minmax(16rem, 1fr))`), one `.asset-card` per row with the same name/category chip/lifecycle chip/streaming chip/device-count/kebab as the old list row, just laid out as a card instead of a CSS-grid list row.
   - **Dropped CDK virtual scroll** (deliberate trade-off, documented not silently lost): the old asset-first list used `@angular/cdk/scrolling` for `O(visible rows)` rendering toward a "thousands of assets" posture (docs/CYCLES-PLAN.md §11 item 4). A responsive multi-column card grid needs viewport-aware/autosize virtual scroll to do the same, which this cycle's scope (search/filter/grid split) didn't take on — `assetRows()` renders via a plain `@for` now, `O(total filtered rows)`. The underlying *fetch* (`refreshAssets()`, one `getAsset()` per asset) was already `O(total assets)` even before this cycle (the list's own documented ceiling), so this trade-off narrows an already-partial scalability guarantee rather than removing a whole-page one; revisiting virtualization for the grid is a named follow-up, not solved here.
   - **`?category=<slug>`** (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's readiness-tile drill-down target, unchanged mechanism, moved from `/devices?category=` to `/assets?category=`) seeds the category filter reactively (an `effect`, so a second drill-down click while already on this page still re-narrows).
+  - **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2" Status entry near the bottom of this file). The subtitle and its `/devices` prose link are deleted outright (F7 — Devices is a sidebar entry now). The `.asset-toolbar` filter card is gone; search/category/status/streaming/archived all project into `[pageBarFilters]`, sized to content (not the global `width:100%` an unstyled `<select>`/`<input>` would otherwise take); "+ Add source"/"Refresh" into `[pageBarActions]`. `AssetsFacade`'s Undo-toast/toast strings and the per-card `N device(s)` line now call `pluralize()` (`shared/ui/page-bar/page-bar.ts`) instead of hand-rolled `(s)` text.
 
 ### `src/app/features/warehouse/**` — **deleted** (docs/UX-SIMPLIFY-REVIEW.md F2, 2026-08-01)
 
@@ -236,6 +240,8 @@ The single flow for bringing any source into the app — a forward-only, back-na
 ### `src/app/features/asset-detail/**` — one asset's manager page (docs/CYCLES-PLAN.md §11, CD-b item 2–3; reworked from a hybrid manager/cockpit page docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B)
 
 `/assets/:assetId`, the Assets page's asset-first grid "Open" target (this cycle's inventory restructure moved the asset-first list from the old combined Devices page to its own `/assets` page — see `features/devices/**`/`features/assets/**`/`features/warehouse/**`'s own sections above). **Management, not operation** — the plan's own explicit split, copying how Samsara/Geotab/DJI FlightHub 2/Auterion/Skydio separate asset detail from live control: **no video, ever, on this page**. Piloting and live video are the cockpit's job (`/fly`) and the lightweight `/live/:deviceId` watch page, one click away via a cockpit-link band; this page is glanceable KPIs, a utilization chart, health, and history — characteristics, a KPI tile row, a "Recent flights" chart, a map with position + trail, telemetry grouped per source device, usage history, and a "Hardware" section carrying the full warehouse actions the list demoted.
+
+**Header — `page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2/docs/design/05-asset-detail.md Wave 2 — see the dated "Wave 2, operational + detail pages" Status entry near the bottom of this file for the full account): the loading-skeleton and loaded `.page-head` pair merge into one `<vision-page-bar [title]="a.displayName" [crumb]="{label:'Assets',to:'/assets'}">`; the identity chips ride `[pageBarFilters]`, "All devices"/"Rename asset…" plus a new `<vision-kebab-menu>` (Archive asset only, gated behind `<vision-confirm-dialog>` — a **behavior change**, not just markup: Archive no longer fires immediately, per that design doc's own acceptance criterion that it "must not sit adjacent to Rename" and "requires a confirm") ride `[pageBarActions]`. The old inline "swap the title for two `<input>`s" rename affordance and the decorative asset photo (`hasImage`/`imageUrl`) are both dropped — neither fits the bar's frozen plain-`string` `title`; the rename form now renders as its own card under the bar instead, and `imageUrl` (dead once its only caller was removed) is deleted from `AssetDetailFacade`. A pre-existing CSS bug (`.inline-form.column input`'s `flex:1 1 12rem` read as a 12rem *height* once `flex-direction` flipped to column, ballooning the rename inputs) was caught live while re-verifying this exact form post-move and fixed alongside it.
 
 - `asset-detail-logic.ts` — pure, unit-tested, mirrors `core/telemetry/telemetry-logic.ts`'s split:
   - `groupTelemetryByDevice(samples: TelemetrySample[])` → `ReadonlyMap<deviceId, TelemetrySample[]>` — regroups one usage's mixed-source samples (CD-a's `deviceId` field is what makes this possible) back apart, preserving each device's own chronological order.
@@ -258,6 +264,8 @@ The single flow for bringing any source into the app — a forward-only, back-na
 ### `src/app/features/replay/**` — flight-replay cockpit (docs/MVP2-PLAN.md §R, R-b; video/clip export + event deep link, docs/OPS-CORE-PLAN.md §R, R-c/Q1)
 
 `/assets/:assetId/replay/:usageId`, the asset detail page's usage-history "Replay" target for one **finished** usage — a referee's use case: "verify where the machine was at minute 7." **`/replay?asset=…&usage=…&t=…`** (docs/OPS-CORE-PLAN.md §Q1) is a second, flat route to the same `ReplayPage` — the event → replay deep link's own target, see `replay.ts`'s own class doc comment and the bullet below for how the two routes are told apart.
+
+**Header — `page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2, operational + detail pages" Status entry near the bottom of this file): the loading-skeleton and loaded `.page-head` pair merge into one always-rendered `<vision-page-bar title="Flight replay" icon="replay" [crumb]="crumb()">` covering every state — loading/`notFound`/`usageOpen`/loaded alike (`replay.ts`'s new `crumb` computed joins `facade.backLink()`'s route-segment array into the bar's plain-`string` `crumb.to`). A working back-crumb even on `notFound`/`usageOpen` is a genuine improvement, not a fabricated status — the title only names the page, it never claims the flight loaded. The old subtitle's real content (the flight's time range) survives as a plain `<p class="range-label">` under the bar, since nothing in the bar's frozen contract fits a read-only stat like that.
 
 - `replay-logic.ts` — pure, unit-tested (mirrors `shared/player/player-recovery.ts`/`shared/map/flight-plan-logic.ts`'s split of pure state/derivation from the component that drives it); every function here re-derives its answer from an already-fetched `UsageTimeline` plus a scrub-time signal, so scrubbing never re-fetches:
   - `nearestSample(samples, atMs)` — the telemetry sample nearest `atMs` (binary search, no interpolation — "the closest recorded reading, not a synthesized one"). Backs the map marker and the per-device telemetry panels alike.
@@ -285,6 +293,8 @@ The single flow for bringing any source into the app — a forward-only, back-na
 ### `src/app/features/live/**` — video-first cockpit: player, collapsible rail, docs/CYCLES-PLAN.md §2, §9 (CU-b item 4), docs/MVP1-PLAN.md §C8 bullet 4
 
 `LivePage` lists `TelemetryStore` and `DetectionsStore` in its own `providers` (one poller per route activation each, stopped on route leave) and drives them from `effect()`s: `TelemetryStore` keyed on `deviceId()`/`hasTelemetry()` (the existing device-capability computed, unchanged — only a `TELEMETRY`-capable device is worth tracking at all); `DetectionsStore` keyed on `stream()?.streamId` (detections only make sense while a stream is actually running — there is no streamId to poll otherwise).
+
+**Header — `page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2 Wave 2 — see the dated "Wave 2, operational + detail pages" Status entry near the bottom of this file): `[title]="d.name"` (no `icon` — this page has no sidebar nav entry/canonical icon of its own, it's a drill-down from Devices/Wall/Command). The protocol/capability chips ride `[pageBarFilters]`; "All devices" + Start/Stop ride `[pageBarActions]`. No description existed to prune.
 
 - **Video-first layout (docs/CYCLES-PLAN.md §9, CU-b item 4).** `live.html`'s `.stage` now holds only the player (and the no-publisher notice) — nothing overlays the video any more. Everything else that used to sit above/below it (telemetry OSD, detections strip) or beside it (Source/Detection-settings/Map/PTZ cards) now lives in `.side`, a **collapsible right rail**: `LivePage.railOpen` (signal, default `true`) toggled by a slim `.rail-toggle` tab between stage and rail — a narrow drawer-handle-style button rather than a full-width "hide details" bar, so it reads as part of the rail's edge. Collapsing it drops `.side` from the DOM entirely and `.layout` reflows to just the player + the toggle tab (`grid-template-columns: minmax(0,1fr) auto` via `.rail-collapsed`).
 - **Map inset toggle + keyboard shortcut** (`LivePage.mapInsetVisible`, independent of `railOpen` — the map can be hidden even while the rail stays open). The Map card's header carries a Hide/Show button; `M` (case-insensitive, ignored while a form field has focus, and only wired while `hasTelemetry()`) toggles it too — a `document`-level `keydown` listener added in the constructor and removed via `DestroyRef.onDestroy`, the same manual-listener idiom `FleetMap` already uses for its own delegated click handler, not a `@HostListener` (this codebase has no precedent for that decorator).
@@ -417,13 +427,13 @@ Deliberately outside the "no component calls `fetch` directly" rule: this page's
 Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, `src/app/shared/ui/**`, `src/app/core/panel-state.ts` — no existing page/component wired onto any of it; Waves 1-4 are the real consumers). Full writeup — design/dataviz choices, the `PanelState` DI deviation, degrade/role-gate/dev-parity notes, tests, build — is in the dated Status entry near the bottom of this file; this section is the permanent reference.
 
 - **Design-token system (`src/styles.css`) — consolidated by docs/STYLE-TOKENS-PLAN.md (see that Status entry below).** Two-tier color: a **primitive ramp** (`--gray-*`/`--blue-*`/`--green-*`/`--amber-*`/`--red-*`/`--rose-*`/`--white`/`--black`) is the ONLY place raw hex lives; **semantic aliases** are all any component references — surfaces (`--bg`/`--panel`/`--panel-raised`/`--panel-hover`/`--border`/`--border-strong`), text (`--text`/`--text-muted`/`--text-faint`), intent (`--color-info`/`-soft`/`-text`/`--color-on-info`, `--color-success`/`-soft`/`-line`/`-text`, `--color-warn`/`-soft`/`-line`/`-text`, `--color-danger`/`-soft`/`-line`/`-text`/`--color-on-danger`, `--color-live`). The old role names `--accent`/`--ok`/`--warn`/`--danger`/`--live` were **renamed** to these `--color-*` (not just aliased — the back-compat aliases were removed once migration finished; if you find `var(--accent)` in a doc/JS comment it's stale, the token is now `--color-info`). Spacing is a **strict rem 8px grid named by px**: `--space-2`(0.125rem/2px), `--space-4`(4px), `--space-8`(8px), `--space-16`, `--space-24`, `--space-32`, `--space-40`, `--space-48`, `--space-64` — 2px/4px are the only sub-8 exceptions; 12px/20px were dropped. Every component gap/padding uses these; borders/radius stay px (geometry, not spacing). Two fonts only: `--font` (UI/display), `--mono` (B612 Mono, telemetry). Video-overlay compositing tokens: `--scrim`/`--scrim-strong` (black washes), `--hairline` (faint white edge). Global `.notice`/`.notice.warn/.danger/.ok` banner primitive (backs `<vision-notice>`).
-- **Tokens/utilities (`src/styles.css`, appended only — no existing token/class changed)**: spacing scale (**since consolidated to the rem 8px grid above** — the original px `--space-1..8` scale is gone); breakpoint reference tokens `--bp-sm/md/lg` (640/900/1200px, `@media` still hardcodes the px value and cites the token name in a comment, since `@media` can't read `var()`); the one canonical frosted-pill HUD surface `--hud-bg`/`--hud-bg-strong`/`--hud-border`/`--hud-blur`/`--hud-blur-strong` + `.surface-hud`/`.surface-hud-strong` utilities (replacing the ≥8 copy-pasted `rgb(6 9 14 / 62%)` recipes across `fly.css`/`cv-control-panel.css`/`flight-command-panel.css`/`fly-osd.ts`/`diagnostics-card.ts`/`preflight-checklist.ts` — none of those existing copies are touched by this wave, each migrates as a later wave next touches it); `.grid12`/`.col-1..12` (below `--bp-md` every `.col-*` collapses to span 12); `<main>` gets a max-width container (`main:not(:has(> .cockpit, > .command-shell))`, guarding out the two existing full-bleed shells so this is genuinely zero-visual-change on every current route — see the Status entry for why a class-based approach wasn't possible this wave).
+- **Tokens/utilities (`src/styles.css`, appended only — no existing token/class changed)**: spacing scale (**since consolidated to the rem 8px grid above** — the original px `--space-1..8` scale is gone); breakpoint reference tokens `--bp-sm/md/lg` (640/900/1200px, `@media` still hardcodes the px value and cites the token name in a comment, since `@media` can't read `var()`); the one canonical frosted-pill HUD surface `--hud-bg`/`--hud-bg-strong`/`--hud-border`/`--hud-blur`/`--hud-blur-strong` + `.surface-hud`/`.surface-hud-strong` utilities (replacing the ≥8 copy-pasted `rgb(6 9 14 / 62%)` recipes across `fly.css`/`cv-control-panel.css`/`flight-command-panel.css`/`fly-osd.ts`/`diagnostics-card.ts`/`preflight-checklist.ts` — none of those existing copies are touched by this wave, each migrates as a later wave next touches it); `.grid12`/`.col-1..12` (below `--bp-md` every `.col-*` collapses to span 12). **The `<main> gets a max-width container` rule this bullet used to describe (`main:not(:has(> .cockpit, > .command-shell)) { max-width: 1400px; margin: 0 auto }`) is deleted, not superseded — docs/NAV-IA-REDESIGN-PLAN.md Wave 1a: once `<main>` became a grid item of the new sidebar shell (`app.css`), `margin: 0 auto` on a grid item suppresses its default `stretch` and shrinks it to `max-content` instead of centering a capped box — confirmed live, `<main>` measured 912px wide against a ~1800px available track with this rule still in place. The sidebar shell now provides the horizontal framing this rule used to; see that Status entry and `--sidebar-w`/`--sidebar-w-rail`/`--sidebar-bp` below.**
 - **`shared/ui/icon-registry.ts`** — `IconName` (the frozen F2 union, 50 names: modes/nav, cockpit/telemetry clusters, monitor/manage) + `const ICONS: Record<IconName, string>`, inner SVG markup only (`<path>`/`<line>`/`<circle>`/`<rect>`/`<polyline>`/`<polygon>`, no `<svg>` wrapper), hand-authored Feather/Lucide-style (24x24 viewBox, `fill=none`/`stroke=currentColor`/`stroke-width=2`/round caps). `bell`'s markup is byte-identical to the pre-existing inline `<svg>` in `shared/ui/notification-bell.html` (that file is unchanged by this wave — a future wave can point it at `<vision-icon name="bell">` with zero visual change).
 - **`shared/ui/icon.ts`** — `<vision-icon>`: `name = input.required<IconName>()`, `size = input<number>(16)`, host `aria-hidden="true"` (decorative only — the labeled control around it owns the accessible name). Renders a 24x24-viewBox `<svg>` via `[innerHTML]` bound through `DomSanitizer.bypassSecurityTrustHtml` — safe because every value comes from the closed, compile-time `ICONS` map, never user input.
 - **`shared/ui/icon-button.ts`** — `<vision-icon-button>`: `icon`/`label` (both `input.required`, `label` drives both `title` and `aria-label` — the one enforced a11y rule), `active = input(false)` (→ `aria-pressed`), `variant: 'ghost'|'hud'|'danger' = 'ghost'`, `activated = output<void>()`. The `hud` variant's CSS reuses the exact `--hud-*` tokens `.surface-hud` is built from. Destructive text-labeled actions (Stop/Disarm/Archive) do **not** use this component — unchanged, per the plan's own poka-yoke rule.
 - **`shared/ui/section-header.ts`** — `<vision-section-header>`: `title` (required), `eyebrow`/`subtitle` (optional), projected `[actions]` slot. `<h2>` is the real section label; the host itself is not a landmark.
 - **`shared/ui/side-panel.ts`/`.html`/`.css`** — `<vision-side-panel>`, the shared drawer shell (generalizes `features/command/asset-panel.html`'s own panel-shell markup, which is unchanged by this wave): `title` (required), `subtitle`/`icon` (optional), `close = output<void>()`; default content slot is the body, `[footer]` is an optional action bar. `role="dialog"` + `aria-label={title}`, `surface-hud-strong`; fixed right column `width: min(24rem, 92vw)`, docked under the header, `z-index: 120` (above the toast host's 100, below a true modal dialog's 150); below `--bp-sm` becomes a full-width bottom sheet (`max-height: 70vh`, slides up). Moves focus to the head on open (`afterNextRender`, this codebase's established "run once the DOM exists" idiom); Esc (bound on the `<aside>` root) emits `close`. Mounting/persistence of "which drawer is open" and "return focus to the invoking tool-rail button" are the host's job (typically via `PanelState` below), not this component's.
-- **`shared/ui/nav-tile.ts` + `shared/ui/tile-grid.ts`** — hub launcher primitives (consumed by Wave 1's `features/hubs/**`, not built by this wave). `<vision-nav-tile>`: a real `<a [routerLink]>` (`icon`/`name`/`to` required, `description`/`badge` optional, `disabled` never actually used — a scaffold area routes to its own honest "coming soon" page instead, flagged via `badge` like `"soon"`) — the whole tile is one focusable link, description/badge are plain `<span>`s, never a second tab stop. `<vision-tile-grid>`: pure layout, `repeat(auto-fill, minmax(13rem,1fr))`, deliberately drops density (wider minimum tile width, then one column) below `--bp-lg`/`--bp-sm`.
+- **`shared/ui/nav-tile.ts` + `shared/ui/tile-grid.ts` — DELETED (docs/NAV-IA-REDESIGN-PLAN.md Wave 1b, docs/design/19-hubs.md).** Used to be the hub-launcher primitives (`<vision-nav-tile>`: a real `<a [routerLink]>` tile; `<vision-tile-grid>`: pure layout, `repeat(auto-fill, minmax(13rem,1fr))`) consumed only by `features/hubs/{operate,monitor,manage}-hub.ts`. Once those three pages were deleted, both primitives had **zero remaining consumers app-wide** (grep-verified before deleting — `features/wall/**` was expected to still use `vision-tile-grid` for its video-tile grid per this doc's own Wave-0 writeup and docs/design/19-hubs.md's acceptance bullet, but in fact never did; `WallPage` has always used its own `wall-tile.ts` + bespoke CSS grid, not this shared primitive — that expectation was stale). Deleted outright, with both specs, rather than left as dead code.
 - **`shared/ui/notice.ts`** — `<vision-notice variant="neutral|warn|danger|ok" [icon]>` (docs/STYLE-TOKENS-PLAN.md): the shared attention-banner, generalizing the ~13 hand-written amber/red "light text on a matching dark line" banners. Renders the global `.notice` primitive; message is projected (`<ng-content>`) so links/`<strong>`/inline `.mono` keep working; `danger` announces as `role="alert"`. Consumers: onboarding (3 danger), command/live/wall (warn), login (danger).
 - **`shared/ui/empty-state.ts`** — `<vision-empty title [message] [icon]>` (class `EmptyState`): the shared zero-state, generalizing the ~15 `<div class="empty"><h3>…</h3><p>…</p></div>` copies. Renders the global `.empty` primitive; CTA projected via `<ng-content>`. `title` is required — a single-line status `.empty` with no heading (e.g. onboarding's "Listening…") intentionally stays a raw `.empty` div, not this component.
 - **`shared/ui/kebab-menu.ts`** — `<vision-kebab-menu label>` (class `KebabMenu`): wraps the native `<details>/<summary>` `.kebab*` disclosure documented in `styles.css`; callers project only the menu entries (`<button>`, `.kebab-divider`, `.danger-action`). Self-closes when a projected entry is clicked (was a per-page `(click)="…open=false"`). `label` → the trigger `aria-label`. Consumers: assets, devices, asset-detail.
@@ -434,6 +444,11 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
   - Consumed by `features/fly/rc-monitor.ts` (`<vision-rc-monitor>`), the cockpit's `rc` tool-rail drawer: the Phase-0 monitor (always available, not capability-gated) is unchanged; R5 adds a **Take control** section below it (`rc-monitor.html`/`.css`, `rc-monitor-logic.ts` — `engageDisabledReason`/`latencyLabel`/`channelBindingLabel`), gated on `assetId`/`assetDisplayName`/`canCommand` inputs (`fly.html` wires `[canCommand]="facade.canShowCommands()"`, the same gate `flight-command-panel` uses — see that section's own note on why this is a front-line UX gate, not the actual server-side capability check). A disabled Take-control button always shows its poka-yoke reason inline (`.disabled-reason`); the engaged state shows a live rateHz/latency chip pair, the channel map, and a big `.btn.danger` **RELEASE** (text-labeled, never icon-only); `denied` shows the server's own human `reason`; `released` distinguishes a watchdog trip (`vision-notice variant="warn"`, "input stalled") from an explicit release. Mounted only while the drawer is open (`@if (isPanelOpen('rc'))`), so both the Gamepad rAF loop and any live relay session end the instant it closes. WebHID/raw-report fidelity, the real `RC_CHANNELS_OVERRIDE` MAVLink send, and Phase 2 (a real airframe) are out of this module's scope — see `adapters/adapter-mavlink/MODULE.md`/`vision-application/MODULE.md`/`vision-api/MODULE.md` for R1-R4.
 - **`core/ui/ui-store.ts#UiStore`** (docs/UI-ARCHITECTURE-PLAN.md) — the canonical mutually-exclusive-overlay coordinator, generalizing `PanelState` (below) to *every* overlay group, not just drawers: within one instance, opening any overlay closes the others (`active`/`isOpen`/`open`/`close(id?)`/`toggle`; optional `storageKey` for persistent groups, omit for transient confirms/editors). Scoped per group — a feature provides one per independent overlay set (a persisted tool-rail group + a transient dialog group). This is what makes overlay state consistent *by construction*. Consumers so far: `flight-command-panel` (3 confirms), `fly` (tool-rail + stop-confirm), `command` (zones), `asset-detail` (4 editors). **API-compatible with `PanelState`** — `PanelState` is the predecessor and is being retired in favour of `UiStore` as each host migrates.
 - **`core/panel-state.ts` additions**: `readPersistedString(key, fallback: string|null): string|null` / `writePersistedString(key, value: string|null)` — the string-valued sibling of the pre-existing `readPersistedFlag`/`writePersistedFlag` (untouched, same file); writing `null` removes the key outright rather than persisting the literal text `"null"`. **`PanelState`** — one-open-at-a-time drawer manager: `active: Signal<string|null>`, `isOpen(id)`, `open(id)` (closes any other), `close()`, `toggle(id)`; an optional constructor `storageKey` round-trips `active` through the two functions above. **Deliberately a plain class, not `@Injectable()`** — see the Status entry for why the frozen "constructed with an optional storageKey" contract doesn't fit Angular constructor-DI cleanly; a host owns one instance directly (`new PanelState('vision.fly.activePanel')`), which is "provided per host" in the sense that matters and fully unit-testable with no `TestBed`. Not consumed by any page yet — Wave 2 (Fly's tool-rail) and Wave 3 (asset-detail's drill-ins) are the intended first hosts.
+- **`core/shell/sidebar-store.ts#SidebarStore`** + **`shared/ui/app-sidebar/**`** (docs/NAV-IA-REDESIGN-PLAN.md Wave 1a) — the persistent left sidebar that replaced the old sticky top header (three mode `<details>` dropdowns) **and**, together with the sibling Wave 1b task, the three `/operate`/`/monitor`/`/manage` hub launcher pages. Full writeup — the F1/F2/F3/F10/F11 findings this closes, the `effectiveCollapsed = collapsed() || fullBleed()` auto-collapse formula and the toggle-button/keyboard-shortcut guard that keeps it from leaking a corrupted preference onto other pages, three real production bugs found and fixed via live browser measurement (not just reasoning), design/dataviz notes, tests, build — is in the dated "Wave 1a" Status entry near the bottom of this file; this bullet is the permanent reference.
+  - **`SidebarStore`** (`providedIn: 'root'`, one shared instance — unlike `UiStore`/`WeatherStore`'s "provided per host"): three independent `localStorage`-backed booleans — `collapsed` (the user's own expanded/rail preference, `vision.sidebar.collapsed`), `advancedOpen`/`upcomingOpen` (the two collapsed-by-default disclosures inside each mode's entry list, one flag each shared across all three modes, `vision.sidebar.advancedOpen`/`vision.sidebar.upcomingOpen`) — `toggle()`/`setCollapsed()`, `toggleAdvanced()`/`setAdvancedOpen()`, `toggleUpcoming()`/`setUpcomingOpen()`.
+  - **`<vision-app-sidebar>`** — renders `NAV_MODES` (`features/hubs/nav-entries.ts`) as the app's **only** navigation surface: a non-interactive uppercase group label per mode (never a link — the specific mechanism that lets the hub pages be deleted), `nav-entries.ts#navTiers`'s `primary` rows always visible, `advanced`/`upcoming` folded under collapsed `<details>` disclosures backed by `SidebarStore`. `managerOnly` filtered exactly once, here (closes F10). Active row: `routerLinkActive` → 2px accent left bar + raised background + `aria-current="page"`. Foot (pinned): `<vision-identity-chip>`/`<vision-notification-bell>` + the live-stream-count/online status chips, moved verbatim in behaviour from the old header's `.status` block — their own dropdowns are repositioned to open rightward via a scoped `::ng-deep` override (`app-sidebar.css`), since `right: 0` was written for a right-aligned header trigger and would otherwise open mostly off the left edge of the viewport from a left-docked sidebar. 240px expanded / 56px collapsed (`--sidebar-w`/`--sidebar-w-rail`, `styles.css`); ≥1024px docked (a **new**, distinct `--sidebar-bp` token — deliberately not reusing the pre-existing `--bp-md`/900px, which already backs ~10 other files' own breakpoints), 641–1024px forced to the rail regardless of `collapsed`, ≤640px an off-canvas sheet behind its own hamburger+scrim (no page bar exists yet for the hamburger to live in — Wave 2 adds one).
+  - **`app.ts`/`app.html`/`app.css`** — the shell: `:host { display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr; height: 100dvh }`, sidebar + a plain-block `<main>` (`height: 100dvh; overflow-y: auto` — **not** a nested grid, see the Status entry's Bug 3 for why that was tried and reverted). Sidebar hidden entirely while unauthenticated (`@if (auth.user())`, mirroring `identity-chip.ts`'s own "renders nothing while `user()` is null" rule). `App#fullBleed` (a `toSignal` over `router.events`, walking the activated-route tree for `data.fullBleed`) feeds `AppSidebar`'s `fullBleed` input, driving the F11 auto-collapse on `/fly`/`/wall`/`/command`. Global `[` shortcut (ignored in an input/textarea/select/contenteditable) and the sidebar's own head chevron both gate on `fullBleed()` before calling `SidebarStore.toggle()` — without that gate, a click/keypress on a full-bleed route silently flips the *persisted* preference with zero visible effect on that route (since the OR formula already forces collapse there), only to surface as "the sidebar is mysteriously collapsed" on the next normal page.
+  - **`--header-height` is deleted** (`styles.css`) — there is no more header; its four call sites (`shared/ui/side-panel.css`, `features/auth/login/login.css`, `features/command/command.css`, `features/fly/fly.css`) were fixed to `top: 0`/`min-height: 100dvh`/`height: 100dvh` respectively (the latter two viewport units, not `height: 100%` — see the Status entry's Bug 3 for why a percentage doesn't reliably resolve through this shell's ancestor chain). `.page` (`styles.css`) lost its own `max-width: 1400px` and is fluid by design (docs/NAV-IA-REDESIGN-PLAN.md §2.3); `.page--form { max-width: 880px; margin-inline: auto }` is the new opt-in for a page that still wants a centered column (not consumed by any page yet).
 
 ## Conventions
 
@@ -4939,3 +4954,914 @@ dropped, Train card copy rewritten), `features/labeling/dataset-detail-facade.ts
 adapter-cv-grpc/adapter-publish-hls/cv-service (backend — W0–W6's own already-shipped work, other
 agents' concurrent changes in this same tree, left untouched per this wave's own `vision-web/**`-only
 scope). This closes docs/CV-TRAINING-V2-PLAN.md end-to-end (W0–W7 all green).
+
+## Status — Wave 1b: hub launcher pages deleted, `/monitor/replay` stops lying (docs/NAV-IA-REDESIGN-PLAN.md Wave 1, docs/design/19-hubs.md, docs/design/10-replay.md) — 2026-08-04
+
+Ran concurrently with a sibling agent rebuilding `app.ts`/`app.html`/`app.css`/`styles.css` and
+`shared/ui/app-sidebar/**`/`core/shell/**` into the new persistent-sidebar shell — this wave's own
+scope was everything **downstream** of that rename: the routes the retired hub pages leave behind, and
+every stray link that used to point at one of them. `nav-entries.ts` itself arrived already rewritten
+(`NavMode.hubRoute` → `primaryRoute`, `navTiers()` added) as a frozen contract and was read, not
+re-edited.
+
+### 1–2. The three hub launchers, deleted
+
+`features/hubs/{operate,monitor,manage}-hub.ts`, `hub-pages.spec.ts`, and `tile-accent.ts` (their
+decorative cool-arc tile-accent palette, no other importer) are gone outright — not unrouted, deleted.
+`hubs.routes.ts` now opens with three plain redirects instead of three `loadComponent`s:
+
+```ts
+{ path: 'operate', pathMatch: 'full', redirectTo: 'fly' },
+{ path: 'monitor', pathMatch: 'full', redirectTo: 'command' },
+{ path: 'manage',  pathMatch: 'full', redirectTo: 'assets' },
+```
+
+— mirroring `features/map/map.routes.ts` (`/map` → `/command`) and
+`features/warehouse/warehouse.routes.ts` (`/warehouse` → `/assets`) exactly, right down to
+`pathMatch: 'full'` being what keeps a bare `/manage` from shadowing `/manage/categories`,
+`/manage/training`, etc. regardless of array order. `shared/ui/app-sidebar/**` (the sibling agent's
+own work) is now the sole renderer of `nav-entries.ts#NAV_MODES` — closing F10 (`managerOnly` used to
+be honoured by `ManageHub` and ignored by the top-bar dropdown) structurally, since there is only one
+renderer left to drift from itself.
+
+### 3. `/monitor/replay` stops advertising a feature that doesn't exist (F8)
+
+It used to redirect to the flat `/replay` route, which — with no `?asset=`/`?usage=` — rendered
+`ReplayPage`'s own honest "No usage specified." empty state: a nav entry ("Replay library — scrub any
+finished flight") landing on what reads as a bug in a working feature, not an unbuilt one. It now
+routes straight at `ComingSoon` instead (`eyebrow: 'Monitor'`, `nearestLabel: 'Open Command'` →
+`/command`), styled identically to the other four scaffold routes in the same file. This closes the
+only in-app navigation path that ever reached the broken empty state.
+
+**Deviation from docs/design/10-replay.md's own refactor list, deliberate and evidence-based:** that
+doc says to "remove the bare `/replay` route so the empty detail state is unreachable." Doing that
+literally would have broken a real, shipped feature — `shared/ui/notification-bell.ts`,
+`features/wall/wall-facade.ts`, and `features/alerts/alerts-facade.ts` all call
+`router.navigate(['/replay'], {queryParams: {asset, usage, t}})`, the event → replay deep link
+(docs/OPS-CORE-PLAN.md §Q1), grep-verified as three live call sites, not a hypothetical. The bare
+`'replay'` route in `features/replay/replay.routes.ts` is **kept**, with a new doc-comment paragraph
+explaining exactly this; only the nav path that used to lead there param-less is closed. F8's own
+acceptance criterion ("no navigation path reaches Replay unavailable") holds either way — the plan's
+literal instruction and its own acceptance criterion diverged once the deep-link feature was accounted
+for, and the criterion is what governed the actual change.
+
+### 4. `data: { fullBleed: true }` on `/fly`, `/wall`, `/command`
+
+One line + a short comment in each of `fly.routes.ts`/`wall.routes.ts`/`command.routes.ts`, for the
+sibling sidebar agent to read and auto-collapse the sidebar to its icon rail on these three full-bleed
+operational views (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5) rather than reflow the video/map.
+
+### 5. Hub back-links purged
+
+Grepped the whole `src/` for `Back to Manage`/`Back to Monitor`/`Back to Operate`/bare `routerLink="/
+manage"` etc. Found exactly two, both named by docs/design/16-training.md: `features/labeling/
+datasets.html` and `features/models/models.html` each had a `<a routerLink="/manage" …>Back to
+Manage</a>` in their `vision-section-header`'s `actions` slot, alongside a real `Models`/`Datasets`
+link — removed, leaving the real link. Every other "Back to …" in the app (`training-job.html`'s "Back
+to datasets"/"Back to dataset", `dataset-detail.html`, `sample-editor.html`, `asset-detail.html`'s
+"Back to Devices"/"Back to overview", `live.html`'s "Back to Devices") points at a page that still
+exists — none of those are hub links, none touched. Both edited files already used external
+`templateUrl`/`styleUrl` (three-file shape already in place), so no split was needed.
+
+### 6. Orphans: `nav-tile`/`tile-grid` both deleted, not just `nav-tile`
+
+`shared/ui/nav-tile.ts` (+ its spec) is the expected orphan — its only consumers were the three hub
+pages. **`shared/ui/tile-grid.ts` (+ its spec) turned out to be orphaned too**, contradicting this
+plan's own assumption (docs/design/19-hubs.md's acceptance bullet: "Wall keeps it for video tiles";
+this doc's own prior Wave-0 entry: "consumed by Wave 1's `features/hubs/**`… Wall keeps `vision-tile-
+grid` for video tiles"). Grep-verified (`vision-tile-grid`/`TileGrid` import sites, before and after
+deleting the hub pages): `WallPage` has always used its own `wall-tile.ts` + a bespoke CSS grid, never
+the shared primitive — that expectation was stale, not something this task changed. Both primitives
+had zero consumers left once the three hub pages were gone, so both are deleted outright (permanent
+`shared/ui/` reference section above updated to record this).
+
+### Left alone, deliberately
+
+- `app.ts`/`app.html`/`app.css`/`styles.css`, `shared/ui/app-sidebar/**`, `core/shell/**` — the sibling
+  agent's own file scope, per this task's explicit fence.
+- `nav-entries.ts` — the frozen contract (`primaryRoute`, `navTiers()`) arrived already applied; read
+  for its exact shape, not re-edited.
+- `nav-entries.ts#navModeById` is now dead in production code (its only callers were the three deleted
+  hub pages; `nav-entries.spec.ts` still exercises it directly). Not removed — `nav-entries.ts` is
+  outside this task's file scope and the function may still be a deliberate small utility for the
+  sidebar to pick up; flagged here for whoever next touches that file.
+- `core/marks/mark-logic.ts`'s own doc comment still cites `features/hubs/tile-accent.ts` (now deleted)
+  as the precedent for its cool-arc hue reservation. Stale after this task but outside its file scope;
+  the reasoning itself is still correct, only the file citation is dangling.
+- The cosmetic `features/hubs/` → `features/navigation/` rename docs/design/19-hubs.md itself flags as
+  optional ("do it in wave 1 or not at all") — not done; the folder still holds `nav-entries.ts`,
+  `hubs.routes.ts`, `coming-soon.ts`(+spec), and `route-audit-logic.ts`(+spec), all still genuinely
+  about navigation, just no longer about hubs.
+
+### Tests / build
+
+`npx tsc --noEmit -p tsconfig.app.json` — clean. `npx tsc --noEmit -p tsconfig.spec.json` — exactly one
+error, `app.spec.ts:65` (`mode.hubRoute` — the sibling agent's own file, mid-flight; not fixed here per
+this task's own explicit instruction). `npx ng test --watch=false` and `ng build --configuration
+production` both fail at the **same** pre-existing point — `app.html:12`/`app.html:47` still read
+`mode.hubRoute` (two `TS2339` errors) — because the Angular application-bundle build step type-checks
+the whole `src/app` tree (every template, not just files reachable from a given spec) before any test
+can run; `--exclude "**/app.spec.ts"` does not change this, confirmed by trying. This is the exact
+scenario this task's own brief anticipated ("if the only remaining type errors are in `app.ts`/
+`app.html` referencing removed nav markup, report that rather than fixing those files yourself") — zero
+errors originate in any file this task touched. Could not obtain an actual vitest pass/fail count or a
+bundle-size delta this run; re-run `ng test`/`ng build` once the sibling sidebar agent lands its own
+`app.ts`/`app.html` rewrite (which necessarily replaces every `mode.hubRoute` reference, since the hub
+launcher markup itself is what's being replaced).
+
+### Files touched
+
+Deleted: `features/hubs/{operate,monitor,manage}-hub.ts`, `features/hubs/hub-pages.spec.ts`,
+`features/hubs/tile-accent.ts`, `shared/ui/nav-tile.ts`+`.spec.ts`, `shared/ui/tile-grid.ts`+`.spec.ts`.
+Edited: `features/hubs/hubs.routes.ts` (rewritten), `features/hubs/nav-entries.spec.ts` (`hubRoute` →
+`primaryRoute`), `app.routes.spec.ts` (redirect-resolution test rewritten, `/monitor/replay`
+component-identity test added, scaffold list extended), `features/fly/fly.routes.ts`/`features/wall/
+wall.routes.ts`/`features/command/command.routes.ts` (`data: {fullBleed: true}` + comment),
+`features/replay/replay.routes.ts` (doc comment only — route itself unchanged), `features/labeling/
+datasets.html`, `features/models/models.html` (Back to Manage removed), and this file. `app.routes.ts`
+itself needed no edit — `HUBS_ROUTES`' three `pathMatch: 'full'` redirects can't shadow any sibling
+route regardless of spread order, so the file's existing MODELS/LABELING ordering comment (unrelated
+constraint) still holds unchanged.
+
+## Status — Wave 1a: persistent left sidebar replaces the top header (docs/NAV-IA-REDESIGN-PLAN.md Wave 1, docs/design/00-shell.md) — 2026-08-04
+
+Ran concurrently with a sibling agent's Wave 1b (above): that task deleted the three hub launcher
+pages and everything downstream of their removal; this task rebuilt the app shell itself —
+`app.ts`/`app.html`/`app.css`, `styles.css`, and the two new files, `core/shell/sidebar-store.ts` and
+`shared/ui/app-sidebar/**` — replacing the sticky top header (three mode `<details>` dropdowns + a
+`.status` cluster) with a persistent left sidebar. `features/hubs/nav-entries.ts` arrived already
+carrying the frozen contract this task consumes (`NavMode.primaryRoute`, `navTiers()`) — read, not
+re-edited, per the task's own hard fence. See `shared/ui/` and `core/shell/` in the permanent reference
+section above for the surface; this entry is the detailed writeup.
+
+### Why a sidebar, and why now — F1/F2/F3/F10/F11
+
+`NAV_MODES` used to feed two parallel renderers (the header dropdowns and the three hub pages), which
+is what let `managerOnly` drift between them (F10 — honoured by `ManageHub`, ignored by the dropdown).
+`AppSidebar` is now the **only** consumer, closing that class of bug structurally: there is no second
+copy left to disagree with the first. The dropdown's own clipping (F3 — Manage's 10 entries showed 7 at
+961px viewport height, no scroll affordance) is gone because nothing here is a popover — the sidebar
+body scrolls (`overflow-y: auto`) instead of silently truncating. Sense of place (F2 — siblings
+invisible outside a dropdown that closes on click) is now permanent: every leaf is on screen at once,
+the active one carries a 2px accent bar + `aria-current="page"`, not just its own page's `<h1>`. F11
+(full-bleed views paying for global chrome) is closed by the auto-collapse formula below, not by
+deleting the sidebar on those routes — the nav stays one click away as a rail, it just never reflows
+the video/map.
+
+### Design/dataviz choices
+
+Not a chart/dashboard task — no `dataviz` skill techniques apply. The `frontend-design` skill's
+"restraint" principle is what actually applied: the sidebar reuses the design-token system wholesale
+(no new colors, no new type scale), spends its one bit of visual distinctiveness on the 2px accent
+left-bar for the active row (the thing F2 needed), and otherwise stays quiet — group labels are the
+existing `.label` uppercase/tracked/muted recipe, the collapse chevron and disclosure triangles reuse
+`vision-icon`'s existing `chevron-left/right` glyphs rather than inventing new ones. `soon` entries
+render exactly as `nav-tile.ts` already rendered them elsewhere in this app (a plain `.chip`, dimmed
+row) — one visual vocabulary for "not built yet," not a second one invented for the sidebar.
+
+### `effectiveCollapsed` and the leak-prevention guard (a mid-task fix, not in the original design)
+
+The auto-collapse formula is `collapsed() || fullBleed()` (`AppSidebar`), where `fullBleed` is fed down
+from `App#fullBleed` (a `toSignal` over `router.events`, walking the *entire* activated-route tree —
+not just the top-level route — for `data.fullBleed`, since `authGuard`'s path-less wrapper route sits
+above every real page). This alone left a real bug, caught by direct user testing of the running app
+mid-task: the head chevron's icon/label read `sidebar.collapsed()` (the raw persisted preference)
+instead of `effectiveCollapsed()`, so on a full-bleed route it could show "Collapse" while already
+visually collapsed (forced by `fullBleed`) — clicking it flipped the *persisted* preference with zero
+visible effect on that route, only to surface as "the sidebar is mysteriously collapsed" on the very
+next normal page. Fixed by disabling the toggle (`[disabled]="fullBleed()"`, `AppSidebar#onToggleClick`
+also short-circuits directly as a backstop) and applying the identical guard to `App`'s global `[`
+shortcut — the persisted preference can now only ever change where its effect is actually visible.
+Regression-tested: `app-sidebar.spec.ts`'s "collapse-toggle button is disabled on a full-bleed route…"
+and `app.spec.ts`'s "is ignored while on a full-bleed route" both assert `SidebarStore.collapsed()`
+never changes from either path while `fullBleed()` is true, and that both work normally once it clears.
+
+### Three production bugs, found and fixed via live browser measurement, not just review
+
+`ng test`/`tsc` were green after the initial implementation, and the shell *looked* correct in a static
+review of the CSS — none of that caught these. Actually running the app (`ng serve`, already live in
+this environment) and measuring real `getBoundingClientRect()`/`getComputedStyle()` values at a real
+viewport (2060×1005, ADMIN session) surfaced three genuine, user-visible regressions, all now fixed and
+re-verified with fresh numbers:
+
+1. **`<main>` collapsed to 912px instead of filling its grid track.** A stale rule at the bottom of
+   `styles.css` (docs/UI-REDESIGN-PLAN.md Wave 0: `main:not(:has(> .cockpit, > .command-shell)) {
+   max-width: 1400px; margin: 0 auto }`) dated from when `<main>` was a plain in-flow block. Once
+   `<main>` became a **grid item** of the new shell, `margin: 0 auto` suppressed its default `stretch`
+   and shrank it to `max-content` instead of centering a capped box. **Deleted outright** (not
+   updated) — the sidebar now provides the horizontal framing this rule used to; `.page` is fluid by
+   design (§2.3) and `.page--form` is the opt-in for a page that still wants a centered column.
+   Verified: `main` now measures exactly its grid track's own width in every case checked below.
+2. **The sidebar footer (identity chip, notification bell, ONLINE status) ran 31px off the bottom of
+   the viewport**, unreachable — `.sidebar { height: 100% }` couldn't resolve against `:host`'s grid
+   row (originally `grid-auto-rows: auto`, an indefinite track size), and even after giving `:host` a
+   definite `grid-template-rows: 1fr`, a grid item's own *automatic minimum size* can still grow the
+   row past an explicit percentage when the item's natural content is taller — confirmed live: 1036px
+   measured against a 1005px viewport. Fixed with a hardcoded `.sidebar { height: 100dvh; min-height:
+   0 }` (mirroring `main`'s own already-correct `height: 100dvh`) — a fixed viewport unit needs no
+   parent-chain percentage resolution at all, sidestepping the bug's actual root cause rather than
+   patching around it. `.sidebar-body`'s pre-existing `flex: 1; min-height: 0; overflow-y: auto` only
+   started actually engaging once `.sidebar` itself was genuinely height-constrained.
+3. **`/fly`/`/command` collapsed to ~333px tall, the rest of the viewport dead black** — the most
+   severe of the three, found *after* bugs 1–2 were reported fixed. `<main>` had been made
+   `display: grid; grid-template-rows: auto 1fr` (banner row / content row) on the assumption that the
+   offline banner (row 1) and the routed page (row 2) always land in that order — true only while the
+   banner actually renders. With the backend reachable (no banner), `<router-outlet>` — correctly
+   excluded from placement via `display: none` — left the routed page as the grid's **only** real
+   item, and row-major auto-placement puts a lone item in row 1 (the `auto` row), not row 2. `.cockpit
+   { height: 100% }` then resolved against that 333px auto row and clamped at its own `min-height:
+   20rem` floor; the video rendered ~154px tall with the rest of the viewport empty. **Fixed by
+   dropping the nested grid entirely** rather than patching the placement (explicit `grid-row`
+   assignment was considered and rejected — simpler and more robust to remove the class of bug than to
+   pin two rows correctly in both banner-present and banner-absent states): `main` is a plain block
+   again (`grid-column: 2; height: 100dvh; overflow-y: auto`), and `.cockpit`/`.command-shell` changed
+   from `height: 100%` to `height: 100dvh` — a viewport unit, needing no ancestor-chain percentage
+   resolution, exactly the same fix shape as bug 2. This also made the earlier `main > router-outlet {
+   display: none }` workaround unnecessary (deleted with its own doc comment) — an empty inline
+   element is harmless in plain block flow, which is what made this a non-issue before the shell
+   existed at all. A phantom, 0px-tall implicit *third* grid row was found and fixed the same way on
+   `:host`'s own (unrelated, outer) grid while investigating bug 2: `<vision-toast-host>`/
+   `<vision-undo-toast>` render only `position: fixed` content, but neither sets its own `:host`
+   display, so left alone they became two more real grid items; `display: contents` on both (`app.css`)
+   makes them disappear from the box tree the same way `<vision-app-sidebar>`'s own host already does.
+
+**Verified with fresh numbers post-fix** (2060×1005 unless noted, ADMIN session, live `ng serve`
+against a real backend):
+
+| Check | Measured |
+|---|---|
+| `/assets` `main` width vs. grid track | both 1820px (1024×… docked width) / both 2048.89px (fullBleed rail width) — exact match in every case |
+| `/assets` `main` fills full document flow, single scroll container | `main.scrollHeight`/`clientHeight` diverge only when content overflows; `html`/`body` never scroll (`htmlCanScroll: false` even when `main` does, forced via a short 1422×395 viewport) |
+| `.sidebar` height vs. viewport | 957px @ 956.667px row; 1006px @ 1005/1006 viewport (multiple checks) — no longer 1036px @ 1005 |
+| `.sidebar-body` scrollable, `.sidebar-foot` fully visible | body `clientHeight` 778–827 vs. `scrollHeight` 858 (genuinely scrolls); foot `bottom` == viewport height exactly, in every check including a realistic 1422×641 (~1280×720) size |
+| `/fly` `.cockpit` height vs. `main`/`sidebar` | all three 1006px, matching exactly (was 333px) |
+| `/fly` `<video>` size | 1952×827 (rail-collapsed) — was ~154px tall |
+| `/command` `.command-shell` height, map edge-to-edge | 1006px matching viewport; map `x+w`/`y+h` land exactly on the viewport's right/bottom edges |
+| `/command`, `/fly` sidebar auto-collapse | `.sidebar` classList contains `collapsed`, width 56px, `main`/content start at `x: 56` |
+
+One item **not** independently live-verified: the ≤640px off-canvas sheet. This sandbox's
+`resize_window` tool is capped at a fixed display resolution (confirmed: `window.innerWidth` stayed
+2060 regardless of the requested size) — screenshots below that width are downscaled thumbnails of the
+same 2060px-wide render, not a genuine narrow-viewport layout. That breakpoint is covered instead by
+`app-sidebar.spec.ts`'s "mobile off-canvas sheet + foot" suite (hamburger opens it, scrim/nav-row-click
+closes it) and uses a plain, low-risk `position: fixed; transform: translateX(-100%)` pattern — nothing
+like the grid/percentage-height interactions the three bugs above came from. Flagged here rather than
+silently claimed as verified.
+
+The offline-banner case (item 5 of the same live-verification pass) was checked analytically rather
+than by taking the shared backend down: `app.spec.ts`'s "shows the offline banner only when the fleet
+is unreachable" test already exercises the render condition directly; `.offline-banner`'s own CSS is
+byte-for-byte unchanged by this task; and `<main>` being confirmed plain block flow (not a grid) means
+the banner — an ordinary, unpositioned `<div>` — simply stacks above the routed page in normal document
+order, with no special-case placement risk left for it to hit. Two in-tab simulation attempts (patching
+`window.fetch`/`EventSource` to fail) didn't trigger it, because `FleetStore`'s live connection had
+already been established before the patch ran; reasoned about rather than chased further given the
+strength of the other three signals.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Degrade**: `AppSidebar` reads `AuthStore.user()`/`FleetStore` exactly as the old header did — a
+  still-loading or anonymous session renders no sidebar at all (mirrors `identity-chip.ts`'s own "no
+  placeholder swapped in" rule); an unreachable backend still shows the offline banner, now in `<main>`
+  instead of under a header, behaviourally unchanged. No new HTTP call is introduced anywhere in this
+  wave — `AppSidebar` reads the same `AuthStore`/`FleetStore` singletons the app already had.
+- **Role-gate**: `managerOnly` filtered once in `AppSidebar#modes` via `canManageOrg(topRole)` — the
+  same ADMIN/MANAGER gate `identity-chip.ts`/the former `ManageHub` already used, reused, not
+  reinvented. A PILOT session sees no `managerOnly` entry anywhere (`app-sidebar.spec.ts` asserts this
+  directly against every `NAV_MODES` entry, not just a hardcoded expected list).
+  Group headers/disclosures/tiering are unaffected by role — only individual entries are filtered.
+- **Dev-parity** (`vision.auth.enabled=false`): the dev principal resolves to `topRole: 'ADMIN'`
+  unchanged (`core/org/org-guard.ts`'s own documented mechanism) — `auth.user()` is non-null the
+  instant `loadMe()` settles, so the sidebar renders the full ADMIN-scoped set immediately, same as a
+  real ADMIN session; nothing in this wave reads `authEnabled` directly. Verified live in this exact
+  mode throughout the browser-measurement pass above (the running `ng serve`'s own dev backend).
+
+### Tests
+
+New: `core/shell/sidebar-store.spec.ts` (8 cases — starts expanded/closed, `toggle()`/`setCollapsed()`
+persistence round-trip, `toggleAdvanced()`/`toggleUpcoming()` independence from each other and from
+`collapsed`, idempotent `setAdvancedOpen(true)` twice). `shared/ui/app-sidebar/app-sidebar.spec.ts` (19
+cases — F1 no `/operate`/`/monitor`/`/manage` link anywhere and every group label is a non-link `DIV`;
+primary-tier rows match `navTiers()` exactly per mode; Advanced/Upcoming disclosures render only the
+right entries, closed by default, dimmed+chip for `soon`; F10 role-gate for PILOT vs. ADMIN, incl. a
+dev-parity case; active-row `routerLinkActive`+`aria-current` via a real `Router` navigation;
+`effectiveCollapsed`'s OR formula and the full-bleed toggle-disable guard; mobile sheet
+open/close/close-on-nav-click; foot renders identity chip/bell/live-online chips verbatim). `app.spec.ts`
+rewritten (15 cases — `routeTreeHasFullBleed` as a pure function, 5 cases incl. nested-child and
+falsy-value edges; sidebar hidden/shown by auth state incl. dev-parity; offline banner; toast
+host/undo-toast preserved; fullBleed correctly reaches the sidebar through a real navigation; the `[`
+shortcut incl. input/contenteditable/modifier-key/full-bleed-route ignore cases).
+`jsdom`'s `isContentEditable` is unimplemented in this project's pinned version (returns `undefined`
+regardless of the element's real state, confirmed directly) — `app.ts#isEditableRegion` checks the
+`contenteditable` *attribute* via `closest()` instead, which both real browsers and jsdom agree on;
+documented in that function's own doc comment so it isn't re-diagnosed as an app bug later.
+
+**95 spec files / 1604 tests, all green** (`npm run test:ci`). `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, measured via a `git worktree add
+--detach` baseline at this branch's own last commit** (this shared tree carries the sibling Wave 1b
+agent's own concurrent, unrelated changes throughout this task — same caveat this file's own "Nav
+simplification"/"CV-TRAINING-PLAN Wave T5" entries already established for a shared-tree measurement):
+
+- **Initial bundle: 367.89 kB → 377.74 kB raw (+9.85 kB) / 104.82 kB → 106.81 kB transfer (+1.99 kB)**
+  — the new sidebar store + component (icon-driven nav rows, tiering, three responsive breakpoints,
+  the mobile sheet) plus the deleted `.app-header`/dropdown markup/CSS; some of this delta is also
+  Wave 1b's own hub-page deletions and `nav-entries.ts` growth, not separable in a shared-tree
+  measurement (see caveat above).
+- `styles.css`'s own compiled output shrank slightly (12.12 kB → 12.05 kB) despite the new sidebar
+  tokens — the deleted `main:not(:has(...))` rule and mode-dropdown CSS outweighed what was added.
+
+### Deviation from the task brief, with reasons
+
+- **`--sidebar-bp: 1024px`, not `--bp-md: 1024px` as the task brief's own quoted plan text names it.**
+  `--bp-md` already exists (`styles.css`, docs/UI-REDESIGN-PLAN.md Wave 0) at **900px** and backs ~10
+  other files' own breakpoints (`command.css`, `fly.css`, `live.css`, `replay.css`, `debug.css`,
+  `tile-grid.ts` before its Wave 1b deletion, the asset-grid/cockpit-map-inset collapse, …) —
+  redefining its value would have silently changed what all of those already mean. A new, distinctly
+  named token carries the sidebar's own 1024px transition point without corrupting an existing,
+  widely-consumed one.
+- **No hover-to-expand overlay on the 641–1024px rail**, unlike docs/design/00-shell.md's own
+  "Suggested design" ("docked rail; hover/click overlays the expanded panel"). The task's own explicit
+  requirements text only specifies "≥1024px docked; 640–1024px rail-only," with no hover-expand
+  behaviour named — implemented literally as given, flagged here since the source design doc goes
+  further.
+- **`SidebarStore.advancedOpen`/`upcomingOpen` are one flag each, shared across all three modes**, not
+  per-mode. Only Manage ever has an `advanced` tier today (`nav-entries.ts#navTiers` — Operate/Monitor
+  have no `group: 'advanced'|'diagnostics'` entries), so per-mode state would track something that
+  can't yet differ; documented in `SidebarStore`'s own class doc as a deliberate simplification, not an
+  oversight, should a later wave add advanced entries to Operate/Monitor.
+
+### Files touched
+
+New: `core/shell/sidebar-store.ts`+`.spec.ts`, `shared/ui/app-sidebar/app-sidebar.ts`/`.html`/`.css`+`.spec.ts`.
+Rewritten: `app.ts`, `app.html`, `app.css`, `app.spec.ts`. Edited: `styles.css` (`.page` fluid,
+`.page--form`, `--sidebar-w`/`--sidebar-w-rail`/`--sidebar-bp` tokens, `--header-height` deleted, the
+stale `main:not(:has(...))` rule deleted), `shared/ui/side-panel.css` (`top: var(--header-height)` →
+`top: 0`), `features/auth/login/login.css` (`min-height` → plain `100dvh`), `features/command/command.css`
+(`.command-shell` height, doc comment), `features/fly/fly.css` (`.cockpit` height + the now-obsolete
+hairline-seam `box-shadow` hack deleted along with its comment), and this file. Untouched (verified via
+`git status`): `features/hubs/**` (read `nav-entries.ts` only, per the task's own hard fence — the
+sibling Wave 1b agent owns everything else there), every other `features/**` path.
+
+## Status — Wave 2, list pages: `page-head` → `vision-page-bar` (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/{04-assets,06-devices,08-alerts,09-activity,13-roster,14-categories}.md) — 2026-08-04
+
+Ran concurrently with two sibling Wave 2 agents migrating the app's other page sets onto the same
+frozen `vision-page-bar` (`shared/ui/page-bar/**`, built ahead of this fan-out and **not** touched by
+this task) — this task's own file scope was exactly six folders: `features/{assets,devices,activity,
+alerts,categories,roster}/**`. Every page's `.page-head` block (`<h1>` + a 1-4 line `<p>` + an action
+row) is replaced by `<vision-page-bar title icon [count] [countNoun] [hint]>`, with `[pageBarFilters]`/
+`[pageBarActions]` projection slots absorbing what used to be a separate filter card/toolbar row and
+the page's own action buttons. No two-pane list+side-panel, `?sel=` param, dense-row rewrite, Alerts
+frame preview, Roster pivot, or Categories editing — those are Wave 3/4, explicitly out of this task.
+
+### Per-page decisions
+
+- **Assets** — subtitle (incl. its `/devices` prose link, F7) deleted outright. `.asset-toolbar`'s
+  search/category/status/streaming/archived move into `[pageBarFilters]`, each given an explicit
+  `width` (`.asset-search`/`.asset-filter`) instead of the visible per-field `<span class="label">`s
+  that card used — the select's own first option text ("All categories", "Any status", "Any
+  streaming") carries the meaning now, `aria-label` keeps it accessible. The card's redundant
+  `<h2>Assets</h2>` (design doc's own named problem — it repeated the bar's title 90px below) is
+  dropped; the `N of M` line stays (it carries different information than the bar's own `[count]` —
+  how far the active filter narrows the fleet, not just the filtered total) but now reads
+  `pluralize(total, 'asset')` instead of the placeholder-looking `asset(s)`. Every other `(s)` hit this
+  task's own scope grep turned up in `features/assets/**` — the per-card `N device(s)` line and four
+  `AssetsFacade` Undo/toast strings (`device(s) archived`, `usage(s) retained`, `stream(s) stopped`,
+  `device(s) failed to restore`) — now call the same `pluralize()` (exported by `page-bar.ts` for
+  exactly this reuse, per its own doc comment). `features/reports/reports.html`'s own `asset(s)
+  flagged` (named in the task brief) is a sibling agent's file, out of this scope, left alone.
+- **Devices** — both subtitle sentences deleted (the second, "Assets live on their own page now.", was
+  stale migration signage from the Assets/Devices split, docs/design/06-devices.md's own finding).
+  Search, the List/Grid toggle, and "Show archived" move into `[pageBarFilters]`; the `Registered
+  devices` / `N device(s)` card header is deleted outright (not fixed in place) — the bar's own
+  `[count]="warehouseRows().length" countNoun="device"` already carries that number, correctly
+  pluralised, so keeping a second copy in the card would only be new redundancy, not new information
+  (contrast Assets' `N of M` line, which the bar's single count can't express). The List/Grid toggle
+  itself is **not** dropped, unlike docs/design/06-devices.md's Wave-3 "side panel" refactor list
+  suggests — that removal is bundled with the side-panel/actions-column rework this task's own brief
+  marks out of scope, so the toggle stays, just relocated.
+- **Activity** — subtitle deleted (title says it). `[count]`/`countNoun="entry"` is genuinely new — the
+  page previously showed no number anywhere, so this isn't replacing a duplicate. **Caught live, not
+  in review**: the first pass used `countNoun="entry"` with no `countNounPlural`, and `pluralize`'s
+  default `${singular}s` rendered "3 entrys" — visible only once the running app was actually screenshotted
+  (`tsc`/`ng test` have no opinion on English spelling). Fixed with the explicit
+  `countNounPlural="entries"` the component's own `input` exists for.
+- **Alerts center** — subtitle deleted; `[count]="facade.events.events().length" countNoun="event"` (the
+  shared `EventsStore` the facade already injects — no new fetch). **The label/asset filters and the
+  "Events / N" header stay inside `<vision-events-rail>`**, not relocated into the bar, despite
+  docs/design/08-alerts.md's own bar mockup showing them there — that markup lives in
+  `shared/ui/events-rail.{ts,html}`, shared with `Wall` and the header bell, and explicitly outside this
+  task's file scope. Flagged rather than worked around (e.g. by duplicating the rail's filter state up
+  into `AlertsPage`, which would have created two sources of truth for one filter). A later task that
+  owns `shared/ui/events-rail.*` can lift `event-row.ts` out per that design doc's own refactor list and
+  relocate the filters at the same time.
+- **Categories** — subtitle carries real instruction (which "Asset categories" alone doesn't say — that
+  the counts are live), so it moves to `hint` instead of being deleted, unlike Assets/Devices/Activity/
+  Alerts. Search moves into `[pageBarFilters]` (still gated on `hasAny()`, unchanged). **No bar `[count]`
+  added** — deliberately, unlike every other page in this task: the card's own `<vision-section-header
+  title="Categories" [subtitle]="rows().length + ' shown'">` sits 40px below the bar and would show the
+  *exact same number* a bar count chip would, since `rows()` is already the one (search-filtered) list
+  this page has no separate "total" concept distinct from. A second identical number that close is
+  duplication, not new information — the same reasoning that dropped Assets'/Devices' redundant inline
+  headers, applied in the other direction (keep the existing one, skip adding a new one).
+- **Roster** — subtitle carries real instruction (the accordion's expand-to-edit interaction isn't
+  obvious from "Pilots / roster" alone), moves to `hint`. Search moves into `[pageBarFilters]`.
+  `[count]="facade.rows().length" countNoun="asset"` is new (like Activity, this page previously showed
+  no number at all) — deliberately **not** the fleet-level pilot/gap summary
+  ("N asset(s) with no pilot") docs/design/13-roster.md's own suggested design calls for; that's bundled
+  with the `By asset | By pilot` pivot rewrite this task's brief marks out of scope (Wave 3).
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface changed — every facade/store injection, HTTP call, and role gate (`Pilots / roster`'s
+own route guard, `Everyone`-scope-style features none of these pages have) is byte-for-byte what it was
+before this task; this wave only moved markup and fixed English pluralisation. Loading/error/empty
+states on all six pages are unchanged (still each facade's own `loading`/`error` signals feeding
+`<vision-empty>`, never a fabricated value). `vision.auth.enabled=false` dev-parity is unaffected — none
+of these six pages' role gates were touched.
+
+### Tests
+
+No new spec files — this codebase's own convention (`CLAUDE.md`/this file's own precedent) favors pure
+`*-logic.ts` unit tests over component specs, and none of these six page components had one before this
+task; none of the six pages' own `*-logic.ts`/`*-logic.spec.ts` files changed (the pluralisation fix
+went through the pre-existing, already-tested `pluralize()`, not new logic). **96 spec files / 1616+
+tests green** (`npx ng test --watch=false`; count crept upward mid-task as sibling Wave 2 agents landed
+their own specs — 1613 was this task's stated starting baseline, 1625 the last observed count, no
+regression at any point checked). `npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, isolated via a scoped `git stash push --
+<this task's 18 files>` / rebuild / `git stash pop` round-trip** (not a worktree, to avoid duplicating
+this large, actively-changing shared tree mid-task; safe because the stash targeted exactly this task's
+own files, none of which any sibling agent also touches) — baseline is "every sibling agent's concurrent
+change, minus only this task's own":
+
+| Lazy chunk | Before | After | Δ raw |
+|---|---|---|---|
+| `assets` | 14.44 kB / 4.24 kB | 14.06 kB / 4.10 kB | −0.38 kB |
+| `devices` | 29.08 kB / 6.25 kB | 28.72 kB / 6.16 kB | −0.36 kB |
+| `activity` | 4.05 kB / 1.57 kB | 4.07 kB / 1.58 kB | +0.02 kB |
+| `alerts` | 2.15 kB / 996 B | 1.96 kB / 911 B | −0.19 kB |
+| `categories` | 5.39 kB / 2.05 kB | 5.21 kB / 1.96 kB | −0.18 kB |
+| `roster` | 6.83 kB / 2.41 kB | 6.73 kB / 2.41 kB | −0.10 kB |
+| Initial (shared) | 376.44 kB / 105.21 kB | 375.45 kB / 103.64 kB | −0.99 kB |
+
+Net negative across the board — deleting a `page-head`'s worth of markup/CSS per page outweighs the
+`<vision-page-bar>` element tag each one now uses (the component's own JS/CSS is already paid for
+elsewhere: sibling Wave 2 agents' pages and Wave 1's own shell both reference it, so these six pages
+are marginal cost only, not first payers).
+
+### Verified live (`ng serve`, ADMIN session, 2060×1005 — this sandbox's actual rendered viewport;
+see Wave 1a's own note above on why `resize_window` doesn't yield a genuine narrower one here)
+
+| Page | Bar height | Content starts at | `.page` spans |
+|---|---|---|---|
+| `/assets` | 55.6px (24.0→79.5) | 95.5px | 240→2060 (fluid, full width) |
+| `/devices` | 55.6px (24.0→79.5) | 95.5px | 240→2060 |
+| `/activity` | 48.0px (24.0→72.0) | 88.0px | 240→2060 |
+| `/monitor/alerts` | 48.0px (24.0→72.0) | 125.9px (rail top, below the notice) | 240→2060 |
+| `/manage/categories` | 57.1px (24.0→81.1) | 135.0px (below the notice + section header) | 240→2060 |
+| `/manage/roster` | 57.1px (24.0→81.1) | 97.1px | 240→2060 |
+
+Every bar renders as one row at this width (no title/filters/actions wrap onto a second line); no
+overlap or clipping observed in any of the six screenshots taken. The "3 entrys" bug above was caught in
+this same pass and fixed before this table was captured. **Not independently re-verified below 640px**
+in this task, for the same environment reason Wave 1a already recorded (`resize_window` reports success
+but `window.innerWidth` never actually changes in this sandbox) — the filter controls this task added
+(`asset-search`/`asset-filter`/`device-search`/`categories-search`/`roster-search`) are plain rem-widths
+inside `<vision-page-bar>`'s own `.page-bar-filters` (`display:flex;flex-wrap:wrap`), the same "restructure
+rather than shrink, no fixed-width overflow risk" pattern the frozen component's own `@media (max-width:
+640px)` rule already establishes — reasoned about, not screenshotted, flagged here rather than silently
+claimed.
+
+### Files touched
+
+Edited: `features/assets/{assets.ts,assets.html,assets.css,assets-facade.ts}`,
+`features/devices/{devices.ts,devices.html,devices.css}`, `features/activity/{activity.ts,activity.html}`,
+`features/alerts/{alerts.ts,alerts.html,alerts.css}`,
+`features/categories/{categories.ts,categories.html,categories.css}`,
+`features/roster/{roster.ts,roster.html,roster.css}`, and this file. Untouched (verified via `git diff
+--name-only` against this task's own scope): `shared/ui/page-bar/**`, `shared/ui/events-rail.*`,
+`styles.css`, `app.*` — every file this task's brief named explicitly out of scope.
+
+## Status — Wave 2, form/configuration pages: `page-head` → `vision-page-bar`, field-width tokens, two correctness fixes (docs/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3, docs/design/{07-add-source,11-settings,12-org,15-reports,18-debug,16-training}.md) — 2026-08-04
+
+Ran concurrently with two sibling Wave 2 agents (the list pages above; the shell/`app.*`/`page-bar`
+component itself, built ahead of this fan-out and not touched here). This task's own file scope:
+`features/{onboarding,settings,org-settings,reports,debug,labeling,models,training-jobs}/**` plus sole
+edit rights on `styles.css` this wave. Net effect: every form page collapsed from a 130px `page-head`
+block to a 48-55px bar, `/add-source` and `/settings` are now a centered 880px reading column instead of
+a left-aligned smear across the fluid width, no control on either page is wider than its plausible value,
+CV training's disabled state reads as one message instead of two disconnected fragments, and the Debug
+Health panel stopped lying about what a 404 means.
+
+### Field-width tokens (`styles.css`, task 3 — the shared primitive every other page below consumes)
+
+`--field-sm: 20ch` / `--field-md: 40ch` / `--field-lg: 100%` (`:root`) plus matching `.field-sm`/
+`.field-md`/`.field-lg` utility classes, applied directly to an `<input>`/`<select>` (not its wrapping
+`.field` div) so a single class selector overrides the global `input, select, textarea { width: 100% }`
+by ordinary specificity — no `!important`. This is the fix for `/add-source`'s own headline F4 finding:
+`DISPLAY NAME` (~10 chars) and `REGISTRATION / TAIL NUMBER` (~6 chars) were both ~1075px wide. Verified
+live (`ng serve`, 2060px viewport): `DISPLAY NAME`/`CATEGORY` now 311px (`field-md`, 40ch), `REGISTRATION`
+155.6px (`field-sm`, 20ch), the Connect step's `PROTOCOL` select 155.6px, `STREAM ADDRESS` (a URI,
+`field-lg`) 518.5px — sized to its actual grid cell, not a fixed 1075px regardless of content. Same
+buckets applied to `/org`'s 5-field invite row (`USERNAME`/`TEMPORARY PASSWORD`/`GROUP`/`ROLE IN GROUP`
+→ `field-sm`, `DISPLAY NAME`/`EMAIL` → `field-md`; measured live: `GROUP` 155.6px vs. `EMAIL` 273.6px,
+so `GROUP` — a select reading "No group" — is no longer as wide as an email address) and `/debug`'s
+`METHOD` select (`field-sm`, was ~165px stretched via a `0.6fr` grid share regardless of content; the
+console's grid itself changed `0.6fr` → `auto` so the now-fixed-width select stops leaving a stretched
+gap in its own column, `debug.css`) and `PATH` (`field-lg`, explicit — the token's own doc comment names
+"the debug console's own request path" as the canonical `field-lg` example).
+
+### `.page--form` (task 2) — `/add-source` and `/settings` only
+
+Both wrapped in `class="page page--form"` (`styles.css`'s own 880px/`margin-inline:auto` utility, added
+in Wave 1a with no consumer until now). `/settings` previously carried its own bespoke `.page {
+max-width: 820px }` override in `settings.css` — deleted in favor of the shared token, so every
+"reading, not deciding" page shares one width instead of each picking its own. Verified live: both pages'
+`.page` rect is exactly 880px wide, horizontally centered within the sidebar-adjusted content area (not
+the raw viewport — center = `sidebar width + contentWidth/2`, confirmed by direct measurement rather than
+assumed); `/org`, `/debug`, `/manage/reports`, `/manage/training` all still measure the full fluid content
+width (1820px at this viewport) — the centering is opt-in per page, not a global regression.
+
+### Per-page page-bar migration (task 1) — description pruning follows §2.2's rule literally
+
+- **`/add-source`** — `icon="plus"` (matches `nav-entries.ts`'s own "Add source" icon, so the bar's icon
+  and the sidebar's active-row icon agree). The old 3-line description is deleted outright, not moved to
+  a `hint` — Step 1's own subtitle ("What is it, and what does it look like?") already does that job,
+  restating it in the bar would be the redundancy §2.2 exists to remove. `Cancel` moves into
+  `[pageBarActions]`. **Left alone, per the design doc's own "Suggested design" vs. this wave's brief**:
+  the dot-rail step indicator, the photo dropzone, and moving the disabled-`Next` reason onto the button
+  itself — all bigger changes than "the header, the form widths, and two correctness fixes."
+- **`/settings`** — `icon="settings"`, `hint="Presets first, knobs behind them, raw values behind
+  those — the same values throughout."` — named verbatim in the task brief as genuinely instructional,
+  kept rather than deleted. **The Interface/Notifications vs. Detection-profile split into
+  `/settings`/`/settings/detection` is Wave 4** (docs/design/11-settings.md's own table) — untouched.
+- **`/org`** — `icon="building-org"`. The old description was two sentences doing two jobs: "Manage the
+  people and groups in your organization" only restated the title, deleted outright; "Grants are limited
+  to your own scope" is a real, non-obvious fact, kept as `hint`. The `Users | Groups` segmented toggle
+  moves into `[pageBarFilters]` (it filters which list shows, the same job every other page's filter slot
+  does). **`[count]`/`[countNoun]` are new and tab-dependent** (`OrgSettingsFacade.barCount`/
+  `barCountNoun`, new computeds) — "3 users" on the Users tab, "1 group" on Groups, verified live by
+  switching tabs and re-measuring the chip text. **The invite-modal extraction, `/org/users`+`/org/groups`
+  route split, and `?sel=` side panel are Wave 3** — untouched; the invite form still sits above the list
+  exactly as before, only its field widths changed.
+- **`/manage/reports`** — `icon="report"` (moved off a hand-rolled `<h1><vision-icon>` prefix into the
+  bar's own `icon` input; `Icon` import dropped from `reports.ts`, now unused). Description deleted
+  outright — it restated what the title plus the section headers below already say. **The `7d/30d/90d`
+  range selector, flight-hours trend, per-row navigation, and CSV export are out of this wave's scope**
+  (the task brief's own line) — untouched.
+- **`/debug`** — `icon="gear"` (matches `nav-entries.ts`). Description deleted outright per the task
+  brief's own explicit example (title says it). **The response pane, request-history panel, and demoting
+  Health to a header chip are Wave-2-out-of-scope** (`docs/design/18-debug.md`'s own bigger "Suggested
+  design") — the existing console/Health/Last-scan three-card layout is otherwise unchanged.
+- **`features/labeling/**`/`features/models/**`/`features/training-jobs/**` — deliberately NOT migrated
+  to `vision-page-bar`.** These three route trees' own top headers are `<vision-section-header>`, not
+  literal `.page-head` — a different, pre-existing shared component (`shared/ui/section-header.ts`,
+  UI-REDESIGN-PLAN Wave 0), used both as a page's own top identity bar (`datasets.html`/`models.html`)
+  and, unambiguously, as a genuine leaf-page breadcrumb-style header elsewhere in the same three folders
+  (`dataset-detail.html`'s `eyebrow="Dataset"`, `sample-editor.html`'s `eyebrow="Sample"`,
+  `training-job.html`'s `eyebrow="Training job"` — none of those three say "Manage" and none were
+  touched). Converting the two page-level ones to `vision-page-bar` would have been a reasonable reading
+  of task 1's "migrate every page-head in your scope," but the task's own item 4 only asked for three
+  narrow fixes (below) — not a component swap — and docs/design/16-training.md's own tab-strip/spine
+  redesign (the natural reason to eventually make this swap) is explicitly out of scope this wave
+  ("no CV-training tab strip"). Flagged here rather than silently done or silently skipped.
+
+### `/manage/training` disabled-state fix (task 4, docs/design/16-training.md)
+
+`datasets.html`/`models.html` both already rendered `<vision-empty icon="alert" title="Training tools
+aren't enabled here" …>` for the disabled branch — already one centered stack by itself (confirmed via
+`empty-state.ts`'s own `.empty { text-align: center }` primitive) — so the "hand-rolled markup" the
+design doc's walkthrough describes was not what this session's own source tree showed; what genuinely
+still broke the "one message" read was the `<vision-section-header>` **above** it, which rendered
+unconditionally regardless of `disabled()`, eyebrow and action button included, sitting above the
+centered empty-state block as a second, disconnected fragment. Fixed both:
+- **`eyebrow="Manage"` deleted outright** from both `datasets.html` and `models.html` — the sidebar's own
+  active-group highlighting already answers "where am I" (docs/design/00-shell.md), so repeating the
+  mode name in the page's own header was pure duplication, not information.
+- **The `Models` action (`datasets.html`) and the `Datasets` action (`models.html`) are now wrapped in
+  `@if (!disabled())`** — a disabled feature's own header shouldn't offer a door into a *second* disabled
+  page (the design doc's own "Models is offered while training is disabled" problem statement, generalized
+  symmetrically to the sibling page since it had the identical issue). `SectionHeader`'s own
+  `.section-head-actions:empty { display: none }` collapses the slot cleanly with nothing projected —
+  no layout gap left behind.
+- **Verified live** (`vision.training.enabled=false` on this deployment, the only reachable state per the
+  task's own note): `document.querySelector('.empty-icon')`/`.empty h3`/`.empty p` all measured
+  `x-center = 1150.0px` — the exact same value, i.e. genuinely one centered stack, not eyeballed. No
+  `Models`/`Datasets` button rendered on either page's disabled state; no `MANAGE`/`Manage` text
+  anywhere on either page.
+- **`Back to Manage` was already gone** before this task touched these files (confirmed via `git log -p`
+  on `datasets.html` — a prior commit, "CV model-registry promote loop," removed it while adding
+  `Models`) — the task brief's own instruction to check this first was correct to include; nothing left
+  to remove here.
+- **Not done, explicitly out of scope**: exposing `vision.training.enabled` to the sidebar so the nav
+  entry itself renders dimmed/`off` before a click (docs/design/16-training.md's own suggested design) —
+  that's `shared/ui/app-sidebar/**`, outside this task's file scope and owned by the sibling shell-wave
+  agent. The tab-strip spine for the *enabled* state is likewise untouched (this wave's own brief: "no
+  CV-training tab strip"; the design doc's own acceptance note that the enabled flow "needs its own pass
+  before any deeper redesign is committed to").
+
+### `/debug` Health probe semantics — a correctness fix, not a redesign (task 5, docs/design/18-debug.md)
+
+**Root cause, verified independently** (not assumed from the design doc): `vision-app/pom.xml` declares
+no `spring-boot-starter-actuator` dependency anywhere in the reactor, and `application.properties` has
+zero `management.*` configuration — there is no actuator autoconfiguration to expose or hide, the
+`/actuator/health` endpoint simply has no servlet mapping. `SecurityConfig`'s `permitAllFilterChain`
+rules out an auth block (that would 401/403, not 404); `SpaResourceConfiguration#isClientRoute()`
+explicitly excludes `actuator/` from the SPA fallback so it 404s cleanly instead of masquerading as the
+Angular shell. The response body is Spring's own default error JSON,
+`{"timestamp":…,"status":404,"error":"Not Found","path":"/actuator/health"}` — confirmed by expanding the
+page's own "Raw JSON" disclosure live. The old code's `healthOverall` computed read this same body's
+`status` field (a **number**, `404`) and rendered it verbatim in a chip styled red for anything `!== 'UP'`
+— a missing probe and an unhealthy system happened to use the same JSON key name, and nothing
+distinguished them.
+
+**Fix**: `describeHealthProbe(response)` (`debug-response.ts`, new, pure, unit-tested — 8 cases in
+`debug-response.spec.ts`) takes a narrow, locally-declared `HealthProbeResponse {status, bodyText,
+reached}` shape (structurally satisfied by `DebugApiService`'s own `RawResponse`, no import needed — this
+module stays dependency-free) and returns `null` (never checked yet) or
+`{kind: 'not-exposed'|'healthy'|'unhealthy', label, tone: 'neutral'|'ok'|'danger'}`. `'not-exposed'`
+(neutral grey) covers *every* non-verdict case — unreachable, any non-2xx (not just 404), or a 2xx body
+that doesn't parse as `{status: string}` — so a future actuator with a differently-shaped body degrades
+honestly here too, rather than crashing or guessing. Only a real `{"status": "…"}` on a genuine 2xx
+response ever earns a colored verdict. `debug.ts#healthProbe` (computed, replacing `healthOverall`) and
+`debug.html`'s Health block now switch on `probe.kind`: `'not-exposed'` renders the grey chip plus a
+plain-language explanation naming the exact HTTP status and why it isn't a health verdict; the existing
+component list / raw-JSON disclosure are otherwise unchanged.
+
+**Verified live against the real running backend** (not just the unit tests): `/debug`'s Health panel now
+shows `health probe not exposed` in a neutral chip, with `GET /actuator/health returns 404 on this
+deployment — Spring Boot Actuator isn't on the classpath here, so there is nothing to check. This is a
+missing probe, not a failing system…` directly beneath it — never the old red `404` chip.
+
+### Pluralisation fixes (task 6, `grep -rn "(s)\|(es)"` across this task's own scope)
+
+Two real hits (one false positive — `dataset-detail.html`'s `s.streamId`, a variable name, not a
+placeholder):
+- **`/manage/reports`**'s `'N asset(s) flagged'` string concatenation → `ReportsFacade.attentionSubtitle`
+  (new computed, `pluralize(attention().length, 'asset')`, `pluralize` imported from
+  `shared/ui/page-bar/page-bar.ts` — the app's one regular-English pluralisation helper, exported
+  precisely for this reuse per its own doc comment). Verified live: an asset count of 1 now renders
+  "1 asset flagged", not "1 asset(s) flagged".
+- **`features/labeling/sample-editor.html`**'s `'N box(es) use a label…'` → `SampleEditorFacade.
+  invalidLabelsMessage` (new computed, `pluralize(invalidLabels.length, 'box', 'boxes')` — "boxes" is
+  irregular, passed explicitly rather than relying on the default `${singular}s`, which would have
+  produced "boxs").
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface changed and no facade/store injection, HTTP call, or role gate was touched anywhere
+in this task — every loading/error/empty state on all eight pages is byte-for-byte what it was before
+(`OrgSettingsFacade`'s `orgGuard`/`canManageOrg` gating, `TrainingStore`/`ModelsFacade`'s `disabled()`
+404-degrade, `DebugApiService`'s deliberate non-typed error handling — all unchanged). `vision.auth.
+enabled=false` dev-parity is unaffected: verified live throughout this task's own browser pass, which ran
+as the dev admin (ADMIN/unbounded) the whole time — `/org`'s Users/Groups tabs, `/debug`'s console, and
+`/manage/training`'s (disabled) pages all rendered exactly as an ADMIN session should, no new gate added
+or removed anywhere in this diff.
+
+### Tests
+
+New: 8 cases in `debug-response.spec.ts` (`describeHealthProbe` — null/healthy/unhealthy/not-exposed ×
+{404-with-Spring-error-body, 404-no-body, 404-HTML-whitelabel-body, unreachable, non-404-non-2xx, 2xx-with-
+no-status-field}). No other new spec files — this codebase's own convention (pure `*-logic.ts` unit tests
+over component specs) applied: `reports-facade.ts`/`sample-editor-facade.ts`'s new computeds route
+through the already-tested `pluralize()`, and `org-settings-facade.ts`'s new `barCount`/`barCountNoun`
+are trivial ternaries over already-tested store signals, none warranting a dedicated spec. **96 spec
+files / 1625 tests green** (`npx ng test --watch=false`; 1613 was this task's own stated starting
+baseline — the delta is this task's 8 new cases plus sibling Wave 2 agents' own concurrent additions, no
+regression at any point checked). `npx tsc --noEmit` clean on both `tsconfig.app.json`/
+`tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, measured via a `git worktree add
+--detach` baseline at this branch's own last commit** (a844c0b — this shared tree carries both sibling
+Wave 2 agents' own concurrent, unrelated changes throughout this task, the same caveat every prior
+shared-tree measurement in this file has already recorded):
+
+- **Initial bundle: 367.89 kB → 375.45 kB raw (+7.56 kB) / 104.82 kB → 103.63 kB transfer (−1.19 kB)** —
+  raw grew (the new field-width tokens/utilities in `styles.css`, `PageBar` now imported by five more
+  components, the new `describeHealthProbe` logic) while estimated transfer *shrank* slightly, most
+  likely gzip finding more repetition across the now-more-uniform bar/field markup; not separable from
+  sibling agents' own concurrent initial-bundle contributions in a shared-tree measurement (same caveat
+  as every prior entry here).
+- `onboarding`/`org-settings`/`debug` lazy chunks each grew modestly (a `<vision-page-bar>` element per
+  page, plus `debug`'s own new `describeHealthProbe`/`HealthProbeResponse` logic) — not itemized
+  per-chunk here since the shared-tree caveat above already applies at the initial-bundle level and would
+  apply equally per-chunk.
+
+### Verified live (`ng serve`, ADMIN session, 2060×1005 viewport — this sandbox's actual rendered size)
+
+Browser automation against this session's own dedicated tab (a pre-existing shared tab in the same tab
+group was, over the course of this task, observed navigating on its own — almost certainly a sibling
+agent's concurrent verification pass against the same running dev server; a fresh tab was created for
+this task's own checks rather than risk cross-talk, per the harness's own tab-hygiene guidance).
+
+| Page | Bar height | `.page` width | Notes |
+|---|---|---|---|
+| `/add-source` | ~55px, one row | 880px, centered (x-center 1150) | `DISPLAY NAME` 311px, `REGISTRATION` 155.6px, `PROTOCOL` 155.6px, `STREAM ADDRESS` 518.5px |
+| `/settings` | 48.0px, one row | 880px, centered (x-center 1150) | content (Interface card) starts at ~73px |
+| `/org` | one row, tab-dependent count | 1820px, fluid | `GROUP` 155.6px vs. `EMAIL` 273.6px; count "3 users" → "1 group" on tab switch |
+| `/manage/reports` | one row | 1820px, fluid | "1 asset flagged" (was "1 asset(s) flagged") |
+| `/debug` | 48.0px, one row | 1820px, fluid | `METHOD` 155.6px, `PATH` 911.9px; Health chip "health probe not exposed" (neutral), confirmed against the real 404 body |
+| `/manage/training` (disabled) | n/a (SectionHeader, not migrated) | — | icon/heading/message all x-center 1150.0 — one stack, not two fragments; no `Models` button, no `MANAGE` eyebrow |
+| `/manage/training/models` (disabled) | n/a | — | same fix, mirrored; no `Datasets` button |
+
+### Files touched
+
+Edited: `styles.css` (field-width tokens + utilities), `features/onboarding/{onboarding.html,
+onboarding.ts}`, `features/settings/{settings.html,settings.ts,settings.css}`,
+`features/org-settings/{org-settings.html,org-settings.ts,org-settings-facade.ts}`,
+`features/reports/{reports.html,reports.ts,reports.css,reports-facade.ts}`,
+`features/debug/{debug.html,debug.ts,debug.css,debug-response.ts,debug-response.spec.ts}`,
+`features/labeling/{datasets.html,datasets.ts,sample-editor.html,sample-editor-facade.ts}`,
+`features/models/{models.html,models.ts}`, and this file. Untouched (verified via `git diff --name-only`
+against this task's own scope): `shared/ui/page-bar/**`, `app.*`, `features/{training-jobs,hubs}/**` (read
+only), every other `features/**` path.
+
+## Status — Wave 2, operational + detail pages: `page-head` → `vision-page-bar` (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/{01-fly,03-wall,10-replay,05-asset-detail,17-preflight}.md) — 2026-08-04
+
+Ran concurrently with two sibling Wave 2 agents (the list pages and form/configuration pages above — both
+this file's own two immediately-preceding Status entries). This task's own file scope was exactly six
+folders: `features/{fly,wall,live,replay,asset-detail,preflight}/**` — the operational (Fly picker, Wall,
+Live) and detail (Asset detail, Replay) surfaces, plus Pre-flight. Every page's `.page-head` block is
+replaced by `<vision-page-bar title icon [count] [countNoun] [hint] [crumb]>` against the frozen
+`shared/ui/page-bar/**` (built ahead of this fan-out, **not** touched by this task). **No cockpit URL
+change, no picker/cockpit split, no minimap move, no Wall density control, no asset-detail tabs, no
+preflight GO/NO-GO verdict or fleet matrix, no replay library** — every one of these is a later-wave item
+this task's own brief named explicitly out of scope, and none were built.
+
+### Per-page decisions
+
+- **Fly picker (`/fly`, `facade.showPicker()` branch only)** — `title="Fly" icon="cockpit"
+  [count]="pickerAssets() ? orderedPickerAssets().length : null" countNoun="drone"`; `null` (not `0`)
+  while the first fetch is in flight, so the bar never flashes "0 drones" before the real count arrives.
+  The old "Pick a drone…" paragraph carries genuine instruction (the remember-and-redirect behavior isn't
+  obvious from the title) so it moved to `hint`, not deleted. **The cockpit (everything under
+  `facade.asset(); as a`) is untouched** — full-bleed `.cockpit` grid, no `.page`/`page-head` there at
+  all; verified live that `data:{fullBleed:true}` (`fly.routes.ts`, unmodified) still collapses the
+  sidebar and the cockpit still fills `100dvh` exactly as before.
+- **Wall** — subtitle deleted outright (docs/design/03-wall.md's own finding: redundant once the bar's
+  count says the same thing). `title="Wall" icon="grid" [count]="tiles().length" countNoun="stream"`.
+  `Tiles per row` moves into `[pageBarFilters]` **unchanged** — the density segmented control the design
+  doc proposes replacing it with is Wave 3/4, out of this task; the Events rail is untouched (wave 3
+  widens it per that same doc). The `N stream(s) are running without a publisher URL` notice now calls
+  `pluralize()`.
+- **Live (`/live/:deviceId`)** — `[title]="d.name"`, no `icon` (this page has no sidebar nav entry of its
+  own — a drill-down from Devices/Wall/Command, not a mode destination). Protocol/capability chips move
+  into `[pageBarFilters]`; "All devices" + Start/Stop into `[pageBarActions]`. No description existed to
+  prune or hint.
+- **Replay (`/assets/:assetId/replay/:usageId` + the flat `/replay?asset=&usage=&t=` deep link)** — the
+  loading-skeleton and loaded states' two separate `.page-head` blocks unify into **one always-rendered**
+  `<vision-page-bar title="Flight replay" icon="replay" [crumb]="crumb()">`, covering
+  loading/`notFound`/`usageOpen`/loaded alike (a new `crumb` computed on `ReplayPage`, joining
+  `facade.backLink()`'s route-segment array — `['/assets', id]` or `['/command']` — into the bar's
+  plain-`string` `crumb.to`; safe because the first segment always starts with `/`, so `Array.join('/')`
+  never doubles a slash). A working back-crumb on `notFound`/`usageOpen` is a genuine improvement over the
+  old bar-less error cards, not a fabricated status — the title only ever names the page, never claims the
+  flight loaded. The old subtitle's real content (the time range) survives as a plain `<p
+  class="range-label">` under the bar — nothing in the bar's frozen contract fits a read-only stat like
+  that. The scrub bar's density-marker tooltip (`'N detection(s) near …'`) now calls `pluralize()` via a
+  new `ReplayPage.bucketTitle()` helper.
+- **Asset detail (`/assets/:id`)** — the loading-skeleton and loaded `.page-head` pair merge into one
+  `<vision-page-bar [title]="a.displayName" [crumb]="{label:'Assets', to:'/assets'}">` (`notFound` stays a
+  bar-less `<vision-empty>` card, unchanged — same convention as Replay's own `notFound` before this task,
+  now shared). Identity chips (category/lifecycle/streaming) ride `[pageBarFilters]`; "All devices" +
+  "Rename asset…" + a new `<vision-kebab-menu>` ride `[pageBarActions]`. **Archive asset moves into that
+  kebab, behind `<vision-confirm-dialog>`** — docs/design/05-asset-detail.md's own acceptance criterion
+  ("Archive asset requires a confirm and is not adjacent to Rename"), gated by a new one-member `dialogs`
+  `UiStore` group on `AssetDetailPage` (mirrors `fly.ts`'s own Stop-stream `dialog` group exactly). **This
+  is a real behavior change, not just markup**: `AssetDetailFacade.archiveAssetNow`'s own doc comment
+  previously stated "fires immediately, no confirm dialog" (docs/UX-REWORK-PLAN.md §U-a2 item 3b, "Undo
+  over confirm") — that comment (and the Undo toast it describes) both still apply, but a confirm now
+  gates the call, superseding that older decision for this one action per the newer, more specific design
+  doc. **Two things dropped, both forced by the bar's frozen plain-`string` `title`, neither replaceable
+  without touching a file outside this task's scope**: the old inline "swap the `<h1>` for two `<input>`s"
+  rename affordance (the rename form now renders as its own card under the bar instead, still gated by the
+  same `editors` group, functionally identical minus the in-place swap) and the decorative asset photo
+  (`hasImage`/`imageUrl`, docs/UX-REWORK-PLAN.md §U-d item 3) — 05-asset-detail.md's own mockup shows no
+  avatar either. `AssetDetailFacade.imageUrl` (dead once its only caller, `AssetDetailPage#assetImageSrc`,
+  was removed) is deleted outright rather than left unreferenced; `hasImage`/`VisionApi.assetImageUrl`
+  themselves are untouched (core API surface, out of this task's file scope) — a future page can still
+  wire them up. **`Usage history`'s own `N usage(s)` subtitle** and **the Archive-undo toast's `N
+  device(s) archived, N usage(s) retained, N stream(s) stopped`** (`AssetDetailFacade.archiveAssetNow`)
+  both now call `pluralize()`.
+  - **Pre-existing bug found and fixed, not introduced**: `.inline-form.column input`'s `flex: 1 1 12rem`
+    sets the flex-basis along the *main* axis — correct for `.inline-form`'s default row direction (12rem
+    width), but `.inline-form.column` (the rename form's own modifier, unchanged by this task) flips that
+    axis to vertical, so the same rule was read as a 12rem (192px) *height*, ballooning both rename inputs
+    into giant boxes. Caught live while re-verifying this exact form after moving it under the new bar —
+    same classes, same combination the pre-existing template already used in the old header, just now
+    actually screenshotted. Fixed with `.inline-form.column input { flex: none }`, scoped correctly (grep-
+    verified `.inline-form.column` has exactly one consumer in this file, `.edit-asset`).
+- **Pre-flight checklist (`/operate/preflight`)** — `title="Pre-flight checklist" icon="list"`, the old
+  paragraph ("The live status card for any drone…") carries real instruction so it moved to `hint` rather
+  than being deleted. The `DRONE` select keeps its exact job (17-preflight.md's own fleet-matrix/GO-NO-GO
+  rewrite is Wave 4, explicitly out of this task) but now rides `[pageBarFilters]`, gated on the same
+  loaded-and-has-assets condition the body's own `@else` branch already used.
+- **Pluralisation fixes (task's own `grep -rn "(s)"` sweep across this scope)**: the four listed above
+  (Wall's notice, Replay's tooltip, Asset detail's subtitle + toast) plus `FlyFacade.initPicker`'s own
+  `console.info` diagnostic log (`picker loaded N asset(s)`, not user-facing, fixed anyway since it was a
+  one-line change in a file already open for this task). One false positive left alone:
+  `replay-logic.ts`/`replay.html`'s several `(s) =>`/`=== s` occurrences are lambda-parameter/variable
+  names, not English pluralisation.
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface changed. Every facade/store injection, HTTP call, poll cadence, and role gate (Pilots
+drill-in's `canManagePilots`, the training-dataset picker's `facade.training.disabled()` gate on Replay)
+is byte-for-byte what it was before this task, with one narrow, deliberate exception: Asset detail's
+Archive action now requires an explicit confirm click before `archiveAssetNow()` fires (see above) — a
+stricter gate, never a looser one; the pre-existing Undo toast still follows a confirmed archive exactly
+as before. Loading/error/empty states are unchanged on every page — still each facade's own
+`loading`/`error`/`notFound` signals feeding `<vision-empty>`/a plain card, never a fabricated value; the
+new always-on Replay bar's crumb is a real link even in the `notFound`/`usageOpen` states, not something
+that pretends the flight loaded. `vision.auth.enabled=false` dev-parity is unaffected — verified live
+throughout this task's own browser pass as the dev admin (ADMIN/unbounded); no role gate was added,
+removed, or touched on any of the six pages.
+
+### Tests
+
+No new spec files — this codebase's own convention (pure `*-logic.ts` unit tests over component specs)
+applied: none of the six page components had one before this task, and the only new logic
+(`ReplayPage.crumb`/`bucketTitle`, `AssetDetailPage`'s `dialogs` group, `WallPage`/`AssetDetailPage`'s
+`pluralize` re-exposure) is either trivial glue over already-tested primitives (`UiStore`, `pluralize()`)
+or DOM/route plumbing no existing `*-logic.ts` file owns. **96 spec files / 1625 tests green** (`npx ng
+test --watch=false`; 1613 was this task's own stated starting baseline — the delta is entirely sibling
+Wave 2 agents' own concurrent additions, no regression at any point checked, including a full-suite rerun
+after this task's own changes were done). `npx tsc --noEmit` clean on both
+`tsconfig.app.json`/`tsconfig.spec.json`, checked both before and after this task's own edits.
+
+### Build
+
+`ng build --configuration production` succeeds. **Bundle delta, isolated via a scoped `git stash push --
+<this task's 18 files>` / rebuild / `git stash pop` round-trip** (safe because the stash targeted exactly
+this task's own files — verified via `git status` immediately before stashing that none of the three
+routes files this task's sibling/earlier wave had already modified, `fly.routes.ts`/`wall.routes.ts`/
+`replay.routes.ts`, nor `MODULE.md` itself, were included, so no concurrent agent's own in-flight edit to
+a shared file was disturbed); baseline is "every sibling agent's concurrent change, minus only this task's
+own":
+
+| Lazy chunk | Before | After | Δ raw |
+|---|---|---|---|
+| `fly` | 98.09 kB / 21.62 kB | 98.20 kB / 21.64 kB | +0.11 kB |
+| `asset-detail` | 44.11 kB / 10.55 kB | 44.76 kB / 10.64 kB | +0.65 kB |
+| `replay` | 28.93 kB / 8.22 kB | 28.71 kB / 8.21 kB | −0.22 kB |
+| `live` | 20.53 kB / 5.58 kB | 20.57 kB / 5.61 kB | +0.04 kB |
+| `wall` | 9.49 kB / 3.24 kB | 9.52 kB / 3.22 kB | +0.03 kB |
+| `preflight` | 5.08 kB / 1.95 kB | 4.96 kB / 1.92 kB | −0.12 kB |
+| Initial (shared) | 375.45 kB / 103.62 kB | 375.45 kB / 103.62 kB | +0.00 kB |
+
+Net **+0.49 kB raw / +0.10 kB transfer** across all six lazy chunks combined, and genuinely zero change to
+the eagerly-loaded initial bundle (`PageBar` is a lazy-chunk-only dependency here — it was already paid
+for by Wave 1's shell and both sibling Wave 2 tasks, so these six pages are marginal-cost consumers, not
+first payers). Two chunks shrank (Replay, Preflight — deleting a `.page-head`'s markup outweighed the new
+`<vision-page-bar>` element and, for Asset detail, the removed photo/dead-`imageUrl` code did not offset
+the new kebab/confirm-dialog wiring, hence that chunk's own larger +0.65 kB).
+
+### Verified live (`ng serve`, ADMIN session, 2060×1005 — this sandbox's actual rendered viewport)
+
+Browser automation against a pre-existing shared tab in the same MCP tab group — over the course of this
+task it was twice observed navigating on its own to unrelated routes (`/add-source`, `/devices`,
+`/org`, `/settings`, `/debug`) with no action from this task's own tool calls; the second sibling Wave 2
+agent's own Status entry (above) independently records the same symptom from its side and attributes it to
+this task's concurrent verification pass against the same shared tab — confirmed mutual, not a bug in
+either task's own code. Worked around by re-querying `location.href` before trusting any DOM state and, for
+the highest-value checks (the archive-confirm flow), driving the interaction end-to-end via
+`javascript_tool` in one round-trip rather than a screenshot-then-click sequence that a stray navigation
+could land between.
+
+| Page | Bar height | Content starts at | Notes |
+|---|---|---|---|
+| `/fly` (picker) | 47.99px (24.0→72.0) | 88.0px (first card) | `?` hint opens; "1 drone" count; page spans full fluid width (sidebar collapsed to icon rail, `fullBleed`) |
+| `/fly` (cockpit) | n/a — untouched | n/a | `.cockpit` still exactly `100dvh`, `main.scrollHeight === main.clientHeight`, no scroll |
+| `/wall` | 50.83px | 90.8px | `main` height === viewport height (1005/1005), `Tiles per row` select found inside the bar (`vision-page-bar select`) |
+| `/live/:deviceId` | 54.98px | 94.97px (stage) | sidebar stays expanded (not full-bleed, unchanged) |
+| Replay, `usageOpen` state | one row | — | crumb "‹ Synthetic drone" resolves correctly; body shows the unchanged "still in progress" card |
+| Replay, `notFound` state | one row | — | crumb "‹ Back" (asset never loaded); body shows the unchanged "Replay unavailable" card |
+| `/assets/:id` | 54.98px | — | kebab → "Archive asset" (danger-styled) → `<vision-confirm-dialog>` with the exact message above, confirmed then Cancelled (not confirmed — the only dev asset in this shared environment); Rename → inline card, inputs measured 38.5px tall post-fix (was ~190px pre-fix) |
+| `/operate/preflight` | 57.08px | — | `?` hint opens with the exact old paragraph text; `DRONE` select rides the bar |
+
+Not independently re-verified below 640px in this task, for the same environment reason every prior Wave 2
+Status entry in this file already records (`resize_window` reports success but `window.innerWidth` never
+actually changes in this sandbox) — every control this task moved is a plain rem-sized element inside
+`<vision-page-bar>`'s own `.page-bar-filters`/`.page-bar-actions` (`display:flex;flex-wrap:wrap`), the same
+"restructure rather than shrink" pattern the frozen component's own `@media (max-width: 640px)` rule
+already establishes.
+
+### Files touched
+
+Edited: `features/fly/{fly.ts,fly.html,fly-facade.ts}`, `features/wall/{wall.ts,wall.html}`,
+`features/live/{live.ts,live.html,live.css}`, `features/replay/{replay.ts,replay.html,replay.css}`,
+`features/asset-detail/{asset-detail.ts,asset-detail.html,asset-detail.css,asset-detail-facade.ts}`,
+`features/preflight/{preflight.ts,preflight.html,preflight.css}`, and this file. Untouched (verified via
+`git status` before stashing and again after popping): `shared/ui/page-bar/**`, `styles.css`, `app.*`,
+`fly.css` (no `.page-head` rule existed there to remove), `fly.routes.ts`/`wall.routes.ts`/
+`replay.routes.ts` (already modified by an earlier wave before this task started; this task never wrote to
+them), every other `features/**` path.

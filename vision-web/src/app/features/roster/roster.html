@@ -1,11 +1,17 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1><vision-icon name="pilot" [size]="24" />Pilots / roster</h1>
-      <p>Every asset's pilot assignments in one place — expand an asset to add or remove a pilot.</p>
-    </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/13-roster.md: `page-head` is gone; the
+       subtitle carries genuine instruction so it becomes a `hint` rather than being deleted (see
+       this file's own class doc comment). -->
+  <vision-page-bar
+    title="Pilots / roster"
+    icon="pilot"
+    [count]="facade.rows().length"
+    countNoun="asset"
+    hint="Every asset's pilot assignments in one place — expand an asset to add or remove a pilot."
+  >
     @if (facade.hasAnyAssets()) {
       <input
+        pageBarFilters
         type="search"
         class="roster-search"
         placeholder="Search assets or pilots…"
@@ -14,7 +20,7 @@
         (ngModelChange)="facade.searchQuery.set($event)"
       />
     }
-  </div>
+  </vision-page-bar>
 
   @if (facade.loading()) {
     <p class="muted">Loading…</p>

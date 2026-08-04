@@ -1,8 +1,14 @@
 <div class="page">
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 — the loading-skeleton and loaded states used to carry two
+       separate `.page-head` blocks (a bare skeleton line, and the real title + time-range
+       subtitle); one `<vision-page-bar>` now covers every state below, loading/notFound/usageOpen/
+       loaded alike — title and the back-to-asset crumb are the same shape regardless of which body
+       renders, and a working crumb even on `notFound` is a genuine improvement (a way back that
+       wasn't there before), not a fabricated status — the title just names the page, it never
+       claims the flight loaded successfully. -->
+  <vision-page-bar title="Flight replay" icon="replay" [crumb]="crumb()" />
+
   @if (facade.loading() && !facade.timeline()) {
-    <div class="page-head">
-      <div class="skeleton-line title"></div>
-    </div>
     <div class="card skeleton-card"></div>
   } @else if (facade.notFound()) {
     <div class="card empty">
@@ -24,16 +30,13 @@
       }
     </div>
   } @else if (facade.timeline(); as t) {
-    <div class="page-head">
-      <div>
-        <a class="back-link" [routerLink]="facade.backLink()">← {{ facade.asset()?.displayName ?? 'Back' }}</a>
-        <h1>Flight replay</h1>
-        <p>
-          {{ facade.clockLabel(facade.fromMs()) }} – {{ facade.clockLabel(facade.toMs()) }}
-          <span class="muted">({{ facade.totalLabel() }} flight)</span>
-        </p>
-      </div>
-    </div>
+    <!-- The old page-head's own time-range line — real flight data, not page-identity prose, so it
+         stays as plain content under the bar rather than moving into the bar itself (nothing in
+         `<vision-page-bar>`'s frozen contract fits a read-only stat like this one). -->
+    <p class="range-label muted">
+      {{ facade.clockLabel(facade.fromMs()) }} – {{ facade.clockLabel(facade.toMs()) }}
+      ({{ facade.totalLabel() }} flight)
+    </p>
 
     <div class="detail-grid">
       <!-- ---- Map --------------------------------------------------------------------------- -->
@@ -153,7 +156,7 @@
                   class="density-marker"
                   [style.left.%]="facade.bucketPercent(bucket)"
                   [style.--density]="bucket.count / facade.maxBucketCount()"
-                  [title]="bucket.count + ' detection(s) near ' + facade.clockLabel(bucket.atMs)"
+                  [title]="bucketTitle(bucket)"
                   (click)="facade.jumpTo(bucket.atMs)"
                 ></button>
               }

@@ -1,96 +1,93 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Assets</h1>
-      <p>
-        Every asset Vision knows about, asset-first — search, filter, and jump straight to Watch,
-        Open, or Archive. Raw device plumbing lives on
-        <a routerLink="/devices">Devices</a>.
-      </p>
-    </div>
-    <div class="row">
-      <button type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
-      <button type="button" class="btn secondary" (click)="facade.refreshAll()" [disabled]="facade.fleet.loading()">
-        Refresh
-      </button>
-    </div>
-  </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/04-assets.md: `page-head` + the boxed
+       `.asset-toolbar` filter card are both gone — every filter/search control below now projects
+       into the bar's `[pageBarFilters]` slot, the two actions into `[pageBarActions]`. The subtitle
+       (and its `/devices` link, F7) is deleted outright rather than kept as a `hint`: "Assets" needs
+       no explanation now that the sidebar marks the active page permanently. -->
+  <vision-page-bar title="Assets" icon="drone" [count]="facade.assetRows().length" countNoun="asset">
+    <input
+      pageBarFilters
+      type="search"
+      name="assetSearch"
+      class="asset-search"
+      placeholder="Search assets by name…"
+      aria-label="Search assets by name"
+      [ngModel]="facade.searchQuery()"
+      (ngModelChange)="facade.searchQuery.set($event)"
+    />
 
-  <!-- ---- Search + filters -------------------------------------------------------------------- -->
-  <section class="card asset-toolbar">
-    <div class="toolbar-row">
-      <input
-        type="search"
-        name="assetSearch"
-        class="asset-search"
-        placeholder="Search assets by name…"
-        aria-label="Search assets by name"
-        [ngModel]="facade.searchQuery()"
-        (ngModelChange)="facade.searchQuery.set($event)"
-      />
-
-      <label class="field-inline">
-        <span class="label">Category</span>
-        <select
-          name="assetCategoryFilter"
-          [ngModel]="facade.categoryFilter()"
-          (ngModelChange)="facade.categoryFilter.set($event)"
-        >
-          <option value="">All categories</option>
-          @for (option of facade.categoryOptions(); track option.slug) {
-            <option [value]="option.slug">{{ option.name }}</option>
-          }
-        </select>
-      </label>
-
-      <label class="field-inline">
-        <span class="label">Status</span>
-        <select
-          name="assetStatusFilter"
-          [ngModel]="facade.statusFilter()"
-          (ngModelChange)="facade.statusFilter.set($event)"
-        >
-          <option value="all">Any status</option>
-          <option value="active">Active</option>
-          <option value="deactivated">Deactivated</option>
-        </select>
-      </label>
-
-      <label class="field-inline">
-        <span class="label">Streaming</span>
-        <select
-          name="assetStreamingFilter"
-          [ngModel]="facade.streamingFilter()"
-          (ngModelChange)="facade.streamingFilter.set($event)"
-        >
-          <option value="all">Any</option>
-          <option value="streaming">Streaming</option>
-          <option value="offline">Offline</option>
-        </select>
-      </label>
-
-      <label class="row toggle">
-        <input
-          type="checkbox"
-          name="showArchived"
-          [ngModel]="facade.showArchived()"
-          (ngModelChange)="facade.toggleShowArchived()"
-        />
-        <span>Show archived</span>
-      </label>
-
-      @if (facade.hasActiveFilters()) {
-        <button type="button" class="btn secondary small" (click)="clearFilters()">Clear filters</button>
+    <select
+      pageBarFilters
+      name="assetCategoryFilter"
+      class="asset-filter"
+      aria-label="Filter by category"
+      [ngModel]="facade.categoryFilter()"
+      (ngModelChange)="facade.categoryFilter.set($event)"
+    >
+      <option value="">All categories</option>
+      @for (option of facade.categoryOptions(); track option.slug) {
+        <option [value]="option.slug">{{ option.name }}</option>
       }
-    </div>
-  </section>
+    </select>
+
+    <select
+      pageBarFilters
+      name="assetStatusFilter"
+      class="asset-filter"
+      aria-label="Filter by status"
+      [ngModel]="facade.statusFilter()"
+      (ngModelChange)="facade.statusFilter.set($event)"
+    >
+      <option value="all">Any status</option>
+      <option value="active">Active</option>
+      <option value="deactivated">Deactivated</option>
+    </select>
+
+    <select
+      pageBarFilters
+      name="assetStreamingFilter"
+      class="asset-filter"
+      aria-label="Filter by streaming"
+      [ngModel]="facade.streamingFilter()"
+      (ngModelChange)="facade.streamingFilter.set($event)"
+    >
+      <option value="all">Any streaming</option>
+      <option value="streaming">Streaming</option>
+      <option value="offline">Offline</option>
+    </select>
+
+    <label class="row toggle" pageBarFilters>
+      <input
+        type="checkbox"
+        name="showArchived"
+        [ngModel]="facade.showArchived()"
+        (ngModelChange)="facade.toggleShowArchived()"
+      />
+      <span>Show archived</span>
+    </label>
+
+    @if (facade.hasActiveFilters()) {
+      <button pageBarFilters type="button" class="btn secondary small" (click)="clearFilters()">Clear filters</button>
+    }
+
+    <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      (click)="facade.refreshAll()"
+      [disabled]="facade.fleet.loading()"
+    >
+      Refresh
+    </button>
+  </vision-page-bar>
 
   <!-- ---- Assets: the grid ---------------------------------------------------------------------- -->
   <section class="card">
-    <header>
-      <h2>Assets</h2>
-      <span class="muted">{{ facade.assetRows().length }} of {{ facade.assets().length }} asset(s)</span>
-    </header>
+    <!-- The bar's own count chip already answers "how many"; this line keeps the one piece of
+         information the chip can't — how the current filter narrows the full fleet — so it stays,
+         fixed to real pluralisation instead of the old "asset(s)" placeholder text. -->
+    <div class="muted assets-shown">{{ facade.assetRows().length }} of {{ pluralize(facade.assets().length, 'asset') }}</div>
 
     @if (facade.assetRows().length === 0) {
       @if (facade.hasAnyAssets()) {
@@ -149,7 +146,7 @@
               }
             </div>
 
-            <div class="asset-card-meta muted">{{ row.deviceCount }} device(s)</div>
+            <div class="asset-card-meta muted">{{ pluralize(row.deviceCount, 'device') }}</div>
 
             <div class="asset-card-actions">
               @if (!row.archived && row.watchDeviceId) {

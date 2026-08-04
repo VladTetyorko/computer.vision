@@ -1,11 +1,15 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1><vision-icon name="category" [size]="24" />Asset categories</h1>
-      <p>Every category assets are grouped by, with live counts.</p>
-    </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/14-categories.md: `page-head` is gone; the
+       subtitle carries genuine instruction so it becomes a `hint` rather than being deleted (see
+       this file's own class doc comment). -->
+  <vision-page-bar
+    title="Asset categories"
+    icon="category"
+    hint="Every category assets are grouped by, with live counts."
+  >
     @if (facade.hasAny()) {
       <input
+        pageBarFilters
         type="search"
         class="categories-search"
         placeholder="Search categories…"
@@ -14,7 +18,7 @@
         (ngModelChange)="facade.searchQuery.set($event)"
       />
     }
-  </div>
+  </vision-page-bar>
 
   <vision-notice icon="help">
     Creating and editing categories is coming — browsing and filtering assets by category already

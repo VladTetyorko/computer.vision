@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { OrgSettingsFacade } from './org-settings-facade';
 
 /**
@@ -19,10 +20,23 @@ import { OrgSettingsFacade } from './org-settings-facade';
  * Reuses the existing management-page look wholesale (`.page`/`.card`/`.btn`/`.chip`/`.segmented`/
  * `.empty`), no new colors. Responsive: the page is a single scrolling column of cards; each list row
  * and each form wraps rather than overflowing on a narrow viewport (see `org-settings.css`).
+ *
+ * **Page bar (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/12-org.md, wave 2).** The old
+ * description was two sentences doing two different jobs: "Manage the people and groups in your
+ * organization" only restated what the title "Organization" already says, so it's deleted outright;
+ * "Grants are limited to your own scope" is a genuine, non-obvious fact about how this page behaves,
+ * so it survives as the bar's `hint`. The `Users | Groups` segmented toggle moves into
+ * `[pageBarFilters]` — it filters which list is showing, the same job every other page's filter slot
+ * does — and the count chip now answers "how many" for whichever section is active
+ * (`OrgSettingsFacade.barCount`/`barCountNoun`). **The invite-form-in-a-modal, the `/org/users` +
+ * `/org/groups` route split, and the `?sel=` side panel are Wave 3** (that design doc's own table) —
+ * this wave only touches the header, the segmented toggle's new home, and the 5-field invite row's
+ * control widths (`--field-sm`/`--field-md`, `org-settings.html`) so `GROUP` stops matching `EMAIL`'s
+ * width for a value a fraction as long.
  */
 @Component({
   selector: 'vision-org-settings',
-  imports: [FormsModule, EmptyState],
+  imports: [FormsModule, EmptyState, PageBar],
   templateUrl: './org-settings.html',
   styleUrl: './org-settings.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

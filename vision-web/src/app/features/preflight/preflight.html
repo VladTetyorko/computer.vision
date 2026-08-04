@@ -1,10 +1,30 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1><vision-icon name="list" [size]="24" />Pre-flight checklist</h1>
-      <p>The live status card for any drone — video feed, telemetry link, GPS fix, battery, armable.</p>
-    </div>
-  </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/17-preflight.md — `page-head` becomes the
+       bar; the old paragraph carried real instruction (what the page is a live view *of*), so it
+       moves behind the `?` hint rather than being dropped. The `DRONE` select keeps its job (this
+       page's fleet-matrix rewrite is 17-preflight.md's own wave-4 scope, out of this task) but now
+       rides `[pageBarFilters]`, gated the same way it always was — only once there's a fleet to
+       pick from. -->
+  <vision-page-bar
+    title="Pre-flight checklist"
+    icon="list"
+    hint="The live status card for any drone — video feed, telemetry link, GPS fix, battery, armable."
+  >
+    @if (!facade.loading() && !facade.error() && facade.hasAnyAssets()) {
+      <label pageBarFilters class="row preflight-picker">
+        <span class="muted">Drone</span>
+        <select
+          aria-label="Choose a drone"
+          [ngModel]="facade.selectedAssetId()"
+          (ngModelChange)="facade.selectAsset($event)"
+        >
+          @for (asset of facade.sortedAssets(); track asset.assetId) {
+            <option [value]="asset.assetId">{{ asset.displayName }}</option>
+          }
+        </select>
+      </label>
+    }
+  </vision-page-bar>
 
   <vision-notice icon="help">
     Saved, editable checklist templates are coming — the card below is today's live status only.
@@ -22,19 +42,6 @@
     </vision-empty>
   } @else {
     <div class="card preflight-card">
-      <label class="preflight-picker">
-        <span class="label">Drone</span>
-        <select
-          aria-label="Choose a drone"
-          [ngModel]="facade.selectedAssetId()"
-          (ngModelChange)="facade.selectAsset($event)"
-        >
-          @for (asset of facade.sortedAssets(); track asset.assetId) {
-            <option [value]="asset.assetId">{{ asset.displayName }}</option>
-          }
-        </select>
-      </label>
-
       <vision-preflight-checklist [items]="facade.preflightItems()" />
     </div>
   }

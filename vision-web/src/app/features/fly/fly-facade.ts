@@ -16,6 +16,7 @@ import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-log
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
+import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import type { BoxesMode, Transport } from '../../shared/player/player';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import {
@@ -414,7 +415,7 @@ export class FlyFacade {
       this.pickerAssets.set(assets);
       this.pickerError.set(false);
       const resolved = resolveActiveAssetId(assets, requestedAssetId, this.settings.flyAssetId());
-      console.info(`${LOG_PREFIX} picker loaded ${assets.length} asset(s)`, {
+      console.info(`${LOG_PREFIX} picker loaded ${pluralize(assets.length, 'asset')}`, {
         requestedAssetId,
         rememberedAssetId: this.settings.flyAssetId(),
         resolved,

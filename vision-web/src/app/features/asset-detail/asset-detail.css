@@ -16,23 +16,10 @@
     height: 12rem;
 }
 
-/* ---- Header ------------------------------------------------------------------------------- */
-
-.header-identity {
-    align-items: flex-start;
-}
-
-/* Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3) — shown only when `hasImage` and the fetch
-   hasn't 404'd (`AssetDetailPage#assetImageSrc`/`onImageError`). */
-.asset-photo {
-    width: 4.5rem;
-    height: 4.5rem;
-    object-fit: cover;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--panel-raised);
-    flex: none;
-}
+/* ---- Header (docs/NAV-IA-REDESIGN-PLAN.md §2.2) -------------------------------------------- */
+/* The identity chips (`.header-chips` in asset-detail.html) ride `<vision-page-bar>`'s own
+   `[pageBarFilters]` slot with no extra local CSS — the shared `.row` class (src/styles.css)
+   already supplies the flex row + gap, and that slot's own `page-bar.css` handles wrapping. */
 
 .edit-asset input {
     max-width: 22rem;
@@ -333,6 +320,16 @@ td.actions {
 .inline-form.column {
     flex-direction: column;
     align-items: stretch;
+}
+
+/* Pre-existing bug surfaced by browser verification while moving this exact form under the new
+   page bar (docs/NAV-IA-REDESIGN-PLAN.md §2.2): `.inline-form input`'s `flex: 1 1 12rem` sets the
+   flex-basis along the *main* axis, which `.inline-form.column` switches to vertical — so the
+   basis was being read as a 12rem (192px) height, not the intended 12rem width, ballooning the
+   rename form's two inputs into giant boxes. `.edit-asset` is the only `.inline-form.column` user
+   (asset-detail.html), so this is scoped to it, not a global rule change. */
+.inline-form.column input {
+    flex: none;
 }
 
 .inline-confirm span {

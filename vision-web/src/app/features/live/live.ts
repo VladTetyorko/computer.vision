@@ -9,6 +9,7 @@ import { LiveMap } from '../../shared/map/live-map/live-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { Notice } from '../../shared/ui/notice';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { LiveFacade } from './live-facade';
 
 /**
@@ -19,10 +20,14 @@ import { LiveFacade } from './live-facade';
  * unchanged) so the facade and this page's child components (`<vision-telemetry-osd>`,
  * `<vision-detections-strip>`, `<vision-live-map>`, `<vision-stream-info>`) keep DI-sharing the
  * exact same store instances as before this refactor.
+ *
+ * **Header** (docs/NAV-IA-REDESIGN-PLAN.md §2.2): `page-head` is now `<vision-page-bar>`, titled
+ * with the device's own name (this page has no nav entry/canonical icon of its own — it's a
+ * drill-down from Devices/Wall/Command, not a sidebar destination, so `icon` is omitted).
  */
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip, StreamInfoPanel, Notice, EmptyState],
+  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip, StreamInfoPanel, Notice, EmptyState, PageBar],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

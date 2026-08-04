@@ -10,6 +10,7 @@ import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { Icon } from '../../shared/ui/icon';
 import { IconButton } from '../../shared/ui/icon-button';
 import { SidePanel } from '../../shared/ui/side-panel';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
 import { PreflightChecklist } from './preflight-checklist';
@@ -78,6 +79,7 @@ type FlyDialog = 'stop';
     Icon,
     IconButton,
     SidePanel,
+    PageBar,
     FlyOsd,
     FailsafeBanner,
     PreflightChecklist,

@@ -1,12 +1,12 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Wall</h1>
-      <p>Every running stream at once. Tiles off-screen stop decoding to keep the visible ones smooth.</p>
-    </div>
-
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/03-wall.md — `page-head` (title + a two-line
+       "how this works" paragraph) becomes the bar; per 03-wall.md the description is redundant
+       once "Wall" + a live count says the same thing, so it is deleted outright rather than moved
+       behind a `?` hint. `Tiles per row` moves into `[pageBarFilters]` unchanged — the density
+       segmented control this select is slated to become is wave 3/4 scope, out of this task. -->
+  <vision-page-bar title="Wall" icon="grid" [count]="facade.tiles().length" countNoun="stream">
     @if (facade.tiles().length > 0) {
-      <label class="row density">
+      <label pageBarFilters class="row density">
         <span class="muted">Tiles per row</span>
         <select [value]="facade.settings.wallDensity()" (change)="facade.setDensity($any($event.target).value)">
           @for (density of facade.densities; track density) {
@@ -15,11 +15,11 @@
         </select>
       </label>
     }
-  </div>
+  </vision-page-bar>
 
   @if (facade.unwatchable() > 0) {
     <vision-notice variant="warn">
-      {{ facade.unwatchable() }} stream(s) are running without a publisher URL — nothing to watch until
+      {{ pluralize(facade.unwatchable(), 'stream') }} running without a publisher URL — nothing to watch until
       mediamtx is reachable and <code>vision.publish.enabled</code> is true.
     </vision-notice>
   }

@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Icon } from '../../shared/ui/icon';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { PilotsCard } from '../asset-detail/pilots-card';
 import { RosterFacade } from './roster-facade';
 import type { RosterRow } from './roster-logic';
@@ -24,10 +25,18 @@ import type { RosterRow } from './roster-logic';
  * same `<vision-pilots-card>` the asset detail page's own Pilots drawer uses — add/remove is
  * byte-for-byte that component's existing logic, not reimplemented here. Honest states: distinct
  * loading / "couldn't load" (with retry) / no assets yet / no assets match the search.
+ *
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/13-roster.md):
+ * the subtitle carries real instruction (the accordion's expand-to-edit interaction isn't obvious
+ * from the title), so it moves to the bar's `hint` rather than being deleted. The search input moves
+ * into `[pageBarFilters]`. The count chip is new — this page previously showed no number anywhere —
+ * and reads the same `rows()` the accordion renders, not a fleet-level pilot/gap summary
+ * (docs/design/13-roster.md's `By asset | By pilot` pivot and "N asset(s) with no pilot" indicator
+ * are the Wave 3 rewrite this task explicitly leaves alone).
  */
 @Component({
   selector: 'vision-roster',
-  imports: [FormsModule, RouterLink, Icon, EmptyState, PilotsCard],
+  imports: [FormsModule, RouterLink, PageBar, Icon, EmptyState, PilotsCard],
   templateUrl: './roster.html',
   styleUrl: './roster.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

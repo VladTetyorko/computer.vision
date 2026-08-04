@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { ActivityFacade } from './activity-facade';
 
 /**
@@ -13,10 +14,17 @@ import { ActivityFacade } from './activity-facade';
  * `ActivityFacade`, which this component injects exclusively. Honest states — a distinct "loading",
  * "couldn't load" (with the reason), and an empty invitation, never a blank list masquerading as "no
  * activity". Responsive: a single scrolling column of rows that wrap on a narrow viewport (`activity.css`).
+ *
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/09-activity.md):
+ * the subtitle ("The changes you've made recently, newest first.") is deleted outright — "My
+ * activity" already says it. No filters/actions exist yet (the `Mine | Everyone` scope toggle and
+ * type/date filters docs/design/09-activity.md proposes are Wave 3 — this page has neither a
+ * `?scope=` param nor day-grouping today, so nothing to relocate beyond the header itself); the count
+ * chip is new, filling a bar slot the old page never had any number in at all.
  */
 @Component({
   selector: 'vision-activity',
-  imports: [EmptyState],
+  imports: [PageBar, EmptyState],
   templateUrl: './activity.html',
   styleUrl: './activity.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

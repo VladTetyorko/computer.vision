@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { SettingsFacade } from './settings-facade';
 
 /**
@@ -11,9 +12,19 @@ import { SettingsFacade } from './settings-facade';
  *
  * Dumb by convention (docs/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation/derivation lives in
  * `SettingsFacade`, which this component injects exclusively.
+ *
+ * **Page bar + centered form (docs/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3, docs/design/11-settings.md,
+ * wave 2).** `page-head`'s own description ("Presets first, knobs behind them, raw values behind
+ * those…") is genuinely instructional, not a restatement of the title, so it survives as the bar's
+ * `hint` rather than being deleted outright. `.page--form` centers the whole page at 880px — this is
+ * a reading-and-deciding page, not a scanning one, per the design doc's own framing. **The Interface/
+ * Notifications vs. Detection-profile split into `/settings`/`/settings/detection` is Wave 4** (that
+ * design doc's own table); this wave only touches the header and the surrounding column width, the
+ * single combined page is otherwise unchanged.
  */
 @Component({
   selector: 'vision-settings',
+  imports: [PageBar],
   templateUrl: './settings.html',
   styleUrl: './settings.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

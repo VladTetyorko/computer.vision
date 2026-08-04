@@ -46,9 +46,12 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it('every hub launcher route itself resolves', () => {
+  it("/operate, /monitor, /manage no longer have their own page — each redirects to its mode's primaryRoute (docs/design/19-hubs.md, docs/NAV-IA-REDESIGN-PLAN.md F1/F10)", () => {
+    expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual(['/fly', '/command', '/assets']);
     for (const mode of NAV_MODES) {
-      expect(routeExists(flat, mode.hubRoute), mode.hubRoute).toBe(true);
+      const hubPath = `/${mode.id}`;
+      expect(routeExists(flat, hubPath), hubPath).toBe(true);
+      expect(flattenRoutes(routes).find((route) => route.path === hubPath)?.kind, hubPath).toBe('redirect');
     }
   });
 
@@ -83,8 +86,11 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it('the new /monitor/replay path (F4-pinned "Replay library" target) resolves', () => {
-    expect(routeExists(flat, '/monitor/replay')).toBe(true);
+  it('/monitor/replay resolves to the ComingSoon scaffold, not ReplayPage (docs/NAV-IA-REDESIGN-PLAN.md F8 — it no longer redirects through the bare /replay route)', async () => {
+    const route = findRouteByPath(routes, 'monitor/replay');
+    expect(route?.loadComponent, '/monitor/replay').toBeDefined();
+    const component = (await route!.loadComponent!()) as { name: string };
+    expect(component.name.endsWith('ComingSoon'), `/monitor/replay: got "${component.name}"`).toBe(true);
   });
 
   it('the new /assets grid (split out of the old combined Devices page) resolves, as a sibling of /assets/:assetId', () => {
@@ -100,7 +106,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
   });
 
   it('every remaining pure-scaffold ComingSoon path resolves', () => {
-    const scaffolds = ['/operate/missions', '/monitor/layouts', '/manage/health', '/manage/firmware'];
+    const scaffolds = ['/operate/missions', '/monitor/replay', '/monitor/layouts', '/manage/health', '/manage/firmware'];
     for (const path of scaffolds) {
       expect(routeExists(flat, path), path).toBe(true);
     }

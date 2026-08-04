@@ -1,13 +1,13 @@
 <div class="page">
   <vision-section-header
-    eyebrow="Manage"
     title="CV model registry"
     subtitle="Every model cv-service currently knows about. Promote one to make it the live default for new detections."
   >
-    <div actions>
-      <a routerLink="/manage/training" class="btn secondary small">Datasets</a>
-      <a routerLink="/manage" class="btn secondary small">Back to Manage</a>
-    </div>
+    @if (!facade.disabled()) {
+      <div actions>
+        <a routerLink="/manage/training" class="btn secondary small">Datasets</a>
+      </div>
+    }
   </vision-section-header>
 
   @if (facade.disabled()) {

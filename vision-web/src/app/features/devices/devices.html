@@ -1,69 +1,64 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Devices</h1>
-      <p>
-        The raw device table — every registered source, its lifecycle, and who owns it. Looking for
-        an asset instead? Assets live on their own page now.
-      </p>
-    </div>
-    <div class="row">
-      <label class="row toggle">
-        <input
-          type="checkbox"
-          name="showArchived"
-          [ngModel]="facade.showArchived()"
-          (ngModelChange)="facade.toggleShowArchived()"
-        />
-        <span>Show archived</span>
-      </label>
-      <button type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
-      <button type="button" class="btn secondary" (click)="facade.refreshAll()" [disabled]="facade.fleet.loading()">
-        Refresh
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/06-devices.md: `page-head` and its own
+       toolbar row are gone — search, the List/Grid toggle, and the archived toggle project into
+       `[pageBarFilters]`; `+ Add source`/`Refresh` into `[pageBarActions]`. Both subtitle sentences
+       are deleted (see this file's own class doc comment for why). -->
+  <vision-page-bar title="Devices" icon="chip" [count]="facade.warehouseRows().length" countNoun="device">
+    <input
+      pageBarFilters
+      type="search"
+      name="deviceSearch"
+      class="device-search"
+      placeholder="Search by name, protocol, URI, or owning asset…"
+      aria-label="Search devices"
+      [ngModel]="facade.searchQuery()"
+      (ngModelChange)="facade.searchQuery.set($event)"
+    />
+    <div class="segmented" pageBarFilters role="group" aria-label="View">
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="viewMode() === 'list'"
+        [attr.aria-pressed]="viewMode() === 'list'"
+        (click)="setViewMode('list')"
+      >
+        <vision-icon name="list" [size]="16" />
+        List
+      </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="viewMode() === 'grid'"
+        [attr.aria-pressed]="viewMode() === 'grid'"
+        (click)="setViewMode('grid')"
+      >
+        <vision-icon name="grid" [size]="16" />
+        Grid
       </button>
     </div>
-  </div>
+    <label class="row toggle" pageBarFilters>
+      <input
+        type="checkbox"
+        name="showArchived"
+        [ngModel]="facade.showArchived()"
+        (ngModelChange)="facade.toggleShowArchived()"
+      />
+      <span>Show archived</span>
+    </label>
+
+    <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      (click)="facade.refreshAll()"
+      [disabled]="facade.fleet.loading()"
+    >
+      Refresh
+    </button>
+  </vision-page-bar>
 
   <section class="card">
-    <div class="toolbar-row">
-      <input
-        type="search"
-        name="deviceSearch"
-        class="device-search"
-        placeholder="Search by name, protocol, URI, or owning asset…"
-        aria-label="Search devices"
-        [ngModel]="facade.searchQuery()"
-        (ngModelChange)="facade.searchQuery.set($event)"
-      />
-      <div class="segmented" role="group" aria-label="View">
-        <button
-          type="button"
-          class="btn secondary small"
-          [class.active]="viewMode() === 'list'"
-          [attr.aria-pressed]="viewMode() === 'list'"
-          (click)="setViewMode('list')"
-        >
-          <vision-icon name="list" [size]="16" />
-          List
-        </button>
-        <button
-          type="button"
-          class="btn secondary small"
-          [class.active]="viewMode() === 'grid'"
-          [attr.aria-pressed]="viewMode() === 'grid'"
-          (click)="setViewMode('grid')"
-        >
-          <vision-icon name="grid" [size]="16" />
-          Grid
-        </button>
-      </div>
-    </div>
-
-    <header>
-      <h2>Registered devices</h2>
-      <span class="muted">{{ facade.warehouseRows().length }} device(s)</span>
-    </header>
-
     @if (facade.warehouseRows().length === 0) {
       @if (facade.hasAnyDevices()) {
         <vision-empty title="No devices match" message="Nothing currently matches this search.">

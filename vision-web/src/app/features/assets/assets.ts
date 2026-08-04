@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { operatorAssetActions, type ActionAvailability } from '../../core/fleet/warehouse-logic';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { AssetsFacade } from './assets-facade';
 import type { AssetListRow } from './assets-logic';
 
@@ -25,10 +25,19 @@ import type { AssetListRow } from './assets-logic';
  * only the route-bound `category` input (only a component can receive one) and the single
  * constructor `effect()` that forwards it into the facade's `categoryFilter`, plus a couple of pure,
  * stateless label/action-list helpers with no injected dependency of their own.
+ *
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/04-assets.md):
+ * the old subtitle — two lines ending in a prose link to `/devices` — is deleted outright rather than
+ * moved to a `hint`, both because "Assets" needs no explanation and because that link was a second
+ * door to a page the sidebar already lists under `⌄ Advanced` (F7). The search/category/status/
+ * streaming filters and the archived toggle, previously boxed in their own `.asset-toolbar` card,
+ * now project into the bar's `[pageBarFilters]` slot; `+ Add source`/`Refresh` project into
+ * `[pageBarActions]`. Wave 2 stops there — the two-pane list/detail rework `docs/design/04-assets.md`
+ * describes is Wave 3, out of this task's scope.
  */
 @Component({
   selector: 'vision-assets',
-  imports: [FormsModule, RouterLink, KebabMenu, EmptyState],
+  imports: [FormsModule, PageBar, KebabMenu, EmptyState],
   templateUrl: './assets.html',
   styleUrl: './assets.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -42,6 +51,10 @@ export class AssetsPage {
   readonly category = input<string | undefined>(undefined);
 
   protected readonly facade = inject(AssetsFacade);
+
+  /** Bound for the template — see `pluralize`'s own doc comment (`shared/ui/page-bar/page-bar.ts`)
+   *  for why this is the one place `asset(s)`/`device(s)`-style pluralisation gets fixed from. */
+  protected readonly pluralize = pluralize;
 
   constructor() {
     // Seeds/updates the facade's category filter from the query param — re-navigating here with a

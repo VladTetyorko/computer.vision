@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Icon } from '../../shared/ui/icon';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { type Device } from '../../core/api/models';
 import type { SimulatedDeviceInfo } from './simulate-logic';
 import { DevicesFacade } from './devices-facade';
@@ -37,10 +38,18 @@ type DeviceViewMode = 'list' | 'grid';
  * the create-asset panel's own open/cancel + drafts (`createAssetFor`/`createAssetName`/
  * `createAssetCategory`/`createAssetSubmitting`, submitting through the facade); and a handful of
  * pure, stateless label/action-list helpers.
+ *
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/06-devices.md):
+ * both old subtitle sentences are deleted outright — "Devices" needs no explanation, and the second
+ * ("Looking for an asset instead? …") was migration signage left over from the Assets/Devices split
+ * that had already outlived its purpose. Search, the List/Grid toggle, and the archived toggle move
+ * into `[pageBarFilters]`; `+ Add source`/`Refresh` into `[pageBarActions]`. The card's own
+ * `Registered devices` header is dropped too — it repeated the page title and the bar's own count
+ * chip now carries the number it used to show.
  */
 @Component({
   selector: 'vision-devices',
-  imports: [FormsModule, Icon, KebabMenu, EmptyState],
+  imports: [FormsModule, Icon, PageBar, KebabMenu, EmptyState],
   templateUrl: './devices.html',
   styleUrl: './devices.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

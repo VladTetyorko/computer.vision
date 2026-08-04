@@ -1,9 +1,10 @@
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, ElementRef, effect, inject, input, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ReplayMap } from './replay-map';
+import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { ReplayFacade } from './replay-facade';
-import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs } from './replay-logic';
+import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDensityBucket } from './replay-logic';
 
 /**
  * The flight-replay cockpit (`/assets/:assetId/replay/:usageId`, docs/MVP2-PLAN.md §R, R-b) — the
@@ -30,7 +31,7 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs } from './replay-l
  */
 @Component({
   selector: 'vision-replay',
-  imports: [FormsModule, RouterLink, ReplayMap],
+  imports: [FormsModule, RouterLink, ReplayMap, PageBar],
   templateUrl: './replay.html',
   styleUrl: './replay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -47,6 +48,18 @@ export class ReplayPage {
   readonly deepLinkOffsetParam = input<string | undefined>(undefined, { alias: 't' });
 
   protected readonly facade = inject(ReplayFacade);
+
+  /**
+   * `<vision-page-bar>`'s `crumb` (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — replaces the old inline
+   * `← {{ asset displayName }}` back-link. `facade.backLink()` is a route-segment array
+   * (`['/assets', id]` or `['/command']`, the deep link's own degraded-path fallback); `crumb.to`
+   * is a plain `string`, so this joins it the same way `RouterLink` would resolve it — safe here
+   * because the first segment always starts with `/`, so `join('/')` never doubles a slash.
+   */
+  protected readonly crumb = computed<PageBarCrumb>(() => ({
+    label: this.facade.asset()?.displayName ?? 'Back',
+    to: this.facade.backLink().join('/'),
+  }));
 
   private readonly videoEl = viewChild<ElementRef<HTMLVideoElement>>('recordingVideo');
   /**
@@ -118,5 +131,11 @@ export class ReplayPage {
   /** A genuinely-missing recording segment (recording enabled after this flight happened, etc.) — falls back to the empty state, never a broken player. */
   protected onVideoError(): void {
     this.facade.videoErrored.set(true);
+  }
+
+  /** The scrub bar's per-bucket density marker tooltip — `pluralize` fixes the old literal
+   *  `N detection(s)` placeholder (docs/NAV-IA-REDESIGN-PLAN.md §2.2's pluralisation sweep). */
+  protected bucketTitle(bucket: DetectionDensityBucket): string {
+    return `${pluralize(bucket.count, 'detection')} near ${this.facade.clockLabel(bucket.atMs)}`;
   }
 }

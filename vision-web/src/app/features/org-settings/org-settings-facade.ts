@@ -25,6 +25,15 @@ export class OrgSettingsFacade {
   /** The group hierarchy pre-flattened for the template (`@for` can't recurse) — depth drives the indent. */
   readonly flatGroups = computed(() => flattenGroupTree(this.org.groupTree()));
 
+  /**
+   * The page bar's count chip (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — "how many" for whichever section
+   * is showing, so it answers before the eye reaches the list below, same as every other migrated
+   * page's `[count]`. Tab-dependent rather than always "users": a Groups count next to "Organization"
+   * while looking at the group tree would be answering the wrong question.
+   */
+  readonly barCount = computed(() => (this.tab() === 'users' ? this.org.users().length : this.org.groups().length));
+  readonly barCountNoun = computed(() => (this.tab() === 'users' ? 'user' : 'group'));
+
   // --- Invite-user form ------------------------------------------------------------------------
   readonly newUsername = signal('');
   readonly newDisplayName = signal('');

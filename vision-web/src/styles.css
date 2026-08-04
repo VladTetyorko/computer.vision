@@ -177,7 +177,35 @@
     --space-48: 3rem;     /* 48px */
     --space-64: 4rem;     /* 64px */
 
-    --header-height: 52px;
+    /* Field-width tokens (docs/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3, docs/design/07-add-source.md) —
+       every text input/select used to inherit the same bare `width: 100%` below as its parent
+       `.field`/`.card`, which is honest inside a form no wider than its own content but absurd once
+       `.page--form`'s 880px column (or a fluid page's full width) is that parent: a 6-character tail
+       number wound up ~1075px wide (`/add-source`'s own headline F4 finding). These size a *control*
+       to its plausible value, independent of how wide its container happens to be — three buckets,
+       not a token per field, so every page picks the same three sizes the same way. `ch` (not `rem`)
+       on purpose: it tracks the font's own average character width, so the bucket stays "N characters
+       wide" across the two registers this app's inputs render in. */
+    --field-sm: 20ch; /* short codes: tail number, HTTP method, a role/enum select */
+    --field-md: 40ch; /* names, emails, single-line free text */
+    --field-lg: 100%; /* URIs, paths, the debug console's own request path — genuinely open-ended */
+
+    /* Sidebar (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md) — the persistent left
+       nav's own two widths (`shared/ui/app-sidebar/**`); `--header-height` (the old sticky top bar's
+       height) is deleted, not renamed — there is no header any more, and no other file referenced
+       that token (grep-verified before removal). */
+    --sidebar-w: 240px;
+    --sidebar-w-rail: 56px;
+    /* A *new*, distinct breakpoint (1024px) for the sidebar's own docked/rail transition —
+       deliberately NOT named `--bp-md` even though docs/NAV-IA-REDESIGN-PLAN.md's own prose names it
+       that: `--bp-md` already exists below (docs/UI-REDESIGN-PLAN.md Wave 0) at 900px and backs
+       ~10 other files' own breakpoints (the asset grid collapse, the cockpit map inset, `command.css`,
+       `fly.css`, `live.css`, `replay.css`, `debug.css`, `tile-grid.ts`, …) — redefining its value
+       here would silently change what every one of those already means without touching any of them.
+       `--sidebar-bp` is scoped to exactly what it names; only `shared/ui/app-sidebar/app-sidebar.css`
+       reads it (as a hardcoded `1024px` in its own `@media`, per the note just below on why `@media`
+       can't read `var()` — the same convention every other breakpoint token here already follows). */
+    --sidebar-bp: 1024px;
 }
 
 * {
@@ -237,10 +265,15 @@ a {
 
 /* ---- Layout primitives -------------------------------------------------- */
 
+/* Fluid (docs/NAV-IA-REDESIGN-PLAN.md §2.3) — the old `max-width: 1400px` centered column dates
+   from when every page sat under a full-width top header with nothing else claiming horizontal
+   space; now that a docked sidebar already reserves its own `--sidebar-w`, capping content width a
+   second time inside `<main>` left real dead space on wide viewports (F4's own walkthrough numbers:
+   `/assets` used ~14% of a 1854px viewport). `max-width: none` + generous side padding lets every
+   list/grid page use the room it actually has; a page that genuinely wants a centered column
+   (`/add-source`, `/settings`) opts in with `.page--form` below instead of this being the default. */
 .page {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: var(--space-24) var(--space-24) var(--space-64);
+    padding: var(--space-24) var(--space-32) var(--space-64);
 }
 
 .page-head {
@@ -256,7 +289,39 @@ a {
     margin: var(--space-4) 0 0;
     color: var(--text-muted);
     font-size: 0.85rem;
+    /* Prose keeps its measure even on a fluid page (docs/NAV-IA-REDESIGN-PLAN.md §2.3) — unchanged
+       from before this task; only `.page` itself lost its own outer cap. */
     max-width: 62ch;
+}
+
+/* Opt-in centered column (docs/NAV-IA-REDESIGN-PLAN.md §2.3) for pages that genuinely want one — a
+   form, a settings screen — now that `.page` itself is fluid by default. Not consumed by any page
+   yet (Wave 1a's own scope is the shell only); a later wave applies it to `/add-source`/`/settings`,
+   which also fixes the 1075px-wide "display name" input the plan's own F4 flagged on `/add-source`. */
+.page--form {
+    max-width: 880px;
+    margin-inline: auto;
+}
+
+/* Field-width buckets (docs/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3) — applied directly to an
+   `<input>`/`<select>`, not its wrapping `.field` div, so they override the bare `width: 100%` every
+   control gets below without disturbing that div's own layout (label stacking, grid spanning, etc.).
+   A plain class selector already outranks the element selector `input, select, textarea { width:
+   100% }` by specificity, so no `!important` is needed. `max-width: 100%` on every bucket is what
+   lets a `ch`-sized control still shrink to fit a phone-width column instead of overflowing it. */
+.field-sm {
+    width: var(--field-sm);
+    max-width: 100%;
+}
+
+.field-md {
+    width: var(--field-md);
+    max-width: 100%;
+}
+
+.field-lg {
+    width: var(--field-lg);
+    max-width: 100%;
 }
 
 .card {
@@ -946,16 +1011,15 @@ tbody tr:last-child td {
   }
 }
 
-/* App-level page grid: `<main>` gets a max-width container so a route rendering directly into it
-   (no `.page` wrapper of its own) still reads at a sane line length on an ultra-wide display.
-   `.page` keeps working unchanged — its own identical 1400px cap just nests inertly inside this one
-   (same value, so no visual change). Excluded via `:has()` rather than a class on `<main>` itself,
-   since `app.html` is out of this wave's file scope (Wave 1 owns it) — this app's two existing
-   full-bleed shells must keep owning the entire viewport exactly as before: `features/fly/fly.css`'s
-   `.cockpit` (edge-to-edge video hero) and `features/command/command.css`'s `.command-shell`
-   (edge-to-edge map dashboard). Re-audit this selector's two named classes if either is ever
-   renamed — a stale selector here would silently stop excluding the shell it names. */
-main:not(:has(> .cockpit, > .command-shell)) {
-  max-width: 1400px;
-  margin: 0 auto;
-}
+/* The `main:not(:has(> .cockpit, > .command-shell)) { max-width: 1400px; margin: 0 auto; }` rule
+   that used to live here (docs/UI-REDESIGN-PLAN.md Wave 0) is deleted, not updated
+   (docs/NAV-IA-REDESIGN-PLAN.md §2.1/§2.3) — it dated from when `<main>` was a plain in-flow block,
+   where `margin: 0 auto` on a `max-width` box is the ordinary way to center a column. `<main>` is
+   now a **grid item** of `app.css`'s own `:host { display: grid }` shell; `margin: 0 auto` on a
+   grid item suppresses the item's default `stretch` and shrinks it to `max-content` instead of
+   centering a capped box — confirmed live (not just reasoned about): with this rule still in place,
+   `<main>` measured 912px wide against an available ~1803px grid track, not even the 1400px the
+   rule names. Removing it outright is correct, not just a fix for the sizing bug: the sidebar now
+   provides the horizontal framing this rule used to (`.page` itself is fluid by design, see that
+   class's own comment above), and a page that still wants a centered column opts in explicitly via
+   `.page--form` instead of every route being capped a second time by its container. */

@@ -1,7 +1,8 @@
-.page-head p {
-    display: flex;
+/* The protocol/capability chips riding `<vision-page-bar>`'s own `[pageBarFilters]` slot
+   (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — `.row` (src/styles.css) already supplies the flex row +
+   gap; this only tightens it to match the chip row's old `--space-4` spacing. */
+.device-chips {
     gap: var(--space-4);
-    flex-wrap: wrap;
 }
 
 .layout {

@@ -2,14 +2,15 @@
   display: contents;
 }
 
-/* Fixed right column, docked under the app header — z-index 120 sits above the toast host (100,
-   `shared/ui/toast-host.ts`) so a notification firing while a drawer is open never renders behind
-   it, and below a true modal dialog (150, `shared/ui/confirm-dialog.ts`/
-   `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`) so a confirm prompt opened from inside a
-   drawer (e.g. Arm/Disarm from the flight drawer, Wave 2) still wins. */
+/* Fixed right column, docked to the viewport top (docs/NAV-IA-REDESIGN-PLAN.md — there is no more
+   global header to dock under; the app shell's own nav is a left sidebar now, not a top bar) —
+   z-index 120 sits above the toast host (100, `shared/ui/toast-host.ts`) so a notification firing
+   while a drawer is open never renders behind it, and below a true modal dialog (150,
+   `shared/ui/confirm-dialog.ts`/`shared/map/fleet-plan-dialog/flight-plan-dialog.ts`) so a confirm
+   prompt opened from inside a drawer (e.g. Arm/Disarm from the flight drawer, Wave 2) still wins. */
 .side-panel {
   position: fixed;
-  top: var(--header-height);
+  top: 0;
   right: 0;
   bottom: 0;
   width: min(24rem, 92vw);

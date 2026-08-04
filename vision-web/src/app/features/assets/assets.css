@@ -2,36 +2,19 @@
     font-weight: 500;
 }
 
-/* ---- Toolbar: search + filters (docs UX-REWORK-PLAN §U-d inventory split) ------------------- */
-
-.asset-toolbar {
-    padding: var(--space-16) var(--space-16);
-}
-
-.toolbar-row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-16);
-}
+/* ---- Page-bar filters: search + selects + archived toggle (docs/NAV-IA-REDESIGN-PLAN.md §2.2,
+   docs/design/04-assets.md) — the old `.asset-toolbar` card is gone; every control below now
+   projects into `<vision-page-bar>`'s `[pageBarFilters]` slot. Each one gets an explicit width here
+   because `input, select { width: 100% }` (src/styles.css) would otherwise stretch it to the full
+   page-bar row the moment it wraps onto its own line — the exact "1075px-wide" finding NAV-IA-
+   REDESIGN-PLAN.md F4 flagged for a lone control dropped into a flex row with nothing to size it. */
 
 .asset-search {
-    flex: 1 1 14rem;
-    min-width: 12rem;
+    width: 16rem;
 }
 
-.field-inline {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-}
-
-.field-inline .label {
-    margin: 0;
-}
-
-.field-inline select {
-    min-width: 9rem;
+.asset-filter {
+    width: 9rem;
 }
 
 .toggle {
@@ -45,6 +28,14 @@
 
 .chip.faded {
     background: transparent;
+}
+
+/* ---- Assets: the "N of M" line (docs/design/04-assets.md problem 6 — fixed pluralisation,
+   `pluralize()` shared with the page bar) --------------------------------------------------------- */
+
+.assets-shown {
+    margin-bottom: var(--space-16);
+    font-size: 0.85rem;
 }
 
 /* ---- Assets: the card grid -------------------------------------------------------------------- */

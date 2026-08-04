@@ -1,10 +1,8 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1><vision-icon name="alert" [size]="24" />Alerts center</h1>
-      <p>Recent detection events across the fleet, newest first.</p>
-    </div>
-  </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/08-alerts.md: `page-head` is gone. The
+       label/asset filters and "N events" header stay inside `<vision-events-rail>` — see this
+       page's own class doc comment for why they aren't relocated into the bar this wave. -->
+  <vision-page-bar title="Alerts center" icon="alert" [count]="facade.events.events().length" countNoun="event" />
 
   <vision-notice icon="help">
     Saved alert thresholds and acknowledgement are coming — this feed already streams live via the

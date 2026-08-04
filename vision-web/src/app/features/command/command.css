@@ -1,11 +1,20 @@
-/* ---- Shell — full-bleed below the header (docs/UX-REWORK-PLAN.md §U-c bullet 1/5) -------------
+/* ---- Shell — full-bleed within <main> (docs/UX-REWORK-PLAN.md §U-c bullet 1/5; docs/NAV-IA-REDESIGN-PLAN.md
+   §2.1 for the `height: 100dvh` change) -------------------------------------------------------------
    Mirrors `features/fly/fly.css`'s `.cockpit` — the other page in this app that opts out of the
-   shared `.page` (centered, max-width, padded) wrapper in favor of genuinely filling the viewport
-   below the sticky header. No `box-shadow`/seam fix is needed here the way Fly's needed one: this
-   page's own topbar is opaque and in normal flow (not translucent chrome over a full-bleed video),
-   so there is no hairline-seam class of bug to guard against. */
+   shared `.page` (centered, max-width, padded) wrapper in favor of genuinely filling its container.
+   There is no more global header to subtract: `app.css`'s own `<main>` is a plain block, `height:
+   100dvh; overflow-y: auto`. `100dvh` here too, not `height: 100%` — a percentage needs this page's
+   *entire* ancestor chain up to `<main>` to carry a definite size to resolve at all, and that isn't
+   guaranteed; confirmed live on `.cockpit` (the identical rule, same reasoning, see that file's own
+   updated comment) that `height: 100%` silently fell back to this element's own content-driven
+   `auto` height instead of filling the viewport. A viewport unit needs no parent-chain resolution,
+   sidestepping the bug rather than patching around it. `/command` also carries `data: {fullBleed:
+   true}` (`command.routes.ts`), which auto-collapses the sidebar to its icon rail while this page is
+   active, the same F11 fix Fly's `.cockpit` gets. No `box-shadow`/seam fix is needed here the way
+   Fly's needed one: this page's own topbar is opaque and in normal flow (not translucent chrome over
+   a full-bleed video), so there is no hairline-seam class of bug to guard against. */
 .command-shell {
-  height: calc(100vh - var(--header-height));
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;

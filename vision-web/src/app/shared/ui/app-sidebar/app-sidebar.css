@@ -1,0 +1,518 @@
+/* `:host { display: contents }` mirrors `side-panel.css`'s own precedent — `<vision-app-sidebar>`
+   itself contributes no box; its real root (`.sidebar`) and the mobile scrim/hamburger become direct
+   children of `app.css`'s `:host { display: grid }` shell, which is what lets `.sidebar` occupy the
+   grid's first (`auto`-sized) column without an extra wrapper box in between. */
+:host {
+  display: contents;
+}
+
+.sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  /* `height: 100dvh`, not `height: 100%` — `.sidebar` is a **grid item** of `app.css`'s `:host`
+     (that component's own `display: contents` unwraps this element straight into the grid), and a
+     grid item's *automatic minimum size* (the content-based floor `min-height: auto` implies) can
+     grow the item — and therefore its row track — past an explicit `height: 100%`/the container's
+     own `height: 100dvh` when the item's natural content is taller, which it is here once every
+     mode/disclosure is expanded for an ADMIN session. Confirmed live: with `height: 100%`, `.sidebar`
+     measured 1036px against a 1005px viewport, pushing `.sidebar-foot` (identity chip, bell, ONLINE
+     status) 31px past the visible edge with nothing to scroll to reach it — `.sidebar-body`'s own
+     `overflow-y: auto` never engaged because nothing had actually constrained `.sidebar`'s height in
+     the first place. A hardcoded `100dvh` (mirroring `app.css`'s own `main { height: 100dvh }`,
+     exactly the same fixed-viewport-unit fix) sidesteps grid row-sizing/percentage-resolution
+     subtlety entirely, and `min-height: 0` below overrides the automatic-minimum contribution
+     outright so nothing can grow this box past that cap regardless of how tall the nav list gets. */
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  transition: width 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+}
+
+/* ---- Head: brand + collapse toggle ------------------------------------------------------------ */
+
+.sidebar-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: 52px;
+  padding: 0 var(--space-8) 0 var(--space-16);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Same aperture-ish mark the old header carried (a ring with a bright pupil) — this is its one home
+   now that `app.css` no longer renders a header at all. */
+.brand-mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--color-info);
+  position: relative;
+}
+
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--color-info);
+}
+
+.brand-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Always visible, even collapsed — the rail's only click affordance back to expanded, alongside the
+   global `[` shortcut. Only its icon direction flips (chevron-right when collapsed). */
+.collapse-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.collapse-toggle:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+/* ---- Body: the three mode groups, primary rows + two disclosures ------------------------------ */
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-16) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The group header — a label, never a link (this file's own class doc's F1 paragraph: this is what
+   removes the old /operate, /monitor, /manage hub pages). Icon+text mirrors `styles.css`'s own
+   `.label` recipe (uppercase, tracked, muted); `.group-divider` is hidden by default and only shown
+   in place of the icon+text on the collapsed *desktop* rail — see the responsive section below for
+   why this is CSS-only, no template `@if`. */
+.group-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: 1.5rem;
+  padding: 0 var(--space-8);
+  margin-top: var(--space-8);
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.nav-group:first-child .group-label {
+  margin-top: 0;
+}
+
+.group-divider {
+  display: none;
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 2.25rem;
+  padding: 0 var(--space-8);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.nav-row:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+/* Active row: 2px accent left bar + raised background (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 3) —
+   `aria-current="page"` is set alongside this in the template so the same state is legible to
+   assistive tech, not just visually. */
+.nav-row.active {
+  background: var(--panel-raised);
+  border-left-color: var(--color-info);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.nav-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Upcoming (`badge: 'soon'`) rows still route somewhere real (`ComingSoon`, never a dead link) but
+   read as visibly not-yet-built (docs/NAV-IA-REDESIGN-PLAN.md F9) — dimmed rather than hidden. */
+.nav-row.dimmed {
+  color: var(--text-faint);
+}
+
+.nav-row.dimmed:hover {
+  color: var(--text-muted);
+}
+
+.nav-row.dimmed .chip {
+  flex: none;
+}
+
+/* ---- Advanced / Upcoming disclosures ------------------------------------------------------------ */
+
+.disclosure summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 2rem;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  list-style: none;
+}
+
+.disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure summary:hover {
+  background: var(--panel-hover);
+  color: var(--text-muted);
+}
+
+.chevron {
+  flex: none;
+  transition: transform 0.15s ease;
+}
+
+.disclosure[open] > summary .chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+
+.disclosure .nav-row {
+  margin-top: var(--space-2);
+}
+
+/* ---- Foot: identity chip, notification bell, live/online status (moved verbatim in behaviour
+   from the old header's `.status` block — see this file's own doc comment) ------------------------- */
+
+.sidebar-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-8) var(--space-16);
+  border-top: 1px solid var(--border);
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-2);
+}
+
+.status-compact {
+  display: none;
+  width: var(--space-8);
+  height: var(--space-8);
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.status-compact.ok {
+  background: var(--color-success);
+}
+
+.status-compact.danger {
+  background: var(--color-danger);
+}
+
+.status-full {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+/* `identity-chip`/`notification-bell` open their own dropdown as `position: absolute; right: 0`
+   relative to themselves — a recipe written for a right-aligned header trigger. This sidebar sits
+   at screen-left, so left unmodified that alignment would open both popups mostly off the left edge
+   of the viewport. Repositioning just these two selectors (never editing either component's own
+   file) opens them rightward instead, bottom-anchored to their own trigger — see this file's own
+   class doc for why `::ng-deep` is the right tool here, matching `fly.css`'s established precedent
+   for adapting a shared component's DOM to one specific host. */
+:host ::ng-deep .sidebar-foot .identity-menu,
+:host ::ng-deep .sidebar-foot .bell-dropdown {
+  top: auto;
+  bottom: 0;
+  left: 100%;
+  right: auto;
+  margin-top: 0;
+  margin-left: var(--space-8);
+}
+
+/* ---- Mobile off-canvas sheet (<640px, --bp-sm) + its scrim/hamburger -------------------------- */
+
+.sidebar-scrim {
+  display: none;
+}
+
+.sidebar-hamburger {
+  display: none;
+}
+
+/* ============================================================================================
+   Responsive (docs/NAV-IA-REDESIGN-PLAN.md §2.1 / docs/design/00-shell.md's own table):
+     >= 1024px (new --sidebar-bp token, see styles.css)  docked, expanded or user-collapsed rail
+     641-1024px                                          forced to the rail regardless of `collapsed`
+     <= 640px (--bp-sm)                                  hidden behind a hamburger; opens as a sheet
+
+   Every rule below that hides nav/foot TEXT (as opposed to sizing the `.sidebar` box itself) is
+   pure CSS `display: none` on an element the template *always* renders — never a template `@if`.
+   That is deliberate: an `@if` gated on `effectiveCollapsed()` would strip the text from the DOM
+   whenever the user's own *desktop* preference is "collapsed", and no amount of CSS can un-hide an
+   element that was never created — exactly the bug this file's own `.group-label`/`.status-row`
+   doc comments in `app-sidebar.html` flag. Wrapping the "collapsed hides text" rules in
+   `min-width: 641px` below (rather than relying on selector specificity to fight the mobile sheet's
+   own override) means the desktop `collapsed` preference structurally cannot affect the mobile
+   sheet at all: below 641px neither of the first two blocks' conditions is ever true, so the
+   `.collapsed` class — however it happens to be set — has no visual effect there, and the mobile
+   sheet always opens at full width showing full text, matching docs/design/00-shell.md's own
+   "hidden; hamburger opens a full-height sheet" (a sheet, not a rail-shaped sheet).
+
+   `--sidebar-bp` is a *new*, distinct token (1024px) rather than reusing the pre-existing `--bp-md`
+   (900px, docs/UI-REDESIGN-PLAN.md Wave 0) — that token already backs ~10 other files' own 900px
+   breakpoints (asset grid collapse, the cockpit map inset, `command.css`, `fly.css`, …); redefining
+   its value here would silently change what all of those already mean without touching any of
+   them. See `styles.css`'s own `--sidebar-bp` doc comment for the full reasoning. */
+
+@media (min-width: 641px) {
+  .sidebar.collapsed {
+    width: var(--sidebar-w-rail);
+  }
+
+  .sidebar.collapsed .sidebar-head {
+    padding: 0 var(--space-4);
+    justify-content: center;
+  }
+
+  .sidebar.collapsed .sidebar-body {
+    padding: var(--space-16) var(--space-4);
+  }
+
+  .sidebar.collapsed .sidebar-foot {
+    align-items: center;
+    padding: var(--space-8) var(--space-4) var(--space-16);
+  }
+
+  .sidebar.collapsed .brand-name,
+  .sidebar.collapsed .group-label > vision-icon,
+  .sidebar.collapsed .group-label > span,
+  .sidebar.collapsed .nav-row-text,
+  .sidebar.collapsed .disclosure summary > span {
+    display: none;
+  }
+
+  .sidebar.collapsed .group-divider {
+    display: block;
+  }
+
+  .sidebar.collapsed .nav-row {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar.collapsed .disclosure summary {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar.collapsed .status-compact {
+    display: block;
+  }
+
+  .sidebar.collapsed .status-full {
+    display: none;
+  }
+
+  /* Reaches into `identity-chip`'s own DOM (see this file's head comment for why `::ng-deep` is
+     appropriate here) — its `<640px` viewport media query already hides this text on a narrow
+     phone; this is the wide-viewport case that query can't see: the sidebar collapsed to a 56px
+     rail by user choice while the actual viewport is still, say, 1600px wide. */
+  :host ::ng-deep .sidebar.collapsed .identity-name,
+  :host ::ng-deep .sidebar.collapsed .identity-role {
+    display: none;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  /* --sidebar-bp */
+  .sidebar {
+    width: var(--sidebar-w-rail);
+  }
+
+  .sidebar-head {
+    padding: 0 var(--space-4);
+    justify-content: center;
+  }
+
+  .sidebar-body {
+    padding: var(--space-16) var(--space-4);
+  }
+
+  .sidebar-foot {
+    align-items: center;
+    padding: var(--space-8) var(--space-4) var(--space-16);
+  }
+
+  .brand-name,
+  .group-label > vision-icon,
+  .group-label > span,
+  .nav-row-text,
+  .disclosure summary > span {
+    display: none;
+  }
+
+  .group-divider {
+    display: block;
+  }
+
+  .nav-row {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .disclosure summary {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .status-compact {
+    display: block;
+  }
+
+  .status-full {
+    display: none;
+  }
+
+  :host ::ng-deep .identity-name,
+  :host ::ng-deep .identity-role {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  /* z-index 126/125 — deliberately above `side-panel.css`'s own 120 (a page-level drawer, e.g. Fly's
+     tool-rail, can in principle be open underneath this shell-level navigation sheet at once; the
+     nav sheet is the bigger context switch and should win) and above the toast host's 100, but
+     below a true modal confirm dialog's 150 (`shared/map/flight-plan-dialog.ts` and friends) so a
+     confirm opened from within a drawer still wins regardless of whether the nav sheet happens to
+     also be open. */
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 126;
+    width: var(--sidebar-w);
+    transform: translateX(-100%);
+    box-shadow: var(--shadow);
+    transition: transform 0.18s ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar {
+      transition: none;
+    }
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 125;
+    background: var(--scrim);
+  }
+
+  .sidebar-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: var(--space-16);
+    left: var(--space-16);
+    z-index: 110;
+    width: 2.5rem;
+    height: 2.5rem;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: var(--shadow);
+    cursor: pointer;
+  }
+}

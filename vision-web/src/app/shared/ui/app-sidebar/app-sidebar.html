@@ -1,0 +1,133 @@
+<aside class="sidebar" [class.collapsed]="effectiveCollapsed()" [class.mobile-open]="mobileOpen()" (keydown.escape)="closeMobile()">
+  <div class="sidebar-head">
+    <a class="brand" routerLink="/fly" title="Vision" (click)="closeMobile()">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Vision</span>
+    </a>
+    <button
+      type="button"
+      class="collapse-toggle"
+      (click)="sidebar.toggle()"
+      [title]="(effectiveCollapsed() ? 'Expand' : 'Collapse') + ' sidebar ([)'"
+      [attr.aria-label]="(effectiveCollapsed() ? 'Expand' : 'Collapse') + ' sidebar'"
+      [attr.aria-expanded]="!effectiveCollapsed()"
+    >
+      <vision-icon [name]="effectiveCollapsed() ? 'chevron-right' : 'chevron-left'" [size]="14" />
+    </button>
+  </div>
+
+  <nav class="sidebar-body" aria-label="Main">
+    @for (mode of modes(); track mode.id) {
+      <div class="nav-group" role="group" [attr.aria-label]="mode.label">
+        <!-- A non-interactive label, never a link — see this file's own class doc's F1 paragraph:
+             this is the specific thing that makes the old /operate, /monitor, /manage hub pages
+             removable without leaving a dead end where they used to be. Both the divider (collapsed
+             rail) and the icon+text (everywhere else) always render; `app-sidebar.css` picks one via
+             plain CSS, never a template `@if` — see that file's own doc comment for why: an `@if`
+             here would strip the icon/text from the DOM entirely whenever `effectiveCollapsed()` is
+             true, and CSS alone cannot restore an element the template never created, which is
+             exactly the mobile off-canvas sheet's own situation (open, full width, yet possibly
+             still "collapsed" per the user's *desktop* preference). -->
+        <div class="group-label">
+          <span class="group-divider" aria-hidden="true"></span>
+          <vision-icon [name]="mode.icon" [size]="14" />
+          <span>{{ mode.label }}</span>
+        </div>
+
+        @for (entry of tiersFor(mode.entries).primary; track entry.to) {
+          <a
+            class="nav-row"
+            [routerLink]="entry.to"
+            routerLinkActive="active"
+            #rlaPrimary="routerLinkActive"
+            [attr.aria-current]="rlaPrimary.isActive ? 'page' : null"
+            [title]="entry.name"
+            [attr.aria-label]="effectiveCollapsed() ? entry.name : null"
+            (click)="closeMobile()"
+          >
+            <vision-icon [name]="entry.icon" [size]="16" />
+            <span class="nav-row-text">{{ entry.name }}</span>
+          </a>
+        }
+
+        @if (tiersFor(mode.entries).advanced.length > 0) {
+          <details class="disclosure" [open]="sidebar.advancedOpen()" (toggle)="onAdvancedToggle($event)">
+            <summary [attr.aria-label]="effectiveCollapsed() ? 'Advanced' : null">
+              <vision-icon name="chevron-right" [size]="12" class="chevron" />
+              <span>Advanced</span>
+            </summary>
+            @for (entry of tiersFor(mode.entries).advanced; track entry.to) {
+              <a
+                class="nav-row"
+                [routerLink]="entry.to"
+                routerLinkActive="active"
+                #rlaAdvanced="routerLinkActive"
+                [attr.aria-current]="rlaAdvanced.isActive ? 'page' : null"
+                [title]="entry.name"
+                [attr.aria-label]="effectiveCollapsed() ? entry.name : null"
+                (click)="closeMobile()"
+              >
+                <vision-icon [name]="entry.icon" [size]="16" />
+                <span class="nav-row-text">{{ entry.name }}</span>
+              </a>
+            }
+          </details>
+        }
+
+        @if (tiersFor(mode.entries).upcoming.length > 0) {
+          <details class="disclosure" [open]="sidebar.upcomingOpen()" (toggle)="onUpcomingToggle($event)">
+            <summary [attr.aria-label]="effectiveCollapsed() ? 'Upcoming' : null">
+              <vision-icon name="chevron-right" [size]="12" class="chevron" />
+              <span>Upcoming</span>
+            </summary>
+            @for (entry of tiersFor(mode.entries).upcoming; track entry.to) {
+              <a
+                class="nav-row dimmed"
+                [routerLink]="entry.to"
+                routerLinkActive="active"
+                #rlaUpcoming="routerLinkActive"
+                [attr.aria-current]="rlaUpcoming.isActive ? 'page' : null"
+                [title]="entry.name + ' (coming soon)'"
+                [attr.aria-label]="effectiveCollapsed() ? entry.name + ' (coming soon)' : null"
+                (click)="closeMobile()"
+              >
+                <vision-icon [name]="entry.icon" [size]="16" />
+                <span class="nav-row-text">{{ entry.name }}</span>
+                <span class="chip">soon</span>
+              </a>
+            }
+          </details>
+        }
+      </div>
+    }
+  </nav>
+
+  <div class="sidebar-foot">
+    <vision-identity-chip />
+    <vision-notification-bell />
+    <!-- Live-stream count / online status (moved verbatim in behaviour from the old header's
+         `.status` block — see this file's own class doc). Both the compact (dot-only) and full
+         (text chip) forms always render; `app-sidebar.css` shows exactly one via CSS, same
+         "no `@if` for a collapse-driven form swap" reasoning as `.group-label` above. -->
+    <div class="status-row" [title]="offline() ? 'Backend unreachable' : 'Backend reachable'">
+      <span class="status-dot status-compact" [class.ok]="fleet.reachable() === true" [class.danger]="offline()" aria-hidden="true"></span>
+      <span class="status-full">
+        @if (liveCount() > 0) {
+          <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
+        }
+        <span class="chip">
+          <span class="dot" [class.ok]="fleet.reachable() === true" [class.danger]="offline()"></span>
+          {{ offline() ? 'OFFLINE' : 'ONLINE' }}
+        </span>
+      </span>
+    </div>
+  </div>
+</aside>
+
+@if (mobileOpen()) {
+  <div class="sidebar-scrim" (click)="closeMobile()"></div>
+} @else {
+  <button type="button" class="sidebar-hamburger" (click)="openMobile()" aria-label="Open navigation" title="Open navigation">
+    <vision-icon name="list" [size]="18" />
+  </button>
+}

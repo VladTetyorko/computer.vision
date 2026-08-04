@@ -1,6 +1,6 @@
-.page {
-    max-width: 820px;
-}
+/* The page's own column width used to be capped here (820px) — superseded by the shared
+   `.page--form` utility (docs/NAV-IA-REDESIGN-PLAN.md §2.3, applied in `settings.html`), so every
+   opted-in "reading, not scanning" page shares one width (880px) instead of each picking its own. */
 
 .toggle {
     display: flex;

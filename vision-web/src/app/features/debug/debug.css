@@ -1,13 +1,13 @@
+/* Method's column is `auto`, not a shared `fr`, now that the select itself is sized to its content
+   via `.field-sm` (`styles.css`, docs/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3) rather than stretching
+   to fill whatever share of the row a `fr` track handed it — this is what actually shrinks it from
+   the ~165px a 6-value enum used to cost (docs/design/18-debug.md's own finding). */
 .console-form {
     display: grid;
-    grid-template-columns: 1.4fr 0.6fr 2fr;
+    grid-template-columns: 1.4fr auto 2fr;
     gap: var(--space-8);
     align-items: end;
     margin-bottom: var(--space-16);
-}
-
-.field.method select {
-    min-width: 6.5rem;
 }
 
 .body-editor {

@@ -1,11 +1,18 @@
 @if (facade.showPicker()) {
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h1>Fly</h1>
-        <p>Pick a drone. Streaming ones show first — pick it again next time and you land straight in the cockpit.</p>
-      </div>
-    </div>
+    <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/01-fly.md — the picker's own `page-head`
+         (an `<h1>` + a two-line "how this works" paragraph) becomes one `<vision-page-bar>`. The
+         paragraph carried genuine instruction (the remember-and-redirect behavior isn't obvious
+         from the title alone), so it moves behind the bar's `?` disclosure rather than being
+         dropped outright. Count is the picker's own asset list, `null` (no chip) until it resolves
+         so the bar doesn't flash "0 drones" while the first fetch is in flight. -->
+    <vision-page-bar
+      title="Fly"
+      icon="cockpit"
+      [count]="facade.pickerAssets() ? facade.orderedPickerAssets().length : null"
+      countNoun="drone"
+      hint="Pick a drone. Streaming ones show first — pick it again next time and you land straight in the cockpit."
+    />
 
     @if (facade.pickerError()) {
       <div class="card empty">

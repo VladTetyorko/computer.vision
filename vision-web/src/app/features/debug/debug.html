@@ -1,14 +1,5 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Debug</h1>
-      <p>
-        Raw HTTP against the Vision backend, for when an adapter misbehaves. The endpoint list
-        is a shortcut into the console below, not a guardrail — failures show up here, not as
-        a toast.
-      </p>
-    </div>
-  </div>
+  <vision-page-bar title="Debug" icon="gear" />
 
   <!-- ---- Raw API console -------------------------------------------------- -->
   <section class="card">
@@ -30,7 +21,7 @@
 
       <label class="field method">
         <span class="label">Method</span>
-        <select [(ngModel)]="method" name="method">
+        <select class="field-sm" [(ngModel)]="method" name="method">
           @for (m of methods; track m) {
             <option [value]="m">{{ m }}</option>
           }
@@ -40,7 +31,7 @@
       <label class="field wide">
         <span class="label">Path</span>
         <input
-          class="mono"
+          class="mono field-lg"
           [(ngModel)]="path"
           name="path"
           placeholder="/api/devices"
@@ -141,32 +132,38 @@
       </button>
     </header>
 
-    @if (healthOverall(); as overall) {
+    @if (healthProbe(); as probe) {
       <p class="row">
         <span class="muted">Overall:</span>
-        <span class="chip" [class.ok]="overall === 'UP'" [class.danger]="overall !== 'UP'">
-          {{ overall }}
+        <span class="chip" [class.ok]="probe.tone === 'ok'" [class.danger]="probe.tone === 'danger'">
+          {{ probe.label }}
         </span>
       </p>
-    }
 
-    @if (healthComponents().length > 0) {
-      <ul class="health-list">
-        @for (component of healthComponents(); track component.name) {
-          <li>
-            <span>{{ component.name }}</span>
-            <span
-              class="chip"
-              [class.ok]="component.status === 'UP'"
-              [class.danger]="component.status !== 'UP'"
-            >
-              {{ component.status }}
-            </span>
-          </li>
-        }
-      </ul>
-    } @else if (healthResponse()) {
-      <p class="muted hint">No component-level detail exposed by this backend — see raw JSON.</p>
+      @if (probe.kind === 'not-exposed') {
+        <p class="muted hint">
+          <span class="mono">GET /actuator/health</span> returns {{ healthResponse()?.status }} on this
+          deployment — Spring Boot Actuator isn't on the classpath here, so there is nothing to check.
+          This is a missing probe, not a failing system — see raw JSON below for exactly what came back.
+        </p>
+      } @else if (healthComponents().length > 0) {
+        <ul class="health-list">
+          @for (component of healthComponents(); track component.name) {
+            <li>
+              <span>{{ component.name }}</span>
+              <span
+                class="chip"
+                [class.ok]="component.status === 'UP'"
+                [class.danger]="component.status !== 'UP'"
+              >
+                {{ component.status }}
+              </span>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="muted hint">No component-level detail exposed by this backend — see raw JSON.</p>
+      }
     } @else if (!healthLoading()) {
       <p class="muted">No health data yet.</p>
     }
