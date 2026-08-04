@@ -1,14 +1,7 @@
-<div class="page onboarding-page">
-  <div class="page-head">
-    <div>
-      <h1>Add a source</h1>
-      <p>
-        Bring a real camera, drone, or a zero-hardware test source into Vision as a first-class
-        asset — with a name, a photo, and a proven-working connection, in one pass.
-      </p>
-    </div>
-    <a class="btn secondary" routerLink="/devices">Cancel</a>
-  </div>
+<div class="page page--form onboarding-page">
+  <vision-page-bar title="Add a source" icon="plus">
+    <a pageBarActions class="btn secondary" routerLink="/devices">Cancel</a>
+  </vision-page-bar>
 
   <ol class="stepper" aria-label="Onboarding steps">
     @for (item of facade.steps; track item.step) {
@@ -35,6 +28,7 @@
           <input
             id="p-name"
             name="displayName"
+            class="field-md"
             [ngModel]="facade.store.displayName()"
             (ngModelChange)="facade.store.displayName.set($event)"
             placeholder="Falcon-2"
@@ -47,6 +41,7 @@
           <input
             id="p-reg"
             name="registrationNumber"
+            class="field-sm"
             [ngModel]="facade.store.registrationNumber()"
             (ngModelChange)="facade.store.registrationNumber.set($event)"
             placeholder="N12345"
@@ -58,6 +53,7 @@
           <select
             id="p-category"
             name="category"
+            class="field-md"
             [ngModel]="facade.store.category()"
             (ngModelChange)="facade.store.chooseCategory($event)"
           >
@@ -172,6 +168,7 @@
                   <select
                     id="c-protocol"
                     name="protocol"
+                    class="field-sm"
                     [ngModel]="facade.store.protocolSelect()"
                     (ngModelChange)="facade.store.protocolSelect.set($event)"
                     required
@@ -190,6 +187,7 @@
                     <input
                       id="c-protocol-custom"
                       name="customProtocol"
+                      class="field-sm"
                       [ngModel]="facade.store.customProtocol()"
                       (ngModelChange)="facade.store.customProtocol.set($event)"
                       placeholder="e.g. onvif"
@@ -203,6 +201,7 @@
                   <input
                     id="c-uri"
                     name="uri"
+                    class="field-lg"
                     [ngModel]="facade.store.uri()"
                     (ngModelChange)="facade.store.uri.set($event)"
                     [placeholder]="facade.store.uriPlaceholder()"
@@ -587,6 +586,7 @@
                   <input
                     id="sim-video-path"
                     name="simVideoPath"
+                    class="field-lg"
                     [ngModel]="facade.store.simVideoPath()"
                     (ngModelChange)="facade.store.simVideoPath.set($event)"
                     placeholder="/srv/videos/flight.mp4"

@@ -1,57 +1,52 @@
-/* Reuses `.page`/`.page-head`/`.card`/`.chip`/`.empty`/`.btn` from `src/styles.css` — no new colors. */
+/* Reuses `.page`/`vision-page-bar`/`.card`/`.chip`/`.chip.warn`/`.empty`/`.btn`/`.segmented` from
+   `src/styles.css` — no new colors. The old accordion styling (`.roster-summary`/`.roster-chevron`/
+   `details[open]`) is gone with the accordion itself (docs/NAV-IA-REDESIGN-PLAN.md §2.4). */
 
-.page-head h1 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-
+/* Explicit width, not just `min-width` — the global `input { width: 100% }` rule would otherwise
+   stretch this to the full page-bar row once it wraps onto its own line
+   (docs/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
 .roster-search {
-  min-width: 14rem;
+  width: 16rem;
   min-height: 40px;
 }
 
 .roster-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
+/* Assignments render inline in the row now — no disclosure, the row itself is the click target
+   (selects via `?sel=`, opens the two-pane detail). */
 .roster-row {
-  padding: 0;
-}
-
-/* Hide the native disclosure triangle — `.roster-chevron` (an inline `<vision-icon>`) is the one
-   visible affordance, rotated open via the `[open]` pseudo-class rather than JS state. */
-.roster-summary {
-  list-style: none;
-  cursor: pointer;
+  width: 100%;
+  text-align: left;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--space-8);
   padding: var(--space-16);
   min-height: 44px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.roster-summary::-webkit-details-marker {
-  display: none;
+.roster-row:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
 }
 
-.roster-chevron {
-  flex: none;
-  color: var(--text-muted);
-  transition: transform 0.15s ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .roster-chevron {
-    transition: none;
-  }
-}
-
-details[open] > .roster-summary .roster-chevron {
-  transform: rotate(90deg);
+/* The identical "2px accent left bar + raised background" selection idiom
+   `app-sidebar.css#.nav-row.active`/`event-row.css#.event-row.selected` already establish. */
+.roster-row.selected {
+  border-left-color: var(--color-info);
 }
 
 .roster-name {
@@ -68,12 +63,6 @@ details[open] > .roster-summary .roster-chevron {
   gap: var(--space-4);
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.roster-body {
-  padding: 0 var(--space-16) var(--space-16);
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-16);
 }
 
 @media (max-width: 640px) {

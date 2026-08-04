@@ -1,12 +1,6 @@
-/* Reuses `.page`/`.page-head`/`.card`/`.label`/`.empty` from `src/styles.css` — no new colors.
+/* Reuses `.page`/`.card`/`.label`/`.empty` from `src/styles.css` — no new colors.
    `<vision-preflight-checklist>` keeps its own cockpit styling (`surface-hud-strong`, a fixed
    15rem width) unmodified — this page just gives it a plain `.card` frame to sit in. */
-
-.page-head h1 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
 
 .preflight-card {
   display: flex;
@@ -15,14 +9,10 @@
   gap: var(--space-16);
 }
 
-.preflight-picker {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  width: 100%;
-  max-width: 20rem;
-}
-
+/* The `DRONE` select riding `<vision-page-bar>`'s own `[pageBarFilters]` slot
+   (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — mirrors `features/wall/wall.css`'s own `.density` label:
+   `.row` (src/styles.css) already supplies the flex row + gap, this just sizes the control itself. */
 .preflight-picker select {
   min-height: 40px;
+  min-width: 12rem;
 }

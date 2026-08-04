@@ -1,7 +1,11 @@
 /* Sizing/positioning (width, max-height, sticky, overflow) is each host page's own concern,
    applied directly to this component's tag (`wall.css`'s `.events-rail`, `command.css`'s own
-   class) — mirrors `shared/map/fleet-map.ts`'s `:host{height:100%}` + the host's own `.map-panel` sizing
-   class working together. This component only owns what's visually *inside* the card. */
+   class) — mirrors `shared/map/fleet-map.ts`'s `:host{height:100%}` + the host's own `.map-panel`
+   sizing class working together. This component only owns what's visually *inside* the card.
+
+   Row-level styling (state chip, label, time, source, confidence) moved to `shared/ui/event-row.css`
+   with the row markup itself (docs/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3) — this file keeps only the
+   card chrome, filters, and list layout around those rows. */
 :host {
   display: block;
 }
@@ -33,119 +37,4 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
-}
-
-/* Column, not row: the top line (state/label/time/action) and the source-name meta line each get
-   their own full-width row — see `.event-row-top`/`.event-meta` below for why. */
-.event-row {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  text-align: left;
-  background: var(--panel-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-8) var(--space-8);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.event-row:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--panel-hover);
-}
-
-.event-row:disabled {
-  cursor: default;
-  opacity: 0.7;
-}
-
-.event-row.open {
-  border-color: var(--color-live);
-}
-
-/* The row's top line: state chip, label, time, action — all inline, none of them ever truncate or
-   shrink (the source-name meta line below is the one place that gives up space; see `.event-meta`).
-   `min-width: 0` here is what lets `.event-label` (its one flexible member) actually shrink instead
-   of forcing this line — and therefore the whole row — wider than its container. */
-.event-row-top {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  min-width: 0;
-}
-
-/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's dot alone used to be the only
-   carrier of OPEN vs. CLOSED — color-blind/low-contrast-unsafe. The dot stays (fast at-a-glance
-   scan), but `event.state` itself (the API's own term, DetectionEventState) now always renders next
-   to it, in the same `chip`/`dot` idiom `command.html`'s readiness tiles already use. */
-.event-state {
-  flex: none;
-}
-
-/* `flex: 1` is what lets this line's other three members (`.event-time`/`.event-affordance`,
-   both `flex: none`) stay full-width regardless of the label's own length — but that means *this*
-   element is the one that gets squeezed when a longer relative-time string (`"1m 23s ago"` vs.
-   `"51s ago"`) leaves it less room, so it needs the identical overflow handling `.event-source`
-   has below, for the identical reason: without it, a label whose shrunk box is narrower than its
-   own text needs would overflow into `.event-time` right next to it — the same overlap class this
-   whole fix exists to close, just one element over. `event.label` is a short enum word
-   (`person`/`car`/...) today, never long enough to actually need the ellipsis in practice, but the
-   failure mode if that ever changes (a longer label value, or several more chip-style siblings
-   added to this line later) is exactly this, so the guard is here regardless. */
-.event-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-  text-transform: capitalize;
-  font-size: 0.85rem;
-}
-
-.event-time {
-  flex: none;
-  font-size: 0.72rem;
-  white-space: nowrap;
-}
-
-/* Cards state their action (docs/UX-REWORK-PLAN.md U-a2 §2.6) — the row's own explicit affordance. */
-.event-affordance {
-  flex: none;
-  font-size: 0.72rem;
-  white-space: nowrap;
-}
-
-/* The source-name/confidence line — deliberately its own full-width row (not squeezed into
-   whatever `.event-row-top` has left over) once a real device/asset name turned out to be one
-   long, unbreakable token (no spaces to wrap on — e.g. `X2Twitter.com_hzTcxvzE2-narxmk_720p`, a
-   real simulated-source filename): confined to `.event-row-top`'s own narrow leftover space at
-   Wall's 300px sidebar width (`wall.css`), that token had nowhere near enough room to truncate to
-   anything legible — giving it the *entire* row's width instead means it only needs to truncate
-   for genuinely extreme names, not routine ones. `min-width: 0` is still needed here too (a flex
-   item's default `min-width: auto` is its content's own minimum size, which for an unbreakable
-   token is that token's full rendered width — exactly what let it overflow in the first place). */
-.event-meta {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-4);
-  min-width: 0;
-  font-size: 0.72rem;
-}
-
-/* The truncatable part — `.event-confidence` stays `flex: none` so only the name ever gives up
-   space. `title` (in the template) carries the full value so a truncated name is still readable
-   on hover/focus. */
-.event-source {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.event-confidence {
-  flex: none;
-  white-space: nowrap;
 }

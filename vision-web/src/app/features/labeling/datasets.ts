@@ -17,6 +17,13 @@ import { DatasetsFacade } from './datasets-facade';
  * Degrades honestly when `vision.training.enabled=false`: `TrainingStore.disabled()` (set the moment
  * the dataset-list call 404s — see that store's own doc comment) renders a `vision-empty`
  * "not enabled here" state instead of a blocked page or a fabricated empty dataset list.
+ *
+ * **Disabled-state cleanup (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/16-training.md, wave 2).**
+ * The header's own `eyebrow="Manage"` is gone — the sidebar's active group already answers "where am
+ * I" (docs/design/00-shell.md), so repeating the mode name in every page's own header was pure
+ * duplication. The **Models** action is hidden while `training.disabled()` — offering a door into a
+ * second disabled page is not a primary action, it's dead weight above the one honest message this
+ * state has to give (`vision-empty`, already used here, already produces one centered stack).
  */
 @Component({
   selector: 'vision-datasets-page',

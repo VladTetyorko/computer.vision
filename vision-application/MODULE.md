@@ -9,7 +9,7 @@ Control-plane services orchestrating `vision-domain` ports: asset/device/stream 
 
 ## Package structure (docs/LAYERING-REFACTOR-PLAN.md §4.1, Wave A)
 
-Feature-first, role-second: `com.drones.vision.application.<feature>` (13 feature packages) plus `pipeline`/`scope`/`exception`. Each feature package holds its `XService`(+`DefaultXService`) and that feature's command/read-model records and package-private collaborators. Test packages mirror main 1:1.
+Feature-first, role-second: `com.drones.vision.application.<feature>` (14 feature packages) plus `pipeline`/`scope`/`exception`. Each feature package holds its `XService`(+`DefaultXService`) and that feature's command/read-model records and package-private collaborators. Test packages mirror main 1:1.
 
 | Package | Contents |
 |---|---|
@@ -24,6 +24,7 @@ Feature-first, role-second: `com.drones.vision.application.<feature>` (13 featur
 | `geofence` | `GeofenceService`+`Default`, `GeofenceZoneSpec`, `GeofenceMonitor` |
 | `mark` | `MarkService`+`Default`, `MarkSpec`, `MarkPatch`, `GeolocateSpec` |
 | `replay` | `ReplayService`+`Default`, `ReplayCaptureSpec`, `ReplaySources`, `UsageTimeline`, `UsageRecording`, `ReplayServiceSettings` |
+| `usage` | `UsageService`+`Default`, `UsageSummary` (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 — the fleet-wide "replay library" list; a sibling of `replay`, not folded into it — see `UsageService`'s own javadoc for why) |
 | `training` | `DatasetService`+`Default`, `DatasetSpec`, `LabelingService`+`Default`, `LabelSpec`, `CaptureSpec`, `TrainingJobService`+`Default`, `TrainingJobView`, `ModelRegistryService`+`Default`, `RegisteredModel`, `TrainingStores`, `TrainingFrameEncoder`*, `YoloDatasetWriter`* |
 | `identity` | `UserService`+`Default`, `UserSpec`, `AuthService`+`Default`, `GroupService`+`Default`, `GroupSpec`, `AssignmentService`+`Default`, `ActivityService`+`Default` |
 | `pipeline` | `StreamPipeline`, `StreamPipelineSettings`, `SupervisedPublisher`†, `DetectionEventEngine`†, `DetectionExtrapolator`*, `UsageTracker`, `VideoSourceRegistry`, `FeedTransmitterRegistry` |
@@ -126,6 +127,12 @@ Types below are grouped by service; see the Package structure table above for wh
   - **Telemetry**: fetched via `TelemetryRepositoryPort.findByUsage(usageId, TELEMETRY_FETCH_LIMIT)` (package-private, 20,000) — see Gotchas for why this is a fetch-then-filter workaround, not a real time-bounded query — then filtered to `[from, to]` inclusive both ends, sorted by `Telemetry#at()`, and thinned to `maxPoints` (see below)
   - **Detections** (docs/MVP2-PLAN.md R-a2 — real now, was always empty under R-a): when `usage.streamId()` is non-`null`, queried directly via `DetectionRepositoryPort.query(new DetectionQuery(streamId, windowFrom, windowTo, null, DETECTION_FETCH_LIMIT))` (package-private, 20,000) — a genuinely time-bounded query, unlike telemetry's fetch-then-filter workaround — then re-sorted ascending by `DetectionResult#capturedAt()` (the port's real implementations return newest-first) and thinned exactly like telemetry. A `null` `streamId()` (legacy/streamless usage) short-circuits to `List.of()` without touching the port at all — see Gotchas for both series' truncation-direction caveats
   - `static <T> List<T> thin(List<T> items, int maxPoints)` (package-private, generic, used for both series) — equidistant-index thinning: if `items.size() <= maxPoints`, returns `items` unchanged (no thinning needed, exact identity — this is how "fewer points than max" and "exactly max" both come out lossless); otherwise selects `maxPoints` indices via `round(i * (n-1) / (maxPoints-1))` for `i` in `0..maxPoints-1`, which always lands exactly on index `0` and index `n-1` — the algorithm's "always keeps first and last" guarantee — and is deterministic (same input + `maxPoints` always produces the same output, no time-based tie-breaking). `maxPoints <= 1` is a degenerate case with no room for both a first and last point: returns a single-element list holding just the first item
+- **`UsageService`** (interface) → **`DefaultUsageService`** (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8) — the fleet-wide "replay library" list: the read side behind `GET /api/usages` (vision-api, `UsageTimelineController`). A sibling of `ReplayService`, not a method on it — see `UsageService`'s own javadoc for why the two collaborator sets don't belong on one constructor
+  - `DefaultUsageService(AssetUsageRepositoryPort, AssetRepositoryPort)` — 2-arg; `AssetRepositoryPort` resolves each row's `assetName` and, via `VisibilityScope#includes`, whether the caller may see it at all
+  - `List<UsageSummary> recent(VisibilityScope, AssetId assetIdOrNull, int limit)` — `IllegalArgumentException` for a non-positive `limit`; silently clamped to `MAX_LIMIT` (package-private, 500) if larger, the same "cap, never an error" idiom `ReplayService#timeline`'s `maxPoints` uses. `assetIdOrNull` present delegates to `AssetUsageRepositoryPort#findRecentByAsset`; absent delegates to its fleet-wide counterpart, `#findRecent` (docs/NAV-IA-REDESIGN-PLAN.md Wave 4 — the one addition to that port this task made, see vision-domain/MODULE.md). Scope filtering runs **after** the repository's own `limit` — a scoped caller can see fewer than `limit` rows even when more of their own flights exist further back; a known, accepted first-cut limitation, same posture as `DefaultAssetStatsService`'s own documented fetch-then-aggregate cap (see `DefaultUsageService`'s own javadoc)
+  - `UsageSummary(usageId, assetId, assetName, startedAt, endedAt, durationSeconds, sampleCount)` — the row read model; `assetName` is `""` (never `null`) when the owning asset can no longer be resolved at all (distinct from the far more common soft-deleted case, where the asset row — and its `Ownership` to scope-check against — still exists); `durationSeconds` is `Duration.between(startedAt, endedAt).getSeconds()`, `null` while the usage is still open, mirroring `UsageRecording#durationSeconds()`'s own whole-seconds convention
+  - **An asset that no longer resolves at all** (empty `AssetRepositoryPort#findById`) is included with `assetName=""` only for an `unbounded()` caller, and silently dropped for every other scope — there is no `Ownership` left to check, so this class takes the safe "hide what can't be verified" default rather than guess
+
 - **`ProbeService`** (interface) → **`DefaultProbeService`** — CONTRACT 1's test-before-save connection probe (docs/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1): the read side behind `POST /api/devices/probe` (vision-api)
   - `DefaultProbeService(VideoSourceRegistry, List<TelemetrySourcePort>)` — reuses `VideoSourceRegistry` exactly as `DefaultStreamService` does (same `sourceFor` seam, so probe and stream selection can never disagree about which adapter handles a protocol) plus the same `List<TelemetrySourcePort>` collection `UsageTracker` already takes; a package-private 4-arg test seam adds explicit `Duration frameTimeout`/`telemetryTimeout` (defaults 8s/2s in production) so tests never wait out the real bounds
   - `ProbeResult probe(StreamDescriptor)` — resolves the adapter (`UnsupportedProtocolException` → 400 for an unrecognized protocol, **not** a probe failure), opens it under a fresh, transient `StreamId` (never registered, never looked up again — this method **never** touches any repository/service, satisfying the port's own "never registers anything" contract), subscribes for exactly one frame with `request(1)`, and closes the source again in a `finally` block regardless of outcome. A source `onError`/a synchronous exception from `open()` is translated via `friendlyMessage` (below) into a `ProbeFailedException`; `onComplete` with no frame yet, or the bounded wait (`frameTimeout`) elapsing with no signal at all, are likewise `ProbeFailedException`s with their own specific messages
@@ -353,6 +360,29 @@ Types below are grouped by service; see the Package structure table above for wh
 - **`maybeDetect`'s `detectionEnabled` gate does not reset outage/backoff state** — toggling `PipelineConfig#detectionEnabled()` off then back on leaves `inOutage`/`backoffNanos`/`nextProbeAtNanos` exactly where they were: if the backoff deadline already elapsed while detection was off, the very next sampled frame after re-enabling immediately attempts a probe (rather than waiting out a "fresh" backoff); if it hadn't elapsed yet, the frame is still skipped until it does. This is a deliberate non-goal, not a bug — the outage/backoff machinery answers "is the CV service healthy," a question that doesn't reset just because the operator flipped a local on/off switch.
 
 ## Status
+
+docs/NAV-IA-REDESIGN-PLAN.md **Wave 4, F8 done** (replay library, application half): a new `usage`
+feature package — `UsageService`+`DefaultUsageService`, `UsageSummary` (see their own API-surface
+entries above for the full contract) — the read side behind `GET /api/usages` (vision-api's
+`UsageTimelineController`, joining its two pre-existing `ReplayService`-backed endpoints). Kept as
+its own service area rather than a method on `ReplayService`: the list needs `AssetRepositoryPort`
+(to resolve each row's `assetName` and enforce `VisibilityScope`), which `ReplayService` has never
+needed and whose constructor is already at a natural size for what it does — bolting this on would
+have pushed `DefaultReplayService` to six constructor parameters for a read path three of its five
+existing collaborators (`TelemetryRepositoryPort`/`DetectionRepositoryPort`/`StreamPublisherPort`)
+don't participate in at all. Built against `AssetUsageRepositoryPort#findRecent(int)`, this wave's
+one addition to that port (vision-domain, additive — see that module's MODULE.md). `./mvnw -B -pl
+vision-application test`: **665/665 green** (up from 658; +7 `DefaultUsageServiceTest` — non-positive
+`limit` rejection, unbounded-scope resolution with a real `assetName`/`durationSeconds`, a
+still-open usage's `null` `endedAt`/`durationSeconds`, a `GROUPS` scope dropping an out-of-subtree
+asset's usage, a fully-gone asset included with `assetName=""` only for an unbounded caller,
+`assetId`-filter delegating to `findRecentByAsset` instead of the fleet-wide query, and the
+`MAX_LIMIT` clamp) — Mockito-based, matching `DefaultReplayServiceTest`'s own precedent for this
+package rather than this module's hand-fake convention elsewhere. One pre-existing hand-fake test
+double, `DefaultLabelingServiceTest.FakeAssetUsageRepositoryPort`, needed the same
+`UnsupportedOperationException("not exercised by this suite")` stub its other unused methods already
+carry, for the new interface method — no behavior change, no other test touched.
+
 docs/CV-TRAINING-V2-PLAN.md **Wave W5 done** (one-button training + capture-from-replay delta, application half): a **delta** on top of CV-TRAINING-PLAN's Wave T2 (below) — deletes the manual-export surface `LabelingService#export` used and adds server-side replay capture. Built against Wave W1's frozen `vision-domain` contract (`DatasetUploadPort`/`DatasetUpload`/`ReplayFrameExtractionPort`) without modifying it. This module did not compile between W1 landing and this wave (it still referenced the deleted `DatasetExportPort`/`DatasetExport`) — expected, per the plan's own wave sequencing (`W1 → W2‖W3‖W4‖W5 → W6 → W7`), and this wave's job to fix.
 
 **Deleted**: `LabelingService#export`/`DefaultLabelingService#export` (**replaced**, not merely renamed — its sink and return type both change); `TrainingStores`'s old `exports: DatasetExportPort` component.

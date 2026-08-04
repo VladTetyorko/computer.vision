@@ -11,34 +11,17 @@ import type { IconName } from './icon-registry';
  * heading. `title` is required; `message` and a leading `icon` are optional. Any call-to-action
  * (a "Add device" button, a "Retry" link) is projected via `<ng-content>` so it keeps its own
  * `.btn`/routing markup and sits below the message exactly as the bespoke blocks did.
+ *
+ * Split into `.ts`/`.html`/`.css` (it was previously one file with an inline `template:`/`styles:`)
+ * while fixing the icon-centring bug documented in `empty-state.css` — every component in this
+ * codebase is three files.
  */
 @Component({
   selector: 'vision-empty',
   imports: [Icon],
+  templateUrl: './empty-state.html',
+  styleUrl: './empty-state.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="empty">
-      @if (icon(); as icon) {
-        <vision-icon class="empty-icon" [name]="icon" [size]="32" />
-      }
-      <h3>{{ title() }}</h3>
-      @if (message(); as message) {
-        <p>{{ message }}</p>
-      }
-      <ng-content />
-    </div>
-  `,
-  styles: `
-    :host {
-      display: block;
-    }
-
-    .empty-icon {
-      display: block;
-      margin: 0 auto var(--space-8);
-      color: var(--text-faint);
-    }
-  `,
 })
 export class EmptyState {
   readonly title = input.required<string>();

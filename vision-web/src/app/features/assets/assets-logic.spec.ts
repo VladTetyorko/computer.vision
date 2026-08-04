@@ -6,6 +6,8 @@ import {
   filterAssetListRowsByCategory,
   filterAssetListRowsByStatus,
   filterAssetListRowsByStreaming,
+  findAssetRowById,
+  parseAssetViewMode,
   searchAssetListRowsByName,
 } from './assets-logic';
 
@@ -207,5 +209,47 @@ describe('searchAssetListRowsByName', () => {
 
   it('narrows to zero rows for a query matching nothing', () => {
     expect(searchAssetListRowsByName(rows, 'nope')).toEqual([]);
+  });
+});
+
+describe('findAssetRowById', () => {
+  const rows = buildAssetListRows(
+    [assetDetails({ assetId: 'a-1' }), assetDetails({ assetId: 'a-2' })],
+    new Set(),
+  );
+
+  it('finds the row matching the given id', () => {
+    expect(findAssetRowById(rows, 'a-2')?.asset.assetId).toBe('a-2');
+  });
+
+  it('degrades to undefined for an id matching no loaded row (stale ?sel=, docs/NAV-IA-REDESIGN-PLAN.md §2.4)', () => {
+    expect(findAssetRowById(rows, 'not-a-real-id')).toBeUndefined();
+  });
+
+  it('degrades to undefined for an undefined id (no selection)', () => {
+    expect(findAssetRowById(rows, undefined)).toBeUndefined();
+  });
+
+  it('degrades to undefined for an empty-string id', () => {
+    expect(findAssetRowById(rows, '')).toBeUndefined();
+  });
+});
+
+describe('parseAssetViewMode', () => {
+  it("reads a persisted 'card' back as 'card'", () => {
+    expect(parseAssetViewMode('card')).toBe('card');
+  });
+
+  it("reads a persisted 'list' back as 'list'", () => {
+    expect(parseAssetViewMode('list')).toBe('list');
+  });
+
+  it('falls back to the dense list default for nothing ever persisted (null)', () => {
+    expect(parseAssetViewMode(null)).toBe('list');
+  });
+
+  it('falls back to the dense list default for a corrupted/unrecognised value', () => {
+    expect(parseAssetViewMode('grid')).toBe('list');
+    expect(parseAssetViewMode('true')).toBe('list');
   });
 });

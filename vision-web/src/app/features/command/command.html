@@ -110,11 +110,15 @@
           </div>
         </div>
       } @else {
+        <!-- `focusAssetId` centres the map on the selected asset (docs/design/02-command.md):
+             selecting a row in the asset list, or "Watch live" in a map popup, both land on
+             `selectAsset`, so both move the camera. -->
         <vision-fleet-map
           class="command-map"
           [zones]="facade.zones()"
           [marks]="facade.marks.marks()"
           [selectedMarkId]="facade.marks.selectedMarkId()"
+          [focusRequest]="facade.focusRequest()"
           (watch)="facade.watchAsset($event)"
           (preview)="facade.selectAsset($event)"
           (openEventAsset)="facade.openEventAsset($event)"

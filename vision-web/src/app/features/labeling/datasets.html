@@ -1,13 +1,13 @@
 <div class="page">
   <vision-section-header
-    eyebrow="Manage"
     title="CV training datasets"
     subtitle="Capture live frames, correct their boxes, and export YOLO datasets to fine-tune detection models."
   >
-    <div actions>
-      <a routerLink="/manage/training/models" class="btn secondary small">Models</a>
-      <a routerLink="/manage" class="btn secondary small">Back to Manage</a>
-    </div>
+    @if (!facade.training.disabled()) {
+      <div actions>
+        <a routerLink="/manage/training/models" class="btn secondary small">Models</a>
+      </div>
+    }
   </vision-section-header>
 
   @if (facade.training.disabled()) {

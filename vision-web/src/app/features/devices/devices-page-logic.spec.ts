@@ -4,6 +4,7 @@ import {
   buildCreateAssetRequestForDevice,
   buildWarehouseRows,
   filterRowsByArchived,
+  findWarehouseRowById,
   mapDeviceOwners,
   searchWarehouseRowsByQuery,
 } from './devices-page-logic';
@@ -174,6 +175,26 @@ describe('searchWarehouseRowsByQuery', () => {
 
   it('narrows to zero rows for a query matching nothing', () => {
     expect(searchWarehouseRowsByQuery(rows, 'nope')).toEqual([]);
+  });
+});
+
+describe('findWarehouseRowById', () => {
+  const rows = buildWarehouseRows([device({ id: 'dev-1' }), device({ id: 'dev-2' })], new Map(), new Set());
+
+  it('finds the row matching the given id', () => {
+    expect(findWarehouseRowById(rows, 'dev-2')?.device.id).toBe('dev-2');
+  });
+
+  it('degrades to undefined for an id matching no loaded row (stale ?sel=, docs/NAV-IA-REDESIGN-PLAN.md §2.4)', () => {
+    expect(findWarehouseRowById(rows, 'not-a-real-id')).toBeUndefined();
+  });
+
+  it('degrades to undefined for an undefined id (no selection)', () => {
+    expect(findWarehouseRowById(rows, undefined)).toBeUndefined();
+  });
+
+  it('degrades to undefined for an empty-string id', () => {
+    expect(findWarehouseRowById(rows, '')).toBeUndefined();
   });
 });
 

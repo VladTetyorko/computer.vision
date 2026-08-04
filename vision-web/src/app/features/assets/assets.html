@@ -1,165 +1,336 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Assets</h1>
-      <p>
-        Every asset Vision knows about, asset-first — search, filter, and jump straight to Watch,
-        Open, or Archive. Raw device plumbing lives on
-        <a routerLink="/devices">Devices</a>.
-      </p>
-    </div>
-    <div class="row">
-      <button type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
-      <button type="button" class="btn secondary" (click)="facade.refreshAll()" [disabled]="facade.fleet.loading()">
-        Refresh
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/04-assets.md: `page-head` + the boxed
+       `.asset-toolbar` filter card are both gone — every filter/search control below now projects
+       into the bar's `[pageBarFilters]` slot, the two actions into `[pageBarActions]`. The subtitle
+       (and its `/devices` link, F7) is deleted outright rather than kept as a `hint`: "Assets" needs
+       no explanation now that the sidebar marks the active page permanently. -->
+  <vision-page-bar title="Assets" icon="drone" [count]="facade.assetRows().length" countNoun="asset">
+    <input
+      pageBarFilters
+      type="search"
+      name="assetSearch"
+      class="asset-search"
+      placeholder="Search assets by name…"
+      aria-label="Search assets by name"
+      [ngModel]="facade.searchQuery()"
+      (ngModelChange)="facade.searchQuery.set($event)"
+    />
+
+    <!-- ---- List/card view toggle (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) —
+         dense list is the default (F5); the card grid is an opt-in for the photo-first case, kept
+         behind this toggle and persisted per user (`core/panel-state.ts`, not a bespoke scheme). -->
+    <div class="segmented" pageBarFilters role="group" aria-label="View">
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="viewMode() === 'list'"
+        [attr.aria-pressed]="viewMode() === 'list'"
+        (click)="setViewMode('list')"
+      >
+        <vision-icon name="list" [size]="16" />
+        List
+      </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="viewMode() === 'card'"
+        [attr.aria-pressed]="viewMode() === 'card'"
+        (click)="setViewMode('card')"
+      >
+        <vision-icon name="grid" [size]="16" />
+        Cards
       </button>
     </div>
-  </div>
 
-  <!-- ---- Search + filters -------------------------------------------------------------------- -->
-  <section class="card asset-toolbar">
-    <div class="toolbar-row">
+    <select
+      pageBarFilters
+      name="assetCategoryFilter"
+      class="asset-filter"
+      aria-label="Filter by category"
+      [ngModel]="facade.categoryFilter()"
+      (ngModelChange)="facade.categoryFilter.set($event)"
+    >
+      <option value="">All categories</option>
+      @for (option of facade.categoryOptions(); track option.slug) {
+        <option [value]="option.slug">{{ option.name }}</option>
+      }
+    </select>
+
+    <select
+      pageBarFilters
+      name="assetStatusFilter"
+      class="asset-filter"
+      aria-label="Filter by status"
+      [ngModel]="facade.statusFilter()"
+      (ngModelChange)="facade.statusFilter.set($event)"
+    >
+      <option value="all">Any status</option>
+      <option value="active">Active</option>
+      <option value="deactivated">Deactivated</option>
+    </select>
+
+    <select
+      pageBarFilters
+      name="assetStreamingFilter"
+      class="asset-filter"
+      aria-label="Filter by streaming"
+      [ngModel]="facade.streamingFilter()"
+      (ngModelChange)="facade.streamingFilter.set($event)"
+    >
+      <option value="all">Any streaming</option>
+      <option value="streaming">Streaming</option>
+      <option value="offline">Offline</option>
+    </select>
+
+    <label class="row toggle" pageBarFilters>
       <input
-        type="search"
-        name="assetSearch"
-        class="asset-search"
-        placeholder="Search assets by name…"
-        aria-label="Search assets by name"
-        [ngModel]="facade.searchQuery()"
-        (ngModelChange)="facade.searchQuery.set($event)"
+        type="checkbox"
+        name="showArchived"
+        [ngModel]="facade.showArchived()"
+        (ngModelChange)="facade.toggleShowArchived()"
       />
+      <span>Show archived</span>
+    </label>
 
-      <label class="field-inline">
-        <span class="label">Category</span>
-        <select
-          name="assetCategoryFilter"
-          [ngModel]="facade.categoryFilter()"
-          (ngModelChange)="facade.categoryFilter.set($event)"
-        >
-          <option value="">All categories</option>
-          @for (option of facade.categoryOptions(); track option.slug) {
-            <option [value]="option.slug">{{ option.name }}</option>
-          }
-        </select>
-      </label>
+    @if (facade.hasActiveFilters()) {
+      <button pageBarFilters type="button" class="btn secondary small" (click)="clearFilters()">Clear filters</button>
+    }
 
-      <label class="field-inline">
-        <span class="label">Status</span>
-        <select
-          name="assetStatusFilter"
-          [ngModel]="facade.statusFilter()"
-          (ngModelChange)="facade.statusFilter.set($event)"
-        >
-          <option value="all">Any status</option>
-          <option value="active">Active</option>
-          <option value="deactivated">Deactivated</option>
-        </select>
-      </label>
+    <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add source</button>
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      (click)="facade.refreshAll()"
+      [disabled]="facade.fleet.loading()"
+    >
+      Refresh
+    </button>
+  </vision-page-bar>
 
-      <label class="field-inline">
-        <span class="label">Streaming</span>
-        <select
-          name="assetStreamingFilter"
-          [ngModel]="facade.streamingFilter()"
-          (ngModelChange)="facade.streamingFilter.set($event)"
-        >
-          <option value="all">Any</option>
-          <option value="streaming">Streaming</option>
-          <option value="offline">Offline</option>
-        </select>
-      </label>
+  <!-- ---- Assets: list/card + detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md)
+       `vision-two-pane` docks the detail beside the list ≥1200px and overlays it below that — see that
+       component's own doc comment. Selection lives in `?sel=<assetId>` via the facade, never a bare
+       component signal, so refresh/Back/sharing all keep working (F6). -->
+  <vision-two-pane
+    [detailOpen]="!!facade.selectedRow()"
+    [detailLabel]="facade.selectedRow()?.asset?.displayName ?? 'Details'"
+    (detailClose)="facade.clearSelection()"
+  >
+    <section class="card" twoPaneList>
+      <!-- The bar's own count chip already answers "how many"; this line keeps the one piece of
+           information the chip can't — how the current filter narrows the full fleet — so it stays,
+           fixed to real pluralisation instead of the old "asset(s)" placeholder text. -->
+      <div class="muted assets-shown">{{ facade.assetRows().length }} of {{ pluralize(facade.assets().length, 'asset') }}</div>
 
-      <label class="row toggle">
-        <input
-          type="checkbox"
-          name="showArchived"
-          [ngModel]="facade.showArchived()"
-          (ngModelChange)="facade.toggleShowArchived()"
-        />
-        <span>Show archived</span>
-      </label>
-
-      @if (facade.hasActiveFilters()) {
-        <button type="button" class="btn secondary small" (click)="clearFilters()">Clear filters</button>
-      }
-    </div>
-  </section>
-
-  <!-- ---- Assets: the grid ---------------------------------------------------------------------- -->
-  <section class="card">
-    <header>
-      <h2>Assets</h2>
-      <span class="muted">{{ facade.assetRows().length }} of {{ facade.assets().length }} asset(s)</span>
-    </header>
-
-    @if (facade.assetRows().length === 0) {
-      @if (facade.hasAnyAssets()) {
-        <vision-empty title="No assets match" message="Nothing currently matches this search/filter combination.">
-          <button type="button" class="btn secondary" (click)="clearFilters()">Clear filters</button>
-        </vision-empty>
-      } @else {
-        <vision-empty
-          title="No assets yet"
-          message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add source" above to bring in the real thing (register, scan, or simulate a moving test drone) as a first-class asset.'
-        >
-          <button type="button" class="btn" (click)="facade.registerSimulator()" [disabled]="facade.submitting()">
-            Add the simulated source
-          </button>
-        </vision-empty>
-      }
-    } @else {
-      <div class="asset-card-grid">
-        @for (row of facade.assetRows(); track row.asset.assetId) {
-          <article class="asset-card" [class.archived]="row.archived">
-            <header class="asset-card-head">
-              <span class="name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
-              <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
-                <button type="button" (click)="facade.openAsset(row)">Details</button>
-                <div class="kebab-divider" role="separator"></div>
-                @for (entry of assetActionsFor(row); track entry.action) {
-                  <div class="kebab-item">
-                    <button
-                      type="button"
-                      [class.danger-action]="entry.action === 'archive'"
-                      [disabled]="!entry.available || facade.busyAssetId() === row.asset.assetId"
-                      [title]="entry.reason ?? ''"
-                      (click)="facade.onAssetAction(row, entry.action)"
-                    >
-                      {{ assetActionLabel(entry.action) }}
-                    </button>
-                    @if (!entry.available && entry.reason) {
-                      <span class="kebab-reason">{{ entry.reason }}</span>
-                    }
-                  </div>
-                }
-              </vision-kebab-menu>
-            </header>
-
-            <div class="asset-card-chips">
-              <span class="chip">{{ row.asset.categoryName }}</span>
-              <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                {{ lifecycleLabel(row.lifecycle) }}
-              </span>
-              @if (!row.archived) {
-                @if (row.streaming) {
-                  <span class="chip ok"><span class="dot live"></span>Live</span>
-                } @else {
-                  <span class="chip">Offline</span>
-                }
-              }
-            </div>
-
-            <div class="asset-card-meta muted">{{ row.deviceCount }} device(s)</div>
-
-            <div class="asset-card-actions">
-              @if (!row.archived && row.watchDeviceId) {
-                <button type="button" class="btn small" (click)="facade.watchAsset(row)">Watch live</button>
-              }
-              <button type="button" class="btn secondary small" (click)="facade.openAsset(row)">Open</button>
-            </div>
-          </article>
+      @if (facade.assetRows().length === 0) {
+        @if (facade.hasAnyAssets()) {
+          <vision-empty title="No assets match" message="Nothing currently matches this search/filter combination.">
+            <button type="button" class="btn secondary" (click)="clearFilters()">Clear filters</button>
+          </vision-empty>
+        } @else {
+          <vision-empty
+            title="No assets yet"
+            message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add source" above to bring in the real thing (register, scan, or simulate a moving test drone) as a first-class asset.'
+          >
+            <button type="button" class="btn" (click)="facade.registerSimulator()" [disabled]="facade.submitting()">
+              Add the simulated source
+            </button>
+          </vision-empty>
         }
+      } @else if (viewMode() === 'list') {
+        <!-- ---- Dense list (default, docs/design/04-assets.md's own row spec): status dot + name ·
+             category · lifecycle · streaming · device count · kebab, ~36px rows — ~20 fit a 1080p
+             screen without scrolling (the page's own acceptance bar). A real `<table>`, not a
+             CSS-grid list: it's the same shape `features/devices/devices.html`'s table already
+             proves, and reuses that table's global CSS (`src/styles.css`) instead of a bespoke
+             column system. Each `<tr>` is clickable + keyboard-operable (F6 — selecting never
+             navigates) via `tabindex`/`role="button"`/Enter·Space; the kebab cell stops propagation
+             so opening it doesn't also select the row underneath it. Wrapped in a contained
+             horizontal scroll (`.table-scroll`) — see `features/devices/devices.css`'s identical
+             note for why: the browser's auto table layout can squeeze Name illegibly once the
+             two-pane panel narrows the available width, so the scrollbar lives here, not on the
+             page. -->
+        <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Category</th>
+              <th>Lifecycle</th>
+              <th>Streaming</th>
+              <th>Devices</th>
+              <th aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of facade.assetRows(); track row.asset.assetId) {
+              <tr
+                class="row-selectable"
+                [class.selected]="row.asset.assetId === facade.selectedId()"
+                [class.archived]="row.archived"
+                tabindex="0"
+                role="button"
+                [attr.aria-pressed]="row.asset.assetId === facade.selectedId()"
+                [attr.aria-label]="'View details for ' + row.asset.displayName"
+                (click)="facade.selectRow(row.asset.assetId)"
+                (keydown.enter)="facade.selectRow(row.asset.assetId)"
+                (keydown.space)="$event.preventDefault(); facade.selectRow(row.asset.assetId)"
+              >
+                <td>
+                  <div class="name-cell">
+                    <span class="dot" [class.live]="row.streaming"></span>
+                    <span class="name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
+                  </div>
+                </td>
+                <td class="muted truncate">{{ row.asset.categoryName }}</td>
+                <td>
+                  <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                    {{ lifecycleLabel(row.lifecycle) }}
+                  </span>
+                </td>
+                <td>
+                  @if (!row.archived) {
+                    @if (row.streaming) {
+                      <span class="chip ok"><span class="dot live"></span>Live</span>
+                    } @else {
+                      <span class="chip">Offline</span>
+                    }
+                  }
+                </td>
+                <td class="muted">{{ row.deviceCount }}</td>
+                <td class="row-kebab-cell" (click)="$event.stopPropagation()">
+                  <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
+                    @for (entry of assetActionsFor(row); track entry.action) {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          [class.danger-action]="entry.action === 'archive'"
+                          [disabled]="!entry.available || facade.busyAssetId() === row.asset.assetId"
+                          [title]="entry.reason ?? ''"
+                          (click)="facade.onAssetAction(row, entry.action)"
+                        >
+                          {{ assetActionLabel(entry.action) }}
+                        </button>
+                        @if (!entry.available && entry.reason) {
+                          <span class="kebab-reason">{{ entry.reason }}</span>
+                        }
+                      </div>
+                    }
+                  </vision-kebab-menu>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        </div>
+      } @else {
+        <!-- ---- Cards (opt-in, docs/design/04-assets.md): the photo-first view — auto-fills so a
+             wide viewport gets more columns rather than one lonely card in a 1400px column (F4). -->
+        <div class="asset-card-grid">
+          @for (row of facade.assetRows(); track row.asset.assetId) {
+            <article
+              class="asset-card"
+              [class.archived]="row.archived"
+              [class.selected]="row.asset.assetId === facade.selectedId()"
+              tabindex="0"
+              role="button"
+              [attr.aria-pressed]="row.asset.assetId === facade.selectedId()"
+              [attr.aria-label]="'View details for ' + row.asset.displayName"
+              (click)="facade.selectRow(row.asset.assetId)"
+              (keydown.enter)="facade.selectRow(row.asset.assetId)"
+              (keydown.space)="$event.preventDefault(); facade.selectRow(row.asset.assetId)"
+            >
+              <header class="asset-card-head">
+                <span class="name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
+                <span class="asset-card-kebab" (click)="$event.stopPropagation()">
+                  <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
+                    @for (entry of assetActionsFor(row); track entry.action) {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          [class.danger-action]="entry.action === 'archive'"
+                          [disabled]="!entry.available || facade.busyAssetId() === row.asset.assetId"
+                          [title]="entry.reason ?? ''"
+                          (click)="facade.onAssetAction(row, entry.action)"
+                        >
+                          {{ assetActionLabel(entry.action) }}
+                        </button>
+                        @if (!entry.available && entry.reason) {
+                          <span class="kebab-reason">{{ entry.reason }}</span>
+                        }
+                      </div>
+                    }
+                  </vision-kebab-menu>
+                </span>
+              </header>
+
+              <div class="asset-card-chips">
+                <span class="chip">{{ row.asset.categoryName }}</span>
+                <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+                  {{ lifecycleLabel(row.lifecycle) }}
+                </span>
+                @if (!row.archived) {
+                  @if (row.streaming) {
+                    <span class="chip ok"><span class="dot live"></span>Live</span>
+                  } @else {
+                    <span class="chip">Offline</span>
+                  }
+                }
+              </div>
+
+              <div class="asset-card-meta muted">{{ pluralize(row.deviceCount, 'device') }}</div>
+            </article>
+          }
+        </div>
+      }
+    </section>
+
+    <!-- ---- Detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md): replaces the
+         old per-row "Open" for triage — chips, the device list, and the full action set, including
+         "Open full ›" for the deep work this panel has no room for. -->
+    @if (facade.selectedRow(); as row) {
+      <div twoPaneDetail>
+        <div class="detail-chips">
+          <span class="chip">{{ row.asset.categoryName }}</span>
+          <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
+            {{ lifecycleLabel(row.lifecycle) }}
+          </span>
+          @if (!row.archived) {
+            @if (row.streaming) {
+              <span class="chip ok"><span class="dot live"></span>Streaming</span>
+            } @else {
+              <span class="chip">Offline</span>
+            }
+          }
+        </div>
+
+        <div class="detail-section">
+          <h3 class="detail-heading">{{ pluralize(row.asset.devices.length, 'device') }}</h3>
+          @if (row.asset.devices.length === 0) {
+            <p class="muted detail-empty">No devices on this asset.</p>
+          } @else {
+            <ul class="detail-device-list">
+              @for (device of row.asset.devices; track device.id) {
+                <li class="detail-device-row">
+                  <span class="chip">{{ device.protocol }}</span>
+                  <span class="truncate" [title]="device.name">{{ device.name }}</span>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+
+        <div class="detail-actions">
+          @if (!row.archived && row.watchDeviceId) {
+            <button type="button" class="btn" (click)="facade.watchAsset(row)">Watch live</button>
+          }
+          @if (!row.archived) {
+            <button type="button" class="btn secondary" (click)="facade.openCockpitFor(row.asset.assetId)">Open cockpit</button>
+          }
+          <a class="btn secondary" [routerLink]="['/assets', row.asset.assetId]">Open full ›</a>
+        </div>
       </div>
     }
-  </section>
+  </vision-two-pane>
 </div>

@@ -1,0 +1,158 @@
+/* `.chip`/`.chip.ok`/`.dot`/`.dot.live`/`.truncate`/`.mono`/`.faint`/`.muted` all come from the
+   global `src/styles.css` primitives — this stylesheet only owns what's specific to one event row.
+   `:host { display: contents }` so this component never adds a layout box of its own — the button
+   below participates directly in whatever flex/grid the host list (`events-rail.html`'s `<li>`,
+   `alerts.html`'s `<li>`) already provides. */
+:host {
+  display: contents;
+}
+
+.event-row {
+  width: 100%;
+  text-align: left;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.event-row:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+}
+
+.event-row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+/* An OPEN event's own border stays live-colored regardless of density — signal, not noise (unlike
+   the old always-on `CLOSED` text chip this row deletes, see `event-row.ts`'s own doc comment). */
+.event-row.open {
+  border-color: var(--color-live);
+}
+
+/* Two-pane's own selection state (Alerts only) — the identical "2px accent left bar + raised
+   background" idiom `app-sidebar.css#.nav-row.active` already establishes for "this is the current
+   one" everywhere else in this app, reused rather than inventing a second selection language. */
+.event-row.selected {
+  background: var(--panel-raised);
+  border-left-color: var(--color-info);
+}
+
+/* The always-visible severity dot (both variants) — gray at rest (`CLOSED`, the norm), live-colored
+   only while OPEN. A fast at-a-glance scan target even on the (now rare) row that has no visible
+   `OPEN` chip room, e.g. a very narrow rail. */
+.event-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.event-dot.open {
+  background: var(--color-live);
+}
+
+.event-label {
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+/* ---- Dense (docs/design/08-alerts.md): one line, ~32px tall ------------------------------------ */
+
+.event-row.dense {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 2rem;
+  padding: 0 var(--space-8);
+}
+
+.event-row.dense .event-label {
+  flex: none;
+  font-size: 0.82rem;
+}
+
+.event-row.dense .event-confidence {
+  flex: none;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  min-width: 2.5rem;
+}
+
+/* The one element allowed to shrink — `min-width: 0` is what actually lets a flex item's own
+   ellipsis take effect (its default `min-width: auto` is its unbroken content's full width, the
+   same gotcha `events-rail.css` already documented before this file existed). */
+.event-source {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.event-row.dense .event-time {
+  flex: none;
+  font-size: 0.72rem;
+}
+
+/* ---- Default (rail/bell — 300px / 22rem hosts): two lines, unchanged from the pre-extraction markup */
+
+.event-row:not(.dense) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-8);
+}
+
+/* The row's top line: state chip, label, time, action — all inline, none of them ever truncate or
+   shrink (the source-name meta line below is the one place that gives up space; see `.event-meta`).
+   `min-width: 0` here is what lets `.event-label` (its one flexible member) actually shrink instead
+   of forcing this line — and therefore the whole row — wider than its container. */
+.event-row-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.event-row:not(.dense) .event-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
+.event-time {
+  flex: none;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.event-affordance {
+  flex: none;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+/* The source-name/confidence line — deliberately its own full-width row (not squeezed into
+   whatever `.event-row-top` has left over) once a real device/asset name turned out to be one
+   long, unbreakable token (no spaces to wrap on — e.g. a real simulated-source filename): confined
+   to a 300px rail's own narrow leftover space, that token had nowhere near enough room to truncate
+   to anything legible — giving it the entire row's width instead means it only needs to truncate
+   for genuinely extreme names, not routine ones. */
+.event-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  min-width: 0;
+  font-size: 0.72rem;
+}
+
+.event-row:not(.dense) .event-confidence {
+  flex: none;
+  white-space: nowrap;
+}

@@ -1,0 +1,158 @@
+/* One 48px row replacing `.page-head`'s ~130px block (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — see
+   `page-bar.ts`'s class doc for why the prose it replaces was redundant once the sidebar started
+   answering "where am I" permanently.
+
+   Sticks to the top of `<main>`'s scroll box (`app.css` makes `<main>` the scroll container), so a
+   page's identity, count and primary action survive a long list scroll. `z-index: 20` keeps it over
+   page content while staying under the side panel (120) and dialogs (150) — the same ladder
+   `shared/ui/side-panel.css` documents. */
+:host {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-16);
+  min-height: 48px;
+  margin-bottom: var(--space-16);
+  padding: var(--space-8) 0;
+  /* Opaque, not translucent: content scrolling under a sticky bar must not ghost through it — the
+     same reasoning the old `.app-header` carried (see this repo's own hairline-seam gotcha). */
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.page-bar-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.page-bar-crumb:hover {
+  color: var(--text);
+}
+
+.page-bar-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+/* Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3). Sized to the bar's own row rather than the
+   larger block the old header used — the photo is identity, not content, so it reads as an avatar
+   beside the name instead of competing with it. `object-fit: cover` keeps any aspect ratio from
+   distorting; the element is removed outright on a 404 (see `page-bar.ts#showAvatar`). */
+.page-bar-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--panel-raised);
+}
+
+/* The count rides the title rather than sitting in the content below it, so "how many" is answered
+   before the eye reaches the list — and so pages stop hand-rolling `N of M thing(s)` strings. */
+.page-bar-count {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.page-bar-hint {
+  position: relative;
+  display: inline-flex;
+}
+
+.page-bar-hint-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.page-bar-hint-trigger:hover {
+  color: var(--text);
+  background: var(--panel-hover);
+}
+
+.page-bar-hint-body {
+  position: absolute;
+  top: calc(100% + var(--space-8));
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 42ch;
+  padding: var(--space-8);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  white-space: normal;
+}
+
+/* Filters take the slack so actions stay pinned right; both collapse onto their own line before the
+   title ever wraps (the flex-wrap above). */
+.page-bar-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-left: auto;
+}
+
+.page-bar-filters:empty {
+  display: none;
+}
+
+.page-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+/* When there are no filters, the actions themselves must claim the slack — otherwise they'd sit
+   flush against the title. `:has()` is already used elsewhere in this codebase's global sheet. */
+:host(:not(:has(.page-bar-filters > *))) .page-bar-actions {
+  margin-left: auto;
+}
+
+.page-bar-actions:empty {
+  display: none;
+}
+
+/* --bp-sm (styles.css) — the bar restructures rather than shrinks: title on its own line, then
+   filters and actions below it, so nothing truncates on a phone. */
+@media (max-width: 640px) {
+  :host {
+    align-items: flex-start;
+    gap: var(--space-8);
+  }
+
+  .page-bar-filters {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  :host(:not(:has(.page-bar-filters > *))) .page-bar-actions {
+    margin-left: 0;
+  }
+}

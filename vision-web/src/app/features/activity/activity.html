@@ -1,10 +1,15 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>My activity</h1>
-      <p>The changes you've made recently, newest first.</p>
-    </div>
-  </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / §2.4: `page-head` stays gone. No `Mine | Everyone` scope
+       toggle — the backend has no all-users activity query to back it (see `activity-facade.ts`'s
+       own class doc comment for the check and this task's report for the flag), so nothing projects
+       into `[pageBarFilters]` this wave. -->
+  <vision-page-bar
+    title="My activity"
+    icon="history"
+    [count]="facade.rows().length"
+    countNoun="entry"
+    countNounPlural="entries"
+  />
 
   <section class="card">
     @if (facade.loading()) {
@@ -19,27 +24,43 @@
         message="Your actions — creating an asset, renaming a device, archiving — will show up here."
       />
     } @else {
-      <ul class="activity-list">
-        @for (row of facade.rows(); track row.id) {
-          <li class="activity-row">
-            <div class="activity-row-head">
-              <span class="chip accent">{{ row.actionLabel }}</span>
-              @if (row.targetLabel) {
-                <span class="muted activity-target">{{ row.targetLabel }}</span>
-              }
-              <span class="activity-summary truncate">{{ row.summary }}</span>
-              <span class="faint mono activity-time">{{ row.relativeTime }}</span>
-            </div>
-            @if (row.details.length > 0) {
-              <div class="activity-details">
-                @for (detail of row.details; track detail.key) {
-                  <span class="activity-detail"><span class="muted">{{ detail.key }}:</span> {{ detail.value }}</span>
+      <!-- Day-grouped (docs/design/09-activity.md: "an audit log is read by 'when'") — pure
+           bucketing lives in `core/activity/activity-logic.ts#groupActivityByDay`, unit-tested. -->
+      @for (group of facade.dayGroups(); track group.label) {
+        <h2 class="activity-day-label">{{ group.label }}</h2>
+        <ul class="activity-list">
+          @for (row of group.rows; track row.id) {
+            <li
+              class="activity-row"
+              [class.tone-success]="row.accentTone === 'success'"
+              [class.tone-info]="row.accentTone === 'info'"
+              [class.tone-warn]="row.accentTone === 'warn'"
+              [class.tone-danger]="row.accentTone === 'danger'"
+            >
+              <div class="activity-row-head">
+                <!-- Absolute time leads (the left gutter); the old relative time moves to a
+                     hover/focus tooltip — still one attribute away, not lost. -->
+                <span class="activity-time mono" [title]="row.relativeTime">{{ row.absoluteTime }}</span>
+                @if (row.targetLabel) {
+                  <span class="muted activity-target">{{ row.targetLabel }}</span>
                 }
+                <!-- No verb chip (docs/design/09-activity.md: "the chip is redundant with the
+                     verb" — the summary text below already states it, e.g. "Created asset 11…";
+                     the left accent border is a color reinforcement of information already present
+                     in visible/announced text, not its sole carrier). -->
+                <span class="activity-summary truncate">{{ row.summary }}</span>
               </div>
-            }
-          </li>
-        }
-      </ul>
+              @if (row.details.length > 0) {
+                <div class="activity-details">
+                  @for (detail of row.details; track detail.key) {
+                    <span class="activity-detail"><span class="muted">{{ detail.key }}:</span> {{ detail.value }}</span>
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
     }
   </section>
 </div>

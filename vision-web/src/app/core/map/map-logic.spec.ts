@@ -305,6 +305,17 @@ describe('nextAutoFitEnabled', () => {
     expect(nextAutoFitEnabled(true, 'userInteraction')).toBe(false);
   });
 
+  // Focusing one asset has to stop the fleet-wide fit, or auto-fit's own effect re-fits to every
+  // marker on the next telemetry tick and yanks the camera straight back off the chosen asset.
+  it('focusing an asset disables auto-fit, and is idempotent when already off', () => {
+    expect(nextAutoFitEnabled(true, 'assetFocused')).toBe(false);
+    expect(nextAutoFitEnabled(false, 'assetFocused')).toBe(false);
+  });
+
+  it('recenter still re-enables auto-fit after an asset focus', () => {
+    expect(nextAutoFitEnabled(nextAutoFitEnabled(true, 'assetFocused'), 'recenterClicked')).toBe(true);
+  });
+
   it('recenter re-enables auto-fit', () => {
     expect(nextAutoFitEnabled(false, 'recenterClicked')).toBe(true);
   });

@@ -26,6 +26,7 @@ import com.drones.vision.application.pipeline.*;
 import com.drones.vision.application.replay.*;
 import com.drones.vision.application.simulation.*;
 import com.drones.vision.application.stream.*;
+import com.drones.vision.application.usage.*;
 import com.drones.vision.domain.port.out.*;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
@@ -305,6 +306,20 @@ public class ApplicationServiceWiring {
         return new DefaultReplayService(assetUsageRepositoryPort, telemetryRepositoryPort, detectionRepositoryPort,
                 streamPublisherPort,
                 new ReplayServiceSettings(replay.defaultMaxPoints(), replay.maxPointsCeiling(), replay.fetchLimit()));
+    }
+
+    /**
+     * The fleet-wide "replay library" list (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8): the read side
+     * behind {@code UsageTimelineController}'s {@code GET /api/usages} (vision-api,
+     * component-scanned) — a sibling read to {@link #replayService}'s per-usage detail, kept as its
+     * own bean/service since it needs a different collaborator ({@link AssetRepositoryPort}, to
+     * resolve each row's display name and enforce visibility) that {@link ReplayService} has no use
+     * for.
+     */
+    @Bean
+    public UsageService usageService(AssetUsageRepositoryPort assetUsageRepositoryPort,
+                                      AssetRepositoryPort assetRepositoryPort) {
+        return new DefaultUsageService(assetUsageRepositoryPort, assetRepositoryPort);
     }
 
     /**

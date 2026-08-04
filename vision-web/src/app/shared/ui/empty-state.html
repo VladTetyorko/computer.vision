@@ -1,0 +1,10 @@
+<div class="empty">
+  @if (icon(); as icon) {
+    <vision-icon class="empty-icon" [name]="icon" [size]="32" />
+  }
+  <h3>{{ title() }}</h3>
+  @if (message(); as message) {
+    <p>{{ message }}</p>
+  }
+  <ng-content />
+</div>

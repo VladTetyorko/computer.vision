@@ -62,6 +62,7 @@ import type {
   UpdateLiveTopicsRequest,
   UpdateStreamConfigRequest,
   UsageRecording,
+  UsageSummary,
   UsageTimeline,
   UserSummary,
 } from './models';
@@ -279,6 +280,26 @@ export class VisionApi {
     return firstValueFrom(
       this.http.get<UsageTimeline>(`/api/usages/${encodeURIComponent(usageId)}/timeline`, { params }),
     );
+  }
+
+  /**
+   * The fleet-wide flight list behind the replay library (docs/design/10-replay.md's frozen wire
+   * contract, Wave 4) — `GET /api/usages`, newest first. `limit`/`assetId` are each only added to
+   * the query string when given, the same convention as every other optional filter in this
+   * class. `features/replay/replay-library-facade.ts` re-fetches with `assetId` set whenever the
+   * asset filter changes, rather than filtering a fleet-wide page client-side — narrowing to one
+   * asset then surfaces *that asset's* newest flights, not whatever happened to survive inside
+   * the fleet-wide `limit`.
+   */
+  listUsages(options: { readonly limit?: number; readonly assetId?: string } = {}): Promise<UsageSummary[]> {
+    const params: Record<string, string | number> = {};
+    if (options.limit !== undefined) {
+      params['limit'] = options.limit;
+    }
+    if (options.assetId !== undefined) {
+      params['assetId'] = options.assetId;
+    }
+    return firstValueFrom(this.http.get<UsageSummary[]>('/api/usages', { params }));
   }
 
   // --- Assets — warehouse lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) ---------------

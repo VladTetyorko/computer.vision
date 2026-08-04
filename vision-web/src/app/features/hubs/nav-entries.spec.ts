@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { NAV_MODES, navModeById } from './nav-entries';
 
 describe('NAV_MODES', () => {
-  it('has exactly the three frozen modes, in order, each with its own hub route', () => {
+  it('has exactly the three frozen modes, in order, each with its own primaryRoute (docs/design/19-hubs.md — where the retired /operate|/monitor|/manage hub paths now redirect)', () => {
     expect(NAV_MODES.map((mode) => mode.id)).toEqual(['operate', 'monitor', 'manage']);
-    expect(NAV_MODES.map((mode) => mode.hubRoute)).toEqual(['/operate', '/monitor', '/manage']);
+    expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual(['/fly', '/command', '/assets']);
   });
 
   it('every entry has a non-empty name/description and a `to` that starts with a slash', () => {

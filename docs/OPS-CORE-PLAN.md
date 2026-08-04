@@ -59,8 +59,17 @@ remains parked. Personas: P pilot, M manager, C crew/referee.
 ### Design — mediamtx does the heavy lifting
 - mediamtx native recording: `MTX_PATHDEFAULTS_RECORD=yes`, fMP4 segments, named volume
   `mediamtx-recordings` (docker-named volume, NOT a repo bind mount — keeps recordings out of the
-  worktree), `MTX_PATHDEFAULTS_RECORDDELETEAFTER=72h` default retention; playback server enabled
+  worktree), `MTX_PATHDEFAULTS_RECORDDELETEAFTER` retention; playback server enabled
   (`MTX_PLAYBACK=yes`, host port **19996**, container 9996 — same 1:1 style as other mediamtx ports).
+  - **Retention: 72h is the spec for a deployment recording real flights; `docker-compose.yml` now
+    ships `1h`** (2026-08-04). `MTX_PATHDEFAULTS_RECORD=yes` records *every* path, and in the dev
+    stack most paths are `adapter-simulation` sources that stream for as long as the app is up.
+    Measured: **~1.8 GB per hour per stream** (hourly fMP4 segments of 1.76–1.84 GB), so one
+    always-on synthetic source trends toward ~130 GB before 72h prunes anything — this is how the
+    `vision_mediamtx-recordings` volume reached 8.4 GB across 15 stale device paths and contributed
+    to filling a 159 GB disk. Restore 72h for real deployments; where simulated and real sources
+    share a host, prefer `MTX_PATHDEFAULTS_RECORD=no` plus per-path enable via mediamtx's API
+    (already noted as possible in `docker-compose.yml`, still unused) rather than a blanket default.
 - mediamtx playback API (v1.19): `GET :19996/get?path=<name>&start=<RFC3339>&duration=<seconds>`
   → single MP4 for the range — this IS clip export; `GET /list?path=` → recorded ranges.
 - `MediamtxStreamPublisher` implements `playbackUrl(streamId, start, duration)` → that /get URL

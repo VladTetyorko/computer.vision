@@ -1,20 +1,66 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1><vision-icon name="pilot" [size]="24" />Pilots / roster</h1>
-      <p>Every asset's pilot assignments in one place — expand an asset to add or remove a pilot.</p>
-    </div>
+  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 (Wave 2, committed) / §2.4 (this wave): `page-head` stays
+       gone. The `By asset | By pilot` pivot and the fleet-level gap indicator join search in the
+       bar's own `[pageBarFilters]` slot — the same projection idiom every other Wave 2/3 page uses,
+       not a change to the bar component itself. -->
+  <vision-page-bar
+    title="Pilots / roster"
+    icon="pilot"
+    [count]="facade.rows().length"
+    countNoun="asset"
+    hint="Every asset's pilot assignments in one place — pick a row to assign or remove a pilot."
+  >
     @if (facade.hasAnyAssets()) {
-      <input
-        type="search"
-        class="roster-search"
-        placeholder="Search assets or pilots…"
-        aria-label="Search assets or pilots"
-        [ngModel]="facade.searchQuery()"
-        (ngModelChange)="facade.searchQuery.set($event)"
-      />
+      <!-- `<ng-container pageBarFilters>` carries the slot's own selector once, on one root node —
+           an `@if` whose body has several root siblings can't otherwise be content-projected
+           correctly (NG8011: the projector can't tell which sibling to match against the slot). -->
+      <ng-container pageBarFilters>
+        <div class="segmented" role="tablist" aria-label="Roster view">
+          <button
+            type="button"
+            class="btn secondary small"
+            role="tab"
+            [class.active]="facade.pivot() === 'asset'"
+            [attr.aria-selected]="facade.pivot() === 'asset'"
+            (click)="facade.setPivot('asset')"
+          >
+            By asset
+          </button>
+          <button
+            type="button"
+            class="btn secondary small"
+            role="tab"
+            [class.active]="facade.pivot() === 'pilot'"
+            [attr.aria-selected]="facade.pivot() === 'pilot'"
+            (click)="facade.setPivot('pilot')"
+          >
+            By pilot
+          </button>
+        </div>
+
+        <!-- docs/design/13-roster.md: "a gap indicator — makes the page answer a real management
+             question at a glance." Signal only when non-zero (`@if` on a plain number is falsy at
+             0, so this already skips a "0 assets" confirmation — the same noise the CLOSED-chip
+             fix elsewhere in this wave exists to remove). -->
+        @if (facade.assetsWithoutPilotCount(); as gap) {
+          <span class="chip warn">
+            <vision-icon name="alert" [size]="12" />
+            {{ gap }} {{ gap === 1 ? 'asset has' : 'assets have' }} no pilot
+          </span>
+        }
+
+        <input
+          type="search"
+          name="rosterSearch"
+          class="roster-search"
+          placeholder="Search assets or pilots…"
+          aria-label="Search assets or pilots"
+          [ngModel]="facade.searchQuery()"
+          (ngModelChange)="facade.searchQuery.set($event)"
+        />
+      </ng-container>
     }
-  </div>
+  </vision-page-bar>
 
   @if (facade.loading()) {
     <p class="muted">Loading…</p>
@@ -26,31 +72,95 @@
     <vision-empty title="No assets yet" message="Add a source, then assign pilots to it here.">
       <a class="btn" routerLink="/add-source">Add source</a>
     </vision-empty>
-  } @else if (facade.rows().length === 0) {
-    <vision-empty title="No matches" message="Try a different search." />
   } @else {
-    <div class="roster-list">
-      @for (row of facade.rows(); track row.asset.assetId) {
-        <details class="card roster-row" (toggle)="onToggle(row, $event)">
-          <summary class="roster-summary">
-            <vision-icon class="roster-chevron" name="chevron-right" [size]="16" />
-            <span class="roster-name truncate">{{ row.asset.displayName }}</span>
-            <span class="chip">{{ row.asset.categoryName }}</span>
-            <span class="roster-pilots">
-              @if (row.pilotNames.length === 0) {
-                <span class="muted">No pilots assigned</span>
-              } @else {
-                @for (name of row.pilotNames; track name) {
-                  <span class="chip accent">{{ name }}</span>
-                }
+    <vision-two-pane [detailOpen]="facade.hasSelection()" [detailLabel]="facade.selectedLabel()" (detailClose)="facade.clearSelection()">
+      <div twoPaneList>
+        @if (facade.pivot() === 'asset') {
+          @if (facade.rows().length === 0) {
+            <vision-empty title="No matches" message="Try a different search." />
+          } @else {
+            <ul class="roster-list">
+              @for (row of facade.rows(); track row.asset.assetId) {
+                <li>
+                  <button
+                    type="button"
+                    class="roster-row"
+                    [class.selected]="row.asset.assetId === facade.selectedId()"
+                    (click)="facade.select(row.asset.assetId)"
+                  >
+                    <span class="roster-name truncate">{{ row.asset.displayName }}</span>
+                    <span class="chip">{{ row.asset.categoryName }}</span>
+                    <span class="roster-pilots">
+                      @if (row.pilotNames.length === 0) {
+                        <span class="muted">No pilots assigned</span>
+                      } @else {
+                        @for (name of row.pilotNames; track name) {
+                          <span class="chip accent">{{ name }}</span>
+                        }
+                      }
+                    </span>
+                  </button>
+                </li>
               }
-            </span>
-          </summary>
-          <div class="roster-body">
+            </ul>
+          }
+        } @else {
+          @if (facade.pilotRows().length === 0) {
+            <vision-empty title="No matches" message="Try a different search." />
+          } @else {
+            <ul class="roster-list">
+              @for (row of facade.pilotRows(); track row.userId) {
+                <li>
+                  <button
+                    type="button"
+                    class="roster-row"
+                    [class.selected]="row.userId === facade.selectedId()"
+                    (click)="facade.select(row.userId)"
+                  >
+                    <span class="roster-name truncate">{{ row.displayName }}</span>
+                    <span class="roster-pilots">
+                      @if (row.assignments.length === 0) {
+                        <span class="muted">No assets assigned</span>
+                      } @else {
+                        @for (assignment of row.assignments; track assignment.assetId) {
+                          <span class="chip accent">{{ assignment.displayName }}</span>
+                        }
+                      }
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        }
+      </div>
+
+      <!-- `<ng-container twoPaneDetail>` carries the slot's own selector on one unconditional root
+           node — two *nested* `@if`s (pivot, then row) directly guarding `<div twoPaneDetail>`
+           silently failed to project at all (verified live: `.two-pane-detail-body` rendered
+           completely empty, no NG8011 warning either — Ivy's static content-projection resolution
+           does not see through a second level of control-flow nesting). Wrapping the whole
+           conditional tree inside one always-present container sidesteps that: the container itself
+           is what gets projected, and everything nested inside it is ordinary template content, no
+           further projection resolution needed. -->
+      <ng-container twoPaneDetail>
+        @if (facade.pivot() === 'asset') {
+          @if (facade.selectedAssetRow(); as row) {
             <vision-pilots-card [assetId]="row.asset.assetId" (changed)="facade.refreshPilotsFor(row.asset.assetId)" />
-          </div>
-        </details>
-      }
-    </div>
+          }
+        } @else {
+          @if (facade.selectedPilotRow(); as row) {
+            <vision-pilot-assignments-panel
+              [displayName]="row.displayName"
+              [assignments]="row.assignments"
+              [assignableAssets]="facade.assignableAssetsForSelectedPilot()"
+              [busy]="facade.assignBusy()"
+              (assign)="facade.assignPilotToAsset(row.userId, $event)"
+              (unassign)="facade.unassignPilotFromAsset(row.userId, $event)"
+            />
+          }
+        }
+      </ng-container>
+    </vision-two-pane>
   }
 </div>

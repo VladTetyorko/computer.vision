@@ -18,8 +18,10 @@ import { SectionHeader } from '../../shared/ui/section-header';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Icon } from '../../shared/ui/icon';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
+import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Stat } from '../../shared/ui/stat';
+import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { PilotsCard } from './pilots-card';
 import { AssetDetailFacade } from './asset-detail-facade';
 import { attributeRowsToRecord, attributesToRows, telemetryFactRows, type AttributeRow, type TelemetryFactRow } from './asset-detail-logic';
@@ -46,22 +48,32 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  *     `effect()` that forwards it to `facade.load()` and resets this page's own local overlay state;
  *   - the overlay/view-state a `UiStore`/`PanelState` group or a drill-in `subView` toggle is
  *     explicitly meant to be **host-owned**, per those classes' own doc comments ("a host owns one
- *     instance directly") — `editors` (the four-editor group, new this refactor), `panels` (the
- *     three/four drawers, unchanged), `subView` (the two wide-table sub-views, unchanged);
+ *     instance directly") — `editors` (the four-editor group), `panels` (the three/four drawers),
+ *     `dialogs` (the Archive-asset confirm, added by docs/NAV-IA-REDESIGN-PLAN.md §2.2 wave 2 — see
+ *     this class's own `requestArchiveAsset` doc comment), `subView` (the two wide-table sub-views);
  *   - truly-ephemeral local view state no other component/route transition needs to stay consistent
  *     with: form drafts (`nameDraft`/`categoryDraft`/`registrationNumberDraft`/`renameDraft`/
- *     `assignDraft`/`attributeRows`), the "which inline row is open" pointer (`rowAction`), and the
- *     asset-photo `<img>` error flag (`imageLoadFailed`);
+ *     `assignDraft`/`attributeRows`) and the "which inline row is open" pointer (`rowAction`);
  *   - a handful of pure, stateless template helpers (label/format mappers, `@for`-bound per-row
  *     readers of a facade signal — the same "plain method reading a signal, called from `@for`"
  *     idiom `features/devices/devices.ts#simulatedInfo` already established).
  *
- * Every HTTP call, toast, silent-degrade path, and poll cadence is unchanged from the pre-facade
- * page — see {@link AssetDetailFacade}'s own doc comment.
+ * **Header** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/05-asset-detail.md): the two
+ * `.page-head` blocks this page used to carry (a skeleton title while loading, the real title +
+ * chips + actions once loaded) are now one `<vision-page-bar>`, shared across both states via
+ * `headerTitle`. `crumb` is a fixed `{ label: 'Assets', to: '/assets' }` (05-asset-detail.md's own
+ * mockup) — back to the list, not to a parent entity. The former inline "swap the `<h1>` for text
+ * inputs" rename affordance is gone: `<vision-page-bar>`'s `title` is a plain required `string`
+ * input (a frozen contract this task must not modify), so it cannot host projected `<input>`
+ * elements — the rename form now renders as its own card directly under the bar instead, still
+ * gated by the same `editors` group. The old decorative asset photo (`hasImage`/`imageUrl`,
+ * docs/UX-REWORK-PLAN.md §U-d item 3) is dropped from this header for the same reason: it has no
+ * slot in the frozen bar and 05-asset-detail.md's own mockup shows no avatar — the underlying
+ * `AssetDetailFacade`/`VisionApi` capability is untouched, only this page's presentation of it.
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, LiveMap, PilotsCard, SectionHeader, SidePanel, Icon, KebabMenu, EmptyState, Stat],
+  imports: [RouterLink, LiveMap, PilotsCard, SectionHeader, SidePanel, Icon, KebabMenu, ConfirmDialog, EmptyState, Stat, PageBar],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -73,6 +85,29 @@ export class AssetDetailPage {
 
   protected readonly facade = inject(AssetDetailFacade);
 
+  /** Fixed back-link for `<vision-page-bar>`'s `crumb` — see this class's own "Header" doc note. */
+  protected readonly crumb: PageBarCrumb = { label: 'Assets', to: '/assets' };
+
+  /** Regular pluralisation for the "Usage history" drill-in's own count subtitle — see
+   *  `shared/ui/page-bar/page-bar.ts`'s own doc comment for why this is one shared helper. */
+  protected readonly pluralize = pluralize;
+
+  /** `<vision-page-bar>`'s `title` while the asset itself hasn't loaded yet (no name to show). */
+  protected readonly headerTitle = computed(() => this.facade.asset()?.displayName ?? 'Asset');
+
+  /**
+   * The asset photo (docs/UX-REWORK-PLAN.md §U-d item 3), fed to `<vision-page-bar>`'s `avatarSrc`.
+   * Restored after the Wave 2 header migration dropped it: the photo was never part of the bar's
+   * plain-string `title`, so that contract never required removing it — it only needed a home, which
+   * `avatarSrc` now is. The graceful 404 (an asset with no uploaded photo) lives inside `PageBar`
+   * itself, so this page no longer carries its own `imageLoadFailed` flag nor the navigation-time
+   * reset that flag required.
+   */
+  protected readonly assetImageSrc = computed(() => {
+    const asset = this.facade.asset();
+    return asset?.hasImage ? this.facade.imageUrl(asset.assetId) : null;
+  });
+
   // --- Overlay/view state — host-owned, see this class's own doc comment above ------------------
 
   private readonly editors = new UiStore();
@@ -83,14 +118,16 @@ export class AssetDetailPage {
   protected readonly panels = new UiStore();
   protected readonly subView = signal<'overview' | 'usage' | 'hardware'>('overview');
 
-  private readonly imageLoadFailed = signal(false);
-  protected readonly assetImageSrc = computed(() => {
-    const asset = this.facade.asset();
-    if (!asset?.hasImage || this.imageLoadFailed()) {
-      return undefined;
-    }
-    return this.facade.imageUrl(asset.assetId);
-  });
+  /**
+   * The Archive-asset confirm's own one-member `UiStore` group (docs/design/05-asset-detail.md's
+   * own acceptance criterion — "Archive asset requires a confirm and is not adjacent to Rename").
+   * A separate group from `editors`/`panels` so a confirm can never coexist with either — mirrors
+   * `features/fly/fly.ts`'s identical single-member `dialog` group for its Stop-stream confirm.
+   */
+  private readonly dialogs = new UiStore();
+  protected isDialogOpen(id: 'archive'): boolean {
+    return this.dialogs.isOpen(id);
+  }
 
   constructor() {
     // The only effect left on this component: forwards the route-bound `assetId` input to the
@@ -99,16 +136,12 @@ export class AssetDetailPage {
     // this component instance across same-route navigations rather than recreating it).
     effect(() => {
       const id = this.assetId();
-      this.imageLoadFailed.set(false); // a fresh navigation deserves a fresh attempt at the photo
       this.subView.set('overview');
       this.panels.close();
       this.editors.close();
+      this.dialogs.close();
       this.facade.load(id);
     });
-  }
-
-  protected onImageError(): void {
-    this.imageLoadFailed.set(true);
   }
 
   protected relativeTime(event: DetectionEvent): string {
@@ -183,16 +216,29 @@ export class AssetDetailPage {
     this.openEditAsset();
   }
 
-  protected assetActionLabel(action: 'archive' | 'restore'): string {
-    return action === 'archive' ? 'Archive asset' : 'Restore asset';
+  /**
+   * Opens the Archive-asset confirm (docs/design/05-asset-detail.md's own acceptance criterion —
+   * Archive requires a confirm and must not sit adjacent to Rename). The button that calls this
+   * lives inside `<vision-kebab-menu>` in the page bar's `pageBarActions` slot (asset-detail.html),
+   * not next to "Rename asset…" — the poka-yoke separation this class doc references.
+   */
+  protected requestArchiveAsset(): void {
+    this.dialogs.open('archive');
   }
 
-  protected onAssetLifecycleAction(action: 'archive' | 'restore'): void {
-    if (action === 'archive') {
-      void this.facade.archiveAssetNow();
-    } else {
-      void this.facade.restoreAssetNow();
-    }
+  protected cancelArchiveAsset(): void {
+    this.dialogs.close('archive');
+  }
+
+  protected async confirmArchiveAsset(): Promise<void> {
+    await this.facade.archiveAssetNow();
+    this.dialogs.close('archive');
+  }
+
+  /** The header's one non-destructive lifecycle action — "Restore asset" only; Archive is
+   *  {@link requestArchiveAsset}'s confirm flow above, not this direct-fire path. */
+  protected restoreAsset(): void {
+    void this.facade.restoreAssetNow();
   }
 
   // --- Registration/tail number editor --------------------------------------------------------

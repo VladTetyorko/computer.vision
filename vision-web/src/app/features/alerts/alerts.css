@@ -1,16 +1,21 @@
-/* Reuses `.page`/`.page-head`/`vision-notice` from `src/styles.css`/`shared/ui`. `vision-events-rail`
-   normally sizes itself as a fixed-width sticky sidebar (`wall.css#.events-rail`) — this page is the
-   rail's own full-width, full-height home instead, mirroring that class's "host applies its own
-   sizing class to this component's tag" convention (see `events-rail.ts`'s own doc comment). */
+/* Reuses `.page`/`vision-page-bar`/`vision-notice`/`vision-two-pane` from `src/styles.css`/`shared/ui`. */
 
-.page-head h1 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
+/* Sized to content ("All labels"/"All assets"), not the global `select { width: 100% }` default —
+   the same `.asset-filter`/`.roster-search` explicit-width idiom every other Wave 2/3 page-bar
+   filter already uses (docs/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
+.alerts-filter {
+  width: 10rem;
 }
 
-.alerts-rail {
-  width: 100%;
-  max-height: none;
-  position: static;
+/* Dense rows (docs/design/08-alerts.md: "~32px tall so ~25 events fit a screen") — a small gap
+   between rows is still a real dense list, not the ~50-60px two-line rows this replaces on this
+   page. `vision-event-row`'s own `:host{display:contents}` means this `<li>` sizes the row, not the
+   component. */
+.alerts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }

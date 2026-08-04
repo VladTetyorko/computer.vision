@@ -1,10 +1,12 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1>Organization</h1>
-      <p>Manage the people and groups in your organization. Grants are limited to your own scope.</p>
-    </div>
-    <div class="segmented" role="tablist" aria-label="Organization sections">
+  <vision-page-bar
+    title="Organization"
+    icon="building-org"
+    hint="Grants are limited to your own scope."
+    [count]="facade.barCount()"
+    [countNoun]="facade.barCountNoun()"
+  >
+    <div pageBarFilters class="segmented" role="tablist" aria-label="Organization sections">
       <button
         type="button"
         class="btn secondary small"
@@ -26,7 +28,7 @@
         Groups
       </button>
     </div>
-  </div>
+  </vision-page-bar>
 
   @if (facade.tab() === 'users') {
     <section class="card">
@@ -38,6 +40,7 @@
             <input
               type="text"
               name="username"
+              class="field-sm"
               autocapitalize="none"
               autocomplete="off"
               [ngModel]="facade.newUsername()"
@@ -51,6 +54,7 @@
             <input
               type="text"
               name="displayName"
+              class="field-md"
               autocomplete="off"
               [ngModel]="facade.newDisplayName()"
               (ngModelChange)="facade.newDisplayName.set($event)"
@@ -63,6 +67,7 @@
             <input
               type="email"
               name="email"
+              class="field-md"
               autocapitalize="none"
               autocomplete="off"
               [ngModel]="facade.newEmail()"
@@ -76,6 +81,7 @@
             <input
               type="password"
               name="password"
+              class="field-sm"
               autocomplete="new-password"
               [ngModel]="facade.newPassword()"
               (ngModelChange)="facade.newPassword.set($event)"
@@ -87,6 +93,7 @@
             <span class="label">Group</span>
             <select
               name="group"
+              class="field-sm"
               [ngModel]="facade.newGroupId()"
               (ngModelChange)="facade.newGroupId.set($event)"
               [disabled]="facade.creatingUser()"
@@ -101,6 +108,7 @@
             <span class="label">Role in group</span>
             <select
               name="role"
+              class="field-sm"
               [ngModel]="facade.newRole()"
               (ngModelChange)="facade.newRole.set($event)"
               [disabled]="facade.creatingUser() || !facade.newGroupId()"
@@ -186,6 +194,7 @@
             <input
               type="text"
               name="groupName"
+              class="field-md"
               autocomplete="off"
               [ngModel]="facade.newGroupName()"
               (ngModelChange)="facade.newGroupName.set($event)"
@@ -197,6 +206,7 @@
             <span class="label">Parent group</span>
             <select
               name="parent"
+              class="field-sm"
               [ngModel]="facade.newParentId()"
               (ngModelChange)="facade.newParentId.set($event)"
               [disabled]="facade.creatingGroup()"

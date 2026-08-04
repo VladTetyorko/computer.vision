@@ -10,7 +10,7 @@ import {
   latestFinishedUsage,
   nextCollapseAction,
   positionLabel,
-  resolveActiveAssetId,
+  rememberedStreamingAssetId,
   sortAssetsForPicker,
   streamStateLabel,
 } from './fly-logic';
@@ -57,27 +57,25 @@ describe('sortAssetsForPicker', () => {
   });
 });
 
-describe('resolveActiveAssetId', () => {
-  const assets = [asset({ assetId: 'known-1' }), asset({ assetId: 'known-2' })];
+describe('rememberedStreamingAssetId (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — "/fly skips the picker when it has nothing to ask")', () => {
+  const streaming = asset({ assetId: 'known-1', status: 'STREAMING' });
+  const offline = asset({ assetId: 'known-2', status: 'OFFLINE' });
+  const assets = [streaming, offline];
 
-  it('prefers the requested id over the remembered one', () => {
-    expect(resolveActiveAssetId(assets, 'known-2', 'known-1')).toBe('known-2');
+  it('redirects to the remembered drone when it is still streaming', () => {
+    expect(rememberedStreamingAssetId(assets, 'known-1')).toBe('known-1');
   });
 
-  it('falls back to the remembered id when nothing was requested', () => {
-    expect(resolveActiveAssetId(assets, undefined, 'known-1')).toBe('known-1');
+  it('does not redirect when the remembered drone exists but has landed — the picker still has something to ask', () => {
+    expect(rememberedStreamingAssetId(assets, 'known-2')).toBeUndefined();
   });
 
-  it('returns undefined when neither id resolves against the fleet', () => {
-    expect(resolveActiveAssetId(assets, 'ghost', null)).toBeUndefined();
+  it('does not redirect when the remembered id no longer exists (archived/deleted since)', () => {
+    expect(rememberedStreamingAssetId(assets, 'gone')).toBeUndefined();
   });
 
-  it('returns undefined when a remembered id no longer exists (archived/deleted since)', () => {
-    expect(resolveActiveAssetId(assets, undefined, 'gone')).toBeUndefined();
-  });
-
-  it('returns undefined when nothing was requested or remembered', () => {
-    expect(resolveActiveAssetId(assets, undefined, null)).toBeUndefined();
+  it('does not redirect when nothing is remembered', () => {
+    expect(rememberedStreamingAssetId(assets, null)).toBeUndefined();
   });
 });
 

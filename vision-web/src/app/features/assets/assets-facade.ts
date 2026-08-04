@@ -1,13 +1,15 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
+import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { buildSyntheticRegisterRequest } from '../../core/fleet/simulation-logic';
 import { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 import { RESTORE_TARGET_STATE } from '../../core/fleet/warehouse-logic';
+import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import type { AssetDetails } from '../../core/api/models';
 import {
   buildAssetListRows,
@@ -15,6 +17,7 @@ import {
   filterAssetListRowsByCategory,
   filterAssetListRowsByStatus,
   filterAssetListRowsByStreaming,
+  findAssetRowById,
   searchAssetListRowsByName,
   type AssetListRow,
   type AssetStatusFilter,
@@ -33,8 +36,10 @@ import {
  * "moves into its feature facade, out of the component" even though it isn't mutually-exclusive
  * overlay state (so it does **not** go through `UiStore`).
  *
- * No behavior change from the pre-facade page: every HTTP call, toast, and silent-degrade path below
- * is carried over verbatim, just relocated.
+ * **Wave 3 addition (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md)**: the `?sel=`-
+ * addressable two-pane selection (`selectedId`/`selectedRow`/`selectRow`/`clearSelection`) and the
+ * detail panel's "Open cockpit" action (`openCockpitFor`) — everything else below predates this wave
+ * and, per the doc comment further down, carries over byte-for-byte.
  */
 @Injectable()
 export class AssetsFacade {
@@ -42,6 +47,13 @@ export class AssetsFacade {
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
   private readonly router = inject(Router);
+  /** Scoped to this page's own route, since `AssetsFacade` is provided in `AssetsPage`'s own
+   *  `providers` array — the same injector that resolves `ActivatedRoute` for the component itself.
+   *  Only used as `selectRow`/`clearSelection`'s `relativeTo` anchor (docs/NAV-IA-REDESIGN-PLAN.md
+   *  §2.4) so `router.navigate([], …)` patches `?sel=` on the current URL rather than resolving `[]`
+   *  against the router root. */
+  private readonly route = inject(ActivatedRoute);
+  private readonly settings = inject(SettingsStore);
 
   readonly fleet = inject(FleetStore);
 
@@ -80,12 +92,20 @@ export class AssetsFacade {
   );
 
   /**
+   * Every loaded asset as a row, before any search/filter narrows it — `assetRows` (the grid) and
+   * `selectedRow` (the two-pane detail panel) both read this rather than each re-deriving from
+   * `assets()`/`fleet.liveDeviceIds()` independently, so a row object picked out of one is
+   * reference-equal to the one found in the other.
+   */
+  private readonly allRows = computed<readonly AssetListRow[]>(() => buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()));
+
+  /**
    * The grid's rows: every filter narrows in sequence (archived → category → status → streaming →
    * name search) — order doesn't change the result, each is a plain array filter, but this is the
    * order the filter toolbar reads left to right.
    */
   readonly assetRows = computed<readonly AssetListRow[]>(() => {
-    const rows = filterAssetListRowsByArchived(buildAssetListRows(this.assets(), this.fleet.liveDeviceIds()), this.showArchived());
+    const rows = filterAssetListRowsByArchived(this.allRows(), this.showArchived());
     const byCategory = filterAssetListRowsByCategory(rows, this.categoryFilter() || undefined);
     const byStatus = filterAssetListRowsByStatus(byCategory, this.statusFilter());
     const byStreaming = filterAssetListRowsByStreaming(byStatus, this.streamingFilter());
@@ -95,6 +115,41 @@ export class AssetsFacade {
   /** `true` once at least one asset has loaded — distinguishes "no assets exist yet" from "filters
    *  matched nothing" for the empty state (never a fabricated "no assets" when the fleet has some). */
   readonly hasAnyAssets = computed(() => this.assets().length > 0);
+
+  // --- Two-pane selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) ----------
+  // `AssetsPage`'s own constructor `effect()` forwards its route-bound `sel` input straight into this
+  // signal on every change — the same "only a component can receive a route input" split `category`
+  // above already documents. Read against `allRows`, not the filtered `assetRows`, so narrowing the
+  // search/filters never silently closes an already-open selection out from under the user.
+  readonly selectedId = signal<string | undefined>(undefined);
+  readonly selectedRow = computed<AssetListRow | undefined>(() => findAssetRowById(this.allRows(), this.selectedId()));
+
+  /** A row was clicked/activated — opens the detail panel and mirrors the choice into `?sel=` so it
+   *  survives refresh, Back and sharing. `replaceUrl: true` (not a new history entry per click) — the
+   *  same choice `SettingsStore`'s own persisted-preference writes make, since row selection is
+   *  browsing, not navigation Back should undo one step at a time for. */
+  selectRow(assetId: string): void {
+    this.selectedId.set(assetId);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { sel: assetId }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  /** The pane's close button / Esc / scrim click (`TwoPane`'s own `detailClose` output) — the pane
+   *  never closes itself, so every dismissal path reaches here. */
+  clearSelection(): void {
+    this.selectedId.set(undefined);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { sel: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  /**
+   * The detail panel's "Open cockpit" action — identical to `asset-detail-facade.ts#openCockpit`
+   * (the asset detail page's own cockpit-link band): remembers this asset as Fly's active pick
+   * (`SettingsStore.flyAssetId`, the same field `FlyPage#selectAsset` writes) so `/fly` lands
+   * directly in the cockpit for it, then navigates. Works whether or not the asset is streaming.
+   */
+  openCockpitFor(assetId: string): void {
+    this.settings.flyAssetId.set(assetId);
+    void this.router.navigate(['/fly']);
+  }
 
   constructor() {
     void this.refreshAssets();
@@ -127,6 +182,14 @@ export class AssetsFacade {
     return row.watchDeviceId ? this.router.navigate(['/live', row.watchDeviceId]) : undefined;
   }
 
+  /**
+   * "Open full ›" (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) — the two-pane
+   * detail panel's own escape hatch to `/assets/:id` for deep work (rename, KPIs, recent flights,
+   * pilots). Selecting a row itself (`selectRow`, above) deliberately does **not** navigate any more
+   * — this is the one action that still does, kept named/shaped exactly as it was pre-Wave-3 so its
+   * one remaining call site (the panel's "Open full ›" link) needs no behavior change, only a new
+   * place to live.
+   */
   openAsset(row: AssetListRow): Promise<boolean> {
     return this.router.navigate(['/assets', row.asset.assetId]);
   }
@@ -151,8 +214,8 @@ export class AssetsFacade {
     try {
       const result = await this.api.deleteAsset(assetId);
       this.undoToast.showUndo(
-        `Archived "${result.displayName}" — ${result.devicesDeleted} device(s) archived, ` +
-          `${result.usagesRetained} usage(s) retained, ${result.streamsStopped} stream(s) stopped.`,
+        `Archived "${result.displayName}" — ${pluralize(result.devicesDeleted, 'device')} archived, ` +
+          `${pluralize(result.usagesRetained, 'usage')} retained, ${pluralize(result.streamsStopped, 'stream')} stopped.`,
         () => void this.undoArchiveAsset(assetId, result.displayName, result.devicesDeleted),
       );
       await Promise.all([this.fleet.refresh({ quiet: true }), this.refreshAssets()]);
@@ -218,11 +281,11 @@ export class AssetsFacade {
     if (devicesFailed > 0) {
       const succeeded = devicesRestored > 0 ? ` (${devicesRestored} succeeded)` : '';
       this.toasts.error(
-        `Restored "${displayName}", but ${devicesFailed} of its ${devicesArchived} device(s) failed to ` +
+        `Restored "${displayName}", but ${devicesFailed} of its ${pluralize(devicesArchived, 'device')} failed to ` +
           `restore${succeeded} — retry from Devices.`,
       );
     } else if (devicesRestored > 0) {
-      this.toasts.ok(`Restored "${displayName}" and ${devicesRestored} device(s).`);
+      this.toasts.ok(`Restored "${displayName}" and ${pluralize(devicesRestored, 'device')}.`);
     } else {
       this.toasts.ok(`Restored "${displayName}".`);
     }

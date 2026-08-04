@@ -25,7 +25,11 @@ import { describe, expect, it } from 'vitest';
 
 // path segment (under features/) of each routed page component, minus the `.ts`.
 const ROUTED_PAGES = [
-  'fly/fly',
+  // `/fly` (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12) split the old combined `fly/fly` into two
+  // routed pages — the picker (`drone-picker`) and the cockpit (`cockpit`), each addressable on
+  // its own now (`/fly` vs `/fly/:assetId`) — each with its own facade below.
+  'fly/drone-picker',
+  'fly/cockpit',
   'command/command',
   'asset-detail/asset-detail',
   'assets/assets',
@@ -33,10 +37,12 @@ const ROUTED_PAGES = [
   'live/live',
   'wall/wall',
   'replay/replay',
+  'replay/replay-library',
   'onboarding/onboarding',
   'org-settings/org-settings',
   'activity/activity',
-  'settings/settings',
+  'settings/account-settings',
+  'settings/detection-settings',
   'auth/login/login',
   'labeling/datasets',
   'labeling/dataset-detail',

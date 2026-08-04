@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
@@ -19,6 +19,7 @@ import {
   buildWarehouseRows,
   deriveCategoryOptions,
   filterRowsByArchived,
+  findWarehouseRowById,
   mapDeviceOwners,
   searchWarehouseRowsByQuery,
   type CategoryOption,
@@ -29,14 +30,15 @@ import {
 /**
  * `DevicesPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection, the
  * warehouse-row read-model (search + `showArchived`, per the plan's own explicit "moves into the
- * facade" call-out for this exact toggle), and every command for the `/devices` table/grid, so the
- * page component itself only injects this class. `viewMode` (list vs. grid) deliberately stays on
- * the component — unlike `showArchived`/`searchQuery` it feeds no domain computed here at all, both
- * views render the identical `warehouseRows()`, so it's pure template-branch view state, the same
- * "host-owned" reasoning `asset-detail.ts`'s own `subView` documents.
+ * facade" call-out for this exact toggle), and every command for the `/devices` table, so the page
+ * component itself only injects this class.
  *
  * No behavior change from the pre-facade page: every HTTP call, toast, and silent-degrade path below
  * is carried over verbatim, just relocated.
+ *
+ * **Wave 3 addition (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)**: the `?sel=`-
+ * addressable two-pane selection (`selectedId`/`selectedRow`/`selectRow`/`clearSelection`) and the
+ * detail panel's clipboard copy affordance (`copyToClipboard`) — everything else predates this wave.
  */
 @Injectable()
 export class DevicesFacade {
@@ -44,6 +46,10 @@ export class DevicesFacade {
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
   private readonly router = inject(Router);
+  /** Scoped to this page's own route (`DevicesFacade` is provided in `DevicesPage`'s own
+   *  `providers`) — see `AssetsFacade`'s identical field for why this is what `selectRow`/
+   *  `clearSelection` anchor their `relativeTo` on. */
+  private readonly route = inject(ActivatedRoute);
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsStore);
@@ -74,16 +80,58 @@ export class DevicesFacade {
     this.showArchived() ? this.allDevicesIncludingArchived() : this.fleet.devices(),
   );
 
-  readonly warehouseRows = computed<readonly WarehouseRow[]>(() =>
-    searchWarehouseRowsByQuery(
-      filterRowsByArchived(buildWarehouseRows(this.warehouseDevices(), this.deviceOwners(), this.fleet.liveDeviceIds()), this.showArchived()),
-      this.searchQuery(),
-    ),
+  /** Every loaded device as a row, before the search box narrows it — `warehouseRows` (the table) and
+   *  `selectedRow` (the two-pane detail panel) both read this, so a row found in one is
+   *  reference-equal to the one found in the other. */
+  private readonly allRows = computed<readonly WarehouseRow[]>(() =>
+    filterRowsByArchived(buildWarehouseRows(this.warehouseDevices(), this.deviceOwners(), this.fleet.liveDeviceIds()), this.showArchived()),
   );
+
+  readonly warehouseRows = computed<readonly WarehouseRow[]>(() => searchWarehouseRowsByQuery(this.allRows(), this.searchQuery()));
 
   /** `true` once at least one device has loaded — distinguishes "no devices exist yet" from
    *  "search matched nothing" for the empty state. */
   readonly hasAnyDevices = computed(() => this.warehouseDevices().length > 0);
+
+  // --- Two-pane selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md) ----------
+  // `DevicesPage`'s own constructor `effect()` forwards its route-bound `sel` input straight into
+  // this signal on every change (same "only a component can receive a route input" split `addSource`
+  // already documents). Read against `allRows`, not the search-narrowed `warehouseRows`, so typing
+  // into the search box never silently closes an already-open selection.
+  readonly selectedId = signal<string | undefined>(undefined);
+  readonly selectedRow = computed<WarehouseRow | undefined>(() => findWarehouseRowById(this.allRows(), this.selectedId()));
+
+  /** A row was clicked/activated — opens the detail panel and mirrors the choice into `?sel=` so it
+   *  survives refresh, Back and sharing. `replaceUrl: true` — selecting a row is browsing, not a
+   *  navigation Back should undo one step at a time for. */
+  selectRow(deviceId: string): void {
+    this.selectedId.set(deviceId);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { sel: deviceId }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  /** The pane's close button / Esc / scrim click (`TwoPane`'s own `detailClose` output) — the pane
+   *  never closes itself, so every dismissal path reaches here. */
+  clearSelection(): void {
+    this.selectedId.set(undefined);
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { sel: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  /**
+   * The detail panel's copy affordances for the full source URI and the device UUID
+   * (docs/design/06-devices.md — "the full source URI, currently cut mid-path with no way to see it")
+   * — mirrors `shared/player/stream-info-panel.ts#copyViewUrl`'s own `navigator.clipboard` + toast
+   * idiom exactly (that panel's the one other place this app copies a value to the clipboard). A
+   * failed write (clipboard permission denied, insecure context) degrades to an error toast pointing
+   * back at the value that's still on-screen — never a silent no-op, never a crash.
+   */
+  async copyToClipboard(value: string, what: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value);
+      this.toasts.ok(`Copied ${what}.`);
+    } catch {
+      this.toasts.error(`Could not copy automatically — the ${what} is still shown in the panel.`);
+    }
+  }
 
   /** Non-archived assets are always valid assign targets — a device's ownership is the only rule. */
   readonly assignableAssets = computed(() => this.assets().filter((asset) => (asset.lifecycle ?? 'ACTIVE') !== 'DELETED'));

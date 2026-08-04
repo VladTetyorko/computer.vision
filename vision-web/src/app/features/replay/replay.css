@@ -1,32 +1,20 @@
 /* ---- Loading skeleton (skeletons over spinners, per U1 convention — mirrors asset-detail.css) */
 
-.skeleton-line,
 .skeleton-card {
     background: var(--panel-raised);
     border-radius: var(--radius-sm);
     animation: pulse 1.6s ease-in-out infinite;
-}
-
-.skeleton-line.title {
-    height: 1.6rem;
-    width: 14rem;
-}
-
-.skeleton-card {
     height: 12rem;
 }
 
-/* ---- Header --------------------------------------------------------------------------------- */
+/* ---- Header (docs/NAV-IA-REDESIGN-PLAN.md §2.2) ---------------------------------------------- */
+/* `.back-link` is gone — the back-to-asset link is now `<vision-page-bar>`'s own `crumb` (replay.ts
+   `crumb` computed). `.range-label` is the old page-head subtitle's own real content (the flight's
+   time range), now plain text under the bar rather than inside it — see replay.html's own comment. */
 
-.back-link {
-    display: inline-block;
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    margin-bottom: var(--space-4);
-}
-
-.back-link:hover {
-    color: var(--color-info);
+.range-label {
+    margin: 0 0 var(--space-16);
+    font-size: 0.85rem;
 }
 
 /* ---- Detail grid (mirrors asset-detail.css) -------------------------------------------------- */

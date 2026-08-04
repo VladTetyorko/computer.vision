@@ -34,22 +34,30 @@ export function sortAssetsForPicker(assets: readonly AssetSummary[]): readonly A
 }
 
 /**
- * Which asset id the cockpit should open straight into, if any: an explicit `?asset=` query param
- * (a future drill-down target — e.g. Command's own "watch this one" links, C-c) wins over the
- * remembered choice from `SettingsStore.flyAssetId`. Either is only honored when that asset is
- * still present in the freshly-fetched fleet — an archived/deleted remembered id falls back to
- * `undefined` (the picker), never a broken cockpit pointed at nothing.
+ * The one auto-redirect `/fly` performs on its own (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12,
+ * docs/design/01-fly.md — "skip the picker when it has nothing to ask"): the operator's remembered
+ * drone (`SettingsStore.flyAssetId`) only counts as "nothing to ask" while it is still actually
+ * **streaming** — merely still existing (the pre-split `resolveActiveAssetId`'s own bar, back when
+ * one component quietly switched between picker/cockpit with no URL change at all) is not enough. A
+ * remembered drone that has simply landed is exactly the case the picker should still ask about,
+ * not silently re-enter. `undefined` (render the picker) covers "nothing remembered", "remembered
+ * id no longer exists" (archived/deleted since) and "remembered id exists but isn't streaming"
+ * alike — `fly-redirect-guard.ts`'s own caller doesn't need to tell those apart, only whether it has
+ * something to skip straight into.
+ *
+ * An explicit `?asset=` query param (Command's/Alerts' own drill-down links) is a *stronger* signal
+ * than "remembered" and is handled separately, unconditionally, by the guard itself — see that
+ * file's own doc comment for why it never calls this function at all.
  */
-export function resolveActiveAssetId(
+export function rememberedStreamingAssetId(
   assets: readonly AssetSummary[],
-  requestedAssetId: string | undefined,
   rememberedAssetId: string | null,
 ): string | undefined {
-  const candidate = requestedAssetId || rememberedAssetId || undefined;
-  if (candidate === undefined) {
+  if (!rememberedAssetId) {
     return undefined;
   }
-  return assets.some((asset) => asset.assetId === candidate) ? candidate : undefined;
+  const asset = assets.find((candidate) => candidate.assetId === rememberedAssetId);
+  return asset?.status === 'STREAMING' ? rememberedAssetId : undefined;
 }
 
 /**

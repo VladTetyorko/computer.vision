@@ -1,0 +1,70 @@
+/* `.chip`/`.chip.ok`/`.dot`/`.dot.live`/`.mono`/`.truncate`/`.muted`/`.btn`/`.empty` are all global
+   primitives (`src/styles.css`). `dl.facts`/`.fact` is the telemetry-facts grid idiom already
+   duplicated independently by `features/command/asset-panel.css`, `features/replay/replay.css`,
+   `features/asset-detail/asset-detail.css` and `features/onboarding/onboarding.css` (that file's own
+   comment calls it a "fourth copy… consistent with that established precedent") — this is a fifth,
+   same reasoning. `.event-dot` mirrors `shared/ui/event-row.css`'s own rule byte-for-byte — Angular's
+   emulated view encapsulation scopes that file's styles to `EventRow` alone, so this component (a
+   different one, reusing the same class name for the same visual meaning) needs its own copy rather
+   than reaching into another component's stylesheet. */
+
+.alert-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.alert-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.event-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.event-dot.open {
+  background: var(--color-live);
+}
+
+.alert-detail-label {
+  margin: 0;
+  font-size: 1.05rem;
+  text-transform: capitalize;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.fact.span-2 {
+  grid-column: 1 / -1;
+}
+
+.fact dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.fact dd {
+  margin: var(--space-2) 0 0;
+  font-size: 0.85rem;
+}
+
+.alert-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}

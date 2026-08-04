@@ -1,8 +1,10 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Icon } from '../../shared/ui/icon';
+import { RouterLink } from '@angular/router';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { type Device } from '../../core/api/models';
 import type { SimulatedDeviceInfo } from './simulate-logic';
 import { DevicesFacade } from './devices-facade';
@@ -18,29 +20,45 @@ import {
 /** "Create asset from this device" renamed to its outcome (docs/UX-REWORK-PLAN.md §U-a2 §3). */
 const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
 
-/** List = the table, grid = device cards — both read the exact same `warehouseRows()`. */
-type DeviceViewMode = 'list' | 'grid';
-
 /**
- * The Devices page (`/devices`) — the raw device table/grid: search, lifecycle actions, the
- * archived toggle, and the register/discover/simulate-adjacent "+ Add source"/"Promote to asset…"
- * flows. Split out of the old combined Devices/Warehouse page (docs/CYCLES-PLAN.md §11's asset-first
- * list moved wholesale to `features/assets/**`, and `/warehouse` itself became a two-tile launcher —
- * see `features/assets/assets.ts`/`features/warehouse/warehouse.ts`'s own class doc comments) once
- * Assets and Devices earned separate pages.
+ * The Devices page (`/devices`) — the raw device table: search, lifecycle actions, the archived
+ * toggle, and the register/discover/simulate-adjacent "+ Add source"/"Promote to asset…" flows. Split
+ * out of the old combined Devices/Warehouse page (docs/CYCLES-PLAN.md §11's asset-first list moved
+ * wholesale to `features/assets/**`, and `/warehouse` itself became a two-tile launcher — see
+ * `features/assets/assets.ts`/`features/warehouse/warehouse.ts`'s own class doc comments) once Assets
+ * and Devices earned separate pages.
  *
  * **Layered per docs/UI-ARCHITECTURE-PLAN.md**: every store/service injection, the warehouse-row
  * read-model, and every HTTP-backed command lives in {@link DevicesFacade}. This component is left
- * holding only: the route-bound `addSource` input (only a component can receive one); `viewMode`
- * (pure template-branch view state — see the facade's own doc comment for why it stays here); the
+ * holding only: the route-bound `addSource`/`sel` inputs (only a component can receive one); the
  * "one inline row open at a time" pointer (`rowAction`) and its drafts (`renameDraft`/`assignDraft`);
  * the create-asset panel's own open/cancel + drafts (`createAssetFor`/`createAssetName`/
  * `createAssetCategory`/`createAssetSubmitting`, submitting through the facade); and a handful of
  * pure, stateless label/action-list helpers.
+ *
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/06-devices.md):
+ * both old subtitle sentences are deleted outright — "Devices" needs no explanation, and the second
+ * ("Looking for an asset instead? …") was migration signage left over from the Assets/Devices split
+ * that had already outlived its purpose. Search and the archived toggle move into `[pageBarFilters]`;
+ * `+ Add source`/`Refresh` into `[pageBarActions]`. The card's own `Registered devices` header is
+ * dropped too — it repeated the page title and the bar's own count chip now carries the number it
+ * used to show.
+ *
+ * **Wave 3 — one action + a panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)**:
+ * the table's own action cell used to render two-to-four full-size buttons, wrapping onto a second
+ * line on most rows (the design doc's own named problem). It now renders exactly one primary verb
+ * (Watch live / Start stream, whichever applies) plus the kebab — every other action (Stop
+ * stream/simulation, rename, lifecycle, assign/unassign, Promote to asset…) moved into the kebab
+ * **and** the two-pane detail panel, so nothing that used to be one click away became two. The row
+ * also drops its own UUID line (the protocol chip already identifies the source) and the `List | Grid`
+ * toggle is gone outright — a grid of raw devices had no use case the table didn't already serve
+ * better, and this task's own file-scope grep found nothing else in the app reading `viewMode`.
+ * Selecting a row opens the panel via `?sel=<deviceId>` (the facade owns it) rather than navigating —
+ * there was nowhere to navigate to before this wave; now there's a panel instead.
  */
 @Component({
   selector: 'vision-devices',
-  imports: [FormsModule, Icon, KebabMenu, EmptyState],
+  imports: [FormsModule, RouterLink, PageBar, KebabMenu, EmptyState, TwoPane],
   templateUrl: './devices.html',
   styleUrl: './devices.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -53,16 +71,16 @@ export class DevicesPage {
    */
   readonly addSource = input<string | undefined>(undefined);
 
+  /**
+   * `?sel=<deviceId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4) — bound the same way `addSource` above is
+   * (`withComponentInputBinding()`, `app.config.ts`); forwarded into the facade by the constructor
+   * `effect()` below, since only a component can receive a route input.
+   */
+  readonly sel = input<string | undefined>(undefined);
+
   protected readonly facade = inject(DevicesFacade);
 
   protected readonly promoteToAssetLabel = PROMOTE_TO_ASSET_LABEL;
-
-  // --- View toggle (pure view state — see `DevicesFacade`'s own doc comment) --------------------
-  protected readonly viewMode = signal<DeviceViewMode>('list');
-
-  protected setViewMode(mode: DeviceViewMode): void {
-    this.viewMode.set(mode);
-  }
 
   /**
    * One inline row open at a time per device — a rename form or an assign picker; both need the
@@ -202,5 +220,19 @@ export class DevicesPage {
     if (this.addSource()) {
       void this.facade.goToAddSource();
     }
+
+    // ?sel= round-trips through the facade's own selectedId signal — forwarded unconditionally
+    // (including `undefined`), the same reasoning `AssetsPage`'s identical effect documents.
+    effect(() => {
+      this.facade.selectedId.set(this.sel());
+    });
+  }
+
+  protected copyDeviceUri(device: Device): void {
+    void this.facade.copyToClipboard(device.uri, 'source URI');
+  }
+
+  protected copyDeviceId(device: Device): void {
+    void this.facade.copyToClipboard(device.id, 'device ID');
   }
 }

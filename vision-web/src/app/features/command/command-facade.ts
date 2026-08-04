@@ -125,6 +125,7 @@ export class CommandFacade {
   private readonly panelOpenPreferenceSignal = signal(readPersistedFlag(PANEL_OPEN_KEY, true));
 
   // --- Selection (docs/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------------
+  private readonly focusTickSignal = signal(0);
   private readonly selectedAssetIdSignal = signal<string | null>(null);
   readonly selectedAssetId = this.selectedAssetIdSignal.asReadonly();
   private readonly selectedVideoDeviceIdSignal = signal<string | undefined>(undefined);
@@ -239,6 +240,11 @@ export class CommandFacade {
    * not "never show me a panel again".
    */
   async selectAsset(assetId: string): Promise<void> {
+    // Bumped on *every* selection, including re-selecting the asset already selected. The map
+    // centres on `focusRequest` changing; keying that off the asset id alone meant clicking the
+    // current asset did nothing, so an operator who had panned away could not click it to bring the
+    // camera back — the one gesture they'd naturally reach for (docs/design/02-command.md).
+    this.focusTickSignal.update((tick) => tick + 1);
     this.selectedAssetIdSignal.set(assetId);
     this.selectedVideoDeviceIdSignal.set(undefined);
     this.panelOpenPreferenceSignal.set(true);
@@ -248,6 +254,16 @@ export class CommandFacade {
       this.selectedVideoDeviceIdSignal.set(device?.id);
     }
   }
+
+  /**
+   * What `<vision-fleet-map>`'s `focusRequest` reads — the selected asset plus a tick that changes on
+   * every `selectAsset` call, so re-selecting the same asset re-centres. `undefined` while nothing is
+   * selected, which leaves the camera alone.
+   */
+  readonly focusRequest = computed(() => {
+    const assetId = this.selectedAssetId();
+    return assetId ? { assetId, tick: this.focusTickSignal() } : undefined;
+  });
 
   closePanel(): void {
     this.selectedAssetIdSignal.set(null);

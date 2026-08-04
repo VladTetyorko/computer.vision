@@ -43,6 +43,14 @@ public final class InMemoryAssetUsageRepository implements AssetUsageRepositoryP
     }
 
     @Override
+    public List<AssetUsage> findRecent(int limit) {
+        return usages.values().stream()
+                .sorted(Comparator.comparing(AssetUsage::startedAt).reversed())
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
     public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
         return usages.values().stream()
                 .filter(usage -> usage.assetId().equals(assetId) && usage.endedAt() == null)

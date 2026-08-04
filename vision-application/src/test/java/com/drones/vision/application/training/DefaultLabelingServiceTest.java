@@ -754,6 +754,11 @@ class DefaultLabelingServiceTest {
         }
 
         @Override
+        public List<AssetUsage> findRecent(int limit) {
+            throw new UnsupportedOperationException("not exercised by this suite");
+        }
+
+        @Override
         public Optional<AssetUsage> findOpenByAsset(AssetId assetId) {
             throw new UnsupportedOperationException("not exercised by this suite");
         }

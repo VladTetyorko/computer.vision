@@ -1,15 +1,23 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { operatorAssetActions, type ActionAvailability } from '../../core/fleet/warehouse-logic';
+import { readPersistedString, writePersistedString } from '../../core/panel-state';
+import { Icon } from '../../shared/ui/icon';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
+import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { AssetsFacade } from './assets-facade';
-import type { AssetListRow } from './assets-logic';
+import { parseAssetViewMode, type AssetListRow, type AssetViewMode } from './assets-logic';
+
+/** `localStorage` key for the `▤ ▦` view toggle (docs/design/04-assets.md) — one page's own key,
+ *  same `vision.<page>.<field>` shape as `vision.command.railOpen`/`vision.fly.mapVisible`. */
+const VIEW_MODE_KEY = 'vision.assets.viewMode';
 
 /**
- * The Assets page (`/assets`) — asset-first grid: search by name, filter by category/lifecycle/
- * streaming, one card per asset with exactly Watch · Open · Archive. Split out of the old combined
+ * The Assets page (`/assets`) — asset-first list: search by name, filter by category/lifecycle/
+ * streaming, one row per asset with a two-pane detail panel for triage. Split out of the old combined
  * Devices page (docs/CYCLES-PLAN.md §11's "asset-first list") once inventory got its own dedicated
  * pages for Assets and Devices. **Assets is the one home for "what I own/fly"**
  * (docs/UX-SIMPLIFY-REVIEW.md F2) — Warehouse, a two-tile launcher that briefly sat between this page
@@ -22,13 +30,31 @@ import type { AssetListRow } from './assets-logic';
  *
  * **Layered per docs/UI-ARCHITECTURE-PLAN.md**: every store/service injection, search/filter
  * read-model, and HTTP-backed command lives in {@link AssetsFacade}. This component is left holding
- * only the route-bound `category` input (only a component can receive one) and the single
- * constructor `effect()` that forwards it into the facade's `categoryFilter`, plus a couple of pure,
- * stateless label/action-list helpers with no injected dependency of their own.
+ * only the route-bound `category`/`sel` inputs (only a component can receive one), the two
+ * constructor `effect()`s that forward them into the facade, the `viewMode` toggle (pure
+ * template-branch state, doesn't feed any facade computed), and a couple of pure, stateless
+ * label/action-list helpers with no injected dependency of their own.
+ *
+ * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/04-assets.md):
+ * the old subtitle — two lines ending in a prose link to `/devices` — is deleted outright rather than
+ * moved to a `hint`, both because "Assets" needs no explanation and because that link was a second
+ * door to a page the sidebar already lists under `⌄ Advanced` (F7). The search/category/status/
+ * streaming filters and the archived toggle, previously boxed in their own `.asset-toolbar` card,
+ * now project into the bar's `[pageBarFilters]` slot; `+ Add source`/`Refresh` project into
+ * `[pageBarActions]`.
+ *
+ * **Wave 3 — two-pane (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md)**: a dense list
+ * is now the default view (F5 — a card spent 260×120 on what a row shows in 32px); the card grid
+ * stays as an opt-in `▤ ▦` view, both reading `facade.assetRows()` — one projection, two renderings,
+ * per the design doc's own "don't duplicate the row/card mapping" instruction. Clicking a row/card no
+ * longer navigates (F6): it opens `vision-two-pane`'s detail panel, bound to `?sel=<assetId>` via the
+ * facade (see `AssetsFacade`'s own doc comment). `/assets/:id` survives as the panel's own "Open
+ * full ›" link, for the deep work — rename, KPIs, recent flights, pilots — a triage panel has no room
+ * for.
  */
 @Component({
   selector: 'vision-assets',
-  imports: [FormsModule, RouterLink, KebabMenu, EmptyState],
+  imports: [FormsModule, RouterLink, Icon, PageBar, KebabMenu, EmptyState, TwoPane],
   templateUrl: './assets.html',
   styleUrl: './assets.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -41,7 +67,34 @@ export class AssetsPage {
    */
   readonly category = input<string | undefined>(undefined);
 
+  /**
+   * `?sel=<assetId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4) — bound the same way `category` above is
+   * (`withComponentInputBinding()`, `app.config.ts`): only a component can receive a route input, so
+   * the constructor `effect()` below is what forwards it into the facade, mirroring `category`'s own
+   * forwarding exactly.
+   */
+  readonly sel = input<string | undefined>(undefined);
+
   protected readonly facade = inject(AssetsFacade);
+
+  /** Bound for the template — see `pluralize`'s own doc comment (`shared/ui/page-bar/page-bar.ts`)
+   *  for why this is the one place `asset(s)`/`device(s)`-style pluralisation gets fixed from. */
+  protected readonly pluralize = pluralize;
+
+  /**
+   * The `▤ ▦` list/card view toggle (docs/design/04-assets.md) — pure template-branch view state,
+   * same "host-owned, not the facade's" reasoning `features/devices/devices.ts`'s own (now-removed)
+   * `viewMode` doc comment gave: both views read the identical `facade.assetRows()`, so this signal
+   * decides nothing any computed in the facade needs to know about. Seeded from `localStorage`
+   * (`readPersistedString`/`parseAssetViewMode` — the codebase's `core/panel-state.ts` idiom, not a
+   * bespoke persistence scheme) so the choice survives a reload.
+   */
+  protected readonly viewMode = signal<AssetViewMode>(parseAssetViewMode(readPersistedString(VIEW_MODE_KEY, null)));
+
+  protected setViewMode(mode: AssetViewMode): void {
+    this.viewMode.set(mode);
+    writePersistedString(VIEW_MODE_KEY, mode);
+  }
 
   constructor() {
     // Seeds/updates the facade's category filter from the query param — re-navigating here with a
@@ -51,6 +104,13 @@ export class AssetsPage {
       if (slug !== undefined) {
         this.facade.categoryFilter.set(slug);
       }
+    });
+
+    // ?sel= round-trips through the facade's own selectedId signal — unlike category above, this one
+    // forwards unconditionally (including `undefined`), since "no ?sel=" is itself a meaningful state
+    // (nothing selected), not "leave whatever was there before" the way an absent ?category= is.
+    effect(() => {
+      this.facade.selectedId.set(this.sel());
     });
   }
 

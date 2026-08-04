@@ -1,0 +1,55 @@
+/* `.page--form` (styles.css) centers this page at 880px — see `detection-settings.css`'s own header
+   comment for the sibling page this file used to be combined with
+   (docs/NAV-IA-REDESIGN-PLAN.md §2.5, docs/design/11-settings.md, Wave 4). */
+
+.blast-line {
+    margin: 0 0 var(--space-16);
+    font-size: 0.82rem;
+}
+
+.toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-16);
+    cursor: pointer;
+    margin-bottom: var(--space-16);
+}
+
+.toggle span {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    font-size: 0.85rem;
+}
+
+.toggle input {
+    margin-top: var(--space-4);
+}
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.hint code {
+    font-family: var(--mono);
+    background: var(--bg);
+    padding: var(--space-2) var(--space-4);
+    border-radius: 4px;
+}
+
+dl {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-16);
+    font-size: 0.85rem;
+}
+
+dt {
+    color: var(--text-muted);
+}
+
+dd {
+    margin: 0;
+}

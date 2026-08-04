@@ -1,21 +1,59 @@
-/* Reuses `.page`/`.card`/`.chip`/`.empty`/`.mono` from `src/styles.css` — this stylesheet only owns
-   the row layout, built to wrap rather than overflow on a narrow viewport. No new colors. */
+/* Reuses `.page`/`.card`/`.chip`/`.empty`/`.mono`/`.muted`/`.truncate` from `src/styles.css` — this
+   stylesheet only owns the day headers and row layout. No new colors — the four accent tones below
+   are `--color-success`/`--color-info`/`--color-warn`/`--color-danger`, the same four tokens every
+   other status surface in this app already draws from. */
 :host {
   display: block;
 }
 
+.activity-day-label {
+  margin: var(--space-16) 0 var(--space-8);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.activity-day-label:first-child {
+  margin-top: 0;
+}
+
 .activity-list {
   list-style: none;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
+/* The verb accent (docs/design/09-activity.md: "Created green / Updated blue / Archived amber /
+   Deleted red" — see `core/activity/activity-logic.ts#activityAccentTone`'s own doc comment for how
+   the four design-doc verbs map onto this app's real six-value `AuditAction`). Replaces the old
+   `.chip.accent` verb badge — three fewer chip elements per row, same information (the summary text
+   already states the verb in prose; this border reinforces it visually, it doesn't solely carry it). */
 .activity-row {
   padding: var(--space-8) var(--space-16);
   background: var(--panel-raised);
   border: 1px solid var(--border);
+  border-left: 3px solid transparent;
   border-radius: var(--radius-sm);
+}
+
+.activity-row.tone-success {
+  border-left-color: var(--color-success);
+}
+
+.activity-row.tone-info {
+  border-left-color: var(--color-info);
+}
+
+.activity-row.tone-warn {
+  border-left-color: var(--color-warn);
+}
+
+.activity-row.tone-danger {
+  border-left-color: var(--color-danger);
 }
 
 .activity-row-head {
@@ -25,7 +63,16 @@
   flex-wrap: wrap;
 }
 
+/* A fixed-width gutter (docs/design/09-activity.md's own mockup: "absolute times in a left
+   gutter") — every row's time lines up in one column instead of drifting with its own text width. */
+.activity-time {
+  flex: none;
+  width: 3.25rem;
+  color: var(--text-muted);
+}
+
 .activity-target {
+  flex: none;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -36,11 +83,6 @@
   min-width: 0;
   color: var(--text);
   font-size: 0.9rem;
-}
-
-.activity-time {
-  flex: none;
-  font-size: 0.78rem;
 }
 
 .activity-details {

@@ -10,6 +10,7 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
@@ -28,6 +29,11 @@ const FIT_PADDING: Leaflet.PointTuple = [48, 48];
 
 /** A single marker never gets zoomed in tighter than this, even though its own bounds has zero area. */
 const FIT_MAX_ZOOM = 16;
+
+/* Minimum zoom when centring on one asset. Below this the "centred" asset is a dot in a city-wide
+   view, which doesn't answer "where is it" any better than the fleet fit already did; the map keeps
+   a closer zoom if the operator had already zoomed in past it. */
+const FOCUS_MIN_ZOOM = 15;
 
 const TRAIL_COLOR = '#4f8cff';
 
@@ -172,6 +178,14 @@ export class FleetMap {
   /** The currently-selected mark id, if any — rendered larger/highlighted. */
   readonly selectedMarkId = input<string | undefined>(undefined);
 
+  /**
+   * A request to centre on one asset (see the effect in the constructor). Carries a `tick` alongside
+   * the id so that **re-selecting the asset already selected still re-centres** — keying this off the
+   * id alone meant an operator who had panned away could not click the same asset to bring the camera
+   * back. `undefined` leaves the camera alone.
+   */
+  readonly focusRequest = input<{ assetId: string; tick: number } | undefined>(undefined);
+
   /** A mark marker was clicked. */
   readonly markSelected = output<string>();
   /** A mark marker was dragged to a new position (drag-to-correct). */
@@ -205,6 +219,18 @@ export class FleetMap {
     // item 6) — a no-op until `initMap()` has created `this.map` (it applies the initial layer
     // itself once the Leaflet chunk lands).
     effect(() => this.applyLayer(this.settings.mapLayer()));
+
+    // Centres the map on each focus request. `untracked` around the body is load-bearing:
+    // `centerOnAsset` reads `store.markers()`, which changes on every telemetry poll, so a tracked
+    // read would re-run this effect every couple of seconds and re-centre the map underneath an
+    // operator who had since panned away. Depending on `focusRequest()` alone makes this fire once
+    // per request — centre on click, then leave the camera to the operator.
+    effect(() => {
+      const request = this.focusRequest();
+      if (request) {
+        untracked(() => this.centerOnAsset(request.assetId));
+      }
+    });
 
     // Redraws every marker (position/icon/popup/trail) on every store update — including the 1s
     // clock tick that only changes `sampleAgeSeconds` — cheap DOM mutation either way. Whether
@@ -546,6 +572,34 @@ export class FleetMap {
       iconSize: [style.diameterPx, style.diameterPx],
       iconAnchor: [style.diameterPx / 2, style.diameterPx / 2],
     });
+  }
+
+  /**
+   * Centres on one asset (docs/design/02-command.md — selecting a row in the asset list should move
+   * the map to it, which it previously did not do at all).
+   *
+   * Turns auto-fit **off** first: its own effect re-fits to every marker whenever the plotted set
+   * moves, so leaving it on would pull the camera back to the whole-fleet bounds on the next
+   * telemetry tick. `Recenter` puts it back. Deliberately *not* wrapped in `suppressAutoFitDisable`
+   * — unlike `fitToMarkers`, this move genuinely should count as "the camera is no longer following
+   * the fleet", so letting the `movestart` listener see it is the correct outcome rather than
+   * something to suppress.
+   *
+   * Silent no-op when the asset has no plotted marker (no position yet, or not in the current
+   * scope): centring on a position we don't have would mean inventing one.
+   */
+  private centerOnAsset(assetId: string): void {
+    const L = this.leaflet;
+    const marker = this.store.markers().find((candidate) => candidate.assetId === assetId);
+    if (!L || !this.map || !marker) {
+      return;
+    }
+    this.autoFit.set(nextAutoFitEnabled(this.autoFit(), 'assetFocused'));
+    this.map.setView(
+      L.latLng(marker.position.latitude, marker.position.longitude),
+      Math.max(this.map.getZoom(), FOCUS_MIN_ZOOM),
+      { animate: true },
+    );
   }
 
   private fitToMarkers(markers: readonly FleetMarker[]): void {

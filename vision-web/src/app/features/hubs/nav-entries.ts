@@ -1,13 +1,17 @@
 import type { IconName } from '../../shared/ui/icon-registry';
 
 /**
- * The route→mode map (docs/UI-REDESIGN-PLAN.md Wave 1), as data — the **one** source of truth for
- * both the app-shell top bar's three mode dropdowns (`app.ts`/`app.html`) and the three hub launcher
- * pages (`operate-hub.ts`/`monitor-hub.ts`/`manage-hub.ts`, each just filters this array down to its
- * own mode and renders it as a `vision-tile-grid`). Keeping this in one file — rather than the
- * dropdown and its hub page each carrying their own copy — is what makes "add/rename an entry" a
- * one-line edit instead of two edits that can silently drift apart (docs/UI-REDESIGN-PLAN.md §D-A's
- * own "the shell rebuild is mostly re-labeling" framing).
+ * The route→mode map, as data — the **one** source of truth for app navigation.
+ *
+ * **Now a single renderer (docs/NAV-IA-REDESIGN-PLAN.md F1, docs/design/19-hubs.md).** This array
+ * used to feed *two* parallel navigation surfaces: the top bar's three mode dropdowns and the three
+ * hub launcher pages (`operate-hub.ts`/`monitor-hub.ts`/`manage-hub.ts`), which rendered exactly the
+ * same entries as a `vision-tile-grid`. Landing on a hub therefore cost a click and a lazy-chunk load
+ * to show what the dropdown above it already listed, and the two renderers drifted — `managerOnly`
+ * was honoured by `ManageHub` and ignored by the dropdown. Both surfaces are gone, replaced by
+ * `shared/ui/app-sidebar/**`, the sole consumer of this file; `/operate`, `/monitor` and `/manage`
+ * redirect to `primaryRoute` (see below). One renderer is what makes the drift structurally
+ * impossible rather than merely fixed.
  *
  * **De-duplicated nav (docs/UX-SIMPLIFY-REVIEW.md F1) — every destination has exactly one canonical
  * entry.** Before this task, `/command` was linked 3× (Operate's "Geofence & safety zones", Monitor's
@@ -51,20 +55,29 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * `NavEntry` fields:
  * - **`group`** — `'configuration'` (Categories/Training/Firmware/Reports — set up once, not every
  *   day), `'diagnostics'` (Health/Debug), or `'advanced'` (Devices). Omitted means "everyday,
- *   ungrouped" (Assets/Add source/Pilots-roster) — `manage-hub.ts` renders those first, flat, then one
- *   labelled `vision-section-header` + `vision-tile-grid` per group that still has a visible entry.
+ *   ungrouped" (Assets/Add source/Pilots-roster). The sidebar reads this through `navTiers()` below:
+ *   `diagnostics`/`advanced` fold into one collapsed `Advanced` disclosure, `configuration` stays
+ *   visible alongside the ungrouped entries.
  * - **`managerOnly`** — hidden unless `canManageOrg(topRole)` (`core/org/org-logic.ts`, ADMIN/MANAGER)
  *   is true, the exact same gate `shared/ui/identity-chip.ts`'s Organization link and
  *   `core/org/org-guard.ts`'s route guard already use — reused here, not a new role system. Every
  *   `group`-carrying entry is `managerOnly`; so is `Pilots / roster` (its own route is already
  *   `orgGuard`-gated, so hiding the tile for a pilot matches where a click would land anyway, not a
  *   new restriction). `Assets`/`Add source` stay ungated — every authenticated role can already reach
- *   both today. Net effect: a plain PILOT's `/manage` hub renders just two tiles (Assets, Add source);
- *   an ADMIN/MANAGER sees the full grouped set. Only `ManageHub` applies this filter today — the
- *   top-bar Manage dropdown (`app.html`) still lists every entry unfiltered (out of this task's own
- *   file scope; a follow-up, not an oversight — see `manage-hub.ts`'s own class doc comment).
+ *   both today. Net effect: a plain PILOT sees just two Manage entries (Assets, Add source); an
+ *   ADMIN/MANAGER sees the full grouped set. The sidebar applies this filter **once**, for the whole
+ *   app — the split-brain where only the hub page filtered and the dropdown did not is gone with the
+ *   hub pages themselves.
  */
 export type NavModeId = 'operate' | 'monitor' | 'manage';
+
+/**
+ * Where `/operate`, `/monitor`, `/manage` now redirect (docs/design/19-hubs.md). The three hub
+ * launcher pages are gone — `NAV_MODES` feeds exactly one renderer, the sidebar — but the paths stay
+ * routable so old bookmarks and external links still land somewhere real, mirroring the same
+ * fold-a-removed-launcher-into-its-successor precedent `features/map/map.routes.ts` (`/map` →
+ * `/command`) and `features/warehouse/warehouse.routes.ts` (`/warehouse` → `/assets`) already set.
+ */
 
 export interface NavEntry {
   readonly icon: IconName;
@@ -90,8 +103,40 @@ export interface NavMode {
   readonly id: NavModeId;
   readonly label: string;
   readonly icon: IconName;
-  readonly hubRoute: string;
+  /** Redirect target for the retired hub path of the same name — see `HUB_REDIRECT_NOTE` above. */
+  readonly primaryRoute: string;
   readonly entries: readonly NavEntry[];
+}
+
+/**
+ * How the sidebar (`shared/ui/app-sidebar/**`) splits one mode's entries into its three visual tiers
+ * (docs/design/00-shell.md). Kept here, next to the data it partitions, so "which tier is this entry
+ * in" has one answer rather than one per renderer — the same single-source-of-truth reasoning that
+ * put `NAV_MODES` itself in this file.
+ *
+ * - **`primary`** — shipped, everyday entries: always visible.
+ * - **`advanced`** — the `diagnostics`/`advanced` groups (Debug, Devices, Maintenance): behind a
+ *   collapsed `Advanced` disclosure. `configuration` stays primary — Categories/CV training/Reports
+ *   are things a manager opens, not troubleshooting tools.
+ * - **`upcoming`** — every `badge: 'soon'` scaffold: behind a collapsed `Upcoming` disclosure, so an
+ *   unbuilt area can never outrank a built one (docs/NAV-IA-REDESIGN-PLAN.md F9).
+ */
+export interface NavTiers {
+  readonly primary: readonly NavEntry[];
+  readonly advanced: readonly NavEntry[];
+  readonly upcoming: readonly NavEntry[];
+}
+
+export function navTiers(entries: readonly NavEntry[]): NavTiers {
+  return {
+    primary: entries.filter((entry) => !entry.badge && !isAdvanced(entry)),
+    advanced: entries.filter((entry) => !entry.badge && isAdvanced(entry)),
+    upcoming: entries.filter((entry) => entry.badge === 'soon'),
+  };
+}
+
+function isAdvanced(entry: NavEntry): boolean {
+  return entry.group === 'diagnostics' || entry.group === 'advanced';
 }
 
 export const NAV_MODES: readonly NavMode[] = [
@@ -99,7 +144,7 @@ export const NAV_MODES: readonly NavMode[] = [
     id: 'operate',
     label: 'Operate',
     icon: 'operate',
-    hubRoute: '/operate',
+    primaryRoute: '/fly',
     entries: [
       {
         icon: 'cockpit',
@@ -115,9 +160,9 @@ export const NAV_MODES: readonly NavMode[] = [
       },
       {
         icon: 'settings',
-        name: 'Flight & detection settings',
-        description: 'Defaults for detection profile, notifications, and per-pipeline options.',
-        to: '/settings',
+        name: 'Detection defaults',
+        description: 'Detection profile, model, and per-pipeline options applied to every new stream.',
+        to: '/settings/detection',
       },
       {
         icon: 'list',
@@ -138,7 +183,7 @@ export const NAV_MODES: readonly NavMode[] = [
     id: 'monitor',
     label: 'Monitor',
     icon: 'monitor',
-    hubRoute: '/monitor',
+    primaryRoute: '/command',
     entries: [
       {
         icon: 'gauge',
@@ -162,7 +207,7 @@ export const NAV_MODES: readonly NavMode[] = [
         icon: 'replay',
         name: 'Replay library',
         description: 'Scrub any finished flight, frame by frame.',
-        to: '/monitor/replay',
+        to: '/replay',
       },
       {
         icon: 'layers',
@@ -177,7 +222,7 @@ export const NAV_MODES: readonly NavMode[] = [
     id: 'manage',
     label: 'Manage',
     icon: 'manage',
-    hubRoute: '/manage',
+    primaryRoute: '/assets',
     entries: [
       // --- Everyday, ungrouped, ungated — every authenticated role sees these -------------------
       {

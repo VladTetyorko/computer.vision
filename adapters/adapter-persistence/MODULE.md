@@ -46,7 +46,7 @@ below). This module gets no `controller/`, `dto/`, or `service/` package — it 
 - `final class JpaCategoryRepository implements CategoryRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaDeviceRepository implements DeviceRepositoryPort` — constructor `(EntityManagerFactory)`.
 - `final class JpaAssetRepository implements AssetRepositoryPort` — constructor `(EntityManagerFactory)`.
-- `final class JpaAssetUsageRepository implements AssetUsageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/MVP2-PLAN.md P-b.
+- `final class JpaAssetUsageRepository implements AssetUsageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/MVP2-PLAN.md P-b. `findRecent(int limit)` (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 — the fleet-wide "replay library" list) is `findRecentByAsset`'s cross-asset counterpart: the same `order by started_at desc` query with no `asset_id` predicate.
 - `final class JpaTelemetryRepository implements TelemetryRepositoryPort` — constructor `(EntityManagerFactory)` (production default retention cap, see Retention below) or `(EntityManagerFactory, int retentionLimitPerUsage)` (test/override seam). docs/MVP2-PLAN.md P-b.
 - `final class JpaDetectionRepository implements DetectionRepositoryPort` — constructor `(EntityManagerFactory)` or `(EntityManagerFactory, int retentionLimitPerStream)`, same shape as `JpaTelemetryRepository`. docs/MVP2-PLAN.md P-b.
 - `final class JpaAssetImageRepository implements AssetImageRepositoryPort` — constructor `(EntityManagerFactory)`. docs/UX-REWORK-PLAN.md §U-d item 3 — the asset image store (CONTRACT 2).
@@ -559,3 +559,21 @@ skipped), proving the package split changed no behavior.
 
 **Deviations from the brief**: none. Ambiguity flagged rather than resolved silently: the
 `AssignmentMapper` non-extraction and the `PersistenceUnit` no-magic-values finding, both above.
+
+## docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 done (replay library, persistence half)
+
+`AssetUsageRepositoryPort` gained one method, `findRecent(int limit)` — `findRecentByAsset`'s
+fleet-wide counterpart, backing `GET /api/usages` (the "replay library" list; see
+vision-application/vision-api's own MODULE.mds for the read model/controller). `JpaAssetUsageRepository`
+implements it with the same `AssetUsageEntity` JPQL query `findRecentByAsset` already uses, minus the
+`asset_id` predicate (`order by started_at desc`, `setMaxResults(limit)`) — no new index, no new
+migration: this table has no per-asset-only index to begin with (see the entity's own javadoc — no
+FK/index beyond `asset_id`), so dropping the predicate doesn't lose one. `./mvnw -B -pl
+adapters/adapter-persistence test`: **98/98 green** (up from 97; docker ran, not skipped) — one new
+`AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit`, written to
+assert relative order among its own rows (by id) within a large fetch rather than assuming they are
+the only/topmost rows in the whole suite, since this table is shared, unpolled, across every other
+nested test class's own inserts in the same run. `vision.persistence.enabled` stays `false` by
+default, so this implementation is not exercised at runtime by the default-config app — the
+in-memory devsupport fallback (`vision-app`'s `InMemoryAssetUsageRepository`) is what the running
+dev server actually uses; see that module's MODULE.md.

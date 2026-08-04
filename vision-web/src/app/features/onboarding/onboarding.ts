@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { FlightPlanDialog } from '../../shared/map/fleet-plan-dialog/flight-plan-dialog';
 import { Notice } from '../../shared/ui/notice';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { OnboardingStore } from './onboarding-store';
 import { OnboardingFacade } from './onboarding-facade';
 
@@ -22,10 +23,24 @@ import { OnboardingFacade } from './onboarding-facade';
  * exclusively. `onPhotoSelected` is the one bit of DOM-specific glue left here (resetting the raw
  * `<input type="file">`'s own value so the same file can be re-selected later) — a truly
  * self-contained view concern no other component/route could ever need to stay in sync with.
+ *
+ * **Page bar + centered form (docs/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3, docs/design/07-add-source.md,
+ * wave 2).** `page-head`'s three-line description is gone outright, not moved into a `hint` — the
+ * step body already carries its own subtitle ("What is it, and what does it look like?") for exactly
+ * this job, so the header would only have restated it. `.page--form` (`styles.css`) centers the whole
+ * wizard at 880px — a form this narrow reads as unfinished at full fluid width, and it's this page's
+ * own F4 finding that a display-name input doesn't need to be 1075px wide. The three standalone
+ * Profile-step fields and the Connect step's protocol/URI/path fields carry the new
+ * `--field-sm`/`--field-md`/`--field-lg` size buckets (`onboarding.html`) — the rest of the wizard's
+ * inputs already sit inside a responsive grid (`.register-form`/`.option-row`) that was never the
+ * 1075px offender the plan named. The step-bar redesign (a dot rail), the photo dropzone, and moving
+ * the disabled-`Next` reason onto the button itself are all `docs/design/07-add-source.md`'s
+ * "Suggested design" — bigger changes this wave deliberately leaves alone (its own "note anything left
+ * for later" instruction).
  */
 @Component({
   selector: 'vision-onboarding',
-  imports: [FormsModule, RouterLink, FlightPlanDialog, Notice],
+  imports: [FormsModule, RouterLink, FlightPlanDialog, Notice, PageBar],
   templateUrl: './onboarding.html',
   styleUrl: './onboarding.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

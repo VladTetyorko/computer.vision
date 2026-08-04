@@ -1,305 +1,83 @@
+/* App shell (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md) — a persistent left
+   sidebar (`<vision-app-sidebar>`, `shared/ui/app-sidebar/**`) plus a `<main>` that scrolls on its
+   own, replacing the old sticky `.app-header` (three mode `<details>` dropdowns + a `.status`
+   cluster) entirely. See `AppSidebar`'s own class doc for the F1/F2/F3/F10 findings this removes —
+   this file only lays out the two regions; every rule that used to live here for the header, its
+   dropdowns, and its status cluster is gone, not just visually superseded. */
 :host {
-    display: block;
-    min-height: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  /* A `grid-template-rows` is required, not optional, even though there's only one row: leaving it
+     unset defaults to `grid-auto-rows: auto`, an *indefinite* track size — and `.sidebar`'s own
+     `height: 100%` (`app-sidebar.css`) cannot resolve a percentage against an indefinite size, so it
+     falls back to `auto` per CSS's own percentage-resolution rule, meaning the sidebar grows to its
+     full *content* height instead of being clamped to the viewport. Confirmed live (not just
+     reasoned about): before this rule, an ADMIN session's fully-expanded sidebar (~1080px of nav
+     rows + foot) simply ran off the bottom of a shorter viewport with nothing to scroll to reach
+     it — `.sidebar-body`'s own `overflow-y: auto` never engaged because the flex column it lives in
+     was never actually height-constrained in the first place. `1fr` gives the row a genuinely
+     definite size (exactly this container's own `height: 100dvh`), which is what makes `.sidebar`'s
+     `height: 100%` — and therefore its body's internal scroll — actually take effect. */
+  grid-template-rows: 1fr;
+  height: 100dvh;
 }
 
-/* Identity/nav only — no action buttons ever render here (verified against `app.html`, docs/
-   UX-REWORK-PLAN.md §U-b item 4); actions belong to the selected entity's own panel. Flat and
-   fully opaque on purpose (item 4's "tighten … flat, bordered bottom, no shadow"): the previous
-   `color-mix(… 88% …)` translucency + `backdrop-filter: blur(8px)` was a soft frosted-glass
-   affordance, the same family of cue as a drop-shadow, and this app's own hairline-seam gotcha
-   (see `features/fly/fly.css`'s `.cockpit` box-shadow doc comment) was partly a consequence of
-   this header not being fully opaque; an opaque header cannot show that seam at all, though the
-   `fly.css` defensive fix is left in place as harmless belt-and-suspenders. */
-.app-header {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    gap: var(--space-24);
-    height: var(--header-height);
-    padding: 0 var(--space-24);
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
+/* `<vision-app-sidebar>`'s own host is `display: contents` (see that component's own CSS) — its
+   real root (`.sidebar`) is what actually occupies this grid's first, `auto`-sized column; when the
+   sidebar isn't rendered at all (unauthenticated — see `app.html`), that column simply has nothing
+   in it and collapses to zero width, so `main`'s own explicit `grid-column: 2` (not left to
+   auto-placement) is what keeps it filling the remaining `1fr` track either way.
+   **Plain block, not a nested grid** — an earlier version of this rule made `main` itself
+   `display: grid; grid-template-rows: auto 1fr` (banner row / content row), on the assumption that
+   the offline banner (row 1, only rendered while `offline()`) and the routed page's own root (row 2)
+   would always land in that order. That assumption broke the instant the backend *is* reachable: with
+   no banner rendered, `<router-outlet>` (excluded from placement below) leaves the routed page as the
+   grid's only real item, and row-major auto-placement puts a lone item in row 1 — the `auto` row —
+   not row 2. Confirmed live: `/fly`'s `.cockpit` measured 333px tall (its own `min-height: 20rem`
+   floor) inside an empty 673px-tall row 2, the video rendering ~154px instead of filling the view.
+   A plain block sidesteps the whole class of bug — the banner (when present) and the routed page
+   just stack in normal document order, exactly like every other block-flow parent in this app, and
+   full-bleed pages get their height from a viewport unit on their *own* root instead
+   (`features/fly/fly.css`'s `.cockpit`, `features/command/command.css`'s `.command-shell`, both
+   `height: 100dvh` — a fixed unit needs no parent-chain percentage resolution at all, sidestepping
+   this bug's own root cause rather than patching around it). */
+main {
+  grid-column: 2;
+  height: 100dvh;
+  overflow-y: auto;
 }
 
-.brand {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    color: var(--text);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-}
-
-/* An aperture-ish mark: a ring with a bright pupil. Cheap, recognisable at 16px. */
-.brand-mark {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 2px solid var(--color-info);
-    position: relative;
-}
-
-.brand-mark::after {
-    content: "";
-    position: absolute;
-    inset: 3px;
-    border-radius: 50%;
-    background: var(--color-info);
-}
-
-/* ---- Hub-and-spoke mode nav (docs/UI-REDESIGN-PLAN.md Wave 1) --------------------------------
-   Replaces the old flat `.tabs`/`.tab` row + single "More ▾" `.tab-more` overflow. Each mode is
-   two affordances sharing one `.mode` wrapper: `.mode-link` (a plain routerLink to the hub) and
-   `.mode-more` (a `<details>` dropdown of that mode's own entries) — `routerLinkActive="active"`
-   sits on `.mode` itself (no routerLink of its own), which is exactly the pre-existing `.tab-more`
-   trick: Angular's `RouterLinkActive` scans every *descendant* routerLink, so `.mode` lights up
-   whenever the hub route *or any entry inside its dropdown* is the current URL. Typographic
-   recipe (uppercase, 600 weight, loosened tracking, muted → text on hover, accent underline when
-   active) is unchanged from the old `.tab`. */
-.modes {
-    display: flex;
-    align-items: center;
-    height: 100%;
-}
-
-.modes-wide {
-    gap: var(--space-4);
-}
-
-.mode {
-    position: relative;
-    display: flex;
-    align-items: center;
-    height: 100%;
-}
-
-.mode-link {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    height: 100%;
-    padding: 0 var(--space-8) 0 var(--space-16);
-    color: var(--text-muted);
-    font-size: 0.78rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border-bottom: 2px solid transparent;
-    transition: color 0.15s ease, border-color 0.15s ease;
-}
-
-.mode-link:hover {
-    color: var(--text);
-}
-
-.mode.active .mode-link {
-    color: var(--text);
-    border-bottom-color: var(--color-info);
-}
-
-.mode-more {
-    position: relative;
-    display: flex;
-    align-items: center;
-    height: 100%;
-}
-
-.mode-more-trigger {
-    display: flex;
-    align-items: center;
-    height: 100%;
-    padding: 0 var(--space-8);
-    color: var(--text-muted);
-    cursor: pointer;
-    list-style: none;
-    transition: color 0.15s ease;
-}
-
-.mode-more-trigger::-webkit-details-marker {
-    display: none;
-}
-
-.mode-more-trigger:hover,
-.mode.active .mode-more-trigger {
-    color: var(--text);
-}
-
-.mode-more-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: var(--space-8);
-    min-width: 14rem;
-    padding: var(--space-8);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    background: var(--panel-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow);
-    z-index: 30;
-}
-
-.mode-more-menu a {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    padding: var(--space-8) var(--space-8);
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-size: 0.85rem;
-}
-
-.mode-more-menu a:hover,
-.mode-more-menu a.active {
-    background: var(--panel-hover);
-    color: var(--text);
-}
-
-.mode-more-menu .entry-name {
-    flex: 1;
-}
-
-.mode-more-menu .chip {
-    flex: none;
-}
-
-/* ---- Narrow ("Menu") layout — hidden by default; shown only below --bp-sm/640px (see the media
-   query at the bottom of this file). One combined `<details>` replacing all three `.mode`
-   triggers, grouped and labeled per mode so nothing is reduced to an unlabeled icon. */
-.modes-narrow {
-    display: none;
-    position: relative;
-    align-items: center;
-}
-
-.modes-narrow > summary {
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    cursor: pointer;
-    list-style: none;
-}
-
-.modes-narrow > summary::-webkit-details-marker {
-    display: none;
-}
-
-.modes-narrow.active > summary {
-    color: var(--text);
-    border-bottom-color: var(--color-info);
-}
-
-.modes-narrow-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: var(--space-8);
-    min-width: 15rem;
-    max-height: calc(100vh - var(--header-height) - var(--space-16));
-    overflow-y: auto;
-    padding: var(--space-8);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-16);
-    background: var(--panel-raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: var(--shadow);
-    z-index: 30;
-}
-
-.modes-narrow-group {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-}
-
-.modes-narrow-group + .modes-narrow-group {
-    padding-top: var(--space-16);
-    border-top: 1px solid var(--border);
-}
-
-.modes-narrow-mode {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    padding: var(--space-8);
-    color: var(--text);
-    font-size: 0.78rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border-radius: var(--radius-sm);
-}
-
-.modes-narrow-mode:hover,
-.modes-narrow-mode.active {
-    background: var(--panel-hover);
-}
-
-.modes-narrow-entry {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    padding: var(--space-8) var(--space-8) var(--space-8) var(--space-32);
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    border-radius: var(--radius-sm);
-}
-
-.modes-narrow-entry:hover,
-.modes-narrow-entry.active {
-    background: var(--panel-hover);
-    color: var(--text);
-}
-
-.status {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
+/* `<vision-toast-host>`/`<vision-undo-toast>` (`app.html`'s last two elements) render only
+   `position: fixed` content of their own (`toast-host.ts`/`undo-toast.ts`) — genuinely out-of-flow
+   regardless of their own host tag's display, exactly like the router-outlet fix above in spirit.
+   Neither component sets its own `:host` display, so left alone they default to (blockified) inline
+   boxes and become two more real grid items here — confirmed live: `getComputedStyle(host)
+   .gridTemplateRows` reported a phantom second, 0px-tall implicit row once they were included in
+   placement, `.sidebar`/`main` still rendered correctly only because that row happened to compute to
+   zero, not because either wrapper was actually excluded from the grid. `display: contents` makes
+   both wrappers disappear from the box tree the same way `<vision-app-sidebar>`'s own host already
+   does (see that component's own CSS), leaving `.sidebar` and `main` as this grid's only two items —
+   tidier, and removes a phantom track a future added grid item (a footer, a second banner row) could
+   otherwise silently land in. */
+vision-toast-host,
+vision-undo-toast {
+  display: contents;
 }
 
 .offline-banner {
-    background: var(--color-warn-soft);
-    border-bottom: 1px solid var(--color-warn-line);
-    color: var(--color-warn-text);
-    padding: var(--space-8) var(--space-24);
-    font-size: 0.82rem;
+  background: var(--color-warn-soft);
+  border-bottom: 1px solid var(--color-warn-line);
+  color: var(--color-warn-text);
+  padding: var(--space-8) var(--space-24);
+  font-size: 0.82rem;
 }
 
 .offline-banner code {
-    font-family: var(--mono);
-    /* Bespoke low-opacity black wash for an inline code chip, not a video/map scrim — 25% is
-       intentionally lighter than either --scrim step (55%/70%) so the chip stays legible against
-       --color-warn-soft; documented bespoke exception per docs/STYLE-TOKENS-PLAN.md's scrim row. */
-    background: rgb(0 0 0 / 25%);
-    padding: var(--space-2) var(--space-4);
-    border-radius: 4px;
-}
-
-/* --bp-sm (styles.css F1) — below this width the header genuinely restructures, not just shrinks:
-   the three wide mode triggers hide in favor of the single combined "Menu" disclosure above. */
-@media (max-width: 640px) {
-    .app-header {
-        gap: var(--space-16);
-        padding: 0 var(--space-16);
-    }
-
-    .brand-name {
-        display: none;
-    }
-
-    .modes-wide {
-        display: none;
-    }
-
-    .modes-narrow {
-        display: flex;
-    }
+  font-family: var(--mono);
+  /* Bespoke low-opacity black wash for an inline code chip, not a video/map scrim — 25% is
+     intentionally lighter than either --scrim step (55%/70%) so the chip stays legible against
+     --color-warn-soft; documented bespoke exception per docs/STYLE-TOKENS-PLAN.md's scrim row. */
+  background: rgb(0 0 0 / 25%);
+  padding: var(--space-2) var(--space-4);
+  border-radius: 4px;
 }

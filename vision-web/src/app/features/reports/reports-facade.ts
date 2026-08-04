@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import type { FleetSummary } from '../../core/api/models';
+import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import { attentionRows, categoryBars, reportKpis } from './reports-logic';
 
 /**
@@ -26,6 +27,9 @@ export class ReportsFacade {
   readonly kpis = computed(() => reportKpis(this.summarySignal()));
   readonly bars = computed(() => categoryBars(this.summarySignal()?.categories ?? []));
   readonly attention = computed(() => attentionRows(this.summarySignal()?.assets ?? []));
+  /** "N asset(s) flagged" was a literal placeholder string — `pluralize` (`shared/ui/page-bar`) is
+   *  this app's one regular-English pluralisation helper, docs/NAV-IA-REDESIGN-PLAN.md §2.2. */
+  readonly attentionSubtitle = computed(() => `${pluralize(this.attention().length, 'asset')} flagged`);
 
   constructor() {
     void this.load();

@@ -28,10 +28,7 @@
     }
 
     @if (!facade.canConfirm() && facade.validation().invalidLabels.length > 0) {
-      <vision-notice variant="warn" icon="alert">
-        {{ facade.validation().invalidLabels.length }} box(es) use a label not in this dataset's vocabulary —
-        pick one from the dropdown before confirming.
-      </vision-notice>
+      <vision-notice variant="warn" icon="alert">{{ facade.invalidLabelsMessage() }}</vision-notice>
     }
     @if (facade.validation().hasDegenerateBox) {
       <vision-notice variant="warn" icon="alert">One or more boxes have no size — resize or remove them before confirming.</vision-notice>

@@ -1,10 +1,5 @@
 <div class="page">
-  <div class="page-head">
-    <div>
-      <h1><vision-icon name="report" [size]="24" />Inventory reports</h1>
-      <p>A read-only, live view of the fleet — counts, category mix, and what needs attention.</p>
-    </div>
-  </div>
+  <vision-page-bar title="Inventory reports" icon="report" />
 
   <vision-notice icon="help">
     Exportable, generated reports are coming — everything below is live from the same summary
@@ -54,7 +49,7 @@
       </section>
 
       <section class="card col-6">
-        <vision-section-header title="Needs attention" [subtitle]="facade.attention().length + ' asset(s) flagged'" />
+        <vision-section-header title="Needs attention" [subtitle]="facade.attentionSubtitle()" />
         @if (facade.attention().length === 0) {
           <p class="muted hint">All quiet — nothing needs attention right now.</p>
         } @else {

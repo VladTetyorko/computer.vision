@@ -10,7 +10,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100dvh - var(--header-height));
+  /* No more global header to subtract (docs/NAV-IA-REDESIGN-PLAN.md) — the sidebar itself is
+     hidden on this page (`app.ts`'s own "hidden while unauthenticated" rule), so the login shell
+     is the only thing on screen and can simply claim the full viewport height. */
+  min-height: 100dvh;
   padding: var(--space-24) var(--space-16);
 }
 

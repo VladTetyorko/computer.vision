@@ -19,6 +19,11 @@ import { ModelsFacade } from './models-facade';
  * here" state `DatasetsPage` uses (`ModelsFacade.disabled`); Promote is hidden entirely for a
  * non-manager (`ModelsFacade.canManage`, matching the backend's own 403); a 409 on promote (the
  * model isn't on the server yet) surfaces as one plain-language `vision-notice`, never a raw error.
+ *
+ * **Disabled-state cleanup (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/16-training.md, wave 2)** —
+ * same treatment as `DatasetsPage`: the `eyebrow="Manage"` duplicate of the sidebar's own active-group
+ * label is gone, and the **Datasets** action is hidden while `disabled()` (it would only lead to that
+ * page's own identical disabled state).
  */
 @Component({
   selector: 'vision-models-page',

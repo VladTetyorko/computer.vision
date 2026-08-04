@@ -9,6 +9,10 @@ export const WALL_ROUTES: Routes = [
   {
     path: 'wall',
     title: 'Wall · Vision',
+    // `fullBleed` (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, docs/design/00-shell.md): read by
+    // `shared/ui/app-sidebar/**` to auto-collapse the sidebar to its icon rail on this full-screen
+    // many-tiles view, rather than reflowing the video to make room for an expanded nav column.
+    data: { fullBleed: true },
     loadComponent: () => import('./wall').then((m) => m.WallPage),
   },
 ];

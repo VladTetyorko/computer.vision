@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
+import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import type { Annotation, Dataset, TrainingSample } from '../../core/api/models';
 import { validateAnnotations } from './sample-editor-logic';
 
@@ -39,6 +40,14 @@ export class SampleEditorFacade {
 
   readonly validation = computed(() => validateAnnotations(this.annotations(), this.dataset()?.classes ?? []));
   readonly canConfirm = computed(() => this.validation().valid);
+  /** "N box(es) use a label…" was a literal placeholder string — `pluralize` (`shared/ui/page-bar`,
+   *  docs/NAV-IA-REDESIGN-PLAN.md §2.2) is this app's one regular-English pluralisation helper;
+   *  "boxes" is irregular, so it's passed explicitly rather than the default `${singular}s`. */
+  readonly invalidLabelsMessage = computed(
+    () =>
+      `${pluralize(this.validation().invalidLabels.length, 'box', 'boxes')} use a label not in this ` +
+      `dataset's vocabulary — pick one from the dropdown before confirming.`,
+  );
 
   private currentDatasetId = '';
 

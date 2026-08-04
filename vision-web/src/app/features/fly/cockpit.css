@@ -1,0 +1,558 @@
+/* ---- Cockpit grid (docs/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user request:
+   "player = full-screen centered hero, key telemetry moves to a bottom row") -------------------- */
+/* Named CSS-grid areas replace the old ten `position: absolute` `.hud-*` regions and their
+   duplicated `.banner-active` offset set — the failsafe banner is a real grid row (content reflows
+   on its own when it appears/disappears, no manual shift math), so is the bottom telemetry strip
+   now, and the tool-rail is a real column. `.grid-main` is the video hero; the map inset and every
+   open tool-rail drawer overlay *it* (absolute/fixed within `.grid-main`, never within `.cockpit`
+   itself) — see that class's own comment below.
+
+   **Relayout, concretely**: `<vision-fly-osd>` used to sit in a `minmax(0,20rem)` left column
+   beside the video (`telemetry`/`ticker` sharing that column, `main` spanning both their rows) —
+   video-as-hero and a narrow instrument column pulling the eye left compete for the same "main
+   thing on screen" role. `telemetry`/`ticker` are now full-width rows *below* `main` instead,
+   which does two things at once: `main` drops to a single `1fr` row spanning the *entire* width
+   (minus the rail column) rather than sharing width with a side column, so the video genuinely
+   fills and centers in the cockpit; and the OSD reads left-to-right along the bottom like an
+   FPV/ground-station strip rather than a stacked instrument panel. Grid:
+
+     grid-template-areas:
+       "banner    banner"
+       "main      rail"
+       "telemetry rail"
+       "ticker    rail"
+       "controls  rail";
+     grid-template-columns: 1fr auto;
+
+   This is now the layout at *every* width — the previous `--bp-md` (900px) override that reshuffled
+   the left telemetry/ticker column into full-width rows is gone because that reshuffle is simply the
+   default now (there is no side column left to collapse). The map inset still hides below `--bp-md`
+   entirely (`.main-map`'s own media query, unchanged) and the tool-rail still stays put beside the
+   video at every width per that same token's own doc comment ("cockpit tool-rail stays"). */
+
+.cockpit {
+  position: relative;
+  display: grid;
+  grid-template-areas:
+    'banner    banner'
+    'main      rail'
+    'telemetry rail'
+    'ticker    rail'
+    'controls  rail';
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto 1fr auto auto auto;
+  /* The one edge-inset every `.main-*` overlay below shares (docs/NAV-IA-REDESIGN-PLAN.md F11,
+     docs/design/01-fly.md — "a grid overlay ... with an --overlay-pad"): named so "the safe margin
+     from the video's own edge" reads as one rule, not half a dozen independent `var(--space-16)`
+     literals that could silently drift apart one at a time. */
+  --overlay-pad: var(--space-16);
+  /* No more global header to subtract (docs/NAV-IA-REDESIGN-PLAN.md §2.1) — `100dvh`, a viewport
+     unit, not `height: 100%`: this page's own root sits directly inside `app.css`'s plain-block
+     `<main>` (`height: 100dvh; overflow-y: auto`), and a percentage height here would need that
+     entire parent chain to carry a *definite* size for `height: 100%` to resolve at all — confirmed
+     live that it does not reliably: with `height: 100%`, `.cockpit` collapsed to its own
+     `min-height: 20rem` floor (~333px) with the rest of the viewport rendering dead black, because
+     nothing between here and `<main>` was guaranteed definite. `100dvh` needs no parent-chain
+     resolution at all, exactly like `<main>`'s own rule right above it in the ancestor chain — the
+     same fixed-viewport-unit fix, one level down. The old `calc(100vh - var(--header-height))` and
+     the hairline-seam `box-shadow` hack that papered over its sub-pixel rounding drift against the
+     (now-deleted) sticky header are both gone outright — the header they guarded against no longer
+     exists, so there is no seam left to hide. Both `/fly` and `/fly/:assetId` also carry
+     `data: {fullBleed: true}` (`fly.routes.ts`), which auto-collapses the sidebar to its icon rail
+     while either page is active — the actual F11 fix (72px of chrome above the failsafe banner), not
+     merely a cosmetic seam patch. */
+  height: 100dvh;
+  min-height: 20rem;
+  overflow: hidden;
+  background: var(--black);
+}
+
+.cockpit-loading,
+.cockpit-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-32);
+}
+
+.cockpit-loading .skeleton-card {
+  width: 100%;
+  max-width: 30rem;
+  height: 12rem;
+}
+
+/* Honest empty state (docs/NAV-IA-REDESIGN-PLAN.md F12 — a bad/stale `:assetId` bookmark) —
+   `vision-empty` centered the same way the loading skeleton is, on the same `--black` cockpit
+   backdrop so a dead link never flashes the app's ordinary light/dark page background mid-cockpit. */
+.cockpit-empty {
+  color: var(--text);
+}
+
+.grid-banner {
+  grid-area: banner;
+  z-index: 10;
+}
+
+/* The bottom OSD strip (`<vision-fly-osd>`) — a real row below the video now, not an overlaid
+   left column (see this file's own grid comment above for the full reasoning). A hairline top
+   border gives the strip a visible "shelf" edge separating it from the video above, echoing
+   `--hud-border`'s own weight without needing a second background layer (the individual
+   `.surface-hud` cluster pills already carry their own chrome). */
+.grid-telemetry {
+  grid-area: telemetry;
+  padding: var(--space-8) var(--space-16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: var(--hud-border);
+}
+
+/* The events ticker — also a real row now, directly below the OSD strip; `max-width` + auto margins
+   keep its short-lived rows from stretching edge-to-edge across the now much wider bottom area. */
+.grid-ticker {
+  grid-area: ticker;
+  width: 100%;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 0 var(--space-16) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: hidden;
+}
+
+.grid-controls {
+  grid-area: controls;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-16);
+  padding: var(--space-16);
+}
+
+/* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·
+   marks · help, each a `vision-icon-button` toggling `panels` (cockpit.ts). Grouped by job
+   (docs/UX-SIMPLIFY-REVIEW.md F4 — see cockpit.html's own comment above `.grid-rail` for the full
+   grouping rationale); this rule now spaces `.rail-group`s apart, each group handling its own
+   tighter inner gap. */
+.grid-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-16);
+  padding: var(--space-16) var(--space-8);
+}
+
+/* One job-group (Control / Vision / Situational / Help) — same inner gap the rail itself used to
+   apply directly to every button; grouping only changes spacing/dividers between groups, not within
+   one. */
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+/* Pins the Help group to the rail's bottom edge, separated from the flying tools above it — Help is
+   reference material, not something touched mid-flight (F4). `margin-top: auto` on a column-flex
+   item consumes all remaining space above it, so this works at any rail height without a fixed
+   offset. */
+.rail-group-help {
+  margin-top: auto;
+}
+
+/* The thin seam between job-groups — reuses `--hairline` (styles.css: "the faint white 1px edge used
+   on surfaces floating over video/map"), the same token `.secondary-tile`'s own border already uses
+   elsewhere in this file, rather than inventing new rail chrome. Narrower than the icon buttons
+   themselves so it reads as a quiet seam, not a rule. No text group label: at this rail's ~2.25rem
+   button width, group names ("Situational") don't read clean (F4: "if it crowds, use just the
+   divider") — `role="group"`/`aria-label` on each `.rail-group` (cockpit.html) carries the same
+   grouping for assistive tech instead. */
+.rail-divider {
+  width: 1.25rem;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.rail-item {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The CV rail button's own "detection is off" tell — the same small red dot
+   `cv-control-panel.ts`'s old `.cv-off-dot` toggle button used to carry, now positioned over the
+   shared `vision-icon-button` from the host page rather than baked into that component. */
+.rail-dot {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  pointer-events: none;
+}
+
+/* No `--bp-md` (900px) grid-area override needed anymore: the telemetry/ticker-collapses-to-
+   full-width-rows behavior that override used to introduce below 900px is simply the default at
+   every width now (see this file's own grid comment above) — the tool-rail still stays put beside
+   the video at every width per `src/styles.css`'s own --bp-lg token note ("cockpit tool-rail
+   stays"), unaffected. The map inset still hides below 900px via its own `.main-map` media query
+   further down this file. */
+
+/* ---- Main: the video hero + everything that overlays it ----------------------------------- */
+/* `position: relative` so every absolutely-positioned overlay below (header strip, map inset,
+   secondary tiles, preflight/diagnostics cards) anchors to *this* box, not the whole `.cockpit`
+   grid — D-C's own rule: "the map inset and open drawer overlay `main`, not the grid." The two
+   tool-rail drawer components (`<vision-flight-command-panel>`/`<vision-cv-control-panel>`) and the
+   plain `<vision-side-panel>` instances below are all `position: fixed` internally (`side-panel.css`),
+   so they dock to the viewport regardless of being mounted here — mounting them inside `.grid-main`
+   is purely "renders beside main's other overlays in the template", not a positioning requirement. */
+.grid-main {
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
+  background: var(--black);
+}
+
+.stage-video {
+  position: absolute;
+  inset: 0;
+}
+
+/* The shared `<vision-player>` normally keeps a fixed 16:9 `.frame` (right for a rail tile, wrong
+   for a cockpit that must fill whatever the viewport's own shape is) — `object-fit: contain` on
+   the inner `<video>` already preserves the picture's real aspect ratio with letterboxing, so
+   dropping the frame's own forced ratio here is safe, not distorting. Scoped to this page's own
+   `.grid-main` subtree via `:host ::ng-deep`, the same reach-into-another-component's-DOM technique
+   this app already uses for Leaflet-owned elements (`shared/map/live-map.css`) — see vision-web/MODULE.md
+   Gotchas for the full reasoning. */
+:host ::ng-deep .stage-video vision-player .frame {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  aspect-ratio: unset;
+  border-radius: 0;
+}
+
+.stage-notice {
+  position: absolute;
+  left: 50%;
+  bottom: 6.5rem;
+  transform: translateX(-50%);
+  z-index: 5;
+}
+
+.notice {
+  background: var(--color-warn-soft);
+  border: 1px solid var(--color-warn-line);
+  color: var(--color-warn-text);
+  border-radius: var(--radius-sm);
+  padding: var(--space-8) var(--space-16);
+  font-size: 0.8rem;
+  max-width: 32rem;
+  text-align: center;
+}
+
+/* ---- Main header overlay: exit, drone switcher, "Bring home" ------------------------------ */
+/* A real 3-column safe-area grid, not a flex row relying on wrap-if-it-overflows
+   (docs/NAV-IA-REDESIGN-PLAN.md F11, docs/design/01-fly.md — "Bring home is clipped at the right
+   edge behind/past the DRONE selector ... fix by giving the overlay a real safe area rather than
+   nudging positions"). Three columns: the exit link (`auto`, left), pure slack (`minmax(0, 1fr)`,
+   absorbs whatever width is left over), and `.header-actions` (`minmax(0, auto)`, right) — the
+   switcher+"Bring home" cluster can only ever grow into the slack column, never past
+   `--overlay-pad` on the right, because a `minmax(0, auto)` track's max is capped at the space
+   actually available, not its own content's natural width (unlike the old flex row, where a wide
+   enough cluster could in principle sit flush against — or past — the container's own edge before
+   `flex-wrap` ever kicked in). `.header-actions` itself still wraps onto a second line inside that
+   column if its own content genuinely doesn't fit (see that class below) — wrapping, never clipping,
+   is this row's one overflow strategy at every width. */
+.main-header {
+  position: absolute;
+  top: var(--overlay-pad);
+  left: var(--overlay-pad);
+  right: var(--overlay-pad);
+  z-index: 6;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
+  align-items: start;
+  column-gap: var(--space-8);
+}
+
+/* The right-hand cluster (switcher + "Bring home") — `min-width: 0` is load-bearing (the grid-item
+   shrink-to-fit trap `.switcher-control`'s own `min-width: 0` already fixes for its child, needed
+   again one level up): without it this flex box would refuse to shrink below its content's natural
+   width and force the grid's own `minmax(0, auto)` column past the space available. `flex-wrap`
+   is the fallback once even a fully-shrunk switcher can't make room — the pair drops to two lines,
+   still entirely inside the safe area, never off the edge. */
+.header-actions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-8);
+  row-gap: var(--space-8);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--hud-bg-strong);
+}
+
+/* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): a labeled cockpit control, not a bare native
+   `<select>` — the "DRONE" label is always visible (fleet/military ethos: words, not just a control
+   floating unexplained in the header), styled as the same frosted-pill chrome every other HUD
+   control here already uses (`.icon-btn`'s own background/border/blur), just wrapping a `<label>`
+   so the label text and the control share one clickable/hoverable surface and one native
+   association, instead of a second free-floating `<span>`. No `margin-left: auto` any more — that
+   used to be what right-aligned this control (and, by extension, "Bring home" after it) inside one
+   shared flex row with the exit link; `.header-actions` now owns right-alignment on its own via
+   `justify-content: flex-end`, one layer up. */
+.switcher-control {
+  max-width: 16rem;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  border-radius: var(--radius-pill);
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-16);
+  cursor: pointer;
+}
+
+.switcher-label {
+  flex: none;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--text) 60%, transparent);
+}
+
+.switcher {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 0;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.switcher:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The dropdown's own popup is native chrome no amount of CSS reaches reliably — `--panel-raised`
+   dark option rows are the one part of it every mainstream engine does still honor, so the list
+   itself stays legible on dark rather than falling back to the OS's default (often light) popup. */
+.switcher option {
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+/* ---- Main overlays: map inset, secondary tiles, preflight/diagnostics ---------------------- */
+
+/* Map inset (M) — a separate persisted toggle, not a tool-rail drawer (D-D); hidden entirely below
+   `--bp-md` regardless of the toggle's own state (`src/styles.css`'s own --bp-md token note: "cockpit
+   map inset hides"). */
+.main-map {
+  position: absolute;
+  left: var(--overlay-pad);
+  bottom: var(--space-32);
+  width: min(22rem, 32vw);
+  /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
+     (400+) from escaping to the root and painting over this page's own header overlay above. */
+  isolation: isolate;
+  z-index: 0;
+}
+
+@media (max-width: 900px) {
+  /* --bp-md */
+  .main-map {
+    display: none;
+  }
+}
+
+.main-secondary {
+  position: absolute;
+  left: var(--overlay-pad);
+  bottom: var(--overlay-pad);
+  z-index: 4;
+  display: flex;
+  gap: var(--space-8);
+}
+
+.secondary-tile {
+  width: 6.5rem;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--black);
+  position: relative;
+}
+
+.secondary-tile:hover {
+  border-color: var(--color-info);
+}
+
+.secondary-tile vision-player {
+  display: block;
+}
+
+:host ::ng-deep .secondary-tile vision-player .frame {
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+
+.tile-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--space-2) var(--space-4);
+  background: var(--scrim-strong);
+  color: var(--white);
+  font-size: 0.62rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — left column, elevated above
+   `.main-secondary`'s own tile strip (also left-anchored, but shorter) — an approximate, not
+   computed, offset (this cockpit's own long-standing convention: see `.main-diagnostics`'s twin). */
+.main-preflight {
+  position: absolute;
+  left: var(--overlay-pad);
+  bottom: calc(var(--overlay-pad) + var(--space-64));
+  z-index: 3;
+}
+
+/* Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — right column; no neighbor to clear on this side
+   now that the old bottom-right detections toggle moved into its own tool-rail drawer. */
+.main-diagnostics {
+  position: absolute;
+  right: var(--overlay-pad);
+  bottom: var(--overlay-pad);
+  z-index: 3;
+}
+
+/* ---- Controls row (Start/Stop, Replay) ----------------------------------------------------- */
+
+/* Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own inline
+   reason sits directly under it, not off in the video-stage notice, so the "why" is right where
+   the eye already is. */
+.start-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.start-hint {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.hint {
+  font-size: 0.72rem;
+}
+
+.btn.big {
+  padding: var(--space-8) var(--space-24);
+  font-size: 1rem;
+  border-radius: var(--radius);
+}
+
+/* ---- Stop-stream confirm — the one remaining full-cockpit scrim overlay -------------------- */
+
+.hud-confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+}
+
+.hud-confirm .card {
+  max-width: 24rem;
+  width: 90%;
+  /* The one place `.card` gets a shadow (docs/UX-REWORK-PLAN.md §U-b item 1): this renders over a
+     full-screen scrim, a genuine floating overlay, not a page panel. */
+  box-shadow: var(--shadow);
+}
+
+.inline-confirm-card {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-line);
+}
+
+.inline-confirm-card p {
+  margin: 0 0 var(--space-8);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ---- Help drawer content (keyboard shortcuts) — the old `.hud-shortcuts` modal's own dl styling,
+   still scoped to this page via Angular's emulated encapsulation even though it's now projected
+   *into* `<vision-side-panel>` (a different component's DOM) — see that component's own doc comment
+   for why plain, non-ancestor selectors like these still match correctly. ---------------------- */
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-4) var(--space-16);
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+/* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): the second `<dl>` — mouse-only, icon-only
+   cockpit controls — gets its own small heading rather than blending into the keyboard list above. */
+.shortcuts-subhead {
+  margin: var(--space-16) 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+dt {
+  font-family: var(--mono);
+  color: var(--text);
+  font-weight: 600;
+}
+
+dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .switcher-control {
+    max-width: 9rem;
+  }
+}

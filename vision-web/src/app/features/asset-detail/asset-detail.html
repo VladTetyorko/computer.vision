@@ -1,8 +1,6 @@
 <div class="page">
   @if (facade.loading() && !facade.asset()) {
-    <div class="page-head">
-      <div class="skeleton-line title"></div>
-    </div>
+    <vision-page-bar [title]="headerTitle()" [crumb]="crumb" />
     <div class="card skeleton-card"></div>
   } @else if (facade.notFound()) {
     <div class="card">
@@ -15,66 +13,83 @@
       </vision-empty>
     </div>
   } @else if (facade.asset(); as a) {
-    <div class="page-head">
-      <div class="row header-identity">
-        @if (assetImageSrc(); as src) {
-          <img class="asset-photo" [src]="src" (error)="onImageError()" alt="" />
+    <!-- Header (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/05-asset-detail.md) — one
+         `<vision-page-bar>` replaces the loading/loaded `.page-head` pair; the identity chips ride
+         `[pageBarFilters]` (the bar's own doc comment names "filter chips" as that slot's job, and
+         this is the closest fit its frozen contract offers for a chip row), actions ride
+         `[pageBarActions]`. The rename affordance moved to its own card below (asset-detail.ts);
+         the asset photo rides the bar's own `avatarSrc` input. -->
+    <vision-page-bar [title]="a.displayName" [crumb]="crumb" [avatarSrc]="assetImageSrc()">
+      <div pageBarFilters class="row header-chips">
+        <span class="chip">{{ a.categoryName }}</span>
+        <span class="chip" [class.ok]="facade.lifecycle() === 'ACTIVE'" [class.faded]="facade.archived()">
+          {{ facade.lifecycle() }}
+        </span>
+        @if (facade.live()) {
+          <span class="chip ok"><span class="dot live"></span>Streaming</span>
         }
-        <div>
-        @if (isEditorOpen('asset')) {
-          <div class="inline-form column edit-asset">
-            <input
-              [value]="nameDraft()"
-              (input)="nameDraft.set($any($event.target).value)"
-              placeholder="Display name"
-              aria-label="Display name"
-            />
-            <input
-              [value]="categoryDraft()"
-              (input)="categoryDraft.set($any($event.target).value)"
-              placeholder="Category slug"
-              aria-label="Category"
-            />
-            <div class="row">
-              <button type="button" class="btn small" (click)="confirmEditAsset()" [disabled]="facade.busy()">Save</button>
-              <button type="button" class="btn secondary small" (click)="cancelEditAsset()">Cancel</button>
-            </div>
-          </div>
-        } @else {
-          <h1>{{ a.displayName }}</h1>
-          <p>
-            <span class="chip">{{ a.categoryName }}</span>
-            <span class="chip" [class.ok]="facade.lifecycle() === 'ACTIVE'" [class.faded]="facade.archived()">
-              {{ facade.lifecycle() }}
-            </span>
-            @if (facade.live()) {
-              <span class="chip ok"><span class="dot live"></span>Streaming</span>
-            }
-          </p>
-        }
-        </div>
       </div>
-      <div class="row">
+      <div pageBarActions class="row">
         <a class="btn secondary" routerLink="/devices">All devices</a>
-        <!-- Lifecycle simplification (docs/UX-REWORK-PLAN.md §U-a2 item 2): operator-facing
-             surfaces show only Archive/Restore — activate/deactivate no longer render here at all.
-             Archive fires immediately (item 3b, "Undo over confirm") — no confirm dialog. -->
         @if (!isEditorOpen('asset') && !facade.archived()) {
           <button type="button" class="btn secondary" (click)="renameAsset()">Rename asset…</button>
         }
         @if (facade.assetLifecycleAction(); as entry) {
-          <button
-            type="button"
-            class="btn secondary"
-            [class.danger-action]="entry.action === 'archive'"
-            (click)="onAssetLifecycleAction(entry.action)"
-            [disabled]="facade.busy()"
-          >
-            {{ assetActionLabel(entry.action) }}
-          </button>
+          @if (entry.action === 'archive') {
+            <!-- Destructive action lives behind the kebab, never beside Rename (docs/design/
+                 05-asset-detail.md's own acceptance criterion) — and now goes through a genuine
+                 confirm (asset-detail.ts's own `requestArchiveAsset` doc comment explains the
+                 departure from the older "Undo over confirm, no dialog" convention). -->
+            <vision-kebab-menu [label]="'More actions for ' + a.displayName">
+              <div class="kebab-item">
+                <button type="button" class="danger-action" (click)="requestArchiveAsset()" [disabled]="facade.busy()">
+                  Archive asset
+                </button>
+              </div>
+            </vision-kebab-menu>
+          } @else {
+            <button type="button" class="btn secondary" (click)="restoreAsset()" [disabled]="facade.busy()">
+              Restore asset
+            </button>
+          }
         }
       </div>
-    </div>
+    </vision-page-bar>
+
+    @if (isEditorOpen('asset')) {
+      <!-- The old header used to swap its own `<h1>` for these two inputs in place; the page bar's
+           `title` is a frozen plain-`string` input, so the rename form is now its own card
+           immediately under the bar instead (asset-detail.ts's own class doc). -->
+      <div class="card inline-form column edit-asset">
+        <input
+          [value]="nameDraft()"
+          (input)="nameDraft.set($any($event.target).value)"
+          placeholder="Display name"
+          aria-label="Display name"
+        />
+        <input
+          [value]="categoryDraft()"
+          (input)="categoryDraft.set($any($event.target).value)"
+          placeholder="Category slug"
+          aria-label="Category"
+        />
+        <div class="row">
+          <button type="button" class="btn small" (click)="confirmEditAsset()" [disabled]="facade.busy()">Save</button>
+          <button type="button" class="btn secondary small" (click)="cancelEditAsset()">Cancel</button>
+        </div>
+      </div>
+    }
+
+    @if (isDialogOpen('archive')) {
+      <vision-confirm-dialog
+        [message]="'Archive ' + a.displayName + '? It stops any active stream and hides the asset from the fleet — Restore asset undoes this later.'"
+        confirmLabel="Archive asset"
+        cancelLabel="Cancel"
+        [busy]="facade.busy()"
+        (confirmed)="confirmArchiveAsset()"
+        (cancelled)="cancelArchiveAsset()"
+      />
+    }
 
     <!-- ==== Overview — a compact glanceable landing (docs/UI-REDESIGN-PLAN.md Wave 3, D-F). Only
          the identity band above, the cockpit band, KPI tiles, the recent-flights chart, and a
@@ -227,7 +242,7 @@
         </button>
         <div class="icon-heading">
           <vision-icon name="history" [size]="18" />
-          <vision-section-header eyebrow="Drill-in" title="Usage history" [subtitle]="a.recentUsages.length + ' usage(s)'" />
+          <vision-section-header eyebrow="Drill-in" title="Usage history" [subtitle]="pluralize(a.recentUsages.length, 'usage')" />
         </div>
         @if (a.recentUsages.length === 0) {
           <p class="muted hint">No recorded usage yet — starts once this asset first streams.</p>

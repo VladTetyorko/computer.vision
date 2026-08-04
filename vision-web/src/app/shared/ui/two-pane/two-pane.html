@@ -1,0 +1,25 @@
+<div class="two-pane-list">
+  <ng-content select="[twoPaneList]" />
+</div>
+
+@if (detailOpen()) {
+  <!-- Scrim only ever renders below --two-pane-bp (CSS `display: none` above it): docked, the list
+       stays fully interactive, so dimming it would be a lie about what is clickable. -->
+  <div class="two-pane-scrim" (click)="detailClose.emit()" aria-hidden="true"></div>
+
+  <aside
+    class="two-pane-detail"
+    role="complementary"
+    [attr.aria-label]="detailLabel()"
+    tabindex="-1"
+    (keydown.escape)="detailClose.emit()"
+  >
+    <div class="two-pane-detail-head">
+      <span class="two-pane-detail-title">{{ detailLabel() }}</span>
+      <vision-icon-button icon="close" label="Close details" (activated)="detailClose.emit()" />
+    </div>
+    <div class="two-pane-detail-body">
+      <ng-content select="[twoPaneDetail]" />
+    </div>
+  </aside>
+}
