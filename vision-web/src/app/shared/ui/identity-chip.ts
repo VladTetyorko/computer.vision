@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth-store';
 import { initialsFor, topRoleLabel } from '../../core/auth/auth-logic';
 import { canManageOrg } from '../../core/org/org-logic';
+import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 
 /**
  * The header identity chip (docs/U-AUTH-PLAN.md wave 4) — displayName + a role badge + a logout
@@ -29,15 +30,27 @@ import { canManageOrg } from '../../core/org/org-logic';
  * the **Log out** action itself (`@if (auth.authEnabled())`), since logging out of a session that
  * was never real has nothing to do.
  *
- * **Responsive collapse — a single `<details>`, not two templates.** At normal widths the trigger
- * shows the avatar, name, and role badge inline (glanceable, no click needed); `identity-chip.css`'s
- * one `@media (max-width: 640px)` rule (the same breakpoint `app.css` already uses for the header's
- * own responsive pass) hides just the name/role text in the trigger, leaving the avatar alone as a
+ * **Responsive collapse — a single template, not two.** At normal widths the trigger shows the
+ * avatar, name, and role badge inline (glanceable, no click needed); `identity-chip.css`'s one
+ * `@media (max-width: 640px)` rule (the same breakpoint `app.css` already uses for the header's own
+ * responsive pass) hides just the name/role text in the trigger, leaving the avatar alone as a
  * compact tap target. The dropdown menu itself is unaffected by that breakpoint — it always carries
  * name, role, and (when relevant) Log out, so opening it on a narrow viewport surfaces exactly the
- * information the trigger hid, never a reduced feature set. Mirrors `app.css`'s `.tab-more`/
- * `shared/ui/notification-bell.ts`'s `.bell` — this app's one native-`<details>` popover idiom, not
- * a new dropdown component.
+ * information the trigger hid, never a reduced feature set.
+ *
+ * **Signal-backed open state, not `<details>`** (docs/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): this
+ * used to be a native `<details>`, whose `open` state lived in the DOM where nothing could see or
+ * reset it — and since this component is mounted once in the always-on shell (`app-sidebar.html`'s
+ * foot) and never destroyed on navigation, "the page component is destroyed on route change" (this
+ * app's only other cleanup mechanism) never applied to it either. Reproduced live: open this menu,
+ * then the notification bell — both stayed open at once (D1); navigate to another page — both stayed
+ * open there too (D2). The trigger now toggles `GlobalOverlayStore` (`'identity-menu'`), which
+ * composes `core/ui/ui-store.ts#UiStore` for exclusivity with the bell and adds the three lifecycle
+ * rules the shell needs and no page does: closes on any navigation, on `Escape` (returning focus to
+ * the trigger), and on a click outside — see that store's own class doc for the full mechanism. The
+ * trigger registers itself (`GlobalOverlayStore.register`) via an `effect()` over its own `viewChild`,
+ * not `afterNextRender()`, because the trigger doesn't exist on the very first render — it sits behind
+ * `@if (auth.user())`, and `user()` can still be `'loading'` at that point.
  */
 @Component({
   selector: 'vision-identity-chip',
@@ -48,6 +61,11 @@ import { canManageOrg } from '../../core/org/org-logic';
 })
 export class IdentityChip {
   protected readonly auth = inject(AuthStore);
+  protected readonly overlays = inject(GlobalOverlayStore);
+  private readonly host = inject(ElementRef<HTMLElement>);
+  /** Optional, not `.required()` — see the class doc's "signal-backed open state" paragraph for why
+   *  the trigger genuinely may not exist yet the first time this runs. */
+  private readonly triggerEl = viewChild<ElementRef<HTMLButtonElement>>('trigger');
 
   protected readonly initials = initialsFor;
   protected readonly roleLabel = topRoleLabel;
@@ -59,6 +77,19 @@ export class IdentityChip {
    * their own).
    */
   protected readonly canManageOrg = computed(() => canManageOrg(this.auth.user()?.topRole));
+
+  constructor() {
+    // Registers this component's own host (trigger + dropdown together) with the shell's overlay
+    // coordinator the moment the trigger exists — see `GlobalOverlayStore.register`'s own doc comment
+    // for why `root` containing `trigger` is what lets a click on the trigger itself never fight the
+    // outside-click listener.
+    effect(() => {
+      const trigger = this.triggerEl();
+      if (trigger) {
+        this.overlays.register('identity-menu', this.host.nativeElement, trigger.nativeElement);
+      }
+    });
+  }
 
   protected async logout(): Promise<void> {
     await this.auth.logout();

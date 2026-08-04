@@ -97,6 +97,51 @@ describe('PageBar', () => {
     expect(render().nativeElement.querySelector('.page-bar-hint-trigger')).toBeNull();
   });
 
+  // docs/UI-STATE-PLAN.md §2.4 — before this, the hint popover only closed by clicking its own
+  // trigger a second time; an operator hitting Escape (or clicking anywhere else) expects it gone.
+  it('closes the hint on Escape, from anywhere in the document', () => {
+    const fixture = render((host) => host.hint.set('Only affects your account.'));
+    const el = fixture.nativeElement as HTMLElement;
+    el.querySelector<HTMLButtonElement>('.page-bar-hint-trigger')!.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.page-bar-hint-body')).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    expect(el.querySelector('.page-bar-hint-body')).toBeNull();
+  });
+
+  it('closes the hint on a click outside it, but a click inside the popover leaves it open', () => {
+    const fixture = render((host) => host.hint.set('Only affects your account.'));
+    const el = fixture.nativeElement as HTMLElement;
+    el.querySelector<HTMLButtonElement>('.page-bar-hint-trigger')!.click();
+    fixture.detectChanges();
+
+    el.querySelector<HTMLElement>('.page-bar-hint-body')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    fixture.detectChanges();
+    expect(el.querySelector('.page-bar-hint-body'), 'a click inside the popover must not close it').not.toBeNull();
+
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    fixture.detectChanges();
+    expect(el.querySelector('.page-bar-hint-body')).toBeNull();
+  });
+
+  it('does not reopen the hint from its own trigger click bubbling to the document listener', () => {
+    const fixture = render((host) => host.hint.set('Only affects your account.'));
+    const el = fixture.nativeElement as HTMLElement;
+    const trigger = el.querySelector<HTMLButtonElement>('.page-bar-hint-trigger')!;
+    trigger.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.page-bar-hint-body')).not.toBeNull();
+
+    // The trigger's own (click) toggles it closed first (target-phase, runs before the document
+    // listener sees the same bubbling event) — the document handler must read that as "already
+    // closed" and leave it closed, never re-toggle it back open.
+    trigger.click();
+    fixture.detectChanges();
+    expect(el.querySelector('.page-bar-hint-body')).toBeNull();
+  });
+
   it('projects filters and actions into their own slots', () => {
     const el = render((host) => {
       host.withFilters.set(true);

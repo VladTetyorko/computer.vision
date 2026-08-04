@@ -168,7 +168,7 @@ Real identity, still no visibility scoping (the plan's own framing: "identity be
   - **`logout()`** — the one method on this store that navigates itself, unlike `FleetStore`'s "leave it to the caller" convention (see that class's own doc comment) — logout has exactly one sane destination and no caller-specific follow-up, so there's nothing a page-level caller could usefully decide instead. Clears local state and routes to `/login` when `authEnabled`, `/fly` when not (dev parity) — even if the `POST /api/auth/logout` call itself fails (best-effort; there's no server-side state left to reconcile against either way).
 - **`core/auth/auth-guard.ts`** — `authGuard: CanActivateFn`, wired into `app.routes.ts`'s one path-less, component-less parent route wrapping every feature route array except `/login` (an empty path segment contributes nothing to a child's own path, so no route URL changed and no per-feature `.routes.ts` file needed touching). Awaits `AuthStore.ready` first, then delegates the entire decision to `needsLogin` — redirects to `/login?returnUrl=<attempted URL>` when it says so, else allows. No dedicated spec (this codebase's own "component specs only as far as existing precedent goes" rule — the guard is thin wiring over an already fully-covered pure function; there is no prior route-guard spec in this app to mirror either).
 - **`features/auth/login/`** — `LoginPage` (`<vision-login>`, route `/login`, own lazy chunk, `login.routes.ts`/`LOGIN_ROUTES`) — username/password via `FormsModule`'s `[ngModel]`/`(ngModelChange)` (this app's existing form idiom, e.g. `features/onboarding/onboarding.html`), inline error (`loginError()`), busy-disables-submit (`loginBusy()`), `returnUrl` bound from the guard's own `?returnUrl=` query param (defaults `/fly`). **Responsive from the start**: a single centered `.card` at every width (`login.css`, `width: min(24rem, 100%)`), `min-height: 44px` on both fields and the submit button — no layout branch between phone and desktop, only the card's own clamped width changes. Dumb by convention: every real decision lives in `AuthStore.login()`.
-- **`shared/ui/identity-chip.ts`/`.html`/`.css`** — `<vision-identity-chip>`, mounted once in `app.html`'s header, left of the notification bell. Injects `AuthStore` directly (root-provided, one session app-wide — no inputs, mirrors `app.ts` injecting `FleetStore` directly). Renders **nothing** while `user()` is `null` (`'loading'`, or a still-anonymous session about to be redirected) — no placeholder swapped out afterward, same "hide entirely, never a stale fake" rule `shared/ui/weather-chip.ts` already follows. **Shown even with auth disabled** (dev parity — the plan's own explicit call: "show the dev admin's name too, so the surface is consistent"); the one thing suppressed in that mode is the **Log out** button itself (`@if (auth.authEnabled())`), logging out of a session that was never real having nothing to do. A single native `<details>` popover (mirrors `app.css`'s `.tab-more`/`notification-bell.ts`'s `.bell` — this app's one disclosure idiom, not a new dropdown component): the trigger shows avatar + name + a role-badge `.chip.accent` at normal widths; one `@media (max-width: 640px)` rule (the same breakpoint `app.css` already uses) hides just the name/role text in the trigger, leaving the avatar alone as the compact tap target — the dropdown menu itself is untouched by that breakpoint, so opening it on a narrow viewport still surfaces name/role/logout, nothing lost, only relocated behind one tap.
+- **`shared/ui/identity-chip.ts`/`.html`/`.css`** — `<vision-identity-chip>`, mounted once in `app.html`'s header, left of the notification bell. Injects `AuthStore` directly (root-provided, one session app-wide — no inputs, mirrors `app.ts` injecting `FleetStore` directly). Renders **nothing** while `user()` is `null` (`'loading'`, or a still-anonymous session about to be redirected) — no placeholder swapped out afterward, same "hide entirely, never a stale fake" rule `shared/ui/weather-chip.ts` already follows. **Shown even with auth disabled** (dev parity — the plan's own explicit call: "show the dev admin's name too, so the surface is consistent"); the one thing suppressed in that mode is the **Log out** button itself (`@if (auth.authEnabled())`), logging out of a session that was never real having nothing to do. **A plain `<button>` + `@if`-rendered popover, not a native `<details>`** (docs/UI-STATE-PLAN.md — see the dated "Global overlay lifecycle" Status entry near the end of this file): the trigger shows avatar + name + a role-badge `.chip.accent` at normal widths; one `@media (max-width: 640px)` rule (the same breakpoint `app.css` already uses) hides just the name/role text in the trigger, leaving the avatar alone as the compact tap target — the dropdown menu itself is untouched by that breakpoint, so opening it on a narrow viewport still surfaces name/role/logout, nothing lost, only relocated behind one tap. Open state is `core/ui/overlay-store.ts#GlobalOverlayStore`'s `'identity-menu'` id, not a component-local flag.
 - **`app.routes.ts`** — `LOGIN_ROUTES` spread at the top level (outside the guard); every other feature route array now lives inside one `{path: '', canActivate: [authGuard], children: [...]}` wrapper. **`app.ts`/`app.html`** — `IdentityChip` added to `App`'s `imports`, `<vision-identity-chip />` in the header's `.status` row.
 - **No visibility filtering** — every logged-in user still sees the whole fleet; `memberships`/`topRole` back the identity chip's role badge only, in this slice (docs/U-AUTH-PLAN.md's own explicit deferral to slice 2 — see `MeResponse`'s own doc comment in `models.ts`).
 
@@ -434,6 +434,18 @@ Deliberately outside the "no component calls `fetch` directly" rule: this page's
 - `debug-history.ts` — pure: `pushHistoryEntry(history, entry, limit = 20)`, newest-first, capped, non-mutating. Backs the last-~20-requests log; clicking a row re-fills the form (`DebugPage.replay()`) but does not re-send.
 - `debug.ts`/`.html`/`.css` — `DebugPage`, three cards: the console above; Health (`GET /actuator/health` parsed for `status`/`components[].status`, up/down chips, raw JSON in a `<details>`); Last scan (`POST /api/discovery/scan` with `{}`, raw `ScanResultResponse` including `failedMethods`). All three reuse `DebugApiService.send()`.
 
+### `src/app/features/demo/**` — the green "Fill demo data" button (backend: `vision-api`'s `com.drones.vision.api.demo`)
+
+A self-contained, removable extra: one click fills an empty platform with 10 simulated assets (video
+from the backend host's `$HOME/Videos`), 10 users, pilot assignments, 2 geofence zones and 5 marks.
+Two new files plus **two lines** in `app-sidebar.html`/`.ts` — nothing else in this module is touched,
+so deleting the feature is `rm -r features/demo` plus reverting those two lines.
+
+- `demo-api.ts` — `DemoApi` (`providedIn: 'root'`), `status()` → `GET /api/demo`, `seed()` → `POST /api/demo/seed` (empty body = the backend's default plan). **Deliberately not folded into `core/api/vision-api.ts`**, and the second documented exception to "only `core/api/` touches `HttpClient`" (after `features/debug/debug-api.service.ts`): these two routes are absent from any deployment with `vision.demo.enabled=false`, so they don't belong on the app's one real API surface.
+- `demo-button/demo-button.ts`/`.html`/`.css` — `<vision-demo-button>`, mounted at the top of `<vision-app-sidebar>`'s foot. **Renders nothing unless the backend answers the probe** (a 404 → permanently hidden for the session), the same "hide entirely rather than show a dead control" rule `identity-chip` follows. Disables itself and swaps its label to `Filling…` while the request is in flight (seeding opens real video streams, so a press is genuinely slow). Reports through `ToastService`: an `ok` toast with the counts plus a **Reload** action (fleet/marks arrive over SSE on their own, but geofences and the roster have no live topic), and — since seeding is fault-tolerant, not atomic — a separate `warn` toast when the response carries `problems`.
+- **No facade/store**: `core/ui/architecture.spec.ts`'s Component→Facade→Store→Service rule is scoped to *routed* pages; this is a non-routed shell affordance with one action and one boolean, the same carve-out `shared/ui/return-home-button.ts` sits in.
+- **Green by composition, not by a new token**: `--color-success` fill with `--green-900` ink, since the frozen palette has no `--color-on-success` and adding one was out of scope. Collapsed rail → icon only, via a `:host-context(.sidebar.collapsed)` rule inside the same `min-width: 641px` guard `app-sidebar.css` uses, so the mobile sheet always keeps the label.
+
 ### `src/app/shared/ui/` — icon system + hub/drawer primitives, `src/app/core/panel-state.ts` (`PanelState`) — Wave-0 shared foundation (docs/UI-REDESIGN-PLAN.md Wave 0)
 
 Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, `src/app/shared/ui/**`, `src/app/core/panel-state.ts` — no existing page/component wired onto any of it; Waves 1-4 are the real consumers). Full writeup — design/dataviz choices, the `PanelState` DI deviation, degrade/role-gate/dev-parity notes, tests, build — is in the dated Status entry near the bottom of this file; this section is the permanent reference.
@@ -455,10 +467,11 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
   - **R5 (the SITL relay — "Take control").** `manual-control-logic.ts` (pure, unit-tested, mirrors `rc-input-logic.ts`'s split): client→server frame builders (`buildEngageFrame`/`buildChannelsFrame`/`buildReleaseFrame`), a defensive `parseManualControlServerMessage(raw)` (any malformed/missing field → `undefined`, never a crash — mirrors `geofence-logic.ts#parseGeofenceBreach`'s own rule; **`denied.code` is deliberately NOT validated against the four frozen refusal codes** — the backend also sends a handler-defensive code, see Gotchas), `computeLatencyMs(tSent, nowMs)` (glass-to-stick RTT = `nowMs - tSent`, **not** `tServer - tSent`), `pushLatencySample`/`rollingAverageMs` (a 10-sample rolling window, `undefined` until the first `ack`), `sendIntervalMs(rateHz)` (clamped 10..50Hz, mirrors the adapter's own `VISION_RC_OVERRIDE_HZ` clamp). `manual-control-client.ts` — `ManualControlClient`, **provided per host** alongside `RcInputService` (injects it directly, DI-sharing the host's instance): opens one `WebSocket('/ws/manual-control')` per `engage(assetId)` call (same-origin, session-cookie auth, mirrors `core/live/live-store.ts`'s `EventSource`), sends `engage` on open, and once the server's own `engaged` frame confirms, streams `channels` frames (`RcInputService.axes()`/`buttons()`, an incrementing `seq`, `tSent=Date.now()`) via `setInterval` at the server-confirmed `rateHz`. Signals: `state` (`'idle'|'engaging'|'engaged'|'denied'|'released'`), `deniedReason`, `latencyMs` (rolling from `ack`), `channelMap`, `rateHz`, `watchdogTripped`. **One socket per session, deliberately** — every release path (explicit, deadman, `denied`, `released`, `watchdog`) closes the socket rather than reusing it for a later `engage`, even though §4 technically allows connection reuse; a documented v1 simplification (this class's own doc comment), not a protocol requirement. **The deadman — `release()` is idempotent, every trigger just calls it**: the explicit RELEASE control, this class's own `DestroyRef.onDestroy` (the RC panel closing — `rc-monitor.ts` only mounts this provider while `isPanelOpen('rc')`), a `visibilitychange` listener (tab hiding), a constructor `effect()` over `RcInputService.connected()` (gamepad disconnecting), and the raw `WebSocket`'s own `onclose`/`onerror` (any drop). A `watchdog`/`released` server frame mirrors the same teardown client-side. No optimistic UI in the *positive* direction (`state` only reads `'engaged'` after the server's own frame); the *negative* direction sets `'released'` synchronously with this class giving up on the connection, regardless of whether the server's own `released` frame ever arrives.
   - Consumed by `features/fly/rc-monitor.ts` (`<vision-rc-monitor>`), the cockpit's `rc` tool-rail drawer: the Phase-0 monitor (always available, not capability-gated) is unchanged; R5 adds a **Take control** section below it (`rc-monitor.html`/`.css`, `rc-monitor-logic.ts` — `engageDisabledReason`/`latencyLabel`/`channelBindingLabel`), gated on `assetId`/`assetDisplayName`/`canCommand` inputs (`fly.html` wires `[canCommand]="facade.canShowCommands()"`, the same gate `flight-command-panel` uses — see that section's own note on why this is a front-line UX gate, not the actual server-side capability check). A disabled Take-control button always shows its poka-yoke reason inline (`.disabled-reason`); the engaged state shows a live rateHz/latency chip pair, the channel map, and a big `.btn.danger` **RELEASE** (text-labeled, never icon-only); `denied` shows the server's own human `reason`; `released` distinguishes a watchdog trip (`vision-notice variant="warn"`, "input stalled") from an explicit release. Mounted only while the drawer is open (`@if (isPanelOpen('rc'))`), so both the Gamepad rAF loop and any live relay session end the instant it closes. WebHID/raw-report fidelity, the real `RC_CHANNELS_OVERRIDE` MAVLink send, and Phase 2 (a real airframe) are out of this module's scope — see `adapters/adapter-mavlink/MODULE.md`/`vision-application/MODULE.md`/`vision-api/MODULE.md` for R1-R4.
 - **`core/ui/ui-store.ts#UiStore`** (docs/UI-ARCHITECTURE-PLAN.md) — the canonical mutually-exclusive-overlay coordinator, generalizing `PanelState` (below) to *every* overlay group, not just drawers: within one instance, opening any overlay closes the others (`active`/`isOpen`/`open`/`close(id?)`/`toggle`; optional `storageKey` for persistent groups, omit for transient confirms/editors). Scoped per group — a feature provides one per independent overlay set (a persisted tool-rail group + a transient dialog group). This is what makes overlay state consistent *by construction*. Consumers so far: `flight-command-panel` (3 confirms), `fly` (tool-rail + stop-confirm), `command` (zones), `asset-detail` (4 editors). **API-compatible with `PanelState`** — `PanelState` is the predecessor and is being retired in favour of `UiStore` as each host migrates.
+- **`core/ui/overlay-store.ts#GlobalOverlayStore`** (`providedIn: 'root'`, docs/UI-STATE-PLAN.md) — the shell's own coordinator, one layer above `UiStore`: composes a single transient (no `storageKey`) `UiStore` instance for the three overlays that live in the always-mounted shell rather than a routed page — `type GlobalOverlayId = 'identity-menu' | 'notification-bell' | 'sidebar-mobile'` — and adds the three lifecycle rules a page gets for free (its own component/`UiStore` is destroyed on navigation) but the shell never does: closes everything on every `Router` `NavigationEnd`, on `Escape` (returning focus to the closed overlay's own registered trigger), and on a click outside the open overlay's registered root — one `document` `keydown`/`click` listener pair total, owned here, cleaned up via `DestroyRef`. `register(id, root, trigger)` is how a consumer (`identity-chip.ts`, `notification-bell.ts`, `app-sidebar.ts`'s mobile-sheet hamburger) associates its own DOM, called from an `effect()` over a `viewChild` rather than `afterNextRender()` since none of the three triggers are guaranteed to exist on the very first render. Fixes docs/UI-STATE-PLAN.md §1's reproduced D1–D5 (two `<details>`-based overlays open at once, surviving navigation) — see the dated "Global overlay lifecycle" Status entry near the end of this file for the full writeup.
 - **`core/panel-state.ts` additions**: `readPersistedString(key, fallback: string|null): string|null` / `writePersistedString(key, value: string|null)` — the string-valued sibling of the pre-existing `readPersistedFlag`/`writePersistedFlag` (untouched, same file); writing `null` removes the key outright rather than persisting the literal text `"null"`. **`PanelState`** — one-open-at-a-time drawer manager: `active: Signal<string|null>`, `isOpen(id)`, `open(id)` (closes any other), `close()`, `toggle(id)`; an optional constructor `storageKey` round-trips `active` through the two functions above. **Deliberately a plain class, not `@Injectable()`** — see the Status entry for why the frozen "constructed with an optional storageKey" contract doesn't fit Angular constructor-DI cleanly; a host owns one instance directly (`new PanelState('vision.fly.activePanel')`), which is "provided per host" in the sense that matters and fully unit-testable with no `TestBed`. Not consumed by any page yet — Wave 2 (Fly's tool-rail) and Wave 3 (asset-detail's drill-ins) are the intended first hosts.
 - **`core/shell/sidebar-store.ts#SidebarStore`** + **`shared/ui/app-sidebar/**`** (docs/NAV-IA-REDESIGN-PLAN.md Wave 1a) — the persistent left sidebar that replaced the old sticky top header (three mode `<details>` dropdowns) **and**, together with the sibling Wave 1b task, the three `/operate`/`/monitor`/`/manage` hub launcher pages. Full writeup — the F1/F2/F3/F10/F11 findings this closes, the `effectiveCollapsed = collapsed() || fullBleed()` auto-collapse formula and the toggle-button/keyboard-shortcut guard that keeps it from leaking a corrupted preference onto other pages, three real production bugs found and fixed via live browser measurement (not just reasoning), design/dataviz notes, tests, build — is in the dated "Wave 1a" Status entry near the bottom of this file; this bullet is the permanent reference.
   - **`SidebarStore`** (`providedIn: 'root'`, one shared instance — unlike `UiStore`/`WeatherStore`'s "provided per host"): three independent `localStorage`-backed booleans — `collapsed` (the user's own expanded/rail preference, `vision.sidebar.collapsed`), `advancedOpen`/`upcomingOpen` (the two collapsed-by-default disclosures inside each mode's entry list, one flag each shared across all three modes, `vision.sidebar.advancedOpen`/`vision.sidebar.upcomingOpen`) — `toggle()`/`setCollapsed()`, `toggleAdvanced()`/`setAdvancedOpen()`, `toggleUpcoming()`/`setUpcomingOpen()`.
-  - **`<vision-app-sidebar>`** — renders `NAV_MODES` (`features/hubs/nav-entries.ts`) as the app's **only** navigation surface: a non-interactive uppercase group label per mode (never a link — the specific mechanism that lets the hub pages be deleted), `nav-entries.ts#navTiers`'s `primary` rows always visible, `advanced`/`upcoming` folded under collapsed `<details>` disclosures backed by `SidebarStore`. `managerOnly` filtered exactly once, here (closes F10). Active row: `routerLinkActive` → 2px accent left bar + raised background + `aria-current="page"`. Foot (pinned): `<vision-identity-chip>`/`<vision-notification-bell>` + the live-stream-count/online status chips, moved verbatim in behaviour from the old header's `.status` block — their own dropdowns are repositioned to open rightward via a scoped `::ng-deep` override (`app-sidebar.css`), since `right: 0` was written for a right-aligned header trigger and would otherwise open mostly off the left edge of the viewport from a left-docked sidebar. 240px expanded / 56px collapsed (`--sidebar-w`/`--sidebar-w-rail`, `styles.css`); ≥1024px docked (a **new**, distinct `--sidebar-bp` token — deliberately not reusing the pre-existing `--bp-md`/900px, which already backs ~10 other files' own breakpoints), 641–1024px forced to the rail regardless of `collapsed`, ≤640px an off-canvas sheet behind its own hamburger+scrim (no page bar exists yet for the hamburger to live in — Wave 2 adds one).
+  - **`<vision-app-sidebar>`** — renders `NAV_MODES` (`features/hubs/nav-entries.ts`) as the app's **only** navigation surface: a non-interactive uppercase group label per mode (never a link — the specific mechanism that lets the hub pages be deleted), `nav-entries.ts#navTiers`'s `primary` rows always visible, `advanced`/`upcoming` folded under collapsed `<details>` disclosures backed by `SidebarStore`. `managerOnly` filtered exactly once, here (closes F10). Active row: `routerLinkActive` → 2px accent left bar + raised background + `aria-current="page"`. Foot (pinned): `<vision-identity-chip>`/`<vision-notification-bell>` + the live-stream-count/online status chips, moved verbatim in behaviour from the old header's `.status` block — their own dropdowns are repositioned to open rightward via a scoped `::ng-deep` override (`app-sidebar.css`), since `right: 0` was written for a right-aligned header trigger and would otherwise open mostly off the left edge of the viewport from a left-docked sidebar. 240px expanded / 56px collapsed (`--sidebar-w`/`--sidebar-w-rail`, `styles.css`); ≥1024px docked (a **new**, distinct `--sidebar-bp` token — deliberately not reusing the pre-existing `--bp-md`/900px, which already backs ~10 other files' own breakpoints), 641–1024px forced to the rail regardless of `collapsed`, ≤640px an off-canvas sheet behind its own hamburger+scrim (no page bar exists yet for the hamburger to live in — Wave 2 adds one). **The mobile sheet's open state is `GlobalOverlayStore`'s `'sidebar-mobile'` id** (docs/UI-STATE-PLAN.md, not a component-local `signal`) — opening it closes an open identity menu/notification bell and vice versa, and it now shares their `Escape`/outside-click/close-on-navigation behavior.
   - **`app.ts`/`app.html`/`app.css`** — the shell: `:host { display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr; height: 100dvh }`, sidebar + a plain-block `<main>` (`height: 100dvh; overflow-y: auto` — **not** a nested grid, see the Status entry's Bug 3 for why that was tried and reverted). Sidebar hidden entirely while unauthenticated (`@if (auth.user())`, mirroring `identity-chip.ts`'s own "renders nothing while `user()` is null" rule). `App#fullBleed` (a `toSignal` over `router.events`, walking the activated-route tree for `data.fullBleed`) feeds `AppSidebar`'s `fullBleed` input, driving the F11 auto-collapse on `/fly`/`/wall`/`/command`. Global `[` shortcut (ignored in an input/textarea/select/contenteditable) and the sidebar's own head chevron both gate on `fullBleed()` before calling `SidebarStore.toggle()` — without that gate, a click/keypress on a full-bleed route silently flips the *persisted* preference with zero visible effect on that route (since the OR formula already forces collapse there), only to surface as "the sidebar is mysteriously collapsed" on the next normal page.
   - **`--header-height` is deleted** (`styles.css`) — there is no more header; its four call sites (`shared/ui/side-panel.css`, `features/auth/login/login.css`, `features/command/command.css`, `features/fly/fly.css`) were fixed to `top: 0`/`min-height: 100dvh`/`height: 100dvh` respectively (the latter two viewport units, not `height: 100%` — see the Status entry's Bug 3 for why a percentage doesn't reliably resolve through this shell's ancestor chain). `.page` (`styles.css`) lost its own `max-width: 1400px` and is fluid by design (docs/NAV-IA-REDESIGN-PLAN.md §2.3); `.page--form { max-width: 880px; margin-inline: auto }` is the new opt-in for a page that still wants a centered column (not consumed by any page yet).
 
@@ -513,6 +526,22 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **`shared/ui/events-rail.css`'s `.event-meta`/`.event-time` flex row let a long, unbreakable device/asset name (e.g. `X2Twitter.com_hzTcxvzE2-narxmk_720p`, a real simulated-source filename) overflow past its own box and visually overlap `.event-time`/`.event-affordance` at Wall's 300px sidebar (`wall.css`).** Root cause: neither the name nor its containing elements had `min-width: 0` (a flex item's default `min-width: auto` is its content's own minimum size — for an unbreakable token, that's its full rendered width) or any `overflow`/`text-overflow` handling, so the text simply rendered past its box rather than shrinking or wrapping. **Fixed**: the row is now two lines — an unshrinkable top line (state chip, label, time, action; all `flex: none` except `.event-label`, which truncates with ellipsis rather than overflowing if a long relative-time string squeezes it) and a full-width `.event-meta` line below for the source name + confidence, so the name gets the *entire* row's width to truncate against instead of whatever `.event-row-top` has left over (confirmed live: at Wall's 300px sidebar the name previously had ~5px available — invisible — vs. ~225px now, comfortably legible before needing to ellipsize). `.event-source` truncates with `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` and carries the full name in a `title` attribute; `.event-confidence` stays `flex: none` so the `%` is never the part that gives way. Verified via CDP screenshots at both Wall's 300px sidebar (name truncates, e.g. `X2Twitter.com_hzTcxvzE2-narxmk…`) and Command's full-width embed (name renders in full) — no overlap at either.
 - **Pre-existing, out-of-scope: `shared/map/fleet-map.ts`'s own layer switcher (`.controls.layers`, `top:0.5rem;left:0.5rem`) overlaps Leaflet's own default zoom control (also `topleft` — `L.map(...)` is constructed with no `zoomControl: false` option, `fleet-map.ts`'s own `initMap()`), confirmed live via a docs/UX-REWORK-PLAN.md §U-c verification screenshot of the new full-bleed Command map** (the "Standard" layer button's own left portion renders behind the zoom control's opaque `+`/`−` box). **Confirmed pre-existing, not a regression from this cycle**: `git diff` against `shared/map/**` for this task is empty — this component was read, not modified (out of this task's own file scope: "don't rework fleet-map/live-map themselves") — so this exact collision already existed on the old `/map` page and the old Command dashboard's own embedded map section, unchanged by anything here. Flagged for whoever next touches `shared/map/fleet-map.ts`: either add `zoomControl: false` and a custom-positioned zoom control that respects `.controls.layers`' own corner, or move one of the two controls to a different corner (`L.control.zoom({position: 'topright'})` collides with the Recenter control's own `top:0.5rem;right:0.5rem` instead — whichever corner is chosen needs auditing against *all three* corner occupants, not just two).
 - **Doc-comment staleness flagged by an earlier cycle — fixed by the infra+cleanup batch, 2026-07-24.** `shared/map/live-dock.ts` (the file whose own doc comment carried the worst of this staleness — "each host page (`MapPage`, and now `CommandPage`, …) guarantees at most one is ever rendered") is now **deleted outright** (see the `/map` fleet overview section above), so that particular comment is simply gone rather than fixed in place. `shared/map/fleet-map.ts`'s own doc comment ("`MapPage` resolves a clicked marker's `watch` output…", "activated/released here — `MapPage` owns that lifecycle") and `core/map/map-store.ts`'s own doc comment (naming `MapPage` as a co-consumer) were rewritten to name `CommandPage` as the sole current host and, for the events lifecycle, `shared/ui/notification-bell.ts` as the actual owner. `core/events/events-store.ts`'s own doc comment — the most substantively stale of the four, since it described "O(visible) discipline" as this store's defining trait when `shared/ui/notification-bell.ts`'s permanent `activate()` had already superseded it — was rewritten to describe the current always-on-in-practice reality directly (see the Detection events section's own "Update, docs/UX-REWORK-PLAN.md §U-c" paragraph above). Left here as a worked example of the failure mode, not because it recurs: a doc comment describing *why* a design choice was made ages fine; a doc comment asserting *who else does this today* silently rots the moment that "who" changes, with no compiler to catch it.
+
+## Status — demo data button — 2026-08-04
+
+**Done.** `features/demo/` (`demo-api.ts`, `demo-button/` as a 3-file component + spec) plus two lines
+in `app-sidebar.html`/`.ts` (`<vision-demo-button />` in the foot, one import). Backed by
+`vision-api`'s new, property-gated `com.drones.vision.api.demo` package — see that MODULE.md for the
+seeding rules; the constraint the whole feature was built under is that it *uses* existing services
+and changes none of them.
+
+Verified: 5 component specs (renders on probe / hides on 404 / disables while seeding + `ok` toast /
+`warn` toast on partial failure / `error` toast on failure), the full `ng test` suite (107 files,
+1745 tests) green, and a production `ng build` clean. Pressed live against a running backend: 10
+assets / 10 users / 14 assignments / 2 zones / 5 marks / 3 streams on the air, `problems: []`; a
+second press extends the fleet to `Demo 11…` and skips the zones/marks it already created. The
+button itself was **not** verified in a real browser — the Chrome extension was unavailable this
+session — so its rendered look is covered by unit tests and the AOT build only.
 
 ## Status — Fly cockpit tool-rail grouping, F4 (docs/UX-SIMPLIFY-REVIEW.md) — 2026-08-01
 
@@ -6515,3 +6544,307 @@ Untouched (per the task's own file scope): every other `features/fly/**` file (`
 for either task, so the mandatory three-file-component rule's own "if you touch one, split it" clause
 never triggered for the four inline-template components named in the task brief), `features/hubs/nav-entries.ts`,
 `app.*`, `styles.css`, every other `features/**` path.
+
+## Status — global overlay lifecycle: identity menu + notification bell + mobile sheet off `<details>` (docs/UI-STATE-PLAN.md) — 2026-08-04
+
+Reproduced live before this task (§1): open the notification bell, then the identity menu — both
+stayed open at once (D1); select an asset — both still open over the side panel (D3); navigate
+`/assets` → `/devices` — **both still open** on the new page (D2). Root cause (D4/D5): both were native
+`<details>` (state lives in the DOM, invisible to any store) mounted in the always-on shell
+(`app-sidebar.html`'s foot), which never unmounts, so "the page component is destroyed on navigation" —
+this app's only other cleanup mechanism — never applied to exactly the two overlays that leaked.
+
+**New `core/ui/overlay-store.ts#GlobalOverlayStore`** (`providedIn: 'root'`) — composes a single
+transient `UiStore` (no `storageKey`; a global overlay must never survive a reload) for
+`type GlobalOverlayId = 'identity-menu' | 'notification-bell' | 'sidebar-mobile'`, plus the three
+lifecycle rules the shell needs and no routed page does, all owned by the store itself rather than
+`app.ts`: closes everything on every `Router` `NavigationEnd`; closes on `Escape`, returning focus to
+the closed overlay's own registered trigger; closes on a click outside the open overlay's registered
+root. One `document` `keydown`/`click` listener pair total (not one pair per component), cleaned up via
+`DestroyRef`. `register(id, root, trigger)` lets a consumer associate its own DOM once its trigger
+exists; **outside-click never fights the trigger** because `root` (registered as the whole component's
+own host element) already contains the trigger button — a click on it is "inside" and left entirely to
+the trigger's own `(click)` handler, and by DOM bubble order that handler always runs before the
+`document`-level listener sees the same click, so a click that just closed the dropdown is never
+re-examined and closed a second time. Full mechanism + why it's correct (not just asserted) is in the
+class's own doc comment; `core/ui/overlay-store.spec.ts` (18 tests) proves exclusivity,
+close-on-navigation, Escape + focus-return, outside-click (including the "closes once, not
+close-then-reopen" ordering claim, traced through a real dispatched event with a listener on the
+trigger itself, not assumed), the stale-`close(id)`-is-a-no-op semantic inherited from `UiStore`, and
+`register()`'s re-registration safety for a trigger that gets swapped out and recreated (the mobile
+sheet's own hamburger/scrim toggle).
+
+**`identity-chip.*`/`notification-bell.*` converted off `<details>`** — same markup/styling/dropdown
+positioning, only the open-state mechanism changed: the `<summary>` trigger is now a `<button
+aria-haspopup aria-expanded>`, the dropdown is `@if (overlays.isOpen(id))` instead of DOM-always-present-
+but-visually-collapsed. Both register their own host (`ElementRef.nativeElement`) + trigger
+(`viewChild`) via a constructor `effect()`, not `afterNextRender()`, since neither trigger is guaranteed
+to exist on the very first render (`identity-chip` sits behind `@if (auth.user())`). `notification-bell`'s
+trigger click (`toggleBell()`) still marks every currently-listed event read on **opening** only —
+computed from the pre-toggle state, so a toggle that closes it (including an exclusivity-driven close
+from the identity menu opening) never re-marks anything.
+
+**The sidebar's mobile sheet joins the same store** (`AppSidebar`'s `mobileOpen` is now
+`computed(() => overlays.isOpen('sidebar-mobile'))`, not a local `signal(false)`) — opening it closes an
+open identity menu/bell and vice versa, and it inherits Escape/outside-click for free. The local
+`(keydown.escape)="closeMobile()"` binding the `<aside>` root used to carry is removed — redundant with,
+and in one respect strictly worse than, the store's own single listener (a local binding only catches
+Escape while focus is *inside* `.sidebar`; the store's `document`-level listener catches it anywhere,
+and — since it would otherwise fire first and close the overlay before the store's own handler runs —
+was also quietly defeating this task's own Escape-returns-focus rule for exactly this one overlay).
+**Left alone, per §2.3/§4**: the sidebar's `Advanced`/`Upcoming` `<details>` disclosures (inline, push
+content, genuinely local/harmless state) and everything under `features/**`.
+
+### Tests
+
+`npx ng test --watch=false`: **108 spec files / 1761 tests, green** (task brief's stated baseline: 103
+files / 1711 — the gap is concurrent sibling work in the same run: a new `core/ui/overlay-consistency.spec.ts`
+guardrail plus `return-home-button.spec.ts`/`page-bar.spec.ts` changes from a sibling task sharing this
+same plan, not part of this task's own file scope). This task's own new/changed specs: `overlay-store.spec.ts`
+(new, 18 tests), `notification-bell.spec.ts` (new, 9 tests — no prior spec existed for this component),
+`identity-chip.spec.ts` (+7 tests: overlay open/close/aria-expanded/aria-haspopup, closing on an inside
+click, exclusivity with the bell, Escape; 2 pre-existing tests updated to open the menu via a real click
+first, since the dropdown is no longer DOM-present-but-hidden while closed), `app-sidebar.spec.ts` (+1
+cross-component exclusivity test: opening the identity menu from inside the rendered sidebar closes an
+open mobile sheet, and vice versa).
+
+### Build
+
+`npx tsc --noEmit` clean on both `tsconfig.app.json`/`tsconfig.spec.json`. `ng build --configuration
+production` succeeds. Bundle delta measured **in isolation** (docs/UI-STATE-PLAN.md's own multi-agent
+working tree meant the live working copy had concurrent sibling changes — page-bar Escape/outside-click,
+`return-home-button` changes, a new `demo-button` feature — mixed in; a `git worktree` checked out at
+this session's starting `HEAD`, with **only this task's own diffs** manually re-applied on top (its two
+files shared with a sibling task, `app-sidebar.html`/`app-sidebar.ts`, had the sibling's own
+`<vision-demo-button>` addition surgically excluded), isolates the true delta rather than conflating it
+with concurrent work): **382.53 kB → 385.57 kB raw (+3.04 kB, +0.8%), 107.76 kB → 108.77 kB transfer
+(+1.01 kB, +0.9%)** — the cost of one new small root-provided store (`overlay-store.ts`, no new runtime
+deps beyond `Router`/`rxjs`, both already eagerly bundled) plus a handful of `aria-*` bindings; removing
+the `<details>`/`<summary>` markup roughly offsets the `<button>` conversion's own added attributes.
+
+### Verified live (`ng serve` on `:4200`, backend `:8080`, ADMIN session, own tab per the task's
+isolation instruction — a sibling agent was driving another)
+
+Re-ran §1's exact reproduction and measured DOM state directly (`.getAttribute('aria-expanded')`,
+element presence via `querySelector`, `document.activeElement`), not a screenshot impression:
+
+- **D1 (two overlays at once)** — opened the bell (`aria-expanded` "false"→"true", `.bell-dropdown`
+  present), then clicked the identity trigger: identity's `aria-expanded` "false"→"true" **and** the
+  bell's own `aria-expanded` "true"→"false" in the same click, `.bell-dropdown` removed from the DOM.
+  Two open at once is now unrepresentable, not just untested.
+- **D2 (survives navigation)** — opened the identity menu on `/assets`, navigated to `/devices` via a
+  sidebar nav-row click: `aria-expanded` read "false" and `.identity-menu`/`.bell-dropdown` were both
+  absent immediately on the new page, no stale frame.
+- **D3 (coexists with a page overlay)** — opened the two-pane detail panel on `/assets`, then the bell:
+  both rendered without fighting each other's `z-index`/positioning (the bell is a shell overlay, the
+  detail panel a page overlay — different, unrelated `UiStore`-family instances by design, §2.1), and
+  closing the bell (Escape) left the detail panel untouched.
+- **Escape** — with the bell open, `Escape` closed it (`aria-expanded` → "false") and moved
+  `document.activeElement` back to `.bell-trigger`, confirmed via direct comparison, not inference.
+- **Outside click** — with the identity menu open, a click on the sidebar's own body (outside
+  `.identity-chip`) closed it; a click on the trigger itself while open closed it exactly once (no
+  flicker-reopen), matching `overlay-store.spec.ts`'s own traced-event-ordering test.
+- **Advanced/Upcoming disclosures unaffected** — toggled the Manage group's `Advanced` `<details>` open,
+  then opened/closed the bell and navigated between pages: the disclosure's own `open` state (a
+  `SidebarStore`-persisted preference, unrelated to this task) was never touched by any of the above.
+- Console clean throughout (`read_console_messages`, no errors at any step).
+
+### Dev parity
+
+`vision.auth.enabled=false`: unaffected — `GlobalOverlayStore` reads only `Router`/`document`/DOM state
+registered by its consumers, never `AuthStore`. The dev ADMIN principal sees the identity
+menu/notification bell exactly as a real ADMIN session would; nothing in this task branches on
+`authEnabled`.
+
+### Degrade behavior
+
+Every one of the three overlays degrades the same way a `UiStore`-backed page overlay already does: a
+component that hasn't called `register()` yet (a fraction of a frame, before its first `effect()` run)
+simply has no entry in the store's host map, so an outside click closes it unconditionally (fails safe,
+never fails open — see `overlay-store.spec.ts`'s explicit test for this) and Escape's own focus-return is
+a guarded no-op (`isConnected` check) rather than an exception. No fabricated state, no blocked page —
+the worst case is "closed a beat early," never a hang or a crash.
+
+### Files touched
+
+New: `core/ui/{overlay-store.ts,overlay-store.spec.ts}`, `shared/ui/notification-bell.spec.ts` (no prior
+spec existed for this component). Edited: `shared/ui/identity-chip.{ts,html,css,spec.ts}`,
+`shared/ui/notification-bell.{ts,html,css}`, `shared/ui/app-sidebar/app-sidebar.{ts,html,spec.ts}`, this
+file's auth/`core/ui`+`SidebarStore` reference sections and this Status entry. **Not touched, per the
+task's own file scope** (owned by a concurrent sibling task sharing docs/UI-STATE-PLAN.md): `core/ui/ui-store.ts`,
+`core/ui/architecture.spec.ts`, `core/ui/overlay-consistency.spec.ts` (the plan's own §3 guardrail spec —
+built by the sibling task, not this one; verified it passes trivially for this task's own files, which
+now contain zero `<details>` tags), `shared/ui/page-bar/**`, `shared/ui/return-home-button.*`,
+`app.ts`/`app.html` (the store is self-sufficient once anything injects it — no shell-level mounting/
+wiring was needed), `styles.css`, any `features/**` path.
+
+## Status — page-overlay Escape/outside-click + the app-wide audit + the overlay guardrail (docs/UI-STATE-PLAN.md §2.4/§3) — 2026-08-04
+
+The other half of docs/UI-STATE-PLAN.md, disjoint from the sibling task above (that one built
+`GlobalOverlayStore` + moved the shell's `<details>` off it; this one fixed the two page-scoped
+floating overlays the plan named directly, audited `features/**`+`shared/**` for stuck/stale view
+state, and wrote §3's guardrail spec). `npm run test:ci` **108 files / 1761 tests** (was 103/1711 before
+either task; this task's own share: +3 files — `overlay-consistency.spec.ts`,
+`return-home-button.spec.ts`, plus 3 new cases in the pre-existing `page-bar.spec.ts`); `npx tsc --noEmit`
+clean on both configs; `ng build --configuration production` green, initial bundle unchanged at
+**388.70 kB raw / 109.50→109.52 kB transfer** (+0.02 kB, noise-level), `asset-detail`/`live` lazy chunks
++0.07/+0.08 kB raw each — isolated via a pathspec-limited `git stash` of exactly this task's six touched
+source files (mirrors this file's own `fly`-split Status entry's identical technique for measuring a
+clean delta inside a shared, concurrently-edited working tree).
+
+### Task 1 — `page-bar`'s `?` hint and `return-home-button`'s confirm gain Escape/outside-click
+
+Both stay **page-scoped local state** (`hintOpen`/`confirmOpen` signals), per the task's own explicit
+instruction not to fold them into `GlobalOverlayStore` — only the *behavior* (one `document`-level
+`keydown`/`click` listener pair, "inside" decided by `Node.contains`) is mirrored from that store's own
+idiom, via `@HostListener('document:keydown.escape')`/`@HostListener('document:click', ['$event'])` on
+each component directly (`page-bar.ts#onDocumentKeydown`/`#onDocumentClick`,
+`return-home-button.ts#onDocumentKeydown`/`#onDocumentClick`).
+
+- **`page-bar`**: `hintRoot` (a new `#hintRoot` template ref spanning the trigger *and* the popover
+  body) is the containment boundary. Verified live (own tab, `/manage/categories`, its own real `hint`
+  copy): opened via `.click()`, `aria-expanded`/the body's presence measured via `querySelector` before
+  and after each gesture — `Escape` closes it, a click on `<h2>Categories</h2>` (outside) closes it, a
+  click on the popover body itself does not.
+- **`return-home-button`**: found and fixed a same-tick self-cancel bug *while writing this fix*, not
+  after — the trigger's own opening click bubbles to the same `document` listener within one synchronous
+  dispatch, before change detection has rendered `<vision-confirm-dialog>`, so the very first real click
+  on "Bring home" would open-then-immediately-close the confirm every time (caught by
+  `return-home-button.spec.ts`, which failed 4/5 on first run for exactly this reason — see that file's
+  own "click on the backdrop" test and `onDocumentClick`'s own doc comment for the fix: the trigger
+  element itself now also counts as "inside"). Both handlers no-op while `busy()` — a request already in
+  flight gets the same "can't interrupt" treatment the dialog's own disabled buttons already give it.
+  **Escape/outside-click can only ever cancel, never confirm** — `ConfirmDialog` itself keeps its own
+  documented "no Escape/backdrop dismissal, ever" contract untouched for its four *other* call sites
+  (`flight-command-panel`'s arm/disarm/mode, `asset-detail`'s archive, `labeling`'s discard); this fix is
+  scoped to the one call site the task named, not a silent app-wide policy change — flagged as a
+  **design tension worth a deliberate follow-up decision**, not resolved unilaterally here (see Findings
+  below). Verified live against a real running simulated asset (`/fly/:assetId`, "Bring home"): opening
+  self-cancel bug reproduced *before* the fix (dialog closed itself on the very click that opened it),
+  confirmed absent after; Escape closes + returns focus to the trigger (`document.activeElement`
+  measured, not inferred); a click on the backdrop cancels, a click on the dialog's own message text
+  does not; a real in-flight `POST` (clicked Confirm, then fired Escape + a backdrop click before the
+  response settled) left the dialog open until the request's own `finally` closed it.
+
+### Task 2 — the audit
+
+Read every routed page + facade in `features/**` and the always-mounted-adjacent pieces of `shared/**`
+(kebab-menu, side-panel, two-pane, confirm-dialog) against three questions: does a busy/loading flag
+reset on every failure path (`try`/`finally`, not just the happy path), does page-local overlay/draft
+state reset on same-route entity-changing navigation (Angular reuses the component instance —
+`asset-detail.ts`/`live.ts`/`cockpit.ts` all *already* re-select via a route-input `effect()`, so the
+question is what that effect resets), and can a stale value read as correct in a context it no longer
+applies to. Busy-flag hygiene across every facade/store in the app (~25 checked:
+`asset-detail-facade`, `assets-facade`, `devices-facade`, `roster-facade`, `models-facade`,
+`training-job-facade`, `dataset-detail-facade`, `sample-editor-facade`, `replay-facade`,
+`replay-library-facade`, `reports-facade`, `preflight-facade`, `activity-facade`, `categories-facade`,
+`pilots-card`, `cockpit-facade`, `live-facade`, `auth-store`, `fleet-store`, `org-store`,
+`training-store`, `debug.ts`, `flight-command-panel.ts`, `cv-control-panel.ts`) was **already clean
+everywhere** — every `set(true)` has a matching `finally`; no fix needed there, a genuinely different
+outcome than the task brief's own steer toward expecting one. Two real defects found and fixed instead,
+both in the second category:
+
+1. **`features/live/live-facade.ts#setDeviceId`** (fixed) — did not reset `explicitlyStopped`/
+   `hasBeenLive` (the "deliberately-stopped" pair backing `stopped()`, docs/MVP2-PLAN.md §S) on a device
+   switch, unlike `CockpitFacade.selectAsset`'s already-correct identical reset for the same class of
+   state on its own asset-switch path — this file was the one place the reset had gone missing, found by
+   diffing the two nearly-identical mechanisms against each other. **Repro**: watch device A, click Stop
+   stream, then navigate — in place, same route/component instance, e.g. via the notification bell, a
+   Wall tile, or any "Watch live" link while already on `/live/:deviceId` — to a *different* device B
+   that was never touched and is genuinely live. Before the fix, device B's player showed "Stream
+   stopped" and refused to attach (`shared/player/player.ts`'s own "a deliberately stopped stream must
+   never attach") despite `facade.live()` being `true` and the page's own Stop/Start button correctly
+   reading "Stop stream" — a directly self-contradictory rendered state. Verified live both ways:
+   reproduced with the fix isolated out (`git stash` on this one file, confirmed the contradiction via
+   `querySelector('.stage .muted')` reading "Stream stopped" alongside the Stop-stream button), then
+   confirmed absent with the fix restored, against two real registered+streaming devices created for the
+   test and torn down afterward.
+2. **`features/asset-detail/asset-detail.ts`'s navigation `effect()`** (fixed) — reset `subView`/
+   `panels`/`editors`/`dialogs` on an asset switch (already correct, pre-existing) but not `rowAction`/
+   `renameDraft`/`assignDraft`. The concrete, reproducible half: `assignDraft` (the "Attach a device"
+   picker's own `<select>`) is never blanked by `openAssign()` either, and the assignable-device pool is
+   global, not asset-scoped — pick an unowned device on asset A without confirming, switch to asset B (in
+   place), reopen "Attach a device" there, and the same device reappears silently pre-selected, never
+   chosen by the operator on B. Verified live both ways on two real assets sharing one unowned simulated
+   device: reproduced with the fix stashed out (`select.value` read `"3ff6f5ed…"` on reopen, unchanged
+   from A's own pick), confirmed blank (`""`) with the fix restored.
+
+**Findings reported, not fixed** (structural, or outside this task's file scope — see task brief):
+- `shared/ui/kebab-menu.ts`'s per-row `<details>` overflow menu (30+ call sites) has no outside-click
+  close (native `<details>` doesn't provide one, and this component only self-closes on selecting an
+  entry) — out of `overlay-consistency.spec.ts`'s own scope by design (§2.3's line is "always-mounted
+  shell", and `shared/ui/**` broadly was deliberately *not* the guard's scope — see that spec's own
+  class doc comment) and out of this task's file scope (`shared/ui/`, not `features/**`). Low severity —
+  a stray open kebab is a small, page-destroyed-on-navigation, non-colliding artifact, not a D1-class
+  "two overlays fighting" bug — but worth a coordinated follow-up if it's ever promoted to a proper
+  fix, since 30 call sites means one shared change, not 30.
+- `ConfirmDialog`'s own "no Escape/backdrop, ever" design and this task's `return-home-button`-only
+  exception (Task 1 above) are now genuinely inconsistent across the app's five confirm-dialog call
+  sites — flagged for a deliberate decision (extend to all five, or revert this one) rather than left to
+  drift silently, which is exactly the failure mode docs/UI-STATE-PLAN.md §3 exists to guard against.
+- Every `ConfirmDialog` usage (all five) has no client-side request timeout — if the underlying HTTP
+  call hangs indefinitely, the modal is unclosable by construction (buttons disabled by `busy`,
+  Escape/backdrop deliberately off everywhere except the one exception above). Not this task's fix (no
+  timeout mechanism exists anywhere in this app to extend), but worth naming as the actual edge case the
+  "no Escape" design trades against.
+- `features/onboarding/onboarding-store.ts#flightPlanDialogOpen` is still a plain `signal(false)`. It
+  doesn't misbehave (self-contained within the wizard's own linear flow, no sibling overlay to collide
+  with, no entity-switch path to go stale across) — this is UI-ARCHITECTURE-PLAN.md's own pre-existing
+  W4 backlog item, not a lifecycle bug this audit's own three questions turned up anything new about.
+- No component/facade/store audited holds a `?sel=`-style id against a collection without deriving the
+  selection via `computed()` off the live collection (`AssetsFacade.selectedRow`,
+  `DevicesFacade.selectedRow`, `RosterFacade.selectedAssetRow`/`selectedPilotRow`,
+  `ReplayLibraryFacade.selectedUsage` all do this correctly already) — a deleted/filtered-out row's
+  selection degrades to "not found" for free, on the next poll, with no separate reset code required.
+  Named here because it's the exact shape docs/UI-STATE-PLAN.md's own audit question describes, and it
+  was already right everywhere it's used.
+
+No component-level spec exists for `live-facade.ts`/`asset-detail.ts` (nor for `cockpit-facade.ts`, nor
+any other facade in this app — `find src -iname '*-facade.spec.ts'` returns nothing app-wide) — this
+repo's own established convention is pure-`*-logic.ts` unit tests plus facades verified end-to-end, not
+`TestBed`-mounted facade specs; a two-line signal reset isn't "logic" worth extracting to a pure function
+either, so both fixes are covered by the live-browser before/after reproduction above instead, consistent
+with that convention rather than inventing a new one for two lines.
+
+### Task 3 — `core/ui/overlay-consistency.spec.ts`, the guardrail
+
+Same technique as `core/ui/architecture.spec.ts` (`import.meta.glob(..., '?raw')`, stripped comments, no
+`TestBed`) scanned against a short, explicit, hardcoded file list — `app.ts`/`app.html`,
+`app-sidebar.html`, `identity-chip.html`, `notification-bell.html`, `events-rail.html`,
+`toast-host.ts`/`undo-toast.ts` (the shell's own two inline-`template:` components) — i.e. only what's
+actually reachable from `app.html`'s permanent render tree, deliberately not all of `shared/ui/**` (see
+`kebab-menu.ts` above for why that would over-reach).
+
+**The heuristic**: a `<details>` counts as an allowed, signal-backed disclosure only if its opening tag
+carries an `[open]="…"` Angular binding — exactly what `app-sidebar.html`'s `Advanced`/`Upcoming` already
+do (paired with `(toggle)` to sync it back); a bare `<details>` relying on native click-to-toggle DOM
+state is flagged regardless of anything else about it, matching docs/UI-STATE-PLAN.md §1 D4's own
+diagnosis word for word. Its own doc comment names what it cannot catch, honestly: a hardcoded
+always-`true` binding would pass without being coordinated by anything; it has no CSS/layout information,
+so a `[open]`-bound `<details>` some future stylesheet turns into a floating overlay would still pass; it
+only sees the files in its own hardcoded list, the identical acknowledged limitation
+`architecture.spec.ts#ROUTED_PAGES` already carries — a `resolves exactly N shell files` sanity test
+guards against that list silently going stale. The union-type half of §3 ("any new `GlobalOverlayId` must
+be registered in the union") is deliberately not re-tested here — the plan's own text says it's already
+`tsc`-enforced, and a Vitest spec re-checking a compiler guarantee would be ceremony, not a guard.
+
+Currently green against the sibling task's finished conversion (`identity-chip.html`/
+`notification-bell.html` no longer contain any `<details>` at all); was seen failing correctly, mid-audit,
+against the sibling's own pre-conversion state — proof the heuristic actually discriminates rather than
+vacuously passing.
+
+### Dev parity
+
+Unaffected by any change in this task — `page-bar`/`return-home-button`'s new listeners read only their
+own local signals and DOM refs, never `AuthStore`/`authEnabled`; the `live-facade`/`asset-detail` fixes
+are plain signal resets with no auth branch nearby.
+
+### Files touched
+
+Edited: `shared/ui/page-bar/page-bar.{ts,html,spec.ts}`, `shared/ui/return-home-button.{ts,html}`,
+`features/live/live-facade.ts`, `features/asset-detail/asset-detail.ts`, this Status entry. New:
+`core/ui/overlay-consistency.spec.ts`, `shared/ui/return-home-button.spec.ts` (no prior component spec
+existed for this one either). **Not touched**: `core/ui/ui-store.ts`, `core/ui/overlay-store.ts`,
+`shared/ui/identity-chip.*`, `shared/ui/notification-bell.*`, `shared/ui/app-sidebar/**`, `app.*`,
+`styles.css`, `shared/ui/confirm-dialog.*`, `shared/ui/kebab-menu.ts` — all named explicitly in the task's
+own file-scope boundary or the Findings section above as reported-not-fixed.

@@ -1,10 +1,11 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
 import { ToastService } from '../../core/toast.service';
+import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 import { eventNotificationText, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
 import { geofenceBreachToastMessage } from '../../core/geofence/geofence-logic';
 import { EventsRail } from './events-rail';
@@ -58,6 +59,20 @@ import type { DetectionEvent } from '../../core/api/models';
  * folded into the unread-badge count or the dropdown list itself, since both are typed to
  * `DetectionEvent` and a breach isn't one; a future cycle that wants breaches counted in the badge
  * too would need to widen that typing, out of this batch's own scope.
+ *
+ * **Signal-backed open state, not `<details>`** (docs/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): the
+ * dropdown used to be a native `<details>`, whose `open` state lived in the DOM where nothing could
+ * see or reset it — and since this component is mounted once in the always-on shell
+ * (`app-sidebar.html`'s foot) and never destroyed on navigation, "the page component is destroyed on
+ * route change" (this app's only other cleanup mechanism) never applied to it. Reproduced live: open
+ * this bell, then the identity menu — both stayed open at once (D1); navigate to another page — both
+ * stayed open there too (D2). The trigger now toggles `GlobalOverlayStore` (`'notification-bell'`),
+ * which composes `core/ui/ui-store.ts#UiStore` for exclusivity with the identity menu and adds the
+ * lifecycle rules the shell needs and no page does: closes on any navigation, on `Escape` (returning
+ * focus to the trigger), and on a click outside — see that store's own class doc for the mechanism.
+ * `toggleBell()` below is the one place opening still has a side effect beyond visibility (marking
+ * events read), so it can't be a bare `overlays.toggle()` call in the template the way
+ * `identity-chip.ts`'s trigger is.
  */
 @Component({
   selector: 'vision-notification-bell',
@@ -73,6 +88,14 @@ export class NotificationBell {
   private readonly toasts = inject(ToastService);
   private readonly liveStore = inject(LiveStore);
   protected readonly events = inject(EventsStore);
+  protected readonly overlays = inject(GlobalOverlayStore);
+  private readonly host = inject(ElementRef<HTMLElement>);
+  /** Optional, mirroring `identity-chip.ts`'s own `viewChild` — this trigger is in fact never behind
+   *  an `@if` (`NotificationBell` itself only ever mounts once the shell already knows
+   *  `auth.user()` is non-null), but kept the same shape as its sibling shell overlay rather than
+   *  special-cased, so both register themselves identically regardless of a constructor-scheduled
+   *  `effect()`'s exact first-run timing relative to view init. */
+  private readonly triggerEl = viewChild<ElementRef<HTMLButtonElement>>('trigger');
 
   private readonly readIds = signal<ReadonlySet<string>>(new Set());
   protected readonly unreadCount = computed(() => unreadEvents(this.events.events(), this.readIds()).length);
@@ -89,6 +112,17 @@ export class NotificationBell {
   constructor() {
     this.events.activate();
     inject(DestroyRef).onDestroy(() => this.events.release());
+
+    // Registers this component's own host (trigger + dropdown together) with the shell's overlay
+    // coordinator — see `identity-chip.ts`'s identical constructor comment and
+    // `GlobalOverlayStore.register`'s own doc comment for why `root` containing `trigger` is what
+    // lets a click on the trigger itself never fight the outside-click listener.
+    effect(() => {
+      const trigger = this.triggerEl();
+      if (trigger) {
+        this.overlays.register('notification-bell', this.host.nativeElement, trigger.nativeElement);
+      }
+    });
 
     // Toast every genuinely new OPEN event — but never on the very first read (whatever's already
     // in the feed at bell-mount time is history, not news; toasting a burst of pre-existing open
@@ -134,16 +168,24 @@ export class NotificationBell {
     });
   }
 
-  /** The native `<details>` `toggle` event (`notification-bell.html`) — opening marks everything read. */
-  protected onToggle(isOpen: boolean): void {
-    if (isOpen) {
+  /**
+   * The trigger's own `(click)` (`notification-bell.html`) — opening marks everything currently
+   * listed as read, same as the old `<details>` `toggle` event's `isOpen` branch. Computes "opening"
+   * from the pre-toggle state rather than reading `overlays.isOpen(...)` back out afterward, since a
+   * `GlobalOverlayStore.toggle` that *closed* the bell (or a click that opened a *different* overlay
+   * and thus closed this one first) must never mark anything read.
+   */
+  protected toggleBell(): void {
+    const opening = !this.overlays.isOpen('notification-bell');
+    this.overlays.toggle('notification-bell');
+    if (opening) {
       this.readIds.set(new Set(this.events.events().map((event) => event.id)));
     }
   }
 
   /** The dropdown's own `<vision-events-rail>` row click — resolves and navigates, then closes. */
-  protected onRailOpen(event: DetectionEvent, details: HTMLDetailsElement): void {
-    details.open = false;
+  protected onRailOpen(event: DetectionEvent): void {
+    this.overlays.close('notification-bell');
     void this.navigate(event);
   }
 

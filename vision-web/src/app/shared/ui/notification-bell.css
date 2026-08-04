@@ -1,7 +1,9 @@
-/* Mirrors `app.css`'s own `.tab-more`/`.tab-more-menu` disclosure idiom (a native `<details>`, no new
-   dropdown-menu component) and `src/styles.css`'s `.kebab`/`.kebab-menu` positioning — this is the
-   third consumer of that exact "trigger + absolute popover, box-shadow since it's a true overlay"
-   shape in this app, not a new pattern. */
+/* A plain `<button>` + `@if`-rendered popover (docs/UI-STATE-PLAN.md §2.3/§2.2), not a native
+   `<details>` — its open state must be closable by something other than itself (the identity menu
+   opening, a route change, Escape, an outside click; see `notification-bell.ts`'s own class doc and
+   `core/ui/overlay-store.ts`), which a `<details>`'s DOM-only `open` attribute structurally can't be.
+   Positioning otherwise mirrors `src/styles.css`'s `.kebab`/`.kebab-menu` "trigger + absolute popover,
+   box-shadow since it's a true overlay" shape used elsewhere in this app. */
 :host {
   display: block;
 }
@@ -19,14 +21,13 @@
   justify-content: center;
   width: 1.9rem;
   height: 1.9rem;
-  cursor: pointer;
-  list-style: none;
+  padding: 0;
+  border: none;
   border-radius: var(--radius-sm);
+  background: none;
   color: var(--text-muted);
-}
-
-.bell-trigger::-webkit-details-marker {
-  display: none;
+  font: inherit;
+  cursor: pointer;
 }
 
 .bell-trigger:hover {

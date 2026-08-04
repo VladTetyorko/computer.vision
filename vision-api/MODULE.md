@@ -9,8 +9,11 @@ REST driving adapter: asset-first + device/stream/discovery endpoints over the d
 ## Package layout (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row B)
 
 Everything below `com.drones.vision.api` lives in one of these subpackages — nothing sits directly
-at the module root anymore: `controller/` (every `@RestController`, 28), `dto/` (wire records only,
-95 — house rule "zero DTO leakage"), `security/` (`CurrentUser`/`PrincipalResolver`/
+at the module root anymore: `controller/` (every `@RestController`, 29 — the 29th is `DemoController`,
+see the `demo/` note below), `dto/` (wire records only,
+98 — house rule "zero DTO leakage"), `demo/` (the additive, property-gated demo data package — its
+own section under API surface; the one subpackage added since this layout was frozen, kept separate
+precisely so it can be deleted in one `rm -r` plus two lines), `security/` (`CurrentUser`/`PrincipalResolver`/
 `SessionAuthenticator` — the token→`UserId` edge, no `org.springframework.security` dependency),
 `ws/` (`ManualControlWebSocketHandler`/`ManualControlHandshakeInterceptor`), `proxy/`
 (`HlsProxyController` — a pass-through edge owning no application service), `support/` (edge-local
@@ -109,6 +112,8 @@ literal it replaced (see `VisionApiProperties` below).
 | TrainingJobController | POST | `/api/datasets/{id}/train` | 202 `TrainingJobResponse` body: `{baseModel, epochs}` | 404 unknown dataset, 403 caller may not manage the organization or the dataset is outside their scope, 400 malformed dataset id, blank `baseModel`/non-positive `epochs` (`TrainingJobSpec`'s own compact-constructor check), or the dataset has no `LABELED` samples to train on (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave, delta'd by docs/CV-TRAINING-V2-PLAN.md §5; gated by `vision.training.enabled`, default `false`; `{id}` is now parsed into a `DatasetId` **at this controller's edge** — a malformed id is a synchronous 400 rather than an opaque failure downstream — then its canonical string form is threaded into `TrainingJobSpec#datasetId()`, which itself stays a plain string all the way to the gRPC boundary; the unknown-dataset/out-of-scope/no-labeled-samples cases are `TrainingJobService#start`'s own synchronous pre-check, not this controller's; body/response shape is otherwise byte-identical to before — the handler now also uploads the dataset to cv-service over gRPC as part of the same job, see vision-application/MODULE.md) |
 | TrainingJobController | GET | `/api/training/jobs/{jobId}` | 200 `TrainingJobResponse` | 404 unknown `jobId` (never started, or evicted under `TrainingJobService`'s finished-job retention policy) (docs/CV-TRAINING-PLAN.md §7/§8; a training **failure** is reported here as `state:"FAILED"` — never a thrown exception) |
 | TrainingJobController | GET | `/api/training/jobs` | 200 `TrainingJobsResponse` (`{jobs:[...]}}`) | — (docs/CV-TRAINING-PLAN.md §7/§8; every tracked job, newest-first by `startedAt`, unscoped/unaudited read — any authenticated caller may poll, mirroring `ModelRegistryController#models`'s own "any caller may read" precedent) |
+| DemoController | GET | `/api/demo` | 200 `DemoStatusResponse` (`{enabled:true, videosDirectory, videos:[…]}`) | — (the console's demo-button availability probe; gated by `vision.demo.enabled`, default **on** — `false` removes this controller and every `…api.demo` bean, so both routes 404 like any unmapped path) |
+| DemoController | POST | `/api/demo/seed` | 201 `DemoSeedResponse` | — (fault-tolerant by design: a step that fails lands in the response's `problems` list, never in an error status; body `DemoSeedRequest` optional in whole and in every field, absent means `DemoPlan.DEFAULT` = 10 assets / 10 users / 3 streams, each count clamped to `DemoPlan.MAX`=50) |
 
 `ApiExceptionHandler` (`@RestControllerAdvice`) mapping table (body `{"error","message"}`):
 
@@ -295,6 +300,34 @@ Both `@RestController @ConditionalOnProperty(prefix="vision.training", name="ena
 
 **Error mapping**: `AccessDeniedException` → 403 (`start` only — caller may not manage the organization, mirroring `ModelRegistryController#promote`'s manager/admin gate exactly); `IllegalArgumentException` → 400 (`start` only — blank `baseModel` or non-positive `epochs`, `TrainingJobSpec`'s own compact-constructor checks); `NoSuchElementException` → 404 (`job` only — unknown `jobId`). All three via the pre-existing, unmodified `ApiExceptionHandler`.
 
+### `com.drones.vision.api.demo` — the demo data package (`vision.demo.enabled`, default on)
+
+A **strictly additive** package: one press of the console's green button fills an empty platform with
+a fleet, a roster, assignments, geofence zones and marks. It introduces no port, decorates no
+existing bean, changes no wiring, and disappears entirely — beans and routes — when
+`vision.demo.enabled=false`. Everything it creates goes through the platform's own application
+services, exactly as the corresponding page would; nothing here touches a repository port directly.
+
+| Type | Collaborators | What it does |
+|---|---|---|
+| `DemoScenario` | `DemoPeople`, `DemoFleet`, `DemoOperations`, `AssignmentService`, `CurrentUser` (5, at the ceiling) | The orchestrator `DemoController` calls. Resolves the acting user once (ownership/actor/scope), runs the five passes, and assigns each asset to a pilot round-robin — plus a second pilot on every third asset, so the roster shows both 1:1 and shared assignments. |
+| `DemoPeople` | `UserService`, `GroupService` | One reused `Demo Squad` group (parented under whatever root group already exists, so a MANAGER-scoped press works) + N users, call-signed `demo.falcon`…, every fourth a MANAGER. **DEV-ONLY**: all share the password `demo`, the same stance `AuthSeedRunner`'s `admin`/`admin` takes. Usernames are de-duplicated against existing ones (`demo.falcon2` on a second press), never a 409. |
+| `DemoFleet` | `SimulationService`, `AssetService`, `DemoVideoLibrary` | N simulated assets via `SimulationService#simulate` — each on its own home point around a ~1.1km ring at `50.45/30.52`, each flying its own 4-point LOOP route at its own speed/altitude, each backed by the next video in the library (round-robin; fully synthetic when the folder holds none). Call signs continue past the highest `Demo NN` already registered (`includeDeleted`), so a second press extends the fleet. **Creation and streaming are two passes** — `simulate(autoStart=true)` aborts the whole call on a stream failure and orphans the asset it just created, so `startStreams` starts only the requested prefix through `AssetService#startStream` and reports each failure instead. |
+| `DemoOperations` | `GeofenceService`, `MarkService` | A `KEEP_IN` operating area + a `KEEP_OUT` no-fly box, and five marks (2 TARGET, HAZARD, FRIENDLY, POI). Both passes are name-idempotent — a second press adds neither a duplicate zone nor a duplicate mark. |
+| `DemoVideoLibrary` | `@Value("${vision.demo.videos-dir:}")` | A **flat, non-recursive** listing of `$HOME/Videos` (override with the property): regular, readable files with a known video extension, sorted by name, sub-directories skipped rather than descended. A missing/unreadable folder yields an empty list, not an error. Its production constructor carries `@Autowired` because a package-private `Path` test-seam constructor is a second candidate — the same disambiguation `LiveUpdateRegistry` needs. |
+| `DemoPlan` / `DemoSeedReport` / `DemoAsset` | — | The resolved plan (clamped to `[0, MAX]`, `startStreams ≤ assets`), what one run created, and one created asset. Deliberately **not** `…api.dto` types: the wire records (`DemoSeedRequest`/`DemoSeedResponse`/`DemoStatusResponse`) are nullable-everywhere and count-derived; the controller maps between the two. |
+
+**Fault tolerance over atomicity.** Every pass catches per-item `RuntimeException`s into a
+`Consumer<String> problems` sink rather than aborting: a run that cannot open three video streams
+(no mediamtx) still leaves ten assets, ten users and a populated map behind, and reports the three
+lines. `DemoSeedResponse#problems` is where they surface — a 500 from `/api/demo/seed` therefore
+means something outside the seeded steps broke.
+
+**Security posture.** Seeding is unauthenticated whenever `vision.auth.enabled=false` (like every
+other route in that mode), and the accounts it creates share one well-known password — so the flag
+is the deployment control: leave `vision.demo.enabled` on for local development, set it to `false`
+anywhere else. `DemoScenario` logs a `WARN` on every press saying exactly that.
+
 ### Auth seams + DTOs (docs/U-AUTH-PLAN.md wave 3)
 
 **`CurrentUser`/`PrincipalResolver` live in `com.drones.vision.api.security`** (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row B — the token→`UserId` edge, still zero `org.springframework.security` dependency). **`CurrentUser` was rewritten around a seam.** It no longer takes an `Ownership fallback`; it takes a `PrincipalResolver` (interface, `security/`: `UserId userId()` + `Ownership ownership()` + `VisibilityScope scope()` — the last added by docs/U-SCOPE-PLAN.md slice 2) and delegates. `vision-app` supplies the resolver — a fixed dev principal when `vision.auth.enabled=false` (identical to the pre-auth behavior), or one reading Spring Security's `SecurityContextHolder` when `true`. **This is deliberately how vision-api stays free of any `org.springframework.security` dependency** (the architecture rule for wave 3): the SecurityContext-reading lives entirely in vision-app; vision-api only knows the plain seam. Every controller still calls `currentUser.userId()`/`.ownership()` unchanged; scope-aware controllers additionally call `currentUser.scope()`. A convenience constructor `CurrentUser(Ownership)` (wrapping `PrincipalResolver.fixed(...)`) is kept so the standalone controller unit tests construct it from a plain `Ownership` exactly as before — and, crucially, **`PrincipalResolver.fixed(...)#scope()` returns `VisibilityScope.unbounded()`**, so every test that builds `CurrentUser(ownership)` (and the auth-off dev principal) keeps behaving as if scoping were off: a scoped read given an unbounded scope returns exactly the unscoped result. The production `PrincipalResolver` constructor is the `@Autowired` one so Spring never picks the convenience ctor.
@@ -335,6 +368,16 @@ Both `@RestController @ConditionalOnProperty(prefix="vision.training", name="ena
 - **Testing an `SseEmitter` controller with MockMvc relies on `ResponseBodyEmitter`'s own early-send buffering, not a documented MockMvc feature** (docs/REALTIME-PLAN.md §4): `LiveUpdateRegistry#connect` sends its `connection` handshake + snapshot burst *synchronously*, inside the same call stack as the `@GetMapping` method, before that method returns the `SseEmitter` — this works (rather than throwing "emitter not yet initialized") because `ResponseBodyEmitter` (`SseEmitter`'s superclass) buffers any `send()` calls made before Spring's `ResponseBodyEmitterReturnValueHandler` attaches its internal `Handler` (which happens as part of processing the controller's return value, itself still inside the same synchronous call), flushing them the moment that attachment completes. `LiveControllerTest` (`mockMvc.perform(get(...)).andExpect(request().asyncStarted()).andReturn()`, then reading `MvcResult#getResponse().getContentAsString()` immediately) relies on exactly this — content sent this way is already in the `MockHttpServletResponse` buffer by the time `perform()` returns. Deltas published *after* the initial connect (from `publishFleetChanged()`/`publishEvent()`, which dispatch onto the registry's own real background scheduler — deliberately not stubbed out even in this test, to exercise the actual production code path) are **not** synchronous, so the test polls `getContentAsString()` in a bounded loop (up to 2s, 20ms between checks) rather than asserting immediately.
 
 ## Status
+
+**Demo data package done** (`com.drones.vision.api.demo` + `DemoController` + three DTOs, 21 new
+tests): `GET /api/demo` and `POST /api/demo/seed` fill an empty platform with 10 simulated assets
+(video from `$HOME/Videos`, flat listing), 10 users in a `Demo Squad` group, pilot assignments, 2
+geofence zones and 5 marks — verified live against a running app (10/10/14/2/5, 3 streams on the
+air with real HLS playback, `problems: []`, second press extends to `Demo 11…` and skips the
+existing zones/marks). Gated by `vision.demo.enabled` (default on; `false` → both routes 404). The
+console's green "Fill demo data" button (`vision-web`, `features/demo/`) is the only caller. Nothing
+pre-existing in this module changed — the package is purely additive, which is the whole point of
+its separate subpackage.
 
 docs/NAV-IA-REDESIGN-PLAN.md **Wave 4, F8 done** (replay library, vision-api half): `UsageTimelineController`
 gained a third endpoint, `GET /api/usages` (docs/design/10-replay.md's frozen wire contract), and two

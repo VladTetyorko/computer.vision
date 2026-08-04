@@ -1,26 +1,36 @@
 @if (auth.user(); as user) {
-  <details class="identity-chip" #menu>
-    <summary class="identity-trigger" [title]="user.displayName + ' · ' + roleLabel(user)">
+  <div class="identity-chip">
+    <button
+      type="button"
+      class="identity-trigger"
+      #trigger
+      [title]="user.displayName + ' · ' + roleLabel(user)"
+      aria-haspopup="menu"
+      [attr.aria-expanded]="overlays.isOpen('identity-menu')"
+      (click)="overlays.toggle('identity-menu')"
+    >
       <span class="identity-avatar" aria-hidden="true">{{ initials(user.displayName) }}</span>
       <span class="identity-name truncate">{{ user.displayName }}</span>
       <span class="chip accent identity-role">{{ roleLabel(user) }}</span>
-    </summary>
+    </button>
 
-    <div class="identity-menu" (click)="menu.open = false">
-      <div class="identity-menu-name">{{ user.displayName }}</div>
-      <div class="identity-menu-role muted">{{ roleLabel(user) }}</div>
+    @if (overlays.isOpen('identity-menu')) {
+      <div class="identity-menu" role="menu" (click)="overlays.close('identity-menu')">
+        <div class="identity-menu-name">{{ user.displayName }}</div>
+        <div class="identity-menu-role muted">{{ roleLabel(user) }}</div>
 
-      <nav class="identity-links">
-        <a routerLink="/activity">My activity</a>
-        <a routerLink="/settings">Account settings</a>
-        @if (canManageOrg()) {
-          <a routerLink="/org">Organization</a>
+        <nav class="identity-links">
+          <a routerLink="/activity">My activity</a>
+          <a routerLink="/settings">Account settings</a>
+          @if (canManageOrg()) {
+            <a routerLink="/org">Organization</a>
+          }
+        </nav>
+
+        @if (auth.authEnabled()) {
+          <button type="button" class="identity-logout" (click)="logout()">Log out</button>
         }
-      </nav>
-
-      @if (auth.authEnabled()) {
-        <button type="button" class="identity-logout" (click)="logout()">Log out</button>
-      }
-    </div>
-  </details>
+      </div>
+    }
+  </div>
 }

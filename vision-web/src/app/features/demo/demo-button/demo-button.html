@@ -1,0 +1,19 @@
+@if (available()) {
+  <button
+    type="button"
+    class="demo-button"
+    [disabled]="busy()"
+    (click)="fill()"
+    [title]="tooltip()"
+    [attr.aria-busy]="busy()"
+    aria-label="Fill demo data"
+  >
+    <!-- Both the icon and the label always render; `demo-button.css` hides the label on the
+         collapsed desktop rail via CSS alone, never a template `@if` — the same rule
+         `app-sidebar.html` documents for its own group labels and status chips (a `@if` bound to
+         the collapse preference would strip the text from the DOM even inside the mobile sheet,
+         where the sidebar is full width and the label should show). -->
+    <vision-icon [name]="busy() ? 'wrench' : 'plus'" [size]="16" />
+    <span class="demo-label">{{ busy() ? 'Filling…' : 'Fill demo data' }}</span>
+  </button>
+}

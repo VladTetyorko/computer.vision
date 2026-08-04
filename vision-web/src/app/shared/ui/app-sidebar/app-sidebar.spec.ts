@@ -289,6 +289,33 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('.status-full')?.textContent).toContain('OFFLINE');
   });
+
+  /**
+   * docs/UI-STATE-PLAN.md §1 D1/D3, §2.2: the mobile sheet now shares `GlobalOverlayStore` with the
+   * identity menu/notification bell it's mounted alongside, so opening one closes the other — this is
+   * the same exclusivity `core/ui/overlay-store.spec.ts` proves at the store level, checked here
+   * through the real rendered shell (the actual scenario the sheet and the chip share one DOM tree).
+   */
+  it('opening the identity menu (a sibling shell overlay) closes an open mobile sheet, and vice versa', () => {
+    const fixture = render({ topRole: 'PILOT' });
+    const root = fixture.nativeElement as HTMLElement;
+
+    (root.querySelector('.sidebar-hamburger') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(root.querySelector('.sidebar')!.classList.contains('mobile-open')).toBe(true);
+
+    (root.querySelector('.identity-trigger') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(root.querySelector('.sidebar')!.classList.contains('mobile-open')).toBe(false);
+    expect(root.querySelector('.identity-trigger')!.getAttribute('aria-expanded')).toBe('true');
+
+    // And the reverse: reopening the sheet closes the menu it just displaced. The hamburger is back
+    // in the DOM here (not the scrim) — the sheet closed the moment the identity menu opened, above.
+    (root.querySelector('.sidebar-hamburger') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(root.querySelector('.sidebar')!.classList.contains('mobile-open')).toBe(true);
+    expect(root.querySelector('.identity-trigger')!.getAttribute('aria-expanded')).toBe('false');
+  });
 });
 
 describe('AppSidebar — Advanced/Upcoming disclosures persist via SidebarStore', () => {

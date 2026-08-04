@@ -3,6 +3,7 @@
     type="button"
     class="btn danger return-home-btn"
     [class.small]="compact()"
+    #trigger
     (click)="requestReturnHome()"
     [disabled]="busy()"
     title="Command this aircraft to return home (RTL)"

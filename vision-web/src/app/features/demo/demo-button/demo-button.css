@@ -1,0 +1,57 @@
+/* The one deliberately green control in the shell. `.btn`'s own variants are blue (action), red
+   (danger) and outline (secondary) — none of them says "this is the throwaway demo affordance", and
+   the request was specifically for a green button, so this composes the existing success tokens
+   rather than inventing a colour: `--color-success` fill with `--green-900` (the darkest green in
+   the ramp) as its ink, since the palette has no `--color-on-success` and the frozen token contract
+   is not this component's to extend. */
+
+:host {
+  display: block;
+}
+
+.demo-button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-8);
+  background: var(--color-success);
+  color: var(--green-900);
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: filter 0.15s ease;
+}
+
+.demo-button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.demo-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-button {
+    transition: none;
+  }
+}
+
+/* Collapsed desktop rail: icon only, centred — mirroring `app-sidebar.css`'s own
+   `min-width: 641px` guard so the phone sheet (which is full width even when the *desktop*
+   preference is "collapsed") always keeps the label. */
+@media (min-width: 641px) {
+  :host-context(.sidebar.collapsed) .demo-button {
+    justify-content: center;
+    padding: var(--space-8) var(--space-4);
+  }
+
+  :host-context(.sidebar.collapsed) .demo-label {
+    display: none;
+  }
+}

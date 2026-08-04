@@ -1,5 +1,7 @@
-/* Mirrors `app.css`'s own `.tab-more`/`.tab-more-menu` and `notification-bell.css`'s `.bell`/
-   `.bell-dropdown` — a native `<details>` popover, this app's standing idiom, not a new component. */
+/* A plain `<button>` + `@if`-rendered popover (docs/UI-STATE-PLAN.md §2.3/§2.2), not a native
+   `<details>` — its open state must be closable by something other than itself (the notification
+   bell opening, a route change, Escape, an outside click; see `identity-chip.ts`'s own class doc and
+   `core/ui/overlay-store.ts`), which a `<details>`'s DOM-only `open` attribute structurally can't be. */
 :host {
   display: block;
 }
@@ -14,15 +16,15 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-  cursor: pointer;
-  list-style: none;
   padding: var(--space-2) var(--space-8) var(--space-2) var(--space-2);
+  border: none;
   border-radius: var(--radius-pill);
   min-height: 2rem;
-}
-
-.identity-trigger::-webkit-details-marker {
-  display: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .identity-trigger:hover {

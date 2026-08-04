@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, computed, inject, input, signal, viewChild } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -39,6 +39,23 @@ import { returnHomeToastFor } from './return-home-button-logic';
  * double-click/double-Enter can never fire the command twice; a plain signal, not a state machine —
  * this is a single one-shot request, not a saga with retries/reducible transitions the way
  * `shared/player/player-recovery.ts`'s reconnect logic is.
+ *
+ * **`Escape` and an outside click both cancel** (docs/UI-STATE-PLAN.md §2.4) — added *here*, on this
+ * component, not on `ConfirmDialog` itself. `ConfirmDialog`'s own doc comment is deliberate about
+ * carrying **no** Escape/backdrop-dismiss of its own ("every dismissal is an explicit button click …
+ * never an accidental key press/misclick either way") — a rule this component still honors for its
+ * own confirm exactly as written: neither handler below can ever *confirm* the command, only ever
+ * calls {@link cancel}, the exact same transition the dialog's own Cancel button already makes, so
+ * the one thing `ConfirmDialog`'s rule actually guards against (an accidental confirm) still cannot
+ * happen. What changes is only *which explicit gestures count as "the operator's decision"* — Escape
+ * and a click on the scrim are now two more, matching the instinct §2.2's `GlobalOverlayStore` serves
+ * for the shell's own overlays. This confirm is page-scoped (dies with whichever host page mounted
+ * it), so per §2.4 it keeps this state as a local `confirmOpen` signal rather than moving into the
+ * shell's store — only the *behavior* is mirrored, via the same "one document-level listener pair,
+ * containment decides inside-vs-outside" idiom `core/ui/overlay-store.ts#GlobalOverlayStore` uses.
+ * Both listeners no-op while {@link busy} is `true` (the request is already in flight — the dialog's
+ * own Confirm/Cancel buttons are disabled for the same reason at that point, so an Escape/outside
+ * click deserves the identical treatment, not a race with the pending request's own `finally`).
  */
 @Component({
   selector: 'vision-return-home-button',
@@ -60,6 +77,21 @@ export class ReturnHomeButton {
 
   protected readonly confirmOpen = signal(false);
   protected readonly busy = signal(false);
+
+  /** The trigger button (`return-home-button.html`'s `#trigger`) — Escape returns focus to it, the
+   *  same "give it back to whatever opened this" courtesy `GlobalOverlayStore`'s own Escape handler
+   *  extends to the shell's overlays. */
+  private readonly trigger = viewChild<ElementRef<HTMLElement>>('trigger');
+
+  /**
+   * `<vision-confirm-dialog>`'s own host element (`ConfirmDialog`, read via its component type rather
+   * than a template `#ref` — the ref would resolve to the *component instance*, not its DOM node,
+   * for a child component). Its `.dialog` card — not this whole host — is what "outside" is measured
+   * against below: `ConfirmDialog`'s backdrop covers the entire viewport, so the card is the only
+   * genuinely "inside" surface; every other pixel, including the now-covered trigger button, reads as
+   * outside and is exactly what a scrim click is supposed to mean.
+   */
+  private readonly confirmDialogHost = viewChild(ConfirmDialog, { read: ElementRef<HTMLElement> });
 
   protected readonly confirmMessage = computed(() => `Command ${this.assetDisplayName()} to return home?`);
 
@@ -87,5 +119,55 @@ export class ReturnHomeButton {
       this.busy.set(false);
       this.confirmOpen.set(false);
     }
+  }
+
+  /**
+   * `Escape` cancels the confirm — never confirms it, see this class's own doc comment. No-ops while
+   * {@link busy} (the request is in flight; the dialog's own buttons are disabled for the same reason
+   * right now). Returns focus to the trigger, `isConnected`-guarded the same defensive way
+   * `GlobalOverlayStore.handleKeydown` guards its own refocus — this trigger can't actually be
+   * detached mid-confirm today, but costs nothing to guard the same way regardless.
+   */
+  @HostListener('document:keydown.escape')
+  protected onDocumentKeydown(): void {
+    if (!this.confirmOpen() || this.busy()) {
+      return;
+    }
+    this.cancel();
+    const trigger = this.trigger()?.nativeElement;
+    if (trigger?.isConnected) {
+      trigger.focus();
+    }
+  }
+
+  /**
+   * A click that lands outside the confirm's own `.dialog` card — i.e. on the backdrop, the only
+   * other reachable surface while the confirm is open — cancels it. See this class's own doc comment
+   * for why this can only ever cancel, matching `page-bar.ts#onDocumentClick`'s identical containment
+   * technique.
+   *
+   * **Must also treat a click on {@link trigger} itself as "inside".** The click that *opens* the
+   * confirm (`requestReturnHome`, bound on the trigger) bubbles to this same `document` listener
+   * within that one synchronous dispatch — before change detection has had a chance to actually
+   * render `<vision-confirm-dialog>`, so `confirmDialogHost()` still resolves to nothing at that exact
+   * instant. Without this guard, every real click on "Bring home" would open the confirm and this
+   * handler would immediately read it as a click "outside" a dialog that simply hadn't rendered yet,
+   * closing what it had just opened, in the same gesture, on every single click — caught by this
+   * component's own `return-home-button.spec.ts`, not merely reasoned about.
+   */
+  @HostListener('document:click', ['$event'])
+  protected onDocumentClick(event: MouseEvent): void {
+    if (!this.confirmOpen() || this.busy() || !(event.target instanceof Node)) {
+      return;
+    }
+    const trigger = this.trigger()?.nativeElement;
+    if (trigger?.contains(event.target)) {
+      return;
+    }
+    const card = this.confirmDialogHost()?.nativeElement.querySelector('.dialog');
+    if (card?.contains(event.target)) {
+      return;
+    }
+    this.cancel();
   }
 }

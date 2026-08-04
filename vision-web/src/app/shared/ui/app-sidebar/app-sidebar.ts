@@ -1,9 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth-store';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { canManageOrg } from '../../../core/org/org-logic';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
+import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
+import { DemoButton } from '../../../features/demo/demo-button/demo-button';
 import { NAV_MODES, navTiers, type NavMode } from '../../../features/hubs/nav-entries';
 import { Icon } from '../icon';
 import { IdentityChip } from '../identity-chip';
@@ -69,10 +71,26 @@ import { NotificationBell } from '../notification-bell';
  * becomes an off-canvas sheet (`mobileOpen`) behind a hamburger button rendered alongside it, since
  * Wave 1a has no page bar yet for a hamburger to live in (`docs/NAV-IA-REDESIGN-PLAN.md` §3 puts the
  * page bar in Wave 2) — this component owns its own trigger rather than waiting for one.
+ *
+ * **The mobile sheet joins `GlobalOverlayStore`** (docs/UI-STATE-PLAN.md §1/§2.2) as `'sidebar-mobile'`
+ * — it used to be a plain local `signal(false)`, invisible to the identity menu/notification bell it
+ * shares this always-mounted shell with, so opening one could leave a *second* thing open behind it
+ * (§1 D1/D3, generalized past just the two `<details>`-turned-overlays the plan's own reproduction
+ * names). Now opening any one of the three closes the other two, and the same `Escape`/outside-click/
+ * navigation rules apply here too, for free. `mobileOpen` is `computed(() =>
+ * overlays.isOpen('sidebar-mobile'))` rather than the store's own bare boolean — same template usage
+ * as before (`[class.mobile-open]="mobileOpen()"`), no call-site churn. The hamburger button registers
+ * itself as `'sidebar-mobile'`'s trigger the same way `identity-chip.ts`/`notification-bell.ts` do —
+ * except this one is swapped out for the scrim while the sheet is open (`app-sidebar.html`'s own
+ * `@if`/`@else`), so `GlobalOverlayStore.register`'s own doc comment on re-registration covers exactly
+ * this component. The local `(keydown.escape)="closeMobile()"` binding this `<aside>` root used to
+ * carry is removed — the store's one document-level listener (docs/UI-STATE-PLAN.md §2.2 rule 3: "one
+ * listener pair … not one per component") now covers it, and covers strictly more (any focus anywhere
+ * on the page, not just inside `.sidebar`).
  */
 @Component({
   selector: 'vision-app-sidebar',
-  imports: [RouterLink, RouterLinkActive, Icon, IdentityChip, NotificationBell],
+  imports: [RouterLink, RouterLinkActive, Icon, IdentityChip, NotificationBell, DemoButton],
   templateUrl: './app-sidebar.html',
   styleUrl: './app-sidebar.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -81,6 +99,10 @@ export class AppSidebar {
   protected readonly sidebar = inject(SidebarStore);
   protected readonly fleet = inject(FleetStore);
   private readonly auth = inject(AuthStore);
+  private readonly overlays = inject(GlobalOverlayStore);
+  private readonly hostRef = inject(ElementRef<HTMLElement>);
+  /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */
+  private readonly hamburgerEl = viewChild<ElementRef<HTMLButtonElement>>('hamburger');
 
   /** `nav-entries.ts#navTiers`, re-exposed as a protected field so the template can call it per mode — same idiom as `identity-chip.ts`'s `protected readonly roleLabel = topRoleLabel`. */
   protected readonly tiersFor = navTiers;
@@ -104,15 +126,31 @@ export class AppSidebar {
   protected readonly liveCount = computed(() => this.fleet.streams().length);
   protected readonly offline = computed(() => this.fleet.reachable() === false);
 
-  /** The <640px off-canvas sheet's own open state — transient, never persisted (docs/design/00-shell.md's responsive table only persists the docked/rail choice, not "was the phone sheet open"). */
-  protected readonly mobileOpen = signal(false);
+  /** The <640px off-canvas sheet's own open state — `GlobalOverlayStore`-backed (see class doc), so
+   *  it shares exclusivity/Escape/outside-click/close-on-navigation with the identity menu and
+   *  notification bell. Still transient, never persisted — same reasoning as before this moved:
+   *  docs/design/00-shell.md's responsive table only persists the docked/rail choice, not "was the
+   *  phone sheet open". */
+  protected readonly mobileOpen = computed(() => this.overlays.isOpen('sidebar-mobile'));
+
+  constructor() {
+    // Registers the hamburger as `'sidebar-mobile'`'s trigger — see class doc's mobile-sheet
+    // paragraph for why this is the one shell overlay whose trigger element gets swapped out (for the
+    // scrim) while open, and why that's still safe.
+    effect(() => {
+      const hamburger = this.hamburgerEl();
+      if (hamburger) {
+        this.overlays.register('sidebar-mobile', this.hostRef.nativeElement, hamburger.nativeElement);
+      }
+    });
+  }
 
   protected openMobile(): void {
-    this.mobileOpen.set(true);
+    this.overlays.open('sidebar-mobile');
   }
 
   protected closeMobile(): void {
-    this.mobileOpen.set(false);
+    this.overlays.close('sidebar-mobile');
   }
 
   /** A native `<details>`'s own `toggle` event carries whether it just opened or closed — read straight off the element rather than tracked separately. */

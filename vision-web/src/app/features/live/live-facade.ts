@@ -162,9 +162,29 @@ export class LiveFacade {
     inject(DestroyRef).onDestroy(() => document.removeEventListener('keydown', onKeydown));
   }
 
-  /** Fed from `LivePage`'s own route-bound `deviceId` input — see this class's own doc comment. */
+  /**
+   * Fed from `LivePage`'s own route-bound `deviceId` input — see this class's own doc comment.
+   *
+   * **Resets the deliberately-stopped state on a device switch** (docs/UI-STATE-PLAN.md §2 — a stale
+   * value surviving into a context where it's wrong). `/live/:deviceId` is reachable from many direct
+   * links to a *different* device while already on this route (the notification bell, Wall tiles,
+   * Assets/Devices/asset-detail "Watch live", Replay's "Watch live") — Angular reuses this same routed
+   * component/facade instance across such a navigation (only the param changes), so without this reset
+   * a device the operator explicitly stopped stays latched `stopped()` (`explicitlyStopped`/
+   * `hasBeenLive`'s own combined read-model, this class's doc comment above) after switching to a
+   * brand-new device that was never touched — the player refuses to attach and shows "Stream stopped"
+   * for a device that may be actively live (`shared/player/player.ts`'s own `stopped` input: "a
+   * deliberately stopped stream must never attach"). Mirrors `CockpitFacade.selectAsset`'s identical
+   * reset on its own equivalent asset-switch path — this facade was the one place that reset had gone
+   * missing.
+   */
   setDeviceId(deviceId: string): void {
+    if (deviceId === this.deviceIdSignal()) {
+      return;
+    }
     this.deviceIdSignal.set(deviceId);
+    this.explicitlyStopped.set(false);
+    this.hasBeenLive.set(false);
   }
 
   toggleRail(): void {

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, HostListener, computed, input, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Icon } from '../icon';
 import type { IconName } from '../icon-registry';
@@ -47,6 +47,17 @@ export function pluralize(count: number, singular: string, plural = `${singular}
  * Content projection, both optional:
  * - `[pageBarFilters]` — search inputs, filter chips/selects. Sits left of the actions, wraps first.
  * - `[pageBarActions]` — the primary button and any icon buttons. Always rightmost.
+ *
+ * **The `?` hint popover closes on `Escape` and on an outside click** (docs/UI-STATE-PLAN.md §2.4) —
+ * before this, it only closed by clicking its own trigger a second time, so an operator who hit
+ * `Escape` expecting *whatever is floating* to go away (the same instinct §2.2's `GlobalOverlayStore`
+ * serves for the shell's identity menu/notification bell) had no way to know this one specific popover
+ * needed a different gesture. This popover is page-scoped — it dies with the page like every other
+ * page overlay (§2.1's "page overlays" tier) — so per §2.4 it keeps its own local `hintOpen` signal
+ * rather than moving into the shell's `GlobalOverlayStore`; only the *behavior* (Escape + outside-click)
+ * is mirrored, via the same "one document-level listener pair, `root.contains(target)` decides
+ * inside-vs-outside" idiom `core/ui/overlay-store.ts#GlobalOverlayStore` uses for the shell's own
+ * overlays — see this class's own `onDocumentKeydown`/`onDocumentClick` below.
  */
 @Component({
   selector: 'vision-page-bar',
@@ -77,6 +88,14 @@ export class PageBar {
 
   protected readonly hintOpen = signal(false);
 
+  /** The hint's own trigger-plus-body wrapper (`page-bar.html`'s `#hintRoot`) — the outside-click
+   *  listener below treats any click landing inside this element (the `?` button *or* the popover
+   *  body itself) as "not outside", the same containment trick `GlobalOverlayStore.register`'s own
+   *  doc comment explains. `undefined` whenever no `hint` input is bound at all (the `@if` in the
+   *  template never renders `#hintRoot` in that case) — every use below already treats that as "there
+   *  is nothing to close". */
+  private readonly hintRoot = viewChild<ElementRef<HTMLElement>>('hintRoot');
+
   /**
    * The `avatarSrc` value whose `<img>` fired `error`, or `null`. Storing the failed **src** rather
    * than a bare boolean is what makes the retry reset itself: navigating to a different asset
@@ -105,5 +124,37 @@ export class PageBar {
 
   protected toggleHint(): void {
     this.hintOpen.update((open) => !open);
+  }
+
+  /**
+   * `Escape` closes the popover from anywhere on the page — a `document`-level listener (not one
+   * scoped to the popover's own DOM, which the trigger button may not even have focus within) because
+   * the operator's instinct this satisfies ("get whatever is floating off my screen") isn't "get rid
+   * of whatever currently has focus". No-ops instantly whenever `hintOpen()` is already `false`, so
+   * this costs nothing on every other keystroke typed anywhere else in the app.
+   */
+  @HostListener('document:keydown.escape')
+  protected onDocumentKeydown(): void {
+    this.hintOpen.set(false);
+  }
+
+  /**
+   * A click anywhere outside {@link hintRoot} (trigger *and* popover body alike) closes it. Bound on
+   * `document:click`, the same phase `GlobalOverlayStore`'s own outside-click listener uses — the
+   * trigger's own `(click)="toggleHint()"` is a *target-phase* listener on the button itself, so by
+   * normal DOM dispatch order it always runs before this bubble-phase `document` listener sees the
+   * same click (see that store's own doc comment for the full ordering argument); a click that just
+   * closed the popover is read as "already closed" here and left alone, never reopened.
+   */
+  @HostListener('document:click', ['$event'])
+  protected onDocumentClick(event: MouseEvent): void {
+    if (!this.hintOpen()) {
+      return;
+    }
+    const root = this.hintRoot()?.nativeElement;
+    if (root && event.target instanceof Node && root.contains(event.target)) {
+      return;
+    }
+    this.hintOpen.set(false);
   }
 }

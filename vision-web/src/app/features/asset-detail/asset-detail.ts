@@ -134,12 +134,25 @@ export class AssetDetailPage {
     // facade and resets this page's own local overlay/view state — a fresh navigation to a
     // *different* asset shouldn't stay parked in the previous one's editor/drill-in (Angular reuses
     // this component instance across same-route navigations rather than recreating it).
+    //
+    // **`rowAction`/`renameDraft`/`assignDraft` reset too** (docs/UI-STATE-PLAN.md §2 — a stale value
+    // surviving into a context where it's wrong), added alongside the pre-existing `panels`/`editors`/
+    // `dialogs` resets above: without this, switching assets (the header switcher, a picker-card pick,
+    // or a bare `?sel=`-adjacent link — all same-route navigations, same component instance) left a
+    // *different* asset's device still "mid-rename" (`rowAction`) and the Assign-device picker's own
+    // stale selection (`assignDraft`) sitting behind a freshly-closed editor. `assignDraft` in
+    // particular isn't cosmetic: `openAssign()` never re-blanks it (`assignableDevices` is the global
+    // unowned-device pool, not asset-scoped), so a device picked but never confirmed on asset A could
+    // reappear silently pre-selected the next time Assign is opened, on asset A or B alike.
     effect(() => {
       const id = this.assetId();
       this.subView.set('overview');
       this.panels.close();
       this.editors.close();
       this.dialogs.close();
+      this.rowAction.set(null);
+      this.renameDraft.set('');
+      this.assignDraft.set('');
       this.facade.load(id);
     });
   }

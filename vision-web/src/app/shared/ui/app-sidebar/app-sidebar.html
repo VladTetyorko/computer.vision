@@ -1,4 +1,4 @@
-<aside class="sidebar" [class.collapsed]="effectiveCollapsed()" [class.mobile-open]="mobileOpen()" (keydown.escape)="closeMobile()">
+<aside class="sidebar" [class.collapsed]="effectiveCollapsed()" [class.mobile-open]="mobileOpen()">
   <div class="sidebar-head">
     <a class="brand" routerLink="/fly" title="Vision" (click)="closeMobile()">
       <span class="brand-mark" aria-hidden="true"></span>
@@ -103,6 +103,9 @@
   </nav>
 
   <div class="sidebar-foot">
+    <!-- Additive, self-removing: renders nothing unless the backend's demo package is present
+         (`vision.demo.enabled`, default on) — see `features/demo/demo-button/demo-button.ts`. -->
+    <vision-demo-button />
     <vision-identity-chip />
     <vision-notification-bell />
     <!-- Live-stream count / online status (moved verbatim in behaviour from the old header's
@@ -127,7 +130,16 @@
 @if (mobileOpen()) {
   <div class="sidebar-scrim" (click)="closeMobile()"></div>
 } @else {
-  <button type="button" class="sidebar-hamburger" (click)="openMobile()" aria-label="Open navigation" title="Open navigation">
+  <button
+    type="button"
+    class="sidebar-hamburger"
+    #hamburger
+    (click)="openMobile()"
+    aria-label="Open navigation"
+    aria-haspopup="true"
+    [attr.aria-expanded]="mobileOpen()"
+    title="Open navigation"
+  >
     <vision-icon name="list" [size]="18" />
   </button>
 }
