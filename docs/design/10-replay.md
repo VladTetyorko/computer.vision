@@ -61,10 +61,33 @@ and Firmware do. This is honest, costs nothing, and removes the false-bug.
 - `Open replay ›` navigates to the existing `/assets/:assetId/replay/:usageId` player — that page
   already works and is not being redesigned here.
 
-**Backend need:** a paged list of finished `AssetUsage` records (`assetId`, `startedAt`, `duration`,
-`eventCount`, `thumbnailUrl`). `AssetUsage` already records sessions + telemetry, so this is a read
-model over existing data, not a new domain concept. Scope it in the wave-4 task; do not block waves
-1–3 on it.
+### Frozen wire contract (wave 4)
+
+`AssetUsage` already carries `id, assetId, startedAt, endedAt, startPosition, lastPosition,
+sampleCount, streamId`. The only genuinely missing piece is a **fleet-wide** query —
+`AssetUsageRepositoryPort` has `findRecentByAsset(assetId, limit)` and no cross-asset equivalent.
+
+```
+GET /api/usages?limit=50[&assetId=<uuid>]
+200 → [                                   // newest first
+  {
+    "usageId":        "uuid",
+    "assetId":        "uuid",
+    "assetName":      "Falcon-2",         // resolved for display; "" if the asset is gone
+    "startedAt":      "2026-08-04T10:36:29.895Z",
+    "endedAt":        "2026-08-04T11:20:00.000Z",  // null while the flight is still open
+    "durationSeconds": 2610,                        // null while open
+    "sampleCount":     1234
+  }
+]
+```
+
+**Scoped out of v1, deliberately** — the earlier sketch above showed a thumbnail and an
+event-density sparkline. Neither is buildable honestly today: nothing stores a per-usage frame (the
+only image endpoint returns a stream's *current* frame, which would fabricate a value for a finished
+flight — the same trap that stopped the Alerts frame preview in wave 3), and detection events are
+not joined to usages. The list ships with asset, start, duration and sample count, which is enough
+to pick a flight. Revisit when event↔usage association exists.
 
 ## Refactor list
 

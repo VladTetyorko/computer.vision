@@ -160,9 +160,9 @@ export const NAV_MODES: readonly NavMode[] = [
       },
       {
         icon: 'settings',
-        name: 'Flight & detection settings',
-        description: 'Defaults for detection profile, notifications, and per-pipeline options.',
-        to: '/settings',
+        name: 'Detection defaults',
+        description: 'Detection profile, model, and per-pipeline options applied to every new stream.',
+        to: '/settings/detection',
       },
       {
         icon: 'list',
@@ -207,8 +207,7 @@ export const NAV_MODES: readonly NavMode[] = [
         icon: 'replay',
         name: 'Replay library',
         description: 'Scrub any finished flight, frame by frame.',
-        to: '/monitor/replay',
-        badge: 'soon',
+        to: '/replay',
       },
       {
         icon: 'layers',

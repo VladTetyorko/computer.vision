@@ -228,8 +228,19 @@ export function fingerprintMarkers(markers: readonly FleetMarker[]): string {
     .join('|');
 }
 
-/** What can flip auto-fit on the fleet map: a manual pan/zoom disables it, the recenter control re-enables it. */
-export type AutoFitEvent = 'userInteraction' | 'recenterClicked';
+/**
+ * What can flip auto-fit on the fleet map: a manual pan/zoom disables it, the recenter control
+ * re-enables it, and focusing one asset disables it.
+ *
+ * **`assetFocused`** is deliberately its own event rather than reusing `userInteraction`, even
+ * though both resolve to `false`. Selecting an asset centres the map on it; auto-fit's own effect
+ * re-fits to *every* marker whenever the marker set changes, which a telemetry poll does every
+ * couple of seconds — so leaving auto-fit on would yank the camera back off the chosen asset almost
+ * immediately. Naming the case says why the camera stopped following the fleet, and keeps the
+ * "operator dragged the map" and "operator picked an asset" transitions separable if they ever need
+ * to differ.
+ */
+export type AutoFitEvent = 'userInteraction' | 'recenterClicked' | 'assetFocused';
 
 /**
  * The auto-fit reducer (docs/CYCLES-PLAN.md §6): "auto-fit bounds on load and when the marker set
@@ -244,6 +255,8 @@ export function nextAutoFitEnabled(current: boolean, event: AutoFitEvent): boole
       return false;
     case 'recenterClicked':
       return true;
+    case 'assetFocused':
+      return false;
     default:
       return current;
   }

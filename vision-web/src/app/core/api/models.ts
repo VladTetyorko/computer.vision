@@ -636,6 +636,27 @@ export interface UsageTimeline {
 }
 
 /**
+ * Mirrors `dto.UsageSummaryResponse` (docs/design/10-replay.md's frozen wire contract, Wave 4 —
+ * `GET /api/usages?limit=&assetId=`), the fleet-wide flight list behind the replay library
+ * (`features/replay/replay-library.ts`). Newest first. `assetName` is resolved server-side for
+ * display — `''` when the owning asset is gone (deleted past recovery), never a dropped row: a
+ * usage outlives its asset. `endedAt`/`durationSeconds` are each independently absent (not
+ * `null`) while the flight is still open — the same `@JsonInclude(NON_NULL)` convention as
+ * `AssetUsage.endedAt` above; `features/replay/replay-library-logic.ts#formatUsageDuration` is
+ * the one place that turns an open flight into an honest "Flying now" rather than a negative or
+ * blank duration.
+ */
+export interface UsageSummary {
+  readonly usageId: string;
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly durationSeconds?: number;
+  readonly sampleCount: number;
+}
+
+/**
  * Mirrors `dto.CategoryCountsResponse`, one row of `FleetSummary#categories` (docs/MVP3-PLAN.md
  * C-a) — per-category asset counts, lifecycle crossed with currently-streaming. Every field is
  * always present (no `NON_NULL`-style optionality — nothing here is nullable server-side).

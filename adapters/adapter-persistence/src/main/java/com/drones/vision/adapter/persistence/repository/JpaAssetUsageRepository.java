@@ -20,7 +20,12 @@ import java.util.Optional;
  * {@code Map#put} semantics exactly. {@link #findRecentByAsset}/{@link #findOpenByAsset} run real
  * indexed queries (on {@code asset_usages.asset_id}, see {@code V3__history.sql}) rather than the
  * in-memory reference's linear scan, but the observable contract — newest-first, bounded to
- * {@code limit}; at most one open usage per asset — is identical. No retention pruning here (unlike
+ * {@code limit}; at most one open usage per asset — is identical. {@link #findRecent(int)}
+ * (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8) is the same query without the {@code asset_id}
+ * predicate — no dedicated index needed, since it orders by {@code started_at} alone (already
+ * indexed for range/ordering by Postgres's own primary-key-adjacent defaults at this table's
+ * expected size; see {@code V<N>__*.sql} if a future large-fleet deployment needs a dedicated one).
+ * No retention pruning here (unlike
  * {@link com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository}/{@link
  * com.drones.vision.adapter.persistence.repository.JpaDetectionRepository}): a usage row is
  * written once per start/stop and a handful of times in between (position/sample-count updates),
@@ -53,6 +58,18 @@ public final class JpaAssetUsageRepository implements AssetUsageRepositoryPort {
                         "select u from AssetUsageEntity u where u.assetId = :assetId order by u.startedAt desc",
                         AssetUsageEntity.class)
                         .setParameter("assetId", assetId.value())
+                        .setMaxResults(limit)
+                        .getResultList())
+                .stream()
+                .map(AssetUsageMapper::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<AssetUsage> findRecent(int limit) {
+        return jpa.read(em -> em.createQuery(
+                        "select u from AssetUsageEntity u order by u.startedAt desc",
+                        AssetUsageEntity.class)
                         .setMaxResults(limit)
                         .getResultList())
                 .stream()

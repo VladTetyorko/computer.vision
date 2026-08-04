@@ -1,8 +1,8 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
+import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
-import { ToastService } from '../../core/toast.service';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
@@ -16,7 +16,6 @@ import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-log
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
-import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import type { BoxesMode, Transport } from '../../shared/player/player';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import {
@@ -26,13 +25,12 @@ import {
   isAllDronesOption,
   isWatchMode,
   latestFinishedUsage,
-  resolveActiveAssetId,
   sortAssetsForPicker,
   trackingIdChanged,
 } from './fly-logic';
 import type { AssetDetails, AssetSummary, DetectionEvent, FlightCapability } from '../../core/api/models';
 
-/** Asset characteristics/usages + the picker's own asset list are re-read at this cadence. */
+/** Asset characteristics/usages + the header switcher's own asset list are re-read at this cadence. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
 /** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the map inset toggle predates
@@ -47,46 +45,54 @@ const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
  * empty box" investigation) — this codebase has no logging service/convention (grep-verified), so
  * plain `console.*` with a stable prefix, mirroring `shared/player/player.ts`'s own `[player]`.
  */
-const LOG_PREFIX = '[fly]';
+const LOG_PREFIX = '[cockpit]';
 
 /**
- * `FlyPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md wave W1) — owns every store/service injection,
- * derived read-model, and command the cockpit needs, so `FlyPage` itself injects only this class
- * (plus its own host-owned `UiStore` instances — the tool-rail drawer group and the Stop-stream
- * confirm — see `fly.ts`'s own doc comment for why those stay on the component rather than here,
- * mirroring `asset-detail.ts`'s `editors`/`panels` and `command.ts`'s `overlay` precedent exactly).
+ * `CockpitPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/fly/:assetId`, the operator cockpit
+ * (docs/MVP3-PLAN.md §C-b, the "one job, one page" persona: *flies ONE drone at a time; everything
+ * else is noise*). Split out of the old combined `FlyFacade` when the cockpit gained its own
+ * addressable route (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12) — `drone-picker-facade.ts` is the
+ * picker's own half; **almost everything below is that same class, unchanged**, just no longer
+ * sharing a component with the picker. See that file's own doc comment for what stayed picker-side.
  *
- * **Provided per route activation**, listed alongside `TelemetryStore`/`DetectionsStore`/
- * `WeatherStore` in `FlyPage`'s own `providers` array (all four page-scoped, not `providedIn:
- * 'root'`) — so this facade's own `inject(TelemetryStore)`/`inject(DetectionsStore)` resolve to the
- * exact same instances the page's child components (`<vision-fly-osd>`, `<vision-detections-strip>`,
- * `<vision-preflight-checklist>`'s own `TelemetryStore`-backed siblings) already DI-share by
- * injecting those stores directly themselves — moving *who injects them first* changes nothing about
- * *which* instance anything sees.
+ * **What's actually different from the pre-split `FlyFacade`, concretely**:
+ *   - `activeAssetId` is now driven by the route's own `:assetId` param (via {@link selectAsset},
+ *     called from `CockpitPage`'s constructor `effect()`) instead of the picker's internal
+ *     resolve-once-then-flip-a-signal dance — there is no more "no asset selected" state for this
+ *     page to represent; every mount of this component already has a concrete id to load.
+ *   - **`loadError`** is new — the honest empty state docs/NAV-IA-REDESIGN-PLAN.md F12 requires for
+ *     a `:assetId` that doesn't resolve (a bad bookmark, a since-deleted asset): `CockpitPage`'s own
+ *     template renders `<vision-empty>` instead of the cockpit while this is `true`, rather than the
+ *     old behavior of silently kicking the operator back to the picker (impossible now anyway — the
+ *     picker is a different route, and yanking the URL out from under a page that failed to load
+ *     would be its own kind of dishonest surprise; a bookmarked dead link should say so, not vanish).
+ *   - `settings.flyAssetId` is written by {@link loadAsset} **on success only**, not by
+ *     {@link selectAsset} up front — the old page only ever called `selectAsset` with an id already
+ *     known-valid (chosen from the fetched picker list), so remembering it immediately was safe; a
+ *     route param can be any string a URL bar or bookmark supplies, so remembering it before
+ *     confirming it actually resolves would let a dead link poison `fly-redirect-guard.ts`'s own
+ *     "remembered" check for every future `/fly` visit. Cleared the same way the old code did
+ *     whenever a load fails and the failed id is the one currently remembered.
+ *   - `pickerAssets`/`orderedPickerAssets` are renamed **`switcherAssets`/`orderedSwitcherAssets`** —
+ *     same `listAssets()`-backed list, same 5s poll, just renamed to say what it is actually for now
+ *     that there is no picker on this page: populating the header `DRONE` switcher's own options.
+ *   - the switcher's `(change)` handler now **navigates** (`Router`) rather than flip an internal
+ *     signal — switching drones, or choosing "All drones…", is a real route change to
+ *     `/fly/:assetId` (or back to `/fly`), addressable/bookmarkable/Back-able like every other
+ *     pick, not an invisible internal state change the URL never reflected. "All drones…" also
+ *     clears `settings.flyAssetId` — see {@link onSwitcherChange}'s own doc comment for why a plain
+ *     navigate alone isn't enough to actually reach the picker while the current drone still flies.
  *
- * **What moved here from `FlyPage` unchanged**: every store/service injection (`VisionApi`,
- * `ToastService`, `FleetStore`, `SettingsStore`, `TelemetryStore`, `DetectionsStore`, `EventsStore`,
- * `GeofenceStore`, `WeatherStore`, `PollScheduler`), every computed read-model (the picker, the
- * device/stream/live trio, `stopped`, `watchMode`, the FC-derived `preflightItems`/`diagnosticsRows`/
- * `canBringHome`/`canShowCommands`, the weather chip's `windLimitMps`, the ticker), and every command
- * method (`selectAsset`, `start`/`stop`, `setPrimaryDevice`, `onLatency`/`onTransport`, …) — same HTTP
- * calls, same toasts, same silent-degrade paths, same poll cadence, just relocated. `mapVisible`
- * mirrors `LiveFacade`'s `mapInsetVisible`/`CommandFacade`'s `railOpen` exactly: a persisted,
- * non-exclusive toggle that lives in the facade as a plain signal, not a `UiStore`.
- *
- * **Route inputs**: `FlyPage`'s `requestedAssetId`/`watch` are Angular `input()`s and can only be
- * declared on the component itself. `requestedAssetId` is read exactly once (mirrors the pre-facade
- * page's own "runs once, never inside the periodic poll" rule — a later query-param change while
- * already on `/fly` must not silently override an operator's own subsequent pick) — `FlyPage`'s
- * constructor passes its current value straight into {@link initPicker}. `watch` must stay reactive
- * (`?watch=1` can flip while this component instance stays mounted across a same-route navigation),
- * so `FlyPage`'s constructor instead forwards it continuously via a constructor `effect()` calling
- * {@link setWatch}, mirroring `LivePage`'s identical `effect(() => this.facade.setDeviceId(...))`.
+ * Every other read-model and command — the device/stream/live trio, `stopped`, `watchMode`, the
+ * FC-derived `preflightItems`/`diagnosticsRows`/`canBringHome`/`canShowCommands`, the weather chip's
+ * `windLimitMps`, the ticker, Start/Stop, the telemetry/detections re-entry guards — is byte-for-byte
+ * what `FlyFacade` already had: same HTTP calls, same toasts, same silent-degrade paths, same poll
+ * cadence, same O(N)-amplification guards (docs/REALTIME-PLAN.md Phase R-a item 2), just relocated.
  */
 @Injectable()
-export class FlyFacade {
+export class CockpitFacade {
   private readonly api = inject(VisionApi);
-  private readonly toasts = inject(ToastService);
+  private readonly router = inject(Router);
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsStore);
@@ -96,7 +102,7 @@ export class FlyFacade {
   readonly geofence = inject(GeofenceStore);
   /**
    * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5) — exposed as the
-   * whole store (not a thin passthrough), mirroring `geofence` above: `fly.html` wires
+   * whole store (not a thin passthrough), mirroring `geofence` above: `cockpit.html` wires
    * `<vision-live-map>`'s `[marks]`/`[selectedMarkId]`/`(markSelected)`/`(markMoved)`/`(mapClicked)`
    * straight to it, and `<vision-marks-panel>` injects this same `providedIn: 'root'` singleton
    * directly (a non-routed presentational child, per `architecture.spec.ts`'s own carve-out —
@@ -105,19 +111,18 @@ export class FlyFacade {
   readonly marks = inject(MarksStore);
   private readonly weather = inject(WeatherStore);
 
-  // --- Picker ------------------------------------------------------------------------------
-  /** Skeleton card count while the first `listAssets()` call is in flight. */
-  readonly skeletonRows = [1, 2, 3] as const;
-  readonly pickerAssets = signal<readonly AssetSummary[] | undefined>(undefined);
-  readonly pickerError = signal(false);
-  readonly orderedPickerAssets = computed(() => sortAssetsForPicker(this.pickerAssets() ?? []));
+  // --- Header switcher's own asset list (renamed from the old FlyFacade's `pickerAssets` — see
+  // this class's own doc comment) ---------------------------------------------------------------
+  readonly switcherAssets = signal<readonly AssetSummary[] | undefined>(undefined);
+  readonly orderedSwitcherAssets = computed(() => sortAssetsForPicker(this.switcherAssets() ?? []));
 
   /** The header switcher's own sentinel `<option>` value (docs/UX-REWORK-PLAN.md §U-a bullet 4). */
   readonly ALL_DRONES_OPTION = ALL_DRONES_OPTION_VALUE;
 
   readonly activeAssetId = signal<string | undefined>(undefined);
   readonly asset = signal<AssetDetails | undefined>(undefined);
-  readonly showPicker = computed(() => this.activeAssetId() === undefined);
+  /** See this class's own doc comment — the honest-empty-state signal `:assetId` degrading needs. */
+  readonly loadError = signal(false);
 
   // --- Telemetry/detections re-entry guards (docs/REALTIME-PLAN.md Phase R-a item 2) ---------
   // The last deviceId/streamId the corresponding constructor effect actually acted on — compared
@@ -128,7 +133,7 @@ export class FlyFacade {
   /** `${assetId} ${firmware}` — see the capabilities-tracking effect below (constructor). */
   private lastCapabilitiesKey: string | undefined = undefined;
 
-  // --- Cockpit: video device selection ------------------------------------------------------
+  // --- Video device selection ------------------------------------------------------------------
   readonly videoDevicesList = computed(() => videoDevices(this.asset()?.devices ?? []));
   /** `undefined` = "use the asset's first VIDEO device" — reset on every asset/device switch. */
   private readonly primaryDeviceIdOverride = signal<string | undefined>(undefined);
@@ -138,7 +143,7 @@ export class FlyFacade {
     return chosen ?? devices[0];
   });
   /**
-   * Secondary video-device tiles (`fly.html`'s `@for (device of secondaryDevices(); track
+   * Secondary video-device tiles (`cockpit.html`'s `@for (device of secondaryDevices(); track
    * device.id)`). **Verified against docs/REALTIME-PLAN.md Phase R-a item 4**: this computed
    * returns a brand-new array (and, on every ~5s `refreshPoll`, brand-new `Device` objects too)
    * regardless of whether anything actually changed, but `@for`'s own `track device.id` already
@@ -147,8 +152,8 @@ export class FlyFacade {
    * instance's own reattach guard (`shared/player/player.ts`'s `lastAttachKey`/`player-recovery.ts#attachKey`)
    * only tears down/rebuilds when the fed `src`/`whepUrl` values themselves change, never on mere
    * reorder/resize. Neither `suspended` nor `stopped` is bound on a secondary tile's player (see
-   * `fly.html`), so its attach key reduces to exactly `(src, whepUrl)` — i.e. tears down only when
-   * the underlying stream id actually changes, per that item's exit criterion.
+   * `cockpit.html`), so its attach key reduces to exactly `(src, whepUrl)` — i.e. tears down only
+   * when the underlying stream id actually changes, per that item's exit criterion.
    */
   readonly secondaryDevices = computed(() => {
     const primaryId = this.primaryDevice()?.id;
@@ -168,7 +173,7 @@ export class FlyFacade {
   private readonly hasBeenLive = signal(false);
   readonly stopped = computed(() => this.explicitlyStopped() || (this.hasBeenLive() && !this.live()));
 
-  /** Fed by `FlyPage`'s own `watch` route input — see this class's own doc comment above. */
+  /** Fed by `CockpitPage`'s own `watch` route input — see this class's own doc comment above. */
   private readonly watchSignal = signal<string | undefined>(undefined);
   readonly watchMode = computed(() => isWatchMode(this.watchSignal()));
 
@@ -203,7 +208,7 @@ export class FlyFacade {
   readonly diagnosticsRows = computed(() => deriveDiagnostics(this.telemetry.latest()?.extra));
 
   /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates `<vision-return-home-button>` (`fly.html`'s
+   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates `<vision-return-home-button>` (`cockpit.html`'s
    * `.hud-header`). Same "re-derive whenever the tracked sample changes, not a continuously-ticking
    * clock" convention as `preflightItems` above: `telemetry.latest()` itself already re-emits
    * roughly every poll/live-update tick while the vehicle is transmitting, so this tracks freshness
@@ -223,7 +228,7 @@ export class FlyFacade {
    */
   readonly capabilities = signal<FlightCapability | undefined>(undefined);
 
-  /** Gates `<vision-flight-command-panel>` (`fly.html`'s `.hud-header`) — `capabilities` itself
+  /** Gates `<vision-flight-command-panel>` (`cockpit.html`'s `.hud-header`) — `capabilities` itself
    * must have loaded *and* say `commandable`, on top of the identical firmware+freshness bar
    * `canBringHome` already clears (`flight-command-panel-logic.ts#canShowCommandPanel`). */
   readonly canShowCommands = computed(() => {
@@ -271,7 +276,7 @@ export class FlyFacade {
   // --- Events ticker overlay (docs/MVP3-PLAN.md §C-b: "this stream's events via events-store,
   // newest, auto-fading") — filters the shared global feed by this asset's id, same derivation
   // `AssetDetailPage`'s own offline-branch already uses (`filterEvents(events.events(), {assetId})`);
-  // "auto-fading" is a pure CSS animation per row (`fly.css`), not a JS timer.
+  // "auto-fading" is a pure CSS animation per row (`cockpit.css`), not a JS timer.
   readonly tickerEvents = computed(() => {
     const assetId = this.activeAssetId();
     if (!assetId) {
@@ -282,7 +287,7 @@ export class FlyFacade {
 
   constructor() {
     // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever the map toggle
-    // actually changes (the `M` shortcut, or `FlyPage#collapseOverlays`'s `Esc` handling); the
+    // actually changes (the `M` shortcut, or `CockpitPage#collapseOverlays`'s `Esc` handling); the
     // initial `signal()` value above already restored whatever was last saved.
     effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
 
@@ -397,6 +402,20 @@ export class FlyFacade {
     // pages that keeps the shared global events poll alive while mounted.
     this.events.activate();
 
+    // `PollScheduler.schedule`'s own contract is "starting one `periodMs` from now" — it never
+    // fires immediately itself, by design (every consumer is expected to do its own first fetch,
+    // see that method's own doc comment). The pre-split `FlyFacade` got this for free: `FlyPage`'s
+    // constructor called `initPicker()` immediately, which populated the one shared `pickerAssets`
+    // signal both the picker grid *and* this switcher read from. Now that `switcherAssets` has no
+    // picker-side reader forcing an immediate fetch, skipping this call would leave the header
+    // switcher showing only its "All drones…" sentinel for up to `ASSET_POLL_INTERVAL_MS` (5s) on
+    // every fresh cockpit mount — confirmed live (not just reasoned about) before this line was
+    // added. `activeAssetId()` is still `undefined` at this point in construction (the component's
+    // own `effect(() => this.facade.selectAsset(this.assetId()))` hasn't run its first turn yet —
+    // Angular effects schedule, they don't run inline at declaration), so `refreshPoll`'s own
+    // `loadAsset` half correctly no-ops here; only the switcher's list gets the early fetch.
+    void this.refreshPoll();
+
     const scheduler = inject(PollScheduler);
     const stopPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refreshPoll());
 
@@ -406,38 +425,54 @@ export class FlyFacade {
     });
   }
 
-  // --- Picker / asset selection ---------------------------------------------------------------
+  // --- Asset selection (route-driven — see this class's own doc comment above) -----------------
 
-  /** Called once by `FlyPage`'s own constructor — see this class's own doc comment above. */
-  async initPicker(requestedAssetId: string | undefined): Promise<void> {
+  /** Called from `CockpitPage`'s own constructor `effect()` whenever the route's `:assetId` changes
+   * (including the very first activation). */
+  selectAsset(assetId: string): void {
+    if (assetId === this.activeAssetId()) {
+      return;
+    }
+    console.info(`${LOG_PREFIX} selecting asset ${assetId}`);
+    this.activeAssetId.set(assetId);
+    this.asset.set(undefined);
+    this.loadError.set(false);
+    this.primaryDeviceIdOverride.set(undefined);
+    this.explicitlyStopped.set(false);
+    this.hasBeenLive.set(false);
+    this.capabilities.set(undefined);
+    void this.loadAsset(assetId);
+  }
+
+  private async loadAsset(assetId: string): Promise<void> {
     try {
-      const assets = await this.api.listAssets();
-      this.pickerAssets.set(assets);
-      this.pickerError.set(false);
-      const resolved = resolveActiveAssetId(assets, requestedAssetId, this.settings.flyAssetId());
-      console.info(`${LOG_PREFIX} picker loaded ${pluralize(assets.length, 'asset')}`, {
-        requestedAssetId,
-        rememberedAssetId: this.settings.flyAssetId(),
-        resolved,
-      });
-      if (resolved) {
-        this.selectAsset(resolved);
-      }
+      const details = await this.api.getAsset(assetId);
+      // A switcher pick / picker-card click / `?asset=` drill-down already only ever names a real
+      // id, but a bare `:assetId` route param can be anything a URL bar or bookmark supplies —
+      // remembering it as "last flown" only once it has actually resolved is what keeps a dead
+      // bookmark from poisoning `fly-redirect-guard.ts`'s own "remembered" check for every future
+      // `/fly` visit (see this class's own doc comment).
+      this.settings.flyAssetId.set(assetId);
+      this.asset.set(details);
     } catch (error) {
-      console.warn(`${LOG_PREFIX} could not load the asset picker`, { error });
-      this.pickerError.set(true);
+      if (this.asset() === undefined) {
+        // The very first load for this pick failed — a genuine dead end (docs/NAV-IA-REDESIGN-PLAN.md
+        // F12's own "must degrade to an honest empty state" requirement), not a background hiccup on
+        // top of an already-working cockpit (that case silently keeps the stale data instead, below).
+        console.warn(`${LOG_PREFIX} could not load asset ${assetId}`, { error });
+        this.loadError.set(true);
+        if (this.settings.flyAssetId() === assetId) {
+          this.settings.flyAssetId.set(null);
+        }
+      }
     }
   }
 
-  retryPicker(): void {
-    void this.initPicker(undefined);
-  }
-
-  /** Refreshes the picker's asset list (feeds the header switcher too) and the active asset, if any. */
+  /** Refreshes the header switcher's own asset list and the active asset. */
   private async refreshPoll(): Promise<void> {
     try {
       const assets = await this.api.listAssets();
-      this.pickerAssets.set(assets);
+      this.switcherAssets.set(assets);
     } catch {
       // Silent-degrade — background enrichment, not a user-initiated action, matches every other
       // poller in this app.
@@ -448,68 +483,10 @@ export class FlyFacade {
     }
   }
 
-  private async loadAsset(assetId: string): Promise<void> {
-    try {
-      const details = await this.api.getAsset(assetId);
-      this.asset.set(details);
-    } catch (error) {
-      if (this.asset() === undefined) {
-        // The very first load for this pick failed — a genuine dead end, not a background hiccup
-        // on top of an already-working cockpit (that case silently keeps the stale data instead).
-        console.warn(`${LOG_PREFIX} could not load asset ${assetId} — returning to the picker`, { error });
-        this.toasts.error('Could not load that drone — it may have been removed.');
-        this.activeAssetId.set(undefined);
-        this.settings.flyAssetId.set(null);
-      }
-    }
-  }
-
   /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 2 — background capability read, not a user-initiated action:
-   * silent-degrade on any failure (404 unknown asset, 403 out of scope, network) straight to
-   * `undefined`, no toast — the flight-command panel just stays hidden, mirroring
-   * `TelemetryStore`/`DetectionsStore`'s own "best-effort context" silent-failure convention rather
-   * than `loadAsset`'s own user-facing error toast (that one guards the entire cockpit's own load).
-   */
-  private async loadCapabilities(assetId: string): Promise<void> {
-    try {
-      const caps = await this.api.flightCapabilities(assetId);
-      this.capabilities.set(caps);
-    } catch (error) {
-      console.warn(`${LOG_PREFIX} could not load flight capabilities for ${assetId} — command panel stays hidden`, {
-        error,
-      });
-      this.capabilities.set(undefined);
-    }
-  }
-
-  /** Picking from the picker grid, the header switcher, or a resolved `?asset=`/remembered id — one path. */
-  selectAsset(assetId: string): void {
-    if (assetId === this.activeAssetId()) {
-      return;
-    }
-    console.info(`${LOG_PREFIX} selecting asset ${assetId}`);
-    this.settings.flyAssetId.set(assetId);
-    this.activeAssetId.set(assetId);
-    this.asset.set(undefined);
-    this.primaryDeviceIdOverride.set(undefined);
-    this.explicitlyStopped.set(false);
-    this.hasBeenLive.set(false);
-    this.capabilities.set(undefined);
-    void this.loadAsset(assetId);
-  }
-
-  /** Returns to the full picker without forgetting the remembered choice (re-picking re-sets it anyway). */
-  openPicker(): void {
-    this.activeAssetId.set(undefined);
-  }
-
-  /**
-   * `fly.html`'s header switcher binds this per-`<option>` (`[selected]`) rather than `[value]` on
-   * the `<select>` itself — see `fly-logic.ts#isSwitcherOptionSelected`'s doc comment for the
+   * `cockpit.html`'s header switcher binds this per-`<option>` (`[selected]`) rather than `[value]`
+   * on the `<select>` itself — see `fly-logic.ts#isSwitcherOptionSelected`'s doc comment for the
    * `<select>`/`@for` ordering race this sidesteps (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2).
-   * Exposed here (rather than a pure `fly-logic.ts` call `FlyPage` makes directly) purely because it
-   * needs the current `activeAssetId` — the single source this facade already owns.
    */
   switcherOptionSelected(candidateAssetId: string): boolean {
     return candidateAssetId === this.activeAssetId();
@@ -517,15 +494,28 @@ export class FlyFacade {
 
   /**
    * The header switcher's single `(change)` handler (docs/UX-REWORK-PLAN.md §U-a bullet 4: fold
-   * the old standalone "All drones" button into this one control) — the sentinel option opens the
-   * full picker, any other value is a real asset id and switches straight to it, same as before.
+   * the old standalone "All drones" button into this one control) — the sentinel option navigates
+   * to the picker (`/fly`), any other value is a real asset id and navigates straight to its own
+   * cockpit route. A real route change either way (docs/NAV-IA-REDESIGN-PLAN.md F12) — unlike the
+   * pre-split page's internal signal flip, both picks are now addressable/Back-able on their own.
+   *
+   * **"All drones…" also forgets the remembered drone** — not just navigate. Without this,
+   * `fly-redirect-guard.ts` would immediately bounce a plain `/fly` right back into *this exact*
+   * cockpit whenever the current drone is still streaming (its own "skip the picker when it has
+   * nothing to ask" job, working as designed) — making the picker practically unreachable from
+   * here for as long as the drone keeps flying, breaking docs/design/01-fly.md's own explicit
+   * promise that "the cockpit needs a way back to it". Choosing "All drones…" is itself an explicit
+   * signal that this visit is *not* "nothing to ask" — clearing `flyAssetId` is what makes the
+   * guard agree. Picking a drone again (from the picker, or this same switcher) re-establishes the
+   * memory exactly as before; nothing else about "remembered" changes.
    */
   onSwitcherChange(value: string): void {
     if (isAllDronesOption(value)) {
-      this.openPicker();
+      this.settings.flyAssetId.set(null);
+      void this.router.navigate(['/fly']);
       return;
     }
-    this.selectAsset(value);
+    void this.router.navigate(['/fly', value]);
   }
 
   // --- Video device switching -----------------------------------------------------------------
@@ -551,7 +541,7 @@ export class FlyFacade {
   }
 
   // --- Start / Stop ------------------------------------------------------------------------
-  // No confirm step here — `FlyPage`'s own host-owned `UiStore` gates `stop()` behind the
+  // No confirm step here — `CockpitPage`'s own host-owned `UiStore` gates `stop()` behind the
   // Stop-stream confirm dialog; this facade only ever executes the actual command.
 
   async start(): Promise<void> {
@@ -604,8 +594,20 @@ export class FlyFacade {
     this.boxesMode.update(cycleBoxesMode);
   }
 
-  /** Fed from `FlyPage`'s own route-bound `watch` input — see this class's own doc comment. */
+  /** Fed from `CockpitPage`'s own route-bound `watch` input — see this class's own doc comment. */
   setWatch(watch: string | undefined): void {
     this.watchSignal.set(watch);
+  }
+
+  private async loadCapabilities(assetId: string): Promise<void> {
+    try {
+      const caps = await this.api.flightCapabilities(assetId);
+      this.capabilities.set(caps);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not load flight capabilities for ${assetId} — command panel stays hidden`, {
+        error,
+      });
+      this.capabilities.set(undefined);
+    }
   }
 }

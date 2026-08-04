@@ -1,14 +1,21 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.application.replay.ReplayService;
 import com.drones.vision.application.replay.UsageRecording;
 import com.drones.vision.application.replay.UsageTimeline;
+import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.application.usage.UsageService;
+import com.drones.vision.application.usage.UsageSummary;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.AssetUsage;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.domain.model.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -28,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,6 +48,8 @@ class UsageTimelineControllerTest {
     private static final DeviceId DEVICE_ID = DeviceId.random();
 
     private ReplayService replayService;
+    private UsageService usageService;
+    private CurrentUser currentUser;
     private MockMvc mockMvc;
 
     private final UsageId usageId = UsageId.random();
@@ -48,7 +58,10 @@ class UsageTimelineControllerTest {
     @BeforeEach
     void setUp() {
         replayService = mock(ReplayService.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new UsageTimelineController(replayService))
+        usageService = mock(UsageService.class);
+        currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(new UsageTimelineController(replayService, usageService, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -59,6 +72,84 @@ class UsageTimelineControllerTest {
 
     private AssetUsage usage(Instant startedAt, Instant endedAt) {
         return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 2);
+    }
+
+    // ---- recent (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 -- the replay library list) ----
+
+    @Test
+    void recentReturns200WithMappedRowsOnHappyPath() throws Exception {
+        Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
+        Instant end = Instant.parse("2026-08-04T11:20:00.000Z");
+        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, end, 2610L, 1234);
+        when(usageService.recent(eq(VisibilityScope.unbounded()), isNull(), eq(50))).thenReturn(List.of(summary));
+
+        mockMvc.perform(get("/api/usages"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].usageId").value(usageId.value().toString()))
+                .andExpect(jsonPath("$[0].assetId").value(assetId.value().toString()))
+                .andExpect(jsonPath("$[0].assetName").value("Falcon-2"))
+                .andExpect(jsonPath("$[0].startedAt").value("2026-08-04T10:36:29.895Z"))
+                .andExpect(jsonPath("$[0].endedAt").value("2026-08-04T11:20:00Z"))
+                .andExpect(jsonPath("$[0].durationSeconds").value(2610))
+                .andExpect(jsonPath("$[0].sampleCount").value(1234));
+    }
+
+    @Test
+    void recentOmitsEndedAtAndDurationSecondsForAStillOpenUsage() throws Exception {
+        Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
+        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, null, null, 12);
+        when(usageService.recent(eq(VisibilityScope.unbounded()), isNull(), eq(50))).thenReturn(List.of(summary));
+
+        mockMvc.perform(get("/api/usages"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].endedAt").doesNotExist())
+                .andExpect(jsonPath("$[0].durationSeconds").doesNotExist());
+    }
+
+    @Test
+    void recentDefaultsLimitTo50WhenAbsent() throws Exception {
+        when(usageService.recent(any(), any(), anyInt())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/usages")).andExpect(status().isOk());
+
+        verify(usageService).recent(eq(VisibilityScope.unbounded()), isNull(), eq(50));
+    }
+
+    @Test
+    void recentPassesRequestedLimitThrough() throws Exception {
+        when(usageService.recent(any(), any(), anyInt())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/usages").param("limit", "5")).andExpect(status().isOk());
+
+        verify(usageService).recent(eq(VisibilityScope.unbounded()), isNull(), eq(5));
+    }
+
+    @Test
+    void recentPassesParsedAssetIdThrough() throws Exception {
+        when(usageService.recent(any(), any(), anyInt())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/usages").param("assetId", assetId.value().toString()))
+                .andExpect(status().isOk());
+
+        verify(usageService).recent(eq(VisibilityScope.unbounded()), eq(assetId), eq(50));
+    }
+
+    @Test
+    void recentReturns400ForMalformedAssetId() throws Exception {
+        mockMvc.perform(get("/api/usages").param("assetId", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void recentReturns400WhenServiceRejectsNonPositiveLimit() throws Exception {
+        when(usageService.recent(any(), any(), eq(0)))
+                .thenThrow(new IllegalArgumentException("limit must be positive: 0"));
+
+        mockMvc.perform(get("/api/usages").param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 
     @Test

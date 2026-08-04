@@ -1,100 +1,3 @@
-/* ---- Picker ---------------------------------------------------------------------------- */
-
-.picker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-  gap: var(--space-16);
-}
-
-/* Asset card rebuild (docs/UX-REWORK-PLAN.md §U-a2 §3) — a flex column so the header row, category,
-   optional facts, and the trailing "Enter cockpit →" line all get consistent spacing regardless of
-   how many facts a given card actually has (an offline asset with no fix yet has fewer than one
-   that's flown and streamed before). */
-.picker-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.picker-card:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-hover);
-}
-
-.picker-card h3 {
-  margin: 0;
-  min-width: 0;
-}
-
-.picker-card p {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
-.picker-card-facts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  margin: 0;
-}
-
-/* No facts at all (never used, no fix) — take up no space rather than leaving an empty gap. */
-.picker-card-facts:empty {
-  display: none;
-}
-
-.picker-card-facts .fact {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-8);
-  font-size: 0.78rem;
-}
-
-.picker-card-facts dt {
-  flex: none;
-  color: var(--text-faint);
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.picker-card-facts dd {
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-}
-
-/* Cards state their action (docs/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — `margin-top: auto` pins this
-   to the card's bottom edge regardless of how many facts render above it, so every card in a grid
-   row ends on the same line. */
-.picker-card-cta {
-  margin-top: auto;
-  padding-top: var(--space-8);
-  border-top: 1px solid var(--border);
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-info);
-}
-
-.skeleton-line,
-.skeleton-card {
-  background: var(--panel-raised);
-  border-radius: var(--radius-sm);
-  animation: pulse 1.6s ease-in-out infinite;
-}
-
-.skeleton-card {
-  /* Taller than a bare-name card (docs/UX-REWORK-PLAN.md §U-a2 §3's rebuild) so the first-ever
-     load doesn't jump in height once the real facts/CTA line arrive. */
-  height: 8.5rem;
-}
-
 /* ---- Cockpit grid (docs/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user request:
    "player = full-screen centered hero, key telemetry moves to a bottom row") -------------------- */
 /* Named CSS-grid areas replace the old ten `position: absolute` `.hud-*` regions and their
@@ -138,6 +41,11 @@
     'controls  rail';
   grid-template-columns: 1fr auto;
   grid-template-rows: auto 1fr auto auto auto;
+  /* The one edge-inset every `.main-*` overlay below shares (docs/NAV-IA-REDESIGN-PLAN.md F11,
+     docs/design/01-fly.md — "a grid overlay ... with an --overlay-pad"): named so "the safe margin
+     from the video's own edge" reads as one rule, not half a dozen independent `var(--space-16)`
+     literals that could silently drift apart one at a time. */
+  --overlay-pad: var(--space-16);
   /* No more global header to subtract (docs/NAV-IA-REDESIGN-PLAN.md §2.1) — `100dvh`, a viewport
      unit, not `height: 100%`: this page's own root sits directly inside `app.css`'s plain-block
      `<main>` (`height: 100dvh; overflow-y: auto`), and a percentage height here would need that
@@ -149,17 +57,18 @@
      same fixed-viewport-unit fix, one level down. The old `calc(100vh - var(--header-height))` and
      the hairline-seam `box-shadow` hack that papered over its sub-pixel rounding drift against the
      (now-deleted) sticky header are both gone outright — the header they guarded against no longer
-     exists, so there is no seam left to hide. `/fly` also carries `data: {fullBleed: true}`
-     (`fly.routes.ts`), which auto-collapses the sidebar to its icon rail while this page is active —
-     the actual F11 fix (72px of chrome above the failsafe banner), not merely a cosmetic seam
-     patch. */
+     exists, so there is no seam left to hide. Both `/fly` and `/fly/:assetId` also carry
+     `data: {fullBleed: true}` (`fly.routes.ts`), which auto-collapses the sidebar to its icon rail
+     while either page is active — the actual F11 fix (72px of chrome above the failsafe banner), not
+     merely a cosmetic seam patch. */
   height: 100dvh;
   min-height: 20rem;
   overflow: hidden;
   background: var(--black);
 }
 
-.cockpit-loading {
+.cockpit-loading,
+.cockpit-empty {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -170,6 +79,13 @@
   width: 100%;
   max-width: 30rem;
   height: 12rem;
+}
+
+/* Honest empty state (docs/NAV-IA-REDESIGN-PLAN.md F12 — a bad/stale `:assetId` bookmark) —
+   `vision-empty` centered the same way the loading skeleton is, on the same `--black` cockpit
+   backdrop so a dead link never flashes the app's ordinary light/dark page background mid-cockpit. */
+.cockpit-empty {
+  color: var(--text);
 }
 
 .grid-banner {
@@ -215,8 +131,8 @@
 }
 
 /* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·
-   marks · help, each a `vision-icon-button` toggling `panels` (fly.ts). Grouped by job
-   (docs/UX-SIMPLIFY-REVIEW.md F4 — see fly.html's own comment above `.grid-rail` for the full
+   marks · help, each a `vision-icon-button` toggling `panels` (cockpit.ts). Grouped by job
+   (docs/UX-SIMPLIFY-REVIEW.md F4 — see cockpit.html's own comment above `.grid-rail` for the full
    grouping rationale); this rule now spaces `.rail-group`s apart, each group handling its own
    tighter inner gap. */
 .grid-rail {
@@ -251,8 +167,8 @@
    elsewhere in this file, rather than inventing new rail chrome. Narrower than the icon buttons
    themselves so it reads as a quiet seam, not a rule. No text group label: at this rail's ~2.25rem
    button width, group names ("Situational") don't read clean (F4: "if it crowds, use just the
-   divider") — `role="group"`/`aria-label` on each `.rail-group` (fly.html) carries the same grouping
-   for assistive tech instead. */
+   divider") — `role="group"`/`aria-label` on each `.rail-group` (cockpit.html) carries the same
+   grouping for assistive tech instead. */
 .rail-divider {
   width: 1.25rem;
   height: 1px;
@@ -340,21 +256,43 @@
 }
 
 /* ---- Main header overlay: exit, drone switcher, "Bring home" ------------------------------ */
-
+/* A real 3-column safe-area grid, not a flex row relying on wrap-if-it-overflows
+   (docs/NAV-IA-REDESIGN-PLAN.md F11, docs/design/01-fly.md — "Bring home is clipped at the right
+   edge behind/past the DRONE selector ... fix by giving the overlay a real safe area rather than
+   nudging positions"). Three columns: the exit link (`auto`, left), pure slack (`minmax(0, 1fr)`,
+   absorbs whatever width is left over), and `.header-actions` (`minmax(0, auto)`, right) — the
+   switcher+"Bring home" cluster can only ever grow into the slack column, never past
+   `--overlay-pad` on the right, because a `minmax(0, auto)` track's max is capped at the space
+   actually available, not its own content's natural width (unlike the old flex row, where a wide
+   enough cluster could in principle sit flush against — or past — the container's own edge before
+   `flex-wrap` ever kicked in). `.header-actions` itself still wraps onto a second line inside that
+   column if its own content genuinely doesn't fit (see that class below) — wrapping, never clipping,
+   is this row's one overflow strategy at every width. */
 .main-header {
   position: absolute;
-  top: var(--space-16);
-  left: var(--space-16);
-  right: var(--space-16);
+  top: var(--overlay-pad);
+  left: var(--overlay-pad);
+  right: var(--overlay-pad);
   z-index: 6;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, auto);
+  align-items: start;
+  column-gap: var(--space-8);
+}
+
+/* The right-hand cluster (switcher + "Bring home") — `min-width: 0` is load-bearing (the grid-item
+   shrink-to-fit trap `.switcher-control`'s own `min-width: 0` already fixes for its child, needed
+   again one level up): without it this flex box would refuse to shrink below its content's natural
+   width and force the grid's own `minmax(0, auto)` column past the space available. `flex-wrap`
+   is the fallback once even a fully-shrunk switcher can't make room — the pair drops to two lines,
+   still entirely inside the safe area, never off the edge. */
+.header-actions {
+  min-width: 0;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-8);
-  /* docs/DRONE-INFRA-PLAN.md I-e Stage 1: "Bring home" can add a second pill-shaped control to this
-     row alongside the exit link/switcher — wrapping (rather than `overflow: hidden`/clipping
-     off-screen) is the safe default; a wrapped second line still reads fine over the video, unlike a
-     silently-clipped control nobody can click. */
-  flex-wrap: wrap;
   row-gap: var(--space-8);
 }
 
@@ -381,9 +319,11 @@
    floating unexplained in the header), styled as the same frosted-pill chrome every other HUD
    control here already uses (`.icon-btn`'s own background/border/blur), just wrapping a `<label>`
    so the label text and the control share one clickable/hoverable surface and one native
-   association, instead of a second free-floating `<span>`. */
+   association, instead of a second free-floating `<span>`. No `margin-left: auto` any more — that
+   used to be what right-aligned this control (and, by extension, "Bring home" after it) inside one
+   shared flex row with the exit link; `.header-actions` now owns right-alignment on its own via
+   `justify-content: flex-end`, one layer up. */
 .switcher-control {
-  margin-left: auto;
   max-width: 16rem;
   display: inline-flex;
   align-items: center;
@@ -437,7 +377,7 @@
    map inset hides"). */
 .main-map {
   position: absolute;
-  left: var(--space-16);
+  left: var(--overlay-pad);
   bottom: var(--space-32);
   width: min(22rem, 32vw);
   /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
@@ -455,8 +395,8 @@
 
 .main-secondary {
   position: absolute;
-  left: var(--space-16);
-  bottom: var(--space-16);
+  left: var(--overlay-pad);
+  bottom: var(--overlay-pad);
   z-index: 4;
   display: flex;
   gap: var(--space-8);
@@ -506,8 +446,8 @@
    computed, offset (this cockpit's own long-standing convention: see `.main-diagnostics`'s twin). */
 .main-preflight {
   position: absolute;
-  left: var(--space-16);
-  bottom: calc(var(--space-16) + var(--space-64));
+  left: var(--overlay-pad);
+  bottom: calc(var(--overlay-pad) + var(--space-64));
   z-index: 3;
 }
 
@@ -515,8 +455,8 @@
    now that the old bottom-right detections toggle moved into its own tool-rail drawer. */
 .main-diagnostics {
   position: absolute;
-  right: var(--space-16);
-  bottom: var(--space-16);
+  right: var(--overlay-pad);
+  bottom: var(--overlay-pad);
   z-index: 3;
 }
 

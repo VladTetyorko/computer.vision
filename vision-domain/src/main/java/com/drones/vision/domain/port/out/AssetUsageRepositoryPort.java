@@ -27,6 +27,10 @@ import java.util.Optional;
  *   <li>{@link #findRecentByAsset(AssetId, int)} returns the most recent
  *       usages for the asset, newest first, bounded to at most {@code
  *       limit}; a snapshot, not a live view.</li>
+ *   <li>{@link #findRecent(int)} is {@link #findRecentByAsset(AssetId, int)}'s
+ *       fleet-wide counterpart (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8): the
+ *       most recent usages across every asset, newest first, bounded to at
+ *       most {@code limit}; a snapshot, not a live view.</li>
  *   <li>{@link #findOpenByAsset(AssetId)} returns the asset's currently open
  *       usage ({@code endedAt == null}), if any. At most one usage per asset
  *       is open at a time.</li>
@@ -64,6 +68,16 @@ public interface AssetUsageRepositoryPort {
      * @return an immutable snapshot of the most recent usages, newest first
      */
     List<AssetUsage> findRecentByAsset(AssetId assetId, int limit);
+
+    /**
+     * Lists the most recent usages across every asset, newest first — the fleet-wide "replay
+     * library" query (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8), {@link #findRecentByAsset(AssetId,
+     * int)}'s cross-asset counterpart.
+     *
+     * @param limit maximum number of usages to return; must be positive
+     * @return an immutable snapshot of the most recent usages across every asset, newest first
+     */
+    List<AssetUsage> findRecent(int limit);
 
     /**
      * Finds the asset's currently open usage, if any.

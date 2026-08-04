@@ -1,0 +1,83 @@
+<div class="page page--form">
+  <vision-page-bar title="Account settings" icon="user" />
+
+  <!-- Task 2 (docs/NAV-IA-REDESIGN-PLAN.md §2.5) — a one-line blast-radius statement, always
+       visible, no click needed: this page's own stakes are low (nothing here reaches anyone else's
+       stream), so a plain muted line is enough — contrast `detection-settings.html`'s own
+       `vision-notice`, reserved for the page whose changes are not this contained. -->
+  <p class="muted blast-line">Only affects your account.</p>
+
+  <!-- ---- Interface ------------------------------------------------------- -->
+  <section class="card">
+    <header><h2>Interface</h2></header>
+
+    <label class="toggle">
+      <input
+        type="checkbox"
+        [checked]="facade.settings.advancedMode()"
+        (change)="facade.toggleAdvanced($any($event.target).checked)"
+      />
+      <span>
+        <strong>Advanced mode</strong>
+        <span class="muted">
+          Reveals raw adapter options and per-stream internals everywhere in the app. This is an
+          account-level choice — turn it on once and it stays on.
+        </span>
+      </span>
+    </label>
+  </section>
+
+  <!-- ---- Notifications (docs/MVP2-PLAN.md §E, E-b bullet 4) -------------------------------- -->
+  <section class="card">
+    <header><h2>Notifications</h2></header>
+
+    <label class="toggle">
+      <input
+        type="checkbox"
+        [checked]="facade.settings.eventNotifications()"
+        (change)="facade.toggleEventNotifications($any($event.target).checked)"
+      />
+      <span>
+        <strong>Notify me about new detection events</strong>
+        <span class="muted">
+          Fires a browser notification the moment a new event opens, but only while this tab isn't
+          the one you're looking at — when it is, the Wall's Events rail already shows it live, so
+          a notification on top would just be noise. Turning this on will ask your browser for
+          permission if it hasn't already been granted.
+        </span>
+      </span>
+    </label>
+
+    @if (facade.notificationPermission() === 'denied') {
+      <p class="muted hint">
+        Notifications are blocked for this site in your browser settings — allow them there first.
+      </p>
+    } @else if (facade.notificationPermission() === 'unsupported') {
+      <p class="muted hint">This browser does not support notifications.</p>
+    }
+  </section>
+
+  <!-- ---- System --------------------------------------------------------- -->
+  <section class="card">
+    <header><h2>System</h2></header>
+    <dl>
+      <dt>Backend</dt>
+      <dd>
+        @switch (facade.fleet.reachable()) {
+          @case (true) { <span class="chip ok">reachable</span> }
+          @case (false) { <span class="chip danger">unreachable</span> }
+          @default { <span class="chip">checking…</span> }
+        }
+      </dd>
+      <dt>Devices</dt>
+      <dd>{{ facade.fleet.devices().length }}</dd>
+      <dt>Active streams</dt>
+      <dd>{{ facade.fleet.streams().length }}</dd>
+    </dl>
+    <p class="muted hint">
+      Phase-1 control plane: RTSP in, HLS out. Events, training and identity arrive in later
+      phases — see <code>ARCHITECTURE.md</code>.
+      Raw request/response access has moved to <a href="/debug">Debug</a>.
+    </p>
+  </section>
+</div>

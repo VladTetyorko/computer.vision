@@ -461,6 +461,33 @@ class PostgresDockerIntegrationTest {
         }
 
         @Test
+        void findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit() {
+            // Fleet-wide (unlike findRecentByAsset), so this table also holds rows from every
+            // other test in this class -- assert relative order among *this test's own* rows
+            // (identified by id) within a large-enough fetch, rather than assuming these are the
+            // only/topmost rows in the whole suite.
+            AssetId assetA = AssetId.random();
+            AssetId assetB = AssetId.random();
+            AssetUsage oldest = new AssetUsage(UsageId.random(), assetA, NOW, NOW.plusSeconds(1), null, null, 0);
+            AssetUsage middle = new AssetUsage(UsageId.random(), assetB, NOW.plusSeconds(10),
+                    NOW.plusSeconds(11), null, null, 0);
+            AssetUsage newest = new AssetUsage(UsageId.random(), assetA, NOW.plusSeconds(20),
+                    NOW.plusSeconds(21), null, null, 0);
+            repository.save(oldest);
+            repository.save(newest);
+            repository.save(middle);
+            Set<UsageId> ours = Set.of(oldest.id(), middle.id(), newest.id());
+
+            List<UsageId> ourOrder = repository.findRecent(10_000).stream()
+                    .map(AssetUsage::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newest.id(), middle.id(), oldest.id()), ourOrder,
+                    "findRecent must span every asset (not just one) and stay newest-first");
+        }
+
+        @Test
         void findOpenByAssetReturnsOnlyTheCurrentlyOpenUsage() {
             AssetId assetId = AssetId.random();
             AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0);

@@ -2,27 +2,25 @@ import type { Routes } from '@angular/router';
 
 /**
  * `/assets/:assetId/replay/:usageId` — the asset detail page's usage history "Replay" target for a
- * finished usage (docs/MVP2-PLAN.md §R, R-b) — and `/replay` — the event → replay deep link's own
- * flat, query-param route (docs/OPS-CORE-PLAN.md §Q1: `?asset=…&usage=…&t=…`). Both load the same
- * `ReplayPage`; see that component's own class doc comment for how it tells the two apart. Split
- * into its own file per vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see
- * `features/fly/fly.routes.ts`'s doc comment for why.
+ * finished usage (docs/MVP2-PLAN.md §R, R-b), unchanged — and `/replay` — the replay library
+ * (docs/design/10-replay.md, Wave 4, F8) **and** the event → replay deep link's own flat,
+ * query-param route (docs/OPS-CORE-PLAN.md §Q1: `?asset=…&usage=…&t=…`), both at once: `/replay`
+ * now loads `ReplayLibraryPage`, which renders the library when no `?usage=` is given and defers
+ * straight to `ReplayPage` (embedded, not routed) when one is — see that component's own class doc
+ * comment for the full "how the two are told apart" writeup. Split into its own file per
+ * vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s doc
+ * comment for why.
  *
- * **The bare `'replay'` route is deliberately kept (docs/NAV-IA-REDESIGN-PLAN.md F8, docs/design/
- * 10-replay.md), despite that design doc's own Wave-1 refactor list literally saying "remove the bare
- * `/replay` route so the empty detail state is unreachable."** That instruction targets one specific
- * problem: the Monitor hub's "Replay library" tile used to redirect here with no params, landing on
- * `ReplayPage`'s own "No usage specified." empty state — a nav entry advertising a feature that
- * doesn't exist (F8). That path is now closed **without touching this file** —
- * `features/hubs/hubs.routes.ts`'s `monitor/replay` route points straight at `ComingSoon` instead of
- * redirecting here (see that file's own doc comment). **This route itself could not be deleted**:
- * `shared/ui/notification-bell.ts`, `features/wall/wall-facade.ts`, and `features/alerts/alerts-
- * facade.ts` all call `router.navigate(['/replay'], {queryParams: {asset, usage, t}})` — the real,
- * shipped event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) — grep-verified live call sites, not a
- * hypothetical. Deleting the route would have 404'd all three. The only way to reach the bare,
- * param-less "No usage specified." state now is typing `/replay` directly into the address bar, which
- * is not a navigation path the app itself exposes — F8's acceptance ("no navigation path reaches
- * Replay unavailable") holds without removing a working feature.
+ * **Wave 1's own "why the bare route can't be deleted" reasoning still holds, updated for who
+ * answers it.** `shared/ui/notification-bell.ts`, `features/wall/wall-facade.ts`, and
+ * `features/alerts/alerts-facade.ts` all call `router.navigate(['/replay'], {queryParams: {asset,
+ * usage, t}})` — the real, shipped event → replay deep link — grep-verified live call sites, not a
+ * hypothetical. Before Wave 4 this route pointed at `ReplayPage` directly, which answered a
+ * param-less visit with "No usage specified."; Wave 1 closed the one navigation path that could
+ * reach that (`features/hubs/hubs.routes.ts`'s `monitor/replay` → `ComingSoon`) without touching
+ * this route, since deleting it outright would have 404'd all three deep-link callers. Wave 4 goes
+ * one step further and makes the param-less case itself honest: it now answers with an actual
+ * library instead of an error state that merely became unreachable.
  */
 export const REPLAY_ROUTES: Routes = [
   {
@@ -35,8 +33,8 @@ export const REPLAY_ROUTES: Routes = [
   {
     path: 'replay',
     title: 'Replay · Vision',
-    // `?asset=`/`?usage=`/`?t=` bind to `ReplayPage`'s aliased `assetIdParam`/`usageIdParam`/
-    // `deepLinkOffsetParam` inputs — see that component's own class doc comment.
-    loadComponent: () => import('./replay').then((m) => m.ReplayPage),
+    // `?asset=`/`?usage=`/`?t=`/`?sel=` bind to `ReplayLibraryPage`'s own aliased inputs — see that
+    // component's class doc comment.
+    loadComponent: () => import('./replay-library').then((m) => m.ReplayLibraryPage),
   },
 ];

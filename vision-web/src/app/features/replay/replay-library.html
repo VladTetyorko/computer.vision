@@ -1,0 +1,161 @@
+@if (usageIdParam(); as usageId) {
+  <!-- Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) — the exact same `ReplayPage` component
+       this URL has always loaded, just reached one component deeper. See class doc comment. -->
+  <vision-replay [asset]="assetIdParam()" [usage]="usageId" [t]="deepLinkOffsetParam()" />
+} @else {
+  <!-- The replay library (docs/design/10-replay.md, Wave 4, F8) -->
+  <div class="page">
+    <vision-page-bar
+      title="Replay library"
+      icon="replay"
+      [count]="facade.loaded() && !facade.errorMessage() ? facade.filteredUsages().length : null"
+      countNoun="flight"
+    >
+      <select
+        pageBarFilters
+        name="replayAssetFilter"
+        class="replay-filter"
+        aria-label="Filter by asset"
+        [ngModel]="facade.assetFilter()"
+        (ngModelChange)="facade.setAssetFilter($event)"
+      >
+        <option value="">All assets</option>
+        @for (option of facade.assetOptions(); track option.assetId) {
+          <option [value]="option.assetId">{{ option.displayName }}</option>
+        }
+      </select>
+
+      <select
+        pageBarFilters
+        name="replayTimeRangeFilter"
+        class="replay-filter"
+        aria-label="Filter by time range"
+        [ngModel]="facade.timeRangeFilter()"
+        (ngModelChange)="facade.timeRangeFilter.set($event)"
+      >
+        <option value="all">Any time</option>
+        <option value="today">Today</option>
+        <option value="7d">Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+      </select>
+
+      @if (facade.hasActiveFilters()) {
+        <button pageBarFilters type="button" class="btn secondary small" (click)="facade.clearFilters()">Clear filters</button>
+      }
+    </vision-page-bar>
+
+    <!-- Two-pane (docs/NAV-IA-REDESIGN-PLAN.md §2.4): the preview docks beside the list ≥1200px and
+         overlays it below that — see `vision-two-pane`'s own doc comment. Selection lives in
+         `?sel=<usageId>`, never a bare component signal, so refresh/Back/sharing all keep working. -->
+    <vision-two-pane
+      [detailOpen]="!!facade.selectedUsage()"
+      [detailLabel]="facade.selectedUsage()?.assetName || 'Flight details'"
+      (detailClose)="facade.clearSelection()"
+    >
+      <section class="card" twoPaneList>
+        @if (facade.hasActiveFilters() && facade.loaded() && !facade.errorMessage()) {
+          <div class="muted flights-shown">{{ facade.filteredUsages().length }} of {{ pluralize(facade.usages().length, 'flight') }}</div>
+        }
+
+        @if (facade.errorMessage(); as message) {
+          <vision-empty title="Couldn't load the replay library" [message]="message">
+            <button type="button" class="btn secondary" (click)="facade.refresh()">Retry</button>
+          </vision-empty>
+        } @else if (facade.loading() && !facade.loaded()) {
+          <p class="muted loading-line">Loading flights…</p>
+        } @else if (facade.filteredUsages().length === 0) {
+          @if (facade.usages().length > 0) {
+            <vision-empty title="No flights match these filters" message="Nothing in the selected time range for this asset.">
+              <button type="button" class="btn secondary" (click)="facade.clearFilters()">Clear filters</button>
+            </vision-empty>
+          } @else {
+            <vision-empty
+              title="No finished flights yet"
+              message="Flights show up here once a drone has flown — start a stream and fly to build replay history."
+            />
+          }
+        } @else {
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Started</th>
+                  <th>Duration</th>
+                  <th>Samples</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (usage of facade.filteredUsages(); track usage.usageId) {
+                  <tr
+                    class="row-selectable"
+                    [class.selected]="usage.usageId === facade.selectedId()"
+                    tabindex="0"
+                    role="button"
+                    [attr.aria-pressed]="usage.usageId === facade.selectedId()"
+                    [attr.aria-label]="'View details for ' + (usage.assetName || 'this flight')"
+                    (click)="facade.selectRow(usage.usageId)"
+                    (keydown.enter)="facade.selectRow(usage.usageId)"
+                    (keydown.space)="$event.preventDefault(); facade.selectRow(usage.usageId)"
+                  >
+                    <td>
+                      <div class="name-cell">
+                        <span class="dot" [class.live]="!usage.endedAt"></span>
+                        <span class="name truncate" [title]="usage.assetName || 'Unknown asset'">{{ usage.assetName || '—' }}</span>
+                      </div>
+                    </td>
+                    <td class="muted">{{ startedLabel(usage.startedAt) }}</td>
+                    <td>
+                      @if (!usage.endedAt) {
+                        <span class="chip ok"><span class="dot live"></span>Flying now</span>
+                      } @else {
+                        {{ formatUsageDuration(usage.durationSeconds) }}
+                      }
+                    </td>
+                    <td class="muted">{{ usage.sampleCount }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </section>
+
+      <!-- Preview (docs/design/10-replay.md, Wave 4): every field here is already loaded on the row
+           itself — no extra fetch on selection, see class doc comment for why. -->
+      @if (facade.selectedUsage(); as usage) {
+        <div twoPaneDetail>
+          <div class="detail-chips">
+            @if (!usage.endedAt) {
+              <span class="chip ok"><span class="dot live"></span>Flying now</span>
+            } @else {
+              <span class="chip">{{ formatUsageDuration(usage.durationSeconds) }}</span>
+            }
+            <span class="chip">{{ pluralize(usage.sampleCount, 'sample') }}</span>
+          </div>
+
+          <dl class="detail-fields">
+            <div class="detail-field">
+              <dt>Asset</dt>
+              <dd>{{ usage.assetName || 'Unknown asset' }}</dd>
+            </div>
+            <div class="detail-field">
+              <dt>Started</dt>
+              <dd>{{ startedLabel(usage.startedAt) }}</dd>
+            </div>
+            @if (usage.endedAt) {
+              <div class="detail-field">
+                <dt>Ended</dt>
+                <dd>{{ startedLabel(usage.endedAt) }}</dd>
+              </div>
+            }
+          </dl>
+
+          <div class="detail-actions">
+            <a class="btn" [routerLink]="['/assets', usage.assetId, 'replay', usage.usageId]">Open replay ›</a>
+          </div>
+        </div>
+      }
+    </vision-two-pane>
+  </div>
+}
