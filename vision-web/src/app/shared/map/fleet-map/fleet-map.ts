@@ -16,9 +16,19 @@ import {
 import type * as Leaflet from 'leaflet';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
 import { EventsStore } from '../../../core/events/events-store';
+import { ThemeStore } from '../../../core/shell/theme-store';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel, selectEventMarkers } from '../../../core/events/events-logic';
 import type { DetectionEvent, GeofenceZone, GeoPosition, Mark } from '../../../core/api/models';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
+import {
+  MAP_LAYERS,
+  droneDivIcon,
+  effectiveMapLayerId,
+  ensureLeafletStylesheet,
+  importLeaflet,
+  isMapLayerExplicit,
+  markMapLayerExplicit,
+  mapLayerTileLayer,
+} from '../tile-cache/leaflet-loader';
 import { FleetMapStore } from '../../../core/map/map-store';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
 import { zoneKindLabel, zoneLayerStyle } from '../../../core/geofence/geofence-logic';
@@ -132,9 +142,24 @@ export class FleetMap {
   protected readonly store = inject(FleetMapStore);
   protected readonly settings = inject(SettingsStore);
   protected readonly events = inject(EventsStore);
+  protected readonly theme = inject(ThemeStore);
 
   /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
   protected readonly layers = MAP_LAYERS;
+
+  /**
+   * The layer actually rendered (docs/VISUAL-REFRESH-PLAN.md F7) — `SettingsStore.mapLayer()`
+   * once the operator has explicitly used the layer picker (`setLayer` below), otherwise the
+   * current theme's own default (`effectiveMapLayerId`/`leaflet-loader.ts`). Drives both
+   * `applyLayer` and the layer-picker's own `[class.active]` binding, so the highlighted button
+   * always matches what is actually on screen. `isMapLayerExplicit()` is a plain (non-signal)
+   * `localStorage` read, safe to call from inside this `computed()`: the only place that flag ever
+   * changes is `setLayer`, which always writes it in the same call as `settings.mapLayer.set(...)`
+   * — a real signal this computed already depends on — so a stale read here is not reachable.
+   */
+  protected readonly activeLayerId = computed<MapLayerId>(() =>
+    effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
+  );
 
   /**
    * The full-page "Watch live" (docs/UX-REWORK-PLAN.md U-a2 item 1): emits the assetId behind a
@@ -186,6 +211,23 @@ export class FleetMap {
    */
   readonly focusRequest = input<{ assetId: string; tick: number } | undefined>(undefined);
 
+  /**
+   * Which assets currently have an open attention reason (docs/VISUAL-REFRESH-PLAN.md F7, task 2)
+   * — `CommandFacade.attentionAssetIds`, the exact same set the entity rail's own severity sort
+   * already derives (`command-logic.ts#buildEntityRows`), so the map and the rail never disagree
+   * about which markers need attention. Recolors that marker `--color-danger` regardless of
+   * `live`/offline — an asset needing attention while flying is still worth flagging, not just one
+   * that has gone quiet.
+   */
+  readonly attentionAssetIds = input<ReadonlySet<string>>(new Set());
+
+  /**
+   * The asset currently selected in `CommandFacade` (a rail row, or a direct marker click) — gets
+   * the same `--color-info` ring every other selected row in the app uses (F4), so map selection
+   * and list selection read as one concept. `undefined` while nothing is selected.
+   */
+  readonly selectedAssetId = input<string | undefined>(undefined);
+
   /** A mark marker was clicked. */
   readonly markSelected = output<string>();
   /** A mark marker was dragged to a new position (drag-to-correct). */
@@ -201,6 +243,11 @@ export class FleetMap {
   /** Position-carrying events worth plotting, most recent first, capped — see class doc. */
   protected readonly eventMarkers = computed(() => selectEventMarkers(this.events.events()));
 
+  /** The legend row's own counts (docs/VISUAL-REFRESH-PLAN.md F7, task 4) — a direct passthrough of
+   * `FleetMapStore.buckets()` (already computed for the marker-plotting logic itself, `core/map/map-logic.ts#bucketAssets`),
+   * not a second derivation; zero new HTTP either way. */
+  protected readonly buckets = this.store.buckets;
+
   private leaflet: typeof Leaflet | null = null;
   private map: Leaflet.Map | null = null;
   private tileLayer: Leaflet.TileLayer | null = null;
@@ -215,10 +262,13 @@ export class FleetMap {
   constructor() {
     afterNextRender(() => void this.initMap());
 
-    // Swaps the tile layer whenever the persisted choice changes (docs/CYCLES-PLAN.md §9, CU-b
-    // item 6) — a no-op until `initMap()` has created `this.map` (it applies the initial layer
-    // itself once the Leaflet chunk lands).
-    effect(() => this.applyLayer(this.settings.mapLayer()));
+    // Swaps the tile layer whenever the effective choice changes (docs/CYCLES-PLAN.md §9, CU-b
+    // item 6; theme-aware default docs/VISUAL-REFRESH-PLAN.md F7) — reading `activeLayerId()`
+    // tracks both `settings.mapLayer()` and `theme.theme()` (it's a `computed()` over both), so a
+    // theme flip re-tiles the map exactly like an explicit layer pick does. A no-op until
+    // `initMap()` has created `this.map` (it applies the initial layer itself once the Leaflet
+    // chunk lands).
+    effect(() => this.applyLayer());
 
     // Centres the map on each focus request. `untracked` around the body is load-bearing:
     // `centerOnAsset` reads `store.markers()`, which changes on every telemetry poll, so a tracked
@@ -238,6 +288,12 @@ export class FleetMap {
     // only when the plotted set actually moved, not on every tick.
     effect(() => {
       const markers = this.store.markers();
+      // Tracked explicitly (not just incidentally, from inside `iconFor`) so a change to either —
+      // an attention reason opening/closing, or the selection moving — re-icons every marker even
+      // in the (moot in practice, but not worth relying on) case where `markers` is empty and
+      // `applyMarkers` never actually calls `iconFor` this tick.
+      this.attentionAssetIds();
+      this.selectedAssetId();
       this.applyMarkers(markers);
       if (this.autoFit()) {
         const fingerprint = fingerprintMarkers(markers);
@@ -291,7 +347,7 @@ export class FleetMap {
     this.map = map;
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    this.applyLayer(this.settings.mapLayer());
+    this.applyLayer();
 
     map.on('movestart zoomstart', () => {
       if (!this.suppressAutoFitDisable) {
@@ -613,31 +669,51 @@ export class FleetMap {
     this.suppressAutoFitDisable = false;
   }
 
+  /** A layer-picker click — an explicit pick always wins over the theme default from here on
+   * (docs/VISUAL-REFRESH-PLAN.md F7), so this also flips `markMapLayerExplicit()`'s persisted flag,
+   * in the same call as the `settings.mapLayer` write `activeLayerId()`'s `computed()` already depends on. */
   protected setLayer(id: MapLayerId): void {
+    markMapLayerExplicit();
     this.settings.mapLayer.set(id);
   }
 
-  /** Swaps the active base layer — a no-op until the map exists (`initMap()` re-applies once it does). */
-  private applyLayer(layerId: MapLayerId): void {
+  /** Swaps the active base layer to `activeLayerId()` — a no-op until the map exists (`initMap()`
+   * re-applies once it does). */
+  private applyLayer(): void {
     const L = this.leaflet;
     if (!L || !this.map) {
       return;
     }
     this.tileLayer?.remove();
-    this.tileLayer = mapLayerTileLayer(L, layerId, (ok) => this.tilesOk.set(ok));
+    this.tileLayer = mapLayerTileLayer(L, this.activeLayerId(), (ok) => this.tilesOk.set(ok));
     this.tileLayer.addTo(this.map);
   }
 
   private iconFor(L: typeof Leaflet, marker: FleetMarker): Leaflet.DivIcon {
+    const modifiers = this.markerModifiers(marker.assetId);
     if (marker.live) {
-      return droneDivIcon(L, marker.headingDegrees ?? 0, 'fleet-drone-marker');
+      return droneDivIcon(L, marker.headingDegrees ?? 0, `fleet-drone-marker${modifiers}`);
     }
     return L.divIcon({
-      className: 'fleet-offline-marker',
+      className: `fleet-offline-marker${modifiers}`,
       html: '<div class="offline-dot"></div>',
       iconSize: [14, 14],
       iconAnchor: [7, 7],
     });
+  }
+
+  /**
+   * `' attention'`/`' selected'` class suffixes (docs/VISUAL-REFRESH-PLAN.md F7, task 2) — one
+   * marker glyph, state carried by colour only: `fleet-map.css` recolors `.attention` to
+   * `--color-danger` regardless of `.fleet-drone-marker`/`.fleet-offline-marker`, and rings
+   * `.selected` in `--color-info`, the same accent F4 gives every other selected row in the app.
+   * Attention wins visually over live/offline either way — a streaming asset that also needs
+   * attention is still worth flagging red, not quietly left live-coloured.
+   */
+  private markerModifiers(assetId: string): string {
+    const attention = this.attentionAssetIds().has(assetId) ? ' attention' : '';
+    const selected = assetId === this.selectedAssetId() ? ' selected' : '';
+    return `${attention}${selected}`;
   }
 
   private popupHtml(marker: FleetMarker): string {
@@ -647,9 +723,11 @@ export class FleetMap {
       `<span class="chip ${marker.live ? 'ok' : ''}">${marker.live ? 'Streaming' : 'Offline'}</span>`,
     ];
     if (marker.flightMode !== undefined) {
-      // Mode line (docs/FC-INTEGRATIONS-PLAN.md F-d) — red text when failsafe, the one severity
-      // color `--live` is reserved for; otherwise the popup's own plain text color.
-      const failsafeStyle = marker.failsafe === true ? ' style="color: var(--color-live); font-weight: 600;"' : '';
+      // Mode line (docs/FC-INTEGRATIONS-PLAN.md F-d) — danger-red text when failsafe (the marker
+      // glyph itself already recolors the same way via `.attention`, docs/VISUAL-REFRESH-PLAN.md
+      // F7 — `--color-live` is reserved for "this asset is streaming", not "this is urgent", now
+      // that the marker glyph's own live/attention split exists); otherwise the popup's plain text.
+      const failsafeStyle = marker.failsafe === true ? ' style="color: var(--color-danger); font-weight: 600;"' : '';
       rows.push(`<div class="popup-row"${failsafeStyle}>Mode ${escapeHtml(marker.flightMode)}</div>`);
     }
     if (marker.batteryPercent !== undefined) {

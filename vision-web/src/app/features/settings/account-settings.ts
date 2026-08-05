@@ -10,9 +10,9 @@ import { AccountSettingsFacade } from './account-settings-facade';
  * defaults" entry (already repointed ahead of this task) goes straight to `/settings/detection` — so
  * this URL now has exactly one name anywhere in the app's own UI.
  *
- * Carries only **per-account** preferences (Interface, Notifications) plus a read-only System status
- * card — see `AccountSettingsFacade`'s own doc comment for why the fleet-wide Detection profile/model
- * moved out to `DetectionSettingsPage`, and why System stays here rather than there.
+ * Carries only **per-account** preferences (Appearance, Interface, Notifications) plus a read-only
+ * System status card — see `AccountSettingsFacade`'s own doc comment for why the fleet-wide Detection
+ * profile/model moved out to `DetectionSettingsPage`, and why System stays here rather than there.
  *
  * Dumb by convention (docs/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation/derivation lives in
  * `AccountSettingsFacade`, which this component injects exclusively.

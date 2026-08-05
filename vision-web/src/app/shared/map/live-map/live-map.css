@@ -62,18 +62,27 @@
   z-index: 1000;
   padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--black) 60%, transparent);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   color: var(--color-warn);
   font-size: 0.72rem;
-  backdrop-filter: blur(4px);
 }
 
 /* Everything below targets DOM that Leaflet creates itself (tiles, markers) rather than
    anything Angular rendered from this component's own template, so Angular's emulated view
-   encapsulation never matches it without `::ng-deep` — see LiveMap's class doc. */
+   encapsulation never matches it without `::ng-deep` — see LiveMap's class doc.
+
+   Map overlay chrome is a `--panel-raised` + `--border` + `--shadow` card, never a `--hud-*`/
+   `--scrim*` frosted-dark pill (docs/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
+   inside `.surface-dark`, and a *map* floating control stays a light card even there; this
+   component never carries `.surface-dark` itself). Marker/flag drop-shadows below use a plain
+   `color-mix(... var(--black) ...)` contact shadow instead — a legibility aid against arbitrary
+   tile imagery, not compositing-over-video chrome, and the same recipe `fleet-map.css`'s own
+   marker already uses. */
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: var(--scrim);
+  background: var(--panel-raised);
   color: var(--text-faint);
 }
 
@@ -81,26 +90,28 @@
   color: var(--text-muted);
 }
 
+/* `--color-live` (docs/VISUAL-REFRESH-PLAN.md F7) — matches `fleet-map.css`'s identical marker
+   glyph; `--color-info` is reserved for interactive/selected, never a status colour (F3). */
 :host ::ng-deep .drone-arrow {
   width: 0;
   height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-bottom: 18px solid var(--color-info);
+  border-bottom: 18px solid var(--color-live);
   transform-origin: 50% 60%;
-  filter: drop-shadow(0 0 2px var(--scrim-strong));
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
 :host ::ng-deep .flag-glyph {
   font-size: 16px;
   line-height: 1;
-  filter: drop-shadow(0 0 2px var(--scrim-strong));
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
 /* ---- Geofence zones (docs/OPS-CORE-PLAN.md §G-c), read-only — mirrors fleet-map.css's own rule -- */
 
 :host ::ng-deep .zone-label {
-  background: color-mix(in srgb, var(--black) 65%, transparent);
+  background: var(--panel-raised);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 0.68rem;

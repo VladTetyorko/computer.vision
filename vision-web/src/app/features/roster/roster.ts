@@ -5,6 +5,7 @@ import { Icon } from '../../shared/ui/icon';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
+import type { PilotAssetAssignment } from '../../core/roster/roster-pivot-logic';
 import { PilotsCard } from '../asset-detail/pilots-card';
 import { PilotAssignmentsPanel } from './pilot-assignments-panel';
 import { RosterFacade } from './roster-facade';
@@ -44,4 +45,14 @@ import { RosterFacade } from './roster-facade';
 })
 export class RosterPage {
   protected readonly facade = inject(RosterFacade);
+
+  /**
+   * The "By pilot" pivot's own row state text (docs/VISUAL-REFRESH-PLAN.md F5 — dot + plain text,
+   * not a chip per assigned asset) — mirrors the "By asset" pivot's `row.pilotNames.join(', ')`,
+   * which needs no helper since `RosterRow#pilotNames` is already `readonly string[]`;
+   * `RosterPilotRow#assignments` carries the display name one level deeper.
+   */
+  protected assetNames(assignments: readonly PilotAssetAssignment[]): string {
+    return assignments.map((assignment) => assignment.displayName).join(', ');
+  }
 }

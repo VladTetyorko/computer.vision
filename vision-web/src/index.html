@@ -6,8 +6,28 @@
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Multi-protocol computer vision and streaming platform.">
-  <meta name="theme-color" content="#0b0e13">
+  <!-- Light is the default theme (docs/VISUAL-REFRESH-PLAN.md F2) — matches src/styles.css's own
+       `--bg` (`--gray-75`). -->
+  <meta name="theme-color" content="#eef1f4">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script>
+    // Anti-flash-of-wrong-theme bootstrap (docs/VISUAL-REFRESH-PLAN.md F3): applies the persisted
+    // theme to `<html>` synchronously, before any stylesheet paints and before Angular's own bundle
+    // has even been fetched. `core/shell/theme-store.ts#ThemeStore` re-applies the identical
+    // attribute once the app boots (its own `providedIn: 'root'` constructor, eagerly injected by
+    // `app.ts`) — this script and that store intentionally read/write the exact same
+    // `vision.theme`/`data-theme` contract, kept in sync by hand since one runs before any Angular
+    // code exists to share it with. Wrapped in try/catch so a `localStorage` access failure (private
+    // browsing quirks in some engines) degrades to the default light theme rather than a blank page.
+    (function () {
+      try {
+        var theme = window.localStorage.getItem('vision.theme');
+        document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+    })();
+  </script>
 </head>
 <body>
   <app-root></app-root>

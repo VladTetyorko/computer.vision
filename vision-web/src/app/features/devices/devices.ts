@@ -11,9 +11,11 @@ import { DevicesFacade } from './devices-facade';
 import {
   DEVICE_ACTION_LABELS,
   RESTORE_TARGET_STATE,
+  describeDeviceState,
   reasonedDeviceActions,
   type ActionAvailability,
   type DeviceLifecycleAction,
+  type DeviceStateDescriptor,
   type WarehouseRow,
 } from './devices-page-logic';
 
@@ -93,6 +95,15 @@ export class DevicesPage {
 
   protected simulatedInfo(device: Device): SimulatedDeviceInfo | undefined {
     return this.facade.simulatedDevices().get(device.id);
+  }
+
+  /**
+   * The table row/detail panel's one merged state indicator (docs/VISUAL-REFRESH-PLAN.md F5 — "at
+   * most one chip per row"): replaces the old separate Lifecycle + Live/Stopped chips. See
+   * `devices-page-logic.ts#describeDeviceState`'s own doc comment for the priority order.
+   */
+  protected deviceState(row: WarehouseRow): DeviceStateDescriptor {
+    return describeDeviceState(row);
   }
 
   protected clearSearch(): void {

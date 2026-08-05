@@ -19,12 +19,13 @@ td:first-child {
     min-width: 14rem;
 }
 
-/* State (Active/Deactivated + Live/Stopped, occasionally + Simulated) is 2-3 chips in a plain
-   wrapping flow. `nowrap` rather than a width that merely *usually* fits: measured at 1280px every
-   row was 76px tall — two lines — because the chips wrapped, which halves the density this whole
-   wave is for (docs/design/06-devices.md's own acceptance criterion is a single-line row at 1280px).
-   The `.table-scroll` wrapper above already contains any resulting overflow, so refusing to wrap
-   costs a scrollbar in the rare 3-chip case instead of costing every row its second line. */
+/* State is the merged Lifecycle+Streaming indicator (docs/VISUAL-REFRESH-PLAN.md F5 — at most one
+   chip, plus an occasional second "Simulated" call-out) in a plain wrapping flow. `nowrap` rather
+   than a width that merely *usually* fits: measured at 1280px every row was 76px tall — two lines —
+   because the chips wrapped, which halves the density this whole wave is for (docs/design/06-
+   devices.md's own acceptance criterion is a single-line row at 1280px). The `.table-scroll`
+   wrapper above already contains any resulting overflow, so refusing to wrap costs a scrollbar in
+   the rare 2-item case instead of costing every row its second line. */
 td:nth-child(4) {
     min-width: 8rem;
     white-space: nowrap;
@@ -100,11 +101,24 @@ tr.archived {
     background: transparent;
 }
 
+/* The merged Lifecycle+Streaming "ordinary" state (docs/VISUAL-REFRESH-PLAN.md F5 — at most one
+   chip per row): a dot + plain text instead of a fourth chip color for the common "active, not
+   currently streaming" (Stopped) case. Reused verbatim by the detail panel's own status row below.
+   See `features/assets/assets.css`'s identical copy — no shared table-utility class exists yet
+   (Angular's emulated view encapsulation means a class declared in one component's stylesheet never
+   reaches another component's own template, `vision-two-pane`'s projected list included). */
+.row-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-4);
+}
+
 /* ---- Row selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md) — every data
-   row is clickable + keyboard-operable (F6: selecting opens the detail panel, never navigates). The
-   selected look mirrors `features/command/command.css`'s own `.rail-row.selected` language (raised
-   background + a `--color-info` accent); `box-shadow: inset` stands in for that file's `border-left`
-   since `border-collapse` on a `<table>` won't reliably render a per-cell left border. See
+   row is clickable + keyboard-operable (F6: selecting opens the detail panel, never navigates).
+   Selected row per docs/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
+   `--color-info` left inset bar plus a `--color-info-soft` background tint — `box-shadow: inset`
+   stands in for a real `border-left` since `border-collapse` on a `<table>` won't reliably render a
+   per-cell left border. Replaces the pre-refresh `--panel-raised` background + 3px accent. See
    `features/assets/assets.css`'s identical rule block for the dense list's own copy of this. -------- */
 tbody tr.row-selectable {
     cursor: pointer;
@@ -120,8 +134,8 @@ tbody tr.row-selectable:focus-visible {
 }
 
 tbody tr.row-selectable.selected {
-    background: var(--panel-raised);
-    box-shadow: inset 3px 0 0 0 var(--color-info);
+    background: var(--color-info-soft);
+    box-shadow: inset 2px 0 0 0 var(--color-info);
 }
 
 .inline-row td {
@@ -160,9 +174,9 @@ tbody tr.row-selectable.selected {
    CSS backing it yet — see that stylesheet's own doc comment for the expected `<details>`/`<summary>`
    shape). */
 
-/* ---- Devices: the detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md) ---
-   Content projected into `vision-two-pane`'s `[twoPaneDetail]` slot — see
-   `features/assets/assets.css`'s identical note; only this page's own field/copy-row layout differs.
+/* ---- Devices: the detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy — title row [the pane's own
+   head] → status chip row → key-value fact grid → actions row). Content projected into
+   `vision-two-pane`'s `[twoPaneDetail]` slot — see `features/assets/assets.css`'s identical note.
    ---------------------------------------------------------------------------------------------- */
 
 .detail-chips {
@@ -173,21 +187,28 @@ tbody tr.row-selectable.selected {
     margin-bottom: var(--space-16);
 }
 
+/* Key-value fact grid (F6 — "two columns, fixed-width muted label column, values aligned"): a real
+   two-column CSS grid, label left, value right, one fact per row — see
+   `features/assets/assets.css`'s identical copy for the full reasoning (why this can't be a literal
+   shared class, and how it differs from `features/asset-detail/asset-detail.css`'s own differently-
+   shaped `.facts`/`.fact`). `.detail-field` is `display: contents` so its own `dt`/`dd` children fall
+   directly into the grid's two column tracks. `dd` keeps `display: flex; flex-direction: column`
+   (unlike the assets page's plainer version) because several facts here nest a copy-row
+   (`.detail-copy-row`) beneath their value. */
 .detail-fields {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-16);
+    display: grid;
+    grid-template-columns: 6.5rem 1fr;
+    column-gap: var(--space-8);
+    row-gap: var(--space-8);
     margin: 0 0 var(--space-16);
 }
 
 .detail-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    min-width: 0;
+    display: contents;
 }
 
 .detail-field dt {
+    padding-top: var(--space-2);
     font-size: 0.72rem;
     font-weight: 600;
     text-transform: uppercase;
@@ -197,6 +218,7 @@ tbody tr.row-selectable.selected {
 
 .detail-field dd {
     margin: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: var(--space-8);

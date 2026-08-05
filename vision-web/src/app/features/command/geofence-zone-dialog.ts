@@ -16,7 +16,16 @@ import { FormsModule } from '@angular/forms';
 import type * as Leaflet from 'leaflet';
 import type { GeoPosition, ZoneKind } from '../../core/api/models';
 import { SettingsStore, type MapLayerId } from '../../core/settings/settings-store';
-import { MAP_LAYERS, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../../shared/map/tile-cache/leaflet-loader';
+import { ThemeStore } from '../../core/shell/theme-store';
+import {
+  MAP_LAYERS,
+  effectiveMapLayerId,
+  ensureLeafletStylesheet,
+  importLeaflet,
+  isMapLayerExplicit,
+  markMapLayerExplicit,
+  mapLayerTileLayer,
+} from '../../shared/map/tile-cache/leaflet-loader';
 import {
   assetsOutsideZoneCount,
   canSaveZone,
@@ -78,6 +87,13 @@ export class GeofenceZoneDialog {
 
   protected readonly layers = MAP_LAYERS;
   protected readonly settings = inject(SettingsStore);
+  protected readonly theme = inject(ThemeStore);
+
+  /** The layer actually rendered (docs/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
+   * field's own doc comment for the full "explicit pick always wins" contract. */
+  protected readonly activeLayerId = computed<MapLayerId>(() =>
+    effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
+  );
 
   private readonly mapHost = viewChild.required<ElementRef<HTMLDivElement>>('mapHost');
 
@@ -107,7 +123,8 @@ export class GeofenceZoneDialog {
     afterNextRender(() => void this.initMap());
 
     effect(() => this.drawVertices(this.vertices()));
-    effect(() => this.applyLayer(this.settings.mapLayer()));
+    // `activeLayerId()` tracks both `settings.mapLayer()` and `theme.theme()` (docs/VISUAL-REFRESH-PLAN.md F7).
+    effect(() => this.applyLayer());
 
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
@@ -124,7 +141,7 @@ export class GeofenceZoneDialog {
     const center = this.center();
     const map = L.map(this.mapHost().nativeElement, { center: [center.latitude, center.longitude], zoom: DEFAULT_ZOOM });
     this.map = map;
-    this.applyLayer(this.settings.mapLayer());
+    this.applyLayer();
 
     map.on('click', (event: Leaflet.LeafletMouseEvent) => {
       this.vertices.update((current) => [...current, { latitude: event.latlng.lat, longitude: event.latlng.lng }]);
@@ -177,18 +194,22 @@ export class GeofenceZoneDialog {
     });
   }
 
-  /** Swaps the active base layer — a no-op until the map exists (`initMap()` re-applies once it does). */
-  private applyLayer(layerId: MapLayerId): void {
+  /** Swaps the active base layer to `activeLayerId()` — a no-op until the map exists (`initMap()`
+   * re-applies once it does). */
+  private applyLayer(): void {
     const L = this.leaflet;
     if (!L || !this.map) {
       return;
     }
     this.tileLayer?.remove();
-    this.tileLayer = mapLayerTileLayer(L, layerId, (ok) => this.tilesOk.set(ok));
+    this.tileLayer = mapLayerTileLayer(L, this.activeLayerId(), (ok) => this.tilesOk.set(ok));
     this.tileLayer.addTo(this.map);
   }
 
+  /** A layer-picker click — an explicit pick always wins over the theme default from here on
+   * (docs/VISUAL-REFRESH-PLAN.md F7); see `FleetMap#setLayer`'s identical doc comment. */
   protected setLayer(id: MapLayerId): void {
+    markMapLayerExplicit();
     this.settings.mapLayer.set(id);
   }
 

@@ -23,6 +23,12 @@ import { Icon } from '../../shared/ui/icon';
  * Arming blockers (the Armable row's `detail`) render verbatim, exactly as the flight controller
  * reported them (`^(PreArm|Arm): …` STATUSTEXT strings) — never paraphrased, so a pilot sees the
  * same words their FC ground station would show.
+ *
+ * **Always dark, in both mount points** (docs/VISUAL-REFRESH-PLAN.md F3/W4): the root element
+ * carries `.surface-dark` itself rather than relying on an ambient enclave — see
+ * `preflight-checklist.html`'s own comment for why (short version: its HUD chrome was already
+ * theme-invariant, but its text tokens weren't, which broke standalone on `/operate/preflight`
+ * once light became the default theme).
  */
 @Component({
   selector: 'vision-preflight-checklist',

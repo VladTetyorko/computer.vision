@@ -1,16 +1,23 @@
 <div class="map-shell">
   <div class="map-host" #mapHost></div>
 
-  @if (!tilesOk()) {
-    <div class="badge offline-badge">Tiles unavailable — trail shown offline</div>
-  }
+  <div class="corner-stack">
+    <div class="legend" role="note" aria-label="Marker legend">
+      <span class="legend-item"><span class="dot live"></span>{{ buckets().streaming.length }} streaming</span>
+      <span class="legend-item"><span class="dot"></span>{{ buckets().offline.length }} offline</span>
+      <span class="legend-item"><span class="dot"></span>{{ buckets().noPosition.length }} no position</span>
+    </div>
+    @if (!tilesOk()) {
+      <div class="badge offline-badge">Tiles unavailable — trail shown offline</div>
+    }
+  </div>
 
   <div class="controls layers segmented" role="group" aria-label="Map layer">
     @for (layer of layers; track layer.id) {
       <button
         type="button"
         class="btn secondary small"
-        [class.active]="settings.mapLayer() === layer.id"
+        [class.active]="activeLayerId() === layer.id"
         (click)="setLayer(layer.id)"
       >
         {{ layer.label }}

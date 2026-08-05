@@ -139,9 +139,9 @@
           </vision-empty>
         }
       } @else if (viewMode() === 'list') {
-        <!-- ---- Dense list (default, docs/design/04-assets.md's own row spec): status dot + name ·
-             category · lifecycle · streaming · device count · kebab, ~36px rows — ~20 fit a 1080p
-             screen without scrolling (the page's own acceptance bar). A real `<table>`, not a
+        <!-- ---- Dense list (default, docs/design/04-assets.md's own row spec, F5 column order —
+             name · category · state · devices · kebab), ~36px rows — ~20 fit a 1080p screen without
+             scrolling (the page's own acceptance bar). A real `<table>`, not a
              CSS-grid list: it's the same shape `features/devices/devices.html`'s table already
              proves, and reuses that table's global CSS (`src/styles.css`) instead of a bespoke
              column system. Each `<tr>` is clickable + keyboard-operable (F6 — selecting never
@@ -157,9 +157,8 @@
             <tr>
               <th>Name</th>
               <th>Category</th>
-              <th>Lifecycle</th>
-              <th>Streaming</th>
-              <th>Devices</th>
+              <th>State</th>
+              <th class="col-num">Devices</th>
               <th aria-label="Actions"></th>
             </tr>
           </thead>
@@ -179,26 +178,31 @@
               >
                 <td>
                   <div class="name-cell">
-                    <span class="dot" [class.live]="row.streaming"></span>
                     <span class="name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
                   </div>
                 </td>
                 <td class="muted truncate">{{ row.asset.categoryName }}</td>
                 <td>
-                  <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                    {{ lifecycleLabel(row.lifecycle) }}
-                  </span>
-                </td>
-                <td>
-                  @if (!row.archived) {
-                    @if (row.streaming) {
-                      <span class="chip ok"><span class="dot live"></span>Live</span>
-                    } @else {
-                      <span class="chip">Offline</span>
+                  <!-- Merged Lifecycle+Streaming (docs/VISUAL-REFRESH-PLAN.md F5 — one chip per row
+                       max): archived/deactivated/live each get a colored chip; the ordinary
+                       "active, not currently streaming" case is a dot + plain text instead of a
+                       fourth chip. -->
+                  @switch (assetState(row).kind) {
+                    @case ('archived') {
+                      <span class="chip faded">{{ assetState(row).label }}</span>
+                    }
+                    @case ('deactivated') {
+                      <span class="chip">{{ assetState(row).label }}</span>
+                    }
+                    @case ('live') {
+                      <span class="chip ok"><span class="dot live"></span>{{ assetState(row).label }}</span>
+                    }
+                    @default {
+                      <span class="row-state"><span class="dot"></span><span class="muted">{{ assetState(row).label }}</span></span>
                     }
                   }
                 </td>
-                <td class="muted">{{ row.deviceCount }}</td>
+                <td class="col-num mono">{{ row.deviceCount }}</td>
                 <td class="row-kebab-cell" (click)="$event.stopPropagation()">
                   <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
                     @for (entry of assetActionsFor(row); track entry.action) {
@@ -265,45 +269,76 @@
                 </span>
               </header>
 
+              <div class="asset-card-meta muted truncate">{{ row.asset.categoryName }}</div>
+
               <div class="asset-card-chips">
-                <span class="chip">{{ row.asset.categoryName }}</span>
-                <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                  {{ lifecycleLabel(row.lifecycle) }}
-                </span>
-                @if (!row.archived) {
-                  @if (row.streaming) {
-                    <span class="chip ok"><span class="dot live"></span>Live</span>
-                  } @else {
-                    <span class="chip">Offline</span>
+                <!-- Merged Lifecycle+Streaming — see the dense list's identical `@switch` above. -->
+                @switch (assetState(row).kind) {
+                  @case ('archived') {
+                    <span class="chip faded">{{ assetState(row).label }}</span>
+                  }
+                  @case ('deactivated') {
+                    <span class="chip">{{ assetState(row).label }}</span>
+                  }
+                  @case ('live') {
+                    <span class="chip ok"><span class="dot live"></span>{{ assetState(row).label }}</span>
+                  }
+                  @default {
+                    <span class="row-state"><span class="dot"></span><span class="muted">{{ assetState(row).label }}</span></span>
                   }
                 }
+                <span class="muted">{{ pluralize(row.deviceCount, 'device') }}</span>
               </div>
-
-              <div class="asset-card-meta muted">{{ pluralize(row.deviceCount, 'device') }}</div>
             </article>
           }
         </div>
       }
     </section>
 
-    <!-- ---- Detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md): replaces the
-         old per-row "Open" for triage — chips, the device list, and the full action set, including
+    <!-- ---- Detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy: title row [`vision-two-pane`'s own
+         head] → status chip row → key-value fact grid → h3 sections → actions row). Replaces the old
+         per-row "Open" for triage — facts, the device list, and the full action set, including
          "Open full ›" for the deep work this panel has no room for. -->
     @if (facade.selectedRow(); as row) {
       <div twoPaneDetail>
+        <!-- Status: the one merged state indicator (F5 — same states as the list's own State column). -->
         <div class="detail-chips">
-          <span class="chip">{{ row.asset.categoryName }}</span>
-          <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-            {{ lifecycleLabel(row.lifecycle) }}
-          </span>
-          @if (!row.archived) {
-            @if (row.streaming) {
-              <span class="chip ok"><span class="dot live"></span>Streaming</span>
-            } @else {
-              <span class="chip">Offline</span>
+          @switch (assetState(row).kind) {
+            @case ('archived') {
+              <span class="chip faded">{{ assetState(row).label }}</span>
+            }
+            @case ('deactivated') {
+              <span class="chip">{{ assetState(row).label }}</span>
+            }
+            @case ('live') {
+              <span class="chip ok"><span class="dot live"></span>{{ assetState(row).label }}</span>
+            }
+            @default {
+              <span class="row-state"><span class="dot"></span><span class="muted">{{ assetState(row).label }}</span></span>
             }
           }
         </div>
+
+        <!-- Fact grid (F6 — two columns, fixed-width muted label column) — everything the panel
+             already has on hand from `AssetListRow`, no extra fetch. -->
+        <dl class="detail-fields">
+          <div class="detail-field">
+            <dt>Category</dt>
+            <dd>{{ row.asset.categoryName }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Lifecycle</dt>
+            <dd>{{ lifecycleLabel(row.lifecycle) }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Devices</dt>
+            <dd class="mono">{{ row.deviceCount }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Asset ID</dt>
+            <dd class="mono truncate" [title]="row.asset.assetId">{{ row.asset.assetId }}</dd>
+          </div>
+        </dl>
 
         <div class="detail-section">
           <h3 class="detail-heading">{{ pluralize(row.asset.devices.length, 'device') }}</h3>
@@ -313,7 +348,7 @@
             <ul class="detail-device-list">
               @for (device of row.asset.devices; track device.id) {
                 <li class="detail-device-row">
-                  <span class="chip">{{ device.protocol }}</span>
+                  <span class="muted">{{ device.protocol }}</span>
                   <span class="truncate" [title]="device.name">{{ device.name }}</span>
                 </li>
               }

@@ -58,7 +58,18 @@
       </section>
 
       <!-- ---- Recording video + clip export (docs/OPS-CORE-PLAN.md §R, R-c) -------------------- -->
-      <section class="card span-2 recording-card">
+      <!-- `.surface-dark` boundary (docs/VISUAL-REFRESH-PLAN.md F3/W4 — "the player region joins
+           the enclave; the library list around it stays themed"): this whole `ReplayPage` is a
+           themed data page — Position map, Playback scrub bar, Telemetry facts, Detection chips —
+           reviewed at a desk, not flown; only this one card actually shows video pixels. The
+           enclave is scoped to exactly this card (header, `<video>`, clip-export controls, hints),
+           not the whole page and not the bare `<video>` tag alone, so it reads as one self-
+           contained dark video panel sitting among the other light `.card` panels in the detail
+           grid — never a full-page dark takeover for what is, apart from this one card, a themed
+           document. (The replay *library* — `replay-library.html`'s flight list/two-pane preview —
+           never shows video at all, so it needed no boundary decision of its own; "Open replay ›"
+           just navigates here.) -->
+      <section class="card span-2 recording-card surface-dark">
         <header>
           <h2>Recording</h2>
         </header>

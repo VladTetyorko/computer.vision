@@ -63,6 +63,12 @@
     background: var(--panel-hover);
 }
 
+/* docs/VISUAL-REFRESH-PLAN.md F5 rule 2 — the ms column is a bare number, right-aligned. */
+th.col-num,
+td.col-num {
+    text-align: right;
+}
+
 .health-list {
     list-style: none;
     margin: 0 0 var(--space-16);

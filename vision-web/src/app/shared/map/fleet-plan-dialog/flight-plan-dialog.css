@@ -78,10 +78,11 @@
   z-index: 1000;
   padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--black) 60%, transparent);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   color: var(--color-warn);
   font-size: 0.7rem;
-  backdrop-filter: blur(4px);
 }
 
 .controls.layers {
@@ -199,7 +200,10 @@
 
 /* Leaflet-owned DOM (the numbered waypoint markers) never gets Angular's `_ngcontent-*`
    attribute — the standard `::ng-deep` workaround, scoped under `:host`, mirrors
-   `live-map.css`/`fleet-map.css`. */
+   `live-map.css`/`fleet-map.css`. Map overlay chrome is a light card, never a `--scrim*`/
+   `--hairline` frosted-dark ring (docs/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
+   inside `.surface-dark`, which this dialog never carries): the waypoint dot's own
+   `--panel-raised` border already separates it from the basemap without needing one. */
 :host ::ng-deep .waypoint-marker .waypoint-dot {
   display: flex;
   align-items: center;
@@ -211,13 +215,13 @@
   color: var(--color-on-info);
   font-size: 0.72rem;
   font-weight: 700;
-  border: 2px solid var(--scrim);
-  box-shadow: 0 0 0 2px var(--hairline);
+  border: 2px solid var(--panel-raised);
+  box-shadow: 0 0 0 1px var(--border);
   cursor: grab;
 }
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: var(--scrim);
+  background: var(--panel-raised);
   color: var(--text-faint);
 }
 

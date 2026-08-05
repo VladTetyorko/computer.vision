@@ -65,11 +65,17 @@ import { Icon } from '../../shared/ui/icon';
     }
 
     /* Advisory, not an emergency — this app's ordinary caution family (identical pairing to
-       styles.css's own .chip.warn), same tinted-bar-plus-accent treatment as failsafe above. */
+       styles.css's own .chip.warn), same tinted-bar-plus-accent treatment as failsafe above.
+       "-text", not the bare --color-warn this read until docs/VISUAL-REFRESH-PLAN.md W4's own
+       sweep caught it — the same AA-contrast fix .chip.warn already got in Wave 0 (see that
+       rule's own comment in styles.css): --color-warn is tuned to read as a fill/border, not as
+       text on its own "-soft" tint, and in light theme specifically that pairing falls under 4.5:1.
+       border-left-color stays on the bare --color-warn deliberately — a border reads fine at
+       that same tuning, only text-on-fill was the AA problem. */
     .banner-rth,
     .banner-landing {
       background: var(--color-warn-soft);
-      color: var(--color-warn);
+      color: var(--color-warn-text);
       border-left-color: var(--color-warn);
     }
   `,

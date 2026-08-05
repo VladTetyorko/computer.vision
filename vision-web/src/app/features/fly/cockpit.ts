@@ -64,6 +64,11 @@ type CockpitDialog = 'stop';
  *
  * Every HTTP call, toast, silent-degrade path, poll cadence, and keyboard shortcut is unchanged from
  * the pre-split page — see {@link CockpitFacade}'s own doc comment for the full "what moved/changed" account.
+ *
+ * **`.surface-dark` enclave root** (docs/VISUAL-REFRESH-PLAN.md F3/W4): `cockpit.html`'s `.cockpit`
+ * div (every branch — loaded, empty, loading) carries `.surface-dark` — this whole route is the
+ * video surface, with no separate light chrome around it (`fullBleed: true`, no page-bar), so the
+ * enclave is the page's own root. See `cockpit.html`'s own comment at that class for the reasoning.
  */
 @Component({
   selector: 'vision-cockpit',

@@ -47,8 +47,9 @@
 }
 
 /* ---- Assets: the dense list (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) —
-   default view. Plain `<table>` reusing the global `table`/`th`/`td` rules (src/styles.css); only the
-   row-selection state and the name cell's status dot need page-local rules. ------------------------ */
+   default view. Plain `<table>` reusing the global `table`/`th`/`td` rules (src/styles.css); only
+   the numeric-column alignment, the merged-state indicator, and row-selection need page-local
+   rules. -------------------------------------------------------------------------------------- */
 
 /* Tighter than the global `td { padding: var(--space-8) }` (src/styles.css) — the design doc's own
    row-height target is ~36px so ~20 assets fit a 1080p screen without scrolling; the full 8px
@@ -87,12 +88,32 @@ td:first-child {
     white-space: nowrap;
 }
 
+/* Numeric column (docs/VISUAL-REFRESH-PLAN.md F5 rule 2 — "numbers right-aligned in `.mono`",
+   naming the Devices column by name): `th`/`td` share the class so the header sits directly over
+   the right-aligned values instead of merely over the column. See
+   `features/devices/devices.css`'s identical copy — no shared table-utility class exists yet
+   (Angular's emulated view encapsulation means a class declared in one component's stylesheet never
+   reaches another component's own template, `vision-two-pane`'s projected list included). */
+th.col-num,
+td.col-num {
+    text-align: right;
+}
+
+/* The merged Lifecycle+Streaming "ordinary" state (F5 — at most one chip per row): a dot + plain
+   text instead of a fourth chip color for the common "active, not currently streaming" case. Reused
+   verbatim by the card grid and the detail panel's own status row below. */
+.row-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-4);
+}
+
 /* Every data row is clickable + keyboard-operable (F6 — selecting opens the detail panel, never
    navigates); `cursor: pointer` and the hover/selected treatment below are what make that legible.
-   The selected look reuses `features/command/command.css`'s own `.rail-row.selected` language
-   (raised background + a `--color-info` accent) rather than inventing a second "this is chosen"
-   idiom — `box-shadow: inset` stands in for that file's `border-left` since `border-collapse` on a
-   `<table>` won't reliably render a per-cell left border. */
+   Selected row per docs/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
+   `--color-info` left inset bar plus a `--color-info-soft` background tint — `box-shadow: inset`
+   stands in for a real `border-left` since `border-collapse` on a `<table>` won't reliably render a
+   per-cell left border. Replaces the pre-refresh `--panel-raised` background + 3px accent. */
 tbody tr.row-selectable {
     cursor: pointer;
 }
@@ -107,8 +128,8 @@ tbody tr.row-selectable:focus-visible {
 }
 
 tbody tr.row-selectable.selected {
-    background: var(--panel-raised);
-    box-shadow: inset 3px 0 0 0 var(--color-info);
+    background: var(--color-info-soft);
+    box-shadow: inset 2px 0 0 0 var(--color-info);
 }
 
 tbody tr.row-selectable.archived {
@@ -136,6 +157,7 @@ tbody tr.row-selectable.archived {
     padding: var(--space-16) var(--space-16);
     background: var(--panel-raised);
     border: 1px solid var(--border);
+    border-left: 2px solid transparent;
     border-radius: var(--radius);
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease;
@@ -150,9 +172,12 @@ tbody tr.row-selectable.archived {
     outline-offset: -2px;
 }
 
+/* Selected card per docs/VISUAL-REFRESH-PLAN.md F4 — the identical left-bar + soft-tint idiom the
+   dense list's own `tbody tr.row-selectable.selected` uses, not a second "this is chosen" language
+   for the opt-in card view. */
 .asset-card.selected {
-    outline: 1px solid var(--color-info);
-    outline-offset: -1px;
+    background: var(--color-info-soft);
+    border-left-color: var(--color-info);
 }
 
 .asset-card.archived {
@@ -196,10 +221,11 @@ tbody tr.row-selectable.archived {
    `.kebab-reason`/`.danger-action` are a shared global primitive (src/styles.css) — see
    `features/devices/devices.css`'s identical note. */
 
-/* ---- Assets: the detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) ---
-   Content projected into `vision-two-pane`'s `[twoPaneDetail]` slot — the pane's own chrome (header,
-   close button, docked/overlay layout) lives in that shared, frozen component; only the body's own
-   layout is this page's concern. --------------------------------------------------------------- */
+/* ---- Assets: the detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy — title row [the pane's own
+   head] → status chip row → key-value fact grid → h3 sections → actions row). Content projected
+   into `vision-two-pane`'s `[twoPaneDetail]` slot — the pane's own chrome (header, close button,
+   docked/overlay layout) lives in that shared, frozen component; only the body's own layout is this
+   page's concern. ---------------------------------------------------------------------------- */
 
 .detail-chips {
     display: flex;
@@ -207,6 +233,43 @@ tbody tr.row-selectable.archived {
     align-items: center;
     gap: var(--space-8);
     margin-bottom: var(--space-16);
+}
+
+/* Key-value fact grid (F6 — "two columns, fixed-width muted label column, values aligned"): a real
+   two-column CSS grid, not the stacked dt-above-dd `.facts`/`.fact` pattern
+   `features/asset-detail/asset-detail.css` uses for its own (differently-shaped) Characteristics
+   drawer — that one tiles two *pairs* per row; this one is a definition-list proper, label left,
+   value right, one fact per row. `.detail-field` is `display: contents` so its own `dt`/`dd`
+   children fall directly into the grid's two column tracks instead of stacking inside a third,
+   unwanted box. See `features/devices/devices.css`'s identical copy (Angular's emulated view
+   encapsulation means this can't be a literal shared class — `vision-two-pane`'s projected content
+   is styled by the *projecting* component's own stylesheet, not `two-pane.css`). */
+.detail-fields {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    column-gap: var(--space-8);
+    row-gap: var(--space-8);
+    margin: 0 0 var(--space-16);
+}
+
+.detail-field {
+    display: contents;
+}
+
+.detail-field dt {
+    padding-top: var(--space-2);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.detail-field dd {
+    margin: 0;
+    min-width: 0;
+    font-size: 0.85rem;
+    color: var(--text);
 }
 
 .detail-section {

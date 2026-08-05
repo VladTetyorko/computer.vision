@@ -475,6 +475,7 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
     - **Alignment contract (measured, not eyeballed — keep both states on it when editing `app-sidebar.css`).** *Expanded (240px):* every glyph in the panel — brand mark, group-label icons, nav-row icons, disclosure chevrons, the demo button's icon, the identity avatar, the status chips — starts on **x=16**, and the foot's three blocks start on **x=8**, the same as a nav row's box (foot padding mirrors the body's `var(--space-16) var(--space-8)` exactly). *Collapsed rail (56px, 55px interior):* everything centres on **x=27.5**. Three structural rules keep that true and are easy to undo by accident: (1) the active-row accent is a `.nav-row.active::before` bar, **not** a `border-left` — a real border is in-flow and pushed the entire nav icon column to x=18 while everything else sat at 16; (2) `.sidebar-body` is `scrollbar-width: thin` expanded and `none` in the rail — a classic 15px scrollbar is laid out inside the padding box, so in the rail it took a third of the content width and shifted every centred icon ~8px off-axis; (3) the rail's head is `padding: 0; gap: var(--space-4)` with `.brand { flex: none }`, the only arrangement that fits the 16px mark + 28px toggle in 55px (the head's min-content is 60px — wider than the rail — so `--space-8` gaps cannot fit, and the expanded `flex: 1` gave the brand an 11px box its own mark overflowed by 5px, shoving it under the toggle). The rail also hides an `Upcoming` row's `soon` chip (44px of text in a 40px column, `flex: none`, previously clipped mid-word by the rail edge) and drops the first group's separator (the head's `border-bottom` is already the line above it). **`.group-label`'s text span carries its own `.group-label-text` class** — while the rail hid it via the bare `.group-label > span`, that selector also matched `.group-divider` (a `<span>` too) at higher specificity than the `.group-divider { display: block }` rule three lines below, so the rail's group separators never rendered in either rail block.
   - **`app.ts`/`app.html`/`app.css`** — the shell: `:host { display: grid; grid-template-columns: auto 1fr; grid-template-rows: 1fr; height: 100dvh }`, sidebar + a plain-block `<main>` (`height: 100dvh; overflow-y: auto` — **not** a nested grid, see the Status entry's Bug 3 for why that was tried and reverted). Sidebar hidden entirely while unauthenticated (`@if (auth.user())`, mirroring `identity-chip.ts`'s own "renders nothing while `user()` is null" rule). `App#fullBleed` (a `toSignal` over `router.events`, walking the activated-route tree for `data.fullBleed`) feeds `AppSidebar`'s `fullBleed` input, driving the F11 auto-collapse on `/fly`/`/wall`/`/command`. Global `[` shortcut (ignored in an input/textarea/select/contenteditable) and the sidebar's own head chevron both gate on `fullBleed()` before calling `SidebarStore.toggle()` — without that gate, a click/keypress on a full-bleed route silently flips the *persisted* preference with zero visible effect on that route (since the OR formula already forces collapse there), only to surface as "the sidebar is mysteriously collapsed" on the next normal page.
   - **`--header-height` is deleted** (`styles.css`) — there is no more header; its four call sites (`shared/ui/side-panel.css`, `features/auth/login/login.css`, `features/command/command.css`, `features/fly/fly.css`) were fixed to `top: 0`/`min-height: 100dvh`/`height: 100dvh` respectively (the latter two viewport units, not `height: 100%` — see the Status entry's Bug 3 for why a percentage doesn't reliably resolve through this shell's ancestor chain). `.page` (`styles.css`) lost its own `max-width: 1400px` and is fluid by design (docs/NAV-IA-REDESIGN-PLAN.md §2.3); `.page--form { max-width: 880px; margin-inline: auto }` is the new opt-in for a page that still wants a centered column (not consumed by any page yet).
+- **`core/shell/theme-store.ts#ThemeStore`** (docs/VISUAL-REFRESH-PLAN.md Wave 0) — the persisted light/dark theme choice behind `src/styles.css`'s two-theme token system. `providedIn: 'root'`, one shared instance, mirroring `SidebarStore` above: `theme: Signal<'light'|'dark'>` (default `'light'`, `localStorage` key `vision.theme`, via `core/panel-state.ts#readPersistedString`/`writePersistedString`), `setTheme(value)`/`toggle()`. Applies `data-theme` on `document.documentElement` explicitly for both values, on construction and on every change — `index.html` carries a matching inline bootstrap `<script>` that applies the same persisted value *before* Angular's bundle even loads (anti-flash-of-wrong-theme; the store's own constructor re-applies it once the app boots, a normally-idempotent no-op). Injected eagerly (side-effect only, never read again) by `app.ts` alongside `SidebarStore`/`FleetStore`. **No visible toggle UI yet** — this wave only wires the mechanism; a later wave adds the sidebar-footer/Settings switch. Full writeup — the F1/F2/F3 token re-point, the `.surface-dark` shared-dark-block mechanism, the primitive audit fixes — is in the dated "Wave 0" Status entry near the top of the Status section below; this bullet is the permanent reference.
 
 ## Conventions
 
@@ -525,8 +526,917 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - `dist/` (Angular build output) is copied verbatim into `target/classes/META-INF/resources` by `maven-resources-plugin` in `prepare-package`; nothing here compiles Java (`No sources to compile` in `mvn` output is expected, not a failure).
 - **`AssetDetailPage`'s telemetry-tracking effect re-entered `TelemetryStore.track()` 50–90×/sec — a self-sustaining loop, not paced by the 5s asset poll — confirmed live via CDP against the running `ng serve` (docs/REALTIME-PLAN.md §4 Phase R-c follow-up).** `features/asset-detail/asset-detail.ts`'s telemetry/detections constructor effects called `track()` unconditionally on every run (unlike `fly.ts`'s already-guarded twin — see the "Signals compare with `Object.is`" Gotcha above), so every ~5s `asset()` reference-churn tick re-entered it with the *same* `deviceId`/`assetId`. That alone would only have reproduced the slower R-a-class burst — the actual amplification was worse: `TelemetryStore.track()` → `startTracking()`'s synchronous prologue (`teardownTracking()`) reads the store's own private `currentAssetIdSignal` *while the caller's effect is still the active reactive consumer*, so that read gets attributed to the *caller's* effect, not the store's internal one. Once `startTracking()`'s async continuation later writes a real (non-`undefined`) value to that same signal, it re-notifies the caller's effect — with `asset()`/`assetTelemetryDevices()` unchanged (confirmed via a throwaway diagnostic instrumentation: ~130 consecutive re-runs in 3s, `assetRefChanged`/`devicesArrRefChanged` both `false` on all but the first) — which re-enters `track()`, repeating the read+write and closing a loop paced only by how fast the store's two lookups resolve (~30–45ms locally). `/live/:deviceId`/Wall are unaffected only because those callers never pass an `assetId` at all, so that same signal is written `undefined→undefined` every time — a no-op `Object.is` comparison that never re-notifies anything; this is incidental immunity, not a guard. **Reproduced live, not just reasoned about**: headless Chrome via CDP against a real, already-running `/api/live` SSE backend in this environment (`vision.live.enabled` is on here — the R-c Status entry's own "404-fallback" assumption is stale) captured 721 `[live] track/untrack telemetry:<assetId>` console lines *and 721 real PATCH `/api/live/{connectionId}/topics` requests* in 11.5s (62.6/sec) — **this was already a live PATCH storm against a real backend in this environment, not merely a future risk once one exists.** **Fixed, defense in depth at both layers**: (1) caller-side — `AssetDetailPage`'s telemetry/detections effects now guard with `core/telemetry/telemetry-logic.ts#trackingIdChanged` exactly like `fly.ts`'s (`lastTelemetryDeviceId`/`lastDetectionsStreamId` fields), the primary fix, since it stops `track()` from ever being re-entered with an unchanged id at all; (2) ref-counting layer — `TelemetryStore`/`DetectionsStore.track()` themselves now no-op on an unchanged `(deviceId/streamId, assetId)` key (`lastTrackKey`, keyed via the new `core/live/live-fallback-logic.ts#trackSessionKey`), so an unguarded call site (`LivePage`/`WallTile` today; anything added later) can't reopen this class of loop even without its own guard. `trackingIdChanged` moved from `features/fly/fly-logic.ts` to `core/telemetry/telemetry-logic.ts` (re-exported from `fly-logic.ts` for its own existing import site, tests moved with it) — the established "second consumer needs it, move it to core/" precedent (see `groupTelemetryByDevice`/`batterySeverity` above). New tests: `telemetry-store.spec.ts`/`detections-store.spec.ts` each gained an "N successive `track()` calls with the same id — even with no caller-side guard — subscribe live exactly once and never untrack" case (the exact churn class this bug was); `live-fallback-logic.spec.ts` gained `trackSessionKey` coverage. **Verified fixed live**: re-ran the identical CDP repro against `ng serve` after the fix — zero `[live] track/untrack telemetry:...` lines and zero PATCH requests over the same window for an unchanged asset. `ng serve` on `:4200` was left running throughout, untouched (same PID before/after, verified via `ss -ltnp`).
 - **`shared/ui/events-rail.css`'s `.event-meta`/`.event-time` flex row let a long, unbreakable device/asset name (e.g. `X2Twitter.com_hzTcxvzE2-narxmk_720p`, a real simulated-source filename) overflow past its own box and visually overlap `.event-time`/`.event-affordance` at Wall's 300px sidebar (`wall.css`).** Root cause: neither the name nor its containing elements had `min-width: 0` (a flex item's default `min-width: auto` is its content's own minimum size — for an unbreakable token, that's its full rendered width) or any `overflow`/`text-overflow` handling, so the text simply rendered past its box rather than shrinking or wrapping. **Fixed**: the row is now two lines — an unshrinkable top line (state chip, label, time, action; all `flex: none` except `.event-label`, which truncates with ellipsis rather than overflowing if a long relative-time string squeezes it) and a full-width `.event-meta` line below for the source name + confidence, so the name gets the *entire* row's width to truncate against instead of whatever `.event-row-top` has left over (confirmed live: at Wall's 300px sidebar the name previously had ~5px available — invisible — vs. ~225px now, comfortably legible before needing to ellipsize). `.event-source` truncates with `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` and carries the full name in a `title` attribute; `.event-confidence` stays `flex: none` so the `%` is never the part that gives way. Verified via CDP screenshots at both Wall's 300px sidebar (name truncates, e.g. `X2Twitter.com_hzTcxvzE2-narxmk…`) and Command's full-width embed (name renders in full) — no overlap at either.
-- **Pre-existing, out-of-scope: `shared/map/fleet-map.ts`'s own layer switcher (`.controls.layers`, `top:0.5rem;left:0.5rem`) overlaps Leaflet's own default zoom control (also `topleft` — `L.map(...)` is constructed with no `zoomControl: false` option, `fleet-map.ts`'s own `initMap()`), confirmed live via a docs/UX-REWORK-PLAN.md §U-c verification screenshot of the new full-bleed Command map** (the "Standard" layer button's own left portion renders behind the zoom control's opaque `+`/`−` box). **Confirmed pre-existing, not a regression from this cycle**: `git diff` against `shared/map/**` for this task is empty — this component was read, not modified (out of this task's own file scope: "don't rework fleet-map/live-map themselves") — so this exact collision already existed on the old `/map` page and the old Command dashboard's own embedded map section, unchanged by anything here. Flagged for whoever next touches `shared/map/fleet-map.ts`: either add `zoomControl: false` and a custom-positioned zoom control that respects `.controls.layers`' own corner, or move one of the two controls to a different corner (`L.control.zoom({position: 'topright'})` collides with the Recenter control's own `top:0.5rem;right:0.5rem` instead — whichever corner is chosen needs auditing against *all three* corner occupants, not just two).
+- **Resolved (2026-07-24, infra+cleanup batch) — kept only as a worked example, not a live issue.** This bullet used to flag `shared/map/fleet-map.ts`'s layer switcher (`.controls.layers`, `topleft`) overlapping Leaflet's own default zoom control (also `topleft`) as a confirmed, pre-existing, unfixed collision. It's fixed: `initMap()` now constructs `L.map(...)` with `zoomControl: false` and adds a zoom control back explicitly at `L.control.zoom({position: 'bottomright'})` — see `fleet-map.ts`'s own class doc comment ("Zoom control vs. layer switcher") and `shared/map/live-map/live-map.ts`'s identical fix. Found stale during docs/VISUAL-REFRESH-PLAN.md Wave 3 (2026-08-05) while reading this exact file for its own task — corrected here rather than left asserting a bug that no longer exists.
 - **Doc-comment staleness flagged by an earlier cycle — fixed by the infra+cleanup batch, 2026-07-24.** `shared/map/live-dock.ts` (the file whose own doc comment carried the worst of this staleness — "each host page (`MapPage`, and now `CommandPage`, …) guarantees at most one is ever rendered") is now **deleted outright** (see the `/map` fleet overview section above), so that particular comment is simply gone rather than fixed in place. `shared/map/fleet-map.ts`'s own doc comment ("`MapPage` resolves a clicked marker's `watch` output…", "activated/released here — `MapPage` owns that lifecycle") and `core/map/map-store.ts`'s own doc comment (naming `MapPage` as a co-consumer) were rewritten to name `CommandPage` as the sole current host and, for the events lifecycle, `shared/ui/notification-bell.ts` as the actual owner. `core/events/events-store.ts`'s own doc comment — the most substantively stale of the four, since it described "O(visible) discipline" as this store's defining trait when `shared/ui/notification-bell.ts`'s permanent `activate()` had already superseded it — was rewritten to describe the current always-on-in-practice reality directly (see the Detection events section's own "Update, docs/UX-REWORK-PLAN.md §U-c" paragraph above). Left here as a worked example of the failure mode, not because it recurs: a doc comment describing *why* a design choice was made ages fine; a doc comment asserting *who else does this today* silently rots the moment that "who" changes, with no compiler to catch it.
+
+## Status — VISUAL-REFRESH-PLAN Wave W5: audit + cleanup (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
+
+**Done.** Tree-wide, read-mostly audit closing out the VISUAL-REFRESH-PLAN: Job 1 swept every
+feature W0–W4 hadn't touched (`settings`, `org-settings`, `alerts`, `debug`, `onboarding`,
+`warehouse`, `labeling`, `models`, `training-jobs`, `categories`, `hubs`, `auth`, `not-found`) for
+token/consistency stragglers; Job 2 grepped the whole `app/` tree for raw hex/`rgb()`, illegal
+`--hud-*`/`--scrim*`, bespoke selected-state CSS, and confirmed `.surface-dark` placement, plus a
+computed (not eyeballed) AA contrast spot-check in both themes. **Nothing under
+`src/styles.css`/`app-sidebar`/`page-bar`/`assets`/`devices`/`roster`/`reports`/`activity`/
+`command`/`shared/map`/`fly`/`wall`/`replay`/`shared/player`/`theme-store.ts` was touched** — every
+fix below lives in a feature Job 1 named or a shared component that feature exclusively owns.
+
+### Job 1 — per-feature findings
+
+Most of the twelve features were already 100% token-driven post-W0 (no raw hex, no bespoke
+selection, no multi-chip rows) and needed **no change**: `warehouse` (a routes-only re-export, no
+UI at all), `models`, `training-jobs`, `hubs`, `auth`, `not-found`, `settings/account-settings.html`.
+Genuine stragglers, all multi-chip-per-row (F5 rule 4) or F5 rule-2 (right-aligned `.mono` numbers)
+gaps that pre-date this plan and were simply never touched by a table/chip pass:
+
+- **`categories.html`/`.css`** — the Total/Active/Deactivated columns were bare left-aligned
+  numbers; added `.col-num`/`.mono` (same `th`/`td`-share-the-class idiom `assets.css`'s own
+  Devices column documents — Angular's emulated encapsulation means the class can't be shared
+  across components). Streaming stays unaligned — it renders a chip/dot (state), not a bare number.
+- **`debug.html`/`.css`** — the raw API console's History table's `ms` column got the identical
+  `.col-num`/`.mono` treatment. Low-stakes (a developer-only tool), fixed anyway since it was a
+  one-line, zero-risk, exactly-in-pattern gap.
+- **`onboarding.html` + new `drone-scan-logic.ts#detailsSummary`** — the "Discover on network"
+  table's Method column was a `.chip.accent` (classification → now `.muted` text) and its Details
+  column rendered **one chip per detail key, unbounded** — the table's own worst multi-chip
+  offender in the whole sweep. Collapsed to one muted, comma-joined, truncated cell via a new pure
+  `detailsSummary(details)` (`drone-scan-logic.ts`, unit-tested, 3 new cases) — the exact
+  N-chips-to-one-text-cell idiom `features/devices/devices.html`'s Capabilities column already
+  established. Replaced `OnboardingFacade#detailPairs` (now dead, removed) with a thin
+  `detailsSummary` passthrough. The neighboring "Listen for drones" vehicle list's own
+  `vehicleDetailChips` (max 2, firmware/sysid, each independently omitted) was left alone — already
+  a deliberately narrow, documented, non-table `<li>` card list, not the unbounded dump the Details
+  column was; its own doc comment updated to stop describing the now-fixed sibling as still doing
+  the old N-chip dump.
+- **`org-settings.html` + `org-settings-facade.ts#membershipsSummary`** — the Users list's rows
+  could show up to 2 (N-chip group memberships) + 1 (topRole) + 1 (Enabled/Disabled) = 4+ chips at
+  once, the second-worst offender found. Group memberships (classification, unbounded) collapsed to
+  one muted, comma-joined, truncated line via a new `membershipsSummary()` facade method (mirrors
+  `features/roster/roster.ts#RosterPage.assetNames`'s identical N-assignments-to-one-line collapse,
+  same "facades aren't unit-tested directly" precedent this codebase already established — no new
+  spec file). `topRole` de-chipped to muted text (classification); Enabled/Disabled stays the row's
+  one genuine state chip.
+- **`labeling/datasets.html`/`.css`** — the dataset-grid cards (a card-list, same F5 scope W2
+  already applied to the assets card grid) each carried a target-category chip **plus** one chip
+  per class **plus** three always-on sample-count chips. Target category (classification) → muted
+  text. The class list (unbounded, classification) → one muted comma-joined `.classes-line`, same
+  Capabilities idiom as above. **Deliberately left the pending/labeled/discarded counts-row as
+  three chips** — considered and rejected collapsing them: they're a simultaneous multi-metric
+  breakdown of *one* dataset's own progress (all three coexist, unlike an
+  archived/deactivated/live mutual-exclusivity state), the same shape F7's already-sanctioned map
+  legend ("several small count indicators in one quiet row") covers, not "which state is this row
+  in" the way F5 rule 4 targets — and there is no `.dot.warn` primitive to recolor them onto even if
+  that were the right call, adding one being out of this read-mostly wave's `src/styles.css` scope.
+  Documented in both files' own comments so the next agent doesn't have to re-derive the reasoning.
+- **`shared/ui/event-row.css`** (owned exclusively by `alerts.html`'s list + Wall/the notification
+  bell's non-selectable rail, confirmed via grep — selection only ever applies on the Alerts page)
+  — `.event-row.selected` used `background: var(--panel-raised)` (identical to the *resting* state)
+  + a left-bar color change only: selecting a row was visually a no-op background-wise, the same
+  "left bar only, no tint" bug W2 already fixed in Roster. Fixed to the canonical F4 pairing
+  (`--color-info-soft` background + `--color-info` left bar). Verified inert for Wall/the bell (no
+  `[selected]` binding is ever passed there), so the fix only ever activates on Alerts.
+- **`features/settings/detection-settings.css`'s `.profile.selected` and
+  `features/fly/cv-control-panel.css`'s `.model-option.selected`(fly, do-not-touch, audited only)**
+  — considered and **left alone**: these are radio-style choice-card pickers (mutually-exclusive
+  preset/model selection, same idiom `onboarding.html`'s method-tile/firmware/link `.segmented`
+  pickers already use), not F4's "table/list row" selection language, and already 100%
+  token-driven (`--color-info`/`--color-info-soft`, no invented hue). Not touched.
+
+### Job 2 — tree-wide grep + contrast audit
+
+1. **Raw hex/`rgb()`** — full-tree grep across every `.css`/`.ts`/`.html` outside `src/styles.css`
+   found exactly the three documented exception categories named by this task and nothing else new
+   *inside my writable scope*: (a) Canvas 2D `ctx.strokeStyle`/`fillStyle` calls
+   (`shared/player/player.ts`, `sample-box-editor.ts`, `detection-overlay-logic.ts`) plus Leaflet
+   `L.polyline({color: '#4f8cff'})` literals (`fleet-map.ts`, `replay-map.ts`, `live-map.ts`,
+   `flight-plan-dialog.ts`) and `sample-box-editor.css`'s `.swatch.model/.operator` (hand-synced
+   canvas-legend twins, already commented as such); (b) the four documented 25%-black-wash
+   exceptions (`app.css`, `live.css`, `wall.css`, `telemetry-osd.ts`); (c) `fleet-map.css`'s amber
+   glow `rgba(245,158,11,0.25)`. **One additional instance of the same (a)-class exception found,
+   not previously named by file**: `core/geofence/geofence-logic.ts`'s `KEEP_OUT_COLOR`/
+   `KEEP_IN_COLOR` (`#ff5d5d`/`#4f8cff`) — pure Leaflet zone-style literals, identical
+   "can't consume `var()` at draw time" constraint as the already-deferred trail-color recolor;
+   every consumer (`shared/map/**`, `features/command/**`) is do-not-touch for this wave, so this is
+   reported, not fixed — folds into the same deferred "theme-reactive canvas/polyline recolor"
+   follow-up item, just one more file in that bucket.
+2. **Bespoke selected/active CSS** — full-tree grep for `.selected`/`.active` CSS rules. Inside my
+   writable scope: only `shared/ui/event-row.css` was wrong (fixed above); everything else already
+   used the canonical F4 pairing or was a non-row toggle-button/tab/picker idiom (`.controls
+   .btn.active`, `.speeds .btn.active`, `org-settings.html`'s tab segmented control) correctly left
+   alone. **Outside my writable scope (do-not-touch), found but not fixed, reported here**:
+   - `features/fly/marks-panel.css`/`features/command/marks-panel.css`'s `.mark-row.selected` use
+     `background: var(--panel-hover)` — **not** `--color-info-soft` — the identical
+     "no tint, selection is a no-op" bug just fixed in `event-row.css`.
+   - `features/replay/replay-library.css`'s `tbody tr.row-selectable.selected` uses
+     `background: var(--panel-raised)` + a 3px inset shadow — **not** `--color-info-soft` —
+     exactly W2's *pre-fix* Assets/Devices pattern, just never migrated because `replay-library.*`
+     sits in `features/replay/**` (W4's scope, not W2's).
+   - `shared/player/sample-box-editor.css`'s `.box-row.selected` uses a full `border-color` change
+     (not the 2px-left-bar shape) — a milder deviation, same category as the (left-alone)
+     `.profile.selected`/`.model-option.selected` choice-card pattern, but this one *is* a scannable
+     annotation-list row, so it reads more like a genuine F4 gap than a picker-card carve-out.
+3. **Contrast spot-check** — computed via the WCAG relative-luminance formula (not eyeballed),
+   against the actual hex values in `src/styles.css` today, in both themes:
+
+   | pairing | light | dark | needs |
+   |---|---|---|---|
+   | `.chip.ok` text/soft | 6.53:1 | 9.70:1 | ≥4.5:1 |
+   | `.chip.warn` text/soft | 6.03:1 | 10.50:1 | ≥4.5:1 |
+   | `.chip.danger` text/soft | 6.00:1 | 8.24:1 | ≥4.5:1 |
+   | `--text-muted` on `--panel-raised` (a nested card, e.g. `org-settings.html`'s `.org-row`) | 5.90:1 | 5.61:1 | ≥4.5:1 |
+   | `--text-muted` on `--panel` | 5.65:1 | 6.11:1 | ≥4.5:1 |
+   | `--text-faint` on `--panel` | 2.94:1 | 4.65:1 | not AA-checked — "faint used only for captions" |
+
+   **No failures** among the checked (non-faint) pairings, in either theme — matches W0's own
+   light-theme-only audit, now cross-checked against dark too. `--text-faint` fails AA in light
+   (2.94:1) exactly as W0 already flagged and deliberately accepted (captions/placeholders only,
+   e.g. the app-wide "empty cell → faint em dash" convention); dark's own faint step happens to
+   clear AA (4.65:1) but that's incidental, not a requirement. A disabled `.btn` primary (opacity
+   0.45) blends to ~1.9–2.2:1 against `--panel` in both themes — expected and spec-compliant. WCAG
+   SC 1.4.3 explicitly exempts disabled/inactive controls from the contrast minimum.
+4. **`.surface-dark` placement** — grepped every reference tree-wide (not just class usage — every
+   comment mentioning it too). Confirmed exactly the five class-application sites W4 documented and
+   no others: `features/wall/wall.html`'s `.page`, `features/fly/cockpit.html`'s `.cockpit` (all
+   three branches), `features/replay/replay.html`'s `.recording-card`, `shared/player/player.ts`'s
+   `.frame`, `features/fly/preflight-checklist.html`'s `.checklist`. Every other file that mentions
+   `surface-dark` does so only in a comment explaining why it deliberately does *not* carry the
+   class (`preflight.ts`, `live-map.css`, `flight-plan-dialog.css`, `geofence-zone-dialog.css`,
+   `replay-map.css`). Nothing got dragged dark accidentally.
+
+Also noted, not fixed (shared component, cross-cutting into do-not-touch consumers, W2 already
+reviewed it "no change needed"): `shared/ui/two-pane/two-pane.css`'s `.two-pane-scrim` (the mobile
+slide-over backdrop) uses `--scrim` rather than the sanctioned `--hud-bg-strong` generic-modal-
+backdrop convention `shared/ui/confirm-dialog.css` established — both are theme-invariant so
+there's no theme bug, just a minor token-category mismatch (`--scrim`'s own doc comment scopes it to
+"video/map" compositing specifically). Low-priority, not touched.
+
+### Degrade / role-gate / dev-parity notes
+
+Every fix in this wave is presentation-only — a chip that used to hold N repeated values now holds
+one joined string of the same data, reading the same already-loaded fields (`Membership[]`,
+`Record<string,string>`, `dataset.classes`); no new `VisionApi` calls, no new HTTP, nothing that can
+fail differently than it already could. No role-gate changed: the same rows are visible to the same
+roles as before (`org-settings`'s ADMIN-only gate, `onboarding`'s existing scan-permission checks,
+etc. are all untouched). `vision.auth.enabled=false` dev parity unaffected — nothing touched here
+reads `AuthStore`/`topRole` for the first time; `org-settings.html` already gated the whole page the
+same way pre- and post-this-wave.
+
+### Tests
+
+New: 3 `detailsSummary` cases (`drone-scan-logic.spec.ts`). `npm run test:ci` → **111 files / 1804
+tests green** (was 111/1801 before this wave). `npx tsc --noEmit` clean on both `tsconfig.app.json`
+and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Isolated bundle delta** (measured via `git stash
+push -- <this wave's 14 files>` / rebuild / `git stash pop`, not just read off one build, since W5
+landed after every other wave's own uncommitted diff was already sitting in this same tree):
+**initial bundle unchanged** (393.31 kB raw both before and after; transfer 110.77 kB → 110.78 kB,
+rounding only) — expected, since every edit this wave made lives in a lazy-loaded feature chunk.
+Per-chunk: `onboarding` 75.71 kB → 75.71 kB raw / 18.63 kB → 18.62 kB transfer; `org-settings` 15.60
+→ 15.58 kB raw / 3.83 → 3.81 kB transfer (net **smaller** — collapsing N chip spans into one text
+binding removes more markup than the new helper methods add); `debug` 14.75 → 14.86 kB raw / 4.50 →
+4.53 kB transfer; `datasets` 8.86 → 8.93 kB raw / 2.88 → 2.91 kB transfer; `categories` 5.25 → 5.36
+kB raw / 1.97 → 2.01 kB transfer; `dataset-detail` unchanged (that file itself wasn't touched). Net
+effect across every touched chunk combined: a few hundred bytes, immaterial. **Still crosses the
+pre-existing 390 kB initial-bundle budget *warning*** by the same 3.31 kB W0's own entry already
+flagged and explained (every TIER 2 token declared twice, once per theme) — this wave neither
+caused nor worsened it.
+
+### Files touched
+
+Edited: `features/categories/{categories.html,categories.css}`, `features/debug/{debug.html,
+debug.css}`, `features/onboarding/{drone-scan-logic.ts,drone-scan-logic.spec.ts,
+onboarding-facade.ts,onboarding.html}`, `features/org-settings/{org-settings-facade.ts,
+org-settings.html,org-settings.css}`, `features/labeling/{datasets.html,datasets.css}`,
+`shared/ui/event-row.css`, this file, `docs/VISUAL-REFRESH-PLAN.md` (status line + W5-done mark).
+**Not touched** (per this wave's own instruction; findings above are reported, not fixed):
+`src/styles.css`, `app-sidebar`, `page-bar`, `assets`, `devices`, `roster`, `reports`, `activity`,
+`command`, `shared/map/**`, `fly`, `wall`, `replay`, `shared/player`, `theme-store.ts`,
+`core/geofence/geofence-logic.ts`, `shared/ui/two-pane/two-pane.css`. **Deferred, tracked as
+follow-up, not a blocker**: the theme-reactive canvas/Leaflet-polyline recolor task (`TRAIL_COLOR`
+and siblings, `DEFAULT_BOX_COLOR`, and now also `core/geofence/geofence-logic.ts`'s
+`KEEP_OUT_COLOR`/`KEEP_IN_COLOR` — all genuinely can't consume `var()` at draw time, need a real
+`getComputedStyle` + redraw-on-theme-change mechanism); the three `.selected` gaps found in
+do-not-touch files (`marks-panel.css` ×2, `replay-library.css`, `sample-box-editor.css`) for
+whichever wave next touches Fly/Command/Replay/the player.
+
+## Status — VISUAL-REFRESH-PLAN Wave 3: command + map (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
+
+**Done.** Scope: `features/command/**`, `shared/map/**` (`fleet-map`, `fleet-plan-dialog`,
+`live-map`, `tile-cache`). F7 (map presentation on light surfaces): theme-aware default basemap,
+one recolored marker glyph (live/offline/attention + a selection ring), overlay controls moved off
+`--hud-*`/`--scrim*` onto light `--panel-raised` cards, a new legend row, and a Command-page F4
+selection-language fix. Ran alongside three other agents on disjoint scopes (sidebar/settings done,
+tables/two-pane done, fly/wall/replay dark enclaves done) — no shared file touched.
+
+### 1. Theme-aware basemap default (`shared/map/tile-cache/leaflet-loader.ts`)
+
+`MAP_LAYERS.standard` (plain OSM raster) was already a genuinely light basemap — no new layer
+definition was needed, contrary to the task's own fallback contingency. The actual gap:
+`SettingsStore.mapLayer` (`core/settings/settings-store.ts`, **out of this wave's file scope**,
+not modified) is a single signal that always holds a concrete `MapLayerId` — its own hardcoded
+`DEFAULT_MAP_LAYER = 'night'` until something changes it — so a consumer reading it alone cannot
+tell "never touched the layer picker" apart from "explicitly chose Night"; both read back
+identically, and the store's own `persist()` effect writes `mapLayer` to `localStorage`
+unconditionally on *any* settings change, not only an explicit layer pick, so an already-persisted
+value cannot retroactively be trusted as "explicit" either.
+
+Solved without touching `settings-store.ts`: a second, tiny persisted flag lives beside `MAP_LAYERS`
+in `leaflet-loader.ts` — `vision.map.layerExplicit` (`isMapLayerExplicit()`/`markMapLayerExplicit()`,
+via the existing `core/panel-state.ts#readPersistedFlag`/`writePersistedFlag` helpers, same idiom as
+`CommandFacade`'s `railOpen`/panel-open flags). `defaultMapLayerIdForTheme(theme)` → `'standard'`
+(light) / `'night'` (dark); `effectiveMapLayerId(theme, chosen, explicit)` → `chosen` once explicit,
+otherwise the theme default — pure, unit-tested (new `leaflet-loader.spec.ts`, 10 cases). Every map
+component (`FleetMap`, `LiveMap`, `FlightPlanDialog`, `GeofenceZoneDialog` — all four
+`mapLayerTileLayer` call sites, grep-verified) now injects `ThemeStore` and exposes a
+`protected readonly activeLayerId = computed(() => effectiveMapLayerId(theme.theme(),
+settings.mapLayer(), isMapLayerExplicit()))`, used both to pick the tile layer (`applyLayer()`, no
+longer parameterized — it reads `activeLayerId()` itself) and to highlight the active button in the
+layer-picker segmented control (`[class.active]="activeLayerId() === layer.id"`, previously
+`settings.mapLayer() === layer.id` — fixed everywhere, since the two could otherwise disagree about
+which button to highlight). Each `setLayer(id)` now also calls `markMapLayerExplicit()` in the same
+call as `settings.mapLayer.set(id)`, so the two persisted values always change together —
+`isMapLayerExplicit()` is a plain (non-signal) read but is safe inside each `computed()` for exactly
+that reason (documented on `activeLayerId` in every component).
+
+**Transitional honesty note**: an existing user whose `localStorage` already carries a persisted
+`mapLayer` (which is virtually everyone, per the "written unconditionally" point above) reads
+`isMapLayerExplicit() === false` immediately after this upgrade, since the new flag key didn't exist
+before — so their console starts following the theme default until they touch the layer picker once
+post-upgrade, even if they'd knowingly picked a non-default layer long ago. Accepted deliberately:
+the alternative (treating any already-persisted `mapLayer` as "explicit") would make the theme-aware
+default practically unreachable for any returning user, defeating the point of this task.
+
+### 2. Marker/selection recolor (`shared/map/fleet-map/**`, `shared/map/live-map/**`)
+
+One glyph shape per state-availability reason (arrow when a heading is known — always the `live`
+bucket — dot otherwise; offline assets never carry a heading, so an un-rotated arrow would fabricate
+one, the "honest degrade" rule CLAUDE.md itself names), colour-only for state: `live` →
+`--color-live` (matching the entity rail's own `.dot.live`, `command.html` — the closest existing
+"marker state" analog on this same page, picked over `--color-success`/`.chip.ok`'s "Streaming"
+green precedent, which is a *badge* concept, not a marker-glyph one), offline → `--text-faint`
+(unchanged), `attention` → `--color-danger`, wins over both regardless of live/offline (an asset
+needing attention while flying is still worth flagging red). `CommandFacade.attentionAssetIds`
+(`computed<ReadonlySet<string>>`, new) is a thin filter over the already-computed `entityRows`
+(`row.severity !== 'ok'`) — no second attention derivation, so the rail and the map can never
+disagree. Threaded to `<vision-fleet-map [attentionAssetIds]="facade.attentionAssetIds()">`; the
+popup's own failsafe-red inline style moved from `--color-live` to `--color-danger` for the same
+reason (that token now means "streaming", not "urgent").
+
+Selection: `<vision-fleet-map [selectedAssetId]="facade.selectedAssetId() ?? undefined">`, a new
+input; a `.selected::before` ring (`border: 2px solid var(--color-info); box-shadow: 0 0 0 2px
+var(--color-info-soft)`) on the divIcon root — safe to position `absolute` without also setting
+`position` itself, since Leaflet's own `.leaflet-marker-icon` class already makes that element a
+positioned containing block. Command's own `.rail-row.selected` (`command.css`) was **not** yet
+F4-correct — it used `background: var(--panel-raised)` plus an extra `outline`, not the
+`--color-info-soft` background every other selected row in the app uses (confirmed against
+`.nav-row.active` (sidebar, Wave 1) and `tr.row-selectable.selected`/`.asset-card.selected`
+(assets/devices, Wave W2) — all landed by parallel agents this same day) — fixed to the canonical
+two-property pairing (`background: var(--color-info-soft); border-left-color: var(--color-info);`,
+outline dropped) so the rail and the new map ring read as the same "this is selected" concept, per
+the task's own explicit ask.
+
+`LiveMap`'s single drone-arrow glyph (Fly cockpit inset / asset-detail) also moved `--color-info` →
+`--color-live` for the identical F3 reason (blue is reserved for interactive/selected, never a
+status colour) — it has no offline/attention/selection concept of its own (always one asset, no
+rail, no `AttentionReason` data available to it), so only the colour-token fix applies there, not
+the state-recolor mechanism.
+
+### 3. Overlay controls → light cards (`--hud-*`/`--scrim*` removal)
+
+Fixed in every file this wave owns that had it: `fleet-plan-dialog/flight-plan-dialog.css`,
+`command/geofence-zone-dialog.css`, `live-map/live-map.css` — `.leaflet-control-attribution`
+background (`--scrim` → `--panel-raised`, matching `fleet-map.css`, which was already correct),
+`.tiles-warning`/`.badge` (a hand-rolled `color-mix(black 60%, transparent)` frosted pill → the same
+`--panel-raised` + `--border` + `--shadow` card `fleet-map.css`'s own badge already used — same
+"map overlay chrome is a light card" fix even where the offending code wasn't literally a named
+`--hud-*`/`--scrim*` token), the numbered waypoint/zone-vertex dot's ring (`border: 2px solid
+var(--scrim); box-shadow: 0 0 0 2px var(--hairline)` → `var(--panel-raised)` border + a `var(--border)`
+outline), and `live-map.css`'s `.zone-label`. `live-map.css`'s marker/flag drop-shadows moved from
+`var(--scrim-strong)` to the same `color-mix(in srgb, var(--black) 40%, transparent)` contact-shadow
+recipe `fleet-map.css`'s own marker already used — a legibility aid against arbitrary tile colour,
+not compositing-over-video chrome, so it isn't subject to the `.surface-dark`-only rule at all, but
+aligning the recipe removes a pointless divergence between the app's two "same glyph" components.
+
+**Deliberately left alone, and why**: every `.backdrop` (`zones-panel.css`, `flight-plan-dialog.css`,
+`geofence-zone-dialog.css`) still reads `background: var(--hud-bg-strong)`. This is a full-page modal
+dimmer, not a "control floating over the map" — F7's own language is about layer pickers/legends/
+counts, not backdrop scrims — and it's not a local anomaly: `shared/ui/confirm-dialog.css` (fully
+out of this wave's scope) uses the **identical** `--hud-bg-strong` backdrop for every generic
+confirm dialog app-wide, an established, unmigrated convention. Fixing 3 of the app's N modal
+backdrops while leaving the pattern's own reference implementation untouched would be inconsistent,
+not correct — a tree-wide backdrop-token decision belongs to Wave 5's audit, not this one.
+
+Also left alone (pre-existing, not named by this task, not newly introduced): `TRAIL_COLOR = '#4f8cff'`
+(`fleet-map.ts`) and its two siblings (`live-map.ts`, `flight-plan-dialog.ts`) — Leaflet path styling
+needs a literal colour string at draw time, so a genuine token fix means resolving
+`getComputedStyle(...).getPropertyValue('--color-info')` at draw time *and* re-styling every already-drawn
+polyline on a theme change (`setStyle()`), which is a real, separate feature, not a recolor, and
+wasn't asked for. `.mark-dot`/`.mark-selected .mark-dot`'s raw `rgb(0 0 0/35%)`/`rgb(255 255 255/25%)`
+box-shadows (both files, pre-existing, symmetric) are the tactical-marks feature's own established
+selection language (white ring, kind-coloured fill) — untouched, since F7's marker/selection language
+is specifically about fleet *asset* markers (live/offline/attention), not marks, and marks already
+has its own dedicated spec (TACTICAL-MARKS-PLAN M5) this task doesn't own. Flagged here for whichever
+wave/task next owns a tree-wide raw-hex/rgb() sweep.
+
+### 4. Legend (`shared/map/fleet-map/**`, new)
+
+`FleetMap` had no legend at all — `FleetMapStore.buckets` (`streaming`/`offline`/`noPosition` counts,
+`core/map/map-logic.ts#bucketAssets`) was already computed for marker-plotting but never rendered
+anywhere; the task's "existing … chips" refers to that already-derived data, not an existing UI. Added
+a `.legend` card (`--panel-raised` + `--border` + `--shadow`, bottom-left, stacked with the
+"tiles unavailable" badge via a new `.corner-stack` wrapper so the two never fight over the same
+absolutely-positioned spot) reusing the global `.dot`/`.dot.live` primitives — no new chip type, no
+new colour: streaming uses `.dot.live` (matching the marker glyph's own new colour), offline and
+no-position both use the plain `.dot` (faint) — deliberately not inventing a fourth colour for
+"no position" (it isn't a "bad" state, just unknown), distinguished by label text alone. Zero new
+HTTP — `FleetMap` already injects `FleetMapStore`, `buckets` is a direct signal passthrough.
+
+### 5. Command page audit (F4/F7 token correctness)
+
+`command.css`/`asset-panel.css`/`marks-panel.css`/`zones-panel.css` were already tier-2-token-clean
+(no raw hex, no dark-value assumptions) apart from the two items already covered above (`.rail-row.selected`
+under task 2; `zones-panel.css`'s own `.backdrop`, left alone per task 3's reasoning). No redesign —
+confirmed via targeted greps (raw hex/`rgb()`, `--hud-*`/`--scrim*`) across the whole `features/command/**`
+tree before and after, not just eyeballed.
+
+### Both themes
+
+Every token used above is tier-2 semantic (`--color-live`/`-danger`/`-info`/`-info-soft`,
+`--panel-raised`/`--border`/`--shadow`/`--text-faint`) — no theme-conditional CSS in any component.
+The one legitimate direct theme read is `ThemeStore.theme()` inside `activeLayerId`'s `computed()`
+in all four map components, exactly the plan's own carve-out ("picking a data source, not a style").
+Not screenshot-verified in a browser this wave (no `ng serve`/browser tooling available in this
+session) — verified by inspection instead: every new/changed rule was checked against both the F2
+(light) and shared-dark-block (`:root[data-theme='dark'], .surface-dark`) token definitions in
+`src/styles.css` to confirm neither block leaves a rule unstyled or wrong-valued.
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface touched, no role gate — this wave is pure client-side styling/token-routing plus
+one new local-preference flag. `vision.auth.enabled=false` dev parity unaffected (nothing here reads
+`AuthStore`/roles). The legend/marker-attention data both degrade the same way their sources already
+do: a stalled `entityRows`/`buckets` poll just keeps showing the last-known counts/colours, never a
+fabricated value — no new failure mode introduced.
+
+### Tests
+
+`npm run test:ci` → **111 files / 1801 tests green** (was 111/1801 already at the point this wave
+started reading the tree — the two parallel waves that landed first, W2 and W4, are folded into that
+count; this wave's own net addition is 1 new file, `leaflet-loader.spec.ts`, 10 cases: 2
+`defaultMapLayerIdForTheme`, 3 `effectiveMapLayerId`, 3 `isMapLayerExplicit`/`markMapLayerExplicit`,
+2 `mapLayerDef`). No `command-facade.spec.ts`/component specs added for `attentionAssetIds` — it's a
+one-line `computed()` filter over already-tested `buildEntityRows`/`command-logic.spec.ts`, and this
+codebase's own convention (grep-confirmed: no `*-facade.spec.ts` file exists anywhere) is that
+facades aren't unit-tested directly, only the pure `*-logic.ts` they wrap. `npx tsc --noEmit` clean
+on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` **not run**, per this wave's own instruction (contention with
+three other agents building in the same tree; a central build runs once every wave lands) — `ng test`'s
+own internal application-builder bundle (part of `npm run test:ci`, not a production build) succeeded
+with no errors, the only build signal available this wave.
+
+### Files touched
+
+Edited: `features/command/command-facade.ts`, `command.css`, `command.html`,
+`geofence-zone-dialog.{ts,html,css}`, `shared/map/fleet-map/fleet-map.{ts,html,css}`,
+`shared/map/fleet-plan-dialog/flight-plan-dialog.{ts,html,css}`,
+`shared/map/live-map/live-map.{ts,html,css}`, `shared/map/tile-cache/leaflet-loader.ts`, this file,
+one Gotcha bullet (stale `fleet-map.ts` zoom-control note, found and fixed while reading this file's
+own section — see that bullet's own text). New: `shared/map/tile-cache/leaflet-loader.spec.ts`. **Not
+touched**: `src/styles.css`, `app-sidebar`/`page-bar`, `settings`, `assets`/`devices`/`roster`/`reports`/
+`activity`, `fly`/`wall`/`replay`, `shared/player`, `shared/ui/confirm-dialog.css` (all out of this
+wave's own scope, per its own instructions), `core/settings/settings-store.ts`/`core/map/**`/
+`core/shell/theme-store.ts` (read/injected, never edited).
+
+## Status — VISUAL-REFRESH-PLAN Wave W4: dark enclaves (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
+
+**Done.** Scope: `features/fly/**`, `features/wall/**`, `features/replay/**`, `shared/player/**`,
+`features/preflight/**`. Applies `.surface-dark` (F3's shared-dark-block mechanism, landed inert by
+Wave 0) to every genuinely video-bearing root in this scope, sweeps the rest for token assumptions
+left over from the single-dark-theme era, and fixes two real bugs the sweep found. No route/backend
+change; every edit is CSS-token/class-only or a doc comment, except the two contrast/behavior fixes
+below (still no logic change — pure token repoint).
+
+### `.surface-dark` placement — four roots, two of them self-applied by the component itself
+
+- **Fly cockpit — `cockpit.html`'s `.cockpit` div, all three branches** (loaded/`#stage`, the
+  "Drone not found" empty state, the loading skeleton) — this whole route is the video surface with
+  no separate chrome around it (`fly.routes.ts`'s `fullBleed: true`, no page-bar), so the enclave is
+  the page's own root. `DronePickerPage` (`/fly`, the picker before a drone is chosen) deliberately
+  stays themed — it's a plain card grid, not video. Verified every drawer mounted inside `.cockpit`
+  (`flight-command-panel.css`, `cv-control-panel.css`, `rc-monitor.css`, `marks-panel.css`,
+  `arm-confirm-dialog.css`, `fly-osd.ts`, `diagnostics-card.ts`) already consumed only TIER 2 tokens
+  (no raw hex, no `--bg` misuse) — they inherit the enclave correctly with zero edits.
+- **Wall — `wall.html`'s outer `.page` div.** The frozen contract names "Wall root" explicitly (F3),
+  and the actual page confirms it: page-bar, the "unwatchable streams" notice, the tile grid, and
+  the events rail are all one "watching a wall of live feeds" picture, not a themed page with a
+  video region inside it — unlike Replay (below), there is no non-video content here worth keeping
+  themed. `wall-tile.ts`'s own `.tile`/chip styling is TIER-2-only, inherits correctly.
+- **Replay — `replay.html`'s `.recording-card` section only** (header, the native `<video>`, clip-
+  export controls, hints), not the whole `ReplayPage` and not the bare `<video>` tag alone. This
+  page is a themed data/review page (Position map, Playback scrub bar, Telemetry facts, Detection
+  chips — reviewed at a desk, not flown) with exactly one card that shows video pixels; the enclave
+  is scoped to that card's own full boundary, matching F3's "the player region joins the enclave;
+  the library list around it stays themed" instruction. The **replay library**
+  (`replay-library.html` — the `/replay` flight list + two-pane preview) needed no boundary decision
+  at all: it never renders video (confirmed from its own class doc comment — thumbnails were
+  explicitly scoped out), only navigates to `ReplayPage` via "Open replay ›" or embeds it directly
+  for the `?usage=` deep link (`<vision-replay>`, which then applies its own internal boundary
+  regardless of entry point). Documented at both the `.recording-card` comment in `replay.html` and
+  a cross-reference in `ReplayPage`'s own class doc comment (`replay.ts`).
+- **`shared/player/player.ts`'s `<vision-player>` — self-applies `.surface-dark` to its own `.frame`
+  root**, rather than relying on an ambient enclave, because this component is mounted far outside
+  the three enclave pages above: `features/live/live.html`, `features/command/asset-panel.html` (both
+  out of this wave's scope) also embed `<vision-player>` directly on a themed, light-by-default page.
+  This is not just future-proofing — it fixes a live bug the sweep caught, see below.
+- **`features/fly/preflight-checklist.ts`'s `<vision-preflight-checklist>` — self-applies
+  `.surface-dark` to its own `.checklist` root**, for the same "mounted in two places, only one of
+  which is already an enclave" reason. It's used inside the Fly cockpit (already `.surface-dark` via
+  the page root above) *and* standalone on `/operate/preflight` (`features/preflight/preflight.ts`
+  — a plain themed page: page-bar, a notice, a `.card` frame; deliberately does **not** get
+  `.surface-dark` itself, see its own class doc comment). Fixes a second real bug, see below.
+
+### Two bugs the sweep found and fixed (not just class/CSS additions — see DoD note)
+
+1. **`shared/player/player.ts`'s `.overlay-status` (the idle/connecting/error placeholder) read
+   `var(--bg)`/`var(--text-muted)`** — safe when the app had one, always-dark theme, broken the
+   moment light became the default: a `<vision-player>` tile mounted outside an enclave (e.g. on
+   Command's asset-panel) would show muted ink text on a light-canvas-to-black gradient instead of
+   the intended dark placeholder. Every *other* piece of chrome in this component (`.badge`,
+   `.box-tooltip`, `.model-legend`) already used the theme-invariant `--scrim`/`--hud-*` tokens and
+   was unaffected — only this one rule used TIER-2 tokens that now vary by theme. Fixed by the
+   `.frame`'s own `.surface-dark` above, which restores the original always-dark resolution
+   unconditionally; comment updated to explain the dependency rather than assert an already-stale
+   "there is only one theme" premise.
+2. **`features/fly/failsafe-banner.ts`'s `.banner-rth, .banner-landing` read the bare `--color-warn`
+   as text color on a `--color-warn-soft` background** — the exact AA-contrast failure Wave 0's own
+   audit already found and fixed once, in `.chip.warn` (styles.css: amber-600-on-amber-50 measures
+   3.75:1 against light theme's own 4.5:1 floor; `--color-warn-text` measures 6.03:1) — Wave 0's
+   audit covered primitives in `styles.css`, not every component's own bespoke copy of the same
+   tinted-chip formula, and this one had drifted from its own sibling rule three lines above it
+   (`.banner-failsafe`, which already correctly used `--color-danger-text`). Fixed the same way:
+   `color: var(--color-warn-text)`. `border-left-color` stays on the bare `--color-warn` deliberately
+   — a border reads fine at that tuning, only text-on-fill failed AA. Grepped the rest of this wave's
+   scope for the same `background: *-soft` + bare (non-`-text`) intent-color-as-text pattern
+   (`cv-control-panel.css`, `rc-monitor.css`, `replay.css`, `cockpit.css`, `sample-box-editor.css`) —
+   every other instance already used the correct `-text` step or inherited a theme-safe `--text`.
+
+### Swept and confirmed correct, no change needed
+
+- `fly-osd.ts`/`diagnostics-card.ts`'s own bare `--color-warn`/`--color-danger` text sits inside
+  `.surface-hud`/`.surface-hud-strong` (theme-invariant near-black fill), never on a `-soft` tint —
+  no contrast issue, unaffected by the theme flip.
+- `wall-tile.ts`'s `.telemetry-chip.stale`'s bare `--color-danger` sits on `.chip`'s own neutral
+  `--panel-raised`, not a `-soft` tint — F1's own AA-against-`--gray-50` design intent covers it.
+- `replay-map.css`'s `.map-shell { background: var(--bg) }` is correct as-is — the Position map
+  stays themed (see the Replay boundary above), so the light canvas fallback color showing while
+  Leaflet tiles load is exactly right, not a leftover dark assumption.
+- Canvas/Leaflet-API draw colors that must be literal (can't consume `var()`):
+  `detection-overlay-logic.ts#DEFAULT_BOX_COLOR`, `sample-box-editor.ts`/`.css`'s model/operator
+  swatches — pre-existing, already documented as deliberate fixed hues kept in sync by hand with
+  their own canvas counterparts, unrelated to theming.
+- No raw hex/`rgb()` found anywhere else in scope outside the already-reviewed canvas contexts above
+  and one pre-existing, explicitly documented bespoke scrim exception (`wall.css`'s `.notice code`
+  25% black wash, unchanged, already flagged in its own comment per the STYLE-TOKENS-PLAN geometry
+  note).
+
+### Left alone, deliberately — cross-cutting with the concurrent Wave W3 map/command scope
+
+Two more `--color-warn`/theme-invariant pairing questions turned up in `replay-map.ts`/`.css`, but
+both are **identical, pre-existing patterns duplicated across `shared/map/live-map.ts`,
+`shared/map/fleet-map.ts`, and `shared/map/fleet-plan-dialog.ts`** — all outside this wave's writable
+scope and inside the concurrently-running Wave W3 (`features/command/**`, `shared/map/**`, F7
+"marker/selection recolour... legend pass"). Fixing only the `replay-map.*` copy would diverge from
+the three sibling files this wave cannot touch, so both are flagged here for W3 instead of fixed:
+`replay-map.ts`'s `L.polyline(..., { color: '#4f8cff' })` trail color (Leaflet needs a literal JS
+color, matching `fleet-map.ts`'s own `TRAIL_COLOR` constant) and `replay-map.css`'s
+`.badge { background: var(--scrim); color: var(--color-warn); }` "tiles unavailable" badge (bare
+`--color-warn`, which now varies by theme, paired with theme-invariant `--scrim` — live-map.css/
+fleet-map.css share the exact same rule).
+
+### Verification
+
+`npx tsc --noEmit -p tsconfig.app.json` and `-p tsconfig.spec.json` both clean. `npm run test:ci`:
+111 files / 1801 tests, all green (no spec changed or added — every edit here is a class addition,
+a token repoint, or a comment; no component logic changed). `ng build` intentionally **not** run
+per this task's own instruction (parallel-agent contention; the central post-wave build covers it).
+
+### Files touched
+
+`features/fly/cockpit.html`/`.ts` (class + doc comment), `features/wall/wall.html`/`.ts` (class +
+doc comment), `features/replay/replay.html`/`.ts` (class + doc comment), `features/fly/
+preflight-checklist.html`/`.ts` (class + doc comment), `features/preflight/preflight.ts` (doc
+comment only), `shared/player/player.ts` (class + doc comment + fixed `.overlay-status` rule),
+`features/fly/failsafe-banner.ts` (fixed `.banner-rth`/`.banner-landing` color), this file,
+`docs/VISUAL-REFRESH-PLAN.md` (one-line W4-done mark only). **Not touched**: `shared/map/**`,
+`features/command/**` (flagged above for W3), `src/styles.css`, `app-sidebar`/`page-bar`/`settings`
+(other waves' scope), any file under `features/{assets,devices,roster,reports,activity}`.
+
+## Status — VISUAL-REFRESH-PLAN Wave W2: tables + two-pane (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
+
+**Done.** Scope: `features/{assets,devices,roster,reports,activity}/**`, `shared/ui/two-pane/**`
+(read in full — no change needed), `shared/ui/side-panel.{css,html,ts}` (read in full — no change
+needed). Applied F5 (table rules) to every table/dense list in scope, F6 (detail-panel anatomy) to
+the assets/devices two-pane detail panels, and F4 (selection language) to every selectable
+row/card in scope.
+
+### F5 — merged state, de-chipped classification, right-aligned numbers
+
+- **Assets** (`assets.html`/`.css`, `assets-logic.ts`): the dense-list and card-grid's separate
+  Lifecycle + Streaming chips merged into one state indicator via new `describeAssetState(row)`
+  (`assets-logic.ts`, unit-tested) — priority archived > deactivated > live > the default "offline"
+  (active, not streaming), rendered as a `.chip`/`.chip.faded`/`.chip.ok` for the three exception
+  states and a `.dot` + plain muted text (new `.row-state` class) for the ordinary case, so the
+  common row never carries a fourth chip color competing with the three that matter. Category was
+  already muted plain text (unchanged); the dense-list Devices column is now `class="col-num mono"`
+  (right-aligned, tabular-nums — the plan's own named example), header `<th class="col-num">` sits
+  directly over it. Card view's category moved out of the old `.asset-card-chips` chip into its own
+  muted meta line; device count moved from a bare number into the same row as the merged-state
+  indicator, as plain muted text (not a chip).
+- **Devices** (`devices.html`/`.css`, `devices-page-logic.ts`): identical merge via new
+  `describeDeviceState(row)` (own module, byte-similar to `describeAssetState` — **deliberately
+  duplicated** rather than lifted to `core/fleet/warehouse-logic.ts` alongside this codebase's usual
+  "second consumer → `core/`" rule, since `core/fleet/**` is outside this task's own file scope;
+  flagged as a follow-up for whoever next touches that module). Protocol de-chipped to muted text
+  (was a `.chip`); the Capabilities column de-chipped from N chips to one muted comma-joined text
+  cell (`'—'` when empty). "Simulated" stays its own chip, unmerged — a device's origin, not its
+  lifecycle/streaming state.
+- **Roster** (`roster.html`/`.css`/`.ts`): both pivots' category/pilot-name/assigned-asset-name
+  chips de-chipped — category → muted text; pilot/asset coverage → one `.dot` (`.ok` when
+  non-empty)/plain `.dot` + a comma-joined, truncated, titled plain-text list, replacing N chips per
+  row with one state indicator (`RosterPage#assetNames`, a small view-formatting helper — the "By
+  pilot" pivot's `RosterPilotRow#assignments` needed one extra `.map().join()` step the "By asset"
+  pivot's already-flat `pilotNames: string[]` didn't). `roster-name`/`roster-category`/the coverage
+  text all gained `.truncate` + `[title]` (title was missing before).
+- **Reports** (`reports.html`): the attention list's per-row category chip de-chipped to muted text
+  (F5 rule 4 — "classification is muted text" — is a general rule, not table-specific); the
+  severity chip(s) stay, they're the row's own state. No literal `<table>` on this page; audited,
+  otherwise already compliant (right-aligned `.mono` category-bar values, no centered columns).
+- **Activity** (`activity.html`): audited — no table, already zero chips per row (an earlier wave's
+  own explicit design choice, documented in-file), absolute-time `.mono` gutter, muted target,
+  truncated summary. No changes needed.
+
+### F6 — key-value fact grid, added where missing
+
+Assets' and Devices' two-pane detail panels previously jumped straight from a status-chip row to a
+device-list/action-set with no facts in between. Added a `<dl class="detail-fields">` (new CSS: a
+real two-column grid, `grid-template-columns: <fixed> 1fr`, `.detail-field { display: contents }`
+so its own `dt`/`dd` children fall directly into the two column tracks) between the status row and
+the `h3` section/actions row:
+- **Assets**: Category, Lifecycle, Devices (`.mono` count), Asset ID (`.mono truncate` + `title`) —
+  all already on `AssetListRow`, no new fetch.
+- **Devices**: Lifecycle, Capabilities, Protocol, Source URI (kept its copy button), Device ID
+  (kept its copy button), Owner (kept its link/"Unassigned" fallback) — all already on
+  `WarehouseRow`, no new fetch.
+
+**Deliberately not a literal shared CSS class** in `two-pane.css`/`side-panel.css`: Angular's
+emulated view encapsulation scopes a component's own stylesheet to its own template only, and
+`vision-two-pane`'s projected `[twoPaneDetail]` content is styled by the *projecting* page's own
+stylesheet (`assets.css`/`devices.css`), never `two-pane.css` — the same reason
+`features/asset-detail/asset-detail.css`'s pre-existing, differently-shaped `.facts`/`.fact` (a
+2-per-row tile grid, not this one's label-left/value-right row grid) already lives page-local too.
+Generalized instead as an identical class-naming/structure convention (`.detail-fields`/
+`.detail-field`/`dt`/`dd`), cross-referenced by comment in both files — mirrors this codebase's own
+pre-existing precedent for `.detail-chips`/`.table-scroll`/the row-selection block, all already
+duplicated the same way for the same reason. `shared/ui/two-pane/**` and
+`shared/ui/side-panel.{css,html,ts}` were read in full and left **untouched**: `TwoPane` already
+renders F6's own "title row" via its head, so no consumer needed a contract change; `SidePanel`
+(the fixed-overlay drawer carrying `.surface-hud-strong`'s always-dark HUD chrome, used by
+Fly/Command/asset-detail drill-ins far outside this wave's own scope) was deliberately not
+retouched — restyling that chrome is W4's "verify HUD pills unchanged over video" territory, not
+W2's, and both `assets`/`devices`' own two-pane detail already used plain themed tokens
+(`--panel`/`--border`), not the HUD treatment, so there was nothing to fix there either.
+
+Devices' panel has no "Open full ›": there is no standalone `/devices/:id` route at all (`/devices`
+carries no `:id` path) — the panel already **is** the full view (every action, the full URI/ID with
+copy, the owning-asset link). Assets' panel keeps its pre-existing "Open full ›" last, unchanged.
+
+### F4 — one selection language
+
+Replaced every bespoke selected-row/card treatment in scope with the frozen 2px `--color-info` left
+inset bar + `--color-info-soft` background tint:
+- Assets dense list (was `--panel-raised` background + a 3px inset shadow) and card grid (was a 1px
+  `outline`, no background tint at all).
+- Devices table (was `--panel-raised` background + a 3px inset shadow).
+- Roster's row buttons (was a left bar only, no background tint).
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface touched — every change here is presentation-only, reading fields the existing
+facades/rows already carry (no new `VisionApi` calls, no new signals beyond the two pure
+`describe*State` functions). No role-gate change: the same pages are reachable by the same roles as
+before. `vision.auth.enabled=false` dev parity unaffected — nothing touched here reads
+`AuthStore`/`topRole`.
+
+### Tests
+
+New: `assets-logic.spec.ts` (+5 cases, `describeAssetState`), `devices-page-logic.spec.ts` (+5
+cases, `describeDeviceState`). `npm run test:ci` → **110 files / 1793 tests green** (whole suite,
+including concurrent waves' own work landing in this same tree). `npx tsc --noEmit` clean on both
+`tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+Not run this wave — `ng build` deliberately skipped per this task's own instruction (avoids
+contention with the concurrent W1/W3/W4 agents in this same tree); a central build runs once every
+wave lands.
+
+### Files touched
+
+Edited: `features/assets/{assets.html,assets.css,assets.ts,assets-logic.ts,assets-logic.spec.ts}`,
+`features/devices/{devices.html,devices.css,devices.ts,devices-facade.ts,devices-page-logic.ts,
+devices-page-logic.spec.ts}`, `features/roster/{roster.html,roster.css,roster.ts}`,
+`features/reports/reports.html`, this file, `docs/VISUAL-REFRESH-PLAN.md` (one-line W2-done mark
+only). **Not touched**: `features/activity/**` (audited, already compliant — see F5 above),
+`features/asset-detail/**` (no F6 ripple — no shared component contract changed),
+`shared/ui/two-pane/**`, `shared/ui/side-panel.{css,html,ts}` (both read in full, neither needed a
+change — see the F6 section above), `core/fleet/warehouse-logic.ts` (out of scope — see the
+`describeDeviceState` note above), any file under `app.css`/`app-sidebar`/`page-bar`/`settings`/
+`command`/`shared/map`/`fly`/`wall`/`replay`/`shared/player`/`styles.css` (other waves' scope).
+
+## Status — VISUAL-REFRESH-PLAN Wave 1: shell + sidebar (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
+
+**Done.** Scope: `shared/ui/app-sidebar/**` (the real work), `features/settings/account-settings.{html,ts}`
++ `account-settings-facade.ts` (new Appearance section), `shared/ui/page-bar/**` (verification only —
+already token-clean post-W0, see below). `app/app.css`/`app.html`/`app.ts` untouched — no shell-markup
+hook was needed, `<vision-app-sidebar>` already exposes everything this wave needed. Builds directly on
+W0's `ThemeStore` (`core/shell/theme-store.ts`, read-only this wave).
+
+### Sidebar simplification (interest-point ranking: orientation → fast switching → quiet ambient status)
+
+- **Group labels lose their icon.** `app-sidebar.html`'s `.group-label` used to render
+  `mode.icon` (14px) beside the uppercase/tracked/muted label text — competing with every nav row's
+  own 16px icon two rows down for the same "what does this glyph mean" attention. Icon markup removed
+  outright (not hidden); the label is now `.group-divider` (rail-collapsed) or plain small-caps text
+  (everywhere else) — the `.group-label > vision-icon` rail-hiding selectors in both collapsed media
+  blocks (`app-sidebar.css`) are dead with it and were deleted, not just left unreferenced. `mode.icon`
+  itself stays defined on `NavMode` (`features/hubs/nav-entries.ts`, out of this task's scope) — simply
+  unused by this one consumer now.
+- **One uniform nav-row height, already true.** Audited, not changed: primary/Advanced/Upcoming rows
+  all already share one `.nav-row` class (`min-height: 2.25rem`, one icon column via a shared
+  `gap: var(--space-8)` + 16px `vision-icon`) — there was no per-tier divergence to fix.
+- **Active row → F4.** `.nav-row.active`'s resting fill moved from `--panel-raised` to
+  `--color-info-soft`; the 2px `--color-info` left inset bar (`::before`) is unchanged — this was
+  already the F4 shape, just with the pre-refresh bespoke background. Now matches the app-wide
+  selection language exactly (2px `--color-info` bar + `--color-info-soft` tint), nothing bespoke left.
+- **Footer consolidated to one quiet status line.** The old foot rendered two representations of the
+  same online/offline fact — a rail-only `.status-compact` dot and an expanded `.status-full` pair of
+  `.chip`s (`"N live"` + a second chip literally spelling `ONLINE`/`OFFLINE`). Collapsed to one markup,
+  rendered identically at every sidebar width: an `"N live"` chip when `liveCount() > 0`, one bare
+  online/offline `.dot` (reusing `src/styles.css`'s own `.dot`/`.dot.ok`/`.dot.danger` primitive instead
+  of the deleted `.status-compact`'s duplicate 8px-circle rules), the new theme toggle, then the
+  notification bell — `.status-dot`'s own `margin-left: auto` now does the "push the trailing cluster
+  right" job `vision-notification-bell`'s own `margin-left: auto` used to do alone. Only the live chip's
+  *text* is hidden on the ≤1024px rail (`.status-row > .chip { display: none }`, both collapsed media
+  blocks) — the dot, toggle and bell render unchanged there, stacked in the same column layout the foot
+  already used. The online dot itself now carries a real accessible name (`role="status"` +
+  `aria-label`/`title` "Backend reachable"/"Backend unreachable") rather than being `aria-hidden` with
+  the fact only readable via the row's own `title` — a strict a11y improvement, not just a visual one.
+  Demo button and identity chip are untouched (out of this task's file scope — `features/demo/**` isn't
+  in W1's writable set — and both already read as quiet, unstyled-beyond-their-own-precedent controls;
+  no override was needed).
+- **Upcoming disclosure loses its per-row `soon` chip.** The `<summary>Upcoming</summary>` title already
+  says it; the chip on every row under it was the same fact restated once per entry. Rows keep their
+  `.dimmed` colour + `title`/`aria-label` "(coming soon)". The now-dead `.sidebar.collapsed .nav-row
+  .chip { display: none }` rule (both collapsed media blocks) — written for exactly this chip, which no
+  `.nav-row` can render anymore — was deleted rather than left as dead CSS.
+
+### Theme toggle UI (docs/VISUAL-REFRESH-PLAN.md F3)
+
+- **Sidebar footer**: a plain icon `<button class="theme-toggle">` in the consolidated status row,
+  calling `ThemeStore.toggle()` directly — `AppSidebar` is a shared shell component, not a routed
+  feature page, so `core/ui/architecture.spec.ts`'s "routed page injects only its facade, never a bare
+  `*Store`" guard doesn't scan it at all (that spec globs `features/**` only). Styled like
+  `notification-bell.ts`'s own trigger (same `1.9rem` box, same one-off inline `<svg>` idiom, same
+  `stroke-width: 1.6` recipe) — deliberately **not** a new `IconName` in `shared/ui/icon-registry.ts`,
+  since that file sits outside this wave's writable scope; the bell's own doc comment already
+  establishes "a bespoke inline svg is fine for a one-off glyph" as precedent. Shows the *destination*
+  theme's glyph (moon while light is active, sun while dark is active — "click this to get that"), with
+  a matching `title`/`aria-label`. Present and clickable at every width, including the ≤1024px forced
+  rail and the <640px mobile sheet (verified live via a new spec case, not just reasoned about).
+- **Settings › Appearance** (`features/settings/account-settings.html`, new section, placed first —
+  before Interface/Notifications/System): a two-button `.segmented` control (`role="group"`, plain
+  `.btn.secondary.small` + `[class.active]`, the exact idiom `onboarding.html`'s firmware/link pickers
+  already use for a mutually-exclusive persisted choice — not `role="tablist"`, since this isn't a tab
+  view). **Routed through `AccountSettingsFacade`, not injected in the page directly** —
+  `AccountSettingsPage` *is* one of `core/ui/architecture.spec.ts`'s `ROUTED_PAGES`, so a bare
+  `inject(ThemeStore)` there would trip the "no `*Store` outside `UiStore`" guard; the facade gained
+  `readonly theme = inject(ThemeStore)` and the template reads/writes it as `facade.theme.theme()`/
+  `facade.theme.setTheme(...)`, the same direct-field idiom `facade.settings`/`facade.fleet` already use
+  rather than new passthrough wrapper methods. The two controls call the identical `ThemeStore` methods
+  — no state duplication, no sync logic needed between them.
+
+### Page bar — verification only, no redesign (task 3)
+
+Read `page-bar.css`/`.html`/`.ts` in full: every colour is already a tier-2 token (post-W0 re-point),
+every spacing value is already an 8px-grid `--space-*` step or geometry (the 48px `min-height`, the
+28px avatar, the 20px hint-trigger circle — icon-scale dimensions, not spacing, per the frontend-style
+skill's own "radii/hairlines are geometry and stay px" rule). No raw hex, no off-grid px, no
+theme-conditional CSS found. **No changes made** — already conformant.
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface touched by this wave — the theme toggle is a pure client-side preference flip
+(`ThemeStore`, W0), same "nothing here can fail partially" note as W0's own entry. No role gate: the
+sidebar and Settings › Appearance render identically for every `topRole`, same as the rest of the shell
+chrome. `vision.auth.enabled=false` dev parity unaffected — nothing added here reads `AuthStore`.
+
+### Tests
+
+New: 5 `AppSidebar` cases (group labels render with no icon; Upcoming rows carry no `.chip`; the
+consolidated status line — live chip + online dot with a real `aria-label`, offline variant; 3 theme-
+toggle cases — default light + "switch to dark" label, click flips `ThemeStore.theme()` +
+`<html data-theme>` both directions, present/clickable on a full-bleed/rail-collapsed route). 2 existing
+`AppSidebar` cases rewritten for the new markup (old "ONLINE"/"OFFLINE" chip-text assertions → dot
+class/`aria-label` assertions; old per-row `soon`-chip assertion → asserts no chip at all).
+`AccountSettingsPage`/`AccountSettingsFacade` gained no new spec — this page has **zero** spec coverage
+of any kind pre-existing (not even for `toggleAdvanced`/`toggleEventNotifications`), so a two-line
+`inject(ThemeStore)` + direct-field-read passthrough follows that same precedent rather than being the
+first test in the file; correctness here rests on `ThemeStore`'s own thorough W0 spec coverage plus
+`tsc`/the architecture guard for wiring. `npm run test:ci` → **110 files / 1788 tests green** (whole
+suite, including concurrent waves' own work in this same tree). `npx tsc --noEmit` clean on both
+`tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+Not run this wave — `ng build` deliberately skipped per this task's own instruction (avoids contention
+with the concurrent W2/W3/W4 agents in this same tree); a central build runs once every wave lands.
+
+### Files touched
+
+Edited: `shared/ui/app-sidebar/app-sidebar.{ts,html,css,spec.ts}`, `features/settings/account-settings.
+{ts,html}`, `features/settings/account-settings-facade.ts`, this file, `docs/VISUAL-REFRESH-PLAN.md`
+(one-line W1-done mark only). **Not touched**: `app/app.css`/`.html`/`.ts` (no hook needed),
+`shared/ui/page-bar/**` (verified, no change needed), `core/shell/sidebar-store.ts` (no new persisted
+flag was needed — the theme toggle's only state is `ThemeStore`'s own), `shared/ui/icon-registry.ts`
+(deliberately — see the theme-toggle paragraph above), any file under `features/assets|devices|roster|
+reports|activity|command|fly|wall|replay`, `shared/map`, `shared/player`, `shared/ui/two-pane` (other
+waves' scope).
+
+## Status — VISUAL-REFRESH-PLAN Wave 0: theme foundation + primitives (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
+
+**Done.** The whole of Wave 0's scope: `src/styles.css` flips from a single dark palette to a
+**two-theme token system** (light default, dark user-selectable), plus a new `ThemeStore` that
+applies the choice and a bootstrap script that avoids a flash of the wrong theme. Component code is
+untouched app-wide — every name in the TIER 2 semantic contract (docs/STYLE-TOKENS-PLAN.md) is
+unchanged, only what each name resolves to moved, so every consumer just follows. Scope was strictly
+`src/styles.css` + `core/shell/theme-store.{ts,spec.ts}` + `app.ts`/`index.html` bootstrap wiring —
+no file under `features/**`/`shared/**` touched.
+
+### The mechanism (docs/VISUAL-REFRESH-PLAN.md F1–F3)
+
+- **TIER 1 (`src/styles.css` `:root`)** — the original dark ramp (`--gray-950…`, `--blue-500…`,
+  etc.) is untouched, still backing the dark theme. A new **light ramp** sits beside it: neutrals
+  `--gray-50/-75/-150/-200/-350/-450/-500` + `--ink-900`, and intent hues
+  `--blue-600/-50/-800`, `--green-600/-50/-700`, `--amber-600/-50/-700`, `--red-600/-50/-700`,
+  `--rose-600` — exactly the plan's own F1 values, landed with **zero lightness tuning**: every
+  contrast pairing TIER 2 actually uses already cleared AA on the first check (see below), so
+  nothing needed adjusting off the plan's own proposed hex.
+  - **One deliberate, documented deviation from F1's literal text**: F2's own spec writes the three
+    `-line` tokens (`--color-success-line`/`-warn-line`/`-danger-line`) as bare hex
+    (`#a9d8bc`/`#e6cc93`/`#efb6bb`) directly in the TIER 2 list, which conflicts with this file's
+    (and `.claude/skills/frontend-style/SKILL.md`'s) own "raw hex ONLY in TIER 1" rule — literally
+    following F2's text would have made those three TIER 2 tokens the sole exception. Resolved by
+    giving each colour a new TIER 1 name instead — `--green-300`/`--amber-300`/`--red-300` (the same
+    relative "between the `-50` tint and the `-600` base" slot the dark ramp's own `-800`/`-200`
+    steps occupy) — and pointing the TIER 2 `-line` tokens at those. Same hex values as the plan
+    specifies, TIER 1/TIER 2 separation preserved.
+- **TIER 2 re-point (`:root`)** — every semantic name (`--bg`/`--panel`/`--panel-raised`/
+  `--panel-hover`/`--border`/`--border-strong`, `--text`/`--text-muted`/`--text-faint`, all eleven
+  `--color-*` intent tokens, `--shadow`) now resolves to the light ramp by default, per F2 exactly.
+  `color-scheme: light` on `:root`. `--radius*`/`--font`/`--mono` are unchanged and theme-invariant
+  (not re-declared per theme).
+- **The shared dark block (F3)** — one new rule, `:root[data-theme='dark'], .surface-dark { … }`,
+  re-declares every one of those same TIER 2 names at their **pre-refresh dark values**, verbatim
+  (plus `color-scheme: dark` and the old `--shadow`). This is the entire mechanism for both the
+  user's dark-theme choice and the always-dark video enclave (Fly cockpit, Wall, replay player
+  region carry `.surface-dark`, per F3 — not applied to any surface by this wave; that's each
+  consuming feature's own job in a later wave) — a plain custom-property cascade, no specificity
+  games: a value set on `.surface-dark` (or inherited from an ancestor closer than `:root`) always
+  wins over one only inherited from `:root`. `--hud-*`/`--scrim*`/`--hairline` were **not** touched —
+  confirmed theme-invariant already, unchanged by this wave.
+
+### Contrast check (computed via the WCAG relative-luminance formula, not eyeballed)
+
+Every pairing the task's own DoD named, plus the ones this wave's own audit needed:
+
+| pairing | ratio | needs |
+|---|---|---|
+| `--text` (ink-900) on `--panel` (gray-50) | 14.93:1 | ≥4.5:1 |
+| `--text` (ink-900) on `--bg` (gray-75) | 13.76:1 | ≥4.5:1 |
+| `--text-muted` (gray-500) on `--panel` | 5.65:1 | ≥4.5:1 |
+| `--text-muted` (gray-500) on `--bg` | 5.21:1 | ≥4.5:1 |
+| `--color-info-text` (blue-800) on `--color-info-soft` (blue-50) | 6.83:1 | ≥4.5:1 |
+| `--color-success-text` (green-700) on `-soft` (green-50) | 6.53:1 | ≥4.5:1 |
+| `--color-warn-text` (amber-700) on `-soft` (amber-50) | 6.03:1 | ≥4.5:1 |
+| `--color-danger-text` (red-700) on `-soft` (red-50) | 6.00:1 | ≥4.5:1 |
+| `--color-on-info` (white) on `--color-info` (blue-600) | 5.10:1 | ≥4.5:1 |
+| `--color-on-danger` (white) on `--color-danger` (red-600) | 5.21:1 | ≥4.5:1 |
+
+All clear. One primitive **failed** on audit and was fixed (not a TIER 1/2 value — a component
+primitive that referenced the wrong tier-2 token): `.chip.warn`'s `color` read the bare
+`--color-warn` (amber-600, 3.75:1 against its own `-soft` fill — fails AA), unlike
+`.chip.accent`/`.ok`/`.danger`, which all already use their own `-text` step; repointed to
+`--color-warn-text` (6.03:1). `--text-faint` (gray-450, 2.94:1 against `--panel`) is deliberately
+**not** AA-checked — the plan's own rule is "faint used only for captions", not body/label text.
+
+### Primitive audit (`src/styles.css`, "everything else compiles untouched" confirmed, not assumed)
+
+- **`.segmented > .btn { background-color: var(--text-muted) }` removed outright** (not re-valued) —
+  the anomaly the task named by name: every inactive segment painted a flat muted-gray fill,
+  wrong in both themes (read as disabled, and fought the active segment's own `--color-info` fill
+  for attention). An inactive segment is now plain `.btn.secondary` (transparent, bordered) exactly
+  as the doc comment above it already said children should be — only the shape rules
+  (`border-radius: 0; margin-left: -1px`) remain on `.segmented > .btn` itself. Active-segment
+  styling (`--color-info` fill) is untouched.
+- **`.chip.warn` fixed** — see the contrast table above.
+- Audited and confirmed already correct, no edit needed (token-driven, so the TIER 2 re-point alone
+  fixed them): `.btn`/`.btn.secondary`/`.btn.danger` (on-info/on-danger now resolve white per F2,
+  exactly the example the task named), `.chip`/`.chip.accent/.ok/.danger`, `.notice`/`.warn/.danger/
+  .ok`, form controls (`input`/`select`/`textarea` on `--panel-raised` over `--bg` — the "visible
+  control" job QF-3 wanted now reads as a genuinely lighter raised field on a gray canvas, not a
+  same-shade fill), kebab menus, tables, `.empty`, leaflet popup/tooltip rules. One stale **comment**
+  (not styling) fixed: the `option { … }` rule's doc comment used to say "`color-scheme: dark` on
+  `:root`…" unconditionally — reworded to describe whichever theme block is currently in effect,
+  since that's no longer always dark.
+- **Top-of-file doc comment rewritten** — replaces the old "Dark-first on purpose … camera
+  monitoring happens in dark rooms" framing with the two-theme model: light default, dark
+  selectable, `.surface-dark` enclave, citing docs/VISUAL-REFRESH-PLAN.md.
+
+### `ThemeStore` (`core/shell/theme-store.ts` + `.spec.ts`)
+
+Mirrors `SidebarStore`'s own shape and doc-comment idiom exactly, one level simpler (a single
+persisted value, not three independent ones): `providedIn: 'root'`, `theme: Signal<'light'|'dark'>`
+(default `'light'`, backed by `core/panel-state.ts#readPersistedString`/`writePersistedString` at
+`localStorage` key `vision.theme` — the pre-existing string-valued sibling of `SidebarStore`'s own
+`readPersistedFlag`/`writePersistedFlag`, so no new persistence helper was needed), `setTheme(value)`/
+`toggle()`. Applies `data-theme` on `document.documentElement` **explicitly for both values** (per
+the task's own requirement) on construction and on every `setTheme` call — not "set for dark, clear
+for light" — so the attribute always names the current theme rather than sometimes being absent.
+An unrecognized/garbage stored value (`localStorage.setItem('vision.theme', 'purple')`, e.g. a
+hand-edited or pre-this-store stale key) falls back to `'light'`, never throws.
+
+**Bootstrap wiring**: `app.ts` injects `ThemeStore` eagerly (`private readonly theme = inject(ThemeStore)`,
+side-effect only, same idiom as `sidebar`/`fleet` above it) so the persisted theme is applied the
+instant the app constructs — ahead of the `auth.user()` gate that hides the sidebar, since theme
+should apply regardless of auth state. `index.html` gained a small inline `<script>` in `<head>`
+that reads the same `vision.theme` key and applies the same `data-theme` attribute **before Angular's
+own bundle loads at all** — without it, a returning dark-theme user would see a flash of the light
+theme (the CSS default) for however long the JS bundle takes to fetch/boot; `ThemeStore`'s own
+constructor re-applies the identical value once Angular is live, a normally-idempotent no-op that
+also means the store's own contract doesn't need to special-case "did the bootstrap script already do
+this". Also updated: `index.html`'s `<meta name="theme-color">` from the old dark `#0b0e13` to the
+new light-default `--bg` (`#eef1f4`), matching the default theme's own canvas.
+
+**No visible toggle UI** — out of scope per the task; Wave 1 (docs/VISUAL-REFRESH-PLAN.md) adds the
+sidebar-footer switch and the Settings › Appearance control, both calling `ThemeStore.setTheme`/
+`toggle` directly (no facade needed — `ThemeStore` isn't a routed-feature domain store, so
+`core/ui/architecture.spec.ts`'s "routed page injects only its facade" rule doesn't apply to it, the
+same carve-out `UiStore` already has there).
+
+### Degrade / role-gate / dev-parity notes
+
+No backend surface, no role gate, no failure mode — this is a pure client-side visual token flip plus
+a `localStorage`-backed preference; nothing here can fail partially or need a "—" fallback.
+`vision.auth.enabled=false` dev parity is unaffected — `ThemeStore` doesn't read `AuthStore`/
+`authEnabled` at all, and applies identically regardless of auth state (verified: it's injected in
+`app.ts` ahead of, and independent of, the `@if (auth.user())` sidebar gate).
+
+### Tests
+
+`npm run test:ci` → **110 files / 1779 tests green** (was 109/1773 — 6 new `ThemeStore` cases:
+default-light-and-applies-attribute, `setTheme('dark')`, `setTheme('light')` explicitly re-applies
+rather than just clearing, `toggle()`, a fresh instance restores a persisted `'dark'` preference and
+re-applies the attribute, an invalid persisted value falls back to `'light'`). `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+### Build
+
+`ng build --configuration production` succeeds. **Initial bundle: 388.70 kB → 392.34 kB raw (+3.64 kB),
+109.52 kB → 110.11 kB transfer (+0.59 kB)** (388.70/109.52 is this same worktree's own last-recorded
+figure, an unrelated concurrent task's entry a few sections below) — driven by two things, both
+inherent to the F3 mechanism the plan itself specifies, not incidental bloat: `styles.css`'s own
+compiled output grew (every TIER 2 token is now declared twice — once for light in `:root`, once
+again verbatim for dark in the shared dark block — on top of the new TIER 1 light-ramp entries), and
+the new `ThemeStore` is a small `providedIn: 'root'` singleton the shell already eagerly loads (same
+"tiny root-provided addition lands in the initial chunk" cost every past `FleetStore`/`SidebarStore`-
+shaped addition in this file has paid). **Crosses the pre-existing 390 kB budget *warning*** (not the
+440 kB error one) by 2.34 kB — flagged here per this file's own established "flagged, not hidden"
+posture for budget crossings (see e.g. the U2/C6/U-c Status entries below), not silently absorbed;
+comfortably inside the error budget (47.66 kB of headroom left).
+
+### Files touched
+
+Edited: `src/styles.css`, `src/index.html`, `src/app/app.ts`, this file. New:
+`src/app/core/shell/theme-store.ts`, `src/app/core/shell/theme-store.spec.ts`. **Not touched**: any
+file under `features/**`/`shared/**` (out of this wave's own scope — the next waves, W1–W5, are the
+real consumers of the light theme and the ones that apply `.surface-dark` to the video enclaves), any
+other Maven module.
 
 ## Status — demo data button — 2026-08-04
 
@@ -3881,10 +4791,12 @@ already existed (`listCategories`, below).
   relocation, verified by the full pre-existing `command-logic.spec.ts` suite passing unchanged
   against the re-exported functions.
 - **`VisionApi.listCategories()` (new)** — `GET /api/categories` → `Category[]`, the endpoint's first
-  frontend call site (`CategoryController` already existed; `core/fleet/category-logic.ts`'s own
-  picker deliberately keeps its own "derive from loaded assets" fast path rather than switching to
-  this, per that file's updated doc comment — the two serve different jobs, an asset-creation picker
-  vs. this page's own full defined-category list).
+  frontend call site (`CategoryController` already existed). At the time this landed,
+  `core/fleet/category-logic.ts`'s own picker deliberately kept its own "derive from loaded assets"
+  fast path rather than switching to this — see the later "category picker's fallback list now comes
+  from the backend" Status entry below for where that changed: the picker's *seed* list is this call's
+  result now (never a hand-maintained copy), while "derive from loaded assets" for the in-use union
+  half stays exactly as it was.
 - **Routing/nav**: each page owns its own `<name>.routes.ts` (`PREFLIGHT_ROUTES`/`ALERTS_ROUTES`/
   `ROSTER_ROUTES`/`CATEGORIES_ROUTES`/`REPORTS_ROUTES`), spread into `app.routes.ts` alongside
   `HUBS_ROUTES`; the matching 5 route objects were removed from `hubs.routes.ts` (now 4 scaffold
@@ -6909,3 +7821,141 @@ Edited: `features/fly/preflight-checklist.ts` (rewritten as the 3-file component
 `features/fly/preflight-checklist.{html,css,spec.ts}`. **Not touched**: `features/preflight/**`,
 `features/fly/cockpit.css` (`.main-preflight`'s bottom-left anchor already fits the narrower collapsed
 card), `derivePreflight` itself.
+
+## Status — VISUAL-REFRESH-PLAN follow-up: the last three F4 stragglers — 2026-08-05
+
+**Done.** Closed the three "found but out of writable scope" F4 selected-state gaps Wave W5's audit
+reported and deferred (see that Status entry above), plus one straggler W4 flagged for W3 mid-flight
+that W3's own concurrent run had already finished by the time the flag landed:
+
+- `features/fly/marks-panel.css` + `features/command/marks-panel.css`'s `.mark-row.selected` —
+  was `background: var(--panel-hover)` with only a border-color change, i.e. selection was a
+  visual no-op background-wise. Adopted the bordered-card recipe `features/assets/assets.css`'s
+  `.asset-card.selected` already established: base rule gains `border-left: 2px solid transparent`
+  (space reserved so the bar doesn't shift layout on select), `.selected` sets
+  `background: var(--color-info-soft)` + `border-left-color: var(--color-info)`.
+- `features/replay/replay-library.css`'s `tbody tr.row-selectable.selected` — had the left-bar
+  (`box-shadow: inset 3px 0 0 0 var(--color-info)`) but no tint (`--panel-raised`, same as resting
+  state). Added `--color-info-soft` background; bar width normalized to 2px to match every other
+  table's `inset 2px 0 0 0` (was 3px, a stray one-off).
+- `shared/player/sample-box-editor.css`'s `.box-row.selected` — used a full uniform border-color
+  change instead of a left bar. Base rule gains `border-left: 2px solid transparent` alongside its
+  existing `border: 1px solid transparent`; `.selected` now sets `border-left-color` only, keeping
+  its already-correct `--color-info-soft` background.
+- `features/replay/replay-map.css` — still had the pre-F7 `--scrim`/`--color-warn` treatment on its
+  tiles-unavailable badge and Leaflet attribution control (this file lives in `features/replay/**`,
+  W4's scope, but the fix pattern is `shared/map/live-map/live-map.css`'s, W3's scope — flagged by
+  W4 for W3, too late for W3's already-finished concurrent run to see). Now `--panel-raised` +
+  `--border` + `--shadow`, identical to `live-map.css`; the arrow drop-shadow moved from
+  `--scrim-strong` to the `color-mix(in srgb, var(--black) 40%, transparent)` contact-shadow recipe
+  `fleet-map.css`/`live-map.css` already use.
+
+Verified after all four: `npx tsc --noEmit` clean, `npm run test:ci` → 111 files / 1804 tests green
+(no new specs needed — every change is a CSS-only token/selector fix, no logic touched), `ng build
+--configuration production` unchanged from Wave W5's own build (393.31 kB initial, same pre-existing
+390 kB budget warning). `docs/VISUAL-REFRESH-PLAN.md`'s deferred-work list updated to mark the F4
+gaps fixed; the theme-reactive canvas/Leaflet-polyline recolor item (including
+`geofence-logic.ts`'s `KEEP_OUT_COLOR`/`KEEP_IN_COLOR`, W5's own find) remains the one genuinely
+open follow-up — it needs runtime `getComputedStyle` + redraw-on-theme-change, a real feature, not
+a token swap.
+
+With this, VISUAL-REFRESH-PLAN (docs/VISUAL-REFRESH-PLAN.md) is fully closed: light theme is the
+default across the whole app, dark remains fully available via the sidebar/Settings toggle, video
+surfaces (Fly cockpit, Wall, the replay clip player, `vision-player`, preflight) stay dark in both
+themes via `.surface-dark`, and every list/table/panel in the app follows the F4/F5/F6 content
+rules. The durable rules for all future styling work live in
+`.claude/skills/frontend-style/SKILL.md`.
+
+## Status — VISUAL-REFRESH-PLAN post-launch fix: two real bugs a live check caught — 2026-08-05
+
+**Done.** Every prior wave verified with `tsc`/`test:ci`/a production build, none of which render a
+page — a live browser check on `/wall` (a wide viewport, only 2 tiles, so the page is shorter than
+the viewport) surfaced two bugs no automated check would have:
+
+1. **`src/styles.css`'s `:root[data-theme='dark'], .surface-dark` block only re-declared custom
+   properties (`--text`, `--bg`, …), never the actual `color`/`background` CSS properties.**
+   `<body>`'s `color: var(--text)` resolves once, using whatever theme scope `<body>` itself sits
+   in (the app-wide theme, since `<body>` is above any `.surface-dark` element), and that
+   *computed* color value just inherits down normally. An element inside `.surface-dark` that
+   never sets its own `color` — Wall's `<h1 class="page-bar-title">` (`shared/ui/page-bar/`) is
+   exactly this — keeps inheriting `<body>`'s already-resolved light-theme ink, invisible against
+   the same block's own correctly-dark `background`. This is not Wall-specific: it silently
+   threatens *any* bare-text element (no `.muted`/`.faint`/component-scoped color) inside any
+   `.surface-dark` root. Fixed once, centrally: `styles.css`'s dark block now also declares
+   `color: var(--text); background: var(--bg);` directly, which restarts inheritance at that exact
+   boundary for every descendant that doesn't set its own — verified this doesn't affect the light
+   theme (the block only ever matches `:root[data-theme='dark']` or `.surface-dark`, neither of
+   which applies to a normal light page).
+2. **Wall's root is the shared `.page` class** (`src/app/features/wall/wall.html`:
+   `<div class="page surface-dark">`), which is padding-only in `styles.css` — no height, no
+   background of its own. Unlike Fly's `.cockpit`/Command's `.command-shell` (each a bespoke root
+   with its own `height: 100dvh`, per `app.css`'s own documented "a fixed viewport unit needs no
+   parent-chain percentage resolution" reasoning), `.page`'s box only ever grows to its content's
+   height. With only 2 tiles, that left a visible gap below/beside the grid where `<main>`'s
+   light-theme background showed through. Fixed with a `.page.surface-dark { min-height: 100dvh; }`
+   rule scoped to `wall.css` — NOT a change to the shared `.page` class, which every light-themed
+   page in the app also uses and must keep its natural (scrollable, content-driven) height.
+
+Audited the other three `.surface-dark` roots for the same two failure modes and found them already
+safe: `features/replay/replay.html`'s `.recording-card` gets its background from the shared `.card`
+class (explicit `background: var(--panel)`); `shared/player/player.ts`'s `.frame` sets its own
+`background: var(--black)` inline; `features/fly/preflight-checklist.html`'s `.checklist` carries
+`.surface-hud-strong` (explicit `background: var(--hud-bg-strong)`). None needed a height fix since
+none of them are page-filling roots the way Wall's `.page` is. All three still benefit from the
+`styles.css` color fix for any bare text they might carry.
+
+Verified: `npx tsc --noEmit` clean, `npm run test:ci` → 111 files / 1804 tests green, `ng build
+--configuration production` unchanged (393.31 kB initial, same pre-existing budget warning),
+live-checked in the browser on `/wall` (page-bar title now legible, no gap, computed
+`getComputedStyle` confirmed `color`/`background` resolve correctly) and re-checked `/fly` for
+regressions (none — HUD chrome, telemetry OSD render identically to before). `docs/VISUAL-REFRESH-
+PLAN.md` and `.claude/skills/frontend-style/SKILL.md` both updated with this finding so a future
+new `.surface-dark` root doesn't repeat either mistake.
+
+## Status — post-launch fix: theme toggle click was bubbling into a navigation — 2026-08-05
+
+**Done.** User-reported bug: clicking the sidebar's light/dark toggle sometimes changed the current
+page and collapsed the sidebar. Root cause: `shared/ui/app-sidebar/app-sidebar.html`'s `.theme-toggle`
+`<button>` sits *inside* the brand `<a routerLink="/fly">` (shares that corner's layout). Its click
+handler only called `theme.toggle()`, so the native click still bubbled up to the parent anchor,
+Angular's `RouterLink` navigated to `/fly`, and — since `/fly` is a full-bleed route —
+`SidebarStore.enterRoute()` (called from `app.ts` on every `NavigationEnd`) then auto-collapsed the
+sidebar. A theme click was silently doubling as a navigation.
+
+Fix: `(click)="theme.toggle(); $event.stopPropagation()"` — same `$event.stopPropagation()` idiom
+already used elsewhere in this codebase for a control nested inside a larger clickable ancestor
+(`features/assets/assets.html`'s row-kebab cells, the dialog-backdrop guards in
+`command/geofence-zone-dialog.html`/`command/zones-panel.html`/`map/fleet-plan-dialog/`). Added a
+regression test to `app-sidebar.spec.ts` (`AppSidebar — theme toggle`) that navigates to `/assets`,
+clicks `.theme-toggle`, and asserts `router.url` is unchanged — confirmed it fails without the fix
+(navigates to `/fly`) and passes with it. `app-sidebar.ts`'s own class doc (theme-toggle paragraph)
+updated to state the nesting and the stopPropagation reason explicitly, so a future edit to that
+button doesn't drop it. `npx tsc --noEmit` clean; full suite 111 files / 1807 tests green.
+
+## Status — category picker's fallback list now comes from the backend, not a hand-maintained copy — 2026-08-05
+
+**Done.** `core/fleet/category-logic.ts#deriveCategoryOptions` used to fall back to a hardcoded
+`DEFAULT_CATEGORY_OPTIONS` constant the doc comment itself admitted was "mirroring
+`InMemoryCategoryRepository`'s own dev/Phase-0 seed" from memory, with nothing keeping the two in
+sync — a duplicate list that could silently drift from the real backend seed. `VisionApi.listCategories()`
+(`GET /api/categories`) already existed (added Wave 4 for `features/categories/**`'s grouped view) but
+this picker had deliberately kept its own hardcoded fallback rather than an extra round trip. At the
+user's request, switched the fallback to the real backend list:
+
+- `deriveCategoryOptions(assets, seedCategories = [])` — `DEFAULT_CATEGORY_OPTIONS` removed; the
+  function is now purely "union `assets`' in-use categories with whatever seed list the caller
+  supplies," no more baked-in default. Both call sites now supply `VisionApi.listCategories()`'s
+  result as that seed.
+- `features/devices/devices-facade.ts` — new private `categories` signal, loaded once via
+  `listCategories()` in the constructor alongside `refreshWarehouse()` (same silent-degrade-on-failure
+  idiom as `refreshWarehouseAssets`); `categoryOptions` computed now reads `deriveCategoryOptions(this.assets(), this.categories())`.
+- `features/onboarding/onboarding-store.ts` — `loadCategoryOptions()` now fetches `listAssets()` and
+  `listCategories()` together (`Promise.all`) instead of just assets; `categoryOptions` starts as `[]`
+  (was `DEFAULT_CATEGORY_OPTIONS`) until that first load resolves — the same transient-empty pattern
+  this store already uses for `mavlinkPort`/`networkAddresses` before their own first fetch completes.
+- `features/devices/devices-page-logic.ts` no longer re-exports `DEFAULT_CATEGORY_OPTIONS` (removed
+  entirely, no remaining references).
+
+`category-logic.spec.ts` rewritten against the new signature (seed passed explicitly per test, plus
+new cases for "no seed supplied" and "both empty"). Verified: `npx tsc --noEmit` clean, full suite
+111 files / 1807 tests green.

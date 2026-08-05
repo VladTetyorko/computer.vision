@@ -249,12 +249,25 @@ interface DrawnBox {
  * at any video bitrate, and hoverable (label + confidence), unlike the server's burned-in boxes
  * (which stay; this is additive, see that module's doc comment on `'burned'`/`'off'`). Callers
  * that never pass `detections` simply never see the canvas draw anything.
+ *
+ * **Always a dark video surface, wherever it's mounted** (docs/VISUAL-REFRESH-PLAN.md F3/W4): the
+ * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
+ * this component is reused far outside the three pages that own their own enclave root (`Fly`
+ * cockpit, `Wall`) — `features/live`, `features/command/asset-panel`, and any future host all mount
+ * `<vision-player>` directly on a themed (light-by-default) page. `.frame`'s own idle/error
+ * placeholder (`.overlay-status`) reads `--bg`/`--text-muted` — safe only when those resolve to
+ * their dark values, which was true unconditionally back when the app had one, always-dark theme,
+ * and is true again now only because `.frame` forces it. Every other bit of chrome in this
+ * component (`.badge`, `.box-tooltip`, `.model-legend`) already used the theme-invariant
+ * `--scrim`/`--hud-*` compositing tokens, so only the placeholder needed this; self-scoping it here
+ * closes that gap once for every host instead of requiring each one to remember to wrap its own
+ * `<vision-player>`. Redundant-but-harmless inside `Fly`/`Wall`, which already provide it.
  */
 @Component({
   selector: 'vision-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="frame" [class.compact]="compact()">
+    <div class="frame surface-dark" [class.compact]="compact()">
       <video #video playsinline muted autoplay [controls]="!compact()"></video>
 
       <canvas
@@ -378,9 +391,12 @@ interface DrawnBox {
       text-align: center;
       font-size: 0.85rem;
       color: var(--text-muted);
-      /* Neither gradient stop has its own crosswalk entry; both sit within a few rgb units of an
-         existing ramp step (#0d1117 ~= --bg's #0b0e13, #05070a is darker still, past even
-         --gray-950) so this consolidates onto --bg/--black rather than adding a new ramp shade. */
+      /* --bg/--text-muted here rely on .frame's own .surface-dark (docs/VISUAL-REFRESH-PLAN.md
+         F3/W4, see this class's own doc comment) to resolve dark — without it this placeholder
+         would read theme-muted ink on a black gradient outside an enclave. Neither gradient stop
+         has its own crosswalk entry; both sit within a few rgb units of an existing dark-ramp step
+         (#0d1117 ~= --bg's dark value #0b0e13, #05070a is darker still, past even --gray-950) so
+         this consolidates onto --bg/--black rather than adding a new ramp shade. */
       background: linear-gradient(180deg, var(--bg) 0%, var(--black) 100%);
     }
 

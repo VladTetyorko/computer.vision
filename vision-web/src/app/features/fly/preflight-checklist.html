@@ -1,4 +1,17 @@
-<div class="checklist surface-hud-strong" [class.collapsed]="isCollapsed()">
+<!-- `.surface-dark` (docs/VISUAL-REFRESH-PLAN.md F3/W4): this card carries its own always-dark HUD
+     chrome (`surface-hud-strong`) in both places it's mounted — as a video overlay inside the Fly
+     cockpit (`cockpit.html`, already `.surface-dark` at the page root) and standalone on
+     `/operate/preflight` (`preflight.html`, an otherwise plain themed page — see that class's own
+     doc comment for why the *page* stays themed). Before this, only the HUD background/border were
+     theme-invariant; this component's own text/severity colors (`--text`, `--color-success-text`,
+     etc.) still read from whichever theme was ambient, which was correct while the app had one
+     theme but broke standalone on `/operate/preflight` once light became the default: ink text on
+     the near-black `--hud-bg-strong` fill is close to unreadable. Self-applying `.surface-dark`
+     here — a "full-surface" card boundary, not a lone-widget hack — makes the card's own text
+     tokens always resolve dark, matching a chrome that was already always-dark, so it renders
+     correctly regardless of host page theme. Redundant-but-harmless where the host page is already
+     `.surface-dark` (the cockpit). -->
+<div class="checklist surface-hud-strong surface-dark" [class.collapsed]="isCollapsed()">
   <!-- Head: a real toggle button only where the host asked for one (`collapsible`); the standalone
        `/operate/preflight` page passes nothing and keeps the plain, always-expanded heading. -->
   @if (collapsible()) {

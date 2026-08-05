@@ -51,7 +51,15 @@
   margin: 0 0 var(--space-4);
 }
 
-.classes-row,
+.classes-line {
+  font-size: 0.8rem;
+}
+
+/* Sample-status breakdown (docs/VISUAL-REFRESH-PLAN.md F5 rule 4 note, `datasets.html`'s own
+   comment above this row): a legend-shaped summary of one dataset's own counts, not "which
+   mutually-exclusive state is this row in" — the app-wide F7 map legend already establishes several
+   small count indicators in one quiet row as a distinct, sanctioned idiom from a table row's single
+   state chip, and pending/labeled/discarded coexist simultaneously rather than being alternatives. */
 .counts-row {
   flex-wrap: wrap;
   gap: var(--space-4);

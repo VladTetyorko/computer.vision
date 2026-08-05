@@ -3,7 +3,12 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { OnboardingStore } from './onboarding-store';
 import { WIZARD_STEPS, type ConnectMethod, type WizardStep } from './onboarding-logic';
-import { isClaimedVehicle, vehicleDetailChips, type VehicleDetailChip } from './drone-scan-logic';
+import {
+  detailsSummary,
+  isClaimedVehicle,
+  vehicleDetailChips,
+  type VehicleDetailChip,
+} from './drone-scan-logic';
 import {
   FIRMWARES,
   FIRMWARE_LABELS,
@@ -110,8 +115,9 @@ export class OnboardingFacade {
     return WIZARD_STEPS.indexOf(step);
   }
 
-  detailPairs(details: Record<string, string>): { key: string; value: string }[] {
-    return Object.entries(details).map(([key, value]) => ({ key, value }));
+  /** See {@link detailsSummary} — the general "Discover on network" table's own Details column. */
+  detailsSummary(details: Record<string, string>): string {
+    return detailsSummary(details);
   }
 
   // --- "Listen for drones" results list (docs/DRONE-INFRA-PLAN.md I-b) — thin helpers over

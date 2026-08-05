@@ -1,3 +1,17 @@
+/* `.page` (styles.css) is padding-only — no height, no background of its own — so with few tiles
+   its box only grows to content height, leaving `<main>`'s own light-theme background exposed
+   below/beside it (confirmed live, docs/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05: a 2-stream
+   Wall showed a white gap under the grid). `min-height: 100dvh`, not `100%` — `<vision-wall>`'s own
+   host has no explicit `display: block`, and a percentage height needs a definite-size ancestor to
+   resolve at all (the exact bug `app.css`'s own `<main>` doc comment already names for `.sidebar`);
+   a viewport unit sidesteps that rather than patching around it, the same reasoning Fly's `.cockpit`
+   and Command's `.command-shell` already use for their own dark, full-bleed roots. `min-`, not a
+   fixed `height`, so a wall with enough tiles to exceed one screen still grows past it and scrolls
+   inside `<main>` instead of clipping. */
+.page.surface-dark {
+    min-height: 100dvh;
+}
+
 .wall-layout {
     display: flex;
     align-items: flex-start;

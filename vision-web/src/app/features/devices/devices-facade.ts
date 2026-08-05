@@ -8,6 +8,7 @@ import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { describeHttpError } from '../../core/api-error';
 import {
   type AssetDetails,
+  type Category,
   type Device,
   type SettableLifecycleState,
 } from '../../core/api/models';
@@ -39,6 +40,10 @@ import {
  * **Wave 3 addition (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)**: the `?sel=`-
  * addressable two-pane selection (`selectedId`/`selectedRow`/`selectRow`/`clearSelection`) and the
  * detail panel's clipboard copy affordance (`copyToClipboard`) — everything else predates this wave.
+ *
+ * **docs/VISUAL-REFRESH-PLAN.md W2** — no facade changes; the merged state indicator
+ * (`devices-page-logic.ts#describeDeviceState`) is a pure read of fields `WarehouseRow` already
+ * carries, called straight from `DevicesPage`.
  */
 @Injectable()
 export class DevicesFacade {
@@ -136,11 +141,27 @@ export class DevicesFacade {
   /** Non-archived assets are always valid assign targets — a device's ownership is the only rule. */
   readonly assignableAssets = computed(() => this.assets().filter((asset) => (asset.lifecycle ?? 'ACTIVE') !== 'DELETED'));
 
-  /** The category picker's options — real, in-use categories when any asset has been loaded, else a small default set. */
-  readonly categoryOptions = computed<readonly CategoryOption[]>(() => deriveCategoryOptions(this.assets()));
+  /** The backend's own defined-category list (`VisionApi.listCategories()`) — the picker's seed;
+   *  loaded once, alongside `refreshWarehouse()`, in the constructor below. */
+  private readonly categories = signal<readonly Category[]>([]);
+
+  /** The category picker's options — every backend-defined category, plus any in-use category a
+   *  loaded asset carries that isn't in that list yet (`deriveCategoryOptions`'s own union rule). */
+  readonly categoryOptions = computed<readonly CategoryOption[]>(() => deriveCategoryOptions(this.assets(), this.categories()));
 
   constructor() {
     void this.refreshWarehouse();
+    void this.loadCategories();
+  }
+
+  /** Best-effort like `refreshWarehouseAssets` — a failed fetch just leaves `categoryOptions` derived
+   *  from in-use asset categories alone, same silent-degrade idiom as everywhere else in this facade. */
+  private async loadCategories(): Promise<void> {
+    try {
+      this.categories.set(await this.api.listCategories());
+    } catch {
+      // Silent-degrade — see doc comment above.
+    }
   }
 
   /** "+ Add source" (docs/UX-REWORK-PLAN.md §U-d) — the onboarding wizard is the only way in now;

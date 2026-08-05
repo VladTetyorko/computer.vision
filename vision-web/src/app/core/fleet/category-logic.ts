@@ -1,7 +1,7 @@
 import type { AssetSummary } from '../api/models';
 
 /**
- * The "existing categories + fallback list" category picker (docs/UX-QUICKWINS-PLAN.md QF-2's
+ * The "existing categories + backend seed list" category picker (docs/UX-QUICKWINS-PLAN.md QF-2's
  * "Create asset from this device"; docs/UX-REWORK-PLAN.md §U-d item 1 — the onboarding wizard's
  * Profile step reuses the exact same picker for its own category field).
  *
@@ -11,18 +11,13 @@ import type { AssetSummary } from '../api/models';
  * comment). `features/devices/devices-page-logic.ts` re-exports everything below so its own
  * pre-existing import site keeps working verbatim.
  *
- * Until docs/UI-REDESIGN-PLAN.md Wave 4, `vision-api.ts` carried no `listCategories()`/`GET
- * /api/categories` call site, even though that endpoint already existed server-side
- * (`CategoryController`) — rather than hand-roll a second, out-of-scope API method, this picker
- * derived its options from categories already present among whatever assets the caller had already
- * loaded (real, in-use categories, no extra round trip) and only fell back to a small hardcoded set
- * — mirroring `InMemoryCategoryRepository`'s own dev/Phase-0 seed (vision-app/devsupport) — for a
- * brand-new install with no asset to derive from yet. **`VisionApi.listCategories()` now exists**
- * (Wave 4, `features/categories/**`'s own grouped view) — this picker deliberately keeps its own
- * "derive from loaded assets" fast path rather than switching to it: an asset-creation picker wants
- * the categories actually in use plus the seed fallback, not necessarily every defined category
- * (the two lists usually coincide, but this file's own contract — "no extra round trip" — is
- * unchanged and still worth keeping).
+ * `deriveCategoryOptions` used to fall back to a hand-maintained `DEFAULT_CATEGORY_OPTIONS` constant
+ * — a small hardcoded list the doc comment here openly admitted was "mirroring
+ * `InMemoryCategoryRepository`'s own dev/Phase-0 seed" from memory, with no mechanism keeping the two
+ * in sync. Now that `VisionApi.listCategories()` (`GET /api/categories`) exists, callers fetch the
+ * backend's own defined-category list once and pass it in as `seedCategories` — the *real* seed,
+ * never a copy that can drift from it. `deriveCategoryOptions` itself stays a pure function: it only
+ * unions whatever seed list it's handed with the categories actually in use among `assets`.
  */
 
 /** One category the picker can offer: enough to render and to send back as `category`. */
@@ -31,28 +26,21 @@ export interface CategoryOption {
   readonly name: string;
 }
 
-/** Fallback options for an install with no asset yet to derive real categories from. */
-export const DEFAULT_CATEGORY_OPTIONS: readonly CategoryOption[] = [
-  { slug: 'drone', name: 'Drone' },
-  { slug: 'ip-camera', name: 'IP Camera' },
-  { slug: 'usb-camera', name: 'USB Camera' },
-  { slug: 'robot', name: 'Robot' },
-  { slug: 'simulated', name: 'Simulated' },
-];
-
 /**
- * The categories already in use among `assets`, deduped by slug and sorted by name. Falls back to
- * {@link DEFAULT_CATEGORY_OPTIONS} only when `assets` is empty (nothing yet to derive a real list
- * from) — an onboarding wizard run against a brand-new install with zero existing assets is exactly
- * this case.
+ * The categories already in use among `assets`, unioned with `seedCategories` (the backend's own
+ * defined-category list, `VisionApi.listCategories()`), deduped by slug and sorted by name.
+ *
+ * Union, never either/or: with only one "Simulated" asset in the fleet, an either/or picker offered
+ * exactly one category and trapped a first real-drone onboarding (U-d live-walkthrough finding) —
+ * every seed category stays available even when the fleet only uses one of them.
  */
-export function deriveCategoryOptions(assets: readonly AssetSummary[]): readonly CategoryOption[] {
-  // Union of the defaults and whatever the fleet already uses — never either/or. With only
-  // one "Simulated" asset in the fleet, an either/or picker offered exactly one category and
-  // trapped a first real-drone onboarding (U-d live-walkthrough finding).
+export function deriveCategoryOptions(
+  assets: readonly AssetSummary[],
+  seedCategories: readonly CategoryOption[] = [],
+): readonly CategoryOption[] {
   const bySlug = new Map<string, CategoryOption>();
-  for (const option of DEFAULT_CATEGORY_OPTIONS) {
-    bySlug.set(option.slug, option);
+  for (const option of seedCategories) {
+    bySlug.set(option.slug, { slug: option.slug, name: option.name });
   }
   for (const asset of assets) {
     if (!bySlug.has(asset.category)) {

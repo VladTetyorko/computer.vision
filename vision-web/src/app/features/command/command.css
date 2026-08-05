@@ -128,13 +128,14 @@
 }
 
 /* Declared after .critical/.warning so "which row did I click" always wins the shared
-   border-left channel; severity stays visible via the row's chip. The raised background
-   and outline carry selection even while the border shows severity on flagged rows. */
+   border-left channel; severity stays visible via the row's own chip. F4's selection language
+   (docs/VISUAL-REFRESH-PLAN.md) — `--color-info-soft` background + `--color-info` accent, the same
+   pairing `.nav-row.active` (sidebar) and `tr.row-selectable.selected`/`.asset-card.selected`
+   (assets/devices) all use — so the rail and the fleet map's own `.selected` marker ring
+   (`shared/map/fleet-map/fleet-map.css`) read as the same "this is what's selected" concept. */
 .rail-row.selected {
-  background: var(--panel-raised);
+  background: var(--color-info-soft);
   border-left-color: var(--color-info);
-  outline: 1px solid var(--color-info);
-  outline-offset: -1px;
 }
 
 .rail-name {

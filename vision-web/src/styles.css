@@ -1,9 +1,19 @@
 /*
  * Vision design tokens + base primitives.
  *
- * Dark-first on purpose: camera monitoring happens in dark rooms and outdoors
- * (docs/UX-DESIGN.md §7.7). The palette continues the Phase-1 console's language
- * so the visual identity carries over rather than restarting.
+ * Two-theme model (docs/VISUAL-REFRESH-PLAN.md, "daylight chart"): **light is the default theme**,
+ * a cool paper-gray canvas with ink text and one aviation blue — the app's monitoring surfaces are
+ * as often a daylit command room as a dark one, and the earlier "dark-first" premise read as
+ * generic "AI product" styling rather than an instrument panel. Dark stays fully available as a
+ * user-selectable second theme (`ThemeStore`, `core/shell/theme-store.ts`, persisted to
+ * `localStorage` as `vision.theme`) at exactly its pre-refresh values — nothing about the dark
+ * palette itself changed, only when it applies. `:root` declares the light TIER 2 values directly;
+ * `:root[data-theme='dark'], .surface-dark` re-declares every TIER 2 name at the old dark values in
+ * one shared block below — the same declarations back both the user's dark theme choice *and*
+ * `.surface-dark`, the permanent dark treatment carried by full-bleed live-video surfaces (Fly
+ * cockpit, Wall, the replay player region) regardless of app theme, since a light frame around dark
+ * video is glare. Components never branch on theme — they reference only the TIER 2 semantic names,
+ * which resolve differently depending on which of the two blocks is in effect for their subtree.
  *
  * docs/UX-REWORK-PLAN.md §U-b ("engineered, not generated") pass: flat/bordered panels replace
  * rounded-card-with-shadow (§1), the accent/status palette was audited for a single saturated hue
@@ -43,17 +53,21 @@
 }
 
 :root {
-    color-scheme: dark;
+    color-scheme: light;
 
     /* ======================================================================
-       TIER 1 — PRIMITIVE RAMP (docs/STYLE-TOKENS-PLAN.md §Colour).
-       The ONLY place raw hex is allowed in this app. Named by hue + numeric
-       lightness step. Components must never reference these directly — they
-       consume the TIER 2 semantic aliases below. Add a new step here (not a
-       hex literal in a component) when a genuinely new shade is needed.
+       TIER 1 — PRIMITIVE RAMP (docs/STYLE-TOKENS-PLAN.md §Colour,
+       docs/VISUAL-REFRESH-PLAN.md F1). The ONLY place raw hex is allowed in
+       this app. Named by hue + numeric lightness step. Components must never
+       reference these directly — they consume the TIER 2 semantic aliases
+       below. Add a new step here (not a hex literal in a component) when a
+       genuinely new shade is needed. Both the dark ramp (original) and the
+       light ramp (docs/VISUAL-REFRESH-PLAN.md) live here side by side — the
+       dark steps are unchanged and still back the shared dark block further
+       down (`:root[data-theme='dark'], .surface-dark`).
        ====================================================================== */
 
-    /* Neutrals — the surface/border/text staircase, dark → light. */
+    /* Neutrals — the dark surface/border/text staircase, dark → light. */
     --gray-950: #0b0e13;
     --gray-900: #141922;
     --gray-850: #1a212c;
@@ -66,26 +80,28 @@
     --white: #ffffff;
     --black: #000000;
 
-    /* Blue — info / primary action / selection / focus. */
+    /* Blue — info / primary action / selection / focus (dark-theme steps). */
     --blue-500: #4f8cff;
     --blue-900: #16264a;
     --blue-100: #a9c8ff;
     --blue-ink: #04101f;
 
-    /* Green — success / healthy (the -800/-200 pair is the notice/toast line + text). */
+    /* Green — success / healthy, dark-theme steps (the -800/-200 pair is the notice/toast line +
+       text). */
     --green-500: #37c977;
     --green-900: #10301f;
     --green-800: #1e5c3a;
     --green-200: #8ce7b4;
 
-    /* Amber — warn / attention (the -800/-200 pair is the notice-banner line + text). */
+    /* Amber — warn / attention, dark-theme steps (the -800/-200 pair is the notice-banner line +
+       text). */
     --amber-500: #ffb340;
     --amber-900: #33260c;
     --amber-800: #5a4413;
     --amber-200: #ffd479;
 
-    /* Red — danger / failure (the -800/-100 pair is the notice-banner line + text; -ink is text
-       painted ON a saturated red fill). */
+    /* Red — danger / failure, dark-theme steps (the -800/-100 pair is the notice-banner line +
+       text; -ink is text painted ON a saturated red fill). */
     --red-500: #ff5d5d;
     --red-900: #331419;
     --red-800: #6b2530;
@@ -93,13 +109,57 @@
     --red-100: #ffb3bd;
     --red-ink: #1a0009;
 
-    /* Rose — "live" / happening-right-now (deliberately off --red-500's hue, ~340° vs 0°, so a
-       temporal "streaming now" state never reads as the "something failed" red). */
+    /* Rose — "live" / happening-right-now, dark-theme step (deliberately off --red-500's hue,
+       ~340° vs 0°, so a temporal "streaming now" state never reads as the "something failed" red). */
     --rose-500: #ff3d78;
+
+    /* Light neutrals — paper canvas → white raised (docs/VISUAL-REFRESH-PLAN.md F1). Contrast-
+       checked against the pairings TIER 2 below actually uses (computed, not eyeballed):
+       ink-900-on-gray-50 14.9:1, ink-900-on-gray-75 13.8:1, gray-500-on-gray-50 5.65:1,
+       gray-500-on-gray-75 5.21:1 — all comfortably clear AA's 4.5:1 floor for --text/--text-muted,
+       so none of these needed tuning off the plan's own proposed values. */
+    --gray-50: #f9fafb; /* panel surface */
+    --gray-75: #eef1f4; /* page canvas */
+    --gray-150: #e5e9ee; /* hover tint */
+    --gray-200: #d9dee5; /* border */
+    --gray-350: #b9c1cc; /* border-strong */
+    --gray-500: #5b6574; /* muted text on light */
+    --gray-450: #8a94a2; /* faint text on light */
+    --ink-900: #1c2431; /* body text on light — ink, not black */
+
+    /* Intent hues, darkened/tinted for light backgrounds (docs/VISUAL-REFRESH-PLAN.md F1) — each
+       base is saturated enough to read as the accent against `--gray-50`/white, each `-text` step
+       checked at ≥4.5:1 against its own `-soft` fill (blue-800/blue-50 6.83:1, green-700/green-50
+       6.53:1, amber-700/amber-50 6.03:1, red-700/red-50 6.00:1) — no lightness tuning needed here
+       either. `-300` is a new naming slot (not in the plan's own F1 list): the `-line` tier-2 tokens
+       (`--color-*-line`) need a raw-hex tier-1 name of their own so they don't become the one
+       tier-2 token holding a literal hex value (this file's own "raw hex ONLY in tier 1" rule) —
+       named to sit lightness-wise between each hue's `-50` tint and `-600` base, the same relative
+       slot `-800`/`-200` occupy in the dark ramp above. */
+    --blue-600: #2e6bcf;
+    --blue-50: #e4edfa;
+    --blue-800: #234f92;
+    --green-600: #1f7f4c;
+    --green-50: #e1f2e8;
+    --green-700: #176038;
+    --green-300: #a9d8bc; /* light success -line */
+    --amber-600: #b26a00;
+    --amber-50: #faf0dc;
+    --amber-700: #7d5200;
+    --amber-300: #e6cc93; /* light warn -line */
+    --red-600: #c9333f;
+    --red-50: #fbe5e7;
+    --red-700: #a32833;
+    --red-300: #efb6bb; /* light danger -line */
+    --rose-600: #d81b60;
 
     /* ======================================================================
        TIER 2 — SEMANTIC ALIASES. What every component references. Re-point a
-       role at a different ramp step here and the whole app follows.
+       role at a different ramp step here and the whole app follows. These
+       are the LIGHT theme's values (docs/VISUAL-REFRESH-PLAN.md F2) — the
+       default theme. The dark theme re-declares every one of these names,
+       unchanged from their pre-refresh values, in the shared block further
+       down (`:root[data-theme='dark'], .surface-dark`).
        ====================================================================== */
 
     /* Surfaces, back to front — a 3-step elevation staircase (docs/UX-REWORK-PLAN.md §U-b item 1):
@@ -107,60 +167,73 @@
        `--panel-raised` is a surface nested *inside* an L1 panel (a form control, a popover/menu, a
        skeleton block) — each step is background-lightness only, no elevation ever comes from a
        shadow. `--panel-hover` is not a fourth elevation step: it is the interaction-feedback tint a
-       panel/row tints to on `:hover`, at any elevation, not a place a page ever sits at rest. */
-    --bg: var(--gray-950);
-    --panel: var(--gray-900);
-    --panel-raised: var(--gray-850);
-    --panel-hover: var(--gray-800);
-    --border: var(--gray-700);
-    --border-strong: var(--gray-600);
+       panel/row tints to on `:hover`, at any elevation, not a place a page ever sits at rest.
+       Elevation direction stays "raised = lighter" in light too: canvas gray-75 → panel gray-50 →
+       raised white (docs/VISUAL-REFRESH-PLAN.md F2). */
+    --bg: var(--gray-75);
+    --panel: var(--gray-50);
+    --panel-raised: var(--white);
+    --panel-hover: var(--gray-150);
+    --border: var(--gray-200);
+    --border-strong: var(--gray-350);
 
     /* Text — three-tier hierarchy: full-contrast body, a muted secondary tier, and a faint tertiary
        tier for captions/timestamps/disabled reasons (contrast-audited, docs/UX-REWORK-PLAN.md
-       §U-b item 7). */
-    --text: var(--gray-100);
-    --text-muted: var(--gray-300);
-    --text-faint: var(--gray-400);
+       §U-b item 7; re-audited for light in docs/VISUAL-REFRESH-PLAN.md F2 — see the F1 ramp
+       comment above for the actual ratios). Ink (`--ink-900`), not black — the "non-eye-damaging"
+       rule is as much about avoiding `#000` text as it is `#fff` canvases. */
+    --text: var(--ink-900);
+    --text-muted: var(--gray-500);
+    --text-faint: var(--gray-450);
 
     /* Intent — exactly one saturated accent hue (blue) for action/selection/focus; success/warn/
-       danger at mutually-distinct hues; live off danger's hue (see --rose-500). Each role carries a
+       danger at mutually-distinct hues; live off danger's hue (see --rose-600). Each role carries a
        base, a `-soft` fill, and (where used) a light `-text`/`-line` for banners and an `-on-*` ink
-       for text painted on the saturated fill. */
-    --color-info: var(--blue-500);
-    --color-info-soft: var(--blue-900);
-    --color-info-text: var(--blue-100);
-    --color-on-info: var(--blue-ink);
-    --color-success: var(--green-500);
-    --color-success-soft: var(--green-900);
-    --color-success-line: var(--green-800);
-    --color-success-text: var(--green-200);
-    --color-warn: var(--amber-500);
-    --color-warn-soft: var(--amber-900);
-    --color-warn-line: var(--amber-800);
-    --color-warn-text: var(--amber-200);
-    --color-danger: var(--red-500);
-    --color-danger-soft: var(--red-900);
-    --color-danger-line: var(--red-800);
-    --color-danger-text: var(--red-200);
-    --color-on-danger: var(--red-ink);
-    --color-live: var(--rose-500);
+       for text painted on the saturated fill. Light theme's base steps are the ramp's `-600`/`-700`
+       (darker/more saturated than the dark theme's `-500`) so each still reads clearly against a
+       pale `-50` soft fill or a white/`--gray-50` panel — see the F1 ramp comment above for the
+       contrast numbers. `--color-on-info`/`--color-on-danger` are white here (not an ink), since
+       white is what reads on the deeper `-600` fills these buttons paint in light (checked:
+       white-on-blue-600 5.10:1, white-on-red-600 5.21:1) — the dark theme's own block below keeps
+       its own ink values, since its fills are the paler `-500` steps ink reads on instead. */
+    --color-info: var(--blue-600);
+    --color-info-soft: var(--blue-50);
+    --color-info-text: var(--blue-800);
+    --color-on-info: var(--white);
+    --color-success: var(--green-600);
+    --color-success-soft: var(--green-50);
+    --color-success-line: var(--green-300);
+    --color-success-text: var(--green-700);
+    --color-warn: var(--amber-600);
+    --color-warn-soft: var(--amber-50);
+    --color-warn-line: var(--amber-300);
+    --color-warn-text: var(--amber-700);
+    --color-danger: var(--red-600);
+    --color-danger-soft: var(--red-50);
+    --color-danger-line: var(--red-300);
+    --color-danger-text: var(--red-700);
+    --color-on-danger: var(--white);
+    --color-live: var(--rose-600);
 
     /* Geometry — not part of the 8px spacing rule (radius/hairlines are geometry, not gaps). Stay
        in px. `--radius` at 5px (docs/UX-REWORK-PLAN.md §U-b item 1); pills are a deliberately
-       different shape. */
+       different shape. Theme-invariant — not re-declared in the dark block below. */
     --radius: 5px;
     --radius-sm: 3px;
     --radius-pill: 999px;
 
     /* Type — 2 families only (docs/STYLE-TOKENS-PLAN.md rule 2). `--font` for UI/display text,
        `--mono` (B612 Mono, avionics numerals) for telemetry/ids/timestamps. Every `font-family` in
-       the app resolves to one of these two — do not add a third. */
+       the app resolves to one of these two — do not add a third. Theme-invariant. */
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: "B612 Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, monospace;
 
     /* Depth — `--shadow` is reserved for true overlays only (menus, dialogs, toasts). `.card` and
-       every panel/tile in this app carry no box-shadow. */
-    --shadow: 0 6px 24px rgb(0 0 0 / 45%);
+       every panel/tile in this app carry no box-shadow. Light's shadow (docs/VISUAL-REFRESH-PLAN.md
+       F2) is a soft, low-alpha ink wash rather than the dark theme's harsher black one — a dark
+       shadow at the dark theme's own 45% alpha reads as a heavy smudge on a pale canvas. The dark
+       theme keeps its original value in the shared dark block below. */
+    --shadow: 0 4px 16px rgb(23 32 48 / 12%);
 
     /* ======================================================================
        SPACING — strict 8px grid, in rem (root = 16px, so 0.5rem = 8px).
@@ -206,6 +279,73 @@
        reads it (as a hardcoded `1024px` in its own `@media`, per the note just below on why `@media`
        can't read `var()` — the same convention every other breakpoint token here already follows). */
     --sidebar-bp: 1024px;
+}
+
+/* ==========================================================================
+   DARK THEME — user-selectable via `ThemeStore` (`core/shell/theme-store.ts`),
+   and the permanent identity of `.surface-dark` full-bleed video enclaves
+   (Fly cockpit, Wall, the replay player region). Re-declares every TIER 2
+   semantic token from the `:root` block above at its pre-refresh dark value
+   (docs/VISUAL-REFRESH-PLAN.md F3) — nothing here is new colour, only where
+   it applies. The selector list is the entire mechanism: the same
+   declarations back both the user's chosen dark theme *and* the enclave.
+   Custom properties re-resolve correctly wherever a rule *references*
+   `var(--text)`/`var(--bg)` at or below this scope — but a plain `color`/
+   `background` inherits its parent's already-*computed* value, not a fresh
+   `var()` lookup, so an element with no explicit `color` of its own (a bare
+   `<h1>`, `.page-bar-title`) just carries `<body>`'s light-theme ink straight
+   through a `.surface-dark` boundary lower in the tree, invisible against
+   the same block's own dark background (confirmed live: Wall's page-bar
+   title, docs/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05). The explicit
+   `color`/`background` declared directly below exist *only* to restart
+   inheritance at this exact boundary for descendants that never set their
+   own — components still only ever consume the TIER 2 names, never this
+   block directly. `--hud-*`/`--scrim*`/`--hairline` (declared in the Wave 0
+   section further down) are NOT re-declared here — they are theme-invariant
+   compositing values, already correct for both blocks, legal only inside
+   `.surface-dark`.
+   ========================================================================== */
+:root[data-theme='dark'],
+.surface-dark {
+    color-scheme: dark;
+
+    --bg: var(--gray-950);
+    --panel: var(--gray-900);
+    --panel-raised: var(--gray-850);
+    --panel-hover: var(--gray-800);
+    --border: var(--gray-700);
+    --border-strong: var(--gray-600);
+
+    --text: var(--gray-100);
+    --text-muted: var(--gray-300);
+    --text-faint: var(--gray-400);
+
+    /* Restart inheritance at this exact boundary — see this block's own doc comment above for why
+       a bare `color`/`background` reference is required here, not just the custom-property
+       re-declarations above. */
+    color: var(--text);
+    background: var(--bg);
+
+    --color-info: var(--blue-500);
+    --color-info-soft: var(--blue-900);
+    --color-info-text: var(--blue-100);
+    --color-on-info: var(--blue-ink);
+    --color-success: var(--green-500);
+    --color-success-soft: var(--green-900);
+    --color-success-line: var(--green-800);
+    --color-success-text: var(--green-200);
+    --color-warn: var(--amber-500);
+    --color-warn-soft: var(--amber-900);
+    --color-warn-line: var(--amber-800);
+    --color-warn-text: var(--amber-200);
+    --color-danger: var(--red-500);
+    --color-danger-soft: var(--red-900);
+    --color-danger-line: var(--red-800);
+    --color-danger-text: var(--red-200);
+    --color-on-danger: var(--red-ink);
+    --color-live: var(--rose-500);
+
+    --shadow: 0 6px 24px rgb(0 0 0 / 45%);
 }
 
 * {
@@ -439,10 +579,11 @@ input::placeholder {
     color: var(--text-faint);
 }
 
-/* Dropdown popup contents: `color-scheme: dark` on `:root` gets the popup chrome itself dark in
-   most engines, but an explicit `option` background/color keeps every option row legible
-   regardless of engine/OS quirks — this was the actual "invisible options" report (a light native
-   dropdown popup over this app's dark select, or unreadable-on-hover option text). */
+/* Dropdown popup contents: `color-scheme` (light or dark, whichever the active theme's `:root`/
+   `:root[data-theme='dark']` block currently declares) gets the popup chrome itself themed in most
+   engines, but an explicit `option` background/color keeps every option row legible regardless of
+   engine/OS quirks — this was the actual "invisible options" report (a popup whose native chrome
+   didn't match this app's own theme, or unreadable-on-hover option text). */
 option {
     background: var(--panel-raised);
     color: var(--text);
@@ -532,10 +673,15 @@ input[type="checkbox"] {
     gap: 0;
 }
 
+/* An inactive segment is otherwise plain `.btn.secondary` (transparent background, bordered) —
+   this rule only ever owns the shape (square corners, overlapping border), never a background.
+   docs/VISUAL-REFRESH-PLAN.md W0: an earlier `background-color: var(--text-muted)` painted every
+   inactive segment a flat muted-gray fill, wrong in both themes (it read as a disabled control, and
+   fought the active segment's own `--color-info` fill for attention instead of receding behind
+   it) — removed outright rather than re-valued. */
 .segmented > .btn {
     border-radius: 0;
     margin-left: -1px;
-    background-color: var(--text-muted);
 }
 
 .segmented > .btn:first-child {
@@ -750,7 +896,12 @@ button.danger-action {
 .chip.warn {
     background: var(--color-warn-soft);
     border-color: transparent;
-    color: var(--color-warn);
+    /* `-text`, not the bare `--color-warn` this used to read (docs/VISUAL-REFRESH-PLAN.md W0 audit)
+       — `.chip.accent`/`.chip.ok`/`.chip.danger` all already use their own `-text` step for exactly
+       this reason: the base intent colour is tuned to read as a fill/border, not as text on its own
+       `-soft` tint. In light, `--color-warn` (amber-600) on `--color-warn-soft` (amber-50) measures
+       3.75:1 against AA's 4.5:1 floor for text; `--color-warn-text` (amber-700) measures 6.03:1. */
+    color: var(--color-warn-text);
 }
 
 .chip.danger {

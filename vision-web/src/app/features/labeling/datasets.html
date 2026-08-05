@@ -79,7 +79,7 @@
               <div>
                 <h2><a [routerLink]="['/manage/training', d.id]">{{ d.name }}</a></h2>
                 @if (d.targetCategory) {
-                  <span class="chip">{{ d.targetCategory }}</span>
+                  <span class="muted">{{ d.targetCategory }}</span>
                 }
               </div>
               @if (facade.canManage()) {
@@ -91,11 +91,12 @@
                 />
               }
             </header>
-            <div class="row classes-row">
-              @for (c of d.classes; track c) {
-                <span class="chip">{{ c }}</span>
-              }
-            </div>
+            <!-- docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — classification (the class taxonomy) is
+                 muted text, not one chip per class; N chips collapse to one comma-joined line, same
+                 idiom `features/devices/devices.html`'s Capabilities column already uses. -->
+            @if (d.classes.length > 0) {
+              <p class="muted truncate classes-line" [title]="d.classes.join(', ')">{{ d.classes.join(', ') }}</p>
+            }
             <div class="row counts-row">
               <span class="chip warn">{{ d.sampleCounts.PENDING }} pending</span>
               <span class="chip ok">{{ d.sampleCounts.LABELED }} labeled</span>

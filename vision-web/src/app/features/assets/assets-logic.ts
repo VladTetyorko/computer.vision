@@ -129,6 +129,42 @@ export function findAssetRowById(rows: readonly AssetListRow[], id: string | und
   return rows.find((row) => row.asset.assetId === id);
 }
 
+/**
+ * docs/VISUAL-REFRESH-PLAN.md F5's "at most one chip per row" — collapses a row's lifecycle +
+ * streaming facts into the one state a glance actually needs, priority archived > deactivated >
+ * live > the default "offline" (an active, non-streaming asset — this app's own steady state,
+ * rendered as a dot + plain text everywhere it's used rather than a fourth chip color, so the
+ * merely-normal case doesn't compete for attention with the three exception states that do get a
+ * chip). Used by the dense list, the card grid, and the two-pane detail panel's own status row —
+ * one source of truth for what used to be two separately-rendered chips per surface.
+ *
+ * **Deliberately duplicated** in `features/devices/devices-page-logic.ts#describeDeviceState`
+ * (byte-similar, `'stopped'`/`'Stopped'` instead of `'offline'`/`'Offline'`) rather than lifted to
+ * `core/fleet/warehouse-logic.ts` alongside this codebase's usual "second consumer → `core/`" rule
+ * — this task's own file scope is exactly `features/{assets,devices,roster,reports,activity}/**` +
+ * `shared/ui/{two-pane,side-panel}.*`, `core/fleet/**` is out of it. Flagged as a follow-up for
+ * whichever task next touches `core/fleet/warehouse-logic.ts`, not solved here.
+ */
+export type AssetStateKind = 'archived' | 'deactivated' | 'live' | 'offline';
+
+export interface AssetStateDescriptor {
+  readonly kind: AssetStateKind;
+  readonly label: string;
+}
+
+export function describeAssetState(row: Pick<AssetListRow, 'lifecycle' | 'archived' | 'streaming'>): AssetStateDescriptor {
+  if (row.archived) {
+    return { kind: 'archived', label: 'Archived' };
+  }
+  if (row.lifecycle === 'DEACTIVATED') {
+    return { kind: 'deactivated', label: 'Deactivated' };
+  }
+  if (row.streaming) {
+    return { kind: 'live', label: 'Live' };
+  }
+  return { kind: 'offline', label: 'Offline' };
+}
+
 /** The `▤ ▦` list/card view toggle (docs/design/04-assets.md's suggested design) — persisted per user
  *  via `core/panel-state.ts#readPersistedString`/`writePersistedString`, the same idiom
  *  `features/command/command.ts`'s `railOpen`/`panelOpen` already use for their own collapse state. */

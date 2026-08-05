@@ -3,6 +3,7 @@ import type { DiscoveredDevice } from '../../core/api/models';
 import {
   MAVLINK_DISCOVERY_METHOD,
   buildMavlinkScanRequest,
+  detailsSummary,
   isClaimedVehicle,
   prefillFromVehicle,
   vehicleDetailChips,
@@ -84,6 +85,22 @@ describe('vehicleDetailChips', () => {
   it('never surfaces mode/armed/mavType or any other detail key as a chip', () => {
     const chips = vehicleDetailChips(candidate({ details: { mode: 'Loiter', armed: 'true', mavType: 'quad' } }));
     expect(chips).toEqual([]);
+  });
+});
+
+describe('detailsSummary', () => {
+  it('returns an empty string for an empty details map', () => {
+    expect(detailsSummary({})).toBe('');
+  });
+
+  it('joins one entry as "key: value" with no trailing separator', () => {
+    expect(detailsSummary({ manufacturer: 'Hikvision' })).toBe('manufacturer: Hikvision');
+  });
+
+  it('comma-joins every entry, in insertion order', () => {
+    expect(detailsSummary({ manufacturer: 'Hikvision', model: 'DS-2CD', firmware: '5.7.0' })).toBe(
+      'manufacturer: Hikvision, model: DS-2CD, firmware: 5.7.0',
+    );
   });
 });
 

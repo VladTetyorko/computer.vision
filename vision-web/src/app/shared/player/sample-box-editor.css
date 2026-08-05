@@ -121,6 +121,7 @@
   padding: var(--space-8);
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
+  border-left: 2px solid transparent;
   cursor: pointer;
 }
 
@@ -128,9 +129,11 @@
   background: var(--panel-hover);
 }
 
+/* Selected per docs/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
+   selected row/card in the app uses (e.g. `features/assets/assets.css`'s `.asset-card.selected`). */
 .box-row.selected {
-  border-color: var(--color-info);
   background: var(--color-info-soft);
+  border-left-color: var(--color-info);
 }
 
 .box-row .swatch {

@@ -45,16 +45,27 @@
   z-index: 1000;
   padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill);
-  background: var(--scrim);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   color: var(--color-warn);
   font-size: 0.72rem;
-  backdrop-filter: blur(4px);
 }
 
-/* Everything below targets DOM Leaflet creates itself — see live-map.css's identical note. */
+/* Everything below targets DOM that Leaflet creates itself rather than anything Angular rendered
+   from this component's own template — see `live-map.css`'s identical note.
+
+   Map overlay chrome is a `--panel-raised` + `--border` + `--shadow` card, never a `--hud-*`/
+   `--scrim*` frosted-dark pill (docs/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
+   inside `.surface-dark`). This component sits outside the `.recording-card` section that carries
+   `.surface-dark` on the replay page (W4's boundary — the clip player is video, this map is a
+   themed review tool), so it stays themed like any other map. The arrow's drop-shadow below uses
+   a plain `color-mix(... var(--black) ...)` contact shadow
+   instead — a legibility aid against arbitrary tile imagery, not compositing-over-video chrome,
+   the same recipe `fleet-map.css`/`live-map.css`'s own markers already use. */
 
 :host ::ng-deep .leaflet-control-attribution {
-  background: var(--scrim);
+  background: var(--panel-raised);
   color: var(--text-faint);
 }
 
@@ -69,5 +80,5 @@
   border-right: 7px solid transparent;
   border-bottom: 18px solid var(--color-info);
   transform-origin: 50% 60%;
-  filter: drop-shadow(0 0 2px var(--scrim-strong));
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--black) 40%, transparent));
 }

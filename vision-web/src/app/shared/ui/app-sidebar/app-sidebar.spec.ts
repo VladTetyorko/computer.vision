@@ -9,6 +9,7 @@ import { EventsStore } from '../../../core/events/events-store';
 import { LiveStore } from '../../../core/live/live-store';
 import { VisionApi } from '../../../core/api/vision-api';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
+import { ThemeStore } from '../../../core/shell/theme-store';
 import { NAV_MODES, navTiers } from '../../../features/hubs/nav-entries';
 
 /**
@@ -125,7 +126,7 @@ describe('AppSidebar — tiering + role gate', () => {
     expect(hrefs).toEqual(advancedTier.map((entry) => entry.to));
   });
 
-  it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed with a "soon" chip', () => {
+  it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed and carrying no per-row chip (docs/VISUAL-REFRESH-PLAN.md Wave 1 — the disclosure title already says it)', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
     const operateIndex = NAV_MODES.findIndex((mode) => mode.id === 'operate');
@@ -139,7 +140,16 @@ describe('AppSidebar — tiering + role gate', () => {
     const rows = details.querySelectorAll('a.nav-row.dimmed');
     expect(rows.length).toBe(upcomingTier.length);
     for (const row of Array.from(rows)) {
-      expect(row.querySelector('.chip')?.textContent?.trim()).toBe('soon');
+      expect(row.querySelector('.chip')).toBeNull();
+    }
+  });
+
+  it('renders every group label without an icon (docs/VISUAL-REFRESH-PLAN.md Wave 1 — icons compete with each row\'s own icon two rows down)', () => {
+    const fixture = render();
+    const root = fixture.nativeElement as HTMLElement;
+    for (const label of Array.from(root.querySelectorAll('.group-label'))) {
+      expect(label.querySelector('vision-icon')).toBeNull();
+      expect(label.querySelector('.group-label-text')?.textContent?.trim().length).toBeGreaterThan(0);
     }
   });
 
@@ -274,20 +284,26 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
     expect(root.querySelector('.sidebar')!.classList.contains('mobile-open')).toBe(false);
   });
 
-  it('preserves the identity chip, notification bell, and the live/online status chips (moved verbatim from the old header)', () => {
+  it('preserves the identity chip and notification bell, and consolidates live count + online status into one quiet line (docs/VISUAL-REFRESH-PLAN.md Wave 1)', () => {
     const fixture = render({ streams: [{}, {}] });
     const root = fixture.nativeElement as HTMLElement;
 
     expect(root.querySelector('.sidebar-foot vision-identity-chip')).not.toBeNull();
     expect(root.querySelector('.sidebar-foot vision-notification-bell')).not.toBeNull();
-    expect(root.querySelector('.status-full')?.textContent).toContain('2 live');
-    expect(root.querySelector('.status-full')?.textContent).toContain('ONLINE');
+    expect(root.querySelector('.status-row .chip')?.textContent).toContain('2 live');
+    const onlineDot = root.querySelector('.status-row .dot.status-dot');
+    expect(onlineDot).not.toBeNull();
+    expect(onlineDot!.classList.contains('ok')).toBe(true);
+    expect(onlineDot!.getAttribute('aria-label')).toBe('Backend reachable');
   });
 
-  it('shows OFFLINE when the fleet is unreachable', () => {
-    const fixture = render({ reachable: false });
+  it('shows the offline dot + label when the fleet is unreachable, with no live-count chip', () => {
+    const fixture = render({ reachable: false, streams: [] });
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('.status-full')?.textContent).toContain('OFFLINE');
+    const onlineDot = root.querySelector('.status-row .dot.status-dot');
+    expect(onlineDot!.classList.contains('danger')).toBe(true);
+    expect(onlineDot!.getAttribute('aria-label')).toBe('Backend unreachable');
+    expect(root.querySelector('.status-row .chip')).toBeNull();
   });
 
   /**
@@ -347,5 +363,85 @@ describe('AppSidebar — Advanced/Upcoming disclosures persist via SidebarStore'
     const manageIndex = NAV_MODES.findIndex((mode) => mode.id === 'manage');
     const advancedDetails = root.querySelectorAll('.nav-group')[manageIndex].querySelectorAll('details.disclosure')[0] as HTMLDetailsElement;
     expect(advancedDetails.open).toBe(true);
+  });
+});
+
+/**
+ * `ThemeStore` is injected directly here (never faked) — the same "exercise the real, simple,
+ * `providedIn: 'root'` store" precedent `SidebarStore` already gets throughout this file, since it
+ * is a plain persisted-signal store, not something with an HTTP/SSE dependency graph worth stubbing
+ * (contrast `FleetStore`/`EventsStore`/`LiveStore` above, faked purely so the tree can mount).
+ */
+describe('AppSidebar — theme toggle (docs/VISUAL-REFRESH-PLAN.md F3/Wave 1)', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('defaults to light, showing the sun (current theme) with a control that switches to dark', () => {
+    const fixture = render();
+    const root = fixture.nativeElement as HTMLElement;
+    const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
+
+    expect(TestBed.inject(ThemeStore).theme()).toBe('light');
+    expect(toggle.getAttribute('aria-label')).toBe('Switch to dark theme');
+    // Sun glyph is the <circle>-based svg; moon is a bare <path> with no circle — see this
+    // component's own doc comment: the icon shows the *current* theme, not the destination.
+    expect(toggle.querySelector('svg circle')).not.toBeNull();
+    expect(toggle.querySelector('svg path')).toBeNull();
+  });
+
+  it('clicking the toggle flips ThemeStore.theme, the button label/glyph, and <html data-theme>', () => {
+    const fixture = render();
+    const root = fixture.nativeElement as HTMLElement;
+    const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
+
+    toggle.click();
+    fixture.detectChanges();
+
+    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(toggle.getAttribute('aria-label')).toBe('Switch to light theme');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(toggle.querySelector('svg path')).not.toBeNull();
+    expect(toggle.querySelector('svg circle')).toBeNull();
+
+    toggle.click();
+    fixture.detectChanges();
+
+    expect(TestBed.inject(ThemeStore).theme()).toBe('light');
+    expect(toggle.getAttribute('aria-label')).toBe('Switch to dark theme');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(toggle.querySelector('svg circle')).not.toBeNull();
+    expect(toggle.querySelector('svg path')).toBeNull();
+  });
+
+  it('remains present and clickable on a full-bleed (rail-collapsed) route', () => {
+    const fixture = render({ fullBleed: true });
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.sidebar')!.classList.contains('collapsed')).toBe(true);
+
+    const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
+    expect(toggle).not.toBeNull();
+    toggle.click();
+    fixture.detectChanges();
+    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+  });
+
+  // Regression guard: the toggle sits inside the brand `<a routerLink="/fly">` (see this file's own
+  // class doc). Without `$event.stopPropagation()` in its click handler, the click bubbles to that
+  // anchor and the router navigates to /fly — which then auto-collapses the sidebar via
+  // `SidebarStore.enterRoute()` (`app.ts`'s `NavigationEnd` handler), since /fly is full-bleed. A
+  // theme click must never double as a navigation.
+  it('does not navigate — it sits inside the brand <a routerLink="/fly"> and must stop click propagation', async () => {
+    const fixture = render();
+    const router = TestBed.inject(Router);
+    await router.navigateByUrl('/assets');
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
+    toggle.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(router.url).toBe('/assets');
+    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
   });
 });

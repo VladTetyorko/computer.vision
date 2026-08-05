@@ -10,7 +10,7 @@
       <button
         type="button"
         class="btn secondary small"
-        [class.active]="settings.mapLayer() === layer.id"
+        [class.active]="activeLayerId() === layer.id"
         (click)="setLayer(layer.id)"
       >
         {{ layer.label }}

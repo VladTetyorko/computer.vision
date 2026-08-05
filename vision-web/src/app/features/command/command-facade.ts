@@ -107,6 +107,16 @@ export class CommandFacade {
     buildEntityRows(this.summary()?.assets ?? [], this.gpsFixTypeByAssetId(), this.geofenceBreachesByAssetId()),
   );
 
+  /**
+   * Which assets `<vision-fleet-map>` should recolor `--color-danger` (docs/VISUAL-REFRESH-PLAN.md
+   * F7, task 2) — every `entityRows` row with a non-`'ok'` severity, by id. Reuses the rail's own
+   * already-computed sort rather than a second attention derivation, so the rail and the map can
+   * never disagree about which assets need attention.
+   */
+  readonly attentionAssetIds = computed<ReadonlySet<string>>(
+    () => new Set(this.entityRows().filter((row) => row.severity !== 'ok').map((row) => row.asset.assetId)),
+  );
+
   /** Every asset's currently-known position — threaded to the Zones panel's own draw-dialog advisory. */
   readonly assetPositions = computed(() => this.mapStore.markers().map((marker) => marker.position));
 

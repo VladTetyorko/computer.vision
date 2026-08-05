@@ -101,11 +101,12 @@
   font-size: 0.78rem;
 }
 
+/* One truncated text line, not a chip row (docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — see
+   `org-settings.html`'s own comment above its usage). */
 .org-row-groups {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
+  display: block;
   margin-top: var(--space-2);
+  font-size: 0.78rem;
 }
 
 .org-row-actions {

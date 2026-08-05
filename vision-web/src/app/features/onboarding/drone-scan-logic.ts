@@ -53,9 +53,11 @@ export interface VehicleDetailChip {
 
 /**
  * The results list's own detail chips (docs/DRONE-INFRA-PLAN.md I-b: "details chips (firmware,
- * sysid)") — deliberately a fixed, narrow pair rather than a generic dump of every `details` entry
- * the way the general "Discover on network" table does, since this scan's whole point is a simpler,
- * drone-specific glance. Each chip is independently omitted when its own key is absent.
+ * sysid)") — deliberately a fixed, narrow pair (never more than 2, each independently omitted when
+ * its own key is absent) rather than a generic dump of every `details` entry the way the general
+ * "Discover on network" table used to (now {@link detailsSummary} below, one plain-text cell —
+ * docs/VISUAL-REFRESH-PLAN.md F5 rule 4 caps every row at one chip, and a card here already spends
+ * its one chip budget on nothing since this list's whole point is a simpler, drone-specific glance).
  */
 export function vehicleDetailChips(candidate: DiscoveredDevice): readonly VehicleDetailChip[] {
   const chips: VehicleDetailChip[] = [];
@@ -68,6 +70,21 @@ export function vehicleDetailChips(candidate: DiscoveredDevice): readonly Vehicl
     chips.push({ key: 'sysid', label: 'Sysid', value: sysid });
   }
   return chips;
+}
+
+/**
+ * A single, comma-joined "key: value" summary of a candidate's raw `details` map — the general
+ * "Discover on network" table's own Details column (docs/VISUAL-REFRESH-PLAN.md F5 rule 4: "at most
+ * one chip per row… classification is muted text, not a chip"). That column used to render one chip
+ * per detail key, unbounded — exactly the pattern F5 bans — collapsed here to plain text the same
+ * way `features/devices/devices.html`'s own Capabilities column already merges N capabilities into
+ * one muted, comma-joined cell. Returns `''` (never a stray leading/trailing `', '`) when `details`
+ * is empty; the template falls back to the usual faint em dash for an empty cell.
+ */
+export function detailsSummary(details: Record<string, string>): string {
+  return Object.entries(details)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(', ');
 }
 
 /** What picking an unclaimed vehicle fills into the Connect step's `register` sub-form. */

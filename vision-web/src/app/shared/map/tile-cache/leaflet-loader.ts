@@ -1,5 +1,7 @@
 import type * as Leaflet from 'leaflet';
 import type { MapLayerId } from '../../../core/settings/settings-store';
+import type { Theme } from '../../../core/shell/theme-store';
+import { readPersistedFlag, writePersistedFlag } from '../../../core/panel-state';
 import { getCachedTile, putCachedTile } from './tile-cache-db';
 import { tileCacheKey } from './tile-cache-logic';
 
@@ -84,6 +86,50 @@ export const MAP_LAYERS: readonly MapLayerDef[] = [
 /** Looks up a layer definition by id, falling back to `standard` for an unrecognized/stale one. */
 export function mapLayerDef(id: MapLayerId): MapLayerDef {
   return MAP_LAYERS.find((layer) => layer.id === id) ?? MAP_LAYERS[0];
+}
+
+// --- Theme-aware default layer (docs/VISUAL-REFRESH-PLAN.md F7, Wave 3) ------------------------
+//
+// `SettingsStore.mapLayer` (docs/CYCLES-PLAN.md §9) is a single persisted signal shared by every
+// map — it always holds a concrete `MapLayerId` (its own hardcoded `DEFAULT_MAP_LAYER = 'night'`
+// until something changes it), so a consumer reading it alone cannot tell "the operator has never
+// touched the layer picker" apart from "the operator explicitly chose Night". That distinction is
+// exactly what F7 needs ("the default follows the theme … an explicit user pick always wins"), so
+// this module tracks it separately, in its own tiny persisted flag, rather than needing a change to
+// `core/settings/settings-store.ts` (out of this wave's own file scope — see `vision-web/MODULE.md`'s
+// dated Wave 3 entry for the full accounting, including why a returning user's *already*-persisted
+// `mapLayer` value cannot retroactively be told apart from the store's own unconditional default).
+
+const MAP_LAYER_EXPLICIT_KEY = 'vision.map.layerExplicit';
+
+/** `standard` (plain OSM raster) is already a genuinely light basemap — no new layer needed. `night`
+ * (CARTO Dark Matter) is the existing dark one. Every other layer (`relief`/`satellite`) is neutral
+ * imagery, never a *default* either theme picks on its own — only ever reached by an explicit pick. */
+export function defaultMapLayerIdForTheme(theme: Theme): MapLayerId {
+  return theme === 'dark' ? 'night' : 'standard';
+}
+
+/** Whether the operator has ever explicitly used the layer picker (`markMapLayerExplicit`) — once
+ * true, `effectiveMapLayerId` stops substituting the theme default and always returns their choice. */
+export function isMapLayerExplicit(): boolean {
+  return readPersistedFlag(MAP_LAYER_EXPLICIT_KEY, false);
+}
+
+/** Records an explicit layer-picker click — `FleetMap`/`LiveMap`'s own `setLayer` calls this
+ * alongside `SettingsStore.mapLayer.set(id)`, so the two persisted values always change together. */
+export function markMapLayerExplicit(): void {
+  writePersistedFlag(MAP_LAYER_EXPLICIT_KEY, true);
+}
+
+/**
+ * The layer id a map should actually render: `chosen` (`SettingsStore.mapLayer()`) once the
+ * operator has made an explicit pick, otherwise the theme's own default — "an explicit user pick
+ * always wins" (docs/VISUAL-REFRESH-PLAN.md F7). Pure and unit-tested (`leaflet-loader.spec.ts`);
+ * `FleetMap`/`LiveMap` each wrap it in a `computed()` reading `ThemeStore.theme()` +
+ * `SettingsStore.mapLayer()`, so both re-render the instant either changes.
+ */
+export function effectiveMapLayerId(theme: Theme, chosen: MapLayerId, explicit: boolean): MapLayerId {
+  return explicit ? chosen : defaultMapLayerIdForTheme(theme);
 }
 
 /**

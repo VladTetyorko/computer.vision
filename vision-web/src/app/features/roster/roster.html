@@ -88,15 +88,18 @@
                     [class.selected]="row.asset.assetId === facade.selectedId()"
                     (click)="facade.select(row.asset.assetId)"
                   >
-                    <span class="roster-name truncate">{{ row.asset.displayName }}</span>
-                    <span class="chip">{{ row.asset.categoryName }}</span>
+                    <span class="roster-name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
+                    <span class="roster-category muted truncate">{{ row.asset.categoryName }}</span>
+                    <!-- Pilot coverage is this row's own state (docs/VISUAL-REFRESH-PLAN.md F5 — at
+                         most one chip per row): a dot + the assigned names as plain text, not a chip
+                         per pilot. -->
                     <span class="roster-pilots">
                       @if (row.pilotNames.length === 0) {
+                        <span class="dot"></span>
                         <span class="muted">No pilots assigned</span>
                       } @else {
-                        @for (name of row.pilotNames; track name) {
-                          <span class="chip accent">{{ name }}</span>
-                        }
+                        <span class="dot ok"></span>
+                        <span class="truncate" [title]="row.pilotNames.join(', ')">{{ row.pilotNames.join(', ') }}</span>
                       }
                     </span>
                   </button>
@@ -117,14 +120,16 @@
                     [class.selected]="row.userId === facade.selectedId()"
                     (click)="facade.select(row.userId)"
                   >
-                    <span class="roster-name truncate">{{ row.displayName }}</span>
+                    <span class="roster-name truncate" [title]="row.displayName">{{ row.displayName }}</span>
+                    <!-- Asset coverage is this row's own state — see the "By asset" pivot's identical
+                         dot + plain-text idiom above. -->
                     <span class="roster-pilots">
                       @if (row.assignments.length === 0) {
+                        <span class="dot"></span>
                         <span class="muted">No assets assigned</span>
                       } @else {
-                        @for (assignment of row.assignments; track assignment.assetId) {
-                          <span class="chip accent">{{ assignment.displayName }}</span>
-                        }
+                        <span class="dot ok"></span>
+                        <span class="truncate" [title]="assetNames(row.assignments)">{{ assetNames(row.assignments) }}</span>
                       }
                     </span>
                   </button>

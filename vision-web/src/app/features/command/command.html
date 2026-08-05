@@ -119,6 +119,8 @@
           [marks]="facade.marks.marks()"
           [selectedMarkId]="facade.marks.selectedMarkId()"
           [focusRequest]="facade.focusRequest()"
+          [attentionAssetIds]="facade.attentionAssetIds()"
+          [selectedAssetId]="facade.selectedAssetId() ?? undefined"
           (watch)="facade.watchAsset($event)"
           (preview)="facade.selectAsset($event)"
           (openEventAsset)="facade.openEventAsset($event)"

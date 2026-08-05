@@ -184,11 +184,12 @@
   color: var(--text);
 }
 
-/* Active row: 2px accent left bar + raised background (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 3) —
+/* Active row: 2px accent left bar + `--color-info-soft` tint (docs/VISUAL-REFRESH-PLAN.md F4 — the
+   one app-wide selection language; this replaces the pre-refresh bespoke `--panel-raised` fill) —
    `aria-current="page"` is set alongside this in the template so the same state is legible to
    assistive tech, not just visually. */
 .nav-row.active {
-  background: var(--panel-raised);
+  background: var(--color-info-soft);
   color: var(--text);
   font-weight: 600;
 }
@@ -298,10 +299,14 @@
 }
 
 /* Left inset only. `var(--space-8)` puts the dot/chips on the shared x=16 glyph axis; a *zero*
-   right inset lets the bell's own `margin-left: auto` below carry it out to the same right edge the
-   demo button already occupies, so the foot's two full-width rows share one. Measured before this:
-   `padding: 0 var(--space-2)` with no `gap` left the status chips and the bell touching at exactly
-   x=158.5 with ~34px of dead space trailing the bell. */
+   right inset lets `.status-dot`'s own `margin-left: auto` below carry the dot/theme-toggle/bell
+   cluster out to the same right edge the demo button already occupies, so the foot's two full-width
+   rows share one. Measured before this: `padding: 0 var(--space-2)` with no `gap` left the status
+   chips and the bell touching at exactly x=158.5 with ~34px of dead space trailing the bell.
+   docs/VISUAL-REFRESH-PLAN.md Wave 1 consolidated the old `.status-compact`/`.status-full` split (a
+   rail-only dot vs. an expanded pair of `.chip`s, one of them literally re-stating ONLINE/OFFLINE in
+   text) into one markup that renders identically at every width — see `app-sidebar.html`'s own
+   comment on this row. */
 .status-row {
   display: flex;
   align-items: center;
@@ -309,31 +314,49 @@
   padding: 0 0 0 var(--space-8);
 }
 
-.status-row vision-notification-bell {
+/* `.dot`/`.dot.ok`/`.dot.danger` (`src/styles.css`) already supply the 8px circle + intent colours —
+   this only adds the "push the dot, the theme toggle and the bell to the row's right edge, leaving
+   the optional live chip flush left" layout, the job `vision-notification-bell`'s own `margin-left:
+   auto` used to do alone before the toggle sat between them. */
+.status-dot {
   margin-left: auto;
 }
 
-.status-compact {
-  display: none;
-  width: var(--space-8);
-  height: var(--space-8);
-  border-radius: 50%;
-  background: var(--text-faint);
-}
-
-.status-compact.ok {
-  background: var(--color-success);
-}
-
-.status-compact.danger {
-  background: var(--color-danger);
-}
-
-.status-full {
-  display: flex;
+.theme-toggle {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-8);
-  flex-wrap: wrap;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+/* Same stroke recipe as `notification-bell.css`'s own `.bell-trigger svg` — the two sit side by side
+   in this row and should read as one family of icon buttons. */
+.theme-toggle svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-toggle {
+    transition: none;
+  }
 }
 
 /* `identity-chip`/`notification-bell` open their own dropdown as `position: absolute; right: 0`
@@ -443,7 +466,6 @@
   }
 
   .sidebar.collapsed .brand-name,
-  .sidebar.collapsed .group-label > vision-icon,
   .sidebar.collapsed .group-label-text,
   .sidebar.collapsed .nav-row-text,
   .sidebar.collapsed .disclosure summary > span {
@@ -473,14 +495,6 @@
     padding: 0;
   }
 
-  /* An `Upcoming` row's `soon` chip is 44px of text in a 40px icon column and `flex: none` keeps it
-     from shrinking, so it overflowed straight through the rail's right edge and was clipped
-     mid-word. The row's own `.dimmed` colour plus its `title`/`aria-label` ("… (coming soon)")
-     already carry the state here. */
-  .sidebar.collapsed .nav-row .chip {
-    display: none;
-  }
-
   .sidebar.collapsed .disclosure summary {
     justify-content: center;
     padding: 0;
@@ -488,22 +502,23 @@
 
   /* Stacked, not inline: as a row the 8px status dot and the 30px bell were centred *as a pair*, so
      neither one landed on the axis (dot centre x=12.3, bell centre x=31.5) while the demo icon and
-     the avatar above them sat at 27.5 and 24.5. One per line puts all four on the same axis. */
+     the avatar above them sat at 27.5 and 24.5. One per line puts all four on the same axis — the
+     theme-toggle button joins the same stack (docs/VISUAL-REFRESH-PLAN.md Wave 1). */
   .sidebar.collapsed .status-row {
     flex-direction: column;
     gap: var(--space-8);
     padding: 0;
   }
 
-  .sidebar.collapsed .status-row vision-notification-bell {
+  .sidebar.collapsed .status-row vision-notification-bell,
+  .sidebar.collapsed .status-row .status-dot {
     margin-left: 0;
   }
 
-  .sidebar.collapsed .status-compact {
-    display: block;
-  }
-
-  .sidebar.collapsed .status-full {
+  /* The live-count chip's own text has nowhere to go in a 40px column — same "no room" reasoning the
+     `Upcoming` row's now-removed `soon` chip used to need; the dot beside it still carries reachable/
+     unreachable, and the live count itself is one click away on `/command`. */
+  .sidebar.collapsed .status-row > .chip {
     display: none;
   }
 
@@ -556,7 +571,6 @@
   }
 
   .brand-name,
-  .group-label > vision-icon,
   .group-label-text,
   .nav-row-text,
   .disclosure summary > span {
@@ -581,10 +595,6 @@
     padding: 0;
   }
 
-  .nav-row .chip {
-    display: none;
-  }
-
   .disclosure summary {
     justify-content: center;
     padding: 0;
@@ -596,15 +606,12 @@
     padding: 0;
   }
 
-  .status-row vision-notification-bell {
+  .status-row vision-notification-bell,
+  .status-row .status-dot {
     margin-left: 0;
   }
 
-  .status-compact {
-    display: block;
-  }
-
-  .status-full {
+  .status-row > .chip {
     display: none;
   }
 

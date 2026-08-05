@@ -4,6 +4,7 @@ import { AuthStore } from '../../../core/auth/auth-store';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { canManageOrg } from '../../../core/org/org-logic';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
+import { ThemeStore } from '../../../core/shell/theme-store';
 import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
 import { DemoButton } from '../../../features/demo/demo-button/demo-button';
 import { NAV_MODES, navTiers, type NavMode } from '../../../features/hubs/nav-entries';
@@ -65,6 +66,33 @@ import { NotificationBell } from '../notification-bell';
  * DOM to adapt it to a new host" technique `features/fly/fly.css`'s `.stage-video vision-player
  * .frame` override already uses) — neither child component's own file is touched.
  *
+ * **Interest-point simplification (docs/VISUAL-REFRESH-PLAN.md Wave 1)** — the sidebar's own ranking
+ * ("where am I" then "one-click switch" then "quiet ambient status") drove three trims: group labels
+ * drop their `mode.icon` glyph entirely (it competed with each row's own icon two rows down; the
+ * uppercase/tracked/muted label text already reads as a label without one); the Upcoming disclosure's
+ * rows drop their per-row `soon` chip (the disclosure's own `<summary>Upcoming</summary>` already says
+ * it); and the foot's old two-`.chip` "N live" / "ONLINE"/"OFFLINE" pair collapses to an "N live" chip
+ * (when > 0) plus one bare online/offline `.dot` — see the theme-toggle paragraph below for what now
+ * shares that row. The active-row treatment (F4: 2px `--color-info` inset bar) keeps its mechanism;
+ * only its resting background moved from `--panel-raised` to `--color-info-soft` in `app-sidebar.css`,
+ * per F4's own "left bar + soft tint" pairing.
+ *
+ * **Theme toggle** (docs/VISUAL-REFRESH-PLAN.md F3/Wave 1) — a plain icon `<button>` in the foot's
+ * status row, sized/styled like `notification-bell.ts`'s own trigger (same box, same one-off inline
+ * `<svg>` idiom — `shared/ui/icon-registry.ts` is out of this task's file scope, so this follows the
+ * pre-existing "a bespoke inline svg is fine for a one-off glyph" precedent that file itself names,
+ * rather than adding a name to the frozen registry from a file this task cannot touch). Calls
+ * `ThemeStore.toggle()` directly, no facade indirection (see the `theme` field's own doc comment for
+ * why that's fine here but not on a routed page). Shows the *current* theme's glyph — sun while
+ * light is active, moon while dark is active — with `title`/`aria-label` describing the action
+ * ("Switch to dark theme" while showing the sun, and vice versa). Identical markup at every width;
+ * the collapsed-rail CSS only ever hides text and the live chip, never this button. Markup-wise it
+ * sits *inside* the brand `<a routerLink="/fly">` (so it shares that corner's layout); its own click
+ * handler calls `$event.stopPropagation()` after `theme.toggle()` for exactly that reason — without
+ * it, the click bubbles to the anchor and the router navigates to `/fly`, which (being full-bleed)
+ * then auto-collapses the sidebar via `SidebarStore.enterRoute()`. A theme click must never double as
+ * a navigation.
+ *
  * **Responsive** (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md): ≥1024px docked
  * (expanded or user-collapsed rail, pure CSS, no JS breakpoint tracking); 640–1024px forced to the
  * rail regardless of `collapsed` (`app-sidebar.css`'s own media query); below 640px the sidebar
@@ -98,6 +126,12 @@ import { NotificationBell } from '../notification-bell';
 export class AppSidebar {
   protected readonly sidebar = inject(SidebarStore);
   protected readonly fleet = inject(FleetStore);
+  /** Backs the foot's theme-toggle button (docs/VISUAL-REFRESH-PLAN.md Wave 1) — a shared shell
+   *  component, not a routed feature page, so `core/ui/architecture.spec.ts`'s "routed page injects
+   *  only its facade" guard doesn't scan this file at all (it globs `features/**` only); the
+   *  `Settings › Appearance` control (`features/settings/account-settings.ts`) IS a routed page and
+   *  goes through `AccountSettingsFacade` instead for exactly that reason. */
+  protected readonly theme = inject(ThemeStore);
   private readonly auth = inject(AuthStore);
   private readonly overlays = inject(GlobalOverlayStore);
   private readonly hostRef = inject(ElementRef<HTMLElement>);

@@ -7,6 +7,34 @@
        `vision-notice`, reserved for the page whose changes are not this contained. -->
   <p class="muted blast-line">Only affects your account.</p>
 
+  <!-- ---- Appearance (docs/VISUAL-REFRESH-PLAN.md F3/Wave 1) — mirrors the sidebar-footer switch;
+       both call `ThemeStore.setTheme` through this page's own facade. -->
+  <section class="card">
+    <header><h2>Appearance</h2></header>
+    <p class="muted hint">
+      Choose how Vision looks on this device. Live video (Fly, Wall, replay) always stays dark,
+      whichever theme you pick.
+    </p>
+    <div class="segmented" role="group" aria-label="Theme">
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="facade.theme.theme() === 'light'"
+        (click)="facade.theme.setTheme('light')"
+      >
+        Light
+      </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="facade.theme.theme() === 'dark'"
+        (click)="facade.theme.setTheme('dark')"
+      >
+        Dark
+      </button>
+    </div>
+  </section>
+
   <!-- ---- Interface ------------------------------------------------------- -->
   <section class="card">
     <header><h2>Interface</h2></header>

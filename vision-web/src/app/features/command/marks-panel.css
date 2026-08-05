@@ -85,16 +85,20 @@ vision-notice {
 
 .mark-row {
   border: 1px solid var(--border);
+  border-left: 2px solid transparent;
   border-radius: var(--radius-sm);
   padding: var(--space-8);
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
+/* Selected per docs/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
+   selected row/card in the app uses (e.g. `features/assets/assets.css`'s `.asset-card.selected`). */
 .mark-row.selected {
-  border-color: var(--color-info);
-  background: var(--panel-hover);
+  background: var(--color-info-soft);
+  border-left-color: var(--color-info);
 }
 
 .mark-row-main {

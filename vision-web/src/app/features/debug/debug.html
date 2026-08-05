@@ -92,7 +92,7 @@
               <th>Method</th>
               <th>Path</th>
               <th>Status</th>
-              <th>ms</th>
+              <th class="col-num">ms</th>
             </tr>
           </thead>
           <tbody>
@@ -109,7 +109,7 @@
                     {{ entry.status || '—' }}
                   </span>
                 </td>
-                <td class="mono">{{ entry.ms }}</td>
+                <td class="col-num mono">{{ entry.ms }}</td>
               </tr>
             }
           </tbody>

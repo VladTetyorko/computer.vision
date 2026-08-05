@@ -18,3 +18,13 @@
 td.actions {
   text-align: right;
 }
+
+/* Numeric columns (docs/VISUAL-REFRESH-PLAN.md F5 rule 2 — "numbers right-aligned in `.mono`"),
+   same `th`/`td`-share-the-class idiom as `features/assets/assets.css`'s own `.col-num` — Angular's
+   emulated view encapsulation means that class doesn't reach this component's template. Streaming
+   stays unaligned: it renders a chip/dot (state), not a bare number, matching the assets dense
+   list's own State column. */
+th.col-num,
+td.col-num {
+  text-align: right;
+}

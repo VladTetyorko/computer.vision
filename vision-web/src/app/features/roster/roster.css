@@ -43,10 +43,13 @@
   background: var(--panel-hover);
 }
 
-/* The identical "2px accent left bar + raised background" selection idiom
-   `app-sidebar.css#.nav-row.active`/`event-row.css#.event-row.selected` already establish. */
+/* Selected row per docs/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
+   `--color-info` left inset bar plus a `--color-info-soft` background tint — replaces the
+   pre-refresh left-bar-only treatment (`--panel-hover`'s own hover tint was doing the "raised"
+   half of the job, which read identically to plain `:hover`). */
 .roster-row.selected {
   border-left-color: var(--color-info);
+  background: var(--color-info-soft);
 }
 
 .roster-name {
@@ -56,17 +59,31 @@
   color: var(--text);
 }
 
+/* Classification, not state (docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — "category/classification is
+   muted text, not a chip"); the old `.chip` wrapper is gone. */
+.roster-category {
+  flex: none;
+  max-width: 9rem;
+}
+
+/* Pilot/asset coverage is this row's own state (F5 — at most one chip per row): a dot + the
+   assigned names as plain text, not a chip per name — see the template's own `.dot`/`.dot.ok` use. */
 .roster-pilots {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-4);
   flex: 1 1 auto;
   min-width: 0;
 }
 
+.roster-pilots .truncate {
+  min-width: 0;
+}
+
 @media (max-width: 640px) {
-  .roster-name {
+  .roster-name,
+  .roster-category {
     max-width: 100%;
     flex-basis: 100%;
   }

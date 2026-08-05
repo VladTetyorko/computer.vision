@@ -321,7 +321,7 @@
                     <tbody>
                       @for (candidate of result.devices; track candidate.method + candidate.address) {
                         <tr>
-                          <td><span class="chip accent">{{ candidate.method }}</span></td>
+                          <td class="muted">{{ candidate.method }}</td>
                           <td>{{ candidate.name }}</td>
                           <td class="mono muted truncate" [title]="candidate.address">
                             {{ candidate.address }}
@@ -333,10 +333,12 @@
                               <span class="faint">unknown</span>
                             }
                           </td>
-                          <td class="details">
-                            @for (pair of facade.detailPairs(candidate.details); track pair.key) {
-                              <span class="chip" [title]="pair.value">{{ pair.key }}</span>
-                            }
+                          <!-- docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — at most one chip per row; this
+                               row already has none, so an unbounded per-key chip dump collapses to
+                               one muted, comma-joined cell (see `drone-scan-logic.ts#detailsSummary`,
+                               same idiom `features/devices/devices.html`'s Capabilities column uses). -->
+                          <td class="details muted truncate" [title]="facade.detailsSummary(candidate.details)">
+                            {{ facade.detailsSummary(candidate.details) || '—' }}
                           </td>
                           <td class="actions">
                             <button type="button" class="btn secondary small" (click)="facade.store.useCandidate(candidate)">

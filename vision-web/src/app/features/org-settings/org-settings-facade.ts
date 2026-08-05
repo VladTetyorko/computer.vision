@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { OrgStore } from '../../core/org/org-store';
 import { flattenGroupTree, roleOptions } from '../../core/org/org-logic';
 import { roleLabel } from '../../core/auth/auth-logic';
-import type { CreateUserRequest, Role } from '../../core/api/models';
+import type { CreateUserRequest, Role, UserMembership } from '../../core/api/models';
 
 type Tab = 'users' | 'groups';
 
@@ -57,6 +57,17 @@ export class OrgSettingsFacade {
 
   groupName(id: string): string {
     return this.org.groups().find((group) => group.id === id)?.name ?? id.slice(0, 8);
+  }
+
+  /**
+   * A single, comma-joined "GroupName · Role" summary of a user's memberships — the Users list's
+   * own membership column (docs/VISUAL-REFRESH-PLAN.md F5 rule 4: at most one chip per row; this
+   * row's one chip is Enabled/Disabled, the row's actual state). Was one `.chip` per membership,
+   * unbounded; collapsed to plain text the same way `features/roster/roster.ts#RosterPage
+   * .assetNames` already collapses a pilot's N asset assignments into one comma-joined list.
+   */
+  membershipsSummary(memberships: readonly UserMembership[]): string {
+    return memberships.map((m) => `${this.groupName(m.groupId)} · ${roleLabel(m.role)}`).join(', ');
   }
 
   canSubmitUser(): boolean {

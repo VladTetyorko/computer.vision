@@ -1,4 +1,10 @@
-<div class="page">
+<!-- `.surface-dark` (docs/VISUAL-REFRESH-PLAN.md F3/W4) on this page's own root: the Wall is
+     genuinely a video surface end to end, not a themed page with a video region inside it — its
+     one job is a grid of live tiles, and the page-bar/notice/events-rail around that grid are all
+     part of the same "watching a wall of live feeds" picture, not separate light chrome (compare
+     the replay library, which stays themed because it never shows video pixels at all). Matches
+     `fly.routes.ts`'s cockpit precedent. -->
+<div class="page surface-dark">
   <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/03-wall.md — `page-head` (title + a two-line
        "how this works" paragraph) becomes the bar; per 03-wall.md the description is redundant
        once "Wall" + a live count says the same thing, so it is deleted outright rather than moved

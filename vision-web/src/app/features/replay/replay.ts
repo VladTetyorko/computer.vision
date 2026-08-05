@@ -28,6 +28,15 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDen
  * DOM plumbing stays here. See `videoDrivenUpdate`'s own doc comment for the full "who's driving
  * whom, and how the feedback loop is broken" writeup (mirrors
  * `shared/map/fleet-map/fleet-map.ts#suppressAutoFitDisable`'s identical idiom).
+ *
+ * **`.surface-dark` boundary (docs/VISUAL-REFRESH-PLAN.md F3/W4)**: only the Recording card
+ * (`replay.html`'s `.recording-card`, the one section with an actual `<video>`) carries
+ * `.surface-dark` — the rest of this page (Position map, Playback scrub bar, Telemetry/Detections
+ * facts, the page-bar) stays on the app theme, since this is a themed data/review page with one
+ * video-bearing card in it, not a video surface with data bolted on (contrast `CockpitPage`, whose
+ * *entire* root is the enclave). See `replay.html`'s own comment on that section for the full
+ * reasoning, including why the replay library (`replay-library.html`) needed no boundary decision
+ * of its own (it never shows video).
  */
 @Component({
   selector: 'vision-replay',

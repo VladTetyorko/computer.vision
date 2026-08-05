@@ -69,9 +69,11 @@ tbody tr.row-selectable:focus-visible {
     outline-offset: -2px;
 }
 
+/* Selected per docs/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
+   selected table row in the app uses (e.g. `features/assets/assets.css`'s identical selector). */
 tbody tr.row-selectable.selected {
-    background: var(--panel-raised);
-    box-shadow: inset 3px 0 0 0 var(--color-info);
+    background: var(--color-info-soft);
+    box-shadow: inset 2px 0 0 0 var(--color-info);
 }
 
 /* ---- Detail preview (docs/design/10-replay.md, Wave 4) — content projected into

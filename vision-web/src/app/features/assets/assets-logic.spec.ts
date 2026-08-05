@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AssetDetails, Device } from '../../core/api/models';
 import {
   buildAssetListRows,
+  describeAssetState,
   filterAssetListRowsByArchived,
   filterAssetListRowsByCategory,
   filterAssetListRowsByStatus,
@@ -232,6 +233,40 @@ describe('findAssetRowById', () => {
 
   it('degrades to undefined for an empty-string id', () => {
     expect(findAssetRowById(rows, '')).toBeUndefined();
+  });
+});
+
+describe('describeAssetState', () => {
+  it('is "archived" whenever archived is true, regardless of lifecycle/streaming', () => {
+    expect(describeAssetState({ lifecycle: 'ACTIVE', archived: true, streaming: true })).toEqual({
+      kind: 'archived',
+      label: 'Archived',
+    });
+  });
+
+  it('is "deactivated" for a non-archived DEACTIVATED row, even while streaming', () => {
+    expect(describeAssetState({ lifecycle: 'DEACTIVATED', archived: false, streaming: true })).toEqual({
+      kind: 'deactivated',
+      label: 'Deactivated',
+    });
+  });
+
+  it('is "live" for an active, streaming row', () => {
+    expect(describeAssetState({ lifecycle: 'ACTIVE', archived: false, streaming: true })).toEqual({
+      kind: 'live',
+      label: 'Live',
+    });
+  });
+
+  it('is "offline" for the default steady state — active, not streaming', () => {
+    expect(describeAssetState({ lifecycle: 'ACTIVE', archived: false, streaming: false })).toEqual({
+      kind: 'offline',
+      label: 'Offline',
+    });
+  });
+
+  it('archived outranks every other state', () => {
+    expect(describeAssetState({ lifecycle: 'DEACTIVATED', archived: true, streaming: false }).kind).toBe('archived');
   });
 });
 

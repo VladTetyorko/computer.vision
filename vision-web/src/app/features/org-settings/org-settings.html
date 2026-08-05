@@ -154,18 +154,22 @@
                 <span class="org-row-name truncate">{{ user.displayName }}</span>
                 <span class="muted org-row-sub truncate">{{ user.username }} · {{ user.email }}</span>
                 @if (user.memberships.length > 0) {
-                  <span class="org-row-groups">
-                    @for (m of user.memberships; track m.groupId) {
-                      <span class="chip">{{ facade.groupName(m.groupId) }} · {{ facade.roleLabel(m.role) }}</span>
-                    }
-                  </span>
+                  <!-- docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — classification is muted text, not a
+                       chip; N group memberships collapse to one comma-joined muted list (mirrors
+                       `features/roster/roster.html`'s identical N-chips-to-one-text-list fix). -->
+                  <span
+                    class="muted org-row-groups truncate"
+                    [title]="facade.membershipsSummary(user.memberships)"
+                  >{{ facade.membershipsSummary(user.memberships) }}</span>
                 }
               </div>
               <div class="org-row-actions">
+                <!-- Top role is this row's classification (muted text); Enabled/Disabled is its one
+                     state chip, per F5 rule 4. -->
                 @if (user.topRole) {
-                  <span class="chip accent">{{ facade.roleLabel(user.topRole) }}</span>
+                  <span class="muted">{{ facade.roleLabel(user.topRole) }}</span>
                 } @else {
-                  <span class="chip">No role</span>
+                  <span class="faint">No role</span>
                 }
                 @if (user.enabled) {
                   <span class="chip ok">Enabled</span>

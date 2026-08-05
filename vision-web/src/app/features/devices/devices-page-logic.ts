@@ -28,12 +28,12 @@ export {
 } from '../../core/fleet/warehouse-logic';
 
 /**
- * The "existing categories + fallback list" category picker moved to `core/fleet/category-logic.ts`
- * (docs/UX-REWORK-PLAN.md §U-d) once the onboarding wizard's Profile step needed the identical
- * picker — same cross-feature-module rule as the re-export block above. Re-exported here so this
- * page's own pre-existing import site keeps working verbatim.
+ * The "existing categories + backend seed list" category picker moved to
+ * `core/fleet/category-logic.ts` (docs/UX-REWORK-PLAN.md §U-d) once the onboarding wizard's Profile
+ * step needed the identical picker — same cross-feature-module rule as the re-export block above.
+ * Re-exported here so this page's own pre-existing import site keeps working verbatim.
  */
-export { DEFAULT_CATEGORY_OPTIONS, deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
+export { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 
 /**
  * The pinned REST contract (docs/CYCLES-PLAN.md §8) is coded against verbatim even though CW-a
@@ -133,6 +133,39 @@ export function searchWarehouseRowsByQuery(
       row.device.uri.toLowerCase().includes(q) ||
       (row.owner?.assetName.toLowerCase().includes(q) ?? false),
   );
+}
+
+/**
+ * docs/VISUAL-REFRESH-PLAN.md F5's "at most one chip per row" — collapses a row's lifecycle +
+ * streaming facts into the one state a glance actually needs, priority archived > deactivated >
+ * live > the default "stopped" (an active device with no running stream — rendered as a dot +
+ * plain text everywhere it's used rather than a fourth chip color, so the merely-normal case
+ * doesn't compete for attention with the three exception states that do get a chip). "Simulated"
+ * is a separate call-out (a device's origin, not its lifecycle/streaming state) and stays its own
+ * chip alongside this one, unmerged.
+ *
+ * **Deliberately duplicated** in `features/assets/assets-logic.ts#describeAssetState`
+ * (byte-similar, `'offline'`/`'Offline'` instead of `'stopped'`/`'Stopped'`) — see that function's
+ * own doc comment for why this isn't lifted to `core/fleet/warehouse-logic.ts` this task.
+ */
+export type DeviceStateKind = 'archived' | 'deactivated' | 'live' | 'stopped';
+
+export interface DeviceStateDescriptor {
+  readonly kind: DeviceStateKind;
+  readonly label: string;
+}
+
+export function describeDeviceState(row: Pick<WarehouseRow, 'lifecycle' | 'archived' | 'streaming'>): DeviceStateDescriptor {
+  if (row.archived) {
+    return { kind: 'archived', label: 'Archived' };
+  }
+  if (row.lifecycle === 'DEACTIVATED') {
+    return { kind: 'deactivated', label: 'Deactivated' };
+  }
+  if (row.streaming) {
+    return { kind: 'live', label: 'Live' };
+  }
+  return { kind: 'stopped', label: 'Stopped' };
 }
 
 /**

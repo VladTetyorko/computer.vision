@@ -6,6 +6,7 @@ import { AuthStore } from './core/auth/auth-store';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
 import { SidebarStore } from './core/shell/sidebar-store';
+import { ThemeStore } from './core/shell/theme-store';
 import { AppSidebar } from './shared/ui/app-sidebar/app-sidebar';
 import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
@@ -30,6 +31,11 @@ import { UndoToast } from './shared/ui/undo-toast';
  * doc comment) — `auth.user()` is non-null the instant `loadMe()` settles, so the sidebar renders
  * with the full ADMIN-scoped set, same as a real ADMIN session. Nothing here reads `authEnabled`
  * directly.
+ *
+ * **Theme bootstrap** (docs/VISUAL-REFRESH-PLAN.md F3): eagerly injecting `ThemeStore` (see the
+ * field below) applies the user's persisted light/dark choice as `data-theme` on `<html>` the moment
+ * this component constructs — before `auth.user()` gates the sidebar, so it applies regardless of
+ * auth state, unlike everything else in this class.
  *
  * **Full-bleed auto-collapse** (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11): `/fly`, `/wall`,
  * `/command` each carry `data: { fullBleed: true }` (a concurrent task's own route change, read
@@ -56,6 +62,13 @@ export class App {
   protected readonly auth = inject(AuthStore);
   private readonly fleet = inject(FleetStore);
   private readonly sidebar = inject(SidebarStore);
+  // Injected for its constructor side effect only (applies the persisted `data-theme` attribute to
+  // `<html>`, docs/VISUAL-REFRESH-PLAN.md F3) — never read again after that, same "eager singleton
+  // mounted once by the shell" shape as `sidebar`/`fleet` above. `index.html`'s own inline bootstrap
+  // script already applies the same attribute before Angular loads (see its comment) so there is no
+  // flash of the wrong theme; this makes it official once the app itself is live and reapplies it if
+  // ever it drifts.
+  private readonly theme = inject(ThemeStore);
   private readonly router = inject(Router);
 
   protected readonly offline = computed(() => this.fleet.reachable() === false);

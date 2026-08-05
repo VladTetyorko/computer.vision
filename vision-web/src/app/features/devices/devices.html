@@ -97,23 +97,28 @@
                   <div class="name">{{ row.device.name }}</div>
                 </td>
                 <td class="source">
-                  <span class="chip">{{ row.device.protocol }}</span>
+                  <!-- Protocol is classification, not state (docs/VISUAL-REFRESH-PLAN.md F5 rule 4
+                       — "category/protocol become muted plain text, not chips"). -->
+                  <span class="muted">{{ row.device.protocol }}</span>
                   <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
                 </td>
+                <td class="muted truncate">{{ row.device.capabilities.join(', ') || '—' }}</td>
                 <td>
-                  @for (capability of row.device.capabilities; track capability) {
-                    <span class="chip">{{ capability }}</span>
-                  }
-                </td>
-                <td>
-                  <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-                    {{ lifecycleLabel(row.lifecycle) }}
-                  </span>
-                  @if (!row.archived) {
-                    @if (row.streaming) {
-                      <span class="chip ok"><span class="dot live"></span>Live</span>
-                    } @else {
-                      <span class="chip">Stopped</span>
+                  <!-- Merged Lifecycle+Streaming (F5 — one chip per row max): archived/deactivated/
+                       live each get a colored chip; "stopped" (active, not currently streaming) is a
+                       dot + plain text instead of a fourth chip. -->
+                  @switch (deviceState(row).kind) {
+                    @case ('archived') {
+                      <span class="chip faded">{{ deviceState(row).label }}</span>
+                    }
+                    @case ('deactivated') {
+                      <span class="chip">{{ deviceState(row).label }}</span>
+                    }
+                    @case ('live') {
+                      <span class="chip ok"><span class="dot live"></span>{{ deviceState(row).label }}</span>
+                    }
+                    @default {
+                      <span class="row-state"><span class="dot"></span><span class="muted">{{ deviceState(row).label }}</span></span>
                     }
                   }
                   @if (simulatedInfo(row.device); as simInfo) {
@@ -263,24 +268,31 @@
       }
     </section>
 
-    <!-- ---- Detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md): what the
-         row truncates — the full source URI, the device UUID (both with a copy button), the owning
-         asset — plus the full action set, so every action stays reachable once a row is open, without
-         reopening the kebab. -->
+    <!-- ---- Detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy: title row [`vision-two-pane`'s own
+         head] → status chip row → key-value fact grid → actions row — this panel has no further h3
+         sections, there's nothing else on a device worth a subsection). What the row truncates — the
+         full source URI, the device UUID (both with a copy button), the owning asset — plus the full
+         action set, so every action stays reachable once a row is open, without reopening the kebab.
+         No "Open full ›": there is no standalone device page (`/devices` has no `:id` route) — this
+         panel already *is* the full view. -->
     @if (facade.selectedRow(); as row) {
       <div twoPaneDetail>
+        <!-- Status: the one merged state indicator (F5 — same states as the table's own State
+             column); "Simulated" stays a separate call-out (a device's origin, not its lifecycle/
+             streaming state), unmerged. -->
         <div class="detail-chips">
-          @for (capability of row.device.capabilities; track capability) {
-            <span class="chip">{{ capability }}</span>
-          }
-          <span class="chip" [class.ok]="row.lifecycle === 'ACTIVE'" [class.faded]="row.archived">
-            {{ lifecycleLabel(row.lifecycle) }}
-          </span>
-          @if (!row.archived) {
-            @if (row.streaming) {
-              <span class="chip ok"><span class="dot live"></span>Live</span>
-            } @else {
-              <span class="chip">Stopped</span>
+          @switch (deviceState(row).kind) {
+            @case ('archived') {
+              <span class="chip faded">{{ deviceState(row).label }}</span>
+            }
+            @case ('deactivated') {
+              <span class="chip">{{ deviceState(row).label }}</span>
+            }
+            @case ('live') {
+              <span class="chip ok"><span class="dot live"></span>{{ deviceState(row).label }}</span>
+            }
+            @default {
+              <span class="row-state"><span class="dot"></span><span class="muted">{{ deviceState(row).label }}</span></span>
             }
           }
           @if (simulatedInfo(row.device); as simInfo) {
@@ -288,11 +300,24 @@
           }
         </div>
 
+        <!-- Fact grid (F6 — two columns, fixed-width muted label column). Capabilities/Protocol are
+             classification (F5 rule 4 — muted text, not chips), matching the table's own columns. -->
         <dl class="detail-fields">
           <div class="detail-field">
-            <dt>Source</dt>
+            <dt>Lifecycle</dt>
+            <dd>{{ lifecycleLabel(row.lifecycle) }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Capabilities</dt>
+            <dd class="muted">{{ row.device.capabilities.join(', ') || '—' }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Protocol</dt>
+            <dd class="muted">{{ row.device.protocol }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Source URI</dt>
             <dd>
-              <span class="chip">{{ row.device.protocol }}</span>
               <div class="detail-copy-row">
                 <span class="mono detail-uri" [title]="row.device.uri">{{ row.device.uri }}</span>
                 <button type="button" class="btn secondary small" (click)="copyDeviceUri(row.device)">Copy</button>

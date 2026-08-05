@@ -4,6 +4,7 @@ import {
   DestroyRef,
   ElementRef,
   afterNextRender,
+  computed,
   effect,
   inject,
   input,
@@ -15,7 +16,17 @@ import type * as Leaflet from 'leaflet';
 import { TelemetryStore } from '../../../core/telemetry/telemetry-store';
 import type { GeoPosition, GeofenceZone, Mark, TelemetrySample } from '../../../core/api/models';
 import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
-import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLayerTileLayer } from '../tile-cache/leaflet-loader';
+import { ThemeStore } from '../../../core/shell/theme-store';
+import {
+  MAP_LAYERS,
+  droneDivIcon,
+  effectiveMapLayerId,
+  ensureLeafletStylesheet,
+  importLeaflet,
+  isMapLayerExplicit,
+  markMapLayerExplicit,
+  mapLayerTileLayer,
+} from '../tile-cache/leaflet-loader';
 import { zoneKindLabel, zoneLayerStyle } from '../../../core/geofence/geofence-logic';
 import { markKindLabel, markStyle, type MarkMoved } from '../../../core/marks/mark-logic';
 
@@ -60,12 +71,14 @@ const EXPAND_TRANSITION_MS = 260;
  * created once in `initMap()` and mutated from `effect()`s that read the `TelemetryStore`
  * injected from the host page's DI — Angular never re-renders Leaflet's own DOM.
  *
- * **Offline fallback.** `.map-shell` has a dark background by default (live-map.css), and
- * Leaflet's marker/overlay panes are independent of the tile pane, so a tile fetch failure (no
- * network at a flying field) just leaves that dark background showing through missing tiles
- * while the trail and marker — vector overlays — keep rendering with no special-case code.
- * `tilesOk` additionally drives a small badge so the operator knows *why* the basemap looks
- * empty, rather than assuming the app itself is broken.
+ * **Offline fallback.** `.map-shell`'s background is `--bg` (live-map.css) — themed, not
+ * hardcoded, since docs/VISUAL-REFRESH-PLAN.md's two-theme flip (paper-gray canvas in light, the
+ * original dark canvas in dark/`.surface-dark`) — and Leaflet's marker/overlay panes are
+ * independent of the tile pane, so a tile fetch failure (no network at a flying field) just
+ * leaves that canvas colour showing through missing tiles while the trail and marker — vector
+ * overlays — keep rendering with no special-case code. `tilesOk` additionally drives a small
+ * badge so the operator knows *why* the basemap looks empty, rather than assuming the app itself
+ * is broken.
  */
 @Component({
   selector: 'vision-live-map',
@@ -76,9 +89,17 @@ const EXPAND_TRANSITION_MS = 260;
 export class LiveMap {
   protected readonly store = inject(TelemetryStore);
   protected readonly settings = inject(SettingsStore);
+  protected readonly theme = inject(ThemeStore);
 
   /** The four switchable base layers (docs/CYCLES-PLAN.md §9, CU-b item 6), for the template's `@for`. */
   protected readonly layers = MAP_LAYERS;
+
+  /** The layer actually rendered (docs/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
+   * field's own doc comment for the full "explicit pick always wins" contract; both components
+   * share the one `effectiveMapLayerId`/`isMapLayerExplicit` mechanism in `leaflet-loader.ts`. */
+  protected readonly activeLayerId = computed<MapLayerId>(() =>
+    effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
+  );
 
   /**
    * Geofence zones, read-only (docs/OPS-CORE-PLAN.md §G-c: "Fly map shows zones read-only, same
@@ -143,10 +164,12 @@ export class LiveMap {
       this.applyTelemetry(trail, latest, follow);
     });
 
-    // Swaps the tile layer whenever the persisted choice changes (docs/CYCLES-PLAN.md §9, CU-b
-    // item 6) — a no-op until `initMap()` has created `this.map` (it applies the initial layer
-    // itself once the Leaflet chunk lands, same pattern as the telemetry effect above).
-    effect(() => this.applyLayer(this.settings.mapLayer()));
+    // Swaps the tile layer whenever the effective choice changes (docs/CYCLES-PLAN.md §9, CU-b item
+    // 6; theme-aware default docs/VISUAL-REFRESH-PLAN.md F7) — `activeLayerId()` tracks both
+    // `settings.mapLayer()` and `theme.theme()`, so a theme flip re-tiles this inset too. A no-op
+    // until `initMap()` has created `this.map` (it applies the initial layer itself once the
+    // Leaflet chunk lands, same pattern as the telemetry effect above).
+    effect(() => this.applyLayer());
 
     // Geofence zones (docs/OPS-CORE-PLAN.md §G-c) — see the `zones` input's own doc comment.
     effect(() => this.applyZones(this.zones()));
@@ -178,7 +201,10 @@ export class LiveMap {
     this.expanded.update((value) => !value);
   }
 
+  /** A layer-picker click — an explicit pick always wins over the theme default from here on
+   * (docs/VISUAL-REFRESH-PLAN.md F7); see `FleetMap#setLayer`'s identical doc comment. */
   protected setLayer(id: MapLayerId): void {
+    markMapLayerExplicit();
     this.settings.mapLayer.set(id);
   }
 
@@ -209,7 +235,7 @@ export class LiveMap {
       this.mapClicked.emit({ latitude: event.latlng.lat, longitude: event.latlng.lng });
     });
 
-    this.applyLayer(this.settings.mapLayer());
+    this.applyLayer();
 
     this.trailLine = L.polyline([], { color: '#4f8cff', weight: 3, opacity: 0.85 }).addTo(map);
     this.marker = L.marker([0, 0], {
@@ -366,14 +392,15 @@ export class LiveMap {
     }
   }
 
-  /** Swaps the active base layer — a no-op until the map exists (`initMap()` re-applies once it does). */
-  private applyLayer(layerId: MapLayerId): void {
+  /** Swaps the active base layer to `activeLayerId()` — a no-op until the map exists (`initMap()`
+   * re-applies once it does). */
+  private applyLayer(): void {
     const L = this.leaflet;
     if (!L || !this.map) {
       return;
     }
     this.tileLayer?.remove();
-    this.tileLayer = mapLayerTileLayer(L, layerId, (ok) => this.tilesOk.set(ok));
+    this.tileLayer = mapLayerTileLayer(L, this.activeLayerId(), (ok) => this.tilesOk.set(ok));
     this.tileLayer.addTo(this.map);
   }
 

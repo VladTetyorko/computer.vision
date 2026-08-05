@@ -9,7 +9,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { AssetsFacade } from './assets-facade';
-import { parseAssetViewMode, type AssetListRow, type AssetViewMode } from './assets-logic';
+import { describeAssetState, parseAssetViewMode, type AssetListRow, type AssetStateDescriptor, type AssetViewMode } from './assets-logic';
 
 /** `localStorage` key for the `▤ ▦` view toggle (docs/design/04-assets.md) — one page's own key,
  *  same `vision.<page>.<field>` shape as `vision.command.railOpen`/`vision.fly.mapVisible`. */
@@ -127,6 +127,15 @@ export class AssetsPage {
       case 'DELETED':
         return 'Archived';
     }
+  }
+
+  /**
+   * The dense list/card grid/detail panel's one merged state indicator (docs/VISUAL-REFRESH-PLAN.md
+   * F5 — "at most one chip per row"): replaces the old separate Lifecycle + Streaming chips. See
+   * `assets-logic.ts#describeAssetState`'s own doc comment for the priority order.
+   */
+  protected assetState(row: AssetListRow): AssetStateDescriptor {
+    return describeAssetState(row);
   }
 
   /** The card's per-row kebab menu — just Archive/Restore, reasoned (docs/UX-REWORK-PLAN.md §U-a2 item 2). */

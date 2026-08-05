@@ -47,17 +47,52 @@
   border-color: var(--color-info);
 }
 
-.badge {
+/* Bottom-left corner (docs/VISUAL-REFRESH-PLAN.md F7, task 4): the legend always sits here; the
+   "tiles unavailable" badge joins it underneath when tiles are failing, rather than the two
+   fighting over the same absolutely-positioned spot. */
+.corner-stack {
   position: absolute;
   left: var(--space-8);
   bottom: var(--space-8);
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+
+/* Legend — one quiet row of the same counts `core/map/map-logic.ts#bucketAssets` already derives
+   (F7: "one quiet row, nothing more" — reuses the global `.dot`/`.dot.live` primitives rather than
+   inventing a fourth colour or a new chip type). */
+.legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-16);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
   padding: var(--space-4) var(--space-8);
   border-radius: var(--radius-pill, 9999px);
   background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
   color: var(--color-warn);
   font-size: 0.72rem;
-  backdrop-filter: blur(4px);
 }
 
 /* Everything below targets DOM that Leaflet creates itself (tiles, markers, popups) rather than
@@ -75,12 +110,17 @@
   color: var(--text-muted);
 }
 
+/* One marker glyph, state carried by colour only (docs/VISUAL-REFRESH-PLAN.md F7, task 2): live
+   (streaming) is `--color-live` — the same accent the entity rail's own `.dot.live` already uses
+   for this exact concept (`command.html`) — offline is `--text-faint`, and `.attention` recolors
+   either shape `--color-danger`, winning over both (declared last; a class-qualified selector also
+   outranks the bare one on specificity, so source order isn't even load-bearing here). */
 :host ::ng-deep .fleet-drone-marker .drone-arrow {
   width: 0;
   height: 0;
   border-left: 6px solid transparent;
   border-right: 6px solid transparent;
-  border-bottom: 15px solid var(--color-info);
+  border-bottom: 15px solid var(--color-live);
   transform-origin: 50% 60%;
   filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--black) 40%, transparent));
 }
@@ -92,6 +132,31 @@
   background: var(--text-faint);
   border: 2px solid var(--panel-raised);
   opacity: 0.85;
+}
+
+:host ::ng-deep .fleet-drone-marker.attention .drone-arrow {
+  border-bottom-color: var(--color-danger);
+}
+
+:host ::ng-deep .fleet-offline-marker.attention .offline-dot {
+  background: var(--color-danger);
+  opacity: 1;
+}
+
+/* Selected marker (docs/VISUAL-REFRESH-PLAN.md F4/F7) — the same `--color-info` accent every other
+   selected row in the app carries, as a ring rather than a left bar (a point marker has no "row" to
+   inset one into). Both Leaflet divIcon roots are already `position: absolute` (Leaflet's own
+   `.leaflet-marker-icon` class), which is what lets an absolutely-positioned `::before` ring here
+   anchor to them without this rule needing to set `position` itself (doing so would fight Leaflet's
+   own placement). */
+:host ::ng-deep .fleet-drone-marker.selected::before,
+:host ::ng-deep .fleet-offline-marker.selected::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--color-info);
+  box-shadow: 0 0 0 2px var(--color-info-soft);
 }
 
 :host ::ng-deep .fleet-popup {

@@ -44,9 +44,9 @@
           <thead>
             <tr>
               <th>Category</th>
-              <th>Total</th>
-              <th>Active</th>
-              <th>Deactivated</th>
+              <th class="col-num">Total</th>
+              <th class="col-num">Active</th>
+              <th class="col-num">Deactivated</th>
               <th>Streaming</th>
               <th></th>
             </tr>
@@ -55,9 +55,9 @@
             @for (row of facade.rows(); track row.slug) {
               <tr>
                 <td>{{ row.name }}</td>
-                <td>{{ row.total }}</td>
-                <td>{{ row.active }}</td>
-                <td>{{ row.deactivated }}</td>
+                <td class="col-num mono">{{ row.total }}</td>
+                <td class="col-num mono">{{ row.active }}</td>
+                <td class="col-num mono">{{ row.deactivated }}</td>
                 <td>
                   @if (row.streaming > 0) {
                     <span class="chip ok"><span class="dot live"></span>{{ row.streaming }}</span>

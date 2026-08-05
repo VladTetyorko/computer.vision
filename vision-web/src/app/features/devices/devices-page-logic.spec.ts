@@ -3,6 +3,7 @@ import type { AssetDetails, Device } from '../../core/api/models';
 import {
   buildCreateAssetRequestForDevice,
   buildWarehouseRows,
+  describeDeviceState,
   filterRowsByArchived,
   findWarehouseRowById,
   mapDeviceOwners,
@@ -12,9 +13,9 @@ import {
 /**
  * The lifecycle-action-menu/edit-builder tests (`availableDeviceActions`, `buildDeviceRenameEdit`,
  * `RESTORE_TARGET_STATE`) live in `core/fleet/warehouse-logic.spec.ts` alongside the functions
- * themselves (docs/CYCLES-PLAN.md §11, CD-b); the category-picker tests
- * (`deriveCategoryOptions`/`DEFAULT_CATEGORY_OPTIONS`) live in `core/fleet/category-logic.spec.ts`
- * the same way (docs/UX-REWORK-PLAN.md §U-d). The asset-first list's own tests
+ * themselves (docs/CYCLES-PLAN.md §11, CD-b); the category-picker tests (`deriveCategoryOptions`)
+ * live in `core/fleet/category-logic.spec.ts` the same way (docs/UX-REWORK-PLAN.md §U-d). The
+ * asset-first list's own tests
  * (`buildAssetListRows`/`filterAssetListRowsByArchived`/`filterAssetListRowsByCategory` and friends)
  * moved to `features/assets/assets-logic.spec.ts` once the Assets page split out of this one — this
  * file keeps only the Devices-page-specific (raw device table) view-model builders.
@@ -195,6 +196,40 @@ describe('findWarehouseRowById', () => {
 
   it('degrades to undefined for an empty-string id', () => {
     expect(findWarehouseRowById(rows, '')).toBeUndefined();
+  });
+});
+
+describe('describeDeviceState', () => {
+  it('is "archived" whenever archived is true, regardless of lifecycle/streaming', () => {
+    expect(describeDeviceState({ lifecycle: 'ACTIVE', archived: true, streaming: true })).toEqual({
+      kind: 'archived',
+      label: 'Archived',
+    });
+  });
+
+  it('is "deactivated" for a non-archived DEACTIVATED row, even while streaming', () => {
+    expect(describeDeviceState({ lifecycle: 'DEACTIVATED', archived: false, streaming: true })).toEqual({
+      kind: 'deactivated',
+      label: 'Deactivated',
+    });
+  });
+
+  it('is "live" for an active, streaming row', () => {
+    expect(describeDeviceState({ lifecycle: 'ACTIVE', archived: false, streaming: true })).toEqual({
+      kind: 'live',
+      label: 'Live',
+    });
+  });
+
+  it('is "stopped" for the default steady state — active, not streaming', () => {
+    expect(describeDeviceState({ lifecycle: 'ACTIVE', archived: false, streaming: false })).toEqual({
+      kind: 'stopped',
+      label: 'Stopped',
+    });
+  });
+
+  it('archived outranks every other state', () => {
+    expect(describeDeviceState({ lifecycle: 'DEACTIVATED', archived: true, streaming: false }).kind).toBe('archived');
   });
 });
 

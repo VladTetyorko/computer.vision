@@ -4,11 +4,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
-import {
-  DEFAULT_CATEGORY_OPTIONS,
-  deriveCategoryOptions,
-  type CategoryOption,
-} from '../../core/fleet/category-logic';
+import { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 import {
   buildSimulationRequest,
   buildSyntheticRegisterRequest,
@@ -105,7 +101,7 @@ export class OnboardingStore {
   readonly displayName = signal('');
   readonly registrationNumber = signal('');
   readonly category = signal('');
-  readonly categoryOptions = signal<readonly CategoryOption[]>(DEFAULT_CATEGORY_OPTIONS);
+  readonly categoryOptions = signal<readonly CategoryOption[]>([]);
 
   readonly photoFile = signal<File | null>(null);
   readonly photoBlob = signal<Blob | null>(null);
@@ -649,10 +645,10 @@ export class OnboardingStore {
 
   private async loadCategoryOptions(): Promise<void> {
     try {
-      const assets = await this.api.listAssets();
-      this.categoryOptions.set(deriveCategoryOptions(assets));
+      const [assets, categories] = await Promise.all([this.api.listAssets(), this.api.listCategories()]);
+      this.categoryOptions.set(deriveCategoryOptions(assets, categories));
     } catch {
-      // Silent-degrade — the fallback list (DEFAULT_CATEGORY_OPTIONS) is already in place.
+      // Silent-degrade — `categoryOptions` just stays whatever it already was (empty on first load).
     }
   }
 

@@ -8,7 +8,13 @@
        cockpit instead of sharing width with a stacked instrument column. The map inset and whichever
        tool-rail drawer is open both overlay `main` itself (absolute within `.grid-main`, never
        within `.cockpit`) — see cockpit.css's own comment on `.grid-main`. -->
-  <div class="cockpit" #stage>
+  <!-- `.surface-dark` (docs/VISUAL-REFRESH-PLAN.md F3/W4): the cockpit is a full-bleed video
+       surface end to end — there is no separate light-themed chrome around it on this route
+       (`fly.routes.ts`'s `fullBleed: true` means no page-bar wraps it either) — so the enclave
+       boundary is this component's own root, matching every other overlay/drawer mounted inside
+       it that already assumed an always-dark ambient (`--hud-*`/`--scrim*`, `--text`/`--panel`
+       etc. throughout `cockpit.css` and the tool-rail drawer components). -->
+  <div class="cockpit surface-dark" #stage>
     @if (facade.failsafeBanner(); as banner) {
       <div class="grid-banner">
         <vision-failsafe-banner [banner]="banner" />
@@ -379,7 +385,7 @@
        degrade to an honest empty state, never a crash or a blank screen"): a bad bookmark or a
        since-deleted asset renders this instead of silently bouncing the operator to a different URL
        — mirrors `LivePage`'s own "Unknown device" empty state exactly (`live.html`). -->
-  <div class="cockpit cockpit-empty">
+  <div class="cockpit cockpit-empty surface-dark">
     <vision-empty title="Drone not found">
       <p>
         No drone with id <span class="mono">{{ assetId() }}</span> is registered here. It may have
@@ -389,7 +395,7 @@
     </vision-empty>
   </div>
 } @else {
-  <div class="cockpit cockpit-loading">
+  <div class="cockpit cockpit-loading surface-dark">
     <div class="card skeleton-card"></div>
   </div>
 }
