@@ -13,15 +13,16 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param assetId  the asset this update is about, as a canonical UUID string, or absent for a
  *                  fleet-wide/asset-less update ({@code type=fleet} or {@code type=event})
  * @param type     one of {@code fleet}, {@code telemetry}, {@code detections}, {@code event},
- *                  {@code devices}, {@code detection-events}, {@code marks}
+ *                  {@code devices}, {@code detection-events}, {@code map}
  * @param payload  already-mapped response DTO(s): {@code List<AssetSummaryResponse>} for {@code
  *                  fleet}, {@code List<TelemetrySampleResponse>} for {@code telemetry} (a
  *                  coalesced batch of appended samples), a single {@code DetectionResultResponse}
  *                  for {@code detections} (latest-frame-only — no backlog), a single {@code
  *                  EventResponse} for {@code event}, a single {@code DevicesSnapshotResponse} for
  *                  {@code devices}, a single {@code DetectionEventResponse} for {@code
- *                  detection-events}, and a single {@code MarkPayload} ({@code {action, mark}}) for
- *                  {@code marks} (docs/TACTICAL-MARKS-PLAN.md §5)
+ *                  detection-events}, and a single {@link MapEventPayload} for {@code map}
+ *                  (docs/MAP-REWORK-PLAN.md §4.3 — the only payload whose delivery is filtered per
+ *                  connection, by its own {@code layerId})
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record LiveEnvelopeResponse(long seq, String assetId, String type, Object payload) {

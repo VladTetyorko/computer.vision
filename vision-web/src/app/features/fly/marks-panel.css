@@ -1,5 +1,7 @@
 /* Drawer *content* only — `<vision-side-panel>` owns the head/close chrome and the drawer surface,
-   mirroring `flight-command-panel.css`'s identical `display: contents` convention. */
+   mirroring `flight-command-panel.css`'s identical `display: contents` convention.
+   The affiliation-swatch rules come from the shared `shared/map/map-controls/mark-symbol.css`,
+   pulled in via this component's `styleUrls` — see that file's own header. */
 
 :host {
   display: contents;
@@ -24,65 +26,27 @@ vision-notice {
   align-self: flex-start;
 }
 
-/* ---- New mark: kind picker + draft confirm form ------------------------------------------- */
+/* ---- List head: the section label plus the UNVERIFIED view filter ---------------------------- */
 
-.kind-picker {
-  flex-wrap: wrap;
-}
-
-.kind-picker .btn {
-  align-items: center;
-  gap: var(--space-4);
-}
-
-/* Only the edit form's kind picker ever shows an active state (the current kind); the New-mark
-   picker's buttons are one-shot triggers, never "selected". */
-.kind-picker .btn.active {
-  background: var(--color-info);
-  color: var(--color-on-info);
-  border-color: var(--color-info);
-}
-
-.draft-form,
-.edit-form {
-  display: flex;
-  flex-direction: column;
+.list-head {
+  align-items: baseline;
+  justify-content: space-between;
   gap: var(--space-8);
 }
 
-.edit-form {
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-8);
+.list-head .label {
+  margin-bottom: 0;
 }
 
-.kind-chip {
-  align-self: flex-start;
-}
-
-.draft-input {
-  width: 100%;
-  padding: var(--space-8);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--panel-raised);
-  color: var(--text);
-  font: inherit;
-}
-
-.draft-input:focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: 1px;
-}
-
-/* ---- The kind glyph every row/chip/button uses — colour itself is an inline style
-   (`core/marks/mark-logic.ts#markColor`, the single source of truth), tinting `<vision-icon>` via
-   `currentColor` so kind is never colour-only (icon shape + colour together, matching each kind's
-   own map-marker glyph). ------------------------------------------------------------------------ */
-
-.mark-icon {
-  display: inline-flex;
+/* A chip that is also a button. Off state is the neutral `.chip`; on state adds `.warn`, matching
+   the verification chip's own colour for unverified — one meaning, one hue (frontend-style §3). */
+.filter-chip {
+  cursor: pointer;
   flex: none;
-  align-items: center;
+}
+
+.filter-chip:hover {
+  border-color: var(--color-warn-line);
 }
 
 /* ---- Active marks list ---------------------------------------------------------------------- */
@@ -107,8 +71,8 @@ vision-notice {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-/* Selected per docs/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
-   selected row/card in the app uses (e.g. `features/assets/assets.css`'s `.asset-card.selected`). */
+/* Selected per frontend-style §4 — the same left-bar + soft-tint idiom every other selected
+   row/card in the app uses. */
 .mark-row.selected {
   background: var(--color-info-soft);
   border-left-color: var(--color-info);
@@ -125,6 +89,12 @@ vision-notice {
   cursor: pointer;
   text-align: left;
   width: 100%;
+}
+
+/* The list-row swatch is the glyph-carrying size (see `mark-symbol.css#.with-glyph`). */
+.mark-row-main .aff-swatch {
+  width: 20px;
+  height: 20px;
 }
 
 .mark-row-text {
@@ -144,13 +114,30 @@ vision-notice {
 
 .mark-row-actions {
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.edit-form {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
 }
 
 .mark-detail {
   border-top: 1px solid var(--border);
   padding-top: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
 .mark-note {
-  margin: 0 0 var(--space-8);
+  margin: 0;
+}
+
+/* ---- Responsive: bigger row actions on touch ------------------------------------------------- */
+
+@media (max-width: 600px), (pointer: coarse) {
+  .mark-row-actions .btn {
+    min-height: 2.5rem;
+  }
 }

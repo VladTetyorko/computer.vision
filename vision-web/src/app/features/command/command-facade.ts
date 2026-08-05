@@ -8,11 +8,17 @@ import { FleetMapStore } from '../../core/map/map-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { activeGeofenceBreaches, groupBreachesByAsset } from '../../core/geofence/geofence-logic';
-import { MarksStore } from '../../core/marks/marks-store';
+import { MarksStore } from '../../core/map-data/marks-store';
+import { LayersStore } from '../../core/map-data/layers-store';
+import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
+import { EventsStore } from '../../core/events/events-store';
+import { selectEventMarkers } from '../../core/events/events-logic';
 import { LiveStore } from '../../core/live/live-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { fleetCentroid } from '../../core/weather/weather-logic';
 import { buildEntityRows, commandGridColumns, type DetailPanelState } from './command-logic';
+import type { DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import type { AssetAttention, FleetSummary } from '../../core/api/models';
 
 /** The one poll driving the entity rail and the selected asset's Status/Telemetry facts alike. */
@@ -31,7 +37,7 @@ const PANEL_OPEN_KEY = 'vision.command.panelOpen';
  * **Provided per route activation**, listed alongside `FleetMapStore`/`WeatherStore` in
  * `CommandPage`'s own `providers` array (both page-scoped, not `providedIn: 'root'` — see their own
  * class doc comments) — all three share one injector, so this facade's own `inject(FleetMapStore)`/
- * `inject(WeatherStore)` resolve to the exact same instances `<vision-fleet-map>`/`<vision-weather-chip>`
+ * `inject(WeatherStore)` resolve to the exact same instances `<vision-weather-chip>`
  * (children of `CommandPage`, injecting those stores directly themselves) already get. Moving the
  * *injection* here changes nothing about *which* instance anything sees — same DI subtree as before,
  * just orchestrated from one class instead of the component.
@@ -52,6 +58,7 @@ export class CommandFacade {
   private readonly fleet = inject(FleetStore);
   private readonly mapStore = inject(FleetMapStore);
   private readonly geofence = inject(GeofenceStore);
+  private readonly events = inject(EventsStore);
   private readonly liveStore = inject(LiveStore);
   private readonly weather = inject(WeatherStore);
 
@@ -68,14 +75,25 @@ export class CommandFacade {
   readonly zones = this.geofence.zones;
 
   /**
-   * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5) — exposed as the
-   * whole store (not a thin passthrough, unlike `zones` above): `command.html` wires
-   * `<vision-fleet-map>`'s `[marks]`/`[selectedMarkId]`/`(markSelected)`/`(markMoved)`/`(mapClicked)`
-   * straight to it, and `<vision-marks-panel>` (`features/command/marks-panel.ts`) injects this same
-   * `providedIn: 'root'` singleton directly (a non-routed presentational child, mirroring
+   * The three halves of the Common Operational Picture (docs/MAP-REWORK-PLAN.md §5.2) — exposed as
+   * whole stores (not thin passthroughs, unlike `zones` above): `command.html` wires
+   * `<vision-tactical-map>`'s `[marks]`/`[layers]`/`[drawings]`/`[selectedMarkId]`/`(markSelected)`/
+   * `(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and the
+   * shared `shared/map/map-controls/**` components plus `features/command/marks-panel.ts` inject the
+   * same `providedIn: 'root'` singletons directly (non-routed presentational children, mirroring
    * `zones-panel.ts` injecting `GeofenceStore` directly).
    */
   readonly marks = inject(MarksStore);
+  readonly layers = inject(LayersStore);
+  readonly drawings = inject(DrawingsStore);
+
+  /**
+   * The map's single `[interactionMode]`, folded from the two independent arming states that can
+   * produce one — an armed mark palette and an armed drawing kind
+   * (`core/map-data/drawings-logic.ts#resolveInteractionMode`). Neither store knows about the other;
+   * this is the one place they meet.
+   */
+  readonly interactionMode = computed(() => resolveInteractionMode(this.marks.armed(), this.drawings.mode()));
 
   /**
    * `assetId → gpsFixType`, built from `FleetMapStore` (docs/FC-INTEGRATIONS-PLAN.md F-d) — feeds
@@ -108,7 +126,7 @@ export class CommandFacade {
   );
 
   /**
-   * Which assets `<vision-fleet-map>` should recolor `--color-danger` (docs/VISUAL-REFRESH-PLAN.md
+   * Which assets `<vision-tactical-map>` should recolor `--color-danger` (docs/VISUAL-REFRESH-PLAN.md
    * F7, task 2) — every `entityRows` row with a non-`'ok'` severity, by id. Reuses the rail's own
    * already-computed sort rather than a second attention derivation, so the rail and the map can
    * never disagree about which assets need attention.
@@ -119,6 +137,30 @@ export class CommandFacade {
 
   /** Every asset's currently-known position — threaded to the Zones panel's own draw-dialog advisory. */
   readonly assetPositions = computed(() => this.mapStore.markers().map((marker) => marker.position));
+
+  /**
+   * `<vision-tactical-map>`'s `[assets]` (docs/MAP-REWORK-PLAN.md §5.1). The map component is dumb
+   * now — unlike the deleted `FleetMap`, which injected `FleetMapStore` itself and therefore only
+   * worked on a page that provided it — so the store's markers are handed over as an input from
+   * here, the one place already holding that store.
+   */
+  readonly markers = this.mapStore.markers;
+
+  /**
+   * The map's `[unplottedAssets]` legend count — assets with no position at all, which by
+   * construction never appear in `markers` above (`core/map/map-logic.ts#buildMarker` returns
+   * `undefined` for them). Only this facade knows the number, so the map is told rather than left to
+   * guess it.
+   */
+  readonly unplottedAssets = computed(() => this.mapStore.buckets().noPosition.length);
+
+  /**
+   * The map's `[events]` — position-carrying detection events, most recent first, capped
+   * (`selectEventMarkers`). Same reason as `markers` above: the deleted `FleetMap` injected
+   * `EventsStore` directly; the store is still never activated/released here (the app-shell
+   * notification bell keeps it warm for the whole session), this facade only reads it.
+   */
+  readonly eventMarkers = computed(() => selectEventMarkers(this.events.events()));
 
   // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) ------------------------------------------
   // Command's chip centers on the fleet centroid, not any one asset — this page's own fleet-summary
@@ -266,7 +308,7 @@ export class CommandFacade {
   }
 
   /**
-   * What `<vision-fleet-map>`'s `focusRequest` reads — the selected asset plus a tick that changes on
+   * What `<vision-tactical-map>`'s `focusRequest` reads — the selected asset plus a tick that changes on
    * every `selectAsset` call, so re-selecting the same asset re-centres. `undefined` while nothing is
    * selected, which leaves the camera alone.
    */
@@ -305,9 +347,27 @@ export class CommandFacade {
     }
   }
 
-  /** `<vision-fleet-map>`'s event-popup "Details" button — unchanged target, just this facade's own wiring. */
+  /** `<vision-tactical-map>`'s event-popup "Details" button — unchanged target, just this facade's own wiring. */
   openEventAsset(assetId: string): void {
     this.openAsset(assetId);
+  }
+
+  // --- Drawings (docs/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------
+
+  /**
+   * `<vision-tactical-map>`'s `(drawingCompleted)` — the map owns the in-progress vertex list and
+   * only ever emits a shape that already passes `Drawing`'s own minimum-point rule
+   * (`tactical-map-logic.ts#completedDraft`), so this is a straight `POST`. The colour comes from
+   * `DrawingsStore`'s own picker state, which is why the toolbar doesn't need to be reachable from
+   * here.
+   */
+  async completeDrawing(draft: DrawingDraft): Promise<void> {
+    await this.drawings.completeDraft(draft);
+  }
+
+  /** `(drawingSelected)` — selecting on the map is the same selection the toolbar's editor reads. */
+  selectDrawing(drawingId: string): void {
+    this.drawings.select(drawingId);
   }
 
   /**

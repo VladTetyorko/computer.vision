@@ -1,0 +1,85 @@
+<div class="toolbar" [class.card]="layout() === 'card'">
+  @if (noWritableLayer()) {
+    <p class="muted hint">You have no layer you can draw on yet.</p>
+  } @else {
+    <div class="axis">
+      <span class="label" id="draw-mode-label">Draw</span>
+      <div class="segmented" role="group" aria-labelledby="draw-mode-label">
+        @for (kind of kinds; track kind) {
+          <button
+            type="button"
+            class="btn secondary small"
+            [class.active]="drawings.mode() === kind"
+            [attr.aria-pressed]="drawings.mode() === kind"
+            (click)="setMode(kind)"
+          >
+            {{ drawKindLabel(kind) }}
+          </button>
+        }
+      </div>
+      @if (drawings.mode(); as mode) {
+        <p class="muted hint">
+          Click the map to add points ({{ clicksNeeded() }} needed), then double-click or press Enter to finish. Esc cancels.
+        </p>
+        <button type="button" class="btn secondary small stop" (click)="stop()">Stop drawing</button>
+      }
+    </div>
+
+    <div class="axis">
+      <span class="label" id="draw-color-label">Colour</span>
+      <div class="row swatches" role="group" aria-labelledby="draw-color-label">
+        @for (option of drawings.colorTokens; track option.token) {
+          <button
+            type="button"
+            class="swatch"
+            [class]="'tone-' + option.token"
+            [class.active]="drawings.colorToken() === option.token"
+            [attr.aria-pressed]="drawings.colorToken() === option.token"
+            [title]="option.label"
+            [attr.aria-label]="option.label"
+            (click)="setColor(option.token)"
+          ></button>
+        }
+      </div>
+    </div>
+  }
+
+  @if (drawings.selected(); as selected) {
+    <div class="axis selected-editor">
+      <span class="label">Selected {{ drawKindLabel(selected.kind).toLowerCase() }}</span>
+      @if (drawings.canEditSelected()) {
+        <input
+          type="text"
+          aria-label="Drawing label"
+          placeholder="Label (optional)"
+          [ngModel]="editLabel()"
+          (ngModelChange)="editLabel.set($event)"
+          (keydown.enter)="saveLabel()"
+          (blur)="saveLabel()"
+        />
+        <div class="row swatches">
+          @for (option of drawings.colorTokens; track option.token) {
+            <button
+              type="button"
+              class="swatch"
+              [class]="'tone-' + option.token"
+              [class.active]="selected.colorToken === option.token"
+              [title]="'Recolour: ' + option.label"
+              [attr.aria-label]="'Recolour: ' + option.label"
+              (click)="recolorSelected(option.token)"
+            ></button>
+          }
+        </div>
+        <div class="row actions">
+          <button type="button" class="btn secondary small" (click)="deselect()">Deselect</button>
+          <button type="button" class="btn danger-action small" (click)="removeSelected()" [disabled]="busy()">Delete</button>
+        </div>
+      } @else {
+        <p class="muted hint">Read-only — you can view this layer but not change it.</p>
+        <div class="row actions">
+          <button type="button" class="btn secondary small" (click)="deselect()">Deselect</button>
+        </div>
+      }
+    </div>
+  }
+</div>

@@ -209,6 +209,19 @@
   background: var(--bg);
 }
 
+/* The drawing toolbar card (docs/MAP-REWORK-PLAN.md §5.2), pinned top-centre over the map on the
+   8px grid (frontend-style §7). `z-index` puts it above Leaflet's own panes but below the page's
+   docked panels, which are real grid-track siblings rather than overlays (see
+   `command-logic.ts#commandGridColumns`) and therefore never overlap it. */
+.command-draw-toolbar {
+  position: absolute;
+  top: var(--space-8);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 500;
+  max-width: min(32rem, calc(100% - var(--space-32)));
+}
+
 .command-map {
   position: absolute;
   inset: 0;
@@ -276,5 +289,14 @@
 
   .command-stage {
     min-height: 40vh;
+  }
+
+  /* On a phone the toolbar spans the map's width rather than floating as a centred pill — a
+     centred card at that width leaves unusable slivers either side. */
+  .command-draw-toolbar {
+    left: var(--space-8);
+    right: var(--space-8);
+    transform: none;
+    max-width: none;
   }
 }

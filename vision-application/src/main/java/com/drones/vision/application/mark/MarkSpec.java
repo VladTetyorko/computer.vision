@@ -1,13 +1,16 @@
 package com.drones.vision.application.mark;
 
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.domain.model.LayerId;
 import com.drones.vision.domain.model.MarkKind;
 import com.drones.vision.application.asset.AssetSpec;
 import com.drones.vision.application.geofence.GeofenceZoneSpec;
+import com.drones.vision.application.map.LayerResolver;
 
 /**
  * Everything needed to create a {@code MANUAL} {@link com.drones.vision.domain.model.Mark} (a map
- * click) — docs/TACTICAL-MARKS-PLAN.md §2.
+ * click) — docs/MAP-REWORK-PLAN.md §3, superseding docs/TACTICAL-MARKS-PLAN.md §2's shape.
  *
  * <p>A top-level record rather than a type nested in {@link MarkService}, so callers can name their
  * input without importing the service, and so the wire DTO in {@code …api.dto} maps to one plain
@@ -18,16 +21,23 @@ import com.drones.vision.application.geofence.GeofenceZoneSpec;
  * repository, mirroring {@link GeofenceZoneSpec}'s own duplication of {@code GeofenceZone}'s
  * invariants.
  *
- * @param kind     the tactical category
- * @param label    short human-readable label; must not be blank
- * @param note     optional free-text detail; blank normalizes to {@code null}
- * @param position where to drop the mark
+ * @param layerId     the layer this mark lands on, or {@code null} to use the creator's default
+ *                    layer (see {@link LayerResolver#defaultLayerFor})
+ * @param kind        the tactical category
+ * @param affiliation friend/enemy affiliation for symbology; must not be {@code null}
+ * @param label       short human-readable label; must not be blank
+ * @param note        optional free-text detail; blank normalizes to {@code null}
+ * @param position    where to drop the mark
  */
-public record MarkSpec(MarkKind kind, String label, String note, GeoPosition position) {
+public record MarkSpec(LayerId layerId, MarkKind kind, Affiliation affiliation, String label, String note,
+                        GeoPosition position) {
 
     public MarkSpec {
         if (kind == null) {
             throw new IllegalArgumentException("MarkSpec kind must not be null");
+        }
+        if (affiliation == null) {
+            throw new IllegalArgumentException("MarkSpec affiliation must not be null");
         }
         if (label == null || label.isBlank()) {
             throw new IllegalArgumentException("MarkSpec label must not be blank");

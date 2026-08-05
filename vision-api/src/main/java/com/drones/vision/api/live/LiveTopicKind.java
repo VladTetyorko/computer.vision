@@ -5,9 +5,9 @@ import java.util.stream.Collectors;
 
 /**
  * The seven kinds of {@link LiveTopic} (docs/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
- * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MARKS}
- * extends it again for the shared tactical-marks operational picture, docs/TACTICAL-MARKS-PLAN.md
- * §5) — {@link #wire()}
+ * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MAP}
+ * extends it again for the common operational picture, docs/MAP-REWORK-PLAN.md
+ * §4.3) — {@link #wire()}
  * is both the topic-string prefix (e.g. {@code "telemetry:<assetId>"}) and the {@code
  * com.drones.vision.api.dto.LiveEnvelopeResponse#type()} value for envelopes of that kind, since
  * the two are deliberately the same vocabulary.
@@ -39,13 +39,20 @@ enum LiveTopicKind {
      */
     DETECTION_EVENTS("detection-events"),
     /**
-     * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md §5) — always-on,
-     * deployment-wide, no per-group filter (matching {@code MarkService#list()}'s own unscoped
-     * shape). The three logical lifecycle events (created/updated/cleared) ride as an {@code
-     * action} field inside the payload rather than as three separate topic kinds, mirroring how
-     * {@link #DETECTION_EVENTS} carries OPEN/CLOSED in one topic instead of two.
+     * The common operational picture (docs/MAP-REWORK-PLAN.md §4.3) — marks, drawings and layers,
+     * always-on. <strong>Replaces the {@code marks} topic outright</strong> (removed, not
+     * deprecated: the SPA is the only client and migrates in Wave E).
+     *
+     * <p>All three entity types and all four lifecycle actions ride as {@code entity}/{@code action}
+     * fields inside {@code MapEventPayload} rather than as twelve topic kinds, mirroring how {@link
+     * #DETECTION_EVENTS} carries OPEN/CLOSED in one topic instead of two.
+     *
+     * <p><strong>Unlike every other topic here, this one is not broadcast to everyone.</strong>
+     * Delivery is filtered per connection against the viewer captured at connect, by the event's
+     * {@code layerId} — see {@link LiveConnection#mayReceive} and {@link MapVisibility}. Visibility
+     * is a property of the data, resolved server-side; a client never filters the map itself.
      */
-    MARKS("marks");
+    MAP("map");
 
     private final String wire;
 

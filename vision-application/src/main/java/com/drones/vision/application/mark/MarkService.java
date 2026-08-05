@@ -1,54 +1,67 @@
 package com.drones.vision.application.mark;
 
+import com.drones.vision.domain.model.LayerId;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;
 import com.drones.vision.domain.model.MarkStatus;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.model.Verification.VerificationState;
 
 import java.util.List;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.geofence.GeofenceService;
+import com.drones.vision.application.map.MapAccessPolicy;
+import com.drones.vision.application.map.MapAccessPolicy.Viewer;
+import com.drones.vision.application.map.MapLayerService;
 import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.scope.VisibilityScope;
 
 /**
  * The shared operational picture: geolocated tactical {@link Mark}s, created two ways (a map click,
- * or a cockpit "geolocate" projected from a drone's pose), annotated and cleared/deleted
- * (docs/TACTICAL-MARKS-PLAN.md §2, revised for the FPV-operator/PILOT persona — see Authorization
- * below).
+ * or a cockpit "geolocate" projected from a drone's pose), annotated, verified, promoted and
+ * cleared/deleted (docs/MAP-REWORK-PLAN.md §3, reworked in place — superseding
+ * docs/TACTICAL-MARKS-PLAN.md §2's shape and its own "list() takes no scope" divergence, see below).
  *
- * <p>One interface, one implementation ({@link DefaultMarkService}). Structurally this mirrors
- * {@link GeofenceService}'s CRUD/list shape — a {@link Mark} is a point version of a {@code
- * GeofenceZone} — and, like geofence zones, {@link #list()} is now unscoped/deployment-wide (see
- * below). Ownership/actor threading still mirrors {@link AssetService}: {@link Ownership} (who it
- * belongs to) and {@link UserId actor} are separate method parameters, never constructor state.
+ * <p>One interface, one implementation ({@link DefaultMarkService}). Visibility and every gate here
+ * now resolve from a {@link Viewer} — identity plus group memberships — through {@link
+ * MapAccessPolicy}, exactly like {@link MapLayerService}; {@code Ownership}/{@code UserId actor} are
+ * no longer separate method parameters (superseded, see below).
  *
- * <h2>Visibility: deployment-wide, not group-filtered</h2>
- * The "shared operational picture" means everyone at the command point sees the <b>same</b> marks —
- * including a PILOT, whose {@link VisibilityScope#kind()} is {@code ASSIGNED_ASSETS} and so carries
- * no group at all (an earlier group-filtered design left pilots unable to see even their own marks;
- * revised). {@link #list()} therefore returns every {@link
- * com.drones.vision.domain.model.MarkStatus#ACTIVE} mark to any authenticated caller, with no
- * scope parameter — the same shape {@link GeofenceService#zones()} already has, and consistent with
- * the {@code "marks"} SSE topic, which broadcasts deployment-wide exactly like the pre-existing
- * {@code fleet}/{@code event} topics. This is an accepted, documented multi-tenant limitation, not
- * this feature's to fix (mirrors the same caveat on the live channel).
+ * <h2>Visibility: layer-scoped, not deployment-wide any more</h2>
+ * docs/TACTICAL-MARKS-PLAN.md's shipped {@code list()} took <b>no scope at all</b> — a deliberate
+ * workaround for a trap in {@code VisibilityScope}: a PILOT's {@code ASSIGNED_ASSETS} scope carries
+ * no group information, so group-filtering hid every mark from the primary FPV-operator persona,
+ * including their own. This rework fixes that properly instead of routing around it: every mark now
+ * lives on a {@link com.drones.vision.domain.model.MapLayer}, and {@link #list} filters to layers
+ * {@link MapAccessPolicy#canView} for the given {@link Viewer} — built from identity and group
+ * membership directly, never from {@code VisibilityScope} (see {@link MapAccessPolicy}'s own javadoc
+ * for exactly why). A PILOT reaches the COP layer (everyone can view it) and their own team's layer
+ * (group membership grants {@code CONTRIBUTE}) without the old trap resurfacing. This supersedes
+ * docs/TACTICAL-MARKS-PLAN.md §2's "deployment-wide, no scope parameter at all" design note in full.
  *
- * <h2>Authorization: creator manages their own, manager manages any</h2>
- * Creating (a map click) and geolocating (cockpit) are open to any authenticated actor, who becomes
- * the mark's owner. Editing a mark — annotation (label/note/kind/position, including drag-to-correct)
- * <em>and</em> a lifecycle transition ({@code status} → {@code CLEARED} or back to {@code ACTIVE})
- * alike — and deleting one are both gated the same way: {@code actor.equals(mark.createdBy())} (the
- * creator may always manage their own mark) <b>or</b> {@link VisibilityScope#canManageOrg()} (a
- * manager/admin may manage any mark), else {@link AccessDeniedException} (403). An unknown id is
- * {@link java.util.NoSuchElementException} (404) — there is no group-visibility gate in front of
- * this check any more, so a PILOT is never hidden from their own mark.
+ * <h2>Authorization</h2>
+ * Creating/geolocating a mark requires {@link MapAccessPolicy#canContribute} on the resolved layer
+ * (explicit, or the creator's default layer if none is given — see {@code LayerResolver
+ * #defaultLayerFor}). Editing/clearing/deleting a mark is gated on: the mark's own creator, while its
+ * {@link com.drones.vision.domain.model.Verification} is still {@code UNVERIFIED}; or {@link
+ * MapAccessPolicy#canManage} on its layer, unconditionally — once a mark is {@code CONFIRMED}, its
+ * creator loses the standing edit right and only a manager may touch it. {@link #verify} requires
+ * {@link MapAccessPolicy#canManage} on the mark's current layer. {@link #promote} requires {@link
+ * MapAccessPolicy#canManage} on the source layer <em>and</em> {@link MapAccessPolicy#canContribute}
+ * on the target (default: the COP layer).
+ *
+ * <p>An unknown mark id is {@link java.util.NoSuchElementException} (404). Every authorization
+ * failure above — including on a mark whose layer the actor cannot even view — is {@link
+ * AccessDeniedException} (403), matching how {@code DefaultFlightCommandService}'s own command gate
+ * already treats a command (as opposed to a read) on an out-of-scope resource: it is more honest to
+ * say "you may not do this" than to hide the mark.
  *
  * <h2>Live broadcast</h2>
- * Every create/update/clear publishes through {@link
- * com.drones.vision.domain.port.out.LiveUpdatePublisherPort}'s {@code publishMark*} methods, so the
- * shared picture stays live for every viewer (docs/TACTICAL-MARKS-PLAN.md §1, "New piece #1").
+ * Every create/patch/verify/promote/delete publishes a {@link
+ * com.drones.vision.domain.model.MapEvent} through {@link
+ * com.drones.vision.domain.port.out.LiveUpdatePublisherPort#publishMapEvent}, so the shared picture
+ * stays live for every viewer whose {@link Viewer} may see the event's layer (scoped SSE delivery is
+ * a Wave C concern). {@link #patch} publishes {@code CLEARED} when the patch flips {@link
+ * #patch}'s status to {@link MarkStatus#CLEARED}, {@code UPDATED} otherwise; {@link #delete} now
+ * publishes {@code DELETED} (the old two-method {@code publishMarkCleared}/{@code
+ * publishMarkUpdated} split used {@code CLEARED} for both a status flip and an actual delete, since
+ * no {@code DELETED} action existed yet — it does now).
  *
  * <h2>Threading</h2>
  * Implementations must be safe for concurrent use; all shared state lives behind the injected
@@ -57,65 +70,96 @@ import com.drones.vision.application.scope.VisibilityScope;
 public interface MarkService {
 
     /**
-     * Lists every {@link MarkStatus#ACTIVE} mark, deployment-wide, newest first.
+     * Lists every {@link MarkStatus#ACTIVE} mark on a layer {@code v} may view, newest first.
      *
-     * <p>Unscoped by design (see the class javadoc's Visibility section) — a {@code CLEARED} mark
-     * drops off this list, matching "clients drop the pin" once cleared.
+     * <p>A {@code CLEARED} mark drops off this list, matching "clients drop the pin" once cleared.
      *
-     * @return an immutable snapshot of active marks, newest first
+     * @param v who is asking
+     * @return an immutable snapshot of visible active marks, newest first
      */
-    List<Mark> list();
+    List<Mark> list(Viewer v);
 
     /**
-     * Drops a {@code MANUAL} mark (a map click).
+     * Drops a {@code MANUAL} mark (a map click), {@code UNVERIFIED} by default.
      *
-     * @param spec      what to create
-     * @param ownership who the mark belongs to
-     * @param actor     the user performing the creation
-     * @return the created mark, {@link com.drones.vision.domain.model.MarkStatus#ACTIVE}
+     * @param v    who is creating it
+     * @param spec what to create
+     * @return the created mark, {@link MarkStatus#ACTIVE}
+     * @throws java.util.NoSuchElementException if {@code spec.layerId()} is given and unknown
+     * @throws AccessDeniedException              if {@code v} does not {@link
+     *                                             MapAccessPolicy#canContribute} to the resolved layer
      */
-    Mark create(MarkSpec spec, Ownership ownership, UserId actor);
+    Mark create(Viewer v, MarkSpec spec);
 
     /**
      * Drops a {@code DETECTION} mark, projected from an asset's freshest telemetry (the cockpit
-     * "geolocate" action).
+     * "geolocate" action), {@code UNVERIFIED} by default.
      *
-     * @param spec      which asset to project from, and the mark's descriptive fields
-     * @param ownership who the mark belongs to
-     * @param actor     the user performing the geolocation
-     * @return the created mark, {@link com.drones.vision.domain.model.MarkStatus#ACTIVE}
-     * @throws IllegalArgumentException if the asset has never reported telemetry, or its freshest
-     *                                   sample is missing latitude/longitude/heading, or its
-     *                                   altitude is missing or not positive — an honest "cannot
-     *                                   geolocate: telemetry incomplete" (→ 400)
+     * @param v    who is geolocating it
+     * @param spec which asset to project from, and the mark's descriptive fields
+     * @return the created mark, {@link MarkStatus#ACTIVE}
+     * @throws java.util.NoSuchElementException if {@code spec.layerId()} is given and unknown
+     * @throws AccessDeniedException              if {@code v} does not {@link
+     *                                             MapAccessPolicy#canContribute} to the resolved layer
+     * @throws IllegalArgumentException           if the asset has never reported telemetry, or its
+     *                                             freshest sample is missing latitude/longitude/
+     *                                             heading, or its altitude is missing or not
+     *                                             positive — an honest "cannot geolocate: telemetry
+     *                                             incomplete" (→ 400)
      */
-    Mark geolocate(GeolocateSpec spec, Ownership ownership, UserId actor);
+    Mark geolocate(Viewer v, GeolocateSpec spec);
 
     /**
-     * Applies a partial edit — annotation and/or a lifecycle transition. Creator-or-manager only
-     * (see the class javadoc's Authorization section) — this applies uniformly to every field,
-     * including a plain annotation/drag-to-correct with no status change.
+     * Applies a partial edit — annotation and/or a lifecycle transition. See the class javadoc's
+     * Authorization section for the creator-while-unverified-or-manager gate.
      *
-     * @param id     the mark to edit
-     * @param patch  the fields to change
-     * @param actor  the user performing the edit
-     * @param scope  used only to test {@link VisibilityScope#canManageOrg()}
+     * @param v     who is editing it
+     * @param id    the mark to edit
+     * @param patch the fields to change
      * @return the updated mark
      * @throws java.util.NoSuchElementException if no mark has that id
-     * @throws AccessDeniedException            if {@code actor} is neither the mark's creator nor a
-     *                                           manager
+     * @throws AccessDeniedException              if {@code v} may not edit this mark
      */
-    Mark update(MarkId id, MarkPatch patch, UserId actor, VisibilityScope scope);
+    Mark patch(Viewer v, MarkId id, MarkPatch patch);
 
     /**
-     * Removes a mark. Creator-or-manager only (see the class javadoc's Authorization section).
+     * Reviews a mark: {@link VerificationState#CONFIRMED} or {@link VerificationState#REJECTED}.
      *
-     * @param id    the mark to delete
-     * @param actor the user performing the deletion
-     * @param scope used only to test {@link VisibilityScope#canManageOrg()}
+     * @param v        who is reviewing it
+     * @param id       the mark to review
+     * @param decision {@link VerificationState#CONFIRMED} or {@link VerificationState#REJECTED}
+     * @return the updated mark
      * @throws java.util.NoSuchElementException if no mark has that id
-     * @throws AccessDeniedException            if {@code actor} is neither the mark's creator nor a
-     *                                           manager
+     * @throws AccessDeniedException              if {@code v} does not {@link
+     *                                             MapAccessPolicy#canManage} its layer
+     * @throws IllegalArgumentException           if {@code decision} is {@link
+     *                                             VerificationState#UNVERIFIED}
      */
-    void delete(MarkId id, UserId actor, VisibilityScope scope);
+    Mark verify(Viewer v, MarkId id, VerificationState decision);
+
+    /**
+     * Moves a mark to a wider-shared layer — DELTA's "verify then share wider" flow — stamping
+     * {@link VerificationState#CONFIRMED} if it is not already.
+     *
+     * @param v          who is promoting it
+     * @param id         the mark to promote
+     * @param targetOrNull the destination layer, or {@code null} to promote to the COP layer
+     * @return the updated mark, now on the target layer
+     * @throws java.util.NoSuchElementException if no mark, or no target layer, has that id
+     * @throws AccessDeniedException              if {@code v} does not {@link
+     *                                             MapAccessPolicy#canManage} the source layer, or
+     *                                             does not {@link MapAccessPolicy#canContribute} to
+     *                                             the target
+     */
+    Mark promote(Viewer v, MarkId id, LayerId targetOrNull);
+
+    /**
+     * Removes a mark. See the class javadoc's Authorization section for the gate.
+     *
+     * @param v  who is deleting it
+     * @param id the mark to delete
+     * @throws java.util.NoSuchElementException if no mark has that id
+     * @throws AccessDeniedException              if {@code v} may not delete this mark
+     */
+    void delete(Viewer v, MarkId id);
 }

@@ -1,7 +1,9 @@
 package com.drones.vision.app.devsupport;
 
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.LayerId;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;
 import com.drones.vision.domain.model.MarkKind;
@@ -9,6 +11,8 @@ import com.drones.vision.domain.model.MarkSource;
 import com.drones.vision.domain.model.MarkStatus;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.model.Verification;
+import com.drones.vision.domain.model.Verification.VerificationState;
 import com.drones.vision.domain.port.out.MarkRepositoryPort;
 
 import org.junit.jupiter.api.Test;
@@ -22,16 +26,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The {@link MarkRepositoryPort} contract against the in-memory reference implementation
- * (docs/TACTICAL-MARKS-PLAN.md §3) — the same contract {@code JpaMarkRepository} is judged
- * against in {@code adapter-persistence}'s Postgres tests.
+ * (docs/TACTICAL-MARKS-PLAN.md §3, reworked by docs/MAP-REWORK-PLAN.md §2.2) — the same contract
+ * {@code JpaMarkRepository} is judged against in {@code adapter-persistence}'s Postgres tests, so
+ * the two stay behavior-compatible.
+ *
+ * <p>The port itself is unchanged by the map rework; what changed is the {@link Mark} flowing
+ * through it, which now carries a {@link LayerId}, an {@link Affiliation} and a {@link Verification}.
+ * The upsert case below exercises exactly those, since promotion ({@code withLayer}) and review
+ * ({@code withVerification}) are both save-over-the-same-id operations.
  */
 class InMemoryMarkRepositoryTest {
 
     private final MarkRepositoryPort repository = new InMemoryMarkRepository();
 
     private static Mark mark(MarkId id, MarkStatus status) {
-        return new Mark(id, new GeoPosition(50.45, 30.52, null), MarkKind.TARGET, "Bunker", null,
-                new Ownership(UserId.random(), GroupId.random()), Instant.now(), status, MarkSource.MANUAL);
+        return mark(id, status, LayerId.random(), Verification.unverified());
+    }
+
+    private static Mark mark(MarkId id, MarkStatus status, LayerId layerId, Verification verification) {
+        return new Mark(id, layerId, new GeoPosition(50.45, 30.52, null), MarkKind.TARGET,
+                Affiliation.HOSTILE, "Bunker", null, new Ownership(UserId.random(), GroupId.random()),
+                Instant.now(), status, MarkSource.MANUAL, verification);
     }
 
     @Test
@@ -61,6 +76,24 @@ class InMemoryMarkRepositoryTest {
         Optional<Mark> found = repository.findById(id);
         assertTrue(found.isPresent());
         assertEquals(MarkStatus.CLEARED, found.get().status());
+    }
+
+    @Test
+    void saveOverwritesTheLayerAndVerificationOfAPromotedMark() {
+        MarkId id = MarkId.random();
+        LayerId team = LayerId.random();
+        LayerId cop = LayerId.random();
+        UserId reviewer = UserId.random();
+        repository.save(mark(id, MarkStatus.ACTIVE, team, Verification.unverified()));
+
+        repository.save(mark(id, MarkStatus.ACTIVE, cop,
+                new Verification(VerificationState.CONFIRMED, reviewer, Instant.now())));
+
+        Optional<Mark> found = repository.findById(id);
+        assertTrue(found.isPresent());
+        assertEquals(cop, found.get().layerId(), "promotion moves the mark to the target layer");
+        assertEquals(VerificationState.CONFIRMED, found.get().verification().state());
+        assertEquals(reviewer, found.get().verification().verifiedBy());
     }
 
     @Test

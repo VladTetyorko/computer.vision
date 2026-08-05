@@ -3,22 +3,31 @@ import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
 import { FleetMapStore } from '../../core/map/map-store';
 import { WeatherStore } from '../../core/weather/weather-store';
-import { FleetMap } from '../../shared/map/fleet-map/fleet-map';
+import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { WeatherChip } from '../../shared/ui/weather-chip';
 import { Notice } from '../../shared/ui/notice';
+import { SidePanel } from '../../shared/ui/side-panel';
+import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
+import { LayerManager } from '../../shared/map/map-controls/layer-manager';
 import { AssetPanel } from './asset-panel';
 import { ZonesPanel } from './zones-panel';
 import { MarksPanel } from './marks-panel';
 import { CommandFacade } from './command-facade';
 
-/** Command's mutually-exclusive overlay group (docs/UI-ARCHITECTURE-PLAN.md) — Zones and, since
- * docs/TACTICAL-MARKS-PLAN.md M5, Marks; typed as a union (not a bare string) so a typo'd id can't
- * compile, mirroring `flight-command-panel.ts#CommandDialog`'s identical precedent. **Deliberately
- * different shells**: Zones stays its pre-existing full backdrop modal (`<vision-zones-panel>`'s own
- * `role="dialog" aria-modal="true"` — unchanged by this wave), but Marks uses the non-blocking
- * `<vision-side-panel>` drawer shell instead (no backdrop) — a true modal would swallow every click
- * on the map underneath, which the Marks panel's own create-by-map-click flow needs to still reach. */
-type CommandOverlay = 'zones' | 'marks';
+/** Command's mutually-exclusive overlay group (docs/UI-ARCHITECTURE-PLAN.md) — Zones, Marks (since
+ * docs/TACTICAL-MARKS-PLAN.md M5), and, since docs/MAP-REWORK-PLAN.md §5.2, **Layers** (the layer
+ * manager) and **Draw** (the drawing toolbar card floating over the map); typed as a union (not a
+ * bare string) so a typo'd id can't compile, mirroring `flight-command-panel.ts#CommandDialog`'s
+ * identical precedent. **Deliberately different shells**: Zones stays its pre-existing full backdrop
+ * modal (`<vision-zones-panel>`'s own `role="dialog" aria-modal="true"`), while Marks and Layers use
+ * the non-blocking `<vision-side-panel>` drawer shell (no backdrop) and Draw is a small card pinned
+ * over the map — a true modal would swallow every click on the map underneath, which
+ * create-by-map-click and drawing-by-map-click both need to still reach.
+ *
+ * All four share one group, so opening Draw closes Marks and vice versa. That is deliberate rather
+ * than incidental: both arm the map's single `[interactionMode]`, and two open panels each claiming
+ * the next click is exactly the drift `UiStore` exists to prevent. */
+type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
 
 /**
  * `/command` — the manager dashboard (docs/UX-REWORK-PLAN.md §U-c, superseding docs/MVP3-PLAN.md
@@ -31,7 +40,7 @@ type CommandOverlay = 'zones' | 'marks';
  * page has). See `CommandFacade`'s own class doc comment for the full "what moved and why" account
  * of the pre-refactor page this class used to be.
  *
- * **Layout**: `<vision-fleet-map>` fills the entire stage between two independently collapsible
+ * **Layout**: `<vision-tactical-map>` fills the entire stage between two independently collapsible
  * docked panels (`command-logic.ts#commandGridColumns` computes the grid — see its own doc comment
  * for why these are real grid-track siblings, not `position: absolute` overlays, and how that
  * avoids the map's own zoom/layer controls entirely by construction rather than z-index
@@ -40,28 +49,41 @@ type CommandOverlay = 'zones' | 'marks';
  * `features/live/live.ts`'s `railOpen`/`features/fly/fly.ts`'s `mapVisible` exactly) — now owned by
  * the facade, not this component.
  *
- * **Selecting an asset** (a rail row, or `<vision-fleet-map>`'s own `(preview)` output — a direct
+ * **Selecting an asset** (a rail row, or `<vision-tactical-map>`'s own `(preview)` output — a direct
  * marker click, unchanged component behavior) opens the right `<vision-asset-panel>`. Everything
  * that panel shows is data the facade already has from its own existing pollers — **zero new
  * recurring requests** — see `CommandFacade`'s own doc comment for the full accounting.
  *
  * **`<vision-live-dock>` is no longer used here** — the old "docked preview beside the map" role is
- * the asset panel's own Video tab. `<vision-fleet-map>`'s `(preview)` handler is retargeted from
- * "resolve a device and dock `LiveDock`" to "select this asset" (`CommandFacade.selectAsset`), which
- * is the only change to how `<vision-fleet-map>` is composed here — the component itself, its
- * inputs, and its `(watch)`/`(preview)`/`(openEventAsset)` outputs are all unchanged.
+ * the asset panel's own Video tab. `<vision-tactical-map>`'s `(preview)` handler is retargeted from
+ * "resolve a device and dock `LiveDock`" to "select this asset" (`CommandFacade.selectAsset`).
+ *
+ * **The map component is dumb now** (docs/MAP-REWORK-PLAN.md §5.1 Wave D): the deleted `FleetMap`
+ * injected `FleetMapStore`/`EventsStore` itself; `<vision-tactical-map>` takes `[assets]`/`[events]`/
+ * `[unplottedAssets]` as plain inputs from `CommandFacade` instead. Every other binding — zones,
+ * marks, focus, attention, selection, and all three outputs — is unchanged.
  */
 @Component({
   selector: 'vision-command',
-  imports: [FleetMap, AssetPanel, ZonesPanel, MarksPanel, WeatherChip, RouterLink, Notice],
+  imports: [
+    TacticalMap,
+    AssetPanel,
+    ZonesPanel,
+    MarksPanel,
+    SidePanel,
+    LayerManager,
+    DrawingToolbar,
+    WeatherChip,
+    RouterLink,
+    Notice,
+  ],
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // `FleetMapStore`/`WeatherStore`: own instance per route activation (page-provided, not
-  // `providedIn: 'root'` — see their own class doc comments), shared by `CommandFacade` and by the
-  // template's own `<vision-fleet-map>`/`<vision-weather-chip>` children, all resolving the same
-  // instances through this one component-level injector. `CommandFacade` is provided alongside them
-  // so it can `inject()` both.
+  // `providedIn: 'root'` — see their own class doc comments). `CommandFacade` is provided alongside
+  // them so it can `inject()` both; `<vision-weather-chip>` still resolves `WeatherStore` through
+  // this same component-level injector, while the map now receives its markers as inputs instead.
   providers: [FleetMapStore, WeatherStore, CommandFacade],
 })
 export class CommandPage {
@@ -96,6 +118,19 @@ export class CommandPage {
 
   protected toggleMarksPanel(): void {
     this.overlay.toggle('marks' satisfies CommandOverlay);
+  }
+
+  protected toggleLayersPanel(): void {
+    this.overlay.toggle('layers' satisfies CommandOverlay);
+  }
+
+  /** Shows/hides the drawing toolbar card. Closing it also stops any drawing in progress, so the map
+   * never stays armed behind a toolbar the manager can no longer see. */
+  protected toggleDrawToolbar(): void {
+    this.overlay.toggle('draw' satisfies CommandOverlay);
+    if (!this.overlay.isOpen('draw')) {
+      this.facade.drawings.stopDrawing();
+    }
   }
 
   constructor() {

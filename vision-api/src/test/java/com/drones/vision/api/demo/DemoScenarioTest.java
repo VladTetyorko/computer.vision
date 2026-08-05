@@ -54,7 +54,7 @@ class DemoScenarioTest {
         when(fleet.seed(eq(4), eq(ownership), eq(ownership.ownerId()), any())).thenReturn(created);
         when(fleet.videosUsed(created)).thenReturn(List.of("drone.mp4"));
         when(operations.seedZones(any())).thenReturn(2);
-        when(operations.seedMarks(eq(ownership), eq(ownership.ownerId()), any())).thenReturn(5);
+        when(operations.seedMarks(any(), any())).thenReturn(5);
         when(fleet.startStreams(eq(created), eq(2), any())).thenReturn(2);
 
         DemoSeedReport report = scenario.seed(new DemoPlan(4, 3, 2));

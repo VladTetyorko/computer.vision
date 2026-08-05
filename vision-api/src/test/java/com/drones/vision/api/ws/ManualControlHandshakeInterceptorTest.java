@@ -1,5 +1,6 @@
 package com.drones.vision.api.ws;
 
+import com.drones.vision.application.map.MapAccessPolicy;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.Ownership;
@@ -84,6 +85,11 @@ class ManualControlHandshakeInterceptorTest {
 
             @Override
             public VisibilityScope scope() {
+                throw new IllegalStateException("no authenticated principal on the current request");
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
                 throw new IllegalStateException("no authenticated principal on the current request");
             }
         };

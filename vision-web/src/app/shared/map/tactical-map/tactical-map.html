@@ -1,0 +1,173 @@
+<div class="map-shell" [class.expanded]="expanded()">
+  <div class="map-host" #mapHost></div>
+
+  <!-- ---- Top-left: the data-layer panel (eye toggles + basemap picker) --------------------- -->
+  <div class="chrome chrome-tl">
+    <button
+      type="button"
+      class="btn secondary small chrome-toggle"
+      [class.active]="layersPanelOpen()"
+      (click)="toggleLayersPanel()"
+      [attr.aria-expanded]="layersPanelOpen()"
+      title="Show or hide map layers and pick a basemap"
+    >
+      <vision-icon name="layers" [size]="14" />
+      <span class="chrome-toggle-label">Layers</span>
+    </button>
+
+    @if (layersPanelOpen()) {
+      <div class="panel" role="group" aria-label="Map layers">
+        @if (builtinLayerRows().length > 0 || dataRows().length > 0) {
+          <p class="panel-label">Data layers</p>
+          <ul class="rows">
+            @for (row of builtinLayerRows(); track row.id) {
+              <li class="row" [class.off]="row.hidden">
+                <button
+                  type="button"
+                  class="eye"
+                  (click)="toggleLayer(row.id)"
+                  [attr.aria-pressed]="!row.hidden"
+                  [title]="row.hidden ? 'Show ' + row.name : 'Hide ' + row.name"
+                >
+                  <vision-icon name="eye" [size]="14" />
+                </button>
+                <span class="row-name truncate">{{ row.name }}</span>
+                <span class="row-count mono">{{ row.count }}</span>
+              </li>
+            }
+            @for (row of dataRows(); track row.id) {
+              <li class="row" [class.off]="row.hidden">
+                <button
+                  type="button"
+                  class="eye"
+                  (click)="toggleLayer(row.id)"
+                  [attr.aria-pressed]="!row.hidden"
+                  [title]="row.hidden ? 'Show ' + row.name : 'Hide ' + row.name"
+                >
+                  <vision-icon name="eye" [size]="14" />
+                </button>
+                <span class="row-name truncate">{{ row.name }}</span>
+                @if (row.kind) {
+                  <span class="chip layer-kind">{{ row.kind === 'COP' ? 'Common' : row.kind === 'TEAM' ? 'Team' : 'Personal' }}</span>
+                }
+                <span class="row-count mono">{{ row.markCount + row.drawingCount }}</span>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="panel-empty">No overlays on this map yet.</p>
+        }
+
+        <p class="panel-label">Basemap</p>
+        <div class="segmented basemaps" role="group" aria-label="Basemap">
+          @for (basemap of basemaps; track basemap.id) {
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="activeBasemapId() === basemap.id"
+              (click)="setBasemap(basemap.id)"
+            >
+              {{ basemap.label }}
+            </button>
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  <!-- ---- Top-right: camera controls (mode-dependent) --------------------------------------- -->
+  <div class="chrome chrome-tr">
+    @if (followMode()) {
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="autoFollow()"
+        (click)="toggleFollow()"
+        title="Recenter on the drone as new positions arrive"
+      >
+        {{ autoFollow() ? 'Following' : 'Follow' }}
+      </button>
+      <button type="button" class="btn secondary small" (click)="toggleExpanded()">
+        {{ expanded() ? 'Collapse' : 'Expand' }}
+      </button>
+    } @else {
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="autoFit()"
+        (click)="recenter()"
+        title="Fit the map to every plotted asset and keep following as positions update"
+      >
+        {{ autoFit() ? 'Auto-fit on' : 'Recenter' }}
+      </button>
+    }
+  </div>
+
+  <!-- ---- Bottom-left: the legend, then the tiles-unavailable badge -------------------------- -->
+  <div class="chrome chrome-bl">
+    @if (legendOpen()) {
+      <div class="panel legend" role="note" aria-label="Map legend">
+        <p class="panel-label">Assets</p>
+        <ul class="rows">
+          <li class="row"><span class="swatch dot live"></span><span class="row-name">Streaming</span><span class="row-count mono">{{ assetCounts().streaming }}</span></li>
+          <li class="row"><span class="swatch dot"></span><span class="row-name">Offline</span><span class="row-count mono">{{ assetCounts().offline }}</span></li>
+          @if (assetCounts().attention > 0) {
+            <li class="row"><span class="swatch dot attention"></span><span class="row-name">Needs attention</span><span class="row-count mono">{{ assetCounts().attention }}</span></li>
+          }
+          @if (assetCounts().noPosition > 0) {
+            <li class="row"><span class="swatch dot faint"></span><span class="row-name">No position</span><span class="row-count mono">{{ assetCounts().noPosition }}</span></li>
+          }
+        </ul>
+
+        @if (hasMarks()) {
+          <p class="panel-label">Affiliation</p>
+          <ul class="rows">
+            @for (row of affiliationRows(); track row.affiliation) {
+              <li class="row" [class.off]="row.count === 0">
+                <span class="swatch mark-symbol" [class]="row.className"><span class="sym-frame"></span></span>
+                <span class="row-name">{{ row.label }}</span>
+                <span class="row-count mono">{{ row.count }}</span>
+              </li>
+            }
+          </ul>
+
+          <p class="panel-label">Mark kinds</p>
+          <ul class="rows">
+            @for (row of kindRows(); track row.kind) {
+              <li class="row">
+                <span class="swatch glyph"><vision-icon [name]="row.icon" [size]="13" /></span>
+                <span class="row-name truncate">{{ row.label }}</span>
+                <span class="row-count mono">{{ row.count }}</span>
+              </li>
+            }
+          </ul>
+          <p class="panel-note">A dashed, dimmed symbol is unverified.</p>
+        }
+
+        @if (shownZones().length > 0) {
+          <p class="panel-label">Zones</p>
+          <ul class="rows">
+            <li class="row"><span class="swatch zone keep-in"></span><span class="row-name">Keep-in</span></li>
+            <li class="row"><span class="swatch zone keep-out"></span><span class="row-name">Keep-out</span></li>
+          </ul>
+        }
+      </div>
+    }
+
+    <button
+      type="button"
+      class="btn secondary small chrome-toggle"
+      [class.active]="legendOpen()"
+      (click)="toggleLegend()"
+      [attr.aria-expanded]="legendOpen()"
+      title="Explain the symbols on this map"
+    >
+      <vision-icon name="help" [size]="14" />
+      <span class="chrome-toggle-label">Legend</span>
+    </button>
+
+    @if (!tilesOk()) {
+      <div class="badge">Tiles unavailable — overlays still shown</div>
+    }
+  </div>
+</div>

@@ -1,5 +1,6 @@
 package com.drones.vision.api.security;
 
+import com.drones.vision.application.map.MapAccessPolicy;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
@@ -79,5 +80,17 @@ public class CurrentUser {
      */
     public VisibilityScope scope() {
         return resolver.scope();
+    }
+
+    /**
+     * Who this request is, as the map's authorization model sees it (docs/MAP-REWORK-PLAN.md §4) —
+     * the argument every {@code /api/map/**} endpoint threads into {@code MapLayerService}/{@code
+     * MarkService}/{@code DrawingService}. See {@link PrincipalResolver#viewer()} for why this is
+     * <em>not</em> derived from {@link #scope()}.
+     *
+     * @return the acting user's map viewer; never {@code null}
+     */
+    public MapAccessPolicy.Viewer viewer() {
+        return resolver.viewer();
     }
 }

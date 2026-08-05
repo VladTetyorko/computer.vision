@@ -10,6 +10,8 @@ import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
+import com.drones.vision.adapter.persistence.entity.MapDrawingEntity;
+import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
@@ -88,6 +90,11 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(DatasetEntity.class);
         configuration.addAnnotatedClass(TrainingSampleEntity.class);
         configuration.addAnnotatedClass(SampleImageEntity.class);
+        // docs/MAP-REWORK-PLAN.md Wave C (V12__map_layers.sql). LayerGrantEmbeddable needs no
+        // registration of its own -- Hibernate discovers an @Embeddable through the @ElementCollection
+        // field that uses it, unlike an @Entity, which must be named explicitly here.
+        configuration.addAnnotatedClass(MapLayerEntity.class);
+        configuration.addAnnotatedClass(MapDrawingEntity.class);
         return configuration.buildSessionFactory();
     }
 }

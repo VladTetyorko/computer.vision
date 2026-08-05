@@ -21,6 +21,7 @@ import com.drones.vision.application.device.*;
 import com.drones.vision.application.fleet.*;
 import com.drones.vision.application.flight.*;
 import com.drones.vision.application.geofence.*;
+import com.drones.vision.application.map.*;
 import com.drones.vision.application.mark.*;
 import com.drones.vision.application.pipeline.*;
 import com.drones.vision.application.replay.*;
@@ -206,14 +207,86 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md) behind {@code
-     * MarksController} (vision-api, component-scanned) — a one-line assembly, mirroring {@link
-     * #geofenceService}'s shape.
+     * The map's authorization model (docs/MAP-REWORK-PLAN.md §3) — pure, stateless, no ports, so one
+     * shared singleton serves every map service and {@code CurrentUser#viewer()}'s consumers alike.
+     */
+    @Bean
+    public MapAccessPolicy mapAccessPolicy() {
+        return new MapAccessPolicy();
+    }
+
+    /**
+     * The shared layer-lookup/default-layer collaborator every map service composes
+     * (docs/MAP-REWORK-PLAN.md §3) — deliberately one bean rather than three instances, because its
+     * {@code copLayerId()}/{@code defaultLayerFor()} are {@code synchronized} find-or-create methods
+     * whose idempotence depends on a single instance guarding a single repository.
+     */
+    @Bean
+    public LayerResolver layerResolver(MapLayerRepositoryPort mapLayerRepositoryPort,
+                                        LiveUpdatePublisherPort liveUpdatePublisherPort) {
+        return new LayerResolver(mapLayerRepositoryPort, liveUpdatePublisherPort);
+    }
+
+    /**
+     * Layer CRUD + grants (docs/MAP-REWORK-PLAN.md §3) behind {@code MapLayersController}
+     * (vision-api, component-scanned). Takes the mark/drawing repositories directly — not their
+     * services — because the only thing it does with them is cascade a layer deletion, for which the
+     * services' own viewer-gated methods would be both wrong (the cascade is already authorized) and
+     * circular.
+     */
+    @Bean
+    public MapLayerService mapLayerService(LayerResolver layerResolver, MarkRepositoryPort markRepositoryPort,
+                                            DrawingRepositoryPort drawingRepositoryPort,
+                                            LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                            MapAccessPolicy mapAccessPolicy) {
+        return new DefaultMapLayerService(layerResolver, markRepositoryPort, drawingRepositoryPort,
+                liveUpdatePublisherPort, mapAccessPolicy);
+    }
+
+    /**
+     * The tactical marks half of the common operational picture (docs/MAP-REWORK-PLAN.md §3) behind
+     * {@code MapMarksController} (vision-api, component-scanned) — reworked in place from the
+     * docs/TACTICAL-MARKS-PLAN.md M4 bean this replaces, which took no policy and no layer resolver.
+     * {@code usageTracker} still backs the cockpit "geolocate" action ({@code
+     * UsageTracker#latestTelemetry}); {@code liveUpdatePublisherPort} is always a real bean, so every
+     * mutation is announced on the {@code map} SSE topic unconditionally.
      */
     @Bean
     public MarkService markService(MarkRepositoryPort markRepositoryPort, UsageTracker usageTracker,
-                                    LiveUpdatePublisherPort liveUpdatePublisherPort) {
-        return new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort);
+                                    LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                    MapAccessPolicy mapAccessPolicy, LayerResolver layerResolver) {
+        return new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort,
+                mapAccessPolicy, layerResolver);
+    }
+
+    /**
+     * Lines/polygons/arrows/text on the map (docs/MAP-REWORK-PLAN.md §3) behind {@code
+     * MapDrawingsController} (vision-api, component-scanned) — a one-line assembly, mirroring
+     * {@link #markService}'s shape minus the telemetry collaborator a drawing has no use for.
+     */
+    @Bean
+    public DrawingService drawingService(DrawingRepositoryPort drawingRepositoryPort,
+                                          LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                          MapAccessPolicy mapAccessPolicy, LayerResolver layerResolver) {
+        return new DefaultDrawingService(drawingRepositoryPort, liveUpdatePublisherPort, mapAccessPolicy,
+                layerResolver);
+    }
+
+    /**
+     * Ensures the single COP layer exists before the first request can ask for it
+     * (docs/MAP-REWORK-PLAN.md §3's "ensured at startup").
+     *
+     * <p>{@code copLayerId()} is a synchronized find-or-create and therefore already idempotent, so
+     * this runner is not a correctness requirement — it is a timing one. Without it, the first
+     * caller to promote a mark (or the first {@code GET /api/map/layers}) would be the one to create
+     * the layer, which means the layer's {@code CREATED} SSE event would race that caller's own
+     * response. Calling it once at startup makes the shared picture present from boot, in both
+     * persistence modes: with Postgres {@code V12__map_layers.sql} has already inserted the row and
+     * this call simply finds it; in memory, this call is what creates it.
+     */
+    @Bean
+    public ApplicationRunner mapLayerBootstrapRunner(MapLayerService mapLayerService) {
+        return args -> mapLayerService.copLayerId();
     }
 
     /**

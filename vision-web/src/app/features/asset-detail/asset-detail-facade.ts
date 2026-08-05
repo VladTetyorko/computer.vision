@@ -9,6 +9,11 @@ import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { EventsStore } from '../../core/events/events-store';
+import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { MarksStore } from '../../core/map-data/marks-store';
+import { LayersStore } from '../../core/map-data/layers-store';
+import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
 import { AuthStore } from '../../core/auth/auth-store';
 import { canManageOrg } from '../../core/org/org-logic';
 import { describeHttpError } from '../../core/api-error';
@@ -129,6 +134,36 @@ export class AssetDetailFacade {
   readonly freshestFacts = computed<readonly TelemetryFactRow[]>(() => telemetryFactRows(this.freshestOverall()));
   readonly freshestAgeSeconds = computed(() => ageSeconds(this.freshestOverall()?.at, this.nowSignal()));
   readonly freshestStale = computed(() => isStale(this.freshestAgeSeconds()));
+
+  // --- Position card map (docs/MAP-REWORK-PLAN.md §5.1 Wave D) -----------------------------------
+  // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own
+  // `TelemetryStore` through DI; the new component is dumb, so the followed marker is built here from
+  // the same telemetry. This page also finally passes zones + marks (the plan's own bug fix — the old
+  // inset dropped both silently), through the two root stores below.
+
+  readonly geofence = inject(GeofenceStore);
+  readonly marks = inject(MarksStore);
+  /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/MAP-REWORK-PLAN.md §5.2). */
+  readonly layers = inject(LayersStore);
+  readonly drawings = inject(DrawingsStore);
+
+  /** Switches the map into follow mode; `null` until the asset has loaded. */
+  readonly mapFollowAssetId = computed(() => this.asset()?.assetId ?? null);
+
+  /** `<vision-tactical-map>`'s `[assets]` — 0 or 1 markers, built from the freshest sample + trail. */
+  readonly mapAssets = computed(() => {
+    const asset = this.asset();
+    if (!asset) {
+      return [];
+    }
+    return followMarkers({
+      assetId: asset.assetId,
+      displayName: asset.displayName,
+      categoryName: asset.categoryName,
+      trail: this.telemetry.trail(),
+      latest: this.freshestOverall(),
+    });
+  });
 
   readonly lifecycle = computed(() => this.asset()?.lifecycle ?? 'ACTIVE');
   readonly archived = computed(() => this.lifecycle() === 'DELETED');

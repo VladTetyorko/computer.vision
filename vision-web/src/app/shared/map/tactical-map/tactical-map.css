@@ -1,0 +1,551 @@
+/* `<vision-tactical-map>` (docs/MAP-REWORK-PLAN.md §5.1) — the merged stylesheet of the deleted
+   `fleet-map.css` + `live-map.css`, plus the new legend / data-layer chrome and the affiliation
+   symbology.
+
+   Two sizing contracts, one per mode, so both predecessors' hosts keep the box they laid out for:
+   fleet mode fills its container (Command's own `inset: 0` stage); follow mode is a 220px inset
+   (the Fly cockpit's `.main-map`, `/live`'s rail, asset detail's Position card all size it that
+   way). A host that wants something else still just sets a height on the element. */
+
+:host {
+  display: block;
+  height: 100%;
+}
+
+:host(.follow-mode) {
+  height: auto;
+}
+
+.map-shell {
+  position: relative;
+  height: 100%;
+  min-height: 420px;
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+}
+
+:host(.follow-mode) .map-shell {
+  height: 220px;
+  min-height: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Expanded to a full pane over the rest of the page — Leaflet is told to remeasure via
+   `invalidateSize()` (see the `expanded` effect). */
+:host(.follow-mode) .map-shell.expanded {
+  position: fixed;
+  inset: var(--space-64) var(--space-16) var(--space-16) var(--space-16);
+  height: auto;
+  z-index: 40;
+  box-shadow: var(--shadow);
+}
+
+.map-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- Chrome: light cards pinned to three corners on the 8px grid (the fourth is Leaflet's own
+   zoom control). Never a `--hud-*`/`--scrim*` frosted pill: this component is never inside a
+   `.surface-dark` enclave, and a control floating over a *map* stays a light card even there. --- */
+
+.chrome {
+  position: absolute;
+  z-index: 1000; /* above Leaflet's own panes */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  max-width: calc(100% - var(--space-32));
+}
+
+.chrome-tl {
+  top: var(--space-8);
+  left: var(--space-8);
+  align-items: flex-start;
+}
+
+.chrome-tr {
+  top: var(--space-8);
+  right: var(--space-8);
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chrome-bl {
+  bottom: var(--space-8);
+  left: var(--space-8);
+  align-items: flex-start;
+}
+
+.chrome-toggle {
+  gap: var(--space-4);
+}
+
+.btn.active {
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
+}
+
+.panel {
+  min-width: 12rem;
+  max-width: min(16rem, 60vw);
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: var(--space-8);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+/* A follow-mode inset is only 220px tall and clips its own overflow, so a 50vh panel would be cut
+   off rather than scrolled. Expanding the inset gives the panel its full height back. */
+:host(.follow-mode) .panel {
+  max-height: 8.5rem;
+}
+
+:host(.follow-mode) .map-shell.expanded .panel {
+  max-height: 50vh;
+}
+
+.panel-label {
+  margin: 0 0 var(--space-4);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.panel-label:not(:first-child) {
+  margin-top: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+}
+
+.panel-empty,
+.panel-note {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--text-faint);
+}
+
+.panel-note {
+  margin-top: var(--space-4);
+}
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 1.75rem;
+  font-size: 0.72rem;
+  color: var(--text);
+}
+
+.row.off {
+  color: var(--text-faint);
+}
+
+.row-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-count {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip.layer-kind {
+  font-size: 0.6rem;
+}
+
+/* The eye toggle: a 24px hit target that grows to 32px on coarse pointers (§responsive below). */
+.eye {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.eye:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.row.off .eye {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.basemaps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+}
+
+.badge {
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--color-warn);
+  font-size: 0.72rem;
+}
+
+/* ---- Legend swatches ------------------------------------------------------------------------ */
+
+.swatch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+}
+
+.swatch.dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.swatch.dot.live {
+  background: var(--color-live);
+}
+
+.swatch.dot.attention {
+  background: var(--color-danger);
+}
+
+.swatch.dot.faint {
+  background: var(--border-strong);
+}
+
+.swatch.glyph {
+  color: var(--text-muted);
+}
+
+.swatch.zone {
+  width: 1rem;
+  height: 0.625rem;
+  border: 2px dashed var(--color-info);
+  border-radius: 2px;
+}
+
+.swatch.zone.keep-out {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.swatch.mark-symbol {
+  position: relative;
+}
+
+/* ---- Responsive: a phone-width host gets a tighter panel and bigger touch targets ------------ */
+
+@media (max-width: 600px), (pointer: coarse) {
+  .chrome-toggle-label {
+    display: none; /* icon-only toggles; the `title`/`aria` text still names them */
+  }
+
+  .panel {
+    max-width: min(14rem, 72vw);
+    max-height: 40vh;
+  }
+
+  .eye {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .row {
+    min-height: 2rem;
+  }
+}
+
+/* ============================================================================================
+   Everything below targets DOM Leaflet renders itself (tiles, markers, popups, tooltips), which
+   Angular's emulated view encapsulation never matches without `::ng-deep`. The legend's own
+   `.mark-symbol` swatches deliberately reuse the same rules — `:host ::ng-deep` matches any
+   descendant of this host, whoever rendered it, so the legend can never drift from the map.
+   ============================================================================================ */
+
+:host ::ng-deep .leaflet-control-attribution {
+  background: var(--panel-raised);
+  color: var(--text-faint);
+}
+
+:host ::ng-deep .leaflet-control-attribution a {
+  color: var(--text-muted);
+}
+
+/* ---- Asset markers: one glyph, state by colour only (docs/VISUAL-REFRESH-PLAN.md F7) --------- */
+
+:host ::ng-deep .asset-marker .drone-arrow {
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 16px solid var(--color-live);
+  transform-origin: 50% 60%;
+  filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--black) 40%, transparent));
+}
+
+:host ::ng-deep .asset-marker .offline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  border: 2px solid var(--panel-raised);
+  opacity: 0.85;
+}
+
+:host ::ng-deep .asset-marker.attention .drone-arrow {
+  border-bottom-color: var(--color-danger);
+}
+
+:host ::ng-deep .asset-marker.attention .offline-dot {
+  background: var(--color-danger);
+  opacity: 1;
+}
+
+/* Selection: the same `--color-info` accent every selected row in the app carries, as a ring
+   (a point marker has no row to inset a left bar into). Leaflet already positions marker roots
+   absolutely, which is what lets this `::before` anchor without fighting its placement. */
+:host ::ng-deep .asset-marker.selected::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--color-info);
+  box-shadow: 0 0 0 2px var(--color-info-soft);
+}
+
+:host ::ng-deep .start-flag .flag-glyph {
+  font-size: 16px;
+  line-height: 1;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--black) 40%, transparent));
+}
+
+/* ---- Mark symbology (docs/MAP-REWORK-PLAN.md §5.1) -------------------------------------------
+   APP-6-inspired, but expressed in this app's own tokens rather than the plan's four hex values:
+   `--color-info` blue = friendly, `--color-danger` red = hostile, `--color-success` green =
+   neutral, `--color-warn` amber = unknown. Same four hues the plan named, theme-aware in both
+   light and dark, and no new colour added to the system. Shape carries the affiliation too, so the
+   symbols stay distinguishable without relying on colour alone. */
+
+:host ::ng-deep .mark-symbol {
+  color: var(--color-warn);
+}
+
+:host ::ng-deep .mark-symbol .sym-frame {
+  position: absolute;
+  inset: 3px;
+  border: 2px solid currentColor;
+  background: color-mix(in srgb, currentColor 22%, var(--panel-raised));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--black) 35%, transparent);
+}
+
+:host ::ng-deep .mark-symbol .sym-glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+/* FRIENDLY — rounded frame. */
+:host ::ng-deep .mark-symbol.aff-friendly {
+  color: var(--color-info);
+}
+
+:host ::ng-deep .mark-symbol.aff-friendly .sym-frame {
+  border-radius: 40%;
+}
+
+/* HOSTILE — diamond (a rotated square; the glyph itself stays upright). */
+:host ::ng-deep .mark-symbol.aff-hostile {
+  color: var(--color-danger);
+}
+
+:host ::ng-deep .mark-symbol.aff-hostile .sym-frame {
+  inset: 4px;
+  transform: rotate(45deg);
+}
+
+/* NEUTRAL — square. */
+:host ::ng-deep .mark-symbol.aff-neutral {
+  color: var(--color-success);
+}
+
+:host ::ng-deep .mark-symbol.aff-neutral .sym-frame {
+  border-radius: 1px;
+}
+
+/* UNKNOWN — quatrefoil, approximated as a rounded diamond (amber is also the base colour above). */
+:host ::ng-deep .mark-symbol.aff-unknown {
+  color: var(--color-warn);
+}
+
+:host ::ng-deep .mark-symbol.aff-unknown .sym-frame {
+  inset: 4px;
+  border-radius: 30%;
+  transform: rotate(45deg);
+}
+
+/* Verification (docs/MAP-REWORK-PLAN.md §5.1): unverified reads as provisional — dashed frame,
+   reduced opacity — and a confirmed mark on the common-picture layer gets a quiet outer ring. */
+:host ::ng-deep .mark-symbol.unverified .sym-frame {
+  border-style: dashed;
+}
+
+:host ::ng-deep .mark-symbol.unverified {
+  opacity: 0.75;
+}
+
+:host ::ng-deep .mark-symbol.cop::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+:host ::ng-deep .mark-symbol.selected::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--color-info);
+  box-shadow: 0 0 0 2px var(--color-info-soft);
+}
+
+/* ---- Drawings (lines / polygons / arrows / text) ---------------------------------------------
+   Vector stroke colours are Leaflet path options (see `tactical-map-logic.ts#drawingColor`); only
+   the two divIcon decorations are styled here. */
+
+:host ::ng-deep .draw-arrowhead .arrowhead {
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-bottom: 12px solid var(--color-info);
+  transform-origin: 50% 60%;
+}
+
+:host ::ng-deep .draw-text span {
+  display: inline-block;
+  white-space: nowrap;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+/* ---- Detection-event markers ------------------------------------------------------------------ */
+
+:host ::ng-deep .event-marker-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-warn);
+  border: 2px solid var(--panel-raised);
+  box-shadow: 0 0 0 3px var(--color-warn-soft);
+}
+
+:host ::ng-deep .event-marker-open .event-marker-dot {
+  background: var(--color-live);
+  animation: event-marker-pulse 2s ease-in-out infinite;
+}
+
+@keyframes event-marker-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host ::ng-deep .event-marker-open .event-marker-dot {
+    animation: none;
+  }
+}
+
+/* ---- Zone labels ------------------------------------------------------------------------------- */
+
+:host ::ng-deep .zone-label {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.7rem;
+  padding: var(--space-2) var(--space-8);
+  box-shadow: none;
+}
+
+:host ::ng-deep .zone-label::before {
+  display: none; /* Leaflet's tooltip arrow reads oddly for a permanent, centered label */
+}
+
+/* ---- Popups ------------------------------------------------------------------------------------
+   `.chip`/`.btn` inside popup HTML are deliberately not redeclared: those come from the global
+   `styles.css`, which (unlike this scoped stylesheet) already applies everywhere. */
+
+:host ::ng-deep .map-popup {
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  font-size: 0.8rem;
+}
+
+:host ::ng-deep .map-popup .popup-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+:host ::ng-deep .map-popup .popup-meta {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+:host ::ng-deep .map-popup .popup-row {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+:host ::ng-deep .map-popup .popup-row.faint {
+  color: var(--text-faint);
+}
+
+:host ::ng-deep .map-popup .btn {
+  margin-top: var(--space-2);
+  width: 100%;
+  justify-content: center;
+}

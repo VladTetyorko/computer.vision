@@ -1,54 +1,56 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.api.support.EnumParsing;
 import com.drones.vision.application.mark.GeolocateSpec;
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.GeoProjection;
 import com.drones.vision.domain.model.MarkKind;
 
 /**
- * Request body for {@code POST /api/marks/geolocate} (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire
- * contract) — the cockpit "geolocate" action: the server reads {@code assetId}'s freshest telemetry
- * and projects a ground point ahead of the drone.
+ * Request body for {@code POST /api/map/marks/geolocate} (docs/MAP-REWORK-PLAN.md §4.1) — the
+ * cockpit "mark target" action: the mark's position is <em>projected</em> from the named asset's
+ * freshest telemetry rather than supplied, so this body carries no coordinates at all.
  *
- * <p>Two fields default rather than fail when absent, so the cockpit's one-tap "Mark target" action
- * (docs/TACTICAL-MARKS-PLAN.md's M5 UX) needs to send only {@code assetId}:
- * <ul>
- *   <li>{@code kind} absent/blank defaults to {@link MarkKind#TARGET} — the natural reading of a
- *       cockpit geolocate with no explicit category, matching the "Mark target" action name. An
- *       explicit but unrecognized value still 400s, same idiom as {@link CreateMarkRequest}.</li>
- *   <li>{@code label} absent/blank defaults to {@value #DEFAULT_LABEL} — {@link GeolocateSpec}
- *       itself requires a non-blank label, so this request supplies one rather than surfacing that
- *       as a caller-facing validation failure.</li>
- *   <li>{@code depressionDegrees} absent defaults to {@link GeoProjection#DEFAULT_DEPRESSION_DEGREES}
- *       — the platform's documented assumed camera angle (docs/TACTICAL-MARKS-PLAN.md Open Q1:
- *       fixed, not operator-exposed in v1).</li>
- * </ul>
+ * <p>Three fields default rather than fail, preserving the one-tap cockpit gesture the
+ * docs/TACTICAL-MARKS-PLAN.md version already had: an absent {@code kind}/{@code affiliation}/{@code
+ * label}/{@code depressionDegrees} becomes {@link MarkKind#TARGET}/{@link Affiliation#HOSTILE}/
+ * {@value #DEFAULT_LABEL}/{@link GeoProjection#DEFAULT_DEPRESSION_DEGREES}. {@code HOSTILE} is the
+ * honest default for a geolocated contact — it is the affiliation the old {@code MarkKind.TARGET}
+ * carried implicitly, and the same one docs/MAP-REWORK-PLAN.md §2.2's migration table assigns to
+ * every pre-existing {@code TARGET} mark.
  *
- * @param assetId            the asset to project from, as a canonical UUID string; required
- * @param kind               {@code "TARGET"}, {@code "HAZARD"}, {@code "POI"}, or {@code
- *                           "FRIENDLY"}, matched case-insensitively; absent/blank defaults to
- *                           {@code "TARGET"}
- * @param label              short human-readable label; absent/blank defaults to {@value
- *                           #DEFAULT_LABEL}
- * @param note               optional free-text detail; blank normalizes to {@code null}
- * @param depressionDegrees  the assumed camera depression angle, degrees; absent defaults to
- *                           {@link GeoProjection#DEFAULT_DEPRESSION_DEGREES}
+ * @param assetId           which asset to project from; required
+ * @param layerId           which layer to create it on, or absent for the caller's default layer
+ * @param depressionDegrees camera depression below the horizon, or absent for the default
  */
-public record GeolocateMarkRequest(String assetId, String kind, String label, String note,
-                                    Double depressionDegrees) {
+public record GeolocateMarkRequest(String assetId, String layerId, String kind, String affiliation, String label,
+                                    String note, Double depressionDegrees) {
 
+    /** The label a geolocated mark gets when the cockpit sends none. */
     static final String DEFAULT_LABEL = "Contact";
 
     /**
      * Converts this request to the application-layer spec.
      *
      * @return the equivalent {@link GeolocateSpec}
-     * @throws IllegalArgumentException if {@code assetId} is missing/blank/malformed, or {@code
-     *                                   kind} is present but unrecognized
+     * @throws IllegalArgumentException if {@code assetId} is blank/malformed, {@code layerId} is
+     *                                   present but malformed, or {@code kind}/{@code affiliation}
+     *                                   is present but unrecognized (→ 400)
      */
     public GeolocateSpec toSpec() {
-        return new GeolocateSpec(requireAssetId(assetId), effectiveKind(kind), effectiveLabel(label), note,
+        return new GeolocateSpec(
+                requireAssetId(assetId),
+                MapRequests.optionalLayerId(layerId),
+                orDefault(EnumParsing.optional(MarkKind.class, "kind", kind), MarkKind.TARGET),
+                orDefault(EnumParsing.optional(Affiliation.class, "affiliation", affiliation), Affiliation.HOSTILE),
+                label == null || label.isBlank() ? DEFAULT_LABEL : label,
+                note,
                 depressionDegrees == null ? GeoProjection.DEFAULT_DEPRESSION_DEGREES : depressionDegrees);
+    }
+
+    private static <T> T orDefault(T value, T fallback) {
+        return value == null ? fallback : value;
     }
 
     private static AssetId requireAssetId(String assetId) {
@@ -56,13 +58,5 @@ public record GeolocateMarkRequest(String assetId, String kind, String label, St
             throw new IllegalArgumentException("GeolocateMarkRequest assetId must not be blank");
         }
         return AssetId.of(assetId);
-    }
-
-    private static MarkKind effectiveKind(String kind) {
-        return kind == null || kind.isBlank() ? MarkKind.TARGET : CreateMarkRequest.toKind(kind);
-    }
-
-    private static String effectiveLabel(String label) {
-        return label == null || label.isBlank() ? DEFAULT_LABEL : label;
     }
 }

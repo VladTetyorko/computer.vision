@@ -844,12 +844,15 @@ export interface DevicesSnapshot {
  * `EventSource`'s automatic `Last-Event-ID` resume work with no client code at all). A discriminated
  * union on `type` so a `switch` narrows `payload` to the right shape per branch — the seven `type`
  * values and their payloads are fixed 1:1 with `LiveTopicKind`'s wire values and
- * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events`/`marks` (each its own
+ * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events`/`map` (each its own
  * backend follow-up batch) are, like `fleet`/`event`, always-on — every connection gets them
  * regardless of the `topics` query parameter, so there is no subscribe/unsubscribe management for
- * either on this side, only envelope routing by `type`. `marks` (docs/TACTICAL-MARKS-PLAN.md §5) is
- * deliberately **not** snapshot-on-connect the way `detection-events` is — see {@link MarkEvent}'s
- * own doc comment.
+ * either on this side, only envelope routing by `type`.
+ *
+ * **`map` replaced `marks`** (docs/MAP-REWORK-PLAN.md §4.3): same always-on posture, same
+ * not-snapshot-on-connect caveat (see {@link MapEventPayload}), but it is the one topic with
+ * **per-connection filtering** — the server delivers a map event only to connections whose captured
+ * viewer may see the event's `layerId`, so this client never filters map data for visibility.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -858,7 +861,7 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'event'; readonly payload: LiveEvent }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'devices'; readonly payload: DevicesSnapshot }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent }
-  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'marks'; readonly payload: MarkEvent };
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'map'; readonly payload: MapEventPayload };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -914,93 +917,251 @@ export interface GeofenceZoneRequest {
   readonly enabled: boolean;
 }
 
-// --- Tactical marks (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire contract) ---------------------
-// Structurally a point version of a geofence zone with tactical types: shared, group-visible pins
-// (target/hazard/POI/friendly) any in-scope user can drop or annotate, persisted AND pushed live
-// over the `marks` `GET /api/live` topic (see {@link MarkEvent} below) — the shared operational
-// picture across the cockpit map inset and the Command map.
+// --- The map as a Common Operational Picture (docs/MAP-REWORK-PLAN.md §4's frozen wire contract) -
+// Everything under `/api/map/**`: layers (with grantable access), marks (now layered, affiliated and
+// verifiable), and drawings. **Replaces the whole `/api/marks` surface** the TACTICAL-MARKS wave
+// shipped — that base path, its `Mark`/`MarkEvent` types and the `marks` SSE topic are all gone
+// (§4's own "breaking change is fine — the SPA in this repo is the only client"). Every list here is
+// already scoped server-side by `MapAccessPolicy` (§3): a layer the viewer may not see never reaches
+// this client at all, over REST or SSE, so nothing below is a client-side visibility filter.
 
-/** Mirrors `domain.model.MarkKind` — colour-by-kind category, not a breach semantic (see `core/marks/mark-logic.ts#markColor`). */
-export type MarkKind = 'TARGET' | 'HAZARD' | 'POI' | 'FRIENDLY';
-
-/** Mirrors `domain.model.MarkStatus` — `CLEARED` marks drop off `GET /api/marks` and are removed client-side. */
-export type MarkStatus = 'ACTIVE' | 'CLEARED';
-
-/** Mirrors `domain.model.MarkSource` — `DETECTION` marks came from the cockpit's geolocate action, an honest estimate (see `GeolocateMarkRequest`). */
-export type MarkSource = 'MANUAL' | 'DETECTION';
+/** Mirrors `domain.model.Affiliation` — APP-6's friend/foe axis, the frame colour+shape of a symbol. */
+export type Affiliation = 'FRIENDLY' | 'HOSTILE' | 'NEUTRAL' | 'UNKNOWN';
 
 /**
- * Mirrors `dto.MarkResponse`, the body of every `/api/marks` endpoint and the `mark` field inside
- * {@link MarkEvent} on the `marks` live topic — one shape parsed regardless of transport.
- * `note` is absent (not `null`) when the mark carries none, `@JsonInclude(NON_NULL)` like every
- * other optional field in this file.
+ * Mirrors `domain.model.MarkKind` — *what the object is*, the inner glyph of a symbol. The old
+ * enum's `FRIENDLY` is gone (whose it is, is now {@link Affiliation}); `UNIT`/`EQUIPMENT` are new.
  */
-export interface Mark {
-  readonly id: string;
+export type MarkKind = 'UNIT' | 'EQUIPMENT' | 'HAZARD' | 'POI' | 'TARGET';
+
+/** Mirrors `domain.model.MarkStatus` — `CLEARED` marks drop off `GET /api/map/marks` and are removed client-side. */
+export type MarkStatus = 'ACTIVE' | 'CLEARED';
+
+/** Mirrors `domain.model.MarkSource` — `DETECTION` marks came from the cockpit's geolocate action, an honest estimate. */
+export type MarkSource = 'MANUAL' | 'DETECTION';
+
+/** Mirrors `domain.model.Verification.VerificationState` — an `UNVERIFIED` mark renders provisional (dashed frame, dimmed). */
+export type VerificationState = 'UNVERIFIED' | 'CONFIRMED' | 'REJECTED';
+
+/**
+ * Mirrors `domain.model.LayerKind`. `COP` is the single deployment-wide common-picture layer
+ * (everyone sees it, managers write to it, it is the default promotion target and can never be
+ * renamed or deleted); `TEAM` belongs to a group; `PERSONAL` to one user.
+ */
+export type LayerKind = 'COP' | 'TEAM' | 'PERSONAL';
+
+/**
+ * Mirrors `domain.model.AccessLevel`, declared least→most privileged. Comparisons go through
+ * `core/map-data/layers-logic.ts#atLeast` (one ranking, never re-derived at a call site) — this app
+ * *does* compare these by rank, unlike {@link Role}, because §3's whole model is "max of the
+ * matching rules".
+ */
+export type AccessLevel = 'VIEW' | 'CONTRIBUTE' | 'MANAGE';
+
+/** Mirrors `domain.model.DrawKind` — LINE/ARROW need ≥2 points, POLYGON ≥3, TEXT exactly 1 + a label. */
+export type DrawKind = 'LINE' | 'POLYGON' | 'ARROW' | 'TEXT';
+
+/** Mirrors `domain.model.LayerGrant.SubjectType` — a grant names either one user or one group. */
+export type GrantSubjectType = 'USER' | 'GROUP';
+
+/** Mirrors `dto.GrantDto` — one row of a layer's access list. `subjectId` is a user id or a group id per `subjectType`. */
+export interface LayerGrant {
+  readonly subjectType: GrantSubjectType;
+  readonly subjectId: string;
+  readonly level: AccessLevel;
+}
+
+/**
+ * Mirrors `dto.LayerResponse`, the body of every `/api/map/layers` endpoint and the `layer` field of
+ * a {@link MapEventPayload}. `myAccess` is the viewer's **server-resolved** effective level (§3's max
+ * rule) — the UI hides what it forbids but never re-derives it, and a 403/404 from the server is
+ * still the arbiter. `grants` is present **only when `myAccess === 'MANAGE'`** (and always absent
+ * over SSE, §4.3), so a reader must treat `undefined` as "not mine to see", never as "no grants".
+ * `ownerUserId`/`groupId` are absent (not `null`) when the layer has none.
+ */
+export interface MapLayer {
+  readonly layerId: string;
+  readonly name: string;
+  readonly kind: LayerKind;
+  readonly ownerUserId?: string;
+  readonly groupId?: string;
+  readonly myAccess: AccessLevel;
+  readonly grants?: readonly LayerGrant[];
+  readonly markCount: number;
+  readonly drawingCount: number;
+  readonly createdAt: string;
+}
+
+/** Mirrors `dto.CreateLayerRequest` — `POST /api/map/layers`. `kind` is `TEAM` (needs `groupId`, managers only) or `PERSONAL` (anyone); `COP` can never be created. */
+export interface CreateLayerRequest {
+  readonly name: string;
+  readonly kind: Exclude<LayerKind, 'COP'>;
+  readonly groupId?: string;
+}
+
+/** The body of `PATCH /api/map/layers/{id}` — rename only (§4.1); the COP layer 403s. */
+export interface RenameLayerRequest {
+  readonly name: string;
+}
+
+/** The body of `PUT /api/map/layers/{id}/grants` — **wholesale**, like `GeofenceZoneRequest`'s own PUT: send the full list, not a delta. */
+export interface SetLayerGrantsRequest {
+  readonly grants: readonly LayerGrant[];
+}
+
+/**
+ * Mirrors `dto.MarkResponse`, the body of every `/api/map/marks` endpoint and the `mark` field of a
+ * {@link MapEventPayload} — one shape regardless of transport. **Position is flat here**
+ * (`latitude`/`longitude`/`altitudeMeters`), not the nested {@link GeoPosition} the old `/api/marks`
+ * shape used: `core/map-data/mark-logic.ts#markPosition` is the one place that reassembles it for
+ * the map/readout code that wants a `GeoPosition`. Optional fields are absent (not `null`), the same
+ * `@JsonInclude(NON_NULL)` convention as everywhere else in this file — including
+ * `verifiedByUserId`/`verifiedAt`, which only exist once someone actually decided.
+ */
+export interface MapMark {
+  readonly markId: string;
+  readonly layerId: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly altitudeMeters?: number;
   readonly kind: MarkKind;
+  readonly affiliation: Affiliation;
   readonly label: string;
   readonly note?: string;
-  readonly position: GeoPosition;
-  readonly createdBy: string;
+  readonly createdByUserId: string;
+  readonly groupId?: string;
   readonly createdAt: string;
   readonly status: MarkStatus;
   readonly source: MarkSource;
-}
-
-/** Mirrors `dto.CreateMarkRequest` — a manual mark (a map click). `position` reuses {@link GeoPosition} verbatim (`PointRequest`'s shape is identical). */
-export interface CreateMarkRequest {
-  readonly kind: MarkKind;
-  readonly label: string;
-  readonly note?: string;
-  readonly position: GeoPosition;
+  readonly verification: VerificationState;
+  readonly verifiedByUserId?: string;
+  readonly verifiedAt?: string;
 }
 
 /**
- * Mirrors `dto.GeolocateMarkRequest` — the cockpit "geolocate" action: the server reads `assetId`'s
- * freshest telemetry and projects a ground point ahead of the drone. Every field but `assetId` is
- * optional — `kind` absent defaults server-side to `TARGET`, `label` to `"Contact"`,
- * `depressionDegrees` to `GeoProjection.DEFAULT_DEPRESSION_DEGREES` (45°, not exposed as a cockpit
- * control in v1) — so the one-tap "Mark target" action can send only `assetId`.
+ * Mirrors `dto.CreateMarkRequest` — a manual mark (an armed map click). `layerId` omitted lets the
+ * server pick the caller's default contributable layer (§3: first TEAM layer, else an auto-created
+ * PERSONAL one — never COP), which is exactly what the palette sends when the viewer has no
+ * CONTRIBUTE layer to choose from.
+ */
+export interface CreateMarkRequest {
+  readonly layerId?: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly altitudeMeters?: number;
+  readonly kind: MarkKind;
+  readonly affiliation: Affiliation;
+  readonly label: string;
+  readonly note?: string;
+}
+
+/**
+ * Mirrors `dto.GeolocateMarkRequest` — the cockpit's one-tap "Mark target": the server reads
+ * `assetId`'s freshest telemetry and projects a ground point ahead of the drone. Every field but
+ * `assetId` is optional (`kind` defaults to `TARGET`, `label` to `"Contact"`, `depressionDegrees` to
+ * the domain's own 45°), so the button can still send `assetId` alone; the Fly palette additionally
+ * sends whatever kind/affiliation/layer the operator has selected (§5.2).
  */
 export interface GeolocateMarkRequest {
   readonly assetId: string;
+  readonly layerId?: string;
   readonly kind?: MarkKind;
+  readonly affiliation?: Affiliation;
   readonly label?: string;
   readonly note?: string;
   readonly depressionDegrees?: number;
 }
 
 /**
- * Mirrors `dto.PatchMarkRequest` — a true partial patch (unlike `GeofenceZoneRequest`'s
- * wholesale-replace `PUT`): every field optional, only a present field changes anything. Used for
- * annotation (label/note/kind), drag-to-correct (`position` only), and clear (`status: 'CLEARED'`
- * only) alike. `core/marks/marks-store.ts` never sends a field it doesn't mean to change.
+ * Mirrors `dto.PatchMarkRequest` — a true partial patch: every field optional, only a present field
+ * changes anything. Drives annotation (label/note/kind/affiliation), drag-to-correct
+ * (`latitude`+`longitude` only) and clear (`status` only) alike. Note the **flat** position fields,
+ * matching {@link MapMark}; `core/map-data/marks-store.ts` never sends a field it doesn't mean.
  */
 export interface PatchMarkRequest {
+  readonly latitude?: number;
+  readonly longitude?: number;
+  readonly altitudeMeters?: number;
   readonly kind?: MarkKind;
+  readonly affiliation?: Affiliation;
   readonly label?: string;
   readonly note?: string;
-  readonly position?: GeoPosition;
   readonly status?: MarkStatus;
 }
 
+/** The body of `POST /api/map/marks/{id}/verify` — a manager's decision; there is no "un-verify" back to `UNVERIFIED`. */
+export interface VerifyMarkRequest {
+  readonly decision: Exclude<VerificationState, 'UNVERIFIED'>;
+}
+
+/** The body of `POST /api/map/marks/{id}/promote` — omit `targetLayerId` for the default (the COP layer). */
+export interface PromoteMarkRequest {
+  readonly targetLayerId?: string;
+}
+
+/** Mirrors `dto.PositionDto` — a drawing vertex. Structurally identical to {@link GeoPosition}, declared separately only because the Java DTO is. */
+export interface PositionDto {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly altitudeMeters?: number;
+}
+
 /**
- * Mirrors `dto.MarkPayload` — the payload of a {@link LiveEnvelope} whose `type` is `'marks'`. One
- * always-on topic carries every mark lifecycle event, with the specific lifecycle riding in
- * `action` rather than three separate topic kinds (mirrors how `detection-events` carries
- * OPEN/CLOSED in one topic) — `'created'` (a map-click create or a cockpit geolocate), `'updated'`
- * (an annotation/drag-to-correct with no status change), or `'cleared'` (a status→`CLEARED`
- * transition, or a delete — `mark.status` is always `'CLEARED'` in this case, even for a delete of
- * a still-`ACTIVE` mark, so a client can resolve which pin to drop with no second lookup).
- *
- * **Deliberately not snapshot-on-connect**, unlike `detection-events`: a fresh `GET /api/live`
- * connection gets no backlog on this topic (`LiveUpdateRegistry`'s own javadoc, "honestly limited")
- * — `core/marks/marks-store.ts` always does its own initial `GET /api/marks` first and merges live
- * deltas on top, never relying on the live channel alone for the current picture.
+ * Mirrors `dto.DrawingResponse` — a line/polygon/arrow/text annotation on a layer. `colorToken` is a
+ * UI token *name* (`accent`/`danger`/…), never a hex value — resolved to a literal stroke colour by
+ * `shared/map/tactical-map/tactical-map-logic.ts#drawingColor`, because Leaflet writes path colours
+ * as SVG presentation attributes that cannot resolve `var(--token)`.
  */
-export interface MarkEvent {
-  readonly action: 'created' | 'updated' | 'cleared';
-  readonly mark: Mark;
+export interface MapDrawingResponse {
+  readonly drawingId: string;
+  readonly layerId: string;
+  readonly kind: DrawKind;
+  readonly label?: string;
+  readonly colorToken?: string;
+  readonly points: readonly PositionDto[];
+  readonly createdByUserId: string;
+  readonly createdAt: string;
+}
+
+/** Mirrors `dto.CreateDrawingRequest` — `layerId` omitted defaults server-side exactly like {@link CreateMarkRequest}'s. */
+export interface CreateDrawingRequest {
+  readonly layerId?: string;
+  readonly kind: DrawKind;
+  readonly label?: string;
+  readonly colorToken?: string;
+  readonly points: readonly PositionDto[];
+}
+
+/** Mirrors `dto.PatchDrawingRequest` — geometry and/or details; an absent field is unchanged. */
+export interface PatchDrawingRequest {
+  readonly points?: readonly PositionDto[];
+  readonly label?: string;
+  readonly colorToken?: string;
+}
+
+/**
+ * Mirrors `dto.MapEventPayload` — the payload of a {@link LiveEnvelope} whose `type` is `'map'`,
+ * the **scoped** topic that replaced `marks` (docs/MAP-REWORK-PLAN.md §4.3). One always-on topic
+ * carries every map lifecycle event for every entity, with the entity and the lifecycle riding in
+ * `entity`/`action` rather than three separate topics (mirroring how `detection-events` carries
+ * OPEN/CLOSED in one). **Exactly one of `mark`/`drawing`/`layer` is present**, matching `entity`;
+ * `layer.grants` is always absent here even for a layer the viewer manages (§4.3 — grants only ever
+ * travel over REST).
+ *
+ * `action` semantics: `'created'`/`'updated'` upsert; `'cleared'` (marks only — a status transition)
+ * and `'deleted'` both remove. `layerId` is always the event's own layer, which is what lets
+ * `LiveUpdateRegistry` deliver an event only to connections whose viewer may see that layer.
+ *
+ * **Deliberately not snapshot-on-connect**: a fresh connection gets no backlog on this topic, so
+ * every `core/map-data/**` store does its own initial `GET` first and folds deltas on top.
+ */
+export interface MapEventPayload {
+  readonly entity: 'mark' | 'drawing' | 'layer';
+  readonly action: 'created' | 'updated' | 'cleared' | 'deleted';
+  readonly layerId: string;
+  readonly mark?: MapMark;
+  readonly drawing?: MapDrawingResponse;
+  readonly layer?: MapLayer;
 }
 
 // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------

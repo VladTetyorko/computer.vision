@@ -14,7 +14,7 @@ import java.util.Set;
  *
  * @param kind    which kind of topic
  * @param assetId the asset this topic is scoped to; {@code null} for {@link #FLEET}/{@link
- *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MARKS}
+ *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MAP}
  */
 record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
@@ -30,8 +30,8 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
     /** The always-on debounced-detection-event topic (extends the R-c channel — see {@link LiveTopicKind#DETECTION_EVENTS}). */
     static final LiveTopic DETECTION_EVENTS = new LiveTopic(LiveTopicKind.DETECTION_EVENTS, null);
 
-    /** The always-on shared tactical-marks topic (docs/TACTICAL-MARKS-PLAN.md §5 — see {@link LiveTopicKind#MARKS}). */
-    static final LiveTopic MARKS = new LiveTopic(LiveTopicKind.MARKS, null);
+    /** The always-on common-operational-picture topic (docs/MAP-REWORK-PLAN.md §4.3 — see {@link LiveTopicKind#MAP}); the only topic whose delivery is filtered per connection. */
+    static final LiveTopic MAP = new LiveTopic(LiveTopicKind.MAP, null);
 
     static LiveTopic telemetry(AssetId assetId) {
         return new LiveTopic(LiveTopicKind.TELEMETRY, assetId);
@@ -73,7 +73,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
             case EVENT -> EVENT;
             case DEVICES -> DEVICES;
             case DETECTION_EVENTS -> DETECTION_EVENTS;
-            case MARKS -> MARKS;
+            case MAP -> MAP;
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
         };

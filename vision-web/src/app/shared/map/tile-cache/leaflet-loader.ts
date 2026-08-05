@@ -6,11 +6,12 @@ import { getCachedTile, putCachedTile } from './tile-cache-db';
 import { tileCacheKey } from './tile-cache-logic';
 
 /**
- * Leaflet bootstrap bits shared by every map in this app (`shared/map/live-map.ts`,
- * docs/CYCLES-PLAN.md §2; `shared/map/fleet-map.ts`, docs/CYCLES-PLAN.md §6): the dynamic import,
+ * Leaflet bootstrap bits shared by every map in this app (`shared/map/tactical-map/`, the one map
+ * component since docs/MAP-REWORK-PLAN.md §5.1; plus `features/replay/replay-map.ts`,
+ * `shared/map/fleet-plan-dialog/`, `features/command/geofence-zone-dialog.ts`): the dynamic import,
  * the runtime stylesheet injection, and the switchable base-layer tile factory
  * (docs/CYCLES-PLAN.md §9, CU-b item 6 — `MAP_LAYERS`/`mapLayerTileLayer`). Pulled out of
- * `live-map.ts` when the `/map` tab needed the identical setup — intra-app DRY (unlike the
+ * the original single-asset map when the `/map` tab needed the identical setup — intra-app DRY (unlike the
  * cross-adapter rule in the Java side of this repo, nothing here stops two Angular pages sharing
  * a plain module).
  *
@@ -31,7 +32,7 @@ const LEAFLET_STYLESHEET_HREF = '/leaflet/leaflet.css';
  * filter every map used to apply unconditionally), **Relief** (OpenTopoMap, contour shading), and
  * **Satellite** (Esri World Imagery). Each carries its own attribution text, shown by Leaflet's
  * attribution control automatically whenever that layer is the one added to the map. Selection is
- * `SettingsStore.mapLayer` — persisted, one choice shared by `LiveMap` and `FleetMap` alike.
+ * `SettingsStore.mapLayer` — persisted, one choice shared by every map in the app.
  */
 export interface MapLayerDef {
   readonly id: MapLayerId;
@@ -115,7 +116,7 @@ export function isMapLayerExplicit(): boolean {
   return readPersistedFlag(MAP_LAYER_EXPLICIT_KEY, false);
 }
 
-/** Records an explicit layer-picker click — `FleetMap`/`LiveMap`'s own `setLayer` calls this
+/** Records an explicit layer-picker click — `TacticalMap`'s own `setBasemap` calls this
  * alongside `SettingsStore.mapLayer.set(id)`, so the two persisted values always change together. */
 export function markMapLayerExplicit(): void {
   writePersistedFlag(MAP_LAYER_EXPLICIT_KEY, true);
@@ -125,7 +126,7 @@ export function markMapLayerExplicit(): void {
  * The layer id a map should actually render: `chosen` (`SettingsStore.mapLayer()`) once the
  * operator has made an explicit pick, otherwise the theme's own default — "an explicit user pick
  * always wins" (docs/VISUAL-REFRESH-PLAN.md F7). Pure and unit-tested (`leaflet-loader.spec.ts`);
- * `FleetMap`/`LiveMap` each wrap it in a `computed()` reading `ThemeStore.theme()` +
+ * `TacticalMap` wraps it in a `computed()` reading `ThemeStore.theme()` +
  * `SettingsStore.mapLayer()`, so both re-render the instant either changes.
  */
 export function effectiveMapLayerId(theme: Theme, chosen: MapLayerId, explicit: boolean): MapLayerId {
@@ -164,17 +165,17 @@ export function ensureLeafletStylesheet(): void {
 /**
  * Builds the tile layer for `layerId` (docs/CYCLES-PLAN.md §9, CU-b item 6) — offline-safe (a
  * tile fetch failure just leaves the host's own dark background showing through; `onStatus`
- * reports which, so the host can show a small "tiles unavailable" badge, as `live-map.ts` already
+ * reports which, so the host can show a small "tiles unavailable" badge, as `tactical-map.ts` already
  * does). Callers create a fresh instance per layer switch — swapping which `TileLayer` is
- * `addTo(map)` is how `LiveMap`/`FleetMap` change the active base layer, and Leaflet's own
+ * `addTo(map)` is how `TacticalMap` changes the active base layer, and Leaflet's own
  * attribution control follows whichever instance is currently added.
  *
  * **IndexedDB tile cache** (docs/MVP3-PLAN.md's Build rules): every tile this layer requests goes
  * through `resolveTileSrc` below instead of a bare `img.src = url` — cache hit serves a stored
  * blob, cache miss fetches, renders, and stores it for next time. Landing here (rather than in
- * each host component) is what makes it shared infra: `LiveMap`, `FleetMap`, `ReplayMap`, and
+ * each host component) is what makes it shared infra: `TacticalMap`, `ReplayMap`, and
  * `FlightPlanDialog` all build their tile layer through this one function, so every map in the app
- * — including the Fly cockpit's map inset, which reuses `LiveMap` unmodified — inherits the cache
+ * — including the Fly cockpit's map inset, which is `TacticalMap` in follow mode — inherits the cache
  * for free, exactly the plan's own "lands in C-b, so Fly/Command/replay/detail maps all inherit
  * it" requirement.
  */
@@ -280,8 +281,8 @@ async function resolveTileSrc(key: string, url: string): Promise<TileSrc> {
 }
 
 /**
- * A divIcon drone marker rotated to `headingDegrees`, shared between the single-drone `LiveMap`
- * inset and the fleet-wide `FleetMap`. `className` lets each host scope its own CSS to the
+ * A divIcon drone marker rotated to `headingDegrees`, used by `TacticalMap` in both of its modes
+ * (the single-drone follow inset and the fleet overview). `className` lets each host scope its CSS to the
  * marker root (the inner `.drone-arrow` element's geometry/color still needs a `::ng-deep` rule
  * per host component — view encapsulation can't reach DOM Leaflet renders itself, see either
  * host's `.css` file — this only shares the JS that builds the icon, not that CSS).

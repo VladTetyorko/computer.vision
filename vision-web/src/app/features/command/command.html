@@ -14,6 +14,18 @@
       <button type="button" class="btn secondary small" (click)="toggleMarksPanel()">
         Marks ({{ facade.marks.marks().length }})
       </button>
+      <button type="button" class="btn secondary small" (click)="toggleLayersPanel()">
+        Layers ({{ facade.layers.layers().length }})
+      </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        [class.active]="isOverlayOpen('draw')"
+        [attr.aria-pressed]="isOverlayOpen('draw')"
+        (click)="toggleDrawToolbar()"
+      >
+        Draw
+      </button>
       <label class="row archived-toggle">
         <input
           type="checkbox"
@@ -35,6 +47,16 @@
 
   @if (isOverlayOpen('marks')) {
     <vision-marks-panel (closePanel)="toggleMarksPanel()" />
+  }
+
+  <!-- Layer manager (docs/MAP-REWORK-PLAN.md §5.2). A sibling drawer rather than an expansion of
+       the map's own data-layer panel — see `<vision-layer-manager>`'s own doc comment for why. Same
+       non-blocking `<vision-side-panel>` shell as Marks, for the same reason (a modal backdrop would
+       swallow map clicks). -->
+  @if (isOverlayOpen('layers')) {
+    <vision-side-panel title="Map layers" icon="layers" subtitle="Who sees what" (close)="toggleLayersPanel()">
+      <vision-layer-manager />
+    </vision-side-panel>
   }
 
   @if (facade.summaryError() && facade.summary() === undefined) {
@@ -113,10 +135,16 @@
         <!-- `focusAssetId` centres the map on the selected asset (docs/design/02-command.md):
              selecting a row in the asset list, or "Watch live" in a map popup, both land on
              `selectAsset`, so both move the camera. -->
-        <vision-fleet-map
+        <vision-tactical-map
           class="command-map"
+          [assets]="facade.markers()"
+          [events]="facade.eventMarkers()"
+          [unplottedAssets]="facade.unplottedAssets()"
           [zones]="facade.zones()"
-          [marks]="facade.marks.marks()"
+          [marks]="facade.marks.displayMarks()"
+          [drawings]="facade.drawings.displayDrawings()"
+          [layers]="facade.layers.layers()"
+          [interactionMode]="facade.interactionMode()"
           [selectedMarkId]="facade.marks.selectedMarkId()"
           [focusRequest]="facade.focusRequest()"
           [attentionAssetIds]="facade.attentionAssetIds()"
@@ -127,7 +155,17 @@
           (markSelected)="facade.marks.select($event)"
           (markMoved)="facade.marks.moveTo($event.id, $event.position)"
           (mapClicked)="facade.marks.handleMapClick($event)"
+          (drawingCompleted)="facade.completeDrawing($event)"
+          (drawingSelected)="facade.selectDrawing($event)"
         />
+
+        <!-- Drawing toolbar (docs/MAP-REWORK-PLAN.md §5.2's "mode buttons on the map chrome") — a
+             `--panel-raised` card floating over the map, per frontend-style §2/§7: never `--hud-*`,
+             which is only legal inside a `.surface-dark` enclave. Only rendered while the Draw
+             overlay is on, so the map's own corners stay clear the rest of the time. -->
+        @if (isOverlayOpen('draw')) {
+          <vision-drawing-toolbar class="command-draw-toolbar" layout="card" />
+        }
       }
     </div>
 

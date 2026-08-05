@@ -1,13 +1,15 @@
 package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
-import com.drones.vision.api.dto.MarkPayload;
+import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.application.stream.ActiveStream;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.asset.AssetStatus;
 import com.drones.vision.application.asset.AssetSummary;
 import com.drones.vision.application.device.DeviceService;
 import com.drones.vision.application.stream.StreamService;
+import com.drones.vision.domain.model.AccessLevel;
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.BoundingBox;
@@ -19,11 +21,19 @@ import com.drones.vision.domain.model.DetectionEventState;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.DrawKind;
+import com.drones.vision.domain.model.Drawing;
+import com.drones.vision.domain.model.DrawingId;
 import com.drones.vision.domain.model.Event;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.domain.model.LayerGrant;
+import com.drones.vision.domain.model.LayerId;
+import com.drones.vision.domain.model.LayerKind;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.MapEvent;
+import com.drones.vision.domain.model.MapLayer;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;
 import com.drones.vision.domain.model.MarkKind;
@@ -35,6 +45,7 @@ import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.model.Verification;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
 import org.junit.jupiter.api.Test;
@@ -47,11 +58,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -117,10 +130,24 @@ class LiveUpdateRegistryTest {
                 DetectionEventState.OPEN, null);
     }
 
-    private static Mark mark(MarkStatus status) {
+    private static Mark mark(MarkStatus status, LayerId layerId) {
         Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-        return new Mark(MarkId.random(), new GeoPosition(50.45, 30.52, null), MarkKind.TARGET, "Bunker", null,
-                ownership, Instant.now(), status, MarkSource.MANUAL);
+        return new Mark(MarkId.random(), layerId, new GeoPosition(50.45, 30.52, null), MarkKind.TARGET,
+                Affiliation.HOSTILE, "Bunker", null, ownership, Instant.now(), status, MarkSource.MANUAL,
+                Verification.unverified());
+    }
+
+    private static Drawing drawing(LayerId layerId) {
+        return new Drawing(DrawingId.random(), layerId, DrawKind.LINE,
+                List.of(new GeoPosition(50.0, 30.0, null), new GeoPosition(50.5, 30.5, null)),
+                null, null, new Ownership(UserId.random(), GroupId.random()), Instant.now());
+    }
+
+    private static MapLayer layer(LayerId layerId) {
+        return new MapLayer(layerId, "Bravo team", LayerKind.TEAM,
+                new Ownership(UserId.random(), GroupId.random()),
+                List.of(new LayerGrant(LayerGrant.SubjectType.USER, UUID.randomUUID(), AccessLevel.VIEW)),
+                Instant.now());
     }
 
     @Test
@@ -222,73 +249,83 @@ class LiveUpdateRegistryTest {
     }
 
     @Test
-    void publishMarkCreatedAppendsAMarksEnvelopeWithActionCreated() {
+    void publishMapEventAppendsAMapEnvelopeCarryingEntityActionAndLayerId() {
         LiveUpdateRegistry registry = registry();
-        Mark created = mark(MarkStatus.ACTIVE);
+        LayerId layerId = LayerId.random();
+        Mark created = mark(MarkStatus.ACTIVE, layerId);
 
-        registry.publishMarkCreated(created);
+        registry.publishMapEvent(new MapEvent(MapEvent.EntityType.MARK, MapEvent.Action.CREATED, layerId, created));
 
-        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MARKS).snapshot();
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MAP).snapshot();
         assertEquals(1, buffered.size());
-        assertEquals("marks", buffered.get(0).type());
-        MarkPayload payload = (MarkPayload) buffered.get(0).payload();
+        assertEquals("map", buffered.get(0).type());
+        MapEventPayload payload = (MapEventPayload) buffered.get(0).payload();
+        assertEquals("mark", payload.entity());
         assertEquals("created", payload.action());
-        assertEquals(created.id().value().toString(), payload.mark().id());
+        assertEquals(layerId.value().toString(), payload.layerId());
+        assertEquals(created.id().value().toString(), payload.mark().markId());
         assertEquals("ACTIVE", payload.mark().status());
+        assertNull(payload.drawing());
+        assertNull(payload.layer());
     }
 
     @Test
-    void publishMarkUpdatedAppendsAMarksEnvelopeWithActionUpdated() {
+    void publishMapEventCarriesAClearedMarkAsIsWithoutForcingItsStatus() {
         LiveUpdateRegistry registry = registry();
-        Mark updated = mark(MarkStatus.ACTIVE);
+        LayerId layerId = LayerId.random();
+        Mark cleared = mark(MarkStatus.CLEARED, layerId);
 
-        registry.publishMarkUpdated(updated);
+        registry.publishMapEvent(new MapEvent(MapEvent.EntityType.MARK, MapEvent.Action.CLEARED, layerId, cleared));
 
-        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MARKS).snapshot();
-        assertEquals(1, buffered.size());
-        assertEquals("marks", buffered.get(0).type());
-        MarkPayload payload = (MarkPayload) buffered.get(0).payload();
-        assertEquals("updated", payload.action());
-        assertEquals("ACTIVE", payload.mark().status(), "annotation-only updates leave status untouched");
-    }
-
-    @Test
-    void publishMarkClearedForcesStatusClearedInThePayloadEvenWhenTheMarkPassedInIsStillActive() {
-        LiveUpdateRegistry registry = registry();
-        // The delete path (DefaultMarkService#delete) publishes the pre-deletion Mark, whose status
-        // may still be ACTIVE -- the wire contract requires the envelope to present "CLEARED"
-        // regardless, so a client can resolve which pin to drop without a second lookup.
-        Mark stillActive = mark(MarkStatus.ACTIVE);
-
-        registry.publishMarkCleared(stillActive);
-
-        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.MARKS).snapshot();
-        assertEquals(1, buffered.size());
-        MarkPayload payload = (MarkPayload) buffered.get(0).payload();
+        MapEventPayload payload = (MapEventPayload) registry.bufferFor(LiveTopic.MAP).snapshot().get(0).payload();
         assertEquals("cleared", payload.action());
-        assertEquals("CLEARED", payload.mark().status(), "cleared must force status=CLEARED even for a still-ACTIVE input Mark");
-        assertEquals(stillActive.id().value().toString(), payload.mark().id());
-    }
-
-    @Test
-    void publishMarkClearedKeepsStatusClearedWhenTheMarkPassedInIsAlreadyCleared() {
-        LiveUpdateRegistry registry = registry();
-        Mark alreadyCleared = mark(MarkStatus.CLEARED);
-
-        registry.publishMarkCleared(alreadyCleared);
-
-        MarkPayload payload = (MarkPayload) registry.bufferFor(LiveTopic.MARKS).snapshot().get(0).payload();
         assertEquals("CLEARED", payload.mark().status());
     }
 
     @Test
-    void marksTopicIsHonestlyLimitedAndHasNothingToReplayWhenNothingHasEverBeenPublished() {
+    void publishMapEventMapsADrawingIntoTheDrawingFieldOnly() {
+        LiveUpdateRegistry registry = registry();
+        LayerId layerId = LayerId.random();
+        Drawing drawn = drawing(layerId);
+
+        registry.publishMapEvent(
+                new MapEvent(MapEvent.EntityType.DRAWING, MapEvent.Action.UPDATED, layerId, drawn));
+
+        MapEventPayload payload = (MapEventPayload) registry.bufferFor(LiveTopic.MAP).snapshot().get(0).payload();
+        assertEquals("drawing", payload.entity());
+        assertEquals("updated", payload.action());
+        assertEquals(drawn.id().value().toString(), payload.drawing().drawingId());
+        assertNull(payload.mark());
+        assertNull(payload.layer());
+    }
+
+    @Test
+    void publishMapEventNeverPutsALayersGrantsOnTheWire() {
+        LiveUpdateRegistry registry = registry();
+        LayerId layerId = LayerId.random();
+        MapLayer granted = layer(layerId);
+        assertEquals(1, granted.grants().size(), "fixture must actually carry a grant");
+
+        registry.publishMapEvent(
+                new MapEvent(MapEvent.EntityType.LAYER, MapEvent.Action.UPDATED, layerId, granted));
+
+        MapEventPayload payload = (MapEventPayload) registry.bufferFor(LiveTopic.MAP).snapshot().get(0).payload();
+        assertEquals("layer", payload.entity());
+        assertEquals("Bravo team", payload.layer().name());
+        assertNull(payload.layer().grants(),
+                "docs/MAP-REWORK-PLAN.md §4.3: layer events over SSE never include grants");
+        assertNull(payload.layer().myAccess(), "myAccess is per-viewer and has no single value on a broadcast");
+    }
+
+    @Test
+    void mapTopicIsHonestlyLimitedAndHasNothingToReplayWhenNothingHasEverBeenPublished() {
         LiveUpdateRegistry registry = registry();
 
-        // Deliberate, documented gap: unlike fleet/devices/detection-events, marks has no
-        // live-query seed (would need a sixth constructor parameter -- see class javadoc). A
-        // viewer's first connection instead relies on its own GET /api/marks read.
-        assertEquals(List.of(), registry.replayFor(LiveTopic.MARKS, null));
+        // Deliberate, documented gap: unlike fleet/devices/detection-events, map has no live-query
+        // seed -- it would need two more constructor parameters AND could not be scoped per
+        // recipient from one shared buffer (see class javadoc). A viewer's first connection instead
+        // relies on its own GET /api/map/* reads, which are already scoped correctly.
+        assertEquals(List.of(), registry.replayFor(LiveTopic.MAP, null));
     }
 
     @Test

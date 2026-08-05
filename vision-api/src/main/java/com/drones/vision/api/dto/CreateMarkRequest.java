@@ -1,72 +1,48 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.support.EnumParsing;
 import com.drones.vision.application.mark.MarkSpec;
-import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.MarkKind;
 
-import java.util.Arrays;
-import java.util.stream.Collectors;
-
 /**
- * Request body for {@code POST /api/marks} (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire
+ * Request body for {@code POST /api/map/marks} (docs/MAP-REWORK-PLAN.md §4.2's frozen wire
  * contract) — a manual mark, dropped by a map click.
  *
- * <p>{@code kind} is matched case-insensitively against {@link MarkKind} names — same idiom as
- * {@link com.drones.vision.api.dto.GeofenceZoneRequest}/{@link SetLifecycleStateRequest} — throwing
- * {@link IllegalArgumentException} (→400 via {@link ApiExceptionHandler}) for
- * an unrecognized value, listing the valid ones. {@code position} is required; a missing one is
- * left to {@link MarkSpec}'s own compact-constructor null check to report, mirroring how {@link
- * com.drones.vision.api.dto.GeofenceZoneRequest#toSpec()} lets {@code GeofenceZoneSpec} validate
- * its own polygon.
+ * <p>{@code kind}/{@code affiliation} are matched case-insensitively against their enum names via
+ * {@link EnumParsing}, throwing {@link IllegalArgumentException} (→ 400 via {@link
+ * ApiExceptionHandler}) for an unrecognized value and listing the valid ones. Position is
+ * <em>flattened</em> into this record rather than nested, matching {@link MarkResponse}'s own shape
+ * — a mark is a point, and the round trip reads the same on both sides.
  *
- * @param kind     {@code "TARGET"}, {@code "HAZARD"}, {@code "POI"}, or {@code "FRIENDLY"}, matched
- *                 case-insensitively
- * @param label    short human-readable label; must not be blank
- * @param note     optional free-text detail; blank normalizes to {@code null}
- * @param position where to drop the mark
+ * @param layerId        which layer to create it on, or absent to let {@code LayerResolver} pick the
+ *                       caller's default (their first TEAM layer, else an auto-created PERSONAL one —
+ *                       never the COP layer directly)
+ * @param altitudeMeters metres, or absent if unknown
+ * @param kind           {@code UNIT}/{@code EQUIPMENT}/{@code HAZARD}/{@code POI}/{@code TARGET}
+ * @param affiliation    {@code FRIENDLY}/{@code HOSTILE}/{@code NEUTRAL}/{@code UNKNOWN}
+ * @param label          short human-readable label; must not be blank
+ * @param note           optional free-text detail; blank normalizes to {@code null}
  */
-public record CreateMarkRequest(String kind, String label, String note, PointRequest position) {
+public record CreateMarkRequest(String layerId, double latitude, double longitude, Double altitudeMeters,
+                                 String kind, String affiliation, String label, String note) {
 
     /**
      * Converts this request to the application-layer spec.
      *
      * @return the equivalent {@link MarkSpec}
-     * @throws IllegalArgumentException if {@code kind} is missing/unrecognized, or any field fails
-     *                                   {@link MarkSpec}'s own validation (e.g. a blank label or a
-     *                                   missing position)
+     * @throws IllegalArgumentException if {@code layerId} is malformed, {@code kind}/{@code
+     *                                   affiliation} is missing/unrecognized, the coordinates are out
+     *                                   of range, or {@code label} is blank
      */
     public MarkSpec toSpec() {
-        return new MarkSpec(toKind(kind), label, note, position == null ? null : position.toPosition());
-    }
-
-    static MarkKind toKind(String kind) {
-        if (kind != null) {
-            for (MarkKind candidate : MarkKind.values()) {
-                if (candidate.name().equalsIgnoreCase(kind)) {
-                    return candidate;
-                }
-            }
-        }
-        throw new IllegalArgumentException("Unknown kind: " + kind + " (valid values: "
-                + Arrays.stream(MarkKind.values()).map(Enum::name).collect(Collectors.joining(", ")) + ")");
-    }
-
-    /**
-     * One geo point on the wire — mirrors {@link com.drones.vision.api.dto.GeofenceZoneRequest
-     * .PolygonPointRequest}'s nested-request convention, but (unlike a polygon vertex) carries its
-     * own optional altitude, since a mark's position is a standalone {@link GeoPosition}, not one
-     * vertex of a zone whose altitude ceiling is a separate, zone-level field. Also reused by {@link
-     * PatchMarkRequest} for the drag-to-correct {@code position} field.
-     *
-     * @param latitude       degrees, range-validated by {@link GeoPosition}'s own compact constructor
-     * @param longitude      degrees, range-validated by {@link GeoPosition}'s own compact constructor
-     * @param altitudeMeters meters, or {@code null} if unknown
-     */
-    public record PointRequest(double latitude, double longitude, Double altitudeMeters) {
-
-        GeoPosition toPosition() {
-            return new GeoPosition(latitude, longitude, altitudeMeters);
-        }
+        return new MarkSpec(
+                MapRequests.optionalLayerId(layerId),
+                EnumParsing.require(MarkKind.class, "kind", kind),
+                EnumParsing.require(Affiliation.class, "affiliation", affiliation),
+                label,
+                note,
+                new PositionDto(latitude, longitude, altitudeMeters).toPosition());
     }
 }

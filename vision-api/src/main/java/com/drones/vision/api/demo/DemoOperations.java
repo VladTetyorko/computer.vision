@@ -2,13 +2,15 @@ package com.drones.vision.api.demo;
 
 import com.drones.vision.application.geofence.GeofenceService;
 import com.drones.vision.application.geofence.GeofenceZoneSpec;
+import com.drones.vision.application.map.MapAccessPolicy.Viewer;
+import com.drones.vision.application.map.MapLayerService;
 import com.drones.vision.application.mark.MarkService;
 import com.drones.vision.application.mark.MarkSpec;
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.domain.model.LayerId;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.model.ZoneKind;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -22,11 +24,22 @@ import java.util.function.Consumer;
 /**
  * The common-operational-picture half of the demo scenario: the geofence zones the fleet flies
  * inside and the tactical marks a crew would have dropped on the map, both created through their
- * own application services so the map, the live SSE {@code marks} topic and the geofence monitor
- * all see them exactly as they would a hand-placed one.
+ * own application services so the map, the live SSE {@code map} topic and the geofence monitor all
+ * see them exactly as they would a hand-placed one.
  *
  * <p>Both passes are name-idempotent: a second press adds neither a duplicate zone nor a duplicate
  * mark, so the button can be pressed repeatedly without turning the map into a pile.
+ *
+ * <h2>Which layer the demo marks land on (docs/MAP-REWORK-PLAN.md Wave C)</h2>
+ * The COP layer, explicitly — {@link MapLayerService#copLayerId()}, not the default layer {@code
+ * LayerResolver} would pick. A demo exists to show the shared picture, and the COP layer is the one
+ * every role can see; letting the marks fall onto the pressing user's own TEAM/PERSONAL layer would
+ * make them invisible to exactly the other-role windows a demo is usually being shown in.
+ *
+ * <p>Their affiliations follow docs/MAP-REWORK-PLAN.md §2.2's own old-kind → (kind, affiliation)
+ * migration table, so the seeded set matches what a pre-rework deployment's marks become after
+ * {@code V12__map_layers.sql} runs: {@code TARGET→(TARGET, HOSTILE)}, {@code HAZARD→(HAZARD,
+ * UNKNOWN)}, {@code POI→(POI, NEUTRAL)}, {@code FRIENDLY→(UNIT, FRIENDLY)}.
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.demo", name = "enabled", matchIfMissing = true)
@@ -44,10 +57,12 @@ public class DemoOperations {
 
     private final GeofenceService geofences;
     private final MarkService marks;
+    private final MapLayerService layers;
 
-    public DemoOperations(GeofenceService geofences, MarkService marks) {
+    public DemoOperations(GeofenceService geofences, MarkService marks, MapLayerService layers) {
         this.geofences = Objects.requireNonNull(geofences, "geofences must not be null");
         this.marks = Objects.requireNonNull(marks, "marks must not be null");
+        this.layers = Objects.requireNonNull(layers, "layers must not be null");
     }
 
     /**
@@ -82,32 +97,37 @@ public class DemoOperations {
     }
 
     /**
-     * Drops the demo's tactical marks, skipping any whose label is already on the board.
+     * Drops the demo's tactical marks onto the COP layer, skipping any whose label is already on the
+     * board.
      *
-     * @param ownership who owns the marks — the pressing user
-     * @param actor     who the marks are attributed to
-     * @param problems  sink for one human-readable line per mark that could not be created
+     * @param viewer   the pressing user — who the marks are owned by and attributed to, and whose
+     *                 access {@link MarkService} checks against the COP layer (any MANAGER/ADMIN may
+     *                 contribute to it; a PILOT pressing the demo button gets one {@code problems}
+     *                 line per mark rather than an error status, matching this class's
+     *                 fault-tolerant contract)
+     * @param problems sink for one human-readable line per mark that could not be created
      * @return how many marks this press actually created
      */
-    public int seedMarks(Ownership ownership, UserId actor, Consumer<String> problems) {
-        Objects.requireNonNull(ownership, "ownership must not be null");
-        Objects.requireNonNull(actor, "actor must not be null");
+    public int seedMarks(Viewer viewer, Consumer<String> problems) {
+        Objects.requireNonNull(viewer, "viewer must not be null");
         Objects.requireNonNull(problems, "problems must not be null");
         Set<String> existing = new LinkedHashSet<>();
+        LayerId cop;
         try {
-            marks.list().stream().map(Mark::label).forEach(existing::add);
+            marks.list(viewer).stream().map(Mark::label).forEach(existing::add);
+            cop = layers.copLayerId();
         } catch (RuntimeException e) {
             problems.accept("marks: " + describe(e));
             return 0;
         }
 
         int created = 0;
-        for (MarkSpec spec : markSpecs()) {
+        for (MarkSpec spec : markSpecs(cop)) {
             if (existing.contains(spec.label())) {
                 continue;
             }
             try {
-                marks.create(spec, ownership, actor);
+                marks.create(viewer, spec);
                 created++;
             } catch (RuntimeException e) {
                 problems.accept("mark " + spec.label() + ": " + describe(e));
@@ -127,18 +147,24 @@ public class DemoOperations {
                         null, true));
     }
 
-    private static List<MarkSpec> markSpecs() {
+    /**
+     * The five demo marks, each carrying the (kind, affiliation) pair docs/MAP-REWORK-PLAN.md §2.2's
+     * migration table assigns to its pre-rework kind — so a freshly seeded demo and a migrated
+     * deployment show the same symbology. Note "Demo ground team" is now {@code (UNIT, FRIENDLY)}:
+     * the old {@code MarkKind.FRIENDLY} is gone, since "whose it is" became {@link Affiliation}.
+     */
+    private static List<MarkSpec> markSpecs(LayerId layerId) {
         return List.of(
-                new MarkSpec(MarkKind.TARGET, "Demo contact 1", "Vehicle spotted on the northern track",
-                        position(0.012, 0.004, 0.0)),
-                new MarkSpec(MarkKind.TARGET, "Demo contact 2", "Second contact, moving south",
-                        position(-0.009, 0.011, 0.0)),
-                new MarkSpec(MarkKind.HAZARD, "Demo hazard", "Power line crossing the valley",
-                        position(0.004, -0.013, 40.0)),
-                new MarkSpec(MarkKind.FRIENDLY, "Demo ground team", "Ground team holding at the crossroads",
-                        position(-0.014, -0.006, 0.0)),
-                new MarkSpec(MarkKind.POI, "Demo launch point", "Where the demo fleet lifts off",
-                        position(0.0, 0.0, 0.0)));
+                new MarkSpec(layerId, MarkKind.TARGET, Affiliation.HOSTILE, "Demo contact 1",
+                        "Vehicle spotted on the northern track", position(0.012, 0.004, 0.0)),
+                new MarkSpec(layerId, MarkKind.TARGET, Affiliation.HOSTILE, "Demo contact 2",
+                        "Second contact, moving south", position(-0.009, 0.011, 0.0)),
+                new MarkSpec(layerId, MarkKind.HAZARD, Affiliation.UNKNOWN, "Demo hazard",
+                        "Power line crossing the valley", position(0.004, -0.013, 40.0)),
+                new MarkSpec(layerId, MarkKind.UNIT, Affiliation.FRIENDLY, "Demo ground team",
+                        "Ground team holding at the crossroads", position(-0.014, -0.006, 0.0)),
+                new MarkSpec(layerId, MarkKind.POI, Affiliation.NEUTRAL, "Demo launch point",
+                        "Where the demo fleet lifts off", position(0.0, 0.0, 0.0)));
     }
 
     /** A square polygon centred on one point — the simplest shape the geofence contract accepts. */

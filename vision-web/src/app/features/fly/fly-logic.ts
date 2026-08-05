@@ -106,7 +106,7 @@ export const TICKER_MAX_EVENTS = 4;
  * only where each button sits in the rail moved. **`layers` was removed** (per direct user request)
  * — the detection-boxes rendering-mode control it used to hold its own drawer for now lives inside
  * the `cv` (Detection) drawer instead (`cv-control-panel.html`'s own "Boxes rendering" section). */
-export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'help';
+export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'map' | 'help';
 
 /**
  * `Esc`'s own "closest thing open, first" priority (docs/UI-REDESIGN-PLAN.md D-D: "Esc calls

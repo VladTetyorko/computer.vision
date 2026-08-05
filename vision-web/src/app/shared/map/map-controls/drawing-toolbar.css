@@ -1,0 +1,129 @@
+:host {
+  display: block;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+/* `card` is the Command variant: a real panel card floating over the map. Per frontend-style §2,
+   a control over a *map* on a themed page is a `--panel-raised` + `--border` + `--shadow` card —
+   never `--hud-*`, which is only legal inside a `.surface-dark` video enclave. Inside the cockpit's
+   dark enclave these same tokens resolve dark, so one rule serves both hosts. */
+.toolbar.card {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-8) var(--space-16);
+  gap: var(--space-8);
+}
+
+.axis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.toolbar.card .axis {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.toolbar.card .label {
+  margin-bottom: 0;
+}
+
+.stop {
+  align-self: flex-start;
+}
+
+.actions {
+  flex-wrap: wrap;
+}
+
+/* ---- Colour swatches ---------------------------------------------------------------------------
+   Five fixed tokens (`core/map-data/drawings-logic.ts#DRAWING_COLOR_TOKENS`), each the *name* the
+   map resolves to a stroke colour. The swatch shows the same intent using this app's own semantic
+   tokens, so nothing here introduces a colour the design system doesn't already own. */
+
+.swatches {
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.swatch {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--tone, var(--color-info));
+  cursor: pointer;
+  flex: none;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.swatch:hover,
+.swatch:focus-visible {
+  border-color: var(--text-muted);
+}
+
+/* Selection is the app's one `--color-info` ring (frontend-style §4). */
+.swatch.active {
+  border-color: var(--color-info);
+  box-shadow: 0 0 0 2px var(--color-info-soft);
+}
+
+.swatch.tone-accent {
+  --tone: var(--color-info);
+}
+
+.swatch.tone-danger {
+  --tone: var(--color-danger);
+}
+
+.swatch.tone-warn {
+  --tone: var(--color-warn);
+}
+
+.swatch.tone-success {
+  --tone: var(--color-success);
+}
+
+.swatch.tone-neutral {
+  --tone: var(--text-faint);
+}
+
+.selected-editor {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
+/* ---- Responsive: bigger targets and a full-width mode row on phones/touch --------------------- */
+
+@media (max-width: 600px), (pointer: coarse) {
+  .segmented {
+    width: 100%;
+  }
+
+  .segmented > .btn {
+    flex: 1;
+    min-height: 2.5rem;
+  }
+
+  .swatch {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  /* A floating card must not eat a phone screen — it stacks like the drawer variant. */
+  .toolbar.card .axis {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -5,7 +5,12 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
+import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { MarksStore } from '../../core/map-data/marks-store';
+import { LayersStore } from '../../core/map-data/layers-store';
+import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
+import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
 
 /** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
  * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
@@ -18,7 +23,7 @@ const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
  * `TelemetryStore`/`DetectionsStore`/`Router`, exactly what the page injected directly before this
  * refactor. `TelemetryStore`/`DetectionsStore` stay listed in `LivePage`'s own `providers` array
  * (unchanged) alongside this facade, so this facade and the page's child components
- * (`<vision-telemetry-osd>`, `<vision-detections-strip>`, `<vision-live-map>`, `<vision-stream-info>`)
+ * (`<vision-telemetry-osd>`, `<vision-detections-strip>`, `<vision-tactical-map>`, `<vision-stream-info>`)
  * still DI-share the exact same store instances as before — only *who injects them* moved.
  *
  * `railOpen`/`mapInsetVisible` are non-exclusive toggles (persisted, but not mutually exclusive with
@@ -35,6 +40,19 @@ export class LiveFacade {
   readonly settings = inject(SettingsStore);
   readonly telemetry = inject(TelemetryStore);
   readonly detections = inject(DetectionsStore);
+
+  /**
+   * The two shared operational-picture stores (both `providedIn: 'root'`, started at boot) —
+   * **new here** (docs/MAP-REWORK-PLAN.md §5.1 Wave D's own bug fix): this page's map inset used to
+   * silently drop zones and marks, showing the operator a different picture from the one Command and
+   * the Fly cockpit were looking at. `<vision-tactical-map>` now gets both, read-only for zones and
+   * click/drag-interactive for marks, exactly as the other two hosts do.
+   */
+  readonly geofence = inject(GeofenceStore);
+  readonly marks = inject(MarksStore);
+  /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/MAP-REWORK-PLAN.md §5.2). */
+  readonly layers = inject(LayersStore);
+  readonly drawings = inject(DrawingsStore);
 
   private readonly deviceIdSignal = signal<string | undefined>(undefined);
 
@@ -91,6 +109,29 @@ export class LiveFacade {
    * (docs/UX-DESIGN.md §5.2).
    */
   readonly hasTelemetry = computed(() => (this.device()?.capabilities ?? []).includes('TELEMETRY'));
+
+  // --- Map inset (docs/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
+  // `<vision-tactical-map>` is dumb — the deleted `<vision-live-map>` read this facade's own
+  // `TelemetryStore` through DI, the new one takes inputs — so the single followed marker is built
+  // here from the same trail/latest signals. This route carries a bare `deviceId` and no asset
+  // context at all, so the device's own id/name is what the marker is keyed and labelled by.
+
+  /** Switches the map into follow mode; `null` (nothing to follow) before the device has loaded. */
+  readonly mapFollowAssetId = computed(() => this.device()?.id ?? null);
+
+  /** `<vision-tactical-map>`'s `[assets]` — 0 or 1 markers (empty until a position exists). */
+  readonly mapAssets = computed(() => {
+    const device = this.device();
+    if (!device) {
+      return [];
+    }
+    return followMarkers({
+      assetId: device.id,
+      displayName: device.name,
+      trail: this.telemetry.trail(),
+      latest: this.telemetry.latest(),
+    });
+  });
 
   readonly optionPairs = computed(() =>
     Object.entries(this.device()?.options ?? {}).map(([key, value]) => ({ key, value })),

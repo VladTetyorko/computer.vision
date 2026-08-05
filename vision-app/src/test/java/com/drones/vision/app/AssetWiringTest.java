@@ -17,7 +17,9 @@ import com.drones.vision.api.controller.FleetController;
 import com.drones.vision.api.controller.FlightCommandController;
 import com.drones.vision.api.controller.GeofenceController;
 import com.drones.vision.api.controller.GroupAdminController;
-import com.drones.vision.api.controller.MarksController;
+import com.drones.vision.api.controller.MapDrawingsController;
+import com.drones.vision.api.controller.MapLayersController;
+import com.drones.vision.api.controller.MapMarksController;
 import com.drones.vision.api.controller.SimulationController;
 import com.drones.vision.api.controller.UserAdminController;
 import com.drones.vision.application.identity.ActivityService;
@@ -33,6 +35,10 @@ import com.drones.vision.application.flight.FlightCommandService;
 import com.drones.vision.application.geofence.GeofenceMonitor;
 import com.drones.vision.application.geofence.GeofenceService;
 import com.drones.vision.application.flight.ManualControlService;
+import com.drones.vision.application.map.DrawingService;
+import com.drones.vision.application.map.LayerResolver;
+import com.drones.vision.application.map.MapAccessPolicy;
+import com.drones.vision.application.map.MapLayerService;
 import com.drones.vision.application.mark.MarkService;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.application.device.ProbeService;
@@ -40,6 +46,7 @@ import com.drones.vision.application.replay.ReplayService;
 import com.drones.vision.application.simulation.SimulationService;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.domain.model.FeedSpec;
+import com.drones.vision.domain.model.LayerKind;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
@@ -47,9 +54,11 @@ import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import com.drones.vision.domain.port.out.CategoryRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.domain.port.out.DrawingRepositoryPort;
 import com.drones.vision.domain.port.out.FeedTransmitterPort;
 import com.drones.vision.domain.port.out.FlightCommandPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
 import com.drones.vision.domain.port.out.MarkRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
 import com.drones.vision.domain.port.out.TelemetrySourcePort;
@@ -62,6 +71,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -307,13 +317,45 @@ class AssetWiringTest {
     @Autowired
     private MarkRepositoryPort markRepositoryPort;
 
-    /** docs/TACTICAL-MARKS-PLAN.md M4: the shared tactical-marks CRUD/geolocate service. */
+    /** docs/TACTICAL-MARKS-PLAN.md M4, reworked docs/MAP-REWORK-PLAN.md §3: the mark CRUD/geolocate/verify/promote service. */
     @Autowired
     private MarkService markService;
 
-    /** docs/TACTICAL-MARKS-PLAN.md M4: {@code GET/POST /api/marks}, {@code POST /api/marks/geolocate}, {@code PATCH}/{@code DELETE /api/marks/{id}}. */
+    /** docs/MAP-REWORK-PLAN.md §3: the map's authorization model, shared by every map service. */
     @Autowired
-    private MarksController marksController;
+    private MapAccessPolicy mapAccessPolicy;
+
+    /** docs/MAP-REWORK-PLAN.md §3: the shared layer-lookup/default-layer collaborator. */
+    @Autowired
+    private LayerResolver layerResolver;
+
+    /** docs/MAP-REWORK-PLAN.md §3: layer CRUD + grants. */
+    @Autowired
+    private MapLayerService mapLayerService;
+
+    /** docs/MAP-REWORK-PLAN.md §3: drawings (line/polygon/arrow/text). */
+    @Autowired
+    private DrawingService drawingService;
+
+    /** docs/MAP-REWORK-PLAN.md §2.3: the layer store (in-memory by default). */
+    @Autowired
+    private MapLayerRepositoryPort mapLayerRepositoryPort;
+
+    /** docs/MAP-REWORK-PLAN.md §2.3: the drawing store (in-memory by default). */
+    @Autowired
+    private DrawingRepositoryPort drawingRepositoryPort;
+
+    /** docs/MAP-REWORK-PLAN.md §4.1: {@code /api/map/layers} CRUD + grants. */
+    @Autowired
+    private MapLayersController mapLayersController;
+
+    /** docs/MAP-REWORK-PLAN.md §4.1: {@code /api/map/marks} CRUD + geolocate/verify/promote. */
+    @Autowired
+    private MapMarksController mapMarksController;
+
+    /** docs/MAP-REWORK-PLAN.md §4.1: {@code /api/map/drawings} CRUD. */
+    @Autowired
+    private MapDrawingsController mapDrawingsController;
 
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
@@ -362,7 +404,32 @@ class AssetWiringTest {
         assertNotNull(mavlinkManualControlSender, "MavlinkManualControlSender bean must be registered (docs/RC-CONTROL-PHASE1-PLAN.md R4)");
         assertNotNull(markRepositoryPort, "MarkRepositoryPort bean must be registered (docs/TACTICAL-MARKS-PLAN.md M2)");
         assertNotNull(markService, "MarkService bean must be registered (docs/TACTICAL-MARKS-PLAN.md M4)");
-        assertNotNull(marksController, "MarksController must resolve its constructor dependencies (docs/TACTICAL-MARKS-PLAN.md M4)");
+        assertNotNull(mapAccessPolicy, "MapAccessPolicy bean must be registered (docs/MAP-REWORK-PLAN.md §3)");
+        assertNotNull(layerResolver, "LayerResolver bean must be registered (docs/MAP-REWORK-PLAN.md §3)");
+        assertNotNull(mapLayerService, "MapLayerService bean must be registered (docs/MAP-REWORK-PLAN.md §3)");
+        assertNotNull(drawingService, "DrawingService bean must be registered (docs/MAP-REWORK-PLAN.md §3)");
+        assertNotNull(mapLayerRepositoryPort, "MapLayerRepositoryPort bean must be registered (docs/MAP-REWORK-PLAN.md §2.3)");
+        assertNotNull(drawingRepositoryPort, "DrawingRepositoryPort bean must be registered (docs/MAP-REWORK-PLAN.md §2.3)");
+        assertNotNull(mapLayersController, "MapLayersController must resolve its constructor dependencies (docs/MAP-REWORK-PLAN.md §4.1)");
+        assertNotNull(mapMarksController, "MapMarksController must resolve its constructor dependencies (docs/MAP-REWORK-PLAN.md §4.1)");
+        assertNotNull(mapDrawingsController, "MapDrawingsController must resolve its constructor dependencies (docs/MAP-REWORK-PLAN.md §4.1)");
+    }
+
+    /**
+     * docs/MAP-REWORK-PLAN.md §3: the COP layer is ensured at startup, in both persistence modes.
+     * This context boots with the default {@code vision.persistence.enabled=false}, so the
+     * {@code mapLayerBootstrapRunner} {@code ApplicationRunner} is what created it — and because
+     * {@code LayerResolver#copLayerId()} is a synchronized find-or-create, asking again must return
+     * the same id rather than mint a second COP layer.
+     */
+    @Test
+    void theCopLayerExistsOnceAfterStartup() {
+        assertNotNull(mapLayerService.copLayerId(), "the COP layer must exist after startup");
+        assertEquals(mapLayerService.copLayerId(), mapLayerService.copLayerId(),
+                "copLayerId() is idempotent -- a second call must not create a second COP layer");
+        assertEquals(1, mapLayerRepositoryPort.findAll().stream()
+                        .filter(layer -> layer.kind() == LayerKind.COP).count(),
+                "exactly one COP layer exists per deployment");
     }
 
     /**

@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DetectionEvent;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.MapEvent;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 
@@ -40,6 +41,11 @@ public final class NoopLiveUpdatePublisher implements LiveUpdatePublisherPort {
 
     @Override
     public void publishDetectionEvent(DetectionEvent event) {
+        // no-op
+    }
+
+    @Override
+    public void publishMapEvent(MapEvent event) {
         // no-op
     }
 }

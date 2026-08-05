@@ -1,0 +1,62 @@
+/* Panel *content* only — the host (a `<vision-side-panel>` drawer, a card) owns the surface,
+   mirroring `features/fly/marks-panel.css`'s own `display: contents` convention. */
+
+:host {
+  display: contents;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.axis {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.axis-options {
+  flex-wrap: wrap;
+}
+
+.axis-options .btn {
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* The one selection language (frontend-style §4) applied to a picker button: the same
+   `--color-info` fill every other "this is the active choice" control in the app uses
+   (`features/fly/marks-panel.css`'s own kind picker set this precedent). */
+.axis-options .btn.active {
+  background: var(--color-info);
+  border-color: var(--color-info);
+  color: var(--color-on-info);
+}
+
+.actions {
+  flex-wrap: wrap;
+}
+
+/* An active button paints its own text `--color-on-info`; the swatch must follow so the frame
+   stays visible against the filled background. */
+.axis-options .btn.active .aff-swatch {
+  color: var(--color-on-info);
+}
+
+/* ---- Responsive: at drawer/phone width the two axes become full-width stacks with bigger
+   targets, rather than wrapping into ragged two-per-row groups. --------------------------------- */
+
+@media (max-width: 600px), (pointer: coarse) {
+  .axis-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-8);
+  }
+
+  .axis-options .btn {
+    justify-content: flex-start;
+    min-height: 2.5rem;
+  }
+}

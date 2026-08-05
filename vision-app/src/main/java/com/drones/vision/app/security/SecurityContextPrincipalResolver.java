@@ -1,14 +1,22 @@
 package com.drones.vision.app.security;
 
 import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.application.map.MapAccessPolicy;
 import com.drones.vision.application.scope.ScopeResolver;
 import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.Membership;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.Role;
+import com.drones.vision.domain.model.User;
 import com.drones.vision.domain.model.UserId;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * The {@link PrincipalResolver} wired when {@code vision.auth.enabled=true} — reads the
@@ -29,6 +37,17 @@ import java.util.Objects;
  * follow-up if a hot path ever reads it repeatedly. The {@code User} is taken straight from the
  * session principal ({@link VisionUserDetails#user()}), so resolving a scope needs no extra
  * repository hit beyond the group/assignment reads {@code ScopeResolver} itself does.
+ *
+ * <p><strong>Map viewer (docs/MAP-REWORK-PLAN.md §4).</strong> {@link #viewer()} deliberately does
+ * <em>not</em> walk the group tree itself. {@link ScopeResolver} already owns that traversal
+ * ({@code DefaultScopeResolver#subtreeOf}, breadth-first with cycle-breaking), and for a MANAGER its
+ * result — {@code scope().groups()} — <em>is</em> the expanded subtree. So the viewer's group set is
+ * simply the user's own direct memberships unioned with whatever {@link ScopeResolver} resolved:
+ * one traversal, one implementation, reused rather than duplicated. The union matters in both
+ * directions: an ADMIN resolves to {@code UNBOUNDED} (no groups at all, but {@link Role#ADMIN}
+ * already grants MANAGE everywhere), and a PILOT resolves to {@code ASSIGNED_ASSETS} (no groups
+ * either), so their direct memberships are the only thing that makes their own team's layer
+ * reachable — exactly the trap {@link MapAccessPolicy}'s javadoc warns about.
  */
 public final class SecurityContextPrincipalResolver implements PrincipalResolver {
 
@@ -51,6 +70,27 @@ public final class SecurityContextPrincipalResolver implements PrincipalResolver
     @Override
     public VisibilityScope scope() {
         return scopeResolver.scopeFor(principal().user());
+    }
+
+    @Override
+    public MapAccessPolicy.Viewer viewer() {
+        User user = principal().user();
+        Set<GroupId> groups = new LinkedHashSet<>();
+        user.memberships().stream().map(Membership::groupId).forEach(groups::add);
+        groups.addAll(scopeResolver.scopeFor(user).groups());
+        return new MapAccessPolicy.Viewer(user.id(), groups, topRoleOf(user));
+    }
+
+    /**
+     * The highest {@link Role} the user holds anywhere, or {@link Role#PILOT} when they hold none —
+     * {@link MapAccessPolicy.Viewer#topRole()} is non-nullable and the least-privileged role is the
+     * honest answer for a membership-less account.
+     */
+    private static Role topRoleOf(User user) {
+        return user.memberships().stream()
+                .map(Membership::role)
+                .max(Comparator.naturalOrder())
+                .orElse(Role.PILOT);
     }
 
     private VisionUserDetails principal() {

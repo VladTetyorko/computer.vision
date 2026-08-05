@@ -1,0 +1,157 @@
+:host {
+  display: contents;
+}
+
+.manager {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.create-trigger {
+  align-self: flex-start;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-8);
+}
+
+.actions {
+  flex-wrap: wrap;
+}
+
+/* ---- Layer rows -------------------------------------------------------------------------------
+   One chip per row (frontend-style §5): the layer *kind* is the chip; the viewer's own access level
+   and the counts are muted text, not a second and third chip. -------------------------------------- */
+
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.layer-row {
+  border: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.layer-head {
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.layer-name {
+  font-weight: 600;
+  min-width: 0;
+  flex: 1;
+}
+
+.layer-meta {
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+  font-size: 0.72rem;
+}
+
+/* Numbers right, tabular (frontend-style §5). */
+.counts {
+  text-align: right;
+}
+
+.layer-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* ---- Grants editor ---------------------------------------------------------------------------- */
+
+.grants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
+.grant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.grant-row {
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.grant-subject {
+  flex: 1;
+  min-width: 0;
+}
+
+.grant-type {
+  font-size: 0.72rem;
+  flex: none;
+}
+
+.grant-row select {
+  width: auto;
+  flex: none;
+}
+
+.add-grant {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  border-top: 1px dashed var(--border);
+  padding-top: var(--space-8);
+}
+
+/* ---- Responsive: the grant row stacks rather than squeezing a select to nothing --------------- */
+
+@media (max-width: 600px), (pointer: coarse) {
+  .grant-row {
+    flex-wrap: wrap;
+  }
+
+  .grant-row select,
+  .grant-row .btn {
+    min-height: 2.5rem;
+  }
+
+  .layer-actions .btn {
+    min-height: 2.5rem;
+  }
+}

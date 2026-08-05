@@ -24,10 +24,13 @@ Angular SPA (driving adapter): the product UI — **Fly** (the operator cockpit,
   - **`UsageSummary`** (docs/design/10-replay.md's frozen wire contract, docs/NAV-IA-REDESIGN-PLAN.md Wave 4 — mirrors `dto.UsageSummaryResponse`, one row of `GET /api/usages`): `{usageId, assetId, assetName, startedAt, endedAt?, durationSeconds?, sampleCount}` — the fleet-wide flight list behind the replay library (`features/replay/replay-library.ts`), distinct from `AssetUsage` (that one is always nested under one already-known asset's own `AssetDetails#recentUsages`; this one is the cross-asset query `AssetUsageRepositoryPort` never had before this wave). `assetName` is resolved server-side for display, `''` if the asset itself is gone; `endedAt`/`durationSeconds` are each independently absent (not `null`) while the flight is still open, same convention as `AssetUsage.endedAt` above.
   - **`FleetSummary`/`CategoryCounts`/`AssetAttention`** (docs/MVP3-PLAN.md C-a/C-c — mirror `dto.FleetSummaryResponse`/`CategoryCountsResponse`/`AssetAttentionResponse`, the body of `GET /api/fleet/summary`): `CategoryCounts` every field required (nothing nullable server-side); `AssetAttention.streamId`/`batteryPercent`/`telemetryAgeMs` absent (not `null`) per that DTO's own doc comment, but `lifecycle` itself is **required**, unlike `AssetSummary#lifecycle?` — a brand-new endpoint with no pre-CW-a backend to stay optional-compatible with. No `sourceState` field exists (the backend deliberately didn't invent a "reconnecting"/"degraded" read) — `features/command/command-logic.ts`'s attention rules key off `batteryPercent`/`telemetryAgeMs`/`openEventCount` only. **`flightMode?`/`armed?`/`failsafe?`** (docs/FC-INTEGRATIONS-PLAN.md F-d) are this cycle's own additions, same latest-telemetry-derivation absence rule as `batteryPercent` — see that interface's own doc comment for why GPS quality is deliberately *not* among these three. Backs `features/command/**` — see that section below.
   - **`FlightState`** (docs/FC-INTEGRATIONS-PLAN.md, frozen wire contract — mirrors `domain.model.FlightState`/`dto.TelemetrySampleResponse#flightState`): `firmware?`/`mode?`/`armed?`/`failsafe?`/`gpsFixType?`/`satellites?`/`hdop?`/`rssiPercent?`/`armingBlockers?`, every field independently absent except that the backend also omits `armingBlockers` when empty (never `null`) — every reader treats a missing one as "no blockers known". `TelemetrySample` gains `flightState?: FlightState` and `extra?: Record<string, number>` (the previously-dropped-at-this-DTO `Telemetry.extra` map, now surfaced — `groundspeedMps` is the one key this app reads, `features/fly/fly-osd.ts`). See `core/telemetry/flight-state-logic.ts` below for every place this app decodes `FlightState` into UI.
-  - **Live updates** (docs/REALTIME-PLAN.md §4, Phase R-c — mirror the `com.drones.vision.api.dto` "Live updates" DTOs 1:1): `LiveConnected` (`connection` SSE event payload), `LiveEvent` (mirrors `EventResponse` — the domain's generic `Event`, **not** `DetectionEvent`; see its own doc comment for the full distinction), `LiveEnvelope` (a discriminated union on `type`: `'fleet'`→`AssetSummary[]`, `'telemetry'`→`TelemetrySample[]`, `'detections'`→`DetectionResult`, `'event'`→`LiveEvent`, `'devices'`→`DevicesSnapshot`, `'detection-events'`→`DetectionEvent`, `'marks'`→`MarkEvent`), `UpdateLiveTopicsRequest`/`LiveSubscription` (the `PATCH` request/response). **The first wire shapes in this app that don't arrive through `VisionApi`/`HttpClient`** — `LiveConnected`/`LiveEnvelope` are read straight off a raw `EventSource` by `core/live/live-store.ts`; still mirrored here 1:1 with their Java DTOs per this file's own convention, since they're exactly as much "the wire contract" as anything fetched the usual way.
+  - **Live updates** (docs/REALTIME-PLAN.md §4, Phase R-c — mirror the `com.drones.vision.api.dto` "Live updates" DTOs 1:1): `LiveConnected` (`connection` SSE event payload), `LiveEvent` (mirrors `EventResponse` — the domain's generic `Event`, **not** `DetectionEvent`; see its own doc comment for the full distinction), `LiveEnvelope` (a discriminated union on `type`: `'fleet'`→`AssetSummary[]`, `'telemetry'`→`TelemetrySample[]`, `'detections'`→`DetectionResult`, `'event'`→`LiveEvent`, `'devices'`→`DevicesSnapshot`, `'detection-events'`→`DetectionEvent`, `'map'`→`MapEventPayload`), `UpdateLiveTopicsRequest`/`LiveSubscription` (the `PATCH` request/response). **The first wire shapes in this app that don't arrive through `VisionApi`/`HttpClient`** — `LiveConnected`/`LiveEnvelope` are read straight off a raw `EventSource` by `core/live/live-store.ts`; still mirrored here 1:1 with their Java DTOs per this file's own convention, since they're exactly as much "the wire contract" as anything fetched the usual way.
   - **`ProbeDeviceRequest`/`ProbeDeviceResult`** (docs/UX-REWORK-PLAN.md §U-d — `POST /api/devices/probe`'s pinned request/response, the onboarding wizard's Test step) and **`AssetSummary.hasImage?`** (the asset image endpoint pair's own presence flag; `AssetDetails` inherits it) are this cycle's own additions, coded against the plan's pinned contract. `hasImage` is optional for the same reason `lifecycle?` is — a backend predating the image endpoints simply omits it, and every reader (`features/asset-detail/asset-detail.ts#assetImageSrc`) treats an absent value as "no photo", never a crash. See this file's own U-d section below for the full write-up and live-verification list.
   - **`ZoneKind`/`GeofenceZone`/`GeofenceZoneRequest`** (docs/OPS-CORE-PLAN.md §G's frozen wire contract — `GET/POST /api/geofences`, `PUT/DELETE /api/geofences/{id}`) — mirror `dto.GeofenceZoneResponse`/`GeofenceZoneRequest` exactly; `polygon` vertices are `{latitude, longitude}` only (a zone's own `maxAltitudeMeters`, optional/absent for "no ceiling", is the one altitude concept a zone carries). `GeofenceZoneRequest` is a **wholesale-replace** body — `PUT` has no partial-patch form, see `core/geofence/geofence-store.ts`'s own doc comment. Backs `core/geofence/**` — see that section below.
-  - **`MarkKind`/`MarkStatus`/`MarkSource`/`Mark`/`CreateMarkRequest`/`GeolocateMarkRequest`/`PatchMarkRequest`/`MarkEvent`** (docs/TACTICAL-MARKS-PLAN.md §4/§5's frozen wire contract — `GET/POST /api/marks`, `POST /api/marks/geolocate`, `PATCH/DELETE /api/marks/{id}`, plus the `marks` `GET /api/live` topic) — mirror `dto.MarkResponse`/`CreateMarkRequest`/`GeolocateMarkRequest`/`PatchMarkRequest`/`MarkPayload` exactly; `Mark.position`/`CreateMarkRequest.position` reuse `GeoPosition` verbatim (no second geo type). `PatchMarkRequest` is a **true partial patch** (every field optional, unlike `GeofenceZoneRequest`'s wholesale-replace) — used for annotation, drag-to-correct (`position` only), and clear (`status: 'CLEARED'` only) alike. `MarkEvent {action: 'created'|'updated'|'cleared', mark}` is the `marks` live-topic payload — **deliberately not snapshot-on-connect** (unlike `detection-events`): a fresh `GET /api/live` connection gets no backlog on this topic, so `core/marks/marks-store.ts` always does its own initial `GET /api/marks` first and merges live deltas on top, never relying on the live channel alone. Backs `core/marks/**` — see that section below.
+  - **The map COP: `Affiliation`/`MarkKind`/`MarkStatus`/`MarkSource`/`VerificationState`/`LayerKind`/`AccessLevel`/`DrawKind`/`GrantSubjectType`, `LayerGrant`/`MapLayer`/`CreateLayerRequest`/`RenameLayerRequest`/`SetLayerGrantsRequest`, `MapMark`/`CreateMarkRequest`/`GeolocateMarkRequest`/`PatchMarkRequest`/`VerifyMarkRequest`/`PromoteMarkRequest`, `PositionDto`/`MapDrawingResponse`/`CreateDrawingRequest`/`PatchDrawingRequest`, `MapEventPayload`** (docs/MAP-REWORK-PLAN.md §4's frozen wire contract — everything under `/api/map/**` plus the `map` `GET /api/live` topic). **Replaces the whole `/api/marks` surface** the TACTICAL-MARKS wave shipped: that base path, the old `Mark`/`MarkEvent` types and the `marks` SSE topic are all deleted (§4's own "breaking change is fine — the SPA in this repo is the only client"). Three things to know before using them:
+    - **`MapMark`'s position is flat** (`latitude`/`longitude`/`altitudeMeters`), not the old nested `GeoPosition` — `core/map-data/mark-logic.ts#markPosition` is the one place that reassembles it, and `#toTacticalMark` the one place it becomes the map's display model. `PatchMarkRequest` stays a **true partial patch** (annotation, drag-to-correct via the two flat coords, clear via `status` alone).
+    - **`MapLayer.myAccess` is server-resolved** (`MapAccessPolicy`, §3's max-of-the-matching-rules) and `grants` is present **only when `myAccess === 'MANAGE'`**, never over SSE — a reader must treat `grants: undefined` as "not mine to see", never "no grants". `AccessLevel` is the one enum this app really does compare by rank; that ranking lives once, in `core/map-data/layers-logic.ts#atLeast`.
+    - **`MapEventPayload {entity, action, layerId, mark?, drawing?, layer?}`** is the `map` live-topic payload — one always-on topic for all three entities, with exactly one of the three objects present. Like the old `marks` topic it is **not snapshot-on-connect** (every `core/map-data/**` store does its own initial `GET` and folds deltas on top), and unlike every other topic it is **filtered per connection** server-side, so nothing on this side ever filters map data for visibility. Backs `core/map-data/**` — see that section below.
   - **`UsageRecording`** (docs/OPS-CORE-PLAN.md §R's frozen wire contract — `GET /api/usages/{usageId}/recording`) — mirrors `dto.UsageRecordingResponse`: `{available, url?, start?, durationSeconds?}`, the latter three omitted (not `null`) whenever `available` is `false`. `url` is mediamtx's own playback `/get` URL for `[start, start+durationSeconds)` — never proxied, same absolute-origin rule as `whepUrl`. Backs `features/replay/**`'s video pane/clip export — see that section below.
   - **`Role`/`Membership`/`MeResponse`** (docs/U-AUTH-PLAN.md wave 3's frozen contract, this app's own wave 4) — `Role = 'PILOT'|'MANAGER'|'ADMIN'`; `Membership {groupId, groupName, role}`; `MeResponse {userId, username, displayName, email, memberships: Membership[], topRole: Role, authEnabled: boolean}`, the body of `GET /api/auth/me`/`POST /api/auth/login`. `authEnabled` is what lets the SPA know whether a login screen makes sense at all — see the dedicated `core/auth/**` section below for how `AuthStore` uses it. No `NON_NULL`-style optionality here — every field is always present on a 200.
   - **Org-scope types** (docs/U-SCOPE-PLAN.md, U-e slice 2's frozen contract; waves 1–2 backend done) — `UserMembership {groupId, role}` (mirrors `UserResponse.MembershipView` — deliberately **not** `Membership` above: the admin-list row carries no `groupName`, the org UI resolves it against the groups list it already loads); `UserSummary {userId, username, displayName, email, enabled, memberships: UserMembership[], topRole?}` (`topRole` **optional** — a membership-less user has none, backend returns `null`); `CreateUserRequest {username, displayName, email, password, memberships?, enabled?}`; `GroupSummary {id, name, parentGroupId?}` (absent parent = root); `CreateGroupRequest {name, parentGroupId?}`; `AssignedPilot {userId}` (mirrors `PilotResponse`); `Assignment {assetId}` (mirrors `AssignmentResponse`); `AuditEntry {id, occurredAt, actor, action, targetType, targetId, summary, details}` (mirrors `AuditEntryResponse` — `action`/`targetType` left as plain strings, `core/org/org-logic.ts#formatActivity` tolerates an unrecognized value rather than a closed union a new backend action would break). Back `core/org/**` (users/groups), `features/asset-detail/pilots-card.ts` (assignment), `features/activity/**` (activity) — see the dedicated section below.
@@ -99,7 +102,7 @@ The app's default landing page and the operator persona's one job: *flies ONE dr
   - **Geofence zones, read-only (docs/OPS-CORE-PLAN.md §G-c, new)** — `[zones]="geofence.zones()"` passed straight to the cockpit's own `<vision-live-map>` (`GeofenceStore` injected root-wide, no page-local fetch); same styles as Command's own zones layer, no click affordance — see `core/geofence/**`'s own section above.
   - **Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W, new)** — `<vision-weather-chip>` inside `<vision-fly-osd>`'s own chip bar (that component injects `WeatherStore` from `CockpitPage`'s `providers` directly, same DI-sharing idiom as `TelemetryStore`), centered on the flown asset's own live-telemetry fix (falling back to `AssetDetails.lastKnownPosition` before one arrives) with `windLimitMps` read from `AssetDetails.attributes['windLimitMps']` — see `core/weather/**`'s own section above.
   - **CV control panel (docs/CV-CONTROL-PLAN.md Wave E, new; boxes-mode + Classes rework and `layers` merge, per direct user request)** — `<vision-cv-control-panel>` (`features/fly/cv-control-panel.ts`/`.html`/`.css`, pure logic in `cv-control-panel-logic.ts`+`.spec.ts`), a HUD toggle button + drawer in `.hud-header` (right of the flight-command cluster, hidden with the rest of the controls in watch mode) — model picker, confidence/inference-rate sliders, a class-filter chip checklist, a **Boxes rendering** section (the Overlay/Burned in/Off segmented control, shortcut `B` — formerly the standalone `layers` drawer's only content; the component gained a plain `boxesMode` input + `boxesModeChange` output for it, not routed through `SettingsStore` since it's a client-side rendering preference, not part of the `PipelineSettings` wire contract), and detection on/off. Drawer subtitle is now "Model · classes · confidence · boxes". **Classes flow** (top to bottom): status line → quick-actions row (the "+ People, vehicles & buildings" preset, now primary `.btn`, plus a "Clear all" button once the filter is non-empty) → a search box that filters the chip checklist live and doubles as the free-text "add" input once nothing matches → the chip checklist itself, each chip a `<span class="class-chip">` shell around a `.chip-label` (click toggles) and, only while checked, a trailing `.chip-remove` "×" (same toggle, explicit affordance); checked chips sort first (`sortSelectedFirst`, a no-op while the filter is `[]`/"all"). New pure helpers `filterLabelsByQuery`/`hasExactLabelMatch`/`sortSelectedFirst` in `cv-control-panel-logic.ts`; the old `removeLabel`/`removeClass` (superseded by `toggleChip`, which — unlike `removeLabel` — handles the `labelFilter === []` "all" edge case) were deleted as dead code. See this file's own dedicated CV-CONTROL-PLAN Wave E changelog section at the end for the full write-up (predates the boxes/Classes rework above).
-  - **Marks — the shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5, new)** — `[marks]="marks.marks()"`/`[selectedMarkId]="marks.selectedMarkId()"`/`(markSelected)`/`(markMoved)`/`(mapClicked)` wired straight to `CockpitFacade.marks` (a public `inject(MarksStore)`, mirroring `geofence` above) on the cockpit's own `<vision-live-map>`. A new `marks` tool-rail drawer (`<vision-marks-panel>`, `features/fly/marks-panel.ts`/`.html`/`.css`, a `target` icon) — a non-routed presentational child injecting `MarksStore` directly (`architecture.spec.ts`'s own carve-out, mirrors `flight-command-panel.ts` injecting `VisionApi` directly): a one-tap **Mark target** button (`marksStore.geolocate(assetId)` — projects a `DETECTION`-sourced pin from the drone's own live telemetry, an honest estimate the panel's own notice states plainly, draggable to correct), a kind-picker → click-the-map → label/note confirm flow for a `MANUAL` pin, the active-marks list (select/**Edit**/Clear/Delete per row — Edit reopens the same kind-picker+label+note shape inline for `annotate(id, edit)`; all three actions shown for every mark, the backend gates annotate/clear/delete alike to creator-or-manager and 403s otherwise, surfaced as a friendly toast rather than a hard-hidden control, docs/TACTICAL-MARKS-PLAN.md's own Roles section), and the selected mark's bearing/distance readout from the drone (`CockpitFacade.dronePosition`, an alias of the existing `weatherPosition` computed — no "from home" readout, no home/launch position is modeled anywhere in this app's telemetry). See `core/marks/**`'s own section below for the store/logic.
+  - **Map COP — marks, layers, drawings (docs/MAP-REWORK-PLAN.md §5.2, Wave E; reworked from docs/TACTICAL-MARKS-PLAN.md M5)** — the cockpit map inset binds `[marks]="facade.marks.displayMarks()"`/`[drawings]="facade.drawings.displayDrawings()"`/`[layers]="facade.layers.layers()"`/`[interactionMode]="facade.interactionMode()"`/`[selectedMarkId]` plus `(markSelected)`/`(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)`, all to `CockpitFacade`'s three public root stores (`marks`/`layers`/`drawings`, mirroring `geofence`). Two tool-rail drawers: **`marks`** (`<vision-marks-panel>`, `target` icon) — the one-tap **Mark target** geolocate (now carrying the palette's kind/affiliation/layer, still an honest estimate the notice states plainly and the pin stays draggable), the shared `<vision-mark-palette>` for new marks and for editing one inline, an **UNVERIFIED filter chip** with a live count, a per-row **Confirm** shortcut for managers, `<vision-verify-controls>` on the selected mark, and the bearing/distance readout from the drone (`CockpitFacade.dronePosition`; `—`, never a fabricated distance, when either end is missing) — and the **new `map` drawer** (`layers` icon) holding `<vision-drawing-toolbar layout="stacked">` + `<vision-layer-manager>`. **One drawer for both map tools, not two rail buttons**: the cockpit's map is a 220 px inset, so Command's floating-toolbar shape would eat the picture it is meant to annotate. `ToolRailPanelId` is therefore seven ids now (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`). See `core/map-data/**` and `shared/map/map-controls/**` above for the stores and controls.
   - **Tool-rail grouped by job (docs/UX-SIMPLIFY-REVIEW.md F4)** — the right-edge `.grid-rail` had grown to 7 glyph-only drawers (flight · rc · cv · detections · marks · layers · help), past the "glance and know" limit the finding names, and was regrouped into four `.rail-group`s (each `role="group" aria-label="…"` for assistive tech) separated by a thin `.rail-divider` (`--hairline`, the same token `.secondary-tile`'s own border already uses): **Control** (flight, rc), **Vision** (cv, detections), **Situational** (marks), and **Help** pinned to the rail's bottom via `.rail-group-help{margin-top:auto}` — reference material, deliberately separated from the flying tools above it. No group gets a text label: at the rail's ~2.25rem button width a word like "Situational" doesn't read clean (the finding's own fallback: "if it crowds, use just the divider"). No "more"/overflow affordance either — the finding explicitly rules that out on a safety-of-flight screen; every remaining button stays always-visible, gated exactly as before (`canShowCommands()`/`!watchMode()`/`live()`/always). **`layers` removed (per direct user request, later than F4 itself)** — the rail is down to 6 drawers (flight · rc · cv · detections · marks · help); the detection-boxes rendering-mode control that used to be the `layers` drawer's only content now lives inside the `cv` (Detection) drawer instead (see the CV control panel bullet above). `ToolRailPanelId` (`fly-logic.ts`) is `'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'help'`; its own doc comment notes the union's declaration order no longer matches the rail's visual order.
 
 ### `src/app/features/command/**` — `/command`, the manager's map-first dashboard (docs/UX-REWORK-PLAN.md §U-c)
@@ -122,7 +125,7 @@ The second of the app's two persona pages, the manager's own: *the map first, th
   - **Loading/error states**: unchanged rule — `summary() === undefined` shows a loading/retry state in the rail only (the map itself, driven by its own independent `FleetMapStore` poll, is unaffected by a summary-poll failure — an improvement over the pre-§U-c page, where the whole page waited on the one summary poll before rendering anything).
   - **Geofence zones + Zones panel (docs/OPS-CORE-PLAN.md §G-c, new)** — `<vision-fleet-map [zones]="geofence.zones()">` renders the zones layer on the same map instance (see `core/geofence/**`'s own section below for the store/logic and why this respects `.command-map`'s own `isolation: isolate` for free — the layer is a Leaflet object *inside* that already-isolated map, not a second DOM overlay). A topbar **Zones (N)** button toggles `<vision-zones-panel>` (`features/command/zones-panel.ts`, its own modal — deliberately **not** a third `commandGridColumns` track, since zone management is an occasional admin task, not something browsed side-by-side with the map every session): list with kind badge/enable-disable toggle/inline rename/undoable delete, plus **"+ New keep-in zone"**/**"+ New keep-out zone"** opening `features/command/geofence-zone-dialog.ts` (`<vision-geofence-zone-dialog>`) — a modal reusing `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`'s own click-to-add-vertices/drag-to-move technique verbatim, adapted from an ordered route to a closed polygon (≥3 vertices, Save disabled with a `.disabled-reason` otherwise), with the KEEP_IN save-time "N assets currently outside this zone" advisory (`assetsOutsideZoneCount`, fed `mapStore.markers()`'s own positions — no second lookup). `entityRows` now also threads `geofenceBreachesByAssetId` (`groupBreachesByAsset(activeGeofenceBreaches(liveStore.liveEvents()))`) into `buildEntityRows` for the new top-rank `geofence-breach` attention reason — see `command-logic.ts`'s own section below and `core/geofence/**`'s for the breach-derivation feed.
   - **Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W, new)** — `<vision-weather-chip>` in the topbar, `providers: [WeatherStore]` own instance centered on the fleet centroid (`core/weather/weather-logic.ts#fleetCentroid` over `assetPositions()`); the wind limit here is always the plan's own 10 m/s default, never a specific asset's `windLimitMps` override — `AssetAttention` (this page's own fleet-summary row shape) carries no `attributes` at all to read one from, unlike Fly's chip (scoped to one selected asset, which does have `attributes`). See `core/weather/**`'s own section below.
-  - **Marks — the shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5, new)** — `[marks]="facade.marks.marks()"`/`[selectedMarkId]`/`(markSelected)`/`(markMoved)`/`(mapClicked)` wired to `CommandFacade.marks` (a public `inject(MarksStore)`) on `<vision-fleet-map>`. A topbar **Marks (N)** button toggles `<vision-marks-panel>` (`features/command/marks-panel.ts`, its own file — near-identical in shape to Fly's but with **no** "Mark target"/bearing readout, both cockpit-only concepts tied to one actively-flown drone Command has no equivalent of): kind-picker → click-the-map → label/note confirm, the active-marks list with select/Edit/Clear/Delete. **`<vision-side-panel>`, not the Zones panel's own backdrop modal** (`command.ts#CommandOverlay`'s own doc comment) — a true modal would swallow every click on the map underneath, breaking create-by-map-click. See `core/marks/**`'s own section below.
+  - **Map COP — marks, layers, drawings (docs/MAP-REWORK-PLAN.md §5.2, Wave E; reworked from docs/TACTICAL-MARKS-PLAN.md M5)** — `<vision-tactical-map>` binds `[marks]="facade.marks.displayMarks()"`/`[drawings]`/`[layers]`/`[interactionMode]`/`[selectedMarkId]` plus `(markSelected)`/`(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` to `CommandFacade`'s three public root stores. The topbar gains **Layers (N)** and **Draw** beside **Marks (N)**; `CommandOverlay` is now `'zones' | 'marks' | 'layers' | 'draw'` — **one group on purpose**, since Marks and Draw both arm the map's single `[interactionMode]` and two panels each claiming the next click is exactly the drift `UiStore` exists to prevent (closing Draw also calls `stopDrawing()`). Marks and Layers use the non-blocking `<vision-side-panel>` shell (a backdrop modal would swallow the map clicks both flows need); Draw is `<vision-drawing-toolbar layout="card">`, a `--panel-raised` card pinned top-centre over the map on the 8 px grid (frontend-style §7 — **never `--hud-*`**, which is only legal inside a `.surface-dark` enclave), spanning the map's width on a phone. `<vision-marks-panel>` is the same shape as Fly's minus the cockpit-only geolocate and bearing readout. See `core/map-data/**` and `shared/map/map-controls/**` above.
 
 ### `src/app/core/geofence/**` — geofence zones (docs/OPS-CORE-PLAN.md §G-c)
 
@@ -135,21 +138,151 @@ Zones are near-static reference data (CRUD via `GET/POST /api/geofences`, `PUT/D
   - **Breach derivation from the generic `LiveEvent` feed** (docs/OPS-CORE-PLAN.md §G's frozen contract: breach events ride the *existing* `event` SSE topic as `EventType.GEOFENCE_BREACH`, attributes `{assetId, zoneId, zoneName, kind, direction: "enter"|"exit"}` — **not** `EventsStore`'s `DetectionEvent` feed, see `LiveEvent`'s own doc comment in `models.ts` for the two being genuinely different domain concepts). `parseGeofenceBreach(event)` decodes one event defensively (any missing/malformed attribute → `undefined`, never a crash). `activeGeofenceBreaches(events)` — every currently-open breach: `events` is assumed **newest-first** (`LiveStore.liveEvents`'s own contract), so a single forward scan recording only the *first-seen* direction per `(assetId, zoneId)` key already reconstructs "latest known state" with no need to reverse/replay chronologically first — a clean bit of algorithmic economy worth re-reading this function's own doc comment for if it's ever touched. `groupBreachesByAsset(breaches)` → `ReadonlyMap<assetId, GeofenceBreach[]>`, `command-logic.ts#buildEntityRows`'s own input shape. `geofenceBreachReasonText(breaches)` — the rail's "why" sentence (one clause per zone); `geofenceBreachToastMessage(event)` — the bell's own toast text for a single `enter` event (`undefined` for `exit` — clearing a breach isn't toast-worthy).
 - `geofence-store.ts` — `GeofenceStore` (`providedIn: 'root'`, started at boot like `FleetStore`, refreshed on mount + a light 30s background poll — zones aren't hot-changing, but both Command and Fly should eventually see another manager's edit without needing `FleetStore`'s own 5s cadence): `zones`/`loaded` signals, `refresh()`, `create(request)`, `rename(zone, name)`/`setEnabled(zone, enabled)` (both **wholesale-replace `PUT`s** — the wire contract has no partial-patch geofence endpoint, so these resend the zone's entire current body with just the one field changed, adopting the server's own response rather than re-`GET`-ting the whole list), `redraw(zone, edit)` (kind/polygon/altitude-ceiling — not reachable from any UI surface this batch adds, the draw dialog is create-only; kept as a ready-made, fully-tested seam for a future "Edit boundary" entry), and **`remove(zone)`** — deletes immediately (no confirm dialog, "undo over confirm") then offers a 10s `UndoToastService` toast whose action re-`POST`s an equivalent zone (a new id — mirrors `features/devices/devices.ts#archiveAssetNow`'s own "the mutation already happened, Undo re-creates via the API" idiom). Every mutation toasts a plain error on failure via `ToastService`, same convention as `FleetStore`'s own warehouse mutations.
 
-`shared/map/fleet-map/fleet-map.ts` and `shared/map/live-map/live-map.ts` both gained a `zones: input<readonly GeofenceZone[]>([])` — a fourth independent Leaflet layer (alongside asset/event markers), deliberately excluded from auto-fit for the identical reason event markers are (a zone drawn far from the fleet must never yank the map view away from the assets themselves); each zone renders as a styled polygon plus a permanent center label (`bindTooltip(..., {permanent: true})`) naming the kind + zone name, non-interactive (`interactive: false` — no click/popup; management lives in the Zones panel, not the map layer). `FlyPage` passes `geofence.zones()` straight to its own `<vision-live-map>` for the read-only cockpit layer (docs/OPS-CORE-PLAN.md §G-c: "Fly map shows zones read-only, same styles").
+`shared/map/tactical-map/tactical-map.ts` (originally `fleet-map.ts` + `live-map.ts`, both deleted in docs/MAP-REWORK-PLAN.md Wave D) carries a `zones: input<readonly GeofenceZone[]>([])` — a fourth independent Leaflet layer (alongside asset/event markers), deliberately excluded from auto-fit for the identical reason event markers are (a zone drawn far from the fleet must never yank the map view away from the assets themselves); each zone renders as a styled polygon plus a permanent center label (`bindTooltip(..., {permanent: true})`) naming the kind + zone name, non-interactive (`interactive: false` — no click/popup; management lives in the Zones panel, not the map layer). `FlyPage` passes `geofence.zones()` straight to its own `<vision-live-map>` for the read-only cockpit layer (docs/OPS-CORE-PLAN.md §G-c: "Fly map shows zones read-only, same styles").
 
-### `src/app/core/marks/**` — the shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5)
+### `src/app/core/map-data/**` — the Common Operational Picture: layers, marks, drawings (docs/MAP-REWORK-PLAN.md §5.2, Wave E)
 
-Marks are, structurally, a point version of a geofence zone with tactical types — created either by clicking any shared map (cockpit or Command) or by the cockpit's own "Mark target" geolocate action, persisted **and** pushed live over the `marks` `GET /api/live` topic (§5's frozen contract, see the API-surface bullet above and `core/live/live-store.ts`'s own `markEvents` entry) so a mark one person drops appears on everyone's map in real time. Mirrors `core/geofence/**`'s CRUD/store/map-layer spine end-to-end, diverging only where the frozen plan says to (partial `PATCH` instead of wholesale `PUT`, live push as the primary path instead of poll-only, an interactive/draggable map layer instead of a read-only one) — see each file's own doc comment for the specific "mirrors X, diverges because Y."
+**Replaces `core/marks/**`, which is deleted.** The TACTICAL-MARKS wave's `MarksStore`/`mark-logic.ts` moved here and
+were reworked to the v2 model; `LayersStore`/`DrawingsStore` are new siblings. All three are `providedIn: 'root'` and
+start at boot alongside `GeofenceStore`, for the same reason marks always were: the same picture backs the Fly cockpit
+inset, Command's full map, `/live/:deviceId` and asset detail, and none of them should stand up its own poller.
 
-- `mark-logic.ts` (+`.spec.ts`) — pure, unit-tested, mirrors `geofence-logic.ts`'s own split:
-  - **Live-delta merge** — `upsertMark(marks, mark)`/`removeMark(marks, id)`/`applyMarkEvent(marks, event)`/`applyMarkEvents(marks, events)`: `created`/`updated` upsert by id, `cleared` removes ("clients drop the pin", matching the server's own `MarkService#list()` ACTIVE-only filter). `MarksStore` folds an initial `GET /api/marks` and every live delta through this same pipeline.
-  - **Colour-by-kind** — `MARK_KINDS` (`TARGET`/`HAZARD`/`POI`/`FRIENDLY`, TARGET-first — the geolocate default), `markColor(kind)` → an `hsl()` string at 4 fixed hues (302°/259°/182°/91°) chosen in the three open bands between this app's reserved status hues (danger ~0°, warn ~36°, success ~146°, info/accent ~219°, live ~342° — computed from their hex, same discipline `features/hubs/tile-accent.ts`'s own decorative cool-arc palette documents, but each hue here is a **fixed per-kind assignment**, not a positional cycle, since kind carries real meaning). `markStyle(kind, selected?)` → `{color, fillColor, diameterPx}` (14px/20px selected) for the map layer's `L.divIcon`. `markKindLabel`/`markKindIcon` (`'target'`/`'alert'`/`'map-pin'`/`'flag'` — two new `IconName`s, `target`'s crosshair + `flag`, added to `icon-registry.ts` and its frozen-set spec) — kind is never colour-only, every render pairs the hue with a distinct icon glyph too.
-  - **Bearing/distance** — `bearingDistance(from, to)`, a byte-for-byte TS port of `domain.model.GeoProjection#bearingDistance` (haversine distance + initial great-circle bearing, `EARTH_RADIUS_METERS` matching the Java constant exactly) — golden-valued against the same cases the backend's own `GeoProjectionTest` uses (cardinal bearings, the ~111,194.9 m/degree-of-latitude baseline, antimeridian sanity). `compassPoint(bearingDegrees)` → the nearest of 8 principal points; `formatDistanceMeters`/`bearingDistanceLabel` → `"142° SE · 1.2 km"`, the selected-mark readout's one-liner.
-- `marks-store.ts` — `MarksStore` (`providedIn: 'root'`, started at boot like `GeofenceStore`): `marks`/`loaded` signals (initial `GET /api/marks`, `refresh()` again on a 30s safety-net `PollScheduler` poll — the live channel is the primary path, this is reconciliation only), folding every `LiveStore.markEvents()` arrival in via an `effect()` that tracks how many it has already processed (mirrors `EventsStore`'s own `applyIncoming` posture — never drops an arrival even if several land before the effect next runs). `create(request)`/`geolocate(assetId, kind?, label?)` (selects the new mark on success), `annotate(id, edit)`/`clear(id)` (both a `PATCH`), `moveTo(id, position)` (drag-to-correct — see its own doc comment for the **honest-revert trick**: since Leaflet has already moved the marker visually before the PATCH settles, a failure forces a fresh-but-content-identical array reference so the map's `applyMarks` effect re-runs and snaps the marker back to the last-known-good position, rather than drifting wrong until the next poll), `remove(id)` (`DELETE`). Every mutation toasts `describeHttpError(error)` on failure (a 403 — not this mark's creator or a manager — renders the backend's own specific sentence, `ApiExceptionHandler`'s `FORBIDDEN` body) without touching local state, same non-optimistic discipline as `GeofenceStore`.
-  - **Selection + create-by-map-click also live here, not just synced domain data** — `selectedMarkId`/`selected` (toggle-select, e.g. for the bearing readout) and `pendingKind`/`draft`/`beginPlacement(kind)`/`cancelPlacement()`/`handleMapClick(position)`/`confirmDraft(label, note?)`/`cancelDraft()` (the create-by-map-click two-step: arm a kind, the next map click captures a position awaiting a label). **Deliberate divergence from the geofence precedent, flagged per the plan's own ask**: this coordination state lives on the store — not a facade, not either component — because it must bridge **two independent DOM subtrees under the same routed page with no parent/child relationship**: the shared map component (wired directly in `fly.html`/`command.html`) and the marks panel (a sibling). Zones never needed this — `GeofenceZoneDialog` draws on its own private, self-contained mini-map, never the shared page map.
-- `shared/map/live-map/live-map.ts` and `shared/map/fleet-map/fleet-map.ts` each independently gained (mirroring how the zones layer is independently implemented in both, not a shared base class) `marks: input<readonly Mark[]>([])` + `selectedMarkId: input<string|undefined>()` + `markSelected`/`markMoved: output<>` + `mapClicked: output<GeoPosition>()` — a fifth Leaflet layer, **interactive unlike zones**: each mark is an `L.marker` with a colour+icon `divIcon` (`markStyle`), `click` → `markSelected.emit(id)`, `dragend` → `markMoved.emit({id, position})` (only `dragend` writes back, mirroring `geofence-zone-dialog.ts`'s own vertex-marker reasoning — a live `drag` tick would fight the in-progress gesture). `map.on('click', ...)` (Leaflet's own event, which — unlike a raw DOM listener on the container — never fires for a click that landed on an interactive marker) emits `mapClicked` unconditionally; the *host* (`MarksStore.handleMapClick`) decides whether anything is currently armed to act on it, keeping the map component itself opinion-free about "placement mode". New global `.leaflet-tooltip` dark-theme override in `src/styles.css` (mirrors the existing `.leaflet-popup-*` override just above it) — the first non-permanent `bindTooltip` usage in this app (every prior one, `.zone-label`, is `permanent: true`).
-- **Fly cockpit** (`features/fly/marks-panel.ts`) and **Command** (`features/command/marks-panel.ts`) each get their own drawer — see those sections above for the per-host writeup.
-- Roles/authz reflect the backend exactly, no client-side duplication of the gate: create/annotate succeed for any in-scope user; clear/delete are gated server-side to the mark's creator or a manager and 403 otherwise. Both panels show Clear/Delete for **every** mark (never hard-hidden by an "is this mine" client guess) and let `MarksStore`'s own `describeHttpError` 403 branch produce the friendly, honest failure message — docs/TACTICAL-MARKS-PLAN.md's own Roles section: "surface a friendly message on 403 rather than a dead control; don't hard-hide, but don't lie." Dev-parity: with `vision.auth.enabled=false` the dev admin is `ADMIN`/unbounded, so every mutation always succeeds for it, unchanged from every other feature's own dev-parity story.
+**The one shape all three share** — initial `GET`, then fold the `map` SSE topic on top, plus a slow safety-net poll
+(30 s) purely to reconcile a connection that was briefly down. The `map` topic is deliberately *not*
+snapshot-on-connect, so the initial `GET` is never optional; each store keeps its own processed-count cursor into the
+single shared `LiveStore.mapEvents()` arrival log and folds only the tail (three consumers, one append-only signal —
+see `core/live/live-store.ts`'s own doc comment for why it isn't fanned out into three signals).
+
+**Visibility is never this layer's job.** Every list arrives already scoped by `MapAccessPolicy` (§3) and the `map`
+topic is filtered per connection (§4.3). The `canX` helpers here exist only so the UI can **hide what the server would
+forbid** — they are not a security boundary, and every mutation still goes to the server, whose 403/404 surfaces as one
+`describeHttpError` toast through each store's own private `run()` seam (the same seam `FleetStore`/`OrgStore` use).
+
+- `map-event-logic.ts` (+`.spec.ts`, 12 cases) — the shared SSE fold, written once so "created/updated upsert,
+  cleared/deleted remove" can't drift between the three entities: `isRemoval`, `upsertById`/`removeById` (upsert
+  replaces **in place**, order preserved; a genuinely new item prepends — the lists are newest-first), and the generic
+  `applyMapEvent`/`applyMapEvents(items, events, MapEntitySpec)`. Ignores every event for another `entity`, and ignores
+  an event whose own object is missing rather than throwing (§4.3 promises exactly one of `mark`/`drawing`/`layer`; a
+  client must degrade to "no change" if a partial deploy ever breaks that promise). `deletedLayerIds`/`dropByLayer` are
+  the belt-and-braces cascade: deleting a layer deletes its marks + drawings server-side and emits DELETED for each, but
+  the marks/drawings stores apply the cascade locally too, so a vanished layer can never leave orphan pins on the map.
+- `layers-logic.ts` (+`.spec.ts`, 15 cases) — `ACCESS_LEVELS` (VIEW<CONTRIBUTE<MANAGE), `accessRank`/**`atLeast`** (the
+  one ranking; never inline an ordinal comparison at a call site), `canView`/`canContribute`/`canManage`,
+  `accessLevelLabel`/`layerKindLabel`, `sortLayers` (COP first then by name — reapplied after an SSE upsert so the panel
+  never reorders differently from a fresh load), `findLayer`/`accessTo`/`layerName`/`copLayer`,
+  `contributableLayers`/`manageableLayers`, **`defaultContributeLayerId`** (first contributable *non-COP* layer — the COP
+  is a promotion target, not a scratchpad, §3's "never COP directly" — falling back to any contributable one, and
+  `undefined` meaning "omit `layerId` and let the server default it", which is what makes the palette work on a first
+  login before any layer list has landed), `applyLayerEvents`, and the wholesale-grants reducers
+  `grantKey`/`upsertGrant`/`removeGrant`/`hasGrant`. **`applyLayerEvents` preserves a previously-known `grants` list**
+  when the incoming layer carries none: SSE never ships grants (§4.3), so a plain upsert would blank a manager's open
+  editor.
+- `mark-logic.ts` (+`.spec.ts`, 21 cases) — moved from `core/marks/mark-logic.ts` and reworked. **The old
+  colour-by-kind palette (`markColor`/`markStyle`/`MARK_HUES`) is gone with it**: v2 marks are drawn by
+  `shared/map/tactical-map/tactical-map-logic.ts`'s APP-6-inspired *affiliation* symbology, which is now the single
+  source of truth for how a mark looks on the map *and* in every list row. What's here: `markPosition` (the one flat→
+  `GeoPosition` reassembly) and `toTacticalMark`/`toTacticalMarks` (the one wire→display projection, replacing Wave D's
+  deleted `adaptMarks` input transform); `MarkMoved`; `applyMarkEvents`; the palette type + reducers
+  (`MarkPalette {kind, affiliation, layerId?}`, `DEFAULT_MARK_PALETTE` = TARGET+HOSTILE matching the server's own
+  geolocate default, `withPaletteKind`/`withPaletteAffiliation`/`withPaletteLayer`, `paletteFromMark`,
+  **`reconcilePaletteLayer`** — re-points a palette whose layer was deleted or whose grant was revoked, returning the
+  *same object* when nothing changed so a store `effect()` can call it without looping); `MarkDraft` +
+  `createMarkRequest`/`editMarkRequest`; the verification helpers (`verificationLabel`,
+  `verificationChipClass` → `warn`/`ok`/`danger`, `isUnverified`, `filterMarks`, `countUnverified`); and the
+  bearing/distance block carried across **byte-for-byte** (`bearingDistance`, a port of `domain.model.GeoProjection
+  #bearingDistance`, `compassPoint`, `formatDistanceMeters`, `bearingDistanceLabel`).
+- `drawings-logic.ts` (+`.spec.ts`, 12 cases) — `toMapDrawing`/`toMapDrawings` (wire→display: the map keys a drawing by
+  `id`, not `drawingId`), `applyDrawingEvents`, `DRAW_KINDS`/`drawKindLabel` (**`POLYGON` reads as "Area" and `TEXT` as
+  "Label"** — what the operator is drawing, not the geometry primitive), `remainingPoints` (the toolbar's live
+  how-many-more-clicks hint; delegates to `tactical-map-logic.ts#minPointsFor` rather than restating the ≥2/≥3/==1
+  rule), `DRAWING_COLOR_TOKENS` (five **token names**, never hex — `accent`/`danger`/`warn`/`success`/`neutral`, kept to
+  the app's own semantic set so a drawing can't introduce a new colour; `accent` is first because it is
+  `drawingColor`'s own fallback), `interactionModeForDrawKind`, **`resolveInteractionMode(markArmed, drawKind)`** (the
+  single `[interactionMode]` a host feeds the map, folded from the two independent arming states — an armed mark wins
+  the tie, since swallowing a deliberate placement click is the more surprising failure), and
+  `createDrawingRequest`/`patchDrawingRequest`.
+- `layers-store.ts` — `LayersStore`: `layers`/`loaded` signals, the derived `contributable`/`manageable`/`cop`/
+  `defaultLayerId`, the per-id lookups the UI gates on (`layer`/`access`/`canContributeTo`/**`canManageLayer`**/`nameOf`/
+  `isCop`), and CRUD (`create`, `rename`, `remove`, **`setGrants`** — wholesale `PUT`, send every grant that should
+  survive). **No undo on delete**, deliberately unlike `GeofenceStore.remove`'s 10 s undo: deleting a layer cascades its
+  marks and drawings, and re-creating the layer would not bring those back — an Undo affordance would promise a restore
+  it cannot deliver, so `<vision-layer-manager>` asks for confirmation instead.
+- `marks-store.ts` (+`.spec.ts`, 21 cases) — `MarksStore`, moved and reworked: `marks`/`loaded`, **`displayMarks`** (the
+  `[marks]` projection, computed once for every host), `selectedMarkId`/`selected`, the palette
+  (`palette`/`armed`/**`pendingPalette`** = the palette *while armed*/`draft`, with `setKind`/`setAffiliation`/`setLayer`/
+  `arm`/`disarm`/`handleMapClick`/`cancelDraft`/`confirmDraft`), `geolocate(assetId, overrides?)` (**now sends the
+  palette's kind/affiliation/layer alongside `assetId`**, all optional on the wire so an untouched palette still gets the
+  server's `TARGET`/`"Contact"` defaults), `annotate`/`clear`/`moveTo`/`remove`, and the new **`verify(id, decision)`** /
+  **`promote(id, targetLayerId?)`**. A constructor `effect()` keeps the palette's layer reconciled against
+  `LayersStore.contributable()` so it can never send a `layerId` the server will 403. `moveTo`'s revert-on-failure touch
+  (a fresh array reference with unchanged content, forcing the map's own `applyMarks` effect to snap the dragged symbol
+  back to the last-known-good position) is carried over unchanged from the v1 store.
+- `drawings-store.ts` — `DrawingsStore`: `drawings`/`loaded`/**`displayDrawings`**, the drawing **mode**
+  (`mode`/`setMode` — passing the active kind toggles it off/`stopDrawing`/`interactionMode`) and `colorToken`/
+  `setColorToken` for the next drawing, selection (`selectedDrawingId`/`selected`/`canEditSelected`/`select`/`deselect`),
+  `targetLayerId`, and `completeDraft`/`setDetails`/`setGeometry`/`remove`. Mode and colour live on the store rather than
+  in the toolbar because *completion* happens elsewhere — `(drawingCompleted)` fires on the map and is handled by the
+  host's facade, which must not have to reach into a sibling component to learn what the operator picked. A TEXT drawing
+  gets a seeded `"Label"` (the domain requires a non-blank one) that is immediately editable in the toolbar, rather than
+  blocking the gesture behind a modal.
+  - **Gap, flagged, not silently skipped**: §5.2's "select → **drag vertices** to edit" is **not** implemented.
+    `<vision-tactical-map>` renders drawings as plain Leaflet paths with no per-vertex handles, and adding them means
+    restructuring that component's internals — explicitly outside Wave E's scope. `setGeometry` is the ready seam;
+    today the same outcome is reached by deleting and redrawing, and label/colour *are* editable in place.
+
+### `src/app/shared/map/map-controls/**` — the four shared map interaction controls (docs/MAP-REWORK-PLAN.md §5.2, Wave E)
+
+Four 3-file components plus one shared stylesheet, used by **both** Fly and Command — which is exactly why they live in
+`shared/map/` rather than either feature folder (this codebase's own "a second consumer moves it to `shared/`" rule).
+All four are non-routed presentational children, so `architecture.spec.ts`'s facade rule doesn't apply and they inject
+the root `core/map-data/**` stores directly, mirroring `features/command/zones-panel.ts` injecting `GeofenceStore`.
+
+- `mark-palette.ts`/`.html`/`.css` — `<vision-mark-palette>`: what the next mark will be, and where it lands. **Two
+  modes chosen by whether `[mark]` is bound** — *create* (unbound) reads and writes the shared `MarksStore.palette`, so
+  the cockpit's "Mark target" geolocate drops exactly the pin the operator picked here with no second control to keep in
+  sync; *edit* (bound) works on a local copy and PATCHes, emitting `(done)` on save **and** cancel so the host can close
+  its editor row. **The "kind × affiliation grid" is two labelled axis rows, not a 20-cell matrix** — drawn literally it
+  is 5 kinds × 4 affiliations, unreadable at drawer width and pure slop (frontend-style §9); two rows express the same
+  two axes, cost one extra tap, and stay legible on a phone. The layer `<select>` offers `LayersStore.contributable()`
+  only, plus a "Default layer" option that omits `layerId` entirely; when the viewer has **no** contributable layer the
+  picker is replaced by an honest sentence rather than blocking a legal action this UI merely can't name yet.
+- `verify-controls.ts`/`.html`/`.css` — `<vision-verify-controls>`: DELTA's verify→confirm→share-wider flow as one
+  strip. The verification chip and the mark's layer name render for **everyone** (an UNVERIFIED pin is a claim, not a
+  fact — the map draws it dashed for the same reason; an unknown layer renders `—`, never a raw uuid).
+  Confirm / Reject / **Promote to common picture** render only where `LayersStore.canManageLayer` says the server
+  resolved MANAGE (§3's rule for `verify`/`promote`). Promote hides once the mark is already on the COP layer (nowhere
+  left to promote to); Confirm/Reject stay available on an already-decided mark — a manager may overturn a call — with
+  the button matching the current state *disabled* rather than removed, so the strip's shape never jumps.
+- `drawing-toolbar.ts`/`.html`/`.css` — `<vision-drawing-toolbar>`: the four mode buttons, the colour swatches, the
+  live "N more clicks, then double-click or Enter" hint, and the selected drawing's label/colour/delete editor.
+  `[layout]` is `'card'` (Command, floating over the map) or `'stacked'` (Fly, filling a drawer column) — **layout only,
+  same controls in the same order**. Arming a mode disarms mark placement (both write the map's single
+  `[interactionMode]`). With no CONTRIBUTE layer the modes give way to one sentence instead of four dead buttons.
+- `layer-manager.ts`/`.html`/`.css` — `<vision-layer-manager>`: create / rename / delete layers and edit their grants.
+  - **Deviation from §5.2, deliberate**: the plan puts the grants editor "from the data-layer panel", i.e. inside
+    `<vision-tactical-map>`'s built-in overlay. That component's internals are explicitly out of Wave E's scope, and a
+    grants editor with two subject pickers, a level select and a create-layer form does not belong in a 14 rem card
+    pinned to a map corner anyway (frontend-style §7). The map panel therefore keeps exactly what Wave D gave it — one
+    eye toggle per layer, client-side decluttering — and *management* is this sibling panel, reachable from both hosts.
+    The two are complementary; neither duplicates the other.
+  - Every visible layer gets a row (name, kind chip, the viewer's own access, mark/drawing counts). Rename, Delete and
+    the Access editor appear only on MANAGE rows; the COP layer never offers rename/delete because the server refuses
+    both. **Create** is split the same way: *Personal* for anyone, *Team* only when the account actually manages a group
+    (a PILOT's `POST kind: TEAM` would always 403). Delete is a two-step confirm naming the exact mark/drawing count it
+    will take with it.
+  - **Honest degrade on the subject pickers**: `/api/users` and `/api/groups` are an admin surface, so a MANAGER who may
+    legitimately re-grant their own layer can still be 403'd listing users. `OrgStore` is loaded lazily and **quietly**
+    (`refresh({quiet: true})`, no toast) the first time an Access editor opens; when it comes back empty the editor says
+    so and still lets existing grants be re-levelled or removed, instead of pretending there is nobody to add.
+  - **Dev parity**: with `vision.auth.enabled=false` the dev admin reports `topRole: 'ADMIN'`, so the Team-layer group
+    list resolves from `OrgStore.groups()` (unbounded for that account) and every management control is available
+    exactly as for a real admin.
+- `mark-symbol.css` — the affiliation swatch (frame shape + semantic colour per affiliation, plus the dashed/dimmed
+  unverified treatment), pulled into `mark-palette` and both feature marks panels via `styleUrls`. **A deliberate,
+  documented restatement of `tactical-map.css`'s own `.mark-symbol` rules**, not a duplication by accident: those rules
+  are `:host ::ng-deep` scoped to the map component's host (Leaflet renders divIcons outside Angular's view
+  encapsulation), so a picker button or a list row in a *different* component can never match them. One shared copy
+  means a mark in a list can't drift from the same mark on the map.
 
 ### `src/app/core/weather/**` — weather go/no-go chip (docs/OPS-CORE-PLAN.md §W, frontend-only)
 
@@ -339,7 +472,98 @@ The single flow for bringing any source into the app — a forward-only, back-na
 - `detection-overlay-logic.ts` — the pure sync matcher above (`BoxesMode`, `selectDetectionResult`, `shouldDrawOverlay`, `DEFAULT_SLACK_BATCHES`), unit-tested. Untouched by U3 — `latencySeconds=0` (WHEP) was already handled correctly by the existing `latencySeconds !== null && latencySeconds >= 0` check. **Composite-model box hues (docs/OPS-CORE-PLAN.md §Q3b, new)**: `detectionModelKey(detection)` resolves a `Detection`'s color key from its own `label` prefix (`"orion12l:tank"` → `"orion12l"` — cv-service's own composite-mode tagging, `registry.py#detect_composite`), never from `Detection.modelId` (every detection in one composite batch shares the *same* `modelId`, the request's whole comma-joined composite id — proto's `Detection` message has no per-detection model-tag field, so `modelId` can't distinguish members within a batch even though it's on the wire); an unprefixed label (any single-model stream, whichever model) resolves to `DEFAULT_MODEL_KEY`. `modelHue(modelKey, alphaPercent = 100)` is the pure hash→color function: `DEFAULT_MODEL_KEY` always returns the exact original box color (`DEFAULT_BOX_COLOR = '#4f8cff'`, or the byte-identical `'rgb(79 140 255 / 85%)'` at `alphaPercent=85` — a single-model stream sees zero visual change); any other key hashes deterministically (a plain djb2-ish string hash → hue `[0,360)`) into `hsl(hue 90% 65%)` (fixed saturation/lightness, same vivid band as `--accent`), stable across calls/reconnects/reloads with no stateful registry. `distinctModelKeys(detections)` — every distinct key in a batch, first-seen order; `shared/player/player.ts`'s legend gate shows a chip only once this reaches ≥2 (the frame *currently* on screen actually mixes models, not merely "composite mode is configured" — a frame where only one member model detected anything still reads as single-model, matching `DEFAULT_MODEL_KEY`'s own zero-change guarantee). Tests: stability (same key → same color), pairwise distinctness across a sample of keys, the exact default-color/default-fill literals, and `distinctModelKeys`' dedupe/order/single-vs-multi cases.
 - `stream-info-panel.ts` — `StreamInfoPanel` (`<vision-stream-info>`, docs/MVP2-PLAN.md §U-info): user-meaning-first replacement for a bare "Source URI / Device id / Stream id / Started" plumbing block, used by `features/live/live.html`'s "Stream" card and `features/asset-detail/asset-detail.html`'s "Stream" card. DI-shares the host's `FleetStore` (root) and `DetectionsStore` (page-provided — every host must list it in its own `providers`, exactly like `TelemetryOsd`/`DetectionsStrip`); takes `deviceId`/`latencySeconds`/**`transport: input<Transport>('hls')`** (docs/MVP2-PLAN.md §L/§U3, new) as inputs, the latter two piped from `<vision-player>`'s `latencyChanged`/`transportChanged` outputs, never re-measured. Renders: a protocol chip + human source description (`core/stream-info-logic.ts#describeSource` — "MJPEG · 192.168.0.107:8080" / "File · flight.mp4 (looped)" / "Simulated · Pattern generator, no camera", never a bare URI, credentials never surfaced here even when the raw `uri` carries them), a live-ticking "Streaming for" duration (`formatDuration`/`sessionDurationSeconds`), **`Transport: WebRTC (WHEP)` / `HLS`** (`core/stream-info-logic.ts#transportLabel`, now honest about which is actually live — no longer a hardcoded `"HLS"`), a latency line (`formatLatency`), a CV status line (`DetectionsStore.status()` on/off + last-detection age — the same two-state derivation `detections-logic.ts#cvStatus` already uses, never a fabricated third "degraded" state, per the explicit "surface honestly, don't invent" directive), a **Copy view link** button (`navigator.clipboard.writeText`, toasts on success/failure), and a collapsed **`<details>` "Technical details"** disclosure holding every raw identifier (device id, URI, stream id, raw `startedAt`) — reachable, never deleted, just not the front door. **Gap, not invented**: resolution/FPS are not shown — no current API DTO (`ActiveStreamResponse`, `DetectionResultResponse`) exposes frame dimensions or a video FPS figure (verified against `vision-api`'s DTOs before writing this), so per docs/MVP2-PLAN.md §U-info's own scoping ("implements what current APIs already serve"), that field is omitted rather than guessed; a future cycle that adds it server-side is where this panel would grow that line. The now-deleted `shared/map/live-dock.ts`'s compact preview never rendered this panel at all (docs/CYCLES-PLAN.md §11's own deviation) but did bind `<vision-player>`'s `whepUrl` input, so that docked preview got WHEP-first playback even without the info panel — its successor, `features/command/asset-panel.ts`'s Video tab, inherits the same omission.
 - **`sample-box-editor.ts`/`.html`/`.css` + `sample-box-editor-logic.ts` + `.spec.ts`** (docs/CV-TRAINING-PLAN.md §4, Wave T5, new) — `SampleBoxEditor` (`<vision-sample-box-editor>`), the editable annotation canvas `features/labeling/sample-editor.ts` hosts: a captured frame `<img>` with its `Annotation[]` drawn as draggable/resizable boxes (drag-create, drag-move, corner-resize, an "Add box" fallback for no-drag-skill-needed precision), plus a side list for label (a `<select>` constrained to the dataset's own `classes`) and delete. **A deliberate fork of `player.ts`'s own `letterboxRect`/`DrawnBox`/`drawBox` idiom, not a shared import** — `player.ts` is read-only (detections are drawn, never dragged) and this wave's own task brief explicitly calls for forking rather than complicating the live player's hot render path; `sample-box-editor-logic.ts` duplicates just the small letterbox-math formula and adds the write-side half player.ts never needs: `boxToPx`/`pxToBox` (normalized↔px round-trip), `clampBox`, `normalizeDragRect`, `hitTest`/`HandleId` (four corner handles — `nw`/`ne`/`sw`/`se`; edge-midpoint handles are a deliberate scope cut, a box's four corners cover every practical correction), `moveBox`/`resizeBox` (bounds- and min-size-clamped). Colors are the same fixed, categorical, two-value encoding the rest of this app already uses: `MODEL` (still-unreviewed suggestion) stays the exact `#4f8cff` every detection box has always drawn; `OPERATOR` (drawn/corrected by hand) is `#37c977` (green, "confirmed truth") — no invented hue. Controlled input, uncontrolled edit session: `annotations` seeds the working copy once per sample; every edit after that is owned locally and reported via `annotationsChange` only on a *committed* change (drag end, a label pick, add, remove), never on every pointermove. Pointer events (not mouse-only) drive every gesture, with a generously oversized hit radius around each handle — touch-friendly per CLAUDE.md's own "large touch targets" rule.
-- `live-map.ts`/`.html`/`.css` — `LiveMap` (`<vision-live-map>`), moved here from `features/live/` in docs/CYCLES-PLAN.md §11 (CD-b) when the asset detail page needed the identical single-asset map inset — this codebase has no precedent for one page importing another page's module (see `core/fleet/device-logic.ts`'s doc comment for the precedent this follows), so a shared `shared/map/` home was used instead of a cross-page import, exactly as `core/fleet/device-logic.ts`/`core/fleet/warehouse-logic.ts` did for pure logic. Behavior is otherwise **completely unchanged** from before the move (verified by the unchanged `leaflet-src` chunk size and near-identical `live` chunk size in Status below) — DI-shares whichever `TelemetryStore` instance its host page provides; Leaflet loads via a **dynamic** `import('leaflet')` inside `initMap()` (via `shared/map/leaflet-loader.ts#importLeaflet`), landing in its own lazy chunk (`leaflet-src`, ~38 kB gz); a divIcon drone marker rotated to heading, a breadcrumb polyline of the current usage's trail, a start-point flag, an auto-follow toggle, a switchable base layer (`shared/map/leaflet-loader.ts#MAP_LAYERS`, bound to `SettingsStore.mapLayer`), expand-to-full-pane, and the offline-tile fallback (`tilesOk`).
+- `live-map.ts`/`.html`/`.css` — `LiveMap` (`<vision-live-map>`) — **deleted 2026-08-05** (docs/MAP-REWORK-PLAN.md §5.1, Wave D). Everything it did — the heading-rotated drone divIcon, the breadcrumb trail, the start-point flag, auto-follow, expand-to-full-pane, the switchable base layer, the offline-tile badge — is now `shared/map/tactical-map/`'s **follow mode** (`[followAssetId]` non-null); see that section below. Its three host pages (`/fly` cockpit inset, `/live/:deviceId`, asset detail's Position card) build the single `[assets]` entry from their own `TelemetryStore` via `tactical-map-logic.ts#followMarkers` instead of the component injecting that store itself.
+
+### `src/app/shared/map/tactical-map/**` — `TacticalMap`, the one map component (docs/MAP-REWORK-PLAN.md §5.1, Wave D)
+
+`tactical-map.ts`/`.html`/`.css` + `tactical-map-logic.ts`/`.spec.ts`. **Replaces `FleetMap` (774 ln) and
+`LiveMap` (437 ln), both deleted** — they had duplicated `applyZones`/`applyMarks`/`escapeHtml`/the
+layer-switcher byte-for-byte. All four map hosts now embed `<vision-tactical-map>`: Command
+(`features/command/command.html`), the Fly cockpit inset (`features/fly/cockpit.html`),
+`/live/:deviceId` (`features/live/live.html`), and asset detail's Position card
+(`features/asset-detail/asset-detail.html`).
+
+**Two modes, one component.** `[followAssetId] === null` → **fleet mode** (the old `FleetMap`): plot
+every `[assets]` marker, auto-fit whenever the plotted set actually moves (`fingerprintMarkers` +
+`nextAutoFitEnabled`, both still in `core/map/map-logic.ts`), raw-HTML popups with Watch-live actions,
+detection-event markers, a Recenter/Auto-fit control. Non-null → **follow mode** (the old `LiveMap`):
+one asset, its trail, a start flag at `trail[0]`, auto-follow centring at zoom 17, Follow + Expand
+controls, and a 220px-tall shell (`:host(.follow-mode)`) so the three inset hosts keep the box they
+laid out for. Everything else — zones, marks, drawings, legend, layer panel, basemap picker, the
+IndexedDB tile cache, `zoomControl` at `bottomright`, the tiles-unavailable badge — is identical in both.
+
+**Inputs** (§5.1's frozen superset): `[assets] readonly FleetMarker[]`, `[followAssetId] string|null`,
+`[zones] readonly GeofenceZone[]`, `[marks]` (v2 `TacticalMark[]`, see the adapter below),
+`[drawings] readonly MapDrawing[]`, `[layers] readonly LayerView[]`, `[events] readonly EventMarker[]`,
+`[selectedMarkId]`, `[selectedAssetId]`, `[attentionAssetIds] ReadonlySet<string>`,
+`[focusRequest] {assetId, tick}`, `[interactionMode] 'view'|'mark'|'draw-line'|'draw-polygon'|'draw-arrow'|'draw-text'`,
+plus `[unplottedAssets] number` (see "honest counts" below). **Outputs**: `(markSelected)`,
+`(markMoved)`, `(mapClicked)`, `(drawingCompleted)`, `(drawingSelected)`, `(watch)`, `(preview)`,
+`(openEventAsset)`, `(layerVisibilityChanged)`.
+
+**Dumb by construction.** Both predecessors injected page-provided stores (`FleetMapStore` /
+`TelemetryStore`) plus `EventsStore`, which is exactly why neither could be dropped onto an arbitrary
+page. `TacticalMap` injects only `SettingsStore` + `ThemeStore` (root, and only to decide which
+*basemap* renders). Overlay data arrives as inputs, built by each host's facade:
+`CommandFacade.markers`/`eventMarkers`/`unplottedAssets` (fleet mode) and
+`CockpitFacade`/`LiveFacade`/`AssetDetailFacade`'s `mapAssets`/`mapFollowAssetId`, all three of which
+call the shared pure `tactical-map-logic.ts#followMarkers({assetId, displayName, trail, latest})`.
+
+**Built-in chrome** (what "self-explaining" means): a collapsible **legend** (bottom-left) naming every
+symbol on the map — affiliation frames, kind glyphs, asset states, zone kinds, each with a live count —
+open by default in fleet mode, closed in follow mode (`linkedSignal(() => !followMode())`, since inputs
+aren't readable in a field initializer); and a collapsible **data-layer panel** (top-left) with an eye
+toggle per layer plus built-in Assets/Zones/Events rows and the four-basemap segmented control folded
+in. Eye state is client-side view state persisted per browser at `localStorage` key
+`vision.map.hiddenLayers` (a JSON string array; `parseHiddenLayers` tolerates every corrupt shape) and
+**orthogonal to server-side visibility** — docs/MAP-REWORK-PLAN.md §3 decides what a viewer may see at
+all, these toggles only declutter their own screen. Built-in overlays use reserved `builtin:assets`/
+`builtin:zones`/`builtin:events` pseudo-ids; a built-in row renders only when that overlay is non-empty.
+
+**Symbology** (APP-6-inspired, `markSymbolClasses` resolves the classes, `tactical-map.css` draws them):
+affiliation → frame shape **and** colour — FRIENDLY rounded/`--color-info`, HOSTILE diamond/`--color-danger`,
+NEUTRAL square/`--color-success`, UNKNOWN rounded-diamond/`--color-warn` (the plan's four hex values
+expressed as this app's own tier-2 tokens, so the symbols follow the light/dark theme and add no new
+colour to the system; shape carries the affiliation too, so they never depend on colour alone).
+`MarkKind` → the inner `<vision-icon>` glyph, inlined as raw SVG from the closed `ICONS` registry since a
+divIcon is raw HTML, not an Angular template. UNVERIFIED → dashed frame + 0.75 opacity; a mark on a COP
+layer gets a quiet outer ring; selection is the app's one `--color-info` ring. **Assets are always
+friendly** (§5.1) — they keep the existing heading-rotated arrow / offline dot with state carried by
+colour only (`--color-live` / `--text-faint` / `--color-danger` for attention), which is already a
+rounded, unambiguous own-force glyph; affiliation *framing* applies to marks.
+
+**Drawings** render fully even though no store feeds them until Wave E: LINE/POLYGON as Leaflet paths in
+the `colorToken`-resolved colour, ARROW as a polyline plus a rotated arrowhead divIcon
+(`arrowRotationDegrees`, cos-latitude corrected), TEXT as a label-only divIcon. A drawing mode turns map
+clicks into vertices (`appendVertex`), double-click/Enter completes (`completedDraft` refuses a
+degenerate shape), Escape abandons, and the mode also takes Leaflet's double-click away from zooming.
+
+**`tactical-map-logic.ts` — pure, framework-free, unit-tested** (`tactical-map-logic.spec.ts`, 33 cases across 8 groups):
+the v2 display model types (`Affiliation`, `TacticalMarkKind`, `VerificationState`, `TacticalMark`,
+`MapDrawing`, `LayerView`, `DrawKind`, `InteractionMode`), the legacy adapter, symbology class
+resolution, layer-visibility filtering + its `localStorage` shape, `layerRows`/`builtinRows`, legend
+counts, the drawing-vertex reducers, `followMarkers`, `drawingColor`, and the two helpers lifted out of
+the deleted components (`escapeHtml`, `zoneTooltipLabel`).
+
+> **Wave D's interim adapter is gone (Wave E).** Wave D shipped a `[marks]` input transform, `adaptMarks`, that
+> accepted the old `core/api/models.ts#Mark` shape and landed every adapted mark on a synthetic `legacy:marks` layer
+> which `layerRows` then named "Marks". Wave E deleted the whole `/api/marks` client, so hosts now pass real v2 data
+> (`core/map-data/marks-store.ts#displayMarks`) and `adaptMarks`/`isLegacyMark`/`adaptLegacyMark`/`LEGACY_MARKS_LAYER_ID`/
+> `LEGACY_MARKS_LAYER_NAME` are all deleted along with the input transform — **the component's public input type never
+> changed**. `layerRows`' synthesis of a row for an *undescribed* layer id stays, now generic: it is the honest degrade
+> for the narrow window where a mark arrives over SSE on a layer whose own `created` event hasn't landed yet (the pin is
+> on the map, so it gets a row and an eye toggle, named by its id until the layer list catches up). The v2 **enums** also
+> moved out of this file into `core/api/models.ts` — where this repo's own convention puts every wire shape — and are
+> re-exported here; the three *interfaces* (`TacticalMark`/`MapDrawing`/`LayerView`) stay, because they are genuinely
+> narrower than the wire DTOs (no ownership/timestamps/status, nested position), with
+> `core/map-data/mark-logic.ts#toTacticalMark` and `drawings-logic.ts#toMapDrawing` the one place each projection happens.
+
+**Honest counts / degrade.** The legend's "no position" row comes from `[unplottedAssets]`, not from
+`[assets]` — an asset with no position has no marker by construction (`buildMarker` returns `undefined`),
+so only a host that tracks the fleet (Command) can know the number; every other host leaves it 0 and the
+row is hidden rather than showing a fabricated zero. A tile-fetch failure still leaves the themed shell
+background showing through with vector overlays intact plus the "Tiles unavailable" badge; an overlay the
+host doesn't pass simply isn't rendered and gets no legend section or layer row.
 
 ### `src/app/shared/map/leaflet-loader.ts` — shared Leaflet bootstrap + the switchable map-layer catalogue + the IndexedDB tile cache (docs/CYCLES-PLAN.md §6, §9; docs/MVP3-PLAN.md §C-b)
 
@@ -381,7 +605,7 @@ The referee's tournament overview and the crew's "where is it" view: every asset
   - `fingerprintMarkers(markers)` — a cheap string key of asset ids + positions, so `FleetMap` can tell "the plotted set moved" apart from `markers()` merely re-deriving every second (it embeds `sampleAgeSeconds`, ticking on the same 1s clock as `TelemetryStore`'s own age readout) — auto-fit only re-runs `fitBounds()` when this actually changes.
   - `nextAutoFitEnabled(current, event)` — the auto-fit reducer: `'userInteraction'` always disables it, `'recenterClicked'` always re-enables it; idempotent either way.
 - `core/map/map-store.ts` — `FleetMapStore` (`@Injectable()`, **not** `providedIn: 'root'` — page-provided like `TelemetryStore`; `CommandPage` lists it in its own `providers` (the former `MapPage` did too, before docs/UX-REWORK-PLAN.md §U-c deleted it), so its pollers start/stop with whichever route currently owns them). Polls `GET /api/assets` every 5s (paused while `document.hidden`, via `PollScheduler`) into `assets`/`buckets`/`markers` signals. **Concurrency cap** (the risk docs/CYCLES-PLAN.md §6 called out): after every asset refresh, `reconcileTrackers` starts a per-asset 2s telemetry poller (one `getAsset()` to find the open usage via `selectOpenUsage`, then `usageTelemetry` polling, also via `PollScheduler`) for every asset newly bucketed `streaming`, and tears one down the moment its asset is no longer `streaming` — `offline`/`noPosition` assets never get a telemetry poller at all. Doesn't reuse `TelemetryStore` itself: that class starts from a *device* id and re-derives the owning asset via `listAssets()`+`getAsset()`; this store already knows the asset id from its own 5s poll, so it resolves the open usage directly with one `getAsset()` per newly-streaming asset instead of repeating that lookup. Also exposes `resolveWatchDevice(assetId)` (one `getAsset()` + `findVideoDevice`, best-effort) and a public `refresh()` (like `FleetStore`'s, mainly so tests don't need to wait on the internal interval).
-- `shared/map/fleet-map.ts`/`.html`/`.css` — `FleetMap`, the actual Leaflet rendering (injects `FleetMapStore` from its host's DI — `CommandPage` today, `MapPage` before its docs/UX-REWORK-PLAN.md §U-c deletion — same DI-sharing pattern as `LiveMap`/`TelemetryStore`). Leaflet loads the same way as `LiveMap` (`shared/map/leaflet-loader.ts#importLeaflet`, its own dynamic import, landing in the same shared-but-still-lazy `leaflet-src` chunk); the same switchable base layer as `LiveMap` (`shared/map/leaflet-loader.ts#MAP_LAYERS`, a `.controls.layers` button row bound to the same `SettingsStore.mapLayer`, so choosing a layer on one map is reflected on the other the next time it's visited). Renders one marker per `FleetMarker`: a rotated divIcon arrow + breadcrumb polyline for `live` ones, a small dimmed dot for offline ones, added/updated/removed by diffing against the previous marker set on every `effect()` tick. Popups are raw HTML (Leaflet popups aren't Angular templates) with name, category, a status chip, battery/altitude/age when live, an **Open full cockpit** button (renamed from "Watch"), and — for `live` markers only — a **Preview** button; a single delegated `click` listener on the map container (matching `.watch-btn`/`.preview-btn[data-asset-id]`) drives the `watch`/`preview` outputs. **Docked preview** (docs/CYCLES-PLAN.md §9, CU-b item 5): clicking a `live` marker directly (not just its popup) also fires `preview` — a `leafletMarker.on('click', …)` listener attached once per marker, re-reading `live` from `store.markers()` at click time rather than trusting the closure (a marker can go offline long after the listener was attached). Resolving *which* device to preview is still `FleetMapStore.resolveWatchDevice`'s job (docking, same split as before); the `watch` output itself is just an assetId — `CommandPage`, its sole host today, routes it straight to `/fly?asset=<id>&watch=1` with no device lookup at all (docs/MVP3-PLAN.md §C-c — see that page's own doc comment; the now-deleted `MapPage` used to resolve the same output to `/live/:deviceId` instead — same component, host-specific meaning, unchanged idea). **Zoom control vs. layer switcher (fixed 2026-07-24, infra+cleanup batch):** Leaflet's default zoom control lands `topleft` by construction — the same corner `.controls.layers` (this component's own base-layer segmented control) occupies, so the two used to render stacked on top of each other. `initMap()` now passes `zoomControl: false` to `L.map(...)` and adds one back explicitly via `L.control.zoom({position: 'bottomright'})` — the one corner nothing else in this template claims (Recenter sits `topright`, the offline badge sits `bottomleft`). `shared/map/live-map.ts` had the identical bug (visually confirmed on `/fly`'s cockpit inset) and got the identical fix — any future map added under `shared/map/**` should default its own zoom control to `bottomright` too, or explicitly justify a different corner. **Auto-fit**: fits bounds to every marker on load and whenever `fingerprintMarkers` changes while `autoFit()` is true; every programmatic `map.fitBounds()` call is wrapped in a `suppressAutoFitDisable` flag so the `movestart`/`zoomstart` listener (registered once, in `initMap()`) can reliably tell an actual drag/scroll/zoom-button/keyboard interaction apart from the component's own recentering — only the former calls `nextAutoFitEnabled(current, 'userInteraction')`. The Recenter control (visible/labelled via `autoFit()`) calls `nextAutoFitEnabled(current, 'recenterClicked')` and force-refits immediately, bypassing the fingerprint gate.
+- `shared/map/fleet-map.ts`/`.html`/`.css` — `FleetMap` — **deleted 2026-08-05** (docs/MAP-REWORK-PLAN.md §5.1, Wave D). Everything it did — the per-`FleetMarker` markers, trails, raw-HTML popups with the delegated `watch`/`preview`/`openEventAsset` click listener, the auto-fit reducer, focus requests, event markers, zones, marks — is now `shared/map/tactical-map/`'s **fleet mode** (`[followAssetId]` null); see that section below. It no longer injects `FleetMapStore`/`EventsStore`: `CommandFacade` passes `[assets]`/`[events]`/`[unplottedAssets]` as inputs.
 - **`shared/map/live-dock.ts`/`.html`/`.css` — `LiveDock` — deleted (infra+cleanup batch, 2026-07-24).** Historical shape, for context on the reuse this section's other bullets still reference: the docked live preview panel (docs/CYCLES-PLAN.md §9, CU-b item 5) — inline `<vision-player>` + a small OSD-style battery/altitude/heading/age summary (from an already-known `FleetMarker`, no second telemetry poller) + a "Watch live"/"Open full cockpit" link to `/live/:deviceId`. Its docked-preview role moved to `AssetPanel`'s own Video tab when Command's §U-c rework shipped (see that section's own doc comment), leaving it a zero-consumer orphan; this cleanup batch grep-verified zero remaining references anywhere in `src/` and deleted all three files rather than leaving it flagged again.
 - **The following two bullets describe the now-deleted `MapPage`'s own template/behavior — kept as historical record of what docs/CYCLES-PLAN.md §11/CU-b shipped, not current code.** `features/command/**`'s own MODULE.md section above describes the *current* equivalents (the entity rail, `AssetPanel`'s Video tab, the ported empty state).
   - *Historical*: the right rail listed every asset, not only unpositioned ones (docs/CYCLES-PLAN.md §11, CD-b); `MapPage.railAssets` was `mapStore.assets()`, each row's chip switched on `bucketFor(asset)`, with Watch/Preview/Open actions.
@@ -508,8 +732,8 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **`shared/player/player.ts`'s WHEP path gathers ICE non-trickle** (`waitForIceGatheringComplete`, bounded to `ICE_GATHERING_TIMEOUT_MS`=3s) rather than implementing WHEP's optional trickle-ICE PATCH exchange — simpler, and irrelevant to the LAN caveat above (a hung/incomplete gather just means a candidate-poor offer, not a different failure mode). If a future cycle needs faster/more-complete ICE negotiation, trickle is the documented gap, not a bug.
 - **`shared/map/flight-plan-dialog.ts` is a modal (`position: fixed`, `z-index: 150`)**, not a page section — deliberately mounted only via `@if` in each host page's template (not always-in-DOM-but-hidden) so its own `afterNextRender` (and therefore Leaflet's `import('leaflet')`) only fires once the dialog is actually opened, matching every other map component's "chunk fetched on first use" convention. `150` sits above the toast host (`z-index: 100`) and the app header (`20`) on purpose — a toast fired while the dialog is open would otherwise render behind it; the dialog itself never toasts, so this is mostly theoretical, not exercised today.
 - **`DiscoveredDevice.suggestedCategory` stays a bare `string`.** Even though `Category` is now mirrored (docs/CYCLES-PLAN.md §2), discovery's suggestion is still typed as a plain slug, not `Category`/an enum — there is still no page that lists `GET /api/categories` to validate against, so don't tighten this without adding that consumer first.
-- **Leaflet's own CSS is loaded at runtime, not imported as a component stylesheet.** `public/leaflet/leaflet.css` is a manual copy of `node_modules/leaflet/dist/leaflet.css` (kept in sync by hand when the `leaflet` version bumps — there is no build step that does this automatically); `angular.json`'s `assets` glob copies it to `dist/leaflet/leaflet.css` like any other static asset. `shared/map/leaflet-loader.ts#ensureLeafletStylesheet()` (shared by both `LiveMap` and `FleetMap` since docs/CYCLES-PLAN.md §6) injects a `<link>` pointing at it the first time a map is created; idempotent, so either component can call it regardless of which one's map is created first. This is deliberate: importing the real file (14.8 kB raw) as a component `styleUrl` would trip the `anyComponentStyle` budget (10 kB error) and, if imported globally instead, would grow the initial bundle — a runtime-injected `<link>` to a plain static asset is invisible to both.
-- **`::ng-deep` in `live-map.css` and `fleet-map.css`** targets DOM Leaflet creates itself (tiles, custom marker/popup/flag divIcons) — those elements never get Angular's `_ngcontent-*` attribute because Angular didn't render them, so emulated view encapsulation would otherwise silently no-op those rules. Still the standard, if deprecated, workaround for third-party-owned DOM inside an Angular component; scoped under `:host` to limit its reach. Each component still carries its **own** copy of the small rules that give Leaflet-owned elements their look (e.g. `.drone-arrow`'s geometry/color) — `shared/map/leaflet-loader.ts` shares the *JS* that builds/configures Leaflet objects, but per-component scoped CSS can't be shared the same way, so this one bit of duplication is intentional. `fleet-map.css`'s popup rules also lean on global classes (`.chip`, `.btn`) from `src/styles.css` for the parts that match existing chip/button styling — those aren't `::ng-deep`'d because a *global* stylesheet already reaches Leaflet-owned DOM without needing to. **The `vision-tiles`/`DARK_TILE_CLASS` CSS-invert dark tint is gone** (docs/CYCLES-PLAN.md §9, CU-b item 6) — "dark" is now the real CARTO Dark Matter tile layer (`Night`, the default), not a filter over OSM; don't reintroduce the filter if OSM ever needs re-tinting for some other reason without checking whether a `Night`-style real layer is the better fix first.
+- **Leaflet's own CSS is loaded at runtime, not imported as a component stylesheet.** `public/leaflet/leaflet.css` is a manual copy of `node_modules/leaflet/dist/leaflet.css` (kept in sync by hand when the `leaflet` version bumps — there is no build step that does this automatically); `angular.json`'s `assets` glob copies it to `dist/leaflet/leaflet.css` like any other static asset. `shared/map/tile-cache/leaflet-loader.ts#ensureLeafletStylesheet()` (shared by every map component — `TacticalMap`, `ReplayMap`, `FlightPlanDialog`, `GeofenceZoneDialog`) injects a `<link>` pointing at it the first time a map is created; idempotent, so either component can call it regardless of which one's map is created first. This is deliberate: importing the real file (14.8 kB raw) as a component `styleUrl` would trip the `anyComponentStyle` budget (10 kB error) and, if imported globally instead, would grow the initial bundle — a runtime-injected `<link>` to a plain static asset is invisible to both.
+- **`::ng-deep` in `tactical-map.css`** (and `replay-map.css`/`flight-plan-dialog.css`) targets DOM Leaflet creates itself (tiles, custom marker/popup/flag divIcons, the affiliation symbol frames) — those elements never get Angular's `_ngcontent-*` attribute because Angular didn't render them, so emulated view encapsulation would otherwise silently no-op those rules. Still the standard, if deprecated, workaround for third-party-owned DOM inside an Angular component; scoped under `:host` to limit its reach. **The duplication this bullet used to describe is gone** (docs/MAP-REWORK-PLAN.md §5.1 Wave D): `live-map.css` and `fleet-map.css` each carried their own copy of the marker/popup/zone-label rules; `tactical-map.css` is the single copy now, and its legend deliberately reuses the very same `::ng-deep .mark-symbol` rules the Leaflet markers use (a `:host ::ng-deep` selector matches any descendant of the host, whoever rendered it), so the legend can never drift from the map. Popup rules still lean on global classes (`.chip`, `.btn`) from `src/styles.css` — those aren't `::ng-deep`'d because a *global* stylesheet already reaches Leaflet-owned DOM without needing to. **The `vision-tiles`/`DARK_TILE_CLASS` CSS-invert dark tint is gone** (docs/CYCLES-PLAN.md §9, CU-b item 6) — "dark" is now the real CARTO Dark Matter tile layer (`Night`, the default), not a filter over OSM; don't reintroduce the filter if OSM ever needs re-tinting for some other reason without checking whether a `Night`-style real layer is the better fix first.
 - **`allowedCommonJsDependencies: ["leaflet"]`** in `angular.json` — Leaflet ships UMD only (no `module`/`exports` field), so without this the build emits (non-fatal) "not ESM, can cause optimization bailouts" warnings.
 - **`InMemoryTelemetryRepository#findByUsage` (vision-app, not this module) returns the *first* `limit` samples of an ever-growing list, not the most recent.** At the sim's 1 Hz, a usage older than ~200 s will make `GET /api/usages/{id}/telemetry?limit=200` keep returning the same frozen earliest window forever, so `TelemetryStore.latest()`/`sampleAgeSeconds()` will appear to go stale permanently past that point in a long-running demo. This is a backend devsupport-adapter limitation (out of `vision-web/**`'s scope to fix), not a frontend bug — worth knowing before blaming the OSD's staleness indicator. `features/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`/`freshestSample` (docs/CYCLES-PLAN.md §11) read from the exact same `usageTelemetry` response, so the asset detail page's per-device panels/"source: …" caption inherit this identical frozen-window ceiling — not a new bug, the same one wearing a new UI.
 - **CDK virtual scroll (`features/devices/devices.ts`, docs/CYCLES-PLAN.md §11) is this app's first actual use of `@angular/cdk`** beyond it sitting in `package.json` unused (it was pinned ahead of time for exactly this — see WEB-PLAN W6). `*cdkVirtualFor` is a classic structural directive (not the newer `@for` control-flow block — Angular has no virtualized `@for` equivalent), so it coexists in the same template as `@if`/`@for`/`@switch` elsewhere on the page without conflict; the one real constraint is that `<cdk-virtual-scroll-viewport>` needs a **fixed height** (`.asset-viewport`, `height: min(64vh, 26rem)`) and becomes its own self-scrolling region — a deliberate, necessary break from this page's otherwise full-document scroll, not an oversight.
@@ -528,6 +752,105 @@ Greenfield, zero-consumer-yet primitives (this wave adds only `src/styles.css`, 
 - **`shared/ui/events-rail.css`'s `.event-meta`/`.event-time` flex row let a long, unbreakable device/asset name (e.g. `X2Twitter.com_hzTcxvzE2-narxmk_720p`, a real simulated-source filename) overflow past its own box and visually overlap `.event-time`/`.event-affordance` at Wall's 300px sidebar (`wall.css`).** Root cause: neither the name nor its containing elements had `min-width: 0` (a flex item's default `min-width: auto` is its content's own minimum size — for an unbreakable token, that's its full rendered width) or any `overflow`/`text-overflow` handling, so the text simply rendered past its box rather than shrinking or wrapping. **Fixed**: the row is now two lines — an unshrinkable top line (state chip, label, time, action; all `flex: none` except `.event-label`, which truncates with ellipsis rather than overflowing if a long relative-time string squeezes it) and a full-width `.event-meta` line below for the source name + confidence, so the name gets the *entire* row's width to truncate against instead of whatever `.event-row-top` has left over (confirmed live: at Wall's 300px sidebar the name previously had ~5px available — invisible — vs. ~225px now, comfortably legible before needing to ellipsize). `.event-source` truncates with `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` and carries the full name in a `title` attribute; `.event-confidence` stays `flex: none` so the `%` is never the part that gives way. Verified via CDP screenshots at both Wall's 300px sidebar (name truncates, e.g. `X2Twitter.com_hzTcxvzE2-narxmk…`) and Command's full-width embed (name renders in full) — no overlap at either.
 - **Resolved (2026-07-24, infra+cleanup batch) — kept only as a worked example, not a live issue.** This bullet used to flag `shared/map/fleet-map.ts`'s layer switcher (`.controls.layers`, `topleft`) overlapping Leaflet's own default zoom control (also `topleft`) as a confirmed, pre-existing, unfixed collision. It's fixed: `initMap()` now constructs `L.map(...)` with `zoomControl: false` and adds a zoom control back explicitly at `L.control.zoom({position: 'bottomright'})` — see `fleet-map.ts`'s own class doc comment ("Zoom control vs. layer switcher") and `shared/map/live-map/live-map.ts`'s identical fix. Found stale during docs/VISUAL-REFRESH-PLAN.md Wave 3 (2026-08-05) while reading this exact file for its own task — corrected here rather than left asserting a bug that no longer exists.
 - **Doc-comment staleness flagged by an earlier cycle — fixed by the infra+cleanup batch, 2026-07-24.** `shared/map/live-dock.ts` (the file whose own doc comment carried the worst of this staleness — "each host page (`MapPage`, and now `CommandPage`, …) guarantees at most one is ever rendered") is now **deleted outright** (see the `/map` fleet overview section above), so that particular comment is simply gone rather than fixed in place. `shared/map/fleet-map.ts`'s own doc comment ("`MapPage` resolves a clicked marker's `watch` output…", "activated/released here — `MapPage` owns that lifecycle") and `core/map/map-store.ts`'s own doc comment (naming `MapPage` as a co-consumer) were rewritten to name `CommandPage` as the sole current host and, for the events lifecycle, `shared/ui/notification-bell.ts` as the actual owner. `core/events/events-store.ts`'s own doc comment — the most substantively stale of the four, since it described "O(visible) discipline" as this store's defining trait when `shared/ui/notification-bell.ts`'s permanent `activate()` had already superseded it — was rewritten to describe the current always-on-in-practice reality directly (see the Detection events section's own "Update, docs/UX-REWORK-PLAN.md §U-c" paragraph above). Left here as a worked example of the failure mode, not because it recurs: a doc comment describing *why* a design choice was made ages fine; a doc comment asserting *who else does this today* silently rots the moment that "who" changes, with no compiler to catch it.
+
+## Status — MAP-REWORK-PLAN Wave E: map stores, controls, panels (docs/MAP-REWORK-PLAN.md §5.2) — 2026-08-05
+
+`vision-web/**` only, coded against §4's frozen wire contract while Wave C built the backend half in parallel — no
+Java module read or run. Wave D's `TacticalMap` had already replaced `FleetMap`/`LiveMap` in all four hosts and was
+rendering `[drawings]`/`[layers]`/`[interactionMode]` against a thin local adapter; this wave gave it real data and
+deleted that adapter. Full writeups live in the new `### src/app/core/map-data/**` and
+`### src/app/shared/map/map-controls/**` sections above, the reworked API-surface bullet, and the Fly/Command feature
+bullets they link from — this entry is the changelog scan.
+
+### What shipped
+
+1. **API client + models** — every §4.1 endpoint (`/api/map/layers` CRUD + grants `PUT`, `/api/map/marks` CRUD +
+   geolocate + verify + promote, `/api/map/drawings` CRUD) with §4.2's exact DTO shapes. The whole `/api/marks` client
+   surface and the old `Mark`/`MarkEvent` models are **deleted**.
+2. **`core/live/live-store.ts`** — the `marks` topic became **`map`** (`MapEventPayload {entity, action, layerId,
+   mark?, drawing?, layer?}`), `markEvents()` → **`mapEvents()`**, `MAX_LIVE_MARK_EVENTS` → `MAX_LIVE_MAP_EVENTS`. One
+   append-only log, three consumers, each with its own cursor.
+3. **`core/map-data/`** (new) — `layers-store.ts`, `marks-store.ts` (moved from `core/marks/`, reworked to v2),
+   `drawings-store.ts`, plus four pure logic files with specs: `map-event-logic` (12), `layers-logic` (15),
+   `mark-logic` (21), `drawings-logic` (12), and a `marks-store.spec.ts` (21) carrying over — and extending — the
+   coverage the deleted `core/marks/marks-store.spec.ts` had.
+4. **`shared/map/map-controls/`** (new) — `<vision-mark-palette>`, `<vision-verify-controls>`,
+   `<vision-drawing-toolbar>`, `<vision-layer-manager>` (3 files each) + the shared `mark-symbol.css`.
+5. **Panels + hosts** — both marks panels reworked onto the shared controls with an UNVERIFIED filter chip and a
+   per-row verify shortcut; Fly gained a `map` tool-rail drawer, Command a Layers drawer and a Draw toolbar card; all
+   four map hosts switched `[marks]` to v2 store data and gained `[layers]`/`[drawings]`.
+
+### Deviations from §5.2, and why
+
+- **Drawing vertex-dragging is not implemented.** §5.2 asks for "select → drag vertices to edit (PATCH)". The map
+  renders drawings as plain Leaflet paths with no per-vertex handles, and adding them means restructuring
+  `shared/map/tactical-map/**` internals — explicitly outside this wave's scope. Label/colour/delete on a selected
+  drawing all work; `DrawingsStore.setGeometry` is the ready seam, and delete-then-redraw reaches the same outcome
+  today. **Flagged for Wave F / a later slice.**
+- **The layer manager is a sibling panel, not an expansion of the map's built-in data-layer panel.** Same reason
+  (that panel lives inside `TacticalMap`), plus a grants editor with two subject pickers, a level select and a
+  create-layer form does not belong in a 14 rem card pinned to a map corner (frontend-style §7). The map panel keeps
+  its eye toggles; management is reachable from both hosts as its own drawer.
+- **The "kind × affiliation grid" is two labelled axis rows**, not a 20-cell matrix — see `<vision-mark-palette>`'s own
+  section for the reasoning.
+- **The v2 enums moved into `core/api/models.ts`** and `tactical-map-logic.ts` re-exports them, rather than the two
+  files each declaring their own copies of the same string unions. This is one more line of edit inside `tactical-map`
+  than the brief's "delete the adapter" strictly allowed, taken because this module's own convention says
+  `api/models.ts` is the only place a wire shape is declared, and two sources of truth for `Affiliation` would drift.
+  The public input types are structurally identical either way.
+
+### Degrade / role-gate / dev-parity notes
+
+- **Degrade**: every store's initial `GET` failure is silent (`loaded()` still flips true — an empty list, not a stuck
+  spinner) and every mutation failure is exactly one `describeHttpError` toast with local state untouched. A mark's
+  layer name renders `—` when unknown, never a raw uuid. `moveTo`'s revert-on-failure touch is carried over. A malformed
+  SSE payload is ignored rather than thrown on. A deleted layer drops its marks/drawings locally even if the server's
+  per-child events don't arrive.
+- **Role-gating mirrors §3 and never trusts itself**: `myAccess` arrives server-resolved; the UI only *hides what the
+  server would forbid* (verify/promote need MANAGE, the layer picker and draw modes need CONTRIBUTE, Team-layer create
+  needs a managed group, rename/delete are absent on the COP layer). Every action still goes to the server and its
+  403/404 surfaces as a toast. The one place a 403 is *expected* — a MANAGER listing `/api/users` for the grants
+  picker — degrades to a named notice with existing grants still editable, and loads quietly (no toast).
+- **Dev parity** (`vision.auth.enabled=false`): the dev admin reports `topRole: 'ADMIN'` with unbounded scope, so every
+  layer comes back `myAccess: 'MANAGE'` and every control is visible — the app behaves exactly as before. The Team-layer
+  group list falls back to `OrgStore.groups()` for an ADMIN, which that account can read.
+
+### Files moved / deleted
+
+- **Deleted**: `core/marks/mark-logic.ts`, `core/marks/mark-logic.spec.ts`, `core/marks/marks-store.ts`,
+  `core/marks/marks-store.spec.ts` (the whole folder); the `/api/marks` methods on `VisionApi`; the old
+  `Mark`/`MarkEvent`/`MarkKind`(v1)/`CreateMarkRequest`(v1)/`GeolocateMarkRequest`(v1)/`PatchMarkRequest`(v1) models;
+  `tactical-map-logic.ts`'s `adaptMarks`/`isLegacyMark`/`adaptLegacyMark`/`LEGACY_MARKS_LAYER_ID`/
+  `LEGACY_MARKS_LAYER_NAME` and the `[marks]` input transform.
+- **Moved**: `core/marks/*` → `core/map-data/*` (reworked, not a straight copy — the colour-by-kind palette did not
+  survive; affiliation symbology replaced it).
+- **Cleaned as touched**: the dangling references to the deleted `FleetMap`/`LiveMap`/`core/marks` in
+  `core/live/live-store.ts` (rewritten for the `map` topic) and this file's own sections.
+
+### Verification
+
+- `npm run test:ci` — **115 files, 1854 tests, all green** (81 new: 60 pure-logic + 21 store).
+- `npx tsc --noEmit` — clean on **both** `tsconfig.app.json` and `tsconfig.spec.json`.
+- `ng build --configuration production` — green. **Initial total 394.32 kB** (110.88 kB transfer), vs. **393.37 kB**
+  (110.77 kB) at `HEAD` before Waves D+E: **+0.95 kB raw / +0.11 kB transfer for both waves combined**. The `command`
+  chunk is 55.34 kB and `cockpit` 94.21 kB. The 390 kB initial budget was **already exceeded at `HEAD` by 3.37 kB** —
+  this is a pre-existing overage, not introduced here; Wave E's own contribution is under 1 kB because everything new
+  is reachable only from lazy feature chunks.
+- Architecture guard (`core/ui/architecture.spec.ts`) green — the four new controls and both marks panels are
+  non-routed presentational children, and both routed pages still inject only their facade.
+
+### Left for Wave F to smoke-test by hand
+
+1. **Role differences end-to-end** — an ADMIN, a MANAGER of one group, and a PILOT should each see a different layer
+   list, and only the manager should see Confirm/Reject/Promote on a mark in their group's layer.
+2. **Promotion visibility** — promote an UNVERIFIED mark from a team layer and confirm it appears on the COP layer for
+   a user who is *not* in that team (this is the §4.3 SSE-filtering path, which no client-side test can cover).
+3. **Live cross-client sync** — two browsers: a mark/drawing/layer created in one appears in the other without a
+   reload, and a layer deleted in one takes its pins with it in the other.
+4. **Drawing gestures on real tiles** — each of the four kinds, plus double-click/Enter completion and Esc abandon, in
+   both the Command card and the Fly drawer.
+5. **Both themes + a phone viewport** for the four new controls (the palette's two axis rows, the toolbar's swatches,
+   the layer manager's grant rows) — verified against tokens by construction here, not screenshotted.
 
 ## Status — VISUAL-REFRESH-PLAN Wave W5: audit + cleanup (docs/VISUAL-REFRESH-PLAN.md) — 2026-08-05
 
@@ -7959,3 +8282,117 @@ user's request, switched the fallback to the real backend list:
 `category-logic.spec.ts` rewritten against the new signature (seed passed explicitly per test, plus
 new cases for "no seed supplied" and "both empty"). Verified: `npx tsc --noEmit` clean, full suite
 111 files / 1807 tests green.
+
+## Status — MAP-REWORK Wave D: `TacticalMap` replaces `FleetMap` + `LiveMap` (docs/MAP-REWORK-PLAN.md §5.1) — 2026-08-05
+
+**Done.** One standalone, self-explaining Leaflet component (`shared/map/tactical-map/`, 3 files +
+pure logic + spec) now serves all four map hosts; `shared/map/fleet-map/**` and `shared/map/live-map/**`
+are **deleted** (6 files), grep-verified zero remaining references in `src/`. See the
+`src/app/shared/map/tactical-map/**` API-surface section above for the component contract; this entry
+records what changed at the hosts and what deliberately did not.
+
+### What moved out of the map and into the hosts
+
+Both deleted components injected page-provided stores, which is exactly why neither was reusable
+anywhere else. The new component takes inputs, so each host's facade gained a small read-model:
+
+- `features/command/command-facade.ts` — `markers` (passthrough of `FleetMapStore.markers`),
+  `unplottedAssets` (`buckets().noPosition.length`), `eventMarkers`
+  (`selectEventMarkers(EventsStore.events())`, newly injected here — still never activated/released,
+  the notification bell keeps that store warm for the session, exactly as `FleetMap` relied on).
+- `features/fly/cockpit-facade.ts`, `features/live/live-facade.ts`,
+  `features/asset-detail/asset-detail-facade.ts` — `mapAssets` + `mapFollowAssetId`, all three built
+  with the shared pure `followMarkers({assetId, displayName, trail, latest})`. Position is the freshest
+  fix, else the last trail point, else nothing plotted at all — which reproduces `LiveMap`'s own
+  empty-trail and no-fix branches rather than inventing a position.
+
+`CommandPage`/`CockpitPage`/`LivePage`/`AssetDetailPage` themselves only swapped the import + selector
+and (Command) added three bindings — no page component gained a store, so `core/ui/architecture.spec.ts`
+stays green untouched.
+
+### Bug fix the plan called for: `/live` and asset detail were dropping zones + marks
+
+Both pages rendered `<vision-live-map />` with **no inputs at all**, so an operator watching a device on
+`/live/:deviceId` or looking at the Position card saw a different operational picture from the one
+Command and the cockpit were showing — no geofence zones, no tactical marks. Both now pass
+`[zones]`/`[marks]`/`[selectedMarkId]` and wire `(markSelected)`/`(markMoved)` (drag-to-correct) through
+the same root `GeofenceStore`/`MarksStore` singletons the other two hosts already use — two new
+injections in each facade, no new HTTP (both stores are root-provided and started at boot).
+`(mapClicked)` is deliberately **not** wired on those two pages: nothing there can arm a pending mark
+kind, so a create-by-click binding would be dead wiring.
+
+### Deliberate deviations from §5.1 (and why)
+
+1. **Affiliation colours are tokens, not the plan's four hex literals.** `#4f8cff`/`#ff5d5d`/green/yellow
+   became `--color-info`/`--color-danger`/`--color-success`/`--color-warn` — the same four hues, but
+   theme-aware and inside this app's own vocabulary, which `.claude/skills/frontend-style` §1 requires
+   ("every colour in component CSS is a `var(--…)`; think a new shade is needed → stop and flag").
+   Frame *shape* still carries affiliation independently of colour.
+2. **Assets keep their existing glyph** rather than being re-drawn inside a FRIENDLY frame. §5.1's "own
+   assets always render as FRIENDLY" is satisfied by the fact that the arrow/dot glyph is already an
+   unambiguous own-force symbol with state carried by colour only (frontend-style §7's rule, and the
+   behavior both deleted components had); wrapping it in a second frame would have changed every
+   existing map surface for no added meaning.
+3. **`[unplottedAssets]` is a new input** not listed in §5.1. The legend's "no position" count cannot be
+   derived from `[assets]`, which by construction excludes exactly those assets. Rather than fabricate or
+   silently drop the count, the host that knows it passes it and the row hides itself at 0.
+4. **Popups and marker-click→`preview` are fleet-mode only**, as before: follow mode's single asset is
+   already the subject of its host page, and `LiveMap` never had popups.
+5. **Legend default is by mode, not by measured container width** (§5.1 says "defaults per host container
+   width") — the two follow-mode hosts *are* the small insets, so mode is the same signal without a
+   `ResizeObserver`.
+6. `[drawings]`/`[layers]`/`[interactionMode]` were wired **fully**, not stubbed: drawings render
+   (line/polygon/arrow/text), drawing modes build drafts with the pure reducers, and the layer panel
+   renders whatever `[layers]` describes. They render nothing today only because no store feeds them
+   until Wave E — which can then plug in without touching this component's API.
+
+### Degrade / role-gate / dev-parity
+
+- **Degrade**: a tile-fetch failure keeps vector overlays and shows the "Tiles unavailable" badge (both
+  predecessors' behavior); an overlay a host doesn't pass renders nothing and contributes no legend
+  section or layer row; a corrupt `vision.map.hiddenLayers` value hides nothing instead of throwing on
+  boot; `followMarkers` returns an empty `[assets]` rather than a marker at a made-up position; the
+  "no position" legend row is absent unless a host supplied the count.
+- **Role-gating**: unchanged — this wave adds no role-gated surface. Server-side visibility (who may see
+  which marks/layers at all) is docs/MAP-REWORK-PLAN.md §3, resolved server-side in Waves B/C; the eye
+  toggles are per-browser decluttering only and never widen what the viewer receives.
+- **Dev parity** (`vision.auth.enabled=false`): nothing here reads `MeResponse`/`topRole` or any auth
+  state, so the dev admin sees exactly what it saw before — the same four maps with the same data.
+
+### Tests + build
+
+`npm run test:ci` → **112 files / 1840 tests green**, including the new
+`shared/map/tactical-map/tactical-map-logic.spec.ts` (33 cases: legacy-adapter mapping, symbology class
+resolution, layer-visibility filtering + `localStorage` shapes, `layerRows`/`builtinRows`, legend counts,
+drawing reducers + arrow rotation, follow-marker fallbacks, `escapeHtml`/`zoneTooltipLabel`/`drawingColor`).
+`npx tsc --noEmit` clean on **both** `tsconfig.app.json` and `tsconfig.spec.json`.
+`ng build --configuration production` green.
+
+**Bundle delta** (raw, production): **initial total unchanged at 393.37 kB** (the map is lazy either
+way; the pre-existing 390 kB budget *warning* is unchanged, not introduced here). Per-route lazy chunks:
+`command` **72.07 → 54.76 kB** (−17.31, −3.70 kB transfer — Command no longer carries its own private copy
+of a map component), `cockpit` 93.83 → 94.18 kB (+0.35), `asset-detail` 45.18 → 45.92 kB (+0.74), `live`
+20.71 → 21.55 kB (+0.84); `leaflet-src` unchanged at 149.55 kB. Whole-`dist` total 1,879,347 → 1,892,174
+bytes (**+12.5 kB raw, +0.68%**) — the new chrome (legend, layer panel, symbology CSS, drawing rendering)
+lands once in a shared chunk instead of twice in two components. `anyComponentStyle` budget not tripped
+(`tactical-map.css` is under the 8 kB warning threshold even carrying both predecessors' rules plus the
+new chrome).
+
+**Not verified live in a browser** — this wave was implemented against the existing hosts without an
+`ng serve` + backend session, so the symbology frames/legend/layer panel have not had the both-themes
+screenshot check `.claude/skills/frontend-style`'s own checklist asks for. Worth doing as part of Wave
+E/F, which will be exercising these surfaces anyway.
+
+### Files touched
+
+- **New**: `shared/map/tactical-map/tactical-map.ts`/`.html`/`.css`, `tactical-map-logic.ts`,
+  `tactical-map-logic.spec.ts`.
+- **Deleted**: `shared/map/fleet-map/fleet-map.ts`/`.html`/`.css`,
+  `shared/map/live-map/live-map.ts`/`.html`/`.css`.
+- **Hosts**: `features/command/command.ts`/`.html`/`command-facade.ts`,
+  `features/fly/cockpit.ts`/`.html`/`cockpit-facade.ts`, `features/live/live.ts`/`.html`/`live-facade.ts`,
+  `features/asset-detail/asset-detail.ts`/`.html`/`asset-detail-facade.ts`.
+- **Doc-comment refresh only** (stale `<vision-fleet-map>`/`<vision-live-map>` references):
+  `features/command/asset-panel.ts`, `features/command/marks-panel.ts`. `core/marks/marks-store.ts` still
+  names both deleted selectors in its own doc comment — left alone deliberately, it is Wave E's file (that
+  store moves to `core/map-data/` there).

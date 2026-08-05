@@ -556,3 +556,14 @@ dd {
     max-width: 9rem;
   }
 }
+
+/* ---- Map drawer (docs/MAP-REWORK-PLAN.md §5.2) ------------------------------------------------
+   One rail drawer carries both map tools — the drawing toolbar and the layer manager — separated by
+   the same hairline every other stacked section in this app uses rather than a second panel shell.
+   See `cockpit.html`'s own comment at that drawer for why they share one button. */
+
+.map-drawer-section + .map-drawer-section {
+  margin-top: var(--space-24);
+  padding-top: var(--space-24);
+  border-top: 1px solid var(--border);
+}

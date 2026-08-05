@@ -5,7 +5,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
-import { LiveMap } from '../../shared/map/live-map/live-map';
+import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { Icon } from '../../shared/ui/icon';
 import { IconButton } from '../../shared/ui/icon-button';
@@ -19,15 +19,18 @@ import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { FlightCommandPanel } from './flight-command-panel';
 import { CvControlPanel } from './cv-control-panel';
 import { RcMonitor } from './rc-monitor';
+import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
+import { LayerManager } from '../../shared/map/map-controls/layer-manager';
 import { MarksPanel } from './marks-panel';
 import { CockpitFacade } from './cockpit-facade';
 import { nextCollapseAction, type ToolRailPanelId } from './fly-logic';
 
 /** `UiStore`'s own storage key for this page's tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) —
- * one key for all six drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`help`; the former `layers`
- * drawer was folded into `detections` per direct user request — see `fly-logic.ts`'s own
- * `ToolRailPanelId` doc comment). Unchanged from the pre-split page's own key — `UiStore` round-trips
- * the same `localStorage` shape, so an already-open drawer survives this refactor across a reload. */
+ * one key for all seven drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`; the former
+ * detection-`layers` drawer was folded into `cv` per direct user request — see `fly-logic.ts`'s own
+ * `ToolRailPanelId` doc comment; the new `map` drawer, docs/MAP-REWORK-PLAN.md §5.2, is the map's
+ * layers + drawing tools and is unrelated to that old one). Unchanged key — `UiStore` round-trips
+ * the same `localStorage` shape, so an already-open drawer survives across a reload. */
 const ACTIVE_PANEL_KEY = 'vision.fly.activePanel';
 
 /** This page's one mutually-exclusive **confirm-dialog** group (docs/UI-ARCHITECTURE-PLAN.md) —
@@ -75,7 +78,7 @@ type CockpitDialog = 'stop';
   imports: [
     RouterLink,
     Player,
-    LiveMap,
+    TacticalMap,
     DetectionsStrip,
     Icon,
     IconButton,
@@ -90,6 +93,8 @@ type CockpitDialog = 'stop';
     CvControlPanel,
     RcMonitor,
     MarksPanel,
+    DrawingToolbar,
+    LayerManager,
   ],
   templateUrl: './cockpit.html',
   styleUrl: './cockpit.css',

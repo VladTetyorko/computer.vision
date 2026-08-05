@@ -4,6 +4,8 @@ import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.live.MapVisibility;
+import com.drones.vision.api.security.CurrentUser;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
@@ -32,12 +34,22 @@ import java.util.Objects;
  * <p>All actual connection/topic/replay/coalescing logic lives in {@link LiveUpdateRegistry} —
  * this class is a thin HTTP-shape translation only (query param/header parsing, path variable),
  * mirroring every other controller in this module.
+ *
+ * <h2>Who the connection is</h2>
+ * One thing beyond HTTP shape does happen here, and only here: the {@code map} topic's delivery is
+ * scoped per viewer (docs/MAP-REWORK-PLAN.md §4.3), and identity is resolved at the API edge, never
+ * inside the registry. So {@link #connect} reads {@link CurrentUser#viewer()} once, at connect time,
+ * turns it into a delivery predicate via {@link MapVisibility#deliveryPredicate}, and hands that to
+ * {@link LiveUpdateRegistry#connect} — which stores it on the connection and consults it on every
+ * broadcast and every resume replay without ever knowing whose it is.
  */
 @RestController
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public class LiveController {
 
     private final LiveUpdateRegistry registry;
+    private final MapVisibility mapVisibility;
+    private final CurrentUser currentUser;
 
     /**
      * {@code @Qualifier} disambiguates the component-scanned {@code liveUpdateRegistry} bean from
@@ -47,8 +59,11 @@ public class LiveController {
      * vision.live.enabled=true}), so Spring's type-based autowiring sees two same-typed candidates
      * for a plain, unqualified {@code LiveUpdateRegistry} constructor parameter.
      */
-    public LiveController(@Qualifier("liveUpdateRegistry") LiveUpdateRegistry registry) {
+    public LiveController(@Qualifier("liveUpdateRegistry") LiveUpdateRegistry registry,
+                           MapVisibility mapVisibility, CurrentUser currentUser) {
         this.registry = Objects.requireNonNull(registry, "registry must not be null");
+        this.mapVisibility = Objects.requireNonNull(mapVisibility, "mapVisibility must not be null");
+        this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
     /**
@@ -59,7 +74,9 @@ public class LiveController {
      *                     {@code null}/absent means fleet/event only
      * @param lastEventId  the {@code Last-Event-ID} header {@code EventSource} sends automatically
      *                     on reconnect (this connection's own {@code seq}); absent means a fresh
-     *                     connect, not a resume
+     *                     connect, not a resume. The replayed burst is re-filtered against the
+     *                     viewer resolved <em>on this request</em>, not the one that first opened
+     *                     the stream, so a revoked grant is not replayed back.
      * @return the SSE stream
      * @throws IllegalArgumentException if {@code topics} contains a malformed entry (unknown kind,
      *                                   missing/malformed asset id) — 400 via {@link
@@ -69,7 +86,7 @@ public class LiveController {
     public SseEmitter connect(@RequestParam(required = false) String topics,
                               @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
         Long since = (lastEventId == null || lastEventId.isBlank()) ? null : Long.parseLong(lastEventId);
-        return registry.connect(topics, since);
+        return registry.connect(topics, since, mapVisibility.deliveryPredicate(currentUser.viewer()));
     }
 
     /**

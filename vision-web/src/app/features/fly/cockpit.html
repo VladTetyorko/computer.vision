@@ -90,13 +90,20 @@
            (900px, cockpit.css) regardless of this toggle's own state. -->
       @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
         <div class="main-map">
-          <vision-live-map
+          <vision-tactical-map
+            [assets]="facade.mapAssets()"
+            [followAssetId]="facade.mapFollowAssetId()"
             [zones]="facade.geofence.zones()"
-            [marks]="facade.marks.marks()"
+            [marks]="facade.marks.displayMarks()"
+            [drawings]="facade.drawings.displayDrawings()"
+            [layers]="facade.layers.layers()"
+            [interactionMode]="facade.interactionMode()"
             [selectedMarkId]="facade.marks.selectedMarkId()"
             (markSelected)="facade.marks.select($event)"
             (markMoved)="facade.marks.moveTo($event.id, $event.position)"
             (mapClicked)="facade.marks.handleMapClick($event)"
+            (drawingCompleted)="facade.completeDrawing($event)"
+            (drawingSelected)="facade.selectDrawing($event)"
           />
         </div>
       }
@@ -199,6 +206,22 @@
       @if (facade.live() && isPanelOpen('detections')) {
         <vision-side-panel title="Detections" icon="eye" (close)="panels.close()">
           <vision-detections-strip />
+        </vision-side-panel>
+      }
+
+      <!-- Map — layers + drawing (docs/MAP-REWORK-PLAN.md §5.2). One drawer for both rather than
+           two rail buttons: the cockpit's own map is a 220px inset, so a toolbar floating over it
+           (Command's shape) would eat the picture it is meant to annotate. See
+           `<vision-layer-manager>`'s doc comment for why the grants editor is a sibling panel rather
+           than an expansion of the map's own data-layer panel. -->
+      @if (isPanelOpen('map')) {
+        <vision-side-panel title="Map" icon="layers" subtitle="Layers and drawing" (close)="panels.close()">
+          <div class="map-drawer-section">
+            <vision-drawing-toolbar layout="stacked" />
+          </div>
+          <div class="map-drawer-section">
+            <vision-layer-manager />
+          </div>
         </vision-side-panel>
       }
 
@@ -322,6 +345,13 @@
           variant="hud"
           [active]="isPanelOpen('marks')"
           (activated)="togglePanel('marks')"
+        />
+        <vision-icon-button
+          icon="layers"
+          label="Map layers and drawing"
+          variant="hud"
+          [active]="isPanelOpen('map')"
+          (activated)="togglePanel('map')"
         />
       </div>
 

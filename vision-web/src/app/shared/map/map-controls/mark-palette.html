@@ -1,0 +1,94 @@
+<div class="palette">
+  <div class="axis">
+    <span class="label">Type</span>
+    <div class="row axis-options">
+      @for (kind of kinds; track kind) {
+        <button
+          type="button"
+          class="btn secondary small"
+          [class.active]="current().kind === kind"
+          [attr.aria-pressed]="current().kind === kind"
+          (click)="setKind(kind)"
+        >
+          <vision-icon [name]="markKindIcon(kind)" [size]="14" />
+          {{ markKindLabel(kind) }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="axis">
+    <span class="label">Affiliation</span>
+    <div class="row axis-options">
+      @for (affiliation of affiliations; track affiliation) {
+        <button
+          type="button"
+          class="btn secondary small"
+          [class.active]="current().affiliation === affiliation"
+          [attr.aria-pressed]="current().affiliation === affiliation"
+          (click)="setAffiliation(affiliation)"
+        >
+          <!-- The map's own frame swatch, so the picker and the pin can never disagree. -->
+          <span class="aff-swatch" [class]="affiliationClass(affiliation)" aria-hidden="true"><span class="sym-frame"></span></span>
+          {{ affiliationLabel(affiliation) }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <div class="axis">
+    <span class="label" id="layer-label">Layer</span>
+    @if (noWritableLayer()) {
+      <p class="muted hint">Lands on your default layer — you have no shared layer to contribute to yet.</p>
+    } @else {
+      <select
+        aria-labelledby="layer-label"
+        [value]="current().layerId ?? ''"
+        (change)="setLayer($any($event.target).value)"
+      >
+        <option value="">Default layer</option>
+        @for (layer of layers.contributable(); track layer.layerId) {
+          <option [value]="layer.layerId" [selected]="current().layerId === layer.layerId">{{ layer.name }}</option>
+        }
+      </select>
+    }
+  </div>
+
+  @if (editing() || marks.draft()) {
+    <div class="axis">
+      <span class="label" id="mark-label">Label</span>
+      <input
+        type="text"
+        aria-labelledby="mark-label"
+        placeholder="What is it?"
+        [ngModel]="labelText()"
+        (ngModelChange)="setLabel($event)"
+        (keydown.enter)="save()"
+      />
+      <input
+        type="text"
+        placeholder="Note (optional)"
+        aria-label="Note"
+        [ngModel]="noteText()"
+        (ngModelChange)="setNote($event)"
+        (keydown.enter)="save()"
+      />
+      <div class="row actions">
+        <button type="button" class="btn small" (click)="save()" [disabled]="!canSave()">
+          {{ editing() ? 'Save changes' : 'Save mark' }}
+        </button>
+        <button type="button" class="btn secondary small" (click)="editing() ? cancelEdit() : cancelDraft()">Cancel</button>
+      </div>
+    </div>
+  } @else if (marks.armed()) {
+    <vision-notice variant="neutral">Click the map to place this mark.</vision-notice>
+    <div class="row actions">
+      <button type="button" class="btn secondary small" (click)="cancelArm()">Cancel</button>
+    </div>
+  } @else {
+    <div class="row actions">
+      <button type="button" class="btn small" (click)="arm()">Place mark</button>
+    </div>
+    <p class="muted hint">Pick a type and affiliation, then click anywhere on the map.</p>
+  }
+</div>

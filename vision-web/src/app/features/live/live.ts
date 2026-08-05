@@ -5,7 +5,7 @@ import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { TelemetryOsd } from './telemetry-osd';
-import { LiveMap } from '../../shared/map/live-map/live-map';
+import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { Notice } from '../../shared/ui/notice';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -18,7 +18,7 @@ import { LiveFacade } from './live-facade';
  * and command lives in `LiveFacade`, which this component injects exclusively. `TelemetryStore`/
  * `DetectionsStore` stay in this component's own `providers` (one poller-set per route activation,
  * unchanged) so the facade and this page's child components (`<vision-telemetry-osd>`,
- * `<vision-detections-strip>`, `<vision-live-map>`, `<vision-stream-info>`) keep DI-sharing the
+ * `<vision-detections-strip>`, `<vision-tactical-map>`, `<vision-stream-info>`) keep DI-sharing the
  * exact same store instances as before this refactor.
  *
  * **Header** (docs/NAV-IA-REDESIGN-PLAN.md §2.2): `page-head` is now `<vision-page-bar>`, titled
@@ -27,7 +27,7 @@ import { LiveFacade } from './live-facade';
  */
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink, TelemetryOsd, LiveMap, DetectionsStrip, StreamInfoPanel, Notice, EmptyState, PageBar],
+  imports: [Player, RouterLink, TelemetryOsd, TacticalMap, DetectionsStrip, StreamInfoPanel, Notice, EmptyState, PageBar],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

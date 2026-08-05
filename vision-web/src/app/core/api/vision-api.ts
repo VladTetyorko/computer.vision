@@ -15,6 +15,8 @@ import type {
   CreateAssetRequest,
   CreateDatasetRequest,
   CreateGroupRequest,
+  CreateDrawingRequest,
+  CreateLayerRequest,
   CreateMarkRequest,
   CreateUserRequest,
   CvModelsResponse,
@@ -33,14 +35,19 @@ import type {
   GroupSummary,
   LabelAnnotationsRequest,
   LiveSubscription,
-  Mark,
+  MapDrawingResponse,
+  MapLayer,
+  MapMark,
   MeResponse,
+  PatchDrawingRequest,
   PatchMarkRequest,
+  PromoteMarkRequest,
   PatchStreamConfigResponse,
   ProbeDeviceRequest,
   ProbeDeviceResult,
   PromoteModelRequest,
   RegisterDeviceRequest,
+  RenameLayerRequest,
   RegisteredModel,
   RegisteredModelsResponse,
   ReturnHomeResponse,
@@ -48,6 +55,7 @@ import type {
   SamplesResponse,
   ScanRequest,
   ScanResult,
+  SetLayerGrantsRequest,
   SettableLifecycleState,
   SimulationResponse,
   StartSimulationRequest,
@@ -65,6 +73,7 @@ import type {
   UsageSummary,
   UsageTimeline,
   UserSummary,
+  VerifyMarkRequest,
 } from './models';
 
 /**
@@ -491,31 +500,89 @@ export class VisionApi {
     return firstValueFrom(this.http.delete<void>(`/api/geofences/${encodeURIComponent(id)}`));
   }
 
-  // --- Tactical marks (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire contract) ------------------
+  // --- The map COP: layers, marks, drawings (docs/MAP-REWORK-PLAN.md §4.1's frozen contract) ---
+  // One base path, `/api/map`, replacing the whole `/api/marks` surface. Every list is already
+  // scoped server-side (§3) — an out-of-scope id 404s rather than 403s, deliberately, so existence
+  // is never revealed; a forbidden action on an object the caller *can* see is the only 403.
 
-  /** Every active mark, deployment-wide, newest first. */
-  listMarks(): Promise<Mark[]> {
-    return firstValueFrom(this.http.get<Mark[]>('/api/marks'));
+  /** Every layer the caller may see, COP first then by name. `grants` is populated only on layers they MANAGE. */
+  listMapLayers(): Promise<MapLayer[]> {
+    return firstValueFrom(this.http.get<MapLayer[]>('/api/map/layers'));
   }
 
-  /** Drops a manual mark (a map click). */
-  createMark(request: CreateMarkRequest): Promise<Mark> {
-    return firstValueFrom(this.http.post<Mark>('/api/marks', request));
+  /** Creates a TEAM (managers of that group; `groupId` required) or PERSONAL (anyone) layer. */
+  createMapLayer(request: CreateLayerRequest): Promise<MapLayer> {
+    return firstValueFrom(this.http.post<MapLayer>('/api/map/layers', request));
   }
 
-  /** Drops a mark projected from an asset's freshest telemetry (the cockpit "geolocate" action). 400 if the asset has no/incomplete telemetry. */
-  geolocateMark(request: GeolocateMarkRequest): Promise<Mark> {
-    return firstValueFrom(this.http.post<Mark>('/api/marks/geolocate', request));
+  /** Rename only. 403 unless the caller MANAGEs the layer; the COP layer can never be renamed. */
+  renameMapLayer(id: string, request: RenameLayerRequest): Promise<MapLayer> {
+    return firstValueFrom(this.http.patch<MapLayer>(`/api/map/layers/${encodeURIComponent(id)}`, request));
   }
 
-  /** Partial edit — annotation and/or a status transition; only present fields change. 403 if the caller is neither the mark's creator nor a manager; 404 unknown id. */
-  patchMark(id: string, request: PatchMarkRequest): Promise<Mark> {
-    return firstValueFrom(this.http.patch<Mark>(`/api/marks/${encodeURIComponent(id)}`, request));
+  /** Cascades: the layer's marks and drawings go with it. 403 unless MANAGE; the COP layer can never be deleted. */
+  deleteMapLayer(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/map/layers/${encodeURIComponent(id)}`));
   }
 
-  /** 403 if the caller is neither the mark's creator nor a manager; 404 unknown id. */
-  deleteMark(id: string): Promise<void> {
-    return firstValueFrom(this.http.delete<void>(`/api/marks/${encodeURIComponent(id)}`));
+  /** **Wholesale** replacement of a layer's access list (§4.1) — send every grant that should survive, not a delta. 403 unless MANAGE. */
+  setMapLayerGrants(id: string, request: SetLayerGrantsRequest): Promise<MapLayer> {
+    return firstValueFrom(this.http.put<MapLayer>(`/api/map/layers/${encodeURIComponent(id)}/grants`, request));
+  }
+
+  /** Every ACTIVE mark on a layer the caller may view, newest first. */
+  listMapMarks(): Promise<MapMark[]> {
+    return firstValueFrom(this.http.get<MapMark[]>('/api/map/marks'));
+  }
+
+  /** Drops a manual mark (an armed map click). 403 unless the caller may CONTRIBUTE to `layerId`; an omitted `layerId` defaults server-side. */
+  createMapMark(request: CreateMarkRequest): Promise<MapMark> {
+    return firstValueFrom(this.http.post<MapMark>('/api/map/marks', request));
+  }
+
+  /** Drops a mark projected from an asset's freshest telemetry (the cockpit "Mark target"). 400 if the asset has no/incomplete telemetry. */
+  geolocateMapMark(request: GeolocateMarkRequest): Promise<MapMark> {
+    return firstValueFrom(this.http.post<MapMark>('/api/map/marks/geolocate', request));
+  }
+
+  /** Partial edit — annotation, drag-to-correct, or a status transition. 403 once CONFIRMED unless the caller MANAGEs the layer; 404 unknown/out-of-scope id. */
+  patchMapMark(id: string, request: PatchMarkRequest): Promise<MapMark> {
+    return firstValueFrom(this.http.patch<MapMark>(`/api/map/marks/${encodeURIComponent(id)}`, request));
+  }
+
+  /** A manager's CONFIRM/REJECT decision. 403 unless the caller MANAGEs the mark's layer. */
+  verifyMapMark(id: string, request: VerifyMarkRequest): Promise<MapMark> {
+    return firstValueFrom(this.http.post<MapMark>(`/api/map/marks/${encodeURIComponent(id)}/verify`, request));
+  }
+
+  /** Moves the mark onto the shared common picture (default target: the COP layer) and stamps it CONFIRMED. 403 unless MANAGE on the source layer + CONTRIBUTE on the target. */
+  promoteMapMark(id: string, request: PromoteMarkRequest = {}): Promise<MapMark> {
+    return firstValueFrom(this.http.post<MapMark>(`/api/map/marks/${encodeURIComponent(id)}/promote`, request));
+  }
+
+  /** 403 unless the caller is the still-unverified mark's creator or MANAGEs its layer; 404 unknown/out-of-scope id. */
+  deleteMapMark(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/map/marks/${encodeURIComponent(id)}`));
+  }
+
+  /** Every drawing on a layer the caller may view. */
+  listMapDrawings(): Promise<MapDrawingResponse[]> {
+    return firstValueFrom(this.http.get<MapDrawingResponse[]>('/api/map/drawings'));
+  }
+
+  /** 400 on a degenerate shape (LINE/ARROW need ≥2 points, POLYGON ≥3, TEXT exactly 1 + a label); 403 without CONTRIBUTE. */
+  createMapDrawing(request: CreateDrawingRequest): Promise<MapDrawingResponse> {
+    return firstValueFrom(this.http.post<MapDrawingResponse>('/api/map/drawings', request));
+  }
+
+  /** Geometry and/or details; only present fields change. */
+  patchMapDrawing(id: string, request: PatchDrawingRequest): Promise<MapDrawingResponse> {
+    return firstValueFrom(this.http.patch<MapDrawingResponse>(`/api/map/drawings/${encodeURIComponent(id)}`, request));
+  }
+
+  /** 403 unless the caller is the drawing's creator or MANAGEs its layer; 404 unknown/out-of-scope id. */
+  deleteMapDrawing(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/map/drawings/${encodeURIComponent(id)}`));
   }
 
   // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------

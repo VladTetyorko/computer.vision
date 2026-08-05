@@ -1,0 +1,30 @@
+<div class="verify">
+  <div class="row facts">
+    <span class="chip" [class]="verificationChipClass(mark().verification)">{{ verificationLabel(mark().verification) }}</span>
+    <span class="muted truncate layer-name" [title]="layerName() ?? 'Layer unknown'">{{ layerName() ?? '—' }}</span>
+  </div>
+
+  @if (canManage()) {
+    <div class="row verbs">
+      <button
+        type="button"
+        class="btn secondary small"
+        (click)="confirm()"
+        [disabled]="busy() || mark().verification === 'CONFIRMED'"
+      >
+        Confirm
+      </button>
+      <button
+        type="button"
+        class="btn secondary small"
+        (click)="reject()"
+        [disabled]="busy() || mark().verification === 'REJECTED'"
+      >
+        Reject
+      </button>
+      @if (canPromote()) {
+        <button type="button" class="btn small" (click)="promote()" [disabled]="busy()">Promote to common picture</button>
+      }
+    </div>
+  }
+</div>

@@ -13,7 +13,7 @@ import {
 } from '../../core/fleet/warehouse-logic';
 import { formatDuration } from '../../core/stream-info-logic';
 import { usageDurationSeconds, type FlightBar } from '../../core/fleet/asset-stats-logic';
-import { LiveMap } from '../../shared/map/live-map/live-map';
+import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Icon } from '../../shared/ui/icon';
@@ -73,7 +73,7 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, LiveMap, PilotsCard, SectionHeader, SidePanel, Icon, KebabMenu, ConfirmDialog, EmptyState, Stat, PageBar],
+  imports: [RouterLink, TacticalMap, PilotsCard, SectionHeader, SidePanel, Icon, KebabMenu, ConfirmDialog, EmptyState, Stat, PageBar],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

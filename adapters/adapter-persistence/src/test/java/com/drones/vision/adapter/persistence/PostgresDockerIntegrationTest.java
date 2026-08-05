@@ -1,5 +1,7 @@
 package com.drones.vision.adapter.persistence;
 
+import com.drones.vision.domain.model.AccessLevel;
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.Annotation;
 import com.drones.vision.domain.model.AnnotationSource;
 import com.drones.vision.domain.model.Asset;
@@ -23,7 +25,14 @@ import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GeofenceZone;
 import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.DrawKind;
+import com.drones.vision.domain.model.Drawing;
+import com.drones.vision.domain.model.DrawingId;
+import com.drones.vision.domain.model.LayerGrant;
+import com.drones.vision.domain.model.LayerId;
+import com.drones.vision.domain.model.LayerKind;
 import com.drones.vision.domain.model.LifecycleState;
+import com.drones.vision.domain.model.MapLayer;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;
 import com.drones.vision.domain.model.MarkKind;
@@ -44,6 +53,8 @@ import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.model.User;
 import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.model.ZoneId;
+import com.drones.vision.domain.model.Verification;
+import com.drones.vision.domain.model.Verification.VerificationState;
 import com.drones.vision.domain.model.ZoneKind;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.AssetRepositoryPort;
@@ -54,7 +65,9 @@ import com.drones.vision.domain.port.out.DatasetRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.DeviceRepositoryPort;
 import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.domain.port.out.DrawingRepositoryPort;
 import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
 import com.drones.vision.domain.port.out.MarkRepositoryPort;
 import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
@@ -70,8 +83,10 @@ import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
+import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
 import com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository;
@@ -100,6 +115,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1009,7 +1025,11 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/TACTICAL-MARKS-PLAN.md §3 — every {@link MarkRepositoryPort} method, upsert semantics. */
+    /**
+     * docs/TACTICAL-MARKS-PLAN.md §3, reworked by docs/MAP-REWORK-PLAN.md §4.4 — every {@link
+     * MarkRepositoryPort} method, upsert semantics, plus the five columns V12 adds (layer,
+     * affiliation, and the flattened {@link Verification} triple).
+     */
     @Nested
     class MarkRepositoryTests {
 
@@ -1026,8 +1046,9 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedMarkRoundTripsWithAltitudeAndNote() {
-            Mark mark = new Mark(MarkId.random(), new GeoPosition(50.45, 30.52, 100.0), MarkKind.TARGET,
-                    "Bunker", "Reinforced, two entrances", ownership(), NOW, MarkStatus.ACTIVE, MarkSource.MANUAL);
+            Mark mark = new Mark(MarkId.random(), LayerId.random(), new GeoPosition(50.45, 30.52, 100.0),
+                    MarkKind.TARGET, Affiliation.HOSTILE, "Bunker", "Reinforced, two entrances", ownership(),
+                    NOW, MarkStatus.ACTIVE, MarkSource.MANUAL, Verification.unverified());
 
             repository.save(mark);
 
@@ -1038,8 +1059,9 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void detectionSourcedMarkWithNoAltitudeOrNoteRoundTripsWithNullFields() {
-            Mark mark = new Mark(MarkId.random(), new GeoPosition(50.45, 30.52, null), MarkKind.HAZARD,
-                    "Estimated hazard", null, ownership(), NOW, MarkStatus.ACTIVE, MarkSource.DETECTION);
+            Mark mark = new Mark(MarkId.random(), LayerId.random(), new GeoPosition(50.45, 30.52, null),
+                    MarkKind.HAZARD, Affiliation.UNKNOWN, "Estimated hazard", null, ownership(), NOW,
+                    MarkStatus.ACTIVE, MarkSource.DETECTION, Verification.unverified());
 
             repository.save(mark);
 
@@ -1048,32 +1070,63 @@ class PostgresDockerIntegrationTest {
             assertNull(found.get().position().altitudeMeters());
             assertNull(found.get().note());
             assertEquals(MarkSource.DETECTION, found.get().source());
+            assertEquals(VerificationState.UNVERIFIED, found.get().verification().state());
+            assertNull(found.get().verification().verifiedBy());
+            assertNull(found.get().verification().verifiedAt());
+        }
+
+        @Test
+        void confirmedMarkRoundTripsItsReviewerAndReviewInstant() {
+            UserId reviewer = UserId.random();
+            Mark mark = new Mark(MarkId.random(), LayerId.random(), new GeoPosition(50.45, 30.52, null),
+                    MarkKind.EQUIPMENT, Affiliation.HOSTILE, "Radar", null, ownership(), NOW,
+                    MarkStatus.ACTIVE, MarkSource.MANUAL,
+                    new Verification(VerificationState.CONFIRMED, reviewer, NOW));
+
+            repository.save(mark);
+
+            Optional<Mark> found = repository.findById(mark.id());
+            assertTrue(found.isPresent());
+            assertEquals(VerificationState.CONFIRMED, found.get().verification().state());
+            assertEquals(reviewer, found.get().verification().verifiedBy());
+            assertEquals(NOW, found.get().verification().verifiedAt());
         }
 
         @Test
         void saveIsAnUpsertPreservingId() {
             MarkId id = MarkId.random();
+            LayerId team = LayerId.random();
+            LayerId cop = LayerId.random();
             Ownership ownership = ownership();
-            repository.save(new Mark(id, new GeoPosition(10.0, 20.0, null), MarkKind.POI, "Original", null,
-                    ownership, NOW, MarkStatus.ACTIVE, MarkSource.MANUAL));
-            repository.save(new Mark(id, new GeoPosition(11.0, 21.0, 5.0), MarkKind.FRIENDLY, "Renamed",
-                    "Updated note", ownership, NOW, MarkStatus.CLEARED, MarkSource.MANUAL));
+            UserId reviewer = UserId.random();
+            repository.save(new Mark(id, team, new GeoPosition(10.0, 20.0, null), MarkKind.POI,
+                    Affiliation.NEUTRAL, "Original", null, ownership, NOW, MarkStatus.ACTIVE,
+                    MarkSource.MANUAL, Verification.unverified()));
+            repository.save(new Mark(id, cop, new GeoPosition(11.0, 21.0, 5.0), MarkKind.UNIT,
+                    Affiliation.FRIENDLY, "Renamed", "Updated note", ownership, NOW, MarkStatus.CLEARED,
+                    MarkSource.MANUAL, new Verification(VerificationState.CONFIRMED, reviewer, NOW)));
 
             Optional<Mark> found = repository.findById(id);
             assertTrue(found.isPresent());
             assertEquals("Renamed", found.get().label());
-            assertEquals(MarkKind.FRIENDLY, found.get().kind());
+            assertEquals(MarkKind.UNIT, found.get().kind());
+            assertEquals(Affiliation.FRIENDLY, found.get().affiliation());
             assertEquals("Updated note", found.get().note());
             assertEquals(MarkStatus.CLEARED, found.get().status());
             assertEquals(new GeoPosition(11.0, 21.0, 5.0), found.get().position());
+            // promotion (withLayer) and verification both survive the upsert
+            assertEquals(cop, found.get().layerId());
+            assertEquals(VerificationState.CONFIRMED, found.get().verification().state());
         }
 
         @Test
         void findAllReturnsEverySavedMark() {
-            Mark first = new Mark(MarkId.random(), new GeoPosition(10.0, 20.0, null), MarkKind.TARGET, "First",
-                    null, ownership(), NOW, MarkStatus.ACTIVE, MarkSource.MANUAL);
-            Mark second = new Mark(MarkId.random(), new GeoPosition(11.0, 21.0, null), MarkKind.HAZARD, "Second",
-                    null, ownership(), NOW, MarkStatus.ACTIVE, MarkSource.DETECTION);
+            Mark first = new Mark(MarkId.random(), LayerId.random(), new GeoPosition(10.0, 20.0, null),
+                    MarkKind.TARGET, Affiliation.HOSTILE, "First", null, ownership(), NOW,
+                    MarkStatus.ACTIVE, MarkSource.MANUAL, Verification.unverified());
+            Mark second = new Mark(MarkId.random(), LayerId.random(), new GeoPosition(11.0, 21.0, null),
+                    MarkKind.HAZARD, Affiliation.UNKNOWN, "Second", null, ownership(), NOW,
+                    MarkStatus.ACTIVE, MarkSource.DETECTION, Verification.unverified());
             repository.save(first);
             repository.save(second);
 
@@ -1084,8 +1137,9 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void deleteByIdIsIdempotentAndRemovesTheMark() {
-            Mark mark = new Mark(MarkId.random(), new GeoPosition(10.0, 20.0, null), MarkKind.TARGET, "Temp", null,
-                    ownership(), NOW, MarkStatus.ACTIVE, MarkSource.MANUAL);
+            Mark mark = new Mark(MarkId.random(), LayerId.random(), new GeoPosition(10.0, 20.0, null),
+                    MarkKind.TARGET, Affiliation.HOSTILE, "Temp", null, ownership(), NOW,
+                    MarkStatus.ACTIVE, MarkSource.MANUAL, Verification.unverified());
             repository.save(mark);
 
             repository.deleteById(mark.id());
@@ -1668,6 +1722,284 @@ class PostgresDockerIntegrationTest {
                     .getSingleResult();
             assertEquals("NO", dataColumn[0], "sample_images.data is required");
             assertEquals("bytea", dataColumn[1]);
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/MAP-REWORK-PLAN.md §2.3/§4.4 — every {@link MapLayerRepositoryPort} method, plus the
+     * element-collection grant list's own wholesale-replacement semantics.
+     */
+    @Nested
+    class MapLayerRepositoryTests {
+
+        private final MapLayerRepositoryPort repository = new JpaMapLayerRepository(entityManagerFactory);
+
+        private Ownership ownership() {
+            return new Ownership(UserId.random(), GroupId.random());
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(LayerId.random()).isEmpty());
+        }
+
+        @Test
+        void layerWithGrantsRoundTripsExactly() {
+            MapLayer layer = new MapLayer(LayerId.random(), "Bravo team", LayerKind.TEAM, ownership(),
+                    List.of(new LayerGrant(LayerGrant.SubjectType.USER, UUID.randomUUID(), AccessLevel.VIEW),
+                            new LayerGrant(LayerGrant.SubjectType.GROUP, UUID.randomUUID(), AccessLevel.MANAGE)),
+                    NOW);
+
+            repository.save(layer);
+
+            Optional<MapLayer> found = repository.findById(layer.id());
+            assertTrue(found.isPresent());
+            assertEquals(layer.name(), found.get().name());
+            assertEquals(LayerKind.TEAM, found.get().kind());
+            assertEquals(layer.ownership(), found.get().ownership());
+            assertEquals(NOW, found.get().createdAt());
+            assertEquals(Set.copyOf(layer.grants()), Set.copyOf(found.get().grants()));
+        }
+
+        @Test
+        void layerWithNoGrantsRoundTripsWithAnEmptyGrantList() {
+            MapLayer layer = new MapLayer(LayerId.random(), "Common picture", LayerKind.COP, ownership(),
+                    List.of(), NOW);
+
+            repository.save(layer);
+
+            Optional<MapLayer> found = repository.findById(layer.id());
+            assertTrue(found.isPresent());
+            assertTrue(found.get().grants().isEmpty());
+            assertEquals(LayerKind.COP, found.get().kind());
+        }
+
+        @Test
+        void saveReplacesTheGrantListWholesaleRatherThanMergingIt() {
+            UUID keptSubject = UUID.randomUUID();
+            MapLayer layer = new MapLayer(LayerId.random(), "Alpha", LayerKind.PERSONAL, ownership(),
+                    List.of(new LayerGrant(LayerGrant.SubjectType.USER, keptSubject, AccessLevel.VIEW),
+                            new LayerGrant(LayerGrant.SubjectType.USER, UUID.randomUUID(), AccessLevel.MANAGE)),
+                    NOW);
+            repository.save(layer);
+
+            repository.save(layer.withGrants(
+                    List.of(new LayerGrant(LayerGrant.SubjectType.USER, keptSubject, AccessLevel.CONTRIBUTE))));
+
+            Optional<MapLayer> found = repository.findById(layer.id());
+            assertTrue(found.isPresent());
+            assertEquals(1, found.get().grants().size(), "the dropped grant must be gone, not merged");
+            assertEquals(keptSubject, found.get().grants().get(0).subjectId());
+            assertEquals(AccessLevel.CONTRIBUTE, found.get().grants().get(0).level(),
+                    "the surviving grant's level must be the new one");
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingId() {
+            LayerId id = LayerId.random();
+            Ownership ownership = ownership();
+            repository.save(new MapLayer(id, "Before", LayerKind.TEAM, ownership, List.of(), NOW));
+            repository.save(new MapLayer(id, "After", LayerKind.TEAM, ownership, List.of(), NOW));
+
+            Optional<MapLayer> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals("After", found.get().name());
+        }
+
+        @Test
+        void findAllReturnsEverySavedLayer() {
+            MapLayer first = new MapLayer(LayerId.random(), "First", LayerKind.TEAM, ownership(), List.of(), NOW);
+            MapLayer second = new MapLayer(LayerId.random(), "Second", LayerKind.PERSONAL, ownership(),
+                    List.of(), NOW);
+            repository.save(first);
+            repository.save(second);
+
+            List<LayerId> ids = repository.findAll().stream().map(MapLayer::id).toList();
+            assertTrue(ids.contains(first.id()));
+            assertTrue(ids.contains(second.id()));
+        }
+
+        @Test
+        void deleteByIdIsIdempotentAndRemovesTheLayerAndItsGrants() {
+            MapLayer layer = new MapLayer(LayerId.random(), "Temp", LayerKind.PERSONAL, ownership(),
+                    List.of(new LayerGrant(LayerGrant.SubjectType.USER, UUID.randomUUID(), AccessLevel.VIEW)),
+                    NOW);
+            repository.save(layer);
+
+            repository.deleteById(layer.id());
+            assertTrue(repository.findById(layer.id()).isEmpty());
+
+            // the ON DELETE CASCADE / Hibernate collection removal left no orphan grant row behind
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                Number orphans = (Number) em.createNativeQuery(
+                                "select count(*) from map_layer_grants where layer_id = ?1")
+                        .setParameter(1, layer.id().value())
+                        .getSingleResult();
+                assertEquals(0L, orphans.longValue());
+            } finally {
+                em.close();
+            }
+
+            // second call on an already-absent id must not throw
+            repository.deleteById(layer.id());
+        }
+    }
+
+    /** docs/MAP-REWORK-PLAN.md §2.3/§4.4 — every {@link DrawingRepositoryPort} method. */
+    @Nested
+    class DrawingRepositoryTests {
+
+        private final DrawingRepositoryPort repository = new JpaDrawingRepository(entityManagerFactory);
+
+        private Ownership ownership() {
+            return new Ownership(UserId.random(), GroupId.random());
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(DrawingId.random()).isEmpty());
+        }
+
+        @Test
+        void polygonWithLabelAndColorTokenRoundTripsExactly() {
+            Drawing drawing = new Drawing(DrawingId.random(), LayerId.random(), DrawKind.POLYGON,
+                    List.of(new GeoPosition(50.0, 30.0, null), new GeoPosition(50.1, 30.0, null),
+                            new GeoPosition(50.1, 30.1, 120.0)),
+                    "Assembly area", "accent", ownership(), NOW);
+
+            repository.save(drawing);
+
+            Optional<Drawing> found = repository.findById(drawing.id());
+            assertTrue(found.isPresent());
+            assertEquals(drawing, found.get());
+        }
+
+        @Test
+        void lineWithNoLabelOrColorTokenRoundTripsWithNullFields() {
+            Drawing drawing = new Drawing(DrawingId.random(), LayerId.random(), DrawKind.LINE,
+                    List.of(new GeoPosition(50.0, 30.0, null), new GeoPosition(50.5, 30.5, null)),
+                    null, null, ownership(), NOW);
+
+            repository.save(drawing);
+
+            Optional<Drawing> found = repository.findById(drawing.id());
+            assertTrue(found.isPresent());
+            assertNull(found.get().label());
+            assertNull(found.get().colorToken());
+            assertEquals(2, found.get().points().size());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingIdAndReplacingGeometry() {
+            DrawingId id = DrawingId.random();
+            LayerId layerId = LayerId.random();
+            Ownership ownership = ownership();
+            repository.save(new Drawing(id, layerId, DrawKind.LINE,
+                    List.of(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null)),
+                    "Before", null, ownership, NOW));
+            repository.save(new Drawing(id, layerId, DrawKind.LINE,
+                    List.of(new GeoPosition(5.0, 6.0, null), new GeoPosition(7.0, 8.0, null),
+                            new GeoPosition(9.0, 10.0, null)),
+                    "After", "danger", ownership, NOW));
+
+            Optional<Drawing> found = repository.findById(id);
+            assertTrue(found.isPresent());
+            assertEquals("After", found.get().label());
+            assertEquals("danger", found.get().colorToken());
+            assertEquals(3, found.get().points().size(), "geometry is replaced, not appended to");
+        }
+
+        @Test
+        void findAllReturnsEverySavedDrawing() {
+            Drawing first = new Drawing(DrawingId.random(), LayerId.random(), DrawKind.TEXT,
+                    List.of(new GeoPosition(1.0, 2.0, null)), "Note", null, ownership(), NOW);
+            Drawing second = new Drawing(DrawingId.random(), LayerId.random(), DrawKind.ARROW,
+                    List.of(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null)),
+                    null, null, ownership(), NOW);
+            repository.save(first);
+            repository.save(second);
+
+            List<Drawing> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void deleteByIdIsIdempotentAndRemovesTheDrawing() {
+            Drawing drawing = new Drawing(DrawingId.random(), LayerId.random(), DrawKind.LINE,
+                    List.of(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null)),
+                    null, null, ownership(), NOW);
+            repository.save(drawing);
+
+            repository.deleteById(drawing.id());
+            assertTrue(repository.findById(drawing.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.deleteById(drawing.id());
+        }
+    }
+
+    /**
+     * docs/MAP-REWORK-PLAN.md §4.4 — same shape as the V7-V11 schema tests, for the three new map
+     * tables and the five columns V12 grafts onto {@code marks}. Also asserts the in-migration COP
+     * layer row exists with the system ownership {@code LayerResolver} stamps, since that row is
+     * what pre-existing marks were backfilled onto.
+     */
+    @Test
+    void v12MigrationCreatesTheMapTablesAndBackfillsMarksOnTopOfV1ThroughV11() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            Object[] pointsColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'map_drawings' and column_name = 'points'")
+                    .getSingleResult();
+            assertEquals("NO", pointsColumn[0], "map_drawings.points is required");
+            assertEquals("jsonb", pointsColumn[1]);
+
+            String colorTokenNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'map_drawings' and column_name = 'color_token'")
+                    .getSingleResult();
+            assertEquals("YES", colorTokenNullable, "color_token is optional");
+
+            Number grantsPkColumns = (Number) em.createNativeQuery(
+                            "select count(*) from information_schema.key_column_usage k "
+                                    + "join information_schema.table_constraints c "
+                                    + "on k.constraint_name = c.constraint_name "
+                                    + "where c.table_name = 'map_layer_grants' "
+                                    + "and c.constraint_type = 'PRIMARY KEY'")
+                    .getSingleResult();
+            assertEquals(3L, grantsPkColumns.longValue(),
+                    "map_layer_grants is keyed by (layer_id, subject_type, subject_id)");
+
+            String layerIdNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'marks' and column_name = 'layer_id'")
+                    .getSingleResult();
+            assertEquals("NO", layerIdNullable, "every mark is on a layer after the backfill");
+
+            String affiliationNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'marks' and column_name = 'affiliation'")
+                    .getSingleResult();
+            assertEquals("NO", affiliationNullable, "every mark has an affiliation after the backfill");
+
+            String verifiedByNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'marks' and column_name = 'verified_by'")
+                    .getSingleResult();
+            assertEquals("YES", verifiedByNullable, "verified_by is absent while a mark is UNVERIFIED");
+
+            Object[] copLayer = (Object[]) em.createNativeQuery(
+                            "select kind, owner_user_id, group_id from map_layers where id = ?1")
+                    .setParameter(1, UUID.fromString("00000000-0000-0000-0000-000000000002"))
+                    .getSingleResult();
+            assertEquals("COP", copLayer[0]);
+            assertEquals(new UUID(0, 0), copLayer[1], "the COP layer is owned by the system principal");
+            assertEquals(new UUID(0, 1), copLayer[2]);
         } finally {
             em.close();
         }

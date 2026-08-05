@@ -1,7 +1,11 @@
 package com.drones.vision.application.mark;
 
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GeoProjection;
+import com.drones.vision.domain.model.LayerId;
+import com.drones.vision.domain.model.MapEvent;
+import com.drones.vision.domain.model.MapLayer;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;
 import com.drones.vision.domain.model.MarkKind;
@@ -9,18 +13,23 @@ import com.drones.vision.domain.model.MarkSource;
 import com.drones.vision.domain.model.MarkStatus;
 import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.model.Verification;
+import com.drones.vision.domain.model.Verification.VerificationState;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 import com.drones.vision.domain.port.out.MarkRepositoryPort;
 
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.stream.Collectors;
+import com.drones.vision.application.map.LayerResolver;
+import com.drones.vision.application.map.MapAccessPolicy;
+import com.drones.vision.application.map.MapAccessPolicy.Viewer;
 import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.scope.VisibilityScope;
 
 /**
  * The one implementation of {@link MarkService}.
@@ -44,41 +53,55 @@ public final class DefaultMarkService implements MarkService {
     private final MarkRepositoryPort markRepository;
     private final UsageTracker usageTracker;
     private final LiveUpdatePublisherPort liveUpdatePublisher;
+    private final MapAccessPolicy policy;
+    private final LayerResolver layerResolver;
 
     public DefaultMarkService(MarkRepositoryPort markRepository, UsageTracker usageTracker,
-                               LiveUpdatePublisherPort liveUpdatePublisher) {
+                               LiveUpdatePublisherPort liveUpdatePublisher, MapAccessPolicy policy,
+                               LayerResolver layerResolver) {
         this.markRepository = Objects.requireNonNull(markRepository, "markRepository must not be null");
         this.usageTracker = Objects.requireNonNull(usageTracker, "usageTracker must not be null");
         this.liveUpdatePublisher =
                 Objects.requireNonNull(liveUpdatePublisher, "liveUpdatePublisher must not be null");
+        this.policy = Objects.requireNonNull(policy, "policy must not be null");
+        this.layerResolver = Objects.requireNonNull(layerResolver, "layerResolver must not be null");
     }
 
     @Override
-    public List<Mark> list() {
+    public List<Mark> list(Viewer v) {
+        Objects.requireNonNull(v, "v must not be null");
+        Map<LayerId, MapLayer> layersById =
+                layerResolver.findAll().stream().collect(Collectors.toMap(MapLayer::id, layer -> layer));
         return markRepository.findAll().stream()
                 .filter(mark -> mark.status() == MarkStatus.ACTIVE)
+                .filter(mark -> isVisible(v, mark, layersById))
                 .sorted(Comparator.comparing(Mark::createdAt).reversed())
                 .toList();
     }
 
-    @Override
-    public Mark create(MarkSpec spec, Ownership ownership, UserId actor) {
-        Objects.requireNonNull(spec, "spec must not be null");
-        Objects.requireNonNull(ownership, "ownership must not be null");
-        Objects.requireNonNull(actor, "actor must not be null");
-
-        Mark mark = new Mark(MarkId.random(), spec.position(), spec.kind(), spec.label(), spec.note(),
-                ownership, Instant.now(), MarkStatus.ACTIVE, MarkSource.MANUAL);
-        Mark saved = markRepository.save(mark);
-        liveUpdatePublisher.publishMarkCreated(saved);
-        return saved;
+    private boolean isVisible(Viewer v, Mark mark, Map<LayerId, MapLayer> layersById) {
+        MapLayer layer = layersById.get(mark.layerId());
+        return layer != null && policy.canView(v, layer);
     }
 
     @Override
-    public Mark geolocate(GeolocateSpec spec, Ownership ownership, UserId actor) {
+    public Mark create(Viewer v, MarkSpec spec) {
+        Objects.requireNonNull(v, "v must not be null");
         Objects.requireNonNull(spec, "spec must not be null");
-        Objects.requireNonNull(ownership, "ownership must not be null");
-        Objects.requireNonNull(actor, "actor must not be null");
+
+        LayerId layerId = resolveLayer(v, spec.layerId());
+        Mark mark = new Mark(MarkId.random(), layerId, spec.position(), spec.kind(), spec.affiliation(),
+                spec.label(), spec.note(), ownershipFor(v), Instant.now(), MarkStatus.ACTIVE, MarkSource.MANUAL,
+                Verification.unverified());
+        return saveAndPublish(mark, MapEvent.Action.CREATED, layerId);
+    }
+
+    @Override
+    public Mark geolocate(Viewer v, GeolocateSpec spec) {
+        Objects.requireNonNull(v, "v must not be null");
+        Objects.requireNonNull(spec, "spec must not be null");
+
+        LayerId layerId = resolveLayer(v, spec.layerId());
 
         Telemetry telemetry = usageTracker.latestTelemetry(spec.assetId())
                 .orElseThrow(() -> new IllegalArgumentException(TELEMETRY_INCOMPLETE));
@@ -91,48 +114,121 @@ public final class DefaultMarkService implements MarkService {
         GeoPosition ground = GeoProjection.project(drone, telemetry.headingDegrees(), telemetry.altitudeMeters(),
                 spec.depressionDegrees());
 
-        Mark mark = new Mark(MarkId.random(), ground, spec.kind(), spec.label(), spec.note(),
-                ownership, Instant.now(), MarkStatus.ACTIVE, MarkSource.DETECTION);
+        Mark mark = new Mark(MarkId.random(), layerId, ground, spec.kind(), spec.affiliation(), spec.label(),
+                spec.note(), ownershipFor(v), Instant.now(), MarkStatus.ACTIVE, MarkSource.DETECTION,
+                Verification.unverified());
+        return saveAndPublish(mark, MapEvent.Action.CREATED, layerId);
+    }
+
+    /**
+     * Resolves the layer a create/geolocate call lands on: {@code explicitLayerId} if given (must
+     * exist), else the caller's default layer (see {@link LayerResolver#defaultLayerFor}) — either
+     * way, {@code v} must {@link MapAccessPolicy#canContribute} to the resolved layer.
+     */
+    private LayerId resolveLayer(Viewer v, LayerId explicitLayerId) {
+        LayerId layerId = explicitLayerId != null ? explicitLayerId : layerResolver.defaultLayerFor(v);
+        MapLayer layer = layerResolver.require(layerId);
+        if (!policy.canContribute(v, layer)) {
+            throw new AccessDeniedException("not permitted to contribute to layer " + layerId.value());
+        }
+        return layerId;
+    }
+
+    private Ownership ownershipFor(Viewer v) {
+        return new Ownership(v.userId(), LayerResolver.homeGroupOf(v));
+    }
+
+    private Mark saveAndPublish(Mark mark, MapEvent.Action action, LayerId layerId) {
         Mark saved = markRepository.save(mark);
-        liveUpdatePublisher.publishMarkCreated(saved);
+        liveUpdatePublisher.publishMapEvent(new MapEvent(MapEvent.EntityType.MARK, action, layerId, saved));
         return saved;
     }
 
     @Override
-    public Mark update(MarkId id, MarkPatch patch, UserId actor, VisibilityScope scope) {
+    public Mark patch(Viewer v, MarkId id, MarkPatch patch) {
+        Objects.requireNonNull(v, "v must not be null");
         Objects.requireNonNull(patch, "patch must not be null");
-        Objects.requireNonNull(actor, "actor must not be null");
-        Objects.requireNonNull(scope, "scope must not be null");
-        // Creator-or-manager, uniformly for every field -- including a plain annotation/drag-to-correct
-        // with no status change. No group-visibility gate in front of this any more: list() is now
-        // deployment-wide, so a PILOT must be able to reach (and manage) their own mark by id.
+
         Mark mark = require(id);
-        requireCreatorOrManager(mark, actor, scope);
+        MapLayer layer = layerResolver.require(mark.layerId());
+        requireVisible(v, mark, layer);
+        requireEditable(v, mark, layer);
 
         MarkKind kind = patch.kind().orElse(mark.kind());
+        Affiliation affiliation = patch.affiliation().orElse(mark.affiliation());
         String label = patch.label().orElse(mark.label());
         String note = patch.note().orElse(mark.note());
         GeoPosition position = patch.position().orElse(mark.position());
-        Mark annotated = mark.withDetails(kind, label, note, position);
+        Mark repositioned = mark.withPosition(position);
+        Mark annotated = repositioned.withDetails(label, note, kind, affiliation);
         Mark updated = patch.status().isPresent() ? annotated.withStatus(patch.status().get()) : annotated;
 
         Mark saved = markRepository.save(updated);
-        if (saved.status() == MarkStatus.CLEARED) {
-            liveUpdatePublisher.publishMarkCleared(saved);
-        } else {
-            liveUpdatePublisher.publishMarkUpdated(saved);
-        }
+        MapEvent.Action action = saved.status() == MarkStatus.CLEARED ? MapEvent.Action.CLEARED : MapEvent.Action.UPDATED;
+        liveUpdatePublisher.publishMapEvent(new MapEvent(MapEvent.EntityType.MARK, action, saved.layerId(), saved));
         return saved;
     }
 
     @Override
-    public void delete(MarkId id, UserId actor, VisibilityScope scope) {
-        Objects.requireNonNull(actor, "actor must not be null");
-        Objects.requireNonNull(scope, "scope must not be null");
+    public Mark verify(Viewer v, MarkId id, VerificationState decision) {
+        Objects.requireNonNull(v, "v must not be null");
+        Objects.requireNonNull(decision, "decision must not be null");
+        if (decision != VerificationState.CONFIRMED && decision != VerificationState.REJECTED) {
+            throw new IllegalArgumentException("verify decision must be CONFIRMED or REJECTED: " + decision);
+        }
+
         Mark mark = require(id);
-        requireCreatorOrManager(mark, actor, scope);
+        MapLayer layer = layerResolver.require(mark.layerId());
+        requireVisible(v, mark, layer);
+        if (!policy.canManage(v, layer)) {
+            throw new AccessDeniedException("not permitted to verify marks on layer " + layer.id().value());
+        }
+
+        Mark saved = markRepository.save(mark.withVerification(new Verification(decision, v.userId(), Instant.now())));
+        liveUpdatePublisher.publishMapEvent(
+                new MapEvent(MapEvent.EntityType.MARK, MapEvent.Action.UPDATED, saved.layerId(), saved));
+        return saved;
+    }
+
+    @Override
+    public Mark promote(Viewer v, MarkId id, LayerId targetOrNull) {
+        Objects.requireNonNull(v, "v must not be null");
+        Objects.requireNonNull(id, "id must not be null");
+
+        Mark mark = require(id);
+        MapLayer source = layerResolver.require(mark.layerId());
+        requireVisible(v, mark, source);
+        if (!policy.canManage(v, source)) {
+            throw new AccessDeniedException("not permitted to promote marks from layer " + source.id().value());
+        }
+
+        LayerId targetId = targetOrNull != null ? targetOrNull : layerResolver.copLayerId();
+        MapLayer target = layerResolver.require(targetId);
+        if (!policy.canContribute(v, target)) {
+            throw new AccessDeniedException("not permitted to promote to layer " + targetId.value());
+        }
+
+        Verification verification = mark.verification().state() == VerificationState.CONFIRMED
+                ? mark.verification()
+                : new Verification(VerificationState.CONFIRMED, v.userId(), Instant.now());
+        Mark saved = markRepository.save(mark.withLayer(targetId).withVerification(verification));
+        liveUpdatePublisher.publishMapEvent(
+                new MapEvent(MapEvent.EntityType.MARK, MapEvent.Action.UPDATED, targetId, saved));
+        return saved;
+    }
+
+    @Override
+    public void delete(Viewer v, MarkId id) {
+        Objects.requireNonNull(v, "v must not be null");
+
+        Mark mark = require(id);
+        MapLayer layer = layerResolver.require(mark.layerId());
+        requireVisible(v, mark, layer);
+        requireEditable(v, mark, layer);
+
         markRepository.deleteById(id);
-        liveUpdatePublisher.publishMarkCleared(mark);
+        liveUpdatePublisher.publishMapEvent(
+                new MapEvent(MapEvent.EntityType.MARK, MapEvent.Action.DELETED, mark.layerId(), mark));
     }
 
     private Mark require(MarkId id) {
@@ -142,17 +238,29 @@ public final class DefaultMarkService implements MarkService {
     }
 
     /**
-     * The creator-or-manager gate shared by {@link #update} (every field, not only a status
-     * transition) and {@link #delete}: {@code actor.equals(mark.createdBy())} (the creator may
-     * always manage their own mark) or {@link VisibilityScope#canManageOrg()} (a manager/admin may
-     * manage any mark), else {@link AccessDeniedException}. Deliberately not additionally
-     * scope-checked against the mark's owning group: any manager, not only one whose subtree
-     * contains this mark, may edit/clear/delete it.
+     * A mark on a layer the viewer may not {@link MapAccessPolicy#canView view} must be
+     * indistinguishable from a mark that does not exist (docs/MAP-REWORK-PLAN.md §4.1: out-of-scope
+     * → 404, never 403 — a 403 would reveal the id is real). Checked before any per-action gate.
      */
-    private void requireCreatorOrManager(Mark mark, UserId actor, VisibilityScope scope) {
-        if (!mark.ownership().ownerId().equals(actor) && !scope.canManageOrg()) {
-            throw new AccessDeniedException(
-                    "Mark " + mark.id().value() + " may only be edited or deleted by its creator or a manager");
+    private void requireVisible(Viewer v, Mark mark, MapLayer layer) {
+        if (!policy.canView(v, layer)) {
+            throw new NoSuchElementException("Unknown mark: " + mark.id().value());
+        }
+    }
+
+    /**
+     * The gate shared by {@link #patch} (every field, including a plain annotation/drag-to-correct
+     * with no status change) and {@link #delete}: the mark's own creator may manage it only while
+     * its {@link Verification} is still {@link VerificationState#UNVERIFIED} — once a manager
+     * confirms or rejects it, the creator's standing edit right lapses and only {@link
+     * MapAccessPolicy#canManage} on its layer remains, else {@link AccessDeniedException}.
+     */
+    private void requireEditable(Viewer v, Mark mark, MapLayer layer) {
+        boolean creatorMayEdit = mark.createdBy().equals(v.userId())
+                && mark.verification().state() == VerificationState.UNVERIFIED;
+        if (!creatorMayEdit && !policy.canManage(v, layer)) {
+            throw new AccessDeniedException("Mark " + mark.id().value()
+                    + " may only be edited or deleted by its creator (while unverified) or a manager");
         }
     }
 }

@@ -1,0 +1,93 @@
+/* ---- The affiliation swatch, shared by every non-map surface that shows a mark ------------------
+   A deliberately small restatement of `tactical-map.css`'s own `.mark-symbol` frame rules (frame
+   shape + semantic colour per affiliation, plus the dashed/dimmed unverified treatment).
+
+   **Why it is restated rather than imported from there**: those rules are `:host ::ng-deep`, scoped
+   to `<vision-tactical-map>`'s own host, because Leaflet renders divIcons outside Angular's view
+   encapsulation — a picker button or a list row in a *different* component can never match them.
+   This file is the one copy every such component shares, pulled in via `styleUrls`
+   (`mark-palette`, Fly's marks panel, Command's marks panel), so a mark in a list can never drift
+   from the same mark on the map.
+
+   Only the frame, the glyph slot and the unverified treatment are restated — not the COP ring or the
+   selection ring, which are map-only concerns (a list row carries selection with the app's own
+   left-bar idiom instead, frontend-style §4). ------------------------------------------------------ */
+
+.aff-swatch {
+  position: relative;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--color-warn);
+}
+
+/* The list-row variant is big enough to carry a kind glyph inside the frame. */
+.aff-swatch.with-glyph {
+  width: 20px;
+  height: 20px;
+}
+
+.aff-swatch .sym-frame {
+  position: absolute;
+  inset: 1px;
+  border: 2px solid currentColor;
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.aff-swatch .sym-glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+/* FRIENDLY — rounded frame. */
+.aff-swatch.aff-friendly {
+  color: var(--color-info);
+}
+
+.aff-swatch.aff-friendly .sym-frame {
+  border-radius: 40%;
+}
+
+/* HOSTILE — diamond (a rotated square; the glyph itself stays upright). */
+.aff-swatch.aff-hostile {
+  color: var(--color-danger);
+}
+
+.aff-swatch.aff-hostile .sym-frame {
+  inset: 2px;
+  transform: rotate(45deg);
+}
+
+/* NEUTRAL — square. */
+.aff-swatch.aff-neutral {
+  color: var(--color-success);
+}
+
+.aff-swatch.aff-neutral .sym-frame {
+  border-radius: 1px;
+}
+
+/* UNKNOWN — quatrefoil, approximated as a rounded diamond. */
+.aff-swatch.aff-unknown {
+  color: var(--color-warn);
+}
+
+.aff-swatch.aff-unknown .sym-frame {
+  inset: 2px;
+  border-radius: 30%;
+  transform: rotate(45deg);
+}
+
+/* Verification: an unverified mark reads as provisional here exactly as it does on the map. */
+.aff-swatch.unverified {
+  opacity: 0.75;
+}
+
+.aff-swatch.unverified .sym-frame {
+  border-style: dashed;
+}

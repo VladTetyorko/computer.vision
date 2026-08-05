@@ -135,7 +135,19 @@
                 </button>
               </vision-section-header>
             </div>
-            <vision-live-map />
+            <!-- Zones + marks are new here (docs/MAP-REWORK-PLAN.md §5.1): the old inset dropped
+                 both silently, so this card showed a different picture from Command's map. -->
+            <vision-tactical-map
+              [assets]="facade.mapAssets()"
+              [followAssetId]="facade.mapFollowAssetId()"
+              [zones]="facade.geofence.zones()"
+              [marks]="facade.marks.displayMarks()"
+              [drawings]="facade.drawings.displayDrawings()"
+              [layers]="facade.layers.layers()"
+              [selectedMarkId]="facade.marks.selectedMarkId()"
+              (markSelected)="facade.marks.select($event)"
+              (markMoved)="facade.marks.moveTo($event.id, $event.position)"
+            />
             <dl class="facts freshest-facts">
               @for (row of facade.freshestFacts(); track row.label) {
                 <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>

@@ -9,9 +9,11 @@ REST driving adapter: asset-first + device/stream/discovery endpoints over the d
 ## Package layout (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row B)
 
 Everything below `com.drones.vision.api` lives in one of these subpackages — nothing sits directly
-at the module root anymore: `controller/` (every `@RestController`, 29 — the 29th is `DemoController`,
-see the `demo/` note below), `dto/` (wire records only,
-98 — house rule "zero DTO leakage"), `demo/` (the additive, property-gated demo data package — its
+at the module root anymore: `controller/` (every `@RestController`, 31 — `MarksController` was
+deleted and `MapLayersController`/`MapMarksController`/`MapDrawingsController` added by
+docs/MAP-REWORK-PLAN.md Wave C; `DemoController` is the property-gated one, see the `demo/` note
+below), `dto/` (wire records only,
+~110 — house rule "zero DTO leakage"), `demo/` (the additive, property-gated demo data package — its
 own section under API surface; the one subpackage added since this layout was frozen, kept separate
 precisely so it can be deleted in one `rm -r` plus two lines), `security/` (`CurrentUser`/`PrincipalResolver`/
 `SessionAuthenticator` — the token→`UserId` edge, no `org.springframework.security` dependency),
@@ -93,11 +95,22 @@ literal it replaced (see `VisionApiProperties` below).
 | UserAdminController | POST | `/api/users/{id}/enabled` | 200 `UserResponse` | 403 caller may not manage / target outside scope, 404 unknown id, 400 bad UUID |
 | GroupAdminController | GET | `/api/groups` | 200 `List<GroupResponse>` | — (scope-filtered; unbounded/ADMIN → all, docs/U-SCOPE-PLAN.md slice-2 cleanup) |
 | GroupAdminController | POST | `/api/groups` | 201 `GroupResponse` | 403 caller may not manage / (manager) creates a root group / parent outside scope; 400 blank name/bad parent UUID, 404 unknown parent group (docs/U-SCOPE-PLAN.md slice 2) |
-| MarksController | GET | `/api/marks` | 200 `List<MarkResponse>` | — (deployment-wide, every `ACTIVE` mark, newest first — unscoped, see docs/TACTICAL-MARKS-PLAN.md M4) |
-| MarksController | POST | `/api/marks` | 201 `MarkResponse` | 400 unrecognized `kind` / missing position (docs/TACTICAL-MARKS-PLAN.md §4 — a manual, map-click mark; ownership from `currentUser.ownership()`) |
-| MarksController | POST | `/api/marks/geolocate` | 201 `MarkResponse` | 400 unrecognized `kind` / blank-or-malformed `assetId` / incomplete telemetry (`"cannot geolocate: telemetry incomplete"`) (docs/TACTICAL-MARKS-PLAN.md §4 — the cockpit "geolocate" action; absent `kind`/`label`/`depressionDegrees` default to `TARGET`/`"Contact"`/`GeoProjection.DEFAULT_DEPRESSION_DEGREES` respectively, see `GeolocateMarkRequest`) |
-| MarksController | PATCH | `/api/marks/{id}` | 200 `MarkResponse` | 404 unknown mark id, 400 bad UUID/unrecognized `kind`/`status`, 403 clear/status-change/edit by neither creator nor manager (docs/TACTICAL-MARKS-PLAN.md §4 — a true partial patch, every field optional) |
-| MarksController | DELETE | `/api/marks/{id}` | 204 | 404 unknown mark id, 400 bad UUID, 403 delete by neither creator nor manager |
+| MapLayersController | GET | `/api/map/layers` | 200 `List<LayerResponse>` | — (docs/MAP-REWORK-PLAN.md §4.1; visible layers only, COP first then by name; `grants` present only when `myAccess == MANAGE`; `markCount`/`drawingCount` are the caller's own visible `ACTIVE` marks / drawings on that layer) |
+| MapLayersController | POST | `/api/map/layers` | 201 `LayerResponse` | 400 unrecognized `kind` (incl. `COP`, which is infrastructure) / blank-or-over-80-char `name` / `TEAM` with no `groupId` / malformed `groupId`; 403 caller is neither ADMIN nor MANAGER of that group |
+| MapLayersController | PATCH | `/api/map/layers/{id}` | 200 `LayerResponse` | 404 unknown layer, 400 bad UUID/blank name, 403 caller does not manage it, **409 the COP layer cannot be renamed** |
+| MapLayersController | DELETE | `/api/map/layers/{id}` | 204 | 404 unknown layer, 400 bad UUID, 403 caller does not manage it, **409 the COP layer cannot be deleted** (cascades to its marks + drawings, each emitting its own `map` SSE event) |
+| MapLayersController | PUT | `/api/map/layers/{id}/grants` | 200 `LayerResponse` | 404 unknown layer, 400 unrecognized `subjectType`/`level` or malformed `subjectId`, 403 caller does not manage it (**wholesale replacement**: an absent/empty list clears every grant) |
+| MapMarksController | GET | `/api/map/marks` | 200 `List<MarkResponse>` | — (docs/MAP-REWORK-PLAN.md §4.1; `ACTIVE` marks on layers the caller may view, newest first — **layer-scoped, superseding the old deployment-wide `/api/marks`**) |
+| MapMarksController | POST | `/api/map/marks` | 201 `MarkResponse` | 400 unrecognized `kind`/`affiliation` (note `FRIENDLY` is no longer a `kind`), out-of-range coordinates, blank `label`, malformed `layerId`; 404 unknown `layerId`; 403 caller may not contribute to the resolved layer (absent `layerId` = "my default layer", never an error) |
+| MapMarksController | POST | `/api/map/marks/geolocate` | 201 `MarkResponse` | 400 blank/malformed `assetId`, unrecognized `kind`/`affiliation`, incomplete telemetry (`"cannot geolocate: telemetry incomplete"`); 404 unknown `layerId`; 403 may not contribute (absent `kind`/`affiliation`/`label`/`depressionDegrees` default to `TARGET`/`HOSTILE`/`"Contact"`/`GeoProjection.DEFAULT_DEPRESSION_DEGREES` — see `GeolocateMarkRequest`) |
+| MapMarksController | PATCH | `/api/map/marks/{id}` | 200 `MarkResponse` | 404 unknown mark, 400 bad UUID / unrecognized `kind`/`affiliation`/`status` / **only one half of the `latitude`+`longitude` pair**, 403 caller is neither the creator (while `UNVERIFIED`) nor a manager of the layer |
+| MapMarksController | POST | `/api/map/marks/{id}/verify` | 200 `MarkResponse` | 404 unknown mark, 400 unrecognized or `UNVERIFIED` `decision`, **403 non-manager** (docs/MAP-REWORK-PLAN.md §3 — `canManage` on the mark's current layer) |
+| MapMarksController | POST | `/api/map/marks/{id}/promote` | 200 `MarkResponse` | 404 unknown mark or unknown target layer, 400 malformed `targetLayerId`, 403 caller does not manage the source layer or may not contribute to the target (**whole body optional**; absent `targetLayerId` = the COP layer; stamps `CONFIRMED` if not already) |
+| MapMarksController | DELETE | `/api/map/marks/{id}` | 204 | 404 unknown mark, 400 bad UUID, 403 neither creator-while-unverified nor manager |
+| MapDrawingsController | GET | `/api/map/drawings` | 200 `List<DrawingResponse>` | — (docs/MAP-REWORK-PLAN.md §4.1; drawings on layers the caller may view) |
+| MapDrawingsController | POST | `/api/map/drawings` | 201 `DrawingResponse` | 400 unrecognized `kind`, wrong point count for the kind (`LINE`/`ARROW` ≥2, `POLYGON` ≥3, `TEXT` exactly 1 + non-blank label), non-kebab-case `colorToken`, out-of-range point, malformed `layerId`; 404 unknown `layerId`; 403 may not contribute |
+| MapDrawingsController | PATCH | `/api/map/drawings/{id}` | 200 `DrawingResponse` | 404 unknown drawing, 400 bad UUID / out-of-range point / point count wrong for the drawing's kind, 403 neither creator nor manager (`points`, when present, **replaces geometry wholesale**) |
+| MapDrawingsController | DELETE | `/api/map/drawings/{id}` | 204 | 404 unknown drawing, 400 bad UUID, 403 neither creator nor manager |
 | DatasetController | POST | `/api/datasets` | 201 `DatasetResponse` | 400 blank name / invalid `targetCategory` slug, 403 caller may not manage the organization (docs/CV-TRAINING-PLAN.md §3's frozen wire contract, Wave T4; gated by `vision.training.enabled`, default `false` — absent entirely when off, every route 404s like any unmapped path) |
 | DatasetController | GET | `/api/datasets` | 200 `DatasetsResponse` (`{datasets:[...]}}`) | — (scope-filtered; `sampleCounts` computed per dataset from `TrainingSampleRepositoryPort#countByDataset`, not a `Dataset` field) |
 | DatasetController | GET | `/api/datasets/{id}` | 200 `DatasetResponse` | 404 unknown id, 400 bad UUID, 403 dataset outside caller's scope (deliberately not the usual hiding 404 — `DatasetService#get`'s own frozen contract) |
@@ -121,7 +134,7 @@ literal it replaced (see `VisionApiProperties` below).
 |---|---|---|
 | `IllegalArgumentException`, `UnsupportedProtocolException` | 400 | `BAD_REQUEST` |
 | `NoSuchElementException` | 404 | `NOT_FOUND` |
-| `AccessDeniedException` (application, docs/U-SCOPE-PLAN.md slice 2) | 403 | `FORBIDDEN` (a scoped **command/grant** against an asset the caller cannot see — deliberately distinct from the 404 a scoped **read** gives, which hides existence, and the 409 a plain `IllegalStateException` gives; thrown by `FlightCommandService#returnToHome`, `AssignmentService#assign`/`unassign` when the asset is out of the acting user's scope, and `MarkService#update`/`delete` (docs/TACTICAL-MARKS-PLAN.md M4) when the acting user is neither the mark's creator nor a manager) |
+| `AccessDeniedException` (application, docs/U-SCOPE-PLAN.md slice 2) | 403 | `FORBIDDEN` (a scoped **command/grant** against an asset the caller cannot see — deliberately distinct from the 404 a scoped **read** gives, which hides existence, and the 409 a plain `IllegalStateException` gives; thrown by `FlightCommandService#returnToHome`, `AssignmentService#assign`/`unassign` when the asset is out of the acting user's scope, and — docs/MAP-REWORK-PLAN.md §3 — by every `MapLayerService`/`MarkService`/`DrawingService` gate: creating a TEAM layer for a group you do not manage, renaming/deleting/re-granting a layer you do not manage, contributing to a layer you may not contribute to, editing a mark you neither created (while `UNVERIFIED`) nor manage, verifying without `canManage`, or promoting without `canManage` on the source. **Note the deliberate 403-vs-404 split the map surface inherits: a scoped *read* hides (an invisible layer/mark/drawing is simply absent from the list), while a *command* against something you cannot see is an honest 403, not a hiding 404** — the same stance `FlightCommandService` already takes) |
 | `IllegalStateException` | 409 | `CONFLICT` |
 | `HlsUpstreamUnavailableException` | 502 | `BAD_GATEWAY` |
 | `ProbeFailedException` | 422 | `UNPROCESSABLE_ENTITY` (docs/UX-REWORK-PLAN.md §U-d item 3 — via `HttpStatus.UNPROCESSABLE_CONTENT`, not the deprecated `UNPROCESSABLE_ENTITY` enum constant on this Spring Framework 7 version; same 422, wire `code` string kept at the conventional HTTP-status name) |
@@ -145,8 +158,12 @@ The one implementation of `LiveUpdatePublisherPort` (vision-domain), plus the SS
   - `List<LiveEnvelopeResponse> replayFor(LiveTopic, Long lastEventId)` / `LiveRingBuffer bufferFor(LiveTopic)` (package-private, purely a test seam for pure, `SseEmitter`-free unit tests in this same package) — the resume-vs-snapshot decision: if `lastEventId` is given and the topic's buffer `canResumeFrom` it (no gap), replay only what's newer; otherwise fall back to "snapshot" via the private `seedIfEmpty` — which, for **`fleet`, `devices`, and `detection-events` specifically** (the latter two added by the backend follow-up batch), means computing one real, live query first if the buffer is still empty (nothing has ever changed since this process started, so there's nothing better buffered yet): `AssetService#assets()` (fleet), `DeviceService#devices()` + `StreamService#streams()` (devices), `DetectionEventRepositoryPort#findRecent` — the exact same source `EventController` reads for `GET /api/events` (detection-events, seeded oldest-first since the port returns newest-first) — every other topic's "snapshot" is honestly just "whatever this process has buffered since it started" (a documented, deliberate limitation: a viewer's first-ever subscription to an asset's `telemetry`/`detections` topic sees nothing until the next sample/result arrives, even if that asset has been streaming the whole time this process has been up; `event` is the one always-on topic that stays in this "honestly limited" bucket too, since `EventPublisherPort` has no read side to query).
   - **Coalescing runs once per topic, shared across every subscribed connection — not independently per connection.** The plan's own "batch...per connection" framing is satisfied in effect (delivery is still batched to roughly one envelope per `COALESCE_MILLIS`ms per topic) while keeping exactly one canonical, resumable sequence number per topic; a genuinely independent per-connection coalescing buffer would have made `Last-Event-ID` resume ambiguous the moment two connections shared a topic. Documented here as a deliberate simplification, not an oversight.
 - **`LiveConnection`** (package-private) — one open connection's `SseEmitter` plus its live, mutable `Set<LiveTopic>` (a `ConcurrentHashMap.newKeySet()`, safe to read/mutate from the connecting thread, a later `PATCH` thread, and the shared broadcast thread all at once); every `send*`/`heartbeat` call serializes on one per-connection lock, since `SseEmitter#send` is not safe to call concurrently for the same emitter.
-- **`LiveTopic`** (package-private record: `kind: LiveTopicKind`, `assetId: AssetId` nullable) — `FLEET`/`EVENT`/`DEVICES`/`DETECTION_EVENTS`/`MARKS` (the last three added by the backend follow-up batch and docs/TACTICAL-MARKS-PLAN.md M4 respectively) are shared constants (`assetId=null`); `telemetry(AssetId)`/`detections(AssetId)` build the per-asset ones. `wire()` renders e.g. `"telemetry:<assetId>"`; `parse(String)`/`parseTopicsParam(String)` (comma-separated) do the reverse, throwing `IllegalArgumentException` for an unknown kind or a missing/malformed asset id (→ 400 via `ApiExceptionHandler`, same as every other id-parsing spot in this module) — `"fleet"`/`"event"`/`"devices"`/`"detection-events"`/`"marks"` with no asset id parse as harmless, redundant aliases for the already-implicit topics of the same kind.
-- **`LiveTopicKind`** (package-private enum: `FLEET`, `EVENT`, `TELEMETRY`, `DETECTIONS`, `DEVICES`, `DETECTION_EVENTS`, `MARKS` — the last three added by the backend follow-up batch and docs/TACTICAL-MARKS-PLAN.md M4 respectively, extending the R-c channel for the fleet/warehouse, events, and tactical-marks UIs) — each constant now carries its own explicit wire string (rather than deriving it from `name()`) so `DETECTION_EVENTS` can use the hyphenated `"detection-events"` (matching `GET /api/events`'s own naming) rather than the underscore a lower-cased enum name would produce; `wire()` doubles as both the topic-string prefix and the `LiveEnvelopeResponse#type()` value for envelopes of that kind, since the plan deliberately uses the same vocabulary for both. **`DEVICES`**: the device-list + active-stream-list snapshot `FleetStore` (vision-web) otherwise polls via `GET /api/devices`+`GET /api/streams` every 5s — deliberately its *own* topic, not folded into `fleet`, since `fleet`'s payload is asset-centric (`AssetSummaryResponse`) and shares nothing with `FleetStore`'s domain (raw `Device`/`ActiveStream`); both lists travel in one envelope (`DevicesSnapshotResponse`) under the channel's one shared `seq`, so a viewer can never see a device list and an active-stream list snapshotted at different moments. **`DETECTION_EVENTS`**: the debounced `DetectionEvent` occurrences (open/advance/close) `GET /api/events` serves — deliberately its own topic, not folded into `event` (the unrelated generic domain `Event`), reusing `DetectionEventResponse` (the exact DTO `EventController` already returns) so `EventsStore` (vision-web) can convert trivially. **`MARKS`** (docs/TACTICAL-MARKS-PLAN.md §5): the shared tactical-marks operational picture — one always-on topic carrying all three mark lifecycle events (`created`/`updated`/`cleared`) as an `action` field inside `MarkPayload`, rather than three separate topic kinds, mirroring exactly how `DETECTION_EVENTS` carries OPEN/CLOSED in one topic instead of two (the codebase's own 1:1 `type`↔topic rule would otherwise have forced three near-duplicate topics for one concept). Deployment-wide, no per-group filter — matching `MarkService#list()`'s own unscoped shape. **Deliberately has no live-query seed** (unlike `FLEET`/`DEVICES`/`DETECTION_EVENTS`) — see `LiveUpdateRegistry`'s own class javadoc ("Snapshot-on-connect" section) and this file's own M4 Status entry for why: seeding it would need a sixth constructor parameter on `LiveUpdateRegistry`, past the five-parameter ceiling that class is already at.
+- **`LiveTopic`** (package-private record: `kind: LiveTopicKind`, `assetId: AssetId` nullable) — `FLEET`/`EVENT`/`DEVICES`/`DETECTION_EVENTS`/`MAP` (the last three added by the backend follow-up batch and docs/MAP-REWORK-PLAN.md §4.3 respectively; `MAP` **replaces** the `MARKS` topic docs/TACTICAL-MARKS-PLAN.md M4 added) are shared constants (`assetId=null`); `telemetry(AssetId)`/`detections(AssetId)` build the per-asset ones. `wire()` renders e.g. `"telemetry:<assetId>"`; `parse(String)`/`parseTopicsParam(String)` (comma-separated) do the reverse, throwing `IllegalArgumentException` for an unknown kind or a missing/malformed asset id (→ 400 via `ApiExceptionHandler`, same as every other id-parsing spot in this module) — `"fleet"`/`"event"`/`"devices"`/`"detection-events"`/`"map"` with no asset id parse as harmless, redundant aliases for the already-implicit topics of the same kind. **`"marks"` no longer parses at all** and is now a 400: the topic is gone, and failing loudly beats silently subscribing an un-migrated client to nothing.
+- **`LiveTopicKind`** (package-private enum: `FLEET`, `EVENT`, `TELEMETRY`, `DETECTIONS`, `DEVICES`, `DETECTION_EVENTS`, `MARKS` — the last three added by the backend follow-up batch and docs/TACTICAL-MARKS-PLAN.md M4 respectively, extending the R-c channel for the fleet/warehouse, events, and tactical-marks UIs) — each constant now carries its own explicit wire string (rather than deriving it from `name()`) so `DETECTION_EVENTS` can use the hyphenated `"detection-events"` (matching `GET /api/events`'s own naming) rather than the underscore a lower-cased enum name would produce; `wire()` doubles as both the topic-string prefix and the `LiveEnvelopeResponse#type()` value for envelopes of that kind, since the plan deliberately uses the same vocabulary for both. **`DEVICES`**: the device-list + active-stream-list snapshot `FleetStore` (vision-web) otherwise polls via `GET /api/devices`+`GET /api/streams` every 5s — deliberately its *own* topic, not folded into `fleet`, since `fleet`'s payload is asset-centric (`AssetSummaryResponse`) and shares nothing with `FleetStore`'s domain (raw `Device`/`ActiveStream`); both lists travel in one envelope (`DevicesSnapshotResponse`) under the channel's one shared `seq`, so a viewer can never see a device list and an active-stream list snapshotted at different moments. **`DETECTION_EVENTS`**: the debounced `DetectionEvent` occurrences (open/advance/close) `GET /api/events` serves — deliberately its own topic, not folded into `event` (the unrelated generic domain `Event`), reusing `DetectionEventResponse` (the exact DTO `EventController` already returns) so `EventsStore` (vision-web) can convert trivially. **`MAP`** (docs/MAP-REWORK-PLAN.md §4.3, **replacing `MARKS` outright** — removed, not deprecated: the SPA is the only client and migrates in Wave E): the whole Common Operational Picture — marks, drawings *and* layers — as one always-on topic carrying `entity` (`mark`/`drawing`/`layer`) and `action` (`created`/`updated`/`cleared`/`deleted`) as fields inside `MapEventPayload`, rather than twelve topic kinds, mirroring exactly how `DETECTION_EVENTS` carries OPEN/CLOSED in one topic instead of two. **It is the one topic whose delivery is filtered per connection** — see "Scoped SSE delivery" below. **Deliberately has no live-query seed** (unlike `FLEET`/`DEVICES`/`DETECTION_EVENTS`): seeding it would need two more `ObjectProvider` constructor parameters on `LiveUpdateRegistry` (past the five-parameter ceiling it is already at) **and** a shared seeded snapshot could not be re-scoped per recipient anyway. A viewer's first connection relies on its own `GET /api/map/layers`+`/marks`+`/drawings` reads, each already scoped correctly, before layering live deltas on top.
+- **Scoped SSE delivery — `map` only** (docs/MAP-REWORK-PLAN.md §4.3, the security-critical half of the rework). Every other topic broadcasts one envelope to every subscribed connection; `map` does not, because visibility is a property of the data. Three pieces, deliberately split so the registry never resolves an identity:
+  - **`MapVisibility`** (`@Component`, same `vision.live.enabled` gate as the registry) — one constructor argument, `MapLayerService`. `deliveryPredicate(Viewer)` returns a `Predicate<String>` over an event's `layerId`; `canView` answers it from a per-`Viewer` TTL cache of visible layer ids (`Viewer` is a record, so a sound map key). **TTL `10_000`ms**, a third of the plan's "stale-grant visibility beyond 30s is a bug" bar. A plain TTL was chosen over invalidate-on-layer-event because a TTL bounds *every* staleness source — a revoked group membership or a changed role emits no map event at all — and because event-driven invalidation would have needed another collaborator on `LiveUpdateRegistry`, already at its five-parameter ceiling. **Negative answers are re-checked, positives are not**: a cached "yes" can only be stale toward over-sharing (bounded by the TTL), but a cached "no" is what a user notices immediately (create a layer, and its own event would be filtered out of your own stream), so a miss triggers one re-resolve, rate-limited to one per `NEGATIVE_TTL_MILLIS`=1000ms per viewer and anchored to the last *miss-triggered* refresh — not to when the entry was filled, which was a real bug the tests caught (an entry filled 0ms ago would otherwise black out a brand-new layer for a full second).
+  - **`LiveController`** captures the connecting request's `CurrentUser#viewer()` **once, at connect**, turns it into that predicate, and passes it to `registry.connect(topics, lastEventId, mapVisibility)`. This is the only place in the SSE stack that touches identity — the constructor grew 1 → 3 arguments (`registry`, `MapVisibility`, `CurrentUser`) for exactly this.
+  - **`LiveConnection`** stores the predicate and exposes `mayReceive(LiveEnvelopeResponse)`, which the registry consults on **every broadcast and every snapshot/resume replay**. The check keys off the buffered `MapEventPayload`'s own `layerId` (anything that is not a `MapEventPayload` passes unconditionally), which is what lets one **unfiltered, shared** ring buffer keep one canonical resumable `seq` while still serving viewers at different access levels — no parallel per-envelope bookkeeping to keep in step, and a `Last-Event-ID` resume is automatically re-filtered against what the viewer may see *now*.
 - **`LiveRingBuffer`** (package-private) — a bounded, sequence-numbered per-topic backlog of `LiveEnvelopeResponse`s, in one of two retention modes selected at construction (`capacity: int, collapseToLatest: boolean`):
   - **FIFO** (`collapseToLatest=false`, `telemetry`/`event`/`detection-events` topics) — every appended envelope retained up to `capacity`, oldest evicted first; each one is individually meaningful.
   - **Latest-only** (`collapseToLatest=true`, `fleet`/`detections`/`devices` topics, `capacity=1`) — `append` replaces the single retained entry outright (docs/REALTIME-PLAN.md §4 item 3: "detections emit latest-frame-only", applied to `fleet`/`devices` too by the same logic — an older snapshot has no value once a newer one lands).
@@ -919,3 +936,112 @@ New `vision.api.*` keys documented, commented out, in `vision-app`'s `applicatio
 move, no test added or removed). `./mvnw -B -pl vision-api compile`/`test-compile`: clean. Build gate
 was `-pl vision-api` only, per this wave's scope (not `-pl vision-api,vision-app`, since `vision-app`
 can't compile right now for unrelated reasons).
+
+## docs/MAP-REWORK-PLAN.md Wave C done (the map as a COP — REST surface + scoped SSE)
+
+Replaces the whole docs/TACTICAL-MARKS-PLAN.md M4 surface: `/api/marks/**` and the `marks` SSE topic
+are **deleted, not deprecated** (the SPA is this repo's only client and migrates in Waves D/E, so a
+compatibility shim would have been dead weight from the day it was written).
+
+### What went away
+
+- `MarksController` + `MarksControllerTest` (deleted).
+- `MarkPayload` (deleted — superseded by `MapEventPayload`).
+- `LiveTopicKind.MARKS` / `LiveTopic.MARKS` (renamed to `MAP` and re-scoped; `"marks"` as a `topics`
+  query value is now a 400).
+- `LiveUpdatePublisherPort#publishMarkCreated`/`#publishMarkUpdated`/`#publishMarkCleared` (the Wave A
+  domain replaced all three with `publishMapEvent(MapEvent)`); `LiveUpdateRegistry` implements the
+  one method now, and the old "force `status=CLEARED` in the payload even for a still-ACTIVE mark"
+  hack is gone with them — the domain carries a real `DELETED` action, so nothing has to lie.
+
+### What replaced it
+
+Three controllers rather than one `MapController`: `MapLayersController`, `MapMarksController`,
+`MapDrawingsController` — the §4.1 table is 16 endpoints over three distinct resources, and this
+module's convention is one controller per resource (`AssetController`/`GeofenceController`/…). Each
+is a thin HTTP translation with `CurrentUser` as its identity seam; **all authorization lives in
+`MapAccessPolicy`**, so there are no per-role HTTP rules for these paths — they ride the same
+`authenticated()` rule for `/api/**` every other route already has (verified in `vision-app`, no
+`SecurityConfig` change was needed).
+
+`MapLayersController` is the one with four constructor dependencies (`MapLayerService`, `MarkService`,
+`DrawingService`, `CurrentUser`): `LayerResponse#markCount`/`#drawingCount` are per-viewer display
+facts, and `MapLayerService` deliberately does not compute them (it owns layers, not their contents).
+Reading the two already-scoped lists and grouping by layer was preferred over widening that service's
+contract for a display concern. Still inside the five-parameter ceiling.
+
+### New DTOs (`dto/`, §4.2 verbatim)
+
+`LayerResponse`, `GrantDto`, `CreateLayerRequest`, `RenameLayerRequest`, `SetGrantsRequest`,
+`MarkResponse` (rewritten), `CreateMarkRequest` (rewritten), `PatchMarkRequest` (rewritten),
+`GeolocateMarkRequest` (extended), `VerifyMarkRequest`, `PromoteMarkRequest`, `DrawingResponse`,
+`CreateDrawingRequest`, `PatchDrawingRequest`, `PositionDto`, `MapEventPayload`, plus the
+package-private `MapRequests` helper (the one place "an absent `layerId` means *resolve my default*,
+a malformed one is a 400" is decided, shared by the four request records that need it).
+
+Two decisions worth knowing:
+
+- **`LayerResponse#grants` is `null` unless `myAccess == MANAGE`**, and always `null` over SSE.
+  Who else can see a layer is itself privileged information. `@JsonInclude(NON_NULL)` omits the field
+  rather than sending `"grants": null`.
+- **`LayerResponse.forEvent`** (the SSE form) also nulls `myAccess` and zeroes
+  `markCount`/`drawingCount` — all three are per-viewer facts, and one broadcast envelope reaches
+  connections at different access levels, so there is no single correct answer. **Wave E must treat a
+  `layer` event as "refetch `GET /api/map/layers`", not as a complete replacement row.**
+
+A new `support/EnumParsing` replaces the hand-copied case-insensitive-enum-lookup loop that
+`CreateMarkRequest#toKind`/`PatchMarkRequest#toStatus`/`CapabilityParsing` each spelled out; the map
+contract parses **eight** enums off request bodies, and eight copies would have been eight places for
+the error-message format to drift.
+
+### `CurrentUser#viewer()` — the new seam
+
+`PrincipalResolver` gained `MapAccessPolicy.Viewer viewer()`; `CurrentUser` delegates. vision-api
+still carries **no** `org.springframework.security` dependency — both implementations live in
+vision-app (see that MODULE.md). `PrincipalResolver.fixed(Ownership)` answers with an `ADMIN` viewer
+over the fixed group, which is the map-side twin of its existing `VisibilityScope.unbounded()`: an
+auth-disabled deployment (and every controller unit test) sees the whole picture, exactly as the
+unscoped marks stack did before layers existed.
+
+Deliberately **not** derived from `CurrentUser#scope()` — `VisibilityScope#includesGroup` is
+hard-`false` for a PILOT's `ASSIGNED_ASSETS` scope, which would make every TEAM layer structurally
+invisible to the primary FPV-operator persona. That is the exact trap docs/MAP-REWORK-PLAN.md §1
+records; see `MapAccessPolicy`'s own javadoc.
+
+### `DemoOperations` migrated
+
+`seedMarks(Ownership, UserId, …)` → `seedMarks(Viewer, …)`, and the demo marks now land on the **COP
+layer explicitly** (`MapLayerService#copLayerId()`), not on whatever default layer `LayerResolver`
+would pick for the pressing user — a demo exists to show the *shared* picture, and marks on the
+presser's own TEAM/PERSONAL layer would be invisible in exactly the other-role windows a demo is
+being shown in. Their affiliations follow §2.2's migration table, so a freshly-seeded demo and a
+migrated deployment show identical symbology (`TARGET→HOSTILE`, `HAZARD→UNKNOWN`, `POI→NEUTRAL`, and
+the old `FRIENDLY` kind → `UNIT`+`FRIENDLY`).
+
+### Tests
+
+`./mvnw -B -pl vision-api test`: **521/521 green** (was 460). Net +61: `MarksControllerTest` (22)
+deleted; `MapLayersControllerTest` (18), `MapMarksControllerTest` (30), `MapDrawingsControllerTest`
+(18), `LiveMapScopingTest` (4), `MapVisibilityTest` (8) added; `LiveUpdateRegistryTest`'s three
+`publishMark*` cases became five `publishMapEvent` ones (incl. one asserting a layer event never puts
+`grants` on the wire); `LiveControllerTest`/`DemoScenarioTest`/`ManualControlHandshakeInterceptorTest`
+updated for the new constructor/method/interface shapes.
+
+`LiveMapScopingTest` is the one that matters: two real SSE connections, two different viewers, one
+real `LiveUpdateRegistry` (real ring buffers, real background dispatcher). It proves a mark on one
+team's layer reaches that team's connection **and never appears anywhere in the other's stream**, a
+COP-layer mark reaches both, the unscoped topics (`fleet`/`devices`) are unaffected by the map
+filter, and a `Last-Event-ID` resume replays only what the *resuming* viewer may see.
+
+**Two bugs the new tests caught before they shipped**, both in code written this wave: the
+`MapVisibility` negative-refresh window was anchored to the entry's fill time instead of the last
+miss-triggered refresh (so a just-created layer was invisible to its own creator for a full second),
+and the SSE assertions were originally positional — the connect burst writes one envelope per
+subscribed topic and the topic set is unordered, so "the last data line" was never a stable handle
+(now selected by content).
+
+**Deviations from the frozen §4 contract**: none in shapes or status codes. One thing the plan left
+implicit and this wave had to settle: **the 403-vs-404 split**. Reads hide (an invisible layer, mark
+or drawing is simply absent from its list), commands are honest (acting on something you cannot see
+is a 403, not a hiding 404) — inherited unchanged from Wave B's frozen service javadocs, and the same
+stance `FlightCommandService` already takes.

@@ -2,6 +2,9 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.live.MapVisibility;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.application.map.MapLayerService;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.asset.AssetStatus;
 import com.drones.vision.application.asset.AssetSummary;
@@ -36,6 +39,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -71,7 +75,10 @@ class LiveControllerTest {
         registry = new LiveUpdateRegistry(
                 provider(assetService), provider(deviceService), provider(streamService), streamPublisherPort,
                 provider(detectionEventRepositoryPort));
-        mockMvc = MockMvcBuilders.standaloneSetup(new LiveController(registry))
+        MapLayerService mapLayerService = mock(MapLayerService.class);
+        when(mapLayerService.layers(any())).thenReturn(List.of());
+        mockMvc = MockMvcBuilders.standaloneSetup(new LiveController(registry, new MapVisibility(mapLayerService),
+                        new CurrentUser(new Ownership(UserId.random(), GroupId.random()))))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }

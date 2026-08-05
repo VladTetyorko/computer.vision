@@ -131,7 +131,19 @@
                 </button>
               </header>
               @if (facade.mapInsetVisible()) {
-                <vision-live-map />
+                <!-- Zones + marks are new here (docs/MAP-REWORK-PLAN.md §5.1): this inset used to
+                     drop both, showing a different picture from Command and the cockpit. -->
+                <vision-tactical-map
+                  [assets]="facade.mapAssets()"
+                  [followAssetId]="facade.mapFollowAssetId()"
+                  [zones]="facade.geofence.zones()"
+                  [marks]="facade.marks.displayMarks()"
+                  [drawings]="facade.drawings.displayDrawings()"
+                  [layers]="facade.layers.layers()"
+                  [selectedMarkId]="facade.marks.selectedMarkId()"
+                  (markSelected)="facade.marks.select($event)"
+                  (markMoved)="facade.marks.moveTo($event.id, $event.position)"
+                />
               }
             </section>
           }

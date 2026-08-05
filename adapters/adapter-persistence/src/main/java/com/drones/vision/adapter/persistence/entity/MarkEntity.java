@@ -1,8 +1,10 @@
 package com.drones.vision.adapter.persistence.entity;
 
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.MarkKind;
 import com.drones.vision.domain.model.MarkSource;
 import com.drones.vision.domain.model.MarkStatus;
+import com.drones.vision.domain.model.Verification.VerificationState;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,8 +18,15 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code marks} — mirrors {@link com.drones.vision.domain.model.Mark} field-for-field
- * (docs/TACTICAL-MARKS-PLAN.md §3); {@link com.drones.vision.adapter.persistence.JpaMarkRepository}
- * owns the mapping in both directions.
+ * (docs/TACTICAL-MARKS-PLAN.md §3, reworked by docs/MAP-REWORK-PLAN.md §4.4 / {@code
+ * V12__map_layers.sql}); {@code MarkMapper} owns the mapping in both directions.
+ *
+ * <p><strong>The V12 rework adds five columns.</strong> {@code layer_id} (which layer the mark lives
+ * on — no FK, see below), {@code affiliation} (the domain {@link Affiliation}: "whose it is", split
+ * out of what {@code kind} used to conflate), and the three-column {@code Verification} value
+ * flattened the same way {@code ownership} already is: {@code verification_state} plus a nullable
+ * {@code verified_by}/{@code verified_at} pair, which are non-null exactly when the state is {@code
+ * CONFIRMED}/{@code REJECTED} — an invariant the domain record enforces on read-back, not the schema.
  *
  * <p>Unlike {@link GeofenceZoneEntity#polygon} (a jsonb {@code List<GeoPosition>}), a mark's
  * {@code position} is a single point, so it is flattened to plain {@code latitude}/{@code
@@ -33,8 +42,9 @@ import java.util.UUID;
  * already follows.
  *
  * <p>No FK to any other table — same "no cross-entity foreign keys" convention as the rest of this
- * schema (see MODULE.md's Conventions); {@code owner_id}/{@code group_id} are plain UUID columns
- * with no referential check, matching the in-memory reference repository's own lack of one.
+ * schema (see MODULE.md's Conventions); {@code owner_id}/{@code group_id}/{@code layer_id} are plain
+ * UUID columns with no referential check, matching the in-memory reference repository's own lack of
+ * one. {@code layer_id} is indexed, since "every mark on the layers I can see" is the access path.
  */
 @Entity
 @Table(name = "marks")
@@ -44,9 +54,16 @@ public class MarkEntity {
     @Column(name = "id", nullable = false)
     private UUID id;
 
+    @Column(name = "layer_id", nullable = false)
+    private UUID layerId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "kind", nullable = false, length = 16)
     private MarkKind kind;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "affiliation", nullable = false, length = 16)
+    private Affiliation affiliation;
 
     @Column(name = "label", nullable = false)
     private String label;
@@ -80,15 +97,28 @@ public class MarkEntity {
     @Column(name = "source", nullable = false, length = 16)
     private MarkSource source;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_state", nullable = false, length = 16)
+    private VerificationState verificationState;
+
+    @Column(name = "verified_by")
+    private UUID verifiedBy;
+
+    @Column(name = "verified_at")
+    private Instant verifiedAt;
+
     /** JPA only. */
     protected MarkEntity() {
     }
 
-    public MarkEntity(UUID id, MarkKind kind, String label, String note, double latitude, double longitude,
-                       Double altitudeMeters, UUID ownerId, UUID groupId, Instant createdAt, MarkStatus status,
-                       MarkSource source) {
+    public MarkEntity(UUID id, UUID layerId, MarkKind kind, Affiliation affiliation, String label, String note,
+                       double latitude, double longitude, Double altitudeMeters, UUID ownerId, UUID groupId,
+                       Instant createdAt, MarkStatus status, MarkSource source,
+                       VerificationState verificationState, UUID verifiedBy, Instant verifiedAt) {
         this.id = id;
+        this.layerId = layerId;
         this.kind = kind;
+        this.affiliation = affiliation;
         this.label = label;
         this.note = note;
         this.latitude = latitude;
@@ -99,14 +129,25 @@ public class MarkEntity {
         this.createdAt = createdAt;
         this.status = status;
         this.source = source;
+        this.verificationState = verificationState;
+        this.verifiedBy = verifiedBy;
+        this.verifiedAt = verifiedAt;
     }
 
     public UUID id() {
         return id;
     }
 
+    public UUID layerId() {
+        return layerId;
+    }
+
     public MarkKind kind() {
         return kind;
+    }
+
+    public Affiliation affiliation() {
+        return affiliation;
     }
 
     public String label() {
@@ -147,5 +188,17 @@ public class MarkEntity {
 
     public MarkSource source() {
         return source;
+    }
+
+    public VerificationState verificationState() {
+        return verificationState;
+    }
+
+    public UUID verifiedBy() {
+        return verifiedBy;
+    }
+
+    public Instant verifiedAt() {
+        return verifiedAt;
     }
 }

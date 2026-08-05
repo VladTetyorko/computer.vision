@@ -82,7 +82,7 @@ public class DemoScenario {
         List<DemoAsset> created = fleet.seed(plan.assets(), ownership, actor, problems::add);
         int assigned = assign(created, roster, scope, problems::add);
         int zones = operations.seedZones(problems::add);
-        int marks = operations.seedMarks(ownership, actor, problems::add);
+        int marks = operations.seedMarks(currentUser.viewer(), problems::add);
         int streams = fleet.startStreams(created, plan.startStreams(), problems::add);
 
         log.warn("Demo data seeded: {} assets, {} users ({} assignments), {} zones, {} marks, {} streams, "

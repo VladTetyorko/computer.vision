@@ -1,5 +1,7 @@
 /* Drawer *content* only — `<vision-side-panel>` owns the head/close chrome and the drawer surface,
-   mirroring `features/fly/marks-panel.css`'s identical convention. */
+   mirroring `features/fly/marks-panel.css`'s identical convention.
+   The affiliation-swatch rules come from the shared `shared/map/map-controls/mark-symbol.css`,
+   pulled in via this component's `styleUrls` — see that file's own header. */
 
 :host {
   display: contents;
@@ -20,58 +22,32 @@ vision-notice {
   margin-bottom: 0;
 }
 
-.kind-picker {
-  flex-wrap: wrap;
-}
+/* ---- List head: the section label plus the UNVERIFIED view filter ---------------------------- */
 
-.kind-picker .btn {
-  align-items: center;
-  gap: var(--space-4);
-}
-
-/* Only the edit form's kind picker ever shows an active state (the current kind); the New-mark
-   picker's buttons are one-shot triggers, never "selected". */
-.kind-picker .btn.active {
-  background: var(--color-info);
-  color: var(--color-on-info);
-  border-color: var(--color-info);
-}
-
-.draft-form,
-.edit-form {
-  display: flex;
-  flex-direction: column;
+.list-head {
+  align-items: baseline;
+  justify-content: space-between;
   gap: var(--space-8);
+}
+
+.list-head .label {
+  margin-bottom: 0;
+}
+
+/* A chip that is also a button. Off state is the neutral `.chip`; on state adds `.warn`, matching
+   the verification chip's own colour for unverified — one meaning, one hue (frontend-style §3). */
+.filter-chip {
+  cursor: pointer;
+  flex: none;
+}
+
+.filter-chip:hover {
+  border-color: var(--color-warn-line);
 }
 
 .edit-form {
   border-top: 1px solid var(--border);
   padding-top: var(--space-8);
-}
-
-.kind-chip {
-  align-self: flex-start;
-}
-
-.draft-input {
-  width: 100%;
-  padding: var(--space-8);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--panel-raised);
-  color: var(--text);
-  font: inherit;
-}
-
-.draft-input:focus-visible {
-  outline: 2px solid var(--color-info);
-  outline-offset: 1px;
-}
-
-.mark-icon {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
 }
 
 .mark-list {
@@ -114,6 +90,12 @@ vision-notice {
   width: 100%;
 }
 
+/* The list-row swatch is the glyph-carrying size (see `mark-symbol.css#.with-glyph`). */
+.mark-row-main .aff-swatch {
+  width: 20px;
+  height: 20px;
+}
+
 .mark-row-text {
   display: flex;
   flex-direction: column;
@@ -131,8 +113,25 @@ vision-notice {
 
 .mark-row-actions {
   justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.mark-detail {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
 .mark-note {
   margin: 0;
+}
+
+/* ---- Responsive: bigger row actions on touch ------------------------------------------------- */
+
+@media (max-width: 600px), (pointer: coarse) {
+  .mark-row-actions .btn {
+    min-height: 2.5rem;
+  }
 }

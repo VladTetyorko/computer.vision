@@ -8,7 +8,10 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
-import { MarksStore } from '../../core/marks/marks-store';
+import { MarksStore } from '../../core/map-data/marks-store';
+import { LayersStore } from '../../core/map-data/layers-store';
+import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
@@ -17,6 +20,7 @@ import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner 
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import type { BoxesMode, Transport } from '../../shared/player/player';
+import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -101,14 +105,25 @@ export class CockpitFacade {
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
   /**
-   * The shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5) — exposed as the
-   * whole store (not a thin passthrough), mirroring `geofence` above: `cockpit.html` wires
-   * `<vision-live-map>`'s `[marks]`/`[selectedMarkId]`/`(markSelected)`/`(markMoved)`/`(mapClicked)`
-   * straight to it, and `<vision-marks-panel>` injects this same `providedIn: 'root'` singleton
-   * directly (a non-routed presentational child, per `architecture.spec.ts`'s own carve-out —
-   * mirrors `flight-command-panel.ts` injecting `VisionApi` directly).
+   * The three halves of the Common Operational Picture (docs/MAP-REWORK-PLAN.md §5.2) — exposed as
+   * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
+   * `<vision-tactical-map>`'s `[marks]`/`[layers]`/`[drawings]`/`[selectedMarkId]`/`(markSelected)`/
+   * `(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and
+   * `<vision-marks-panel>` plus the shared `shared/map/map-controls/**` components inject the same
+   * `providedIn: 'root'` singletons directly (non-routed presentational children, per
+   * `architecture.spec.ts`'s own carve-out).
    */
   readonly marks = inject(MarksStore);
+  readonly layers = inject(LayersStore);
+  readonly drawings = inject(DrawingsStore);
+
+  /**
+   * The map inset's single `[interactionMode]`, folded from the two independent arming states that
+   * can produce one — an armed mark palette and an armed drawing kind
+   * (`core/map-data/drawings-logic.ts#resolveInteractionMode`). Neither store knows about the other;
+   * this is the one place they meet.
+   */
+  readonly interactionMode = computed(() => resolveInteractionMode(this.marks.armed(), this.drawings.mode()));
   private readonly weather = inject(WeatherStore);
 
   // --- Header switcher's own asset list (renamed from the old FlyFacade's `pickerAssets` — see
@@ -273,6 +288,31 @@ export class CockpitFacade {
    * exists" — so `<vision-marks-panel>` renders drone-only and says so, never a fabricated distance).
    */
   readonly dronePosition = this.weatherPosition;
+
+  // --- Map inset (docs/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
+  // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own
+  // `TelemetryStore` through DI. The new component is dumb — every overlay is an input — so the
+  // cockpit's single followed drone is built here from the exact same trail/latest signals, via the
+  // shared pure builder. An empty array (no fix and no trail yet) plots nothing, which is precisely
+  // what the old component's empty-trail branch did.
+
+  /** The one asset the map follows — also what `[followAssetId]` switches the map into follow mode with. */
+  readonly mapFollowAssetId = computed(() => this.activeAssetId() ?? null);
+
+  /** `<vision-tactical-map>`'s `[assets]` — 0 or 1 markers, per §5.1's "1 in follow mode". */
+  readonly mapAssets = computed(() => {
+    const assetId = this.activeAssetId();
+    if (!assetId) {
+      return [];
+    }
+    return followMarkers({
+      assetId,
+      displayName: this.asset()?.displayName ?? '',
+      categoryName: this.asset()?.categoryName,
+      trail: this.telemetry.trail(),
+      latest: this.telemetry.latest(),
+    });
+  });
 
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
@@ -612,6 +652,18 @@ export class CockpitFacade {
   /** Fed from `CockpitPage`'s own route-bound `watch` input — see this class's own doc comment. */
   setWatch(watch: string | undefined): void {
     this.watchSignal.set(watch);
+  }
+
+  // --- Drawings (docs/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------
+
+  /** `<vision-tactical-map>`'s `(drawingCompleted)` — the map only ever emits a shape that already passes `Drawing`'s own minimum-point rule, so this is a straight `POST`. */
+  async completeDrawing(draft: DrawingDraft): Promise<void> {
+    await this.drawings.completeDraft(draft);
+  }
+
+  /** `(drawingSelected)` — the same selection the toolbar's editor reads. */
+  selectDrawing(drawingId: string): void {
+    this.drawings.select(drawingId);
   }
 
   private async loadCapabilities(assetId: string): Promise<void> {

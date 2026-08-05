@@ -109,7 +109,12 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `usageTracker` | `UsageTracker` | `new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort, telemetryRepositoryPort, List<TelemetrySourcePort>, liveUpdatePublisherPort, geofenceMonitor)` — the 7-arg ctor (docs/OPS-CORE-PLAN.md §G, on top of docs/REALTIME-PLAN.md §4's own 6-arg bump); both `liveUpdatePublisherPort` and `geofenceMonitor` are always real beans (never `null`), so this is unconditional wiring, not a feature-flag branch here |
 | `geofenceMonitor` | `GeofenceMonitor` | `new GeofenceMonitor(geofenceRepositoryPort, eventPublisherPort, liveUpdatePublisherPort)` — docs/OPS-CORE-PLAN.md §G; breach evaluation on the telemetry hot path, threaded into `usageTracker` above |
 | `geofenceService` | `GeofenceService` | `new DefaultGeofenceService(geofenceRepositoryPort, geofenceMonitor)` — docs/OPS-CORE-PLAN.md §G; CRUD/list behind `GET/POST /api/geofences`, `PUT`/`DELETE /api/geofences/{id}` (vision-api's `GeofenceController`); a one-line assembly, mirroring `replayService`'s shape |
-| `markService` | `MarkService` | `new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort)` — docs/TACTICAL-MARKS-PLAN.md M4; the shared tactical-marks operational picture behind `GET/POST /api/marks`, `POST /api/marks/geolocate`, `PATCH`/`DELETE /api/marks/{id}` (vision-api's `MarksController`); `usageTracker` backs the cockpit "geolocate" action (`UsageTracker#latestTelemetry`), `liveUpdatePublisherPort` is always a real bean (never `null`) so every create/update/clear is announced on the `marks` SSE topic unconditionally, the same "always a real bean" posture `usageTracker`/`streamService` already have |
+| `markService` | `MarkService` | `new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort, mapAccessPolicy, layerResolver)` — docs/TACTICAL-MARKS-PLAN.md M4, **reworked in place by docs/MAP-REWORK-PLAN.md §3** (the 3-arg ctor grew to 5); behind `MapMarksController` (`/api/map/marks/**`), not the deleted `MarksController`. `usageTracker` still backs the cockpit "geolocate" action (`UsageTracker#latestTelemetry`); `liveUpdatePublisherPort` is always a real bean so every create/patch/verify/promote/delete is announced on the `map` SSE topic unconditionally |
+| `mapAccessPolicy` | `MapAccessPolicy` | `new MapAccessPolicy()` — docs/MAP-REWORK-PLAN.md §3; the map's whole authorization model. Pure, stateless, no ports, so one shared singleton serves all three map services **and** `CurrentUser#viewer()`'s consumers |
+| `layerResolver` | `LayerResolver` | `new LayerResolver(mapLayerRepositoryPort, liveUpdatePublisherPort)` — docs/MAP-REWORK-PLAN.md §3; the shared layer-lookup / default-layer / COP find-or-create collaborator. **Deliberately one bean, not three instances**: its `copLayerId()`/`defaultLayerFor()` are `synchronized` find-or-create methods whose idempotence depends on a single instance guarding a single repository |
+| `mapLayerService` | `MapLayerService` | `new DefaultMapLayerService(layerResolver, markRepositoryPort, drawingRepositoryPort, liveUpdatePublisherPort, mapAccessPolicy)` — docs/MAP-REWORK-PLAN.md §3; layer CRUD + grants behind `MapLayersController`. Takes the mark/drawing **repositories** directly rather than their services, because the only thing it does with them is cascade a layer deletion — for which the services' own viewer-gated methods would be both wrong (the cascade is already authorized) and circular |
+| `drawingService` | `DrawingService` | `new DefaultDrawingService(drawingRepositoryPort, liveUpdatePublisherPort, mapAccessPolicy, layerResolver)` — docs/MAP-REWORK-PLAN.md §3; lines/polygons/arrows/text behind `MapDrawingsController`; `markService`'s shape minus the telemetry collaborator a drawing has no use for |
+| `mapLayerBootstrapRunner` | `ApplicationRunner` | `args -> mapLayerService.copLayerId()` — docs/MAP-REWORK-PLAN.md §3's "ensured at startup". **Not a correctness requirement** (`copLayerId()` is a synchronized find-or-create, already idempotent) but a **timing** one: without it the first caller to promote a mark, or the first `GET /api/map/layers`, would be the one to create the COP layer, racing its own `CREATED` SSE event against its own response. With Postgres, `V12__map_layers.sql` has already inserted the row and this call merely finds it; in memory, this call is what creates it |
 | `streamService` | `StreamService` | `new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort)` — the 10-arg ctor (docs/REALTIME-PLAN.md §4), wired with `usageTracker`, `overlayRenderer` (docs/MVP1-PLAN.md §C8 bullet 2), `detectionEventRepositoryPort` (docs/MVP2-PLAN.md §E, E-a) and `liveUpdatePublisherPort` — same "always a real bean, unconditional wiring" note as `usageTracker` above |
 | `liveUpdatePublisherPort` | `LiveUpdatePublisherPort` | `LiveUpdateRegistry` (vision-api, `com.drones.vision.api.live`) if `vision.live.enabled` (default `true`) else `NoopLiveUpdatePublisher` (devsupport) — see "Server-push data plane" below |
 | `detectionEventRepositoryPort` | `DetectionEventRepositoryPort` | `InMemoryDetectionEventRepository` (devsupport) — docs/MVP2-PLAN.md §E, E-a; persistence explicitly deferred, same posture as `auditTrailPort`; wrapped in `LiveUpdateDetectionEventRepository` when `vision.live.enabled=true` (default — backend follow-up batch, extends the `detection-events` live topic) — see "Server-push data plane" below |
@@ -152,6 +157,8 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `InMemoryGroupRepository` | `GroupRepositoryPort` | `JpaGroupRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<GroupId, Group>`, `save` is upsert-by-id (docs/U-AUTH-PLAN.md wave 3) |
 | `InMemoryAssignmentRepository` | `AssignmentRepositoryPort` | `JpaAssignmentRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a concurrent set of (pilot, asset) links → `assign` idempotent-no-duplicate, `unassign` idempotent-removal for free (docs/U-SCOPE-PLAN.md slice 2, feature 2) |
 | `InMemoryMarkRepository` | `MarkRepositoryPort` | `JpaMarkRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<MarkId, Mark>`, no eviction/cap (docs/TACTICAL-MARKS-PLAN.md §3/M2); consumed by the `markService` bean (docs/TACTICAL-MARKS-PLAN.md M4, see Bean inventory above) |
+| `InMemoryMapLayerRepository` | `MapLayerRepositoryPort` | `JpaMapLayerRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<LayerId, MapLayer>`, no eviction/cap (docs/MAP-REWORK-PLAN.md §2.3). `save` is put-by-id, which replaces the layer's grant list wholesale exactly as the JPA side's `merge` over the `map_layer_grants` element collection does; `deleteById` is `Map#remove`, idempotent and **non-cascading** (cascading to marks/drawings is `DefaultMapLayerService`'s job — each removed row must publish its own `MapEvent`). **The COP layer is not pre-seeded here** the way `V12__map_layers.sql` seeds it for Postgres; `mapLayerBootstrapRunner` calling `LayerResolver#copLayerId()` once at startup is what makes both modes converge on exactly one |
+| `InMemoryDrawingRepository` | `DrawingRepositoryPort` | `JpaDrawingRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<DrawingId, Drawing>`, no eviction/cap (docs/MAP-REWORK-PLAN.md §2.3), matching `InMemoryMarkRepository` exactly; ordering is `DefaultDrawingService`'s job, not this class's |
 | `InMemoryTelemetryRepository` | `TelemetryRepositoryPort` | `JpaTelemetryRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; one `CopyOnWriteArrayList` per `UsageId` here vs. an indexed `(usage_id, at)` query in the JPA replacement, which also adds retention pruning this class doesn't have (see adapter-persistence/MODULE.md) |
 | `InMemoryDatasetRepository` | `DatasetRepositoryPort` | `JpaDatasetRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<DatasetId, Dataset>`, no eviction/cap (docs/CV-TRAINING-PLAN.md §1, Wave T3) |
 | `InMemoryTrainingSampleRepository` | `TrainingSampleRepositoryPort` | `JpaTrainingSampleRepository` (adapter-persistence) — wired now, gated by `vision.persistence.enabled`; a plain `ConcurrentHashMap<TrainingSampleId, TrainingSample>`; `findByDataset` filters + sorts newest-captured-first in memory before bounding to `limit`, the same deterministic order the JPA replacement picks (docs/CV-TRAINING-PLAN.md §1, Wave T3) |
@@ -162,7 +169,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `NoopDetectionPort` | `DetectionPort` | `GrpcDetectionPort` (adapter-cv-grpc) — wired now, gated by `vision.cv.enabled`; see "CV inference wiring" below |
 | `NoopStreamPublisher` | `StreamPublisherPort` | already superseded by default (`adapter-publish-hls`'s `MediamtxStreamPublisher`); this is just the `vision.publish.enabled=false` fallback |
 | `NoopReplayFrameExtractor` | `ReplayFrameExtractionPort` | `MediamtxReplayFrameExtractor` (adapter-publish-hls) — wired now, gated by `vision.publish.enabled`; docs/CV-TRAINING-V2-PLAN.md §7; always `Optional.empty()`, same "honest absence" posture `NoopStreamPublisher`'s own unconfigured case already has |
-| `NoopLiveUpdatePublisher` | `LiveUpdatePublisherPort` | `LiveUpdateRegistry` (vision-api) — wired now (default), gated by `vision.live.enabled`; see "Server-push data plane" below |
+| `NoopLiveUpdatePublisher` | `LiveUpdatePublisherPort` (incl. `publishMapEvent`, docs/MAP-REWORK-PLAN.md Wave A) | `LiveUpdateRegistry` (vision-api) — wired now (default), gated by `vision.live.enabled`; see "Server-push data plane" below |
 
 `DevPrincipal` (not a port implementation — a wiring-only constant holder): `USER_ID`/`GROUP_ID`/`OWNERSHIP` fixed dev-mode identity, see "Dev principal" below.
 
@@ -1170,3 +1177,103 @@ this run, so every docker-gated integration test actually ran rather than skippi
 in both adapter-rtsp and adapter-publish-hls, `PostgresDockerIntegrationTest`'s full 17-nested-class
 suite in adapter-persistence, `RtspSimulationDockerE2ETest` in this module) — all green. `cv-service`'s
 own gate (`scripts/test.sh`, outside the Maven reactor) also independently verified: **193/193 passed**.
+
+## docs/MAP-REWORK-PLAN.md Wave C done (the map as a COP — wiring, devsupport, security check)
+
+The wiring/devsupport third of Wave C. The REST + scoped-SSE third is in vision-api/MODULE.md; the
+JPA + `V12__map_layers.sql` third is in adapters/adapter-persistence/MODULE.md.
+
+### Wiring (`ApplicationServiceWiring`, `PersistenceWiringConfiguration`)
+
+Six new beans in `ApplicationServiceWiring` (`mapAccessPolicy`, `layerResolver`, `mapLayerService`,
+`drawingService`, `mapLayerBootstrapRunner`, plus the reworked `markService`) and two in
+`PersistenceWiringConfiguration` (`mapLayerRepositoryPort`, `drawingRepositoryPort`, gated by the
+existing `vision.persistence.enabled` exactly like the other fifteen — no new flag). See the Bean
+inventory above for each one's rationale; the three worth repeating here:
+
+- **`layerResolver` is one bean, not one instance per service.** `copLayerId()`/`defaultLayerFor()`
+  are `synchronized` find-or-create; their idempotence is a property of a single instance guarding a
+  single repository, and three private instances would have quietly reintroduced the duplicate-COP-
+  layer race the `synchronized` was there to prevent.
+- **`mapLayerService` takes repositories, not services**, for its delete-cascade. Going through
+  `MarkService`/`DrawingService` would have re-run a viewer gate on an operation already authorized
+  at the layer level, and created a service cycle.
+- **`mapLayerBootstrapRunner` is about timing, not correctness** — see its Bean inventory row.
+
+### Spring Security: no change needed, and that was checked, not assumed
+
+`SecurityConfig#securedFilterChain` already matches `"/api/**"` → `.authenticated()`, so
+`/api/map/**` is covered the moment it exists. **No per-role HTTP rules were added, deliberately**:
+map authorization is `MapAccessPolicy`'s, resolved per-layer from data (kind + ownership + grants +
+membership), and a `hasRole(...)` matcher on these paths could only ever be a coarser, second,
+drifting copy of it. The permit-all chain (`vision.auth.enabled=false`, the default) covers the new
+routes through its existing `anyRequest().permitAll()`, unchanged.
+
+The identity seam did change, in this module: `PrincipalResolver` (vision-api) gained
+`MapAccessPolicy.Viewer viewer()`, and both implementations here implement it.
+
+- `DevPrincipalResolver` → `Viewer(DevPrincipal.USER_ID, {DevPrincipal.GROUP_ID}, ADMIN)`. The
+  map-side twin of its existing `VisibilityScope.unbounded()`: `MapAccessPolicy` grants ADMIN
+  `MANAGE` on every layer, so an auth-disabled deployment sees the entire picture — byte-for-byte the
+  visibility the unscoped marks stack had before layers existed. **This is what keeps the
+  default-config bar green.**
+- `SecurityContextPrincipalResolver` → the user's own direct membership groups **unioned with**
+  `scopeResolver.scopeFor(user).groups()`, and `topRole` = the highest `Role` held (`PILOT` when
+  none). **The group-subtree traversal is reused, not duplicated**: `DefaultScopeResolver#subtreeOf`
+  already owns it, and for a MANAGER its result *is* the expanded subtree. The union matters in both
+  directions — an ADMIN resolves to `UNBOUNDED` (no groups, but ADMIN already manages everything) and
+  a PILOT to `ASSIGNED_ASSETS` (no groups either), so their direct memberships are the only thing
+  making their own team's layer reachable. That asymmetry is the whole point: deriving the viewer
+  from `VisibilityScope` instead would hit `includesGroup`'s hard-`false` for `ASSIGNED_ASSETS` and
+  make every TEAM layer structurally invisible to the primary FPV-operator persona — the trap
+  docs/MAP-REWORK-PLAN.md §1 records.
+
+### Tests
+
+`./mvnw -B -pl vision-app test -DskipWeb`: **205/205 green** (was 203, +2).
+
+- `InMemoryMarkRepositoryTest` 5→6 for the reworked `Mark` (every fixture carries a `LayerId`,
+  `Affiliation` and `Verification`); the new case covers **promotion + review surviving an upsert**,
+  since `withLayer`/`withVerification` are both save-over-the-same-id operations.
+- `AssetWiringTest` 6→7: its `MarksController` assertions became the three map controllers plus the
+  five new service/policy/repository beans, and a new `theCopLayerExistsOnceAfterStartup` proves the
+  bootstrap runner ran **and** that `copLayerId()` is idempotent (exactly one `COP` layer in the
+  repository afterwards) — the in-memory half of the invariant `V12__map_layers.sql`'s fixed-id seed
+  provides on the Postgres side.
+- `ArchitectureTest`: **9/9 rules green, no changes needed.** The new controllers/DTOs stay inside
+  vision-api and touch only vision-domain + vision-application; `MapVisibility` lives in vision-api's
+  `live` package and depends on `MapLayerService` (application), not on any adapter; Spring Security
+  imports stayed confined to this module.
+
+### Default-config bar (the acceptance gate), proven
+
+Baseline measured by building this repo's `HEAD` in a throwaway git worktree against an isolated
+local Maven repo, since Waves A/B had already left these modules red in the working tree:
+
+| module | before (HEAD) | after | delta |
+|---|---|---|---|
+| adapter-persistence | 98 | 113 | +15 |
+| vision-api | 460 | 521 | +61 |
+| vision-app | 203 | 205 | +2 |
+| **total** | **761** | **839** | **+78** |
+
+All green in both runs, all under **default configuration** — `vision.auth.enabled=false`,
+`vision.persistence.enabled=false`, `vision.live.enabled=true`. No pre-existing test was weakened or
+deleted to get there; the only deletions are the ones the frozen contract required
+(`MarksControllerTest`, whose subject no longer exists). Docker was reachable, so
+adapter-persistence's Testcontainers suite **ran** rather than skipping, in both the before and after
+measurements.
+
+**Deviations from the brief**: none in this module.
+
+**Honest gaps / explicitly out of scope:**
+- **No `LiveWiringTest` coverage of `MapVisibility`'s bean gating.** It carries the same
+  `@ConditionalOnProperty(vision.live.enabled)` as `LiveUpdateRegistry`/`LiveController` and
+  `LiveDisabledWiringTest` still passes (the context starts clean with live off), but there is no
+  explicit assertion that the bean is absent in that mode — inferred from context startup, not
+  asserted directly.
+- **The COP layer is created per-process when `vision.persistence.enabled=false`.** That is the
+  in-memory contract working as intended (nothing survives a restart), but it does mean a dev-mode
+  restart mints a *new* COP `LayerId`, so any client that cached the old one sees an unknown layer.
+  Harmless today (Wave E refetches `GET /api/map/layers` on connect); worth remembering when
+  debugging a dev session that looks like it "lost" its shared marks.

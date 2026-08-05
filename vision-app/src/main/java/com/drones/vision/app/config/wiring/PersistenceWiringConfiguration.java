@@ -194,4 +194,32 @@ public class PersistenceWiringConfiguration {
         }
         return new InMemorySampleImageStore();
     }
+
+    /**
+     * docs/MAP-REWORK-PLAN.md §2.3/§4.4 — map layers (with their grant list), same toggle idiom as
+     * the fifteen above.
+     *
+     * <p>The two persistence modes seed the COP layer differently but converge: {@code
+     * V12__map_layers.sql} inserts it with a fixed id, while the in-memory fallback starts empty and
+     * relies on {@code LayerResolver#copLayerId()}'s synchronized find-or-create, which {@code
+     * ApplicationServiceWiring#mapLayerBootstrapRunner} calls once at startup.
+     */
+    @Bean
+    public MapLayerRepositoryPort mapLayerRepositoryPort(VisionPersistenceProperties properties,
+                                                          ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaMapLayerRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryMapLayerRepository();
+    }
+
+    /** docs/MAP-REWORK-PLAN.md §2.3/§4.4 — map drawings, same toggle idiom as the sixteen above. */
+    @Bean
+    public DrawingRepositoryPort drawingRepositoryPort(VisionPersistenceProperties properties,
+                                                        ObjectProvider<EntityManagerFactory> entityManagerFactory) {
+        if (properties.enabled()) {
+            return new JpaDrawingRepository(entityManagerFactory.getObject());
+        }
+        return new InMemoryDrawingRepository();
+    }
 }

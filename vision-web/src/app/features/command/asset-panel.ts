@@ -19,7 +19,7 @@ export type AssetPanelTab = 'status' | 'telemetry' | 'video';
  * **Deliberately dumb** — every input is data `CommandPage` already has from its own existing
  * pollers (see that page's own class doc comment for the full "zero new recurring requests" case):
  * `asset` from the one `GET /api/fleet/summary` poll, `marker` from the embedded
- * `<vision-fleet-map>`'s own `FleetMapStore` (battery/altitude/heading/position/sample-age, so this
+ * `CommandFacade`'s own `FleetMapStore` (battery/altitude/heading/position/sample-age, so this
  * panel never spins up a second `TelemetryStore` poller for an asset the map is already tracking —
  * same reuse `shared/map/live-dock.ts` already established for the docked-preview panel this
  * replaces), and `videoDeviceId`/`stream` from `CommandPage`'s one-shot

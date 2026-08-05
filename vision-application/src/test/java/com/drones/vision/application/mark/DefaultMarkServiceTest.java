@@ -1,19 +1,28 @@
 package com.drones.vision.application.mark;
 
+import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.GeoProjection;
 import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.LayerId;
+import com.drones.vision.domain.model.LayerKind;
+import com.drones.vision.domain.model.MapEvent;
+import com.drones.vision.domain.model.MapLayer;
 import com.drones.vision.domain.model.Mark;
 import com.drones.vision.domain.model.MarkId;
 import com.drones.vision.domain.model.MarkKind;
 import com.drones.vision.domain.model.MarkSource;
 import com.drones.vision.domain.model.MarkStatus;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.Role;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.UserId;
+import com.drones.vision.domain.model.Verification;
+import com.drones.vision.domain.model.Verification.VerificationState;
 import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
 import com.drones.vision.domain.port.out.MarkRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,20 +37,25 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import com.drones.vision.application.map.LayerResolver;
+import com.drones.vision.application.map.MapAccessPolicy;
+import com.drones.vision.application.map.MapAccessPolicy.Viewer;
 import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.scope.VisibilityScope;
 
 class DefaultMarkServiceTest {
 
     private FakeMarkRepositoryPort markRepository;
+    private FakeMapLayerRepositoryPort mapLayerRepository;
     private UsageTracker usageTracker;
     private FakeLiveUpdatePublisherPort liveUpdatePublisher;
+    private LayerResolver layerResolver;
     private MarkService service;
 
     private final UserId creator = UserId.random();
@@ -49,328 +63,513 @@ class DefaultMarkServiceTest {
     private final Ownership ownership = new Ownership(creator, group);
     private final AssetId assetId = AssetId.random();
 
+    private MapLayer cop;
+    private MapLayer team;
+
     @BeforeEach
     void setUp() {
         markRepository = new FakeMarkRepositoryPort();
+        mapLayerRepository = new FakeMapLayerRepositoryPort();
         usageTracker = mock(UsageTracker.class);
         liveUpdatePublisher = new FakeLiveUpdatePublisherPort();
-        service = new DefaultMarkService(markRepository, usageTracker, liveUpdatePublisher);
+        layerResolver = new LayerResolver(mapLayerRepository, liveUpdatePublisher);
+        service = new DefaultMarkService(markRepository, usageTracker, liveUpdatePublisher, new MapAccessPolicy(),
+                layerResolver);
+
+        cop = mapLayerRepository.save(new MapLayer(LayerId.random(), "Common picture", LayerKind.COP,
+                new Ownership(UserId.random(), GroupId.random()), List.of(), Instant.now()));
+        team = mapLayerRepository.save(new MapLayer(LayerId.random(), "Alpha team", LayerKind.TEAM,
+                new Ownership(UserId.random(), group), List.of(), Instant.now()));
+        liveUpdatePublisher.reset();
     }
 
     private static GeoPosition position() {
         return new GeoPosition(50.45, 30.52, null);
     }
 
-    private Mark mark(Ownership owner, MarkStatus status) {
-        return new Mark(MarkId.random(), position(), MarkKind.TARGET, "Bunker", null, owner,
-                Instant.now(), status, MarkSource.MANUAL);
+    private Viewer pilotViewer(UserId userId) {
+        return new Viewer(userId, Set.of(group), Role.PILOT);
+    }
+
+    private Viewer managerViewer(UserId userId, GroupId managedGroup) {
+        return new Viewer(userId, Set.of(managedGroup), Role.MANAGER);
+    }
+
+    private Viewer adminViewer(UserId userId) {
+        return new Viewer(userId, Set.of(), Role.ADMIN);
+    }
+
+    private Mark mark(LayerId layerId, Ownership owner, MarkStatus status, Verification verification) {
+        return new Mark(MarkId.random(), layerId, position(), MarkKind.TARGET, Affiliation.HOSTILE, "Bunker", null,
+                owner, Instant.now(), status, MarkSource.MANUAL, verification);
     }
 
     private Telemetry telemetry(Double lat, Double lon, Double heading, Double altitude) {
         return new Telemetry(DeviceId.random(), Instant.now(), lat, lon, altitude, heading, 80.0, Map.of());
     }
 
-    // --- create ----------------------------------------------------------
+    // --- create ------------------------------------------------------------
 
     @Test
-    void createSetsOwnershipActiveManualAndPublishesCreated() {
-        MarkSpec spec = new MarkSpec(MarkKind.HAZARD, "Wire", "low visibility", position());
+    void createOnExplicitLayerSetsOwnershipUnverifiedActiveManualAndPublishesCreated() {
+        MarkSpec spec = new MarkSpec(team.id(), MarkKind.HAZARD, Affiliation.UNKNOWN, "Wire", "low visibility",
+                position());
 
-        Mark created = service.create(spec, ownership, creator);
+        Mark created = service.create(pilotViewer(creator), spec);
 
-        assertEquals(ownership, created.ownership());
+        assertEquals(creator, created.ownership().ownerId());
+        assertEquals(team.id(), created.layerId());
         assertEquals(MarkStatus.ACTIVE, created.status());
         assertEquals(MarkSource.MANUAL, created.source());
         assertEquals(MarkKind.HAZARD, created.kind());
+        assertEquals(Affiliation.UNKNOWN, created.affiliation());
         assertEquals("Wire", created.label());
         assertEquals(position(), created.position());
+        assertEquals(VerificationState.UNVERIFIED, created.verification().state());
         assertEquals(created, markRepository.findById(created.id()).orElseThrow());
-        assertEquals(created, liveUpdatePublisher.created);
+        assertEquals(1, liveUpdatePublisher.events.size());
+        MapEvent event = liveUpdatePublisher.events.get(0);
+        assertEquals(MapEvent.EntityType.MARK, event.entity());
+        assertEquals(MapEvent.Action.CREATED, event.action());
+        assertEquals(created, event.payload());
+    }
+
+    @Test
+    void createWithoutContributeAccessIsDenied() {
+        MarkSpec spec = new MarkSpec(team.id(), MarkKind.HAZARD, Affiliation.UNKNOWN, "Wire", null, position());
+        Viewer outsider = new Viewer(UserId.random(), Set.of(), Role.PILOT);
+
+        assertThrows(AccessDeniedException.class, () -> service.create(outsider, spec));
+        assertTrue(markRepository.findAll().isEmpty());
+    }
+
+    @Test
+    void createOnUnknownLayerThrowsNoSuchElement() {
+        MarkSpec spec = new MarkSpec(LayerId.random(), MarkKind.HAZARD, Affiliation.UNKNOWN, "Wire", null,
+                position());
+
+        assertThrows(NoSuchElementException.class, () -> service.create(pilotViewer(creator), spec));
     }
 
     @Test
     void createRejectsNullCollaborators() {
-        MarkSpec spec = new MarkSpec(MarkKind.HAZARD, "Wire", null, position());
-        assertThrows(NullPointerException.class, () -> service.create(null, ownership, creator));
-        assertThrows(NullPointerException.class, () -> service.create(spec, null, creator));
-        assertThrows(NullPointerException.class, () -> service.create(spec, ownership, null));
+        MarkSpec spec = new MarkSpec(team.id(), MarkKind.HAZARD, Affiliation.UNKNOWN, "Wire", null, position());
+        assertThrows(NullPointerException.class, () -> service.create(null, spec));
+        assertThrows(NullPointerException.class, () -> service.create(pilotViewer(creator), null));
     }
 
-    // --- geolocate ---------------------------------------------------------
+    // --- create: default-layer selection ------------------------------------
+
+    @Test
+    void createWithNoLayerUsesTheCreatorsFirstTeamLayerByName() {
+        MapLayer betaTeam = mapLayerRepository.save(new MapLayer(LayerId.random(), "Beta team", LayerKind.TEAM,
+                new Ownership(UserId.random(), group), List.of(), Instant.now()));
+        MarkSpec spec = new MarkSpec(null, MarkKind.POI, Affiliation.NEUTRAL, "Wire", null, position());
+
+        Mark created = service.create(pilotViewer(creator), spec);
+
+        // "Alpha team" sorts before "Beta team" case-insensitively.
+        assertEquals(team.id(), created.layerId());
+        assertNotNull(mapLayerRepository.findById(betaTeam.id()));
+    }
+
+    @Test
+    void createWithNoLayerAndNoTeamMembershipAutoCreatesAPersonalLayer() {
+        Viewer soloPilot = new Viewer(UserId.random(), Set.of(), Role.PILOT);
+        MarkSpec spec = new MarkSpec(null, MarkKind.POI, Affiliation.NEUTRAL, "Wire", null, position());
+
+        Mark created = service.create(soloPilot, spec);
+
+        MapLayer personal = mapLayerRepository.findById(created.layerId()).orElseThrow();
+        assertEquals(LayerKind.PERSONAL, personal.kind());
+        assertEquals(soloPilot.userId(), personal.ownership().ownerId());
+
+        // Calling again reuses the same auto-created personal layer (idempotent).
+        Mark second = service.create(soloPilot, spec);
+        assertEquals(created.layerId(), second.layerId());
+    }
+
+    // --- geolocate -----------------------------------------------------------
 
     @Test
     void geolocateProjectsFromLatestTelemetryAndPublishesCreated() {
         Telemetry sample = telemetry(50.45, 30.52, 0.0, 100.0);
         when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(sample));
-        GeolocateSpec spec = new GeolocateSpec(assetId, MarkKind.TARGET, "Contact", null,
-                GeoProjection.DEFAULT_DEPRESSION_DEGREES);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, GeoProjection.DEFAULT_DEPRESSION_DEGREES);
 
-        Mark created = service.geolocate(spec, ownership, creator);
+        Mark created = service.geolocate(pilotViewer(creator), spec);
 
         GeoPosition expected = GeoProjection.project(new GeoPosition(50.45, 30.52, 100.0), 0.0, 100.0,
                 GeoProjection.DEFAULT_DEPRESSION_DEGREES);
         assertEquals(expected, created.position());
         assertEquals(MarkSource.DETECTION, created.source());
         assertEquals(MarkStatus.ACTIVE, created.status());
-        assertEquals(ownership, created.ownership());
+        assertEquals(creator, created.ownership().ownerId());
+        assertEquals(team.id(), created.layerId());
         assertEquals(created, markRepository.findById(created.id()).orElseThrow());
-        assertEquals(created, liveUpdatePublisher.created);
+        assertEquals(1, liveUpdatePublisher.events.size());
+    }
+
+    @Test
+    void geolocateWithoutContributeAccessIsDeniedBeforeTouchingTelemetry() {
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, 45.0);
+        Viewer outsider = new Viewer(UserId.random(), Set.of(), Role.PILOT);
+
+        assertThrows(AccessDeniedException.class, () -> service.geolocate(outsider, spec));
+        assertTrue(markRepository.findAll().isEmpty());
     }
 
     @Test
     void geolocateThrowsWhenTheAssetHasNeverReportedTelemetry() {
         when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.empty());
-        GeolocateSpec spec = new GeolocateSpec(assetId, MarkKind.TARGET, "Contact", null, 45.0);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, 45.0);
 
-        assertThrows(IllegalArgumentException.class, () -> service.geolocate(spec, ownership, creator));
+        assertThrows(IllegalArgumentException.class, () -> service.geolocate(pilotViewer(creator), spec));
         assertTrue(markRepository.findAll().isEmpty());
-        assertNull(liveUpdatePublisher.created);
+        assertTrue(liveUpdatePublisher.events.isEmpty());
     }
 
     @Test
     void geolocateThrowsWhenPositionIsMissing() {
         when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(telemetry(null, null, 0.0, 100.0)));
-        GeolocateSpec spec = new GeolocateSpec(assetId, MarkKind.TARGET, "Contact", null, 45.0);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, 45.0);
 
-        assertThrows(IllegalArgumentException.class, () -> service.geolocate(spec, ownership, creator));
+        assertThrows(IllegalArgumentException.class, () -> service.geolocate(pilotViewer(creator), spec));
         assertTrue(markRepository.findAll().isEmpty());
-        assertNull(liveUpdatePublisher.created);
     }
 
     @Test
     void geolocateThrowsWhenHeadingIsMissing() {
         when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(telemetry(50.45, 30.52, null, 100.0)));
-        GeolocateSpec spec = new GeolocateSpec(assetId, MarkKind.TARGET, "Contact", null, 45.0);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, 45.0);
 
-        assertThrows(IllegalArgumentException.class, () -> service.geolocate(spec, ownership, creator));
+        assertThrows(IllegalArgumentException.class, () -> service.geolocate(pilotViewer(creator), spec));
         assertTrue(markRepository.findAll().isEmpty());
-        assertNull(liveUpdatePublisher.created);
     }
 
     @Test
     void geolocateThrowsWhenAltitudeIsMissing() {
         when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(telemetry(50.45, 30.52, 0.0, null)));
-        GeolocateSpec spec = new GeolocateSpec(assetId, MarkKind.TARGET, "Contact", null, 45.0);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, 45.0);
 
-        assertThrows(IllegalArgumentException.class, () -> service.geolocate(spec, ownership, creator));
+        assertThrows(IllegalArgumentException.class, () -> service.geolocate(pilotViewer(creator), spec));
         assertTrue(markRepository.findAll().isEmpty());
-        assertNull(liveUpdatePublisher.created);
     }
 
     @Test
     void geolocateThrowsWhenAltitudeIsNotPositive() {
         when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(telemetry(50.45, 30.52, 0.0, 0.0)));
-        GeolocateSpec spec = new GeolocateSpec(assetId, MarkKind.TARGET, "Contact", null, 45.0);
+        GeolocateSpec spec = new GeolocateSpec(assetId, team.id(), MarkKind.TARGET, Affiliation.HOSTILE, "Contact",
+                null, 45.0);
 
-        assertThrows(IllegalArgumentException.class, () -> service.geolocate(spec, ownership, creator));
+        assertThrows(IllegalArgumentException.class, () -> service.geolocate(pilotViewer(creator), spec));
         assertTrue(markRepository.findAll().isEmpty());
-        assertNull(liveUpdatePublisher.created);
     }
 
-    // --- list: deployment-wide, ACTIVE only -----------------------------
+    // --- list: layer-scoped, ACTIVE only -----------------------------------
 
     @Test
-    void listReturnsEveryActiveMarkDeploymentWideRegardlessOfOwnerOrGroup() {
-        Mark ownMark = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        Mark otherOwnersMark =
-                markRepository.save(mark(new Ownership(UserId.random(), GroupId.random()), MarkStatus.ACTIVE));
+    void listReturnsOnlyMarksOnVisibleLayers() {
+        Mark onCop = markRepository.save(mark(cop.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        Mark onTeam = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MapLayer otherTeam = mapLayerRepository.save(new MapLayer(LayerId.random(), "Other team", LayerKind.TEAM,
+                new Ownership(UserId.random(), GroupId.random()), List.of(), Instant.now()));
+        markRepository.save(mark(otherTeam.id(), new Ownership(UserId.random(), otherTeam.ownership().groupId()),
+                MarkStatus.ACTIVE, Verification.unverified()));
 
-        List<Mark> visible = service.list();
+        List<Mark> visible = service.list(pilotViewer(UserId.random()));
 
-        assertEquals(Set.of(ownMark, otherOwnersMark), Set.copyOf(visible));
+        // A pilot who is only a member of `group` sees COP + their own team, not the other team.
+        assertEquals(Set.of(onCop, onTeam), Set.copyOf(visible));
     }
 
     @Test
     void listExcludesClearedMarks() {
-        Mark active = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        markRepository.save(mark(ownership, MarkStatus.CLEARED));
+        Mark active = markRepository.save(mark(cop.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        markRepository.save(mark(cop.id(), ownership, MarkStatus.CLEARED, Verification.unverified()));
 
-        List<Mark> visible = service.list();
+        List<Mark> visible = service.list(pilotViewer(creator));
 
         assertEquals(List.of(active), visible);
     }
 
     @Test
     void listSortsNewestFirst() {
-        Mark older = markRepository.save(new Mark(MarkId.random(), position(), MarkKind.POI, "old", null,
-                ownership, Instant.now().minusSeconds(60), MarkStatus.ACTIVE, MarkSource.MANUAL));
-        Mark newer = markRepository.save(new Mark(MarkId.random(), position(), MarkKind.POI, "new", null,
-                ownership, Instant.now(), MarkStatus.ACTIVE, MarkSource.MANUAL));
+        Mark older = markRepository.save(new Mark(MarkId.random(), cop.id(), position(), MarkKind.POI,
+                Affiliation.NEUTRAL, "old", null, ownership, Instant.now().minusSeconds(60), MarkStatus.ACTIVE,
+                MarkSource.MANUAL, Verification.unverified()));
+        Mark newer = markRepository.save(new Mark(MarkId.random(), cop.id(), position(), MarkKind.POI,
+                Affiliation.NEUTRAL, "new", null, ownership, Instant.now(), MarkStatus.ACTIVE, MarkSource.MANUAL,
+                Verification.unverified()));
 
-        assertEquals(List.of(newer, older), service.list());
+        assertEquals(List.of(newer, older), service.list(pilotViewer(creator)));
     }
 
-    // --- update: creator-or-manager gate applies to every field --------
-
-    /**
-     * The persona this gate exists for: an FPV operator (PILOT, {@code ASSIGNED_ASSETS} scope,
-     * {@code canManageOrg()==false}) drops a mark and must be able to drag-correct/annotate it
-     * afterward, even though their scope carries no group and grants no management authority.
-     */
     @Test
-    void updateByCreatorAppliesPresentFieldsAndPublishesUpdatedEvenWithAPilotScope() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        MarkPatch patch = new MarkPatch(Optional.of(MarkKind.FRIENDLY), Optional.of("Renamed"),
-                Optional.empty(), Optional.empty(), Optional.empty());
+    void listRejectsNullViewer() {
+        assertThrows(NullPointerException.class, () -> service.list(null));
+    }
 
-        Mark updated = service.update(existing.id(), patch, creator, VisibilityScope.assignedAssets(Set.of()));
+    // --- patch: creator-while-unverified-or-manager gate --------------------
 
-        assertEquals(MarkKind.FRIENDLY, updated.kind());
+    @Test
+    void patchByCreatorWhileUnverifiedAppliesPresentFieldsAndPublishesUpdated() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MarkPatch patch = new MarkPatch(Optional.of(MarkKind.UNIT), Optional.of(Affiliation.FRIENDLY),
+                Optional.of("Renamed"), Optional.empty(), Optional.empty(), Optional.empty());
+
+        Mark updated = service.patch(pilotViewer(creator), existing.id(), patch);
+
+        assertEquals(MarkKind.UNIT, updated.kind());
+        assertEquals(Affiliation.FRIENDLY, updated.affiliation());
         assertEquals("Renamed", updated.label());
         assertEquals(existing.note(), updated.note());
         assertEquals(existing.position(), updated.position());
         assertEquals(MarkStatus.ACTIVE, updated.status());
-        assertEquals(updated, liveUpdatePublisher.updated);
-        assertNull(liveUpdatePublisher.cleared);
+        assertEquals(1, liveUpdatePublisher.events.size());
+        assertEquals(MapEvent.Action.UPDATED, liveUpdatePublisher.events.get(0).action());
     }
 
     @Test
-    void updateByNonCreatorManagerAppliesPresentFieldsAndPublishesUpdated() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.of("Renamed"), Optional.empty(),
+    void patchByNonCreatorManagerAppliesPresentFieldsAndPublishesUpdated() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.of("Renamed"), Optional.empty(),
                 Optional.empty(), Optional.empty());
 
-        Mark updated = service.update(existing.id(), patch, UserId.random(), VisibilityScope.unbounded());
+        Mark updated = service.patch(managerViewer(UserId.random(), group), existing.id(), patch);
 
         assertEquals("Renamed", updated.label());
-        assertEquals(updated, liveUpdatePublisher.updated);
     }
 
     @Test
-    void updateByNonCreatorNonManagerIsDeniedAndLeavesTheMarkUnchanged() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.of("Renamed"), Optional.empty(),
+    void patchByAdminAlwaysSucceeds() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.of("Renamed"), Optional.empty(),
                 Optional.empty(), Optional.empty());
 
-        assertThrows(AccessDeniedException.class, () -> service.update(existing.id(), patch, UserId.random(),
-                VisibilityScope.assignedAssets(Set.of())));
+        Mark updated = service.patch(adminViewer(UserId.random()), existing.id(), patch);
+
+        assertEquals("Renamed", updated.label());
+    }
+
+    @Test
+    void patchByInScopeNonCreatorNonManagerIsDeniedAndLeavesTheMarkUnchanged() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.of("Renamed"), Optional.empty(),
+                Optional.empty(), Optional.empty());
+        // A fellow team member can VIEW the layer, so the denial is an honest 403.
+        Viewer teammate = pilotViewer(UserId.random());
+
+        assertThrows(AccessDeniedException.class, () -> service.patch(teammate, existing.id(), patch));
         assertEquals(existing, markRepository.findById(existing.id()).orElseThrow());
-        assertNull(liveUpdatePublisher.updated);
+        assertTrue(liveUpdatePublisher.events.isEmpty());
     }
 
     @Test
-    void updateLeavesFieldsUnchangedWhenPatchIsEmpty() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
+    void patchOfInvisibleMarkReadsAsUnknown() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.of("Renamed"), Optional.empty(),
+                Optional.empty(), Optional.empty());
+        // An outsider may not learn the mark exists (docs/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
+        Viewer outsider = new Viewer(UserId.random(), Set.of(), Role.PILOT);
 
-        Mark updated =
-                service.update(existing.id(), MarkPatch.NOTHING, creator, VisibilityScope.assignedAssets(Set.of()));
-
-        assertEquals(existing.kind(), updated.kind());
-        assertEquals(existing.label(), updated.label());
-        assertEquals(existing.position(), updated.position());
+        assertThrows(NoSuchElementException.class, () -> service.patch(outsider, existing.id(), patch));
+        assertEquals(existing, markRepository.findById(existing.id()).orElseThrow());
+        assertTrue(liveUpdatePublisher.events.isEmpty());
     }
 
     @Test
-    void updateUnknownIdThrowsNoSuchElement() {
-        MarkId unknown = MarkId.random();
+    void verifyAndPromoteAndDeleteOfInvisibleMarkReadAsUnknown() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        Viewer outsider = new Viewer(UserId.random(), Set.of(), Role.PILOT);
+
         assertThrows(NoSuchElementException.class,
-                () -> service.update(unknown, MarkPatch.NOTHING, creator, VisibilityScope.unbounded()));
+                () -> service.verify(outsider, existing.id(), VerificationState.CONFIRMED));
+        assertThrows(NoSuchElementException.class, () -> service.promote(outsider, existing.id(), null));
+        assertThrows(NoSuchElementException.class, () -> service.delete(outsider, existing.id()));
+        assertEquals(existing, markRepository.findById(existing.id()).orElseThrow());
+        assertTrue(liveUpdatePublisher.events.isEmpty());
     }
 
-    // --- update: status transition, the same creator-or-manager gate ---
+    @Test
+    void creatorLosesEditRightOnceMarkIsConfirmed() {
+        Verification confirmed = new Verification(VerificationState.CONFIRMED, UserId.random(), Instant.now());
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, confirmed));
+        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.of("Renamed"), Optional.empty(),
+                Optional.empty(), Optional.empty());
+
+        assertThrows(AccessDeniedException.class, () -> service.patch(pilotViewer(creator), existing.id(), patch));
+
+        // A manager may still edit it.
+        Mark updated = service.patch(managerViewer(UserId.random(), group), existing.id(), patch);
+        assertEquals("Renamed", updated.label());
+    }
 
     @Test
-    void updateStatusToClearedByCreatorWithAPilotScopeSucceedsAndPublishesCleared() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.of(MarkStatus.CLEARED));
+    void patchUnknownIdThrowsNoSuchElement() {
+        MarkId unknown = MarkId.random();
+        assertThrows(NoSuchElementException.class, () -> service.patch(adminViewer(creator), unknown, MarkPatch.NOTHING));
+    }
 
-        Mark updated = service.update(existing.id(), patch, creator, VisibilityScope.assignedAssets(Set.of()));
+    @Test
+    void patchStatusToClearedByCreatorSucceedsAndPublishesCleared() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.of(MarkStatus.CLEARED));
+
+        Mark updated = service.patch(pilotViewer(creator), existing.id(), patch);
 
         assertEquals(MarkStatus.CLEARED, updated.status());
-        assertEquals(updated, liveUpdatePublisher.cleared);
-        assertNull(liveUpdatePublisher.updated);
+        assertEquals(MapEvent.Action.CLEARED, liveUpdatePublisher.events.get(0).action());
     }
 
     @Test
-    void updateStatusToClearedByNonCreatorManagerSucceeds() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
+    void patchReopensAClearedMarkBackToActive() {
+        Mark cleared = markRepository.save(mark(team.id(), ownership, MarkStatus.CLEARED, Verification.unverified()));
         MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.of(MarkStatus.CLEARED));
+                Optional.empty(), Optional.of(MarkStatus.ACTIVE));
 
-        Mark updated = service.update(existing.id(), patch, UserId.random(), VisibilityScope.unbounded());
-
-        assertEquals(MarkStatus.CLEARED, updated.status());
-        assertEquals(updated, liveUpdatePublisher.cleared);
-    }
-
-    @Test
-    void updateStatusToClearedByNonCreatorNonManagerIsDeniedAndLeavesTheMarkActive() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
-        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.of(MarkStatus.CLEARED));
-
-        assertThrows(AccessDeniedException.class, () -> service.update(existing.id(), patch, UserId.random(),
-                VisibilityScope.assignedAssets(Set.of())));
-        assertEquals(MarkStatus.ACTIVE, markRepository.findById(existing.id()).orElseThrow().status());
-        assertNull(liveUpdatePublisher.cleared);
-    }
-
-    @Test
-    void updateReopensAClearedMarkBackToActiveByItsCreatorAndPublishesUpdated() {
-        Mark cleared = markRepository.save(mark(ownership, MarkStatus.CLEARED));
-        MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.of(MarkStatus.ACTIVE));
-
-        Mark reopened = service.update(cleared.id(), patch, creator, VisibilityScope.assignedAssets(Set.of()));
+        Mark reopened = service.patch(pilotViewer(creator), cleared.id(), patch);
 
         assertEquals(MarkStatus.ACTIVE, reopened.status());
-        assertEquals(reopened, liveUpdatePublisher.updated);
+        assertEquals(MapEvent.Action.UPDATED, liveUpdatePublisher.events.get(0).action());
     }
 
-    // --- delete ----------------------------------------------------------
+    // --- verify --------------------------------------------------------------
 
     @Test
-    void deleteByCreatorRemovesAndPublishesCleared() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
+    void verifyByManagerConfirmsAndStampsReviewer() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        UserId reviewer = UserId.random();
 
-        service.delete(existing.id(), creator, VisibilityScope.unbounded());
+        Mark verified = service.verify(managerViewer(reviewer, group), existing.id(), VerificationState.CONFIRMED);
+
+        assertEquals(VerificationState.CONFIRMED, verified.verification().state());
+        assertEquals(reviewer, verified.verification().verifiedBy());
+        assertEquals(MapEvent.Action.UPDATED, liveUpdatePublisher.events.get(0).action());
+    }
+
+    @Test
+    void verifyByNonManagerIsDenied() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.verify(pilotViewer(creator), existing.id(), VerificationState.CONFIRMED));
+    }
+
+    @Test
+    void verifyRejectsUnverifiedAsADecision() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.verify(managerViewer(UserId.random(), group), existing.id(), VerificationState.UNVERIFIED));
+    }
+
+    // --- promote ---------------------------------------------------------------
+
+    @Test
+    void promoteWithNoTargetDefaultsToCopAndStampsConfirmedVerification() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+        UserId manager = UserId.random();
+
+        Mark promoted = service.promote(managerViewer(manager, group), existing.id(), null);
+
+        assertEquals(cop.id(), promoted.layerId());
+        assertEquals(VerificationState.CONFIRMED, promoted.verification().state());
+        assertEquals(manager, promoted.verification().verifiedBy());
+        assertEquals(cop.id(), liveUpdatePublisher.events.get(0).layerId());
+    }
+
+    @Test
+    void promoteAnAlreadyConfirmedMarkKeepsItsOriginalVerification() {
+        Verification original = new Verification(VerificationState.CONFIRMED, UserId.random(), Instant.now().minusSeconds(3600));
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, original));
+
+        Mark promoted = service.promote(managerViewer(UserId.random(), group), existing.id(), null);
+
+        assertEquals(original, promoted.verification());
+    }
+
+    @Test
+    void promoteToExplicitTargetRequiresContributeOnTarget() {
+        MapLayer noAccessLayer = mapLayerRepository.save(new MapLayer(LayerId.random(), "Sealed", LayerKind.TEAM,
+                new Ownership(UserId.random(), GroupId.random()), List.of(), Instant.now()));
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.promote(managerViewer(UserId.random(), group), existing.id(), noAccessLayer.id()));
+    }
+
+    @Test
+    void promoteRequiresManageOnSourceLayer() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.promote(pilotViewer(UserId.random()), existing.id(), null));
+    }
+
+    // --- delete ------------------------------------------------------------
+
+    @Test
+    void deleteByCreatorRemovesAndPublishesDeleted() {
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
+
+        service.delete(pilotViewer(creator), existing.id());
 
         assertTrue(markRepository.findById(existing.id()).isEmpty());
-        assertEquals(existing, liveUpdatePublisher.cleared);
+        assertEquals(MapEvent.Action.DELETED, liveUpdatePublisher.events.get(0).action());
+        assertEquals(existing, liveUpdatePublisher.events.get(0).payload());
     }
 
     @Test
     void deleteByManagerSucceeds() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
 
-        service.delete(existing.id(), UserId.random(), VisibilityScope.groups(Set.of(group)));
+        service.delete(managerViewer(UserId.random(), group), existing.id());
 
         assertTrue(markRepository.findById(existing.id()).isEmpty());
-        assertEquals(existing, liveUpdatePublisher.cleared);
     }
 
     @Test
     void deleteByNonCreatorNonManagerIsDeniedAndKeepsTheMark() {
-        Mark existing = markRepository.save(mark(ownership, MarkStatus.ACTIVE));
+        Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
 
         assertThrows(AccessDeniedException.class,
-                () -> service.delete(existing.id(), UserId.random(), VisibilityScope.assignedAssets(Set.of())));
+                () -> service.delete(pilotViewer(UserId.random()), existing.id()));
         assertTrue(markRepository.findById(existing.id()).isPresent());
-        assertNull(liveUpdatePublisher.cleared);
     }
 
     @Test
     void deleteUnknownIdThrowsNoSuchElement() {
         MarkId unknown = MarkId.random();
-        assertThrows(NoSuchElementException.class,
-                () -> service.delete(unknown, creator, VisibilityScope.unbounded()));
+        assertThrows(NoSuchElementException.class, () -> service.delete(adminViewer(creator), unknown));
     }
 
-    // --- constructor -----------------------------------------------------
+    // --- constructor ---------------------------------------------------------
 
     @Test
     void constructorRejectsNullCollaborators() {
+        MapAccessPolicy policy = new MapAccessPolicy();
         assertThrows(NullPointerException.class,
-                () -> new DefaultMarkService(null, usageTracker, liveUpdatePublisher));
+                () -> new DefaultMarkService(null, usageTracker, liveUpdatePublisher, policy, layerResolver));
         assertThrows(NullPointerException.class,
-                () -> new DefaultMarkService(markRepository, null, liveUpdatePublisher));
+                () -> new DefaultMarkService(markRepository, null, liveUpdatePublisher, policy, layerResolver));
         assertThrows(NullPointerException.class,
-                () -> new DefaultMarkService(markRepository, usageTracker, null));
+                () -> new DefaultMarkService(markRepository, usageTracker, null, policy, layerResolver));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultMarkService(markRepository, usageTracker, liveUpdatePublisher, null, layerResolver));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultMarkService(markRepository, usageTracker, liveUpdatePublisher, policy, null));
     }
 
     /** In-memory {@link MarkRepositoryPort}. */
-    private static final class FakeMarkRepositoryPort implements MarkRepositoryPort {
+    static final class FakeMarkRepositoryPort implements MarkRepositoryPort {
         private final Map<MarkId, Mark> byId = new ConcurrentHashMap<>();
 
         @Override
@@ -395,11 +594,39 @@ class DefaultMarkServiceTest {
         }
     }
 
-    /** Capturing fake {@link LiveUpdatePublisherPort}; only the three {@code publishMark*} methods matter here. */
-    private static final class FakeLiveUpdatePublisherPort implements LiveUpdatePublisherPort {
-        private Mark created;
-        private Mark updated;
-        private Mark cleared;
+    /** In-memory {@link MapLayerRepositoryPort}. */
+    static final class FakeMapLayerRepositoryPort implements MapLayerRepositoryPort {
+        private final Map<LayerId, MapLayer> byId = new ConcurrentHashMap<>();
+
+        @Override
+        public MapLayer save(MapLayer layer) {
+            byId.put(layer.id(), layer);
+            return layer;
+        }
+
+        @Override
+        public Optional<MapLayer> findById(LayerId id) {
+            return Optional.ofNullable(byId.get(id));
+        }
+
+        @Override
+        public List<MapLayer> findAll() {
+            return List.copyOf(byId.values());
+        }
+
+        @Override
+        public void deleteById(LayerId id) {
+            byId.remove(id);
+        }
+    }
+
+    /** Capturing fake {@link LiveUpdatePublisherPort}; only {@link #publishMapEvent} matters here. */
+    static final class FakeLiveUpdatePublisherPort implements LiveUpdatePublisherPort {
+        final List<MapEvent> events = new ArrayList<>();
+
+        void reset() {
+            events.clear();
+        }
 
         @Override
         public void publishFleetChanged() {
@@ -422,18 +649,8 @@ class DefaultMarkServiceTest {
         }
 
         @Override
-        public void publishMarkCreated(Mark mark) {
-            this.created = mark;
-        }
-
-        @Override
-        public void publishMarkUpdated(Mark mark) {
-            this.updated = mark;
-        }
-
-        @Override
-        public void publishMarkCleared(Mark mark) {
-            this.cleared = mark;
+        public void publishMapEvent(MapEvent event) {
+            events.add(event);
         }
     }
 }

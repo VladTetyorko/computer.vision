@@ -1,57 +1,58 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.api.support.EnumParsing;
 import com.drones.vision.application.mark.MarkPatch;
+import com.drones.vision.domain.model.Affiliation;
+import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.MarkKind;
 import com.drones.vision.domain.model.MarkStatus;
 
-import java.util.Arrays;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /**
- * Request body for {@code PATCH /api/marks/{id}} (docs/TACTICAL-MARKS-PLAN.md §4's frozen wire
- * contract) — a true partial patch: every field is optional, and only a present field changes
- * anything, mirroring {@link UpdateStreamConfigRequest}'s "absent means unchanged" convention
- * rather than {@link com.drones.vision.api.dto.GeofenceZoneRequest}'s wholesale-replace shape.
+ * Request body for {@code PATCH /api/map/marks/{id}} (docs/MAP-REWORK-PLAN.md §4.2) — a true
+ * partial patch: every field is optional and {@code null} means "leave unchanged".
  *
- * <p>A present-but-blank {@code note} clears it — {@code null}/absent leaves it unchanged, an
- * empty string {@code ""} is a present value that {@link com.drones.vision.domain.model.Mark
- * #withDetails} then normalizes to {@code null} — the same "blank distinguishes from absent only
- * via an explicit empty string" trick {@link MarkPatch}'s own javadoc documents.
+ * <p><strong>Position is all-or-nothing.</strong> {@code latitude} and {@code longitude} must be
+ * supplied together (half a move is meaningless) — supplying one without the other is a {@code 400}
+ * rather than a silently-ignored field. {@code altitudeMeters} rides along with them and may be
+ * {@code null} to clear the altitude, which is exactly why it cannot be patched on its own.
  *
- * @param kind     replacement kind ({@code "TARGET"}/{@code "HAZARD"}/{@code "POI"}/{@code
- *                 "FRIENDLY"}, matched case-insensitively), or {@code null} to leave it unchanged
- * @param label    replacement label, or {@code null} to leave it unchanged
- * @param note     replacement note (blank clears it), or {@code null} to leave it unchanged
- * @param position replacement position (drag-to-correct), or {@code null} to leave it unchanged
- * @param status   replacement lifecycle status ({@code "ACTIVE"}/{@code "CLEARED"}, matched
- *                 case-insensitively), or {@code null} to leave it unchanged
+ * @param kind        {@code UNIT}/{@code EQUIPMENT}/{@code HAZARD}/{@code POI}/{@code TARGET}
+ * @param affiliation {@code FRIENDLY}/{@code HOSTILE}/{@code NEUTRAL}/{@code UNKNOWN}
+ * @param status      {@code ACTIVE} or {@code CLEARED} — the lifecycle transition; verification is
+ *                    its own endpoint ({@code POST .../verify}), never a patch field
  */
-public record PatchMarkRequest(String kind, String label, String note, CreateMarkRequest.PointRequest position,
-                                String status) {
+public record PatchMarkRequest(Double latitude, Double longitude, Double altitudeMeters, String kind,
+                                String affiliation, String label, String note, String status) {
 
     /**
      * Converts this request to the application-layer patch.
      *
-     * @return the equivalent {@link MarkPatch}
-     * @throws IllegalArgumentException if {@code kind} or {@code status} is present but unrecognized
+     * @return the equivalent {@link MarkPatch} ({@link MarkPatch#NOTHING}-equivalent for an
+     *         all-absent body)
+     * @throws IllegalArgumentException if only one of {@code latitude}/{@code longitude} is present,
+     *                                   the coordinates are out of range, or {@code kind}/{@code
+     *                                   affiliation}/{@code status} is present but unrecognized (→ 400)
      */
     public MarkPatch toPatch() {
         return new MarkPatch(
-                kind == null ? Optional.empty() : Optional.of(CreateMarkRequest.toKind(kind)),
+                Optional.ofNullable(EnumParsing.optional(MarkKind.class, "kind", kind)),
+                Optional.ofNullable(EnumParsing.optional(Affiliation.class, "affiliation", affiliation)),
                 Optional.ofNullable(label),
                 Optional.ofNullable(note),
-                position == null ? Optional.empty() : Optional.of(position.toPosition()),
-                status == null ? Optional.empty() : Optional.of(toStatus(status)));
+                Optional.ofNullable(position()),
+                Optional.ofNullable(EnumParsing.optional(MarkStatus.class, "status", status)));
     }
 
-    private static MarkStatus toStatus(String status) {
-        for (MarkStatus candidate : MarkStatus.values()) {
-            if (candidate.name().equalsIgnoreCase(status)) {
-                return candidate;
-            }
+    private GeoPosition position() {
+        if (latitude == null && longitude == null) {
+            return null;
         }
-        throw new IllegalArgumentException("Unknown status: " + status + " (valid values: "
-                + Arrays.stream(MarkStatus.values()).map(Enum::name).collect(Collectors.joining(", ")) + ")");
+        if (latitude == null || longitude == null) {
+            throw new IllegalArgumentException(
+                    "PatchMarkRequest latitude and longitude must be supplied together to move a mark");
+        }
+        return new GeoPosition(latitude, longitude, altitudeMeters);
     }
 }

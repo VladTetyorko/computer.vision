@@ -1,0 +1,216 @@
+<div class="manager">
+  <!-- ---- Create ------------------------------------------------------------------------------ -->
+  <div class="section">
+    @if (creating()) {
+      <div class="create-form">
+        <span class="label" id="new-layer-name">Layer name</span>
+        <input
+          type="text"
+          aria-labelledby="new-layer-name"
+          placeholder="e.g. Recon east"
+          [ngModel]="newName()"
+          (ngModelChange)="newName.set($event)"
+          (keydown.enter)="submitCreate()"
+        />
+
+        @if (canCreateTeamLayer()) {
+          <span class="label" id="new-layer-kind">Shared with</span>
+          <div class="segmented" role="group" aria-labelledby="new-layer-kind">
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="newKind() === 'PERSONAL'"
+              (click)="setNewKind('PERSONAL')"
+            >
+              Only me
+            </button>
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="newKind() === 'TEAM'"
+              (click)="setNewKind('TEAM')"
+            >
+              A team
+            </button>
+          </div>
+
+          @if (newKind() === 'TEAM') {
+            <span class="label" id="new-layer-group">Team</span>
+            <select
+              aria-labelledby="new-layer-group"
+              [value]="newGroupId()"
+              (change)="newGroupId.set($any($event.target).value)"
+            >
+              <option value="">Pick a team…</option>
+              @for (group of teamGroups(); track group.id) {
+                <option [value]="group.id" [selected]="newGroupId() === group.id">{{ group.name }}</option>
+              }
+            </select>
+          }
+        } @else {
+          <p class="muted hint">This layer will be yours alone. Team layers are created by whoever manages the team.</p>
+        }
+
+        <div class="row actions">
+          <button type="button" class="btn small" (click)="submitCreate()" [disabled]="!canSubmitCreate()">Create layer</button>
+          <button type="button" class="btn secondary small" (click)="cancelCreate()">Cancel</button>
+        </div>
+      </div>
+    } @else {
+      <button type="button" class="btn secondary small create-trigger" (click)="startCreate()">
+        <vision-icon name="plus" [size]="14" />
+        New layer
+      </button>
+    }
+  </div>
+
+  <!-- ---- Rows --------------------------------------------------------------------------------- -->
+  <div class="section">
+    <span class="label">Layers ({{ layers.layers().length }})</span>
+
+    @if (!layers.loaded()) {
+      <p class="muted hint">Loading…</p>
+    } @else if (layers.layers().length === 0) {
+      <p class="muted hint">No layers yet — create one above and your marks will land on it.</p>
+    } @else {
+      <ul class="layer-list">
+        @for (layer of layers.layers(); track layer.layerId) {
+          <li class="layer-row">
+            <div class="row layer-head">
+              @if (renaming() === layer.layerId) {
+                <input
+                  type="text"
+                  aria-label="Layer name"
+                  [ngModel]="renameText()"
+                  (ngModelChange)="renameText.set($event)"
+                  (keydown.enter)="submitRename(layer)"
+                  (keydown.escape)="cancelRename()"
+                />
+                <button type="button" class="btn small" (click)="submitRename(layer)" [disabled]="busy()">Save</button>
+                <button type="button" class="btn secondary small" (click)="cancelRename()">Cancel</button>
+              } @else {
+                <span class="layer-name truncate" [title]="layer.name">{{ layer.name }}</span>
+                <span class="chip">{{ layerKindLabel(layer.kind) }}</span>
+              }
+            </div>
+
+            <div class="row layer-meta">
+              <span class="muted">{{ accessLevelLabel(layer.myAccess) }}</span>
+              <span class="muted mono counts">{{ layer.markCount }} marks · {{ layer.drawingCount }} drawings</span>
+            </div>
+
+            @if (canManage(layer)) {
+              <div class="row layer-actions">
+                <button type="button" class="btn secondary small" (click)="toggleGrants(layer)">
+                  {{ editingGrantsFor() === layer.layerId ? 'Close access' : 'Access' }}
+                </button>
+                @if (!isSystemLayer(layer)) {
+                  <button type="button" class="btn secondary small" (click)="startRename(layer)">Rename</button>
+                  <button type="button" class="btn danger-action small" (click)="requestDelete(layer)">Delete</button>
+                }
+              </div>
+
+              @if (confirmingDelete() === layer.layerId) {
+                <div class="confirm">
+                  <vision-notice variant="danger">
+                    Deleting “{{ layer.name }}” also deletes its {{ layer.markCount }} marks and
+                    {{ layer.drawingCount }} drawings. This cannot be undone.
+                  </vision-notice>
+                  <div class="row actions">
+                    <button type="button" class="btn danger small" (click)="confirmDelete(layer)" [disabled]="busy()">
+                      Delete layer
+                    </button>
+                    <button type="button" class="btn secondary small" (click)="cancelDelete()">Keep it</button>
+                  </div>
+                </div>
+              }
+
+              @if (editingGrantsFor() === layer.layerId) {
+                <div class="grants">
+                  <span class="label">Who can see this layer</span>
+
+                  @if (draftGrants().length === 0) {
+                    <p class="muted hint">
+                      No one else yet — {{ layer.kind === 'TEAM' ? 'the owning team already sees it.' : 'only you can see it.' }}
+                    </p>
+                  } @else {
+                    <ul class="grant-list">
+                      @for (grant of draftGrants(); track grant.subjectType + grant.subjectId) {
+                        <li class="row grant-row">
+                          <span class="grant-subject truncate" [title]="grantSubjectName(grant)">
+                            {{ grantSubjectName(grant) }}
+                          </span>
+                          <span class="muted grant-type">{{ grant.subjectType === 'GROUP' ? 'Team' : 'Person' }}</span>
+                          <select
+                            [attr.aria-label]="'Access level for ' + grantSubjectName(grant)"
+                            [value]="grant.level"
+                            (change)="setGrantLevel(grant, $any($event.target).value)"
+                          >
+                            @for (level of levels; track level) {
+                              <option [value]="level" [selected]="grant.level === level">{{ accessLevelLabel(level) }}</option>
+                            }
+                          </select>
+                          <button type="button" class="btn secondary small" (click)="dropGrant(grant)">Remove</button>
+                        </li>
+                      }
+                    </ul>
+                  }
+
+                  @if (subjectsUnavailable()) {
+                    <vision-notice variant="warn">
+                      Can't list people or teams with this account — existing access can still be changed or removed.
+                    </vision-notice>
+                  } @else {
+                    <div class="add-grant">
+                      <div class="segmented" role="group" aria-label="Grant to">
+                        <button
+                          type="button"
+                          class="btn secondary small"
+                          [class.active]="newSubjectType() === 'USER'"
+                          (click)="setSubjectType('USER')"
+                        >
+                          Person
+                        </button>
+                        <button
+                          type="button"
+                          class="btn secondary small"
+                          [class.active]="newSubjectType() === 'GROUP'"
+                          (click)="setSubjectType('GROUP')"
+                        >
+                          Team
+                        </button>
+                      </div>
+                      <select
+                        aria-label="Who to grant access to"
+                        [value]="newSubjectId()"
+                        (change)="newSubjectId.set($any($event.target).value)"
+                      >
+                        <option value="">{{ newSubjectType() === 'GROUP' ? 'Pick a team…' : 'Pick a person…' }}</option>
+                        @for (option of subjectOptions(); track option.id) {
+                          <option [value]="option.id" [selected]="newSubjectId() === option.id">{{ option.name }}</option>
+                        }
+                      </select>
+                      <select aria-label="Access level" [value]="newLevel()" (change)="newLevel.set($any($event.target).value)">
+                        @for (level of levels; track level) {
+                          <option [value]="level" [selected]="newLevel() === level">{{ accessLevelLabel(level) }}</option>
+                        }
+                      </select>
+                      <button type="button" class="btn secondary small" (click)="addGrant()" [disabled]="newSubjectId().length === 0">
+                        Add
+                      </button>
+                    </div>
+                  }
+
+                  <div class="row actions">
+                    <button type="button" class="btn small" (click)="saveGrants(layer)" [disabled]="busy()">Save access</button>
+                    <button type="button" class="btn secondary small" (click)="toggleGrants(layer)">Cancel</button>
+                  </div>
+                </div>
+              }
+            }
+          </li>
+        }
+      </ul>
+    }
+  </div>
+</div>

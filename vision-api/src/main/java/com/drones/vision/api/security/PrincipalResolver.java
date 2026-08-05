@@ -1,10 +1,13 @@
 package com.drones.vision.api.security;
 
+import com.drones.vision.application.map.MapAccessPolicy;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.Role;
 import com.drones.vision.domain.model.UserId;
 
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * The seam {@link CurrentUser} delegates to for the acting request's identity — the one place the
@@ -46,14 +49,40 @@ public interface PrincipalResolver {
     VisibilityScope scope();
 
     /**
+     * Who the current request is, as the <em>map's</em> authorization model sees it
+     * (docs/MAP-REWORK-PLAN.md §3/§4): identity + every group whose membership should count toward
+     * map visibility + the highest {@link Role} held.
+     *
+     * <p><strong>Deliberately not derived from {@link #scope()}.</strong> {@link
+     * VisibilityScope#includesGroup} is hard-{@code false} for a PILOT's {@code ASSIGNED_ASSETS}
+     * scope (it carries asset ids, not groups), which would make every {@code TEAM} layer
+     * structurally invisible to the primary FPV-operator persona — the exact trap
+     * docs/MAP-REWORK-PLAN.md §1 records and {@link MapAccessPolicy}'s own javadoc explains. Map
+     * visibility resolves from plain group membership instead.
+     *
+     * <p><strong>Group-subtree expansion is not re-implemented here.</strong> A manager's subtree is
+     * already expanded, once, by {@code DefaultScopeResolver}; implementations are expected to reuse
+     * that (a manager's {@code scope().groups()} <em>is</em> the expanded subtree) unioned with the
+     * user's own direct memberships, rather than walking the group tree a second time.
+     *
+     * @return the acting user's map viewer; never {@code null}
+     */
+    MapAccessPolicy.Viewer viewer();
+
+    /**
      * A resolver that always answers with one fixed {@link Ownership} (and its {@code ownerId} as
      * the acting user), and an {@link VisibilityScope#unbounded()} scope — the shape {@link
      * CurrentUser}'s pre-auth behavior had, kept for tests and for {@code vision-app}'s
      * dev-principal wiring when {@code vision.auth.enabled=false}. An unbounded scope is the
      * slice-2 guardrail: a scoped read given it returns exactly the unscoped result.
      *
+     * <p>Its {@link #viewer()} is the matching map-side guardrail: {@link Role#ADMIN} over {@code
+     * ownership.groupId()}, which {@link MapAccessPolicy} grants {@code MANAGE} on every layer — so
+     * an auth-disabled deployment sees the whole map exactly as it did before layers existed.
+     *
      * @param ownership the fixed ownership to answer with; must not be {@code null}
-     * @return a resolver returning {@code ownership}, {@code ownership.ownerId()}, and an unbounded scope
+     * @return a resolver returning {@code ownership}, {@code ownership.ownerId()}, an unbounded scope
+     *         and an ADMIN viewer
      */
     static PrincipalResolver fixed(Ownership ownership) {
         Objects.requireNonNull(ownership, "ownership must not be null");
@@ -71,6 +100,11 @@ public interface PrincipalResolver {
             @Override
             public VisibilityScope scope() {
                 return VisibilityScope.unbounded();
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                return new MapAccessPolicy.Viewer(ownership.ownerId(), Set.of(ownership.groupId()), Role.ADMIN);
             }
         };
     }
