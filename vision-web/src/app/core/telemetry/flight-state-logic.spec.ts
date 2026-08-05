@@ -8,8 +8,10 @@ import {
   flightBanner,
   gpsFixLabel,
   gpsSeverity,
+  preflightSummary,
   vibeSeverity,
 } from './flight-state-logic';
+import type { PreflightItem, PreflightState } from './flight-state-logic';
 
 function flightState(partial: Partial<FlightState> = {}): FlightState {
   return { ...partial };
@@ -274,6 +276,47 @@ describe('derivePreflight', () => {
       const [, , , , armable] = derivePreflight(sample({ flightState: flightState({ armed: false }) }), false, false, NOW);
       expect(armable.state).toBe('ok');
     });
+  });
+});
+
+describe('preflightSummary (the collapsed checklist head)', () => {
+  function rows(...states: readonly PreflightState[]): readonly PreflightItem[] {
+    return states.map((state, index) => ({ label: `row ${index}`, state }));
+  }
+
+  it('reads "All clear" only when every row passed', () => {
+    expect(preflightSummary(rows('ok', 'ok', 'ok'))).toEqual({
+      ok: 3,
+      fail: 0,
+      unknown: 0,
+      state: 'ok',
+      label: 'All clear',
+    });
+  });
+
+  it('never claims all clear while a reading is still missing', () => {
+    const summary = preflightSummary(rows('ok', 'unknown', 'ok'));
+    expect(summary.state).toBe('unknown');
+    expect(summary.label).toBe('1 unchecked');
+  });
+
+  it('lets one failure win over any number of ok/unknown rows', () => {
+    const summary = preflightSummary(rows('ok', 'unknown', 'fail', 'ok'));
+    expect(summary).toEqual({ ok: 2, fail: 1, unknown: 1, state: 'fail', label: '1 blocker' });
+  });
+
+  it('pluralizes the blocker count', () => {
+    expect(preflightSummary(rows('fail', 'fail')).label).toBe('2 blockers');
+  });
+
+  it('treats the real 5-row derivation with nothing known yet as all-unknown but for the video row', () => {
+    const summary = preflightSummary(derivePreflight(undefined, false, false, Date.parse('2026-07-28T00:00:10.000Z')));
+    expect(summary.state).toBe('fail'); // no camera device → the Video feed row itself fails
+    expect(summary.unknown).toBe(4);
+  });
+
+  it('is all clear on an empty list — nothing to fail (a defensive, not a rendered, case)', () => {
+    expect(preflightSummary([]).label).toBe('All clear');
   });
 });
 

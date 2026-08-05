@@ -1,0 +1,124 @@
+.checklist {
+  pointer-events: auto;
+  border-radius: var(--radius);
+  padding: var(--space-8) var(--space-16);
+  width: 15rem;
+}
+
+/* Collapsed: shrink to the head row's own content instead of holding the expanded card's 15rem —
+   the point of collapsing is to give the video stage its space back once the stream is up. */
+.checklist.collapsed {
+  width: auto;
+  padding: var(--space-4) var(--space-8);
+}
+
+.head {
+  margin: 0 0 var(--space-8);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+}
+
+/* The collapsible head is a button, so it needs the chrome reset every other bare-button control in
+   the cockpit gets; it stays a flex row so the summary chip + chevron ride the title. */
+.head-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  padding: var(--space-4) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+  cursor: pointer;
+}
+
+.head-toggle:hover {
+  color: var(--text);
+}
+
+.checklist.collapsed .head-toggle {
+  margin: 0;
+}
+
+.head-title {
+  flex: none;
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+.summary-ok {
+  color: var(--color-success-text);
+}
+
+.summary-fail {
+  color: var(--color-danger-text);
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.glyph {
+  flex: none;
+  width: 1rem;
+  font-family: var(--mono);
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.label {
+  flex: 1;
+  min-width: 6rem;
+}
+
+.detail {
+  flex-basis: 100%;
+  padding-left: var(--space-24);
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+}
+
+.row-ok .glyph {
+  color: var(--color-success-text);
+}
+
+.row-fail .glyph {
+  color: var(--color-danger-text);
+}
+
+.row-fail .detail {
+  color: var(--color-danger-text);
+}
+
+.row-unknown .glyph {
+  color: var(--text-faint);
+}

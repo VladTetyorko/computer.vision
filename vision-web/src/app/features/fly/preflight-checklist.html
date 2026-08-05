@@ -1,0 +1,33 @@
+<div class="checklist surface-hud-strong" [class.collapsed]="isCollapsed()">
+  <!-- Head: a real toggle button only where the host asked for one (`collapsible`); the standalone
+       `/operate/preflight` page passes nothing and keeps the plain, always-expanded heading. -->
+  @if (collapsible()) {
+    <button
+      type="button"
+      class="head head-toggle"
+      [attr.aria-expanded]="!isCollapsed()"
+      [title]="isCollapsed() ? 'Show the pre-flight checklist' : 'Collapse the pre-flight checklist'"
+      (click)="collapsedChange.emit(!isCollapsed())"
+    >
+      <span class="head-title">Pre-flight</span>
+      <span class="summary" [class]="'summary-' + summary().state">{{ summary().label }}</span>
+      <vision-icon [name]="isCollapsed() ? 'chevron-down' : 'chevron-up'" [size]="14" />
+    </button>
+  } @else {
+    <h3 class="head">Pre-flight</h3>
+  }
+
+  @if (!isCollapsed()) {
+    <ul>
+      @for (item of items(); track item.label) {
+        <li [class]="'row-' + item.state">
+          <span class="glyph">{{ glyph(item.state) }}</span>
+          <span class="label">{{ item.label }}</span>
+          @if (item.detail) {
+            <span class="detail">{{ item.detail }}</span>
+          }
+        </li>
+      }
+    </ul>
+  }
+</div>

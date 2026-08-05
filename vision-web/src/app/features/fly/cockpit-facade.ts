@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, linkedSignal, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
@@ -194,7 +194,9 @@ export class CockpitFacade {
   );
 
   /** Pre-arm ground check — hidden once watch-mode drops the controls entirely, or once the FC
-   * itself confirms armed (the OSD chip bar is the live instrument from that point on). */
+   * itself confirms armed (the OSD chip bar is the live instrument from that point on). Within that
+   * window it is never hidden by the stream starting — it only *collapses*, see
+   * {@link preflightCollapsed}. */
   readonly showPreflightChecklist = computed(() => {
     if (this.watchMode()) {
       return false;
@@ -202,6 +204,19 @@ export class CockpitFacade {
     const sample = this.telemetry.latest();
     return sample === undefined || sample.flightState?.armed !== true;
   });
+
+  /**
+   * Whether the pre-flight card is collapsed to its one-line summary head (per direct user request:
+   * "appear before starting stream, and after that — collapse"). A `linkedSignal` over `live()`, not
+   * a plain `computed`, so it does both jobs at once: the default re-derives on every stream
+   * transition — expanded while nothing is streaming (running the ground check *is* the operator's
+   * job at that moment), collapsed the instant the stream goes live and the video stage becomes the
+   * thing worth the space — while the card's own head can still write to it for as long as that
+   * state lasts (an operator who re-opens the card mid-stream keeps it open until the stream itself
+   * stops or restarts). Deliberately **not** persisted: this is a per-flight glance, not a
+   * remembered preference like the map inset.
+   */
+  readonly preflightCollapsed = linkedSignal(() => this.live());
 
   /** docs/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
    * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */

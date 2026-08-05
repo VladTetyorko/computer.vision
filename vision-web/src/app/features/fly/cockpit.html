@@ -117,10 +117,18 @@
       }
 
       <!-- ---- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
-           in watch mode, and once the FC itself confirms armed. -->
+           in watch mode, and once the FC itself confirms armed. Collapsible per direct user request:
+           open before the stream starts, collapsed to its summary head once it's running (the video
+           stage owns that space then), re-openable by clicking the head — the state itself is
+           `CockpitFacade#preflightCollapsed`'s job, see that signal's own doc comment. -->
       @if (facade.showPreflightChecklist()) {
         <div class="main-preflight">
-          <vision-preflight-checklist [items]="facade.preflightItems()" />
+          <vision-preflight-checklist
+            [items]="facade.preflightItems()"
+            [collapsible]="true"
+            [collapsed]="facade.preflightCollapsed()"
+            (collapsedChange)="facade.preflightCollapsed.set($event)"
+          />
         </div>
       }
 

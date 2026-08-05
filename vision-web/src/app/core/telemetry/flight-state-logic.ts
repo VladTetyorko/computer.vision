@@ -237,6 +237,38 @@ export function derivePreflight(
   ];
 }
 
+/** The one-glance rollup `<vision-preflight-checklist>`'s collapsed header shows — see {@link preflightSummary}. */
+export interface PreflightSummary {
+  readonly ok: number;
+  readonly fail: number;
+  readonly unknown: number;
+  /** Worst row state across the whole list — drives the collapsed header's own accent color. */
+  readonly state: PreflightState;
+  /** What the collapsed header reads: `'2 blockers'` / `'1 unchecked'` / `'All clear'`. */
+  readonly label: string;
+}
+
+/**
+ * Rolls `derivePreflight`'s rows up into the single line the checklist card shows once it collapses
+ * (the cockpit collapses it the moment the stream starts — see `cockpit-facade.ts`'s own
+ * `preflightCollapsed`). Deliberately pessimistic, the same poka-yoke rule every row itself follows:
+ * one `'fail'` makes the whole summary `'fail'`, and any remaining `'unknown'` keeps it `'unknown'`
+ * — a collapsed card never reads `All clear` while a reading is still missing.
+ */
+export function preflightSummary(items: readonly PreflightItem[]): PreflightSummary {
+  const count = (state: PreflightState): number => items.filter((item) => item.state === state).length;
+  const ok = count('ok');
+  const fail = count('fail');
+  const unknown = count('unknown');
+  if (fail > 0) {
+    return { ok, fail, unknown, state: 'fail', label: `${fail} blocker${fail === 1 ? '' : 's'}` };
+  }
+  if (unknown > 0) {
+    return { ok, fail, unknown, state: 'unknown', label: `${unknown} unchecked` };
+  }
+  return { ok, fail, unknown, state: 'ok', label: 'All clear' };
+}
+
 // --- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e — ArduPilot-only RX extras) ------------------
 // Everything below rides `TelemetrySample.extra` (the frozen wire-contract keys, decoded
 // server-side only when the source firmware is ArduPilot and actually emits the underlying MAVLink

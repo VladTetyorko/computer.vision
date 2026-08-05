@@ -2404,7 +2404,10 @@ API surface/core for the full function list: `gpsFixLabel`/`gpsSeverity`/`flight
   `.hud.hud-preflight`, bottom-left, clear of both `.hud-controls` and `.hud-secondary`) only when
   `!watchMode() && (telemetry.latest() === undefined || latest.flightState?.armed !== true)` — a
   ground-check card, gone once the FC confirms armed (the OSD chip bar is the live instrument from
-  that point on).
+  that point on). **Since superseded on two points** — it is a 3-file component now
+  (`preflight-checklist.{ts,html,css}` + `.spec.ts`) and it *collapses* rather than staying full-size
+  once the stream starts; see the "pre-flight card collapses once the stream starts" Status entry at
+  the end of this file for the current contract.
 - **`features/fly/fly-osd.ts`** — 5 new chips, each independently omitted (never fabricated) when its
   own field is absent: **ground speed** (`extra['groundspeedMps']`, one decimal, `X.Xm/s` — closes
   this component's own previously-documented "no speed reading" gap, doc comment rewritten in place
@@ -6849,3 +6852,60 @@ existed for this one either). **Not touched**: `core/ui/ui-store.ts`, `core/ui/o
 `shared/ui/identity-chip.*`, `shared/ui/notification-bell.*`, `shared/ui/app-sidebar/**`, `app.*`,
 `styles.css`, `shared/ui/confirm-dialog.*`, `shared/ui/kebab-menu.ts` — all named explicitly in the task's
 own file-scope boundary or the Findings section above as reported-not-fixed.
+
+## Status — pre-flight card collapses once the stream starts (direct user request) — 2026-08-04
+
+**The ask, verbatim**: "I have a Pre-flight menu in Flight. I need it to appear before starting stream.
+and after that - collapse." Scope: the cockpit's `<vision-preflight-checklist>` only — no change to
+`derivePreflight`'s rows, to when the card is *mounted*, or to `/operate/preflight`'s standalone page.
+
+### What changed
+
+- **`features/fly/preflight-checklist.*` — split into 3 files and made collapsible.** Was a single
+  `.ts` with inline `template:`/`styles:`; now `preflight-checklist.{ts,html,css}` (this repo's standing
+  3-file component rule), plus a first `preflight-checklist.spec.ts`. New surface, all opt-in so the
+  existing standalone page keeps its old look with no binding change: `collapsible` (default `false` —
+  off means the plain `<h3>Pre-flight</h3>` heading, never collapsible), `collapsed` (default `false`,
+  **ignored unless `collapsible`**), and the `collapsedChange` output. Still deliberately dumb: it never
+  flips its own state, it only emits what the operator asked for — the host owns the state, same
+  convention as `<vision-side-panel>`'s own `close`. Collapsed renders the head *only* (no `<ul>`), and
+  `.checklist.collapsed` drops the expanded card's fixed `width: 15rem` to `auto` so the video stage
+  actually gets the space back.
+- **`core/telemetry/flight-state-logic.ts` — new pure `preflightSummary(items)` → `PreflightSummary
+  {ok, fail, unknown, state, label}`.** The one line the collapsed head shows. Worst-state-wins, the same
+  poka-yoke rule every individual row already follows: any `'fail'` → `'fail'` / `"N blocker(s)"`; else
+  any `'unknown'` → `'unknown'` / `"N unchecked"`; else `'ok'` / `"All clear"` — a collapsed card can
+  never read *All clear* while a reading is still missing. `.spec.ts` covers all three tiers, the
+  pluralization, and the real 5-row derivation with nothing known yet.
+- **`features/fly/cockpit-facade.ts` — `preflightCollapsed = linkedSignal(() => this.live())`.** The
+  first `linkedSignal` in this app (grep-verified), and the reason it's that rather than a `computed` or
+  a bare `signal`: the default must *re-derive on every stream transition* (expanded while nothing is
+  streaming, collapsed the moment the stream goes live) **and** stay writable, so an operator who
+  re-opens the card mid-stream keeps it open until the stream itself stops or restarts. Not persisted —
+  a per-flight glance, unlike the map inset's remembered `panel-state` flag.
+- **`features/fly/cockpit.html`** — binds `[collapsible]="true" [collapsed]="facade.preflightCollapsed()"
+  (collapsedChange)="facade.preflightCollapsed.set($event)"`.
+
+### What deliberately did *not* change
+
+`showPreflightChecklist()` keeps its exact old gate (`!watchMode() && (no sample || armed !== true)`) —
+starting a stream now *collapses* the card, it does not unmount it; only arming still removes it
+entirely, which was and remains docs/FC-INTEGRATIONS-PLAN.md F-d's own rule. `features/preflight/
+preflight.html` passes neither new input, so `/operate/preflight` renders exactly as before — verified
+by a spec case, not just by inspection.
+
+### Tests
+
+`npx ng test --watch=false` → **109 files / 1773 passed** (was 108 / 1762): +6 `preflightSummary` cases,
++5 `PreflightChecklist` component cases (plain-heading default, `collapsed` ignored without
+`collapsible`, expanded-with-toggle-head, collapsed-drops-rows-and-shows-summary, head-emits-but-never-
+self-flips). `npx tsc --noEmit` clean.
+
+### Files touched
+
+Edited: `features/fly/preflight-checklist.ts` (rewritten as the 3-file component's `.ts`),
+`features/fly/cockpit.html`, `features/fly/cockpit-facade.ts`,
+`core/telemetry/flight-state-logic.{ts,spec.ts}`, this file. New:
+`features/fly/preflight-checklist.{html,css,spec.ts}`. **Not touched**: `features/preflight/**`,
+`features/fly/cockpit.css` (`.main-preflight`'s bottom-left anchor already fits the narrower collapsed
+card), `derivePreflight` itself.
