@@ -1,10 +1,15 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.asset.AssetStats;
 import com.drones.vision.application.asset.AssetStatsService;
+import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -13,6 +18,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -28,13 +34,18 @@ class AssetStatsControllerTest {
     private AssetStatsService assetStatsService;
     private MockMvc mockMvc;
 
+    // A CurrentUser built from a plain Ownership resolves to an unbounded scope, so these
+    // wiring/status tests see every asset; the out-of-scope 404 case stubs AssetService#details to
+    // throw, the same idiom AssetControllerTest uses.
+    private final CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
+
     @BeforeEach
     void setUp() {
         assetService = mock(AssetService.class);
         assetStatsService = mock(AssetStatsService.class);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AssetStatsController(assetService, assetStatsService))
+                .standaloneSetup(new AssetStatsController(assetService, assetStatsService, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -57,7 +68,7 @@ class AssetStatsControllerTest {
                 .andExpect(jsonPath("$.lastKnownBatteryPercent").value(68))
                 .andExpect(jsonPath("$.flightInProgress").value(true));
 
-        verify(assetService).details(assetId);
+        verify(assetService).details(any(VisibilityScope.class), eq(assetId));
         verify(assetStatsService).statsFor(assetId);
     }
 
@@ -81,7 +92,21 @@ class AssetStatsControllerTest {
     @Test
     void statsReturns404ForAnUnknownAssetAndNeverCallsAssetStatsService() throws Exception {
         AssetId assetId = AssetId.random();
-        when(assetService.details(eq(assetId))).thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
+        when(assetService.details(any(VisibilityScope.class), eq(assetId)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
+
+        mockMvc.perform(get("/api/assets/{id}/stats", assetId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+
+        verifyNoInteractions(assetStatsService);
+    }
+
+    @Test
+    void statsReturns404ForAnOutOfScopeAssetAndNeverCallsAssetStatsService() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(assetService.details(any(VisibilityScope.class), eq(assetId)))
+                .thenThrow(new NoSuchElementException("Asset outside scope: " + assetId.value()));
 
         mockMvc.perform(get("/api/assets/{id}/stats", assetId.value()))
                 .andExpect(status().isNotFound())

@@ -1,8 +1,23 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.application.asset.AssetDetails;
+import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.asset.AssetStatus;
+import com.drones.vision.application.asset.AssetSummary;
+import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.AssetImage;
+import com.drones.vision.domain.model.Capability;
+import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.domain.model.Device;
+import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.domain.model.Ownership;
+import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,7 +25,12 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,17 +50,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class AssetImageControllerTest {
 
+    private AssetService assetService;
     private AssetImageRepositoryPort assetImageRepositoryPort;
     private MockMvc mockMvc;
 
     private final AssetId assetId = AssetId.random();
+    private final CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
 
     @BeforeEach
     void setUp() {
+        assetService = mock(AssetService.class);
         assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new AssetImageController(assetImageRepositoryPort))
+        // In scope by default: a CurrentUser built from a plain Ownership resolves to an unbounded
+        // scope, and AssetService#details is stubbed to succeed for assetId unless a test overrides
+        // it below to simulate an out-of-scope/unknown asset.
+        when(assetService.details(any(VisibilityScope.class), eq(assetId))).thenReturn(details(assetId));
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(new AssetImageController(assetService, currentUser, assetImageRepositoryPort))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
+    }
+
+    private static AssetDetails details(AssetId id) {
+        Device device = new Device(DeviceId.random(), "fpv-cam", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://demo"), Map.of()));
+        Asset asset = new Asset(id, "my drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(device.id()), Map.of());
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        return new AssetDetails(summary, List.of(device), List.of());
     }
 
     // ---- PUT /api/assets/{id}/image ----
@@ -108,6 +145,33 @@ class AssetImageControllerTest {
         verifyNoInteractions(assetImageRepositoryPort);
     }
 
+    @Test
+    void putReturns404ForAnOutOfScopeAsset() throws Exception {
+        when(assetService.details(any(VisibilityScope.class), eq(assetId)))
+                .thenThrow(new NoSuchElementException("Asset outside scope: " + assetId.value()));
+
+        mockMvc.perform(put("/api/assets/{id}/image", assetId.value())
+                        .contentType("image/jpeg").content(new byte[]{1, 2, 3}))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
+    @Test
+    void putReturns404ForAnUnknownAsset() throws Exception {
+        AssetId unknown = AssetId.random();
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
+
+        mockMvc.perform(put("/api/assets/{id}/image", unknown.value())
+                        .contentType("image/jpeg").content(new byte[]{1, 2, 3}))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
     // ---- GET /api/assets/{id}/image ----
 
     @Test
@@ -137,6 +201,18 @@ class AssetImageControllerTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void getReturns404ForAnOutOfScopeAssetWithoutTouchingTheImagePort() throws Exception {
+        when(assetService.details(any(VisibilityScope.class), eq(assetId)))
+                .thenThrow(new NoSuchElementException("Asset outside scope: " + assetId.value()));
+
+        mockMvc.perform(get("/api/assets/{id}/image", assetId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+
+        verifyNoInteractions(assetImageRepositoryPort);
+    }
+
     // ---- DELETE /api/assets/{id}/image ----
 
     @Test
@@ -151,5 +227,18 @@ class AssetImageControllerTest {
     void deleteReturns400ForAMalformedUuid() throws Exception {
         mockMvc.perform(delete("/api/assets/{id}/image", "not-a-uuid"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void deleteReturns404ForAnUnknownAssetInsteadOfASilentNoOp() throws Exception {
+        AssetId unknown = AssetId.random();
+        when(assetService.details(any(VisibilityScope.class), eq(unknown)))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
+
+        mockMvc.perform(delete("/api/assets/{id}/image", unknown.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+
+        verifyNoInteractions(assetImageRepositoryPort);
     }
 }

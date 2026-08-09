@@ -304,6 +304,20 @@ services:
       VISION_PERSISTENCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       VISION_PERSISTENCE_USERNAME: ${POSTGRES_USER}
       VISION_PERSISTENCE_PASSWORD: ${POSTGRES_PASSWORD}
+      # docs/U-AUTH-PLAN.md wave 3: turn on real Spring Security session auth
+      # for anyone using `docker compose up`. The *compiled* default
+      # (vision.auth.enabled=false in vision-app's application.properties)
+      # stays off on purpose -- ~26 unrelated @SpringBootTest classes plus
+      # AuthDisabledSecurityTest rely on that default, so only this
+      # compose-level override flips it, never the compiled default (see
+      # vision-app/MODULE.md's "Auth / session security" section). On first
+      # boot AuthSeedRunner seeds three DEV-ONLY accounts, password equal to
+      # username -- admin/admin (ADMIN), manager/manager (MANAGER),
+      # pilot/pilot (PILOT), see AuthSeedRunner's own javadoc warning. Anyone
+      # standing this compose file up beyond local dev/demo MUST create real
+      # users through UserService and change/remove these seeded accounts
+      # before exposing it.
+      VISION_AUTH_ENABLED: "true"
     ports:
       - "8080:8080"
     volumes:

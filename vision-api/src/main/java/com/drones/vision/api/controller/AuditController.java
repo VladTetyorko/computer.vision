@@ -1,6 +1,8 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.AuditEntryResponse;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.domain.model.AuditTargetType;
 import com.drones.vision.domain.port.out.AuditTrailPort;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,6 +23,21 @@ import java.util.stream.Collectors;
  * add a layer that does nothing. This follows the precedent {@link AssetController} already sets
  * for a usage's telemetry trail. Writing to the trail is never exposed — entries are produced by
  * the services that make the changes, never by a caller.
+ *
+ * <h2>Management gate (docs/U-SCOPE-PLAN.md, U-e slice 2)</h2>
+ * {@link #list} exposes who-changed-what across the <em>whole fleet</em>, a cross-tenant
+ * information leak once real users exist — so it is admission-gated on {@link
+ * com.drones.vision.application.scope.VisibilityScope#canManageOrg()}, true for ADMIN
+ * ({@code UNBOUNDED}) and MANAGER ({@code GROUPS}) scopes, false for PILOT ({@code
+ * ASSIGNED_ASSETS}) or an unaffiliated caller, throwing {@link AccessDeniedException} (403 via
+ * {@code ApiExceptionHandler}) otherwise. This mirrors the same ADMIN/MANAGER gate {@link
+ * GroupAdminController}/{@link UserAdminController} apply, enforced directly in this controller
+ * rather than in an application service since — per the class javadoc above — there deliberately
+ * is no service layer here to put it in. <strong>This does not further filter a MANAGER's view down
+ * to their own group subtree</strong> — an admitted MANAGER sees the whole fleet's audit trail, the
+ * same coarser posture {@code VisibilityScope#canManageOrg}'s own javadoc already calls a "deferred
+ * slice-2 cleanup" elsewhere in this codebase. With auth off (the default) the dev principal's scope
+ * is unbounded, so this gate is a no-op and behavior is unchanged from before scoping.
  */
 @RestController
 public class AuditController {
@@ -29,9 +46,11 @@ public class AuditController {
     private static final int DEFAULT_LIMIT = 100;
 
     private final AuditTrailPort auditTrail;
+    private final CurrentUser currentUser;
 
-    public AuditController(AuditTrailPort auditTrail) {
+    public AuditController(AuditTrailPort auditTrail, CurrentUser currentUser) {
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
+        this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
     /**
@@ -41,11 +60,16 @@ public class AuditController {
      * @param targetId   optional filter: the id to scope to; requires {@code targetType}
      * @param limit      maximum entries to return
      * @return the matching entries, newest first
+     * @throws AccessDeniedException if the caller's scope may not manage the organization (403);
+     *                                see the class javadoc's Management gate section
      */
     @GetMapping("/api/audit")
     public List<AuditEntryResponse> list(@RequestParam(required = false) String targetType,
                                           @RequestParam(required = false) String targetId,
                                           @RequestParam(defaultValue = "" + DEFAULT_LIMIT) int limit) {
+        if (!currentUser.scope().canManageOrg()) {
+            throw new AccessDeniedException("Not permitted to view the audit trail");
+        }
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be positive: " + limit);
         }
