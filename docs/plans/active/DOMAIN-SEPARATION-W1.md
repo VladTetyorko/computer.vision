@@ -178,8 +178,30 @@ nothing else can be in flight while every import in the repo moves.
       The 98 measured earlier included intra-context imports; 70 is the cross-context subset that
       actually breaks Maven extraction. `{@code X}` mentions were correctly left bare — they resolve
       nothing and need no import.
-- [ ] W1.5 package reorganization
+- [x] **W1.5a domain package reorganization** — 130 types into `com.drones.vision.kernel` (15) +
+      `com.drones.vision.<ctx>.domain.{model,port}`. Packages only; files stay in the `vision-domain`
+      Maven module so W1.6 is a pure directory→module move. 197 files moved, references rewritten in
+      573, 101 imports added where a same-package reference became cross-package. C4/C5 applied.
+      `ContextArchitectureTest` grew domain coverage (4 rules now, incl. kernel isolation);
+      ArchUnit's three domain/application rules gained `..kernel..`.
+      Verified: domain 518 · application 819 · api 551 · app 222 · adapters 366 — **identical counts
+      to before the move**.
+- [ ] W1.5b application package reorganization → `com.drones.vision.<ctx>.application.*`
 - [ ] W1.6 Maven extraction
+
+### Package scheme (fixed in W1.5a, applies to W1.5b and W1.6)
+
+```
+com.drones.vision.kernel                       shared kernel — ids + pure value objects
+com.drones.vision.<context>.domain.model       records/enums owned by the context
+com.drones.vision.<context>.domain.port        that context's driven ports   (".out" dropped)
+com.drones.vision.<context>.application.<f>    services, keeping today's feature subpackage,
+                                               collapsed when the feature name equals the context
+```
+
+**The context is the outermost segment on purpose**: the context is the future Maven module, so
+extraction stays a directory move. A layer-first layout (`domain.warehouse`) could not be extracted
+without splitting a package tree in half.
 
 ### Known collision ahead of W1.5/W1.6
 

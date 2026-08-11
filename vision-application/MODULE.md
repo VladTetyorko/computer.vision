@@ -13,6 +13,8 @@ Feature-first, role-second: `com.drones.vision.application.<feature>` (14 featur
 
 **The `exception` package is gone** (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C1). A two-class package that both the perception and warehouse feature sets reached into was a cross-context edge with no owner; each exception now lives with the code that throws it — `UnsupportedProtocolException` in `stream`, `ProbeFailedException` in `device`.
 
+**Domain types now live in per-context packages** (docs/plans/active/DOMAIN-SEPARATION-W1.md, W1.5a): the flat `com.drones.vision.domain.model`/`domain.port.out` are gone, replaced by `com.drones.vision.<context>.domain.model`/`.domain.port` plus `com.drones.vision.kernel` for the 15 shared types (every id, `GeoPosition`, `Ownership`, `LifecycleState`, `Capability`, `BoundingBox`, `StreamDescriptor`, `GeoProjection`). Every import in this module was rewritten accordingly; no service behavior changed. **This module's own packages have not moved yet** — that is W1.5b, which will place them under `com.drones.vision.<context>.application.*`.
+
 **Feature packages are grouped into bounded contexts**, frozen by `ContextArchitectureTest` (vision-app): `identity`{identity,scope} · `warehouse`{asset,device,category,discovery,fleet,usage} · `perception`{stream,pipeline} · `flight`{flight,geofence} · `map`{map,mark} · `learning`{training} · `events`{replay} · `simulation`{simulation}. The graph between them is **acyclic** and any new cross-context edge fails that test.
 
 | Package | Contents |
