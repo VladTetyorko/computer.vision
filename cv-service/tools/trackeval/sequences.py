@@ -81,6 +81,16 @@ _OBJECT_COLORS: tuple[tuple[int, int, int], ...] = (_RED, _GREEN, _BLUE, _YELLOW
 # scenario rather than being an unused parameter.
 POSITION_JITTER = 0.004
 
+# World texture for the ego-motion scenarios: enough marks, spread over enough
+# world, that `goodFeaturesToTrack` finds a stable set in any single view.
+_TEXTURE_COLOR = (150, 150, 150)
+_TEXTURE_MARK_PIXELS = 3
+_BAR_MARGIN = 0.02
+_WORLD_TEXTURE_POINTS: tuple[tuple[float, float], ...] = tuple(
+    (round(0.02 + 0.043 * index, 4), round(0.06 + 0.113 * ((index * 7) % 8), 4))
+    for index in range(40)
+)
+
 # Solid fill + alternating stripes + a bright border: a flat-colour box has
 # no corners at all, and `engines/lk.py`'s `cv2.goodFeaturesToTrack` needs
 # real corners to hold a target, not just an edge.
@@ -185,6 +195,29 @@ def _draw_bar(image: "np.ndarray", left_fraction: float, right_fraction: float, 
     x1 = max(0, min(width, int(round(right_fraction * width))))
     if x1 > x0:
         image[:, x0:x1] = color
+
+
+def _draw_world_texture(image: "np.ndarray", camera_left: float) -> None:
+    """A deterministic scatter of world-fixed marks, drawn offset by the camera.
+
+    Every other scenario renders onto a FLAT background, which is fine for
+    them -- they test association, and association reads boxes. It is not
+    fine for ego-motion: a global-motion estimator works by tracking the
+    BACKGROUND, and a uniform field has nothing to track, so `flow` would
+    return IDENTITY on a flat scene and a compensation test would pass or
+    fail for the wrong reason. These marks are what a real scene supplies
+    for free and a synthetic one has to be given deliberately.
+
+    World-fixed, so their apparent motion IS the camera's -- which is
+    exactly the signal being estimated.
+    """
+    height, width = image.shape[:2]
+    for world_x, world_y in _WORLD_TEXTURE_POINTS:
+        x = int(round((world_x - camera_left) * width))
+        y = int(round(world_y * height))
+        if not (0 <= x < width - _TEXTURE_MARK_PIXELS and 0 <= y < height - _TEXTURE_MARK_PIXELS):
+            continue
+        image[y : y + _TEXTURE_MARK_PIXELS, x : x + _TEXTURE_MARK_PIXELS] = _TEXTURE_COLOR
 
 
 def _render_frame(
@@ -415,10 +448,109 @@ def dropout(seed: int = DEFAULT_SEED) -> Sequence:
     return Sequence(name="dropout", fps=DEFAULT_FPS, width=FRAME_WIDTH, height=FRAME_HEIGHT, frames=tuple(frames))
 
 
+# -- scenario: pan_step -----------------------------------------------------
+#
+# The scenario that isolates what ego-motion compensation actually buys. Three
+# things had to be true at once, and each rules out a simpler scenario:
+#
+#  * a CONSTANT pan does not discriminate -- constant-velocity prediction
+#    absorbs it, because the track learns the apparent velocity while it can
+#    still see the object. So the camera is STILL while the target is visible
+#    and starts panning exactly when the target disappears: the velocity the
+#    track learned is now stale.
+#  * an occlusion alone does not discriminate -- a single-object tracker
+#    follows PIXELS, and with the target hidden LK happily tracks whatever
+#    texture is in its window, which on a world-fixed background moves exactly
+#    like a world-fixed target. So the occluder is a UNIFORM bar: LK loses its
+#    corners and stalls, leaving the session coasting on prediction alone.
+#  * a lone target does not discriminate either -- re-acquisition falls back to
+#    the nearest box, and with one detection on screen that is trivially the
+#    right one. So there is a DISTRACTOR, world-placed so that it sits exactly
+#    where an UNCOMPENSATED prediction points when the target reappears.
+#
+# The result is a fork with a visibly different outcome: uncompensated, the
+# re-anchor takes the distractor and the operator's id follows the wrong
+# object; compensated, it takes the target. REVIEW findings A1/A2.
+
+PAN_STEP_FRAME_COUNT = 90
+PAN_STEP_STATIC_FRAMES = 30          # camera still; the track learns velocity 0
+PAN_STEP_GAP_FRAMES = 30             # both objects hidden, camera panning
+PAN_STEP_CAMERA_VELOCITY = 0.005     # frame-widths per frame, once it starts
+PAN_STEP_TARGET_WORLD_X = 0.62
+PAN_STEP_LANE = 0.55
+# The distractor sits exactly one pan-displacement to the right of the target,
+# so when both reappear it occupies the image position the target ITSELF
+# occupied before the pan -- which is precisely where a prediction that does
+# not know the camera moved still points.
+PAN_STEP_DISTRACTOR_OFFSET = PAN_STEP_CAMERA_VELOCITY * PAN_STEP_GAP_FRAMES
+
+
+def pan_step(seed: int = DEFAULT_SEED) -> Sequence:
+    """A world-static target and a world-static distractor, both hidden behind
+    a uniform bar exactly as the camera starts to pan -- so the learned
+    velocity is stale, the visual tracker has nothing of the target to hold,
+    and the distractor is waiting at the stale prediction's position when the
+    bar clears."""
+    rng = Random(seed)
+    colors = {1: _OBJECT_COLORS[0], 2: _OBJECT_COLORS[1]}
+    gap_start = PAN_STEP_STATIC_FRAMES
+    gap_end = gap_start + PAN_STEP_GAP_FRAMES  # exclusive
+    distractor_world_x = PAN_STEP_TARGET_WORLD_X + PAN_STEP_DISTRACTOR_OFFSET
+
+    def camera_left_at(index: int) -> float:
+        return PAN_STEP_CAMERA_VELOCITY * max(0, index - gap_start)
+
+    # The bar only has to deny LK any texture belonging to either object while
+    # they are hidden, so it spans both objects' whole image excursion across
+    # the gap. Visibility itself is carried by the ground truth, not inferred
+    # from the pixels.
+    hidden_positions = [
+        world - camera_left_at(index)
+        for index in range(gap_start, gap_end)
+        for world in (PAN_STEP_TARGET_WORLD_X, distractor_world_x)
+    ]
+    bar_left = min(hidden_positions) - _BAR_MARGIN
+    bar_right = max(hidden_positions) + OBJECT_WIDTH_FRACTION + _BAR_MARGIN
+
+    frames = []
+    for index in range(PAN_STEP_FRAME_COUNT):
+        camera_left = camera_left_at(index)
+        hidden = gap_start <= index < gap_end
+
+        def underlay(image: "np.ndarray", camera_left=camera_left, hidden=hidden) -> None:
+            _draw_world_texture(image, camera_left)
+            if hidden:
+                _draw_bar(image, bar_left, bar_right, OCCLUSION_BAR_COLOR)
+
+        objects = tuple(
+            GroundTruthObject(
+                gt_id=gt_id,
+                label=OBJECT_LABEL,
+                box=_lane_box(
+                    world - camera_left,
+                    PAN_STEP_LANE,
+                    rng.uniform(-POSITION_JITTER, POSITION_JITTER),
+                ),
+                visible=not hidden,
+            )
+            for gt_id, world in ((1, PAN_STEP_TARGET_WORLD_X), (2, distractor_world_x))
+        )
+        frames.append(_render_frame(index, objects, colors, underlay=underlay))
+    return Sequence(
+        name="pan_step",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
 SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "linear": linear,
     "occlusion": occlusion,
     "crossing": crossing,
     "pan": pan,
     "dropout": dropout,
+    "pan_step": pan_step,
 }
