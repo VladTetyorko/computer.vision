@@ -41,7 +41,7 @@ import com.drones.vision.api.security.CurrentUser;
  * IllegalArgumentException}, validated against the vehicle's capabilities before dispatch —
  * deliberately distinct from the not-commandable 409, see {@code DefaultFlightCommandService}); and
  * {@code 403} when the asset exists but is outside the caller's {@link CurrentUser#scope()}
- * ({@link com.drones.vision.identity.application.scope.AccessDeniedException}, mapped by {@link
+ * ({@link com.drones.vision.platform.AccessDeniedException}, mapped by {@link
  * ApiExceptionHandler} — docs/plans/done/U-SCOPE-PLAN.md, feature 3).
  *
  * <p>{@code GET /api/assets/{id}/flight-capabilities} is instead a <em>read</em>: {@code 200} with

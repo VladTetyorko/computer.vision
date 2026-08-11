@@ -2,9 +2,9 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.AuditEntryResponse;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.domain.model.AuditTargetType;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.platform.AuditTrailPort;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * <h2>Management gate (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2)</h2>
  * {@link #list} exposes who-changed-what across the <em>whole fleet</em>, a cross-tenant
  * information leak once real users exist — so it is admission-gated on {@link
- * com.drones.vision.identity.application.scope.VisibilityScope#canManageOrg()}, true for ADMIN
+ * com.drones.vision.platform.VisibilityScope#canManageOrg()}, true for ADMIN
  * ({@code UNBOUNDED}) and MANAGER ({@code GROUPS}) scopes, false for PILOT ({@code
  * ASSIGNED_ASSETS}) or an unaffiliated caller, throwing {@link AccessDeniedException} (403 via
  * {@code ApiExceptionHandler}) otherwise. This mirrors the same ADMIN/MANAGER gate {@link
@@ -77,7 +77,7 @@ public class AuditController {
             throw new IllegalArgumentException("targetType and targetId must be supplied together");
         }
 
-        List<com.drones.vision.identity.domain.model.AuditEntry> entries = targetType == null
+        List<com.drones.vision.platform.AuditEntry> entries = targetType == null
                 ? auditTrail.findRecent(limit)
                 : auditTrail.findByTarget(parseTargetType(targetType), targetId, limit);
         return entries.stream().map(AuditEntryResponse::from).toList();

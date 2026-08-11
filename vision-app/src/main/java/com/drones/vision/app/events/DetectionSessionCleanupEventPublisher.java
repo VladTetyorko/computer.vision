@@ -1,9 +1,9 @@
 package com.drones.vision.app.events;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
-import com.drones.vision.events.domain.model.Event;
-import com.drones.vision.events.domain.model.EventType;
-import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventType;
+import com.drones.vision.platform.EventPublisherPort;
 
 import java.util.Objects;
 

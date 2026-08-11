@@ -17,7 +17,7 @@ import java.util.Set;
  *
  * <h2>Why identity, not {@code VisibilityScope}</h2>
  * This policy resolves from the viewer's own identity and group memberships ({@link Viewer}), never
- * from {@code com.drones.vision.identity.application.scope.VisibilityScope}. That is a deliberate departure
+ * from {@code com.drones.vision.platform.VisibilityScope}. That is a deliberate departure
  * from how every other scoped read/command in this module works, made to avoid a trap this module's
  * own history already hit once: {@code VisibilityScope#includesGroup} is hard-{@code false} for a
  * {@code ASSIGNED_ASSETS} (PILOT) scope, because that scope carries no group information at all —

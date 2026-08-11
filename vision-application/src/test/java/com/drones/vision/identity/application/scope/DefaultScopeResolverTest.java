@@ -9,6 +9,7 @@ import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.platform.VisibilityScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

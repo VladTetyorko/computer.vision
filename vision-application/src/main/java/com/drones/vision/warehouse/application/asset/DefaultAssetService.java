@@ -3,9 +3,9 @@ package com.drones.vision.warehouse.application.asset;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.AssetUsage;
-import com.drones.vision.identity.domain.model.AuditAction;
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -19,7 +19,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 
 import java.time.Instant;
@@ -33,7 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.application.device.DeviceService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
@@ -122,7 +122,7 @@ public final class DefaultAssetService implements AssetService {
         // Reuse the unscoped result and filter: an unbounded scope returns it unchanged (the
         // guardrail), a bounded one keeps only assets the scope includes.
         return assets(includeDeleted).stream()
-                .filter(summary -> scope.includes(summary.asset()))
+                .filter(summary -> scope.includes(summary.asset().id(), summary.asset().ownership()))
                 .toList();
     }
 
@@ -141,7 +141,7 @@ public final class DefaultAssetService implements AssetService {
     public AssetDetails details(VisibilityScope scope, AssetId id) {
         Objects.requireNonNull(scope, "scope must not be null");
         AssetDetails details = details(id); // NoSuchElementException -> 404 for an unknown id
-        if (!scope.includes(details.summary().asset())) {
+        if (!scope.includes(details.summary().asset().id(), details.summary().asset().ownership())) {
             // Out of scope: report exactly as "unknown" so existence is not revealed (a 404, not a
             // 403). Same message as require()'s so the two cases are indistinguishable to a caller.
             throw new NoSuchElementException("Unknown asset: " + id.value());

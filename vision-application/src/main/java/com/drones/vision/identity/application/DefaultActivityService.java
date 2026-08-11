@@ -1,8 +1,8 @@
 package com.drones.vision.identity.application;
 
-import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 
 import java.util.List;
 import java.util.Objects;

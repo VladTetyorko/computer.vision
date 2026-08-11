@@ -4,8 +4,8 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 
 import java.util.Set;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Manages the pilot&rarr;asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2) —

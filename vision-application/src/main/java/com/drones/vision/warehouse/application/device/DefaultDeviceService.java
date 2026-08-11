@@ -1,19 +1,19 @@
 package com.drones.vision.warehouse.application.device;
 
-import com.drones.vision.identity.domain.model.AuditAction;
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.events.domain.model.Event;
-import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventType;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
-import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.platform.EventPublisherPort;
 
 import java.util.LinkedHashMap;
 import java.util.List;

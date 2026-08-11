@@ -5,7 +5,7 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.learning.domain.port.ModelRegistryPort;
 
 import java.util.List;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The CV model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2): list every known
@@ -38,7 +38,7 @@ public interface ModelRegistryService {
      * @param ref   the model reference to promote
      * @param actor who is promoting it, for the audit trail
      * @param scope the acting user's visibility; must satisfy {@link VisibilityScope#canManageOrg()}
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException if {@code scope} may not manage the organization (audited as a
+     * @throws com.drones.vision.platform.AccessDeniedException if {@code scope} may not manage the organization (audited as a
      *                               denial before this method throws)
      * @throws IllegalStateException if cv-service refuses the promotion — e.g. an unknown model id
      *                                (rsync the artifact first) or no registry reachable at all;

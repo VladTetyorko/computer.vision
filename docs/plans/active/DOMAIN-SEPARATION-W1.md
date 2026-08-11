@@ -267,7 +267,7 @@ the things every context writes to.
 |---|---|---|
 | `Event`, `EventType`, `EventPublisherPort` | `events` | already kernel-only in their references; nothing about them is replay-specific |
 | `AuditEntry`, `AuditId`, `AuditAction`, `AuditTargetType`, `AuditTrailPort` | `identity` | audit is not an identity concern, it is a platform concern that happens to name a `UserId` (kernel) |
-| `VisibilityScope` | `identity.application.scope` | every context filters by it; it is the authorization *value*, not identity's aggregate |
+| `VisibilityScope`, `AccessDeniedException` | `identity.application.scope` | every context filters by the scope and throws the exception when the filter says no; it is the authorization *value*, not identity's aggregate |
 
 `VisibilityScope` needs two edits before it can move: `includes(Asset)` becomes
 `includes(AssetId, Ownership)` — both kernel types, and all 8 call sites already hold an `Asset` —
@@ -322,6 +322,7 @@ streamService.activeDeviceIds()            DefaultAssetService
 streamService.streams() / .stop(id)        DefaultAssetService, DefaultDeviceService, DefaultFleetSummaryService
 streamService.start(device, cfg, tracking) DefaultAssetService
 usageTracker.latestTelemetry(assetId)      DefaultAssetStatsService, DefaultFleetSummaryService
+recent DetectionEvents per asset           DefaultFleetSummaryService
 VideoSourceRegistry + TelemetrySourcePort  DefaultProbeService
 ```
 
@@ -330,7 +331,7 @@ VideoSourceRegistry + TelemetrySourcePort  DefaultProbeService
    direction. (This re-homes C4's `EventRuleConfig`, whose W1.2 assignment was made before the config
    family's owner was settled.)
 2. **`warehouse.domain.port.AssetLiveStatePort`** — warehouse declares what it needs
-   (`activeDeviceIds`, `streamsFor`, `stopStreamsFor`, `latestTelemetry`, `startStream`), returning
+   (`activeDeviceIds`, `streamsFor`, `stopStreamsFor`, `latestTelemetry`, `startStream`, `recentDetectionEvents`), returning
    warehouse-owned records. Perception implements it; vision-app wires it.
 3. **`warehouse.domain.port.DevicePlumbingProbePort`** — `DefaultProbeService`'s body moves behind
    it, composed in vision-app from `VideoSourceRegistry` + `TelemetrySourcePort`. `ProbeResult` keeps

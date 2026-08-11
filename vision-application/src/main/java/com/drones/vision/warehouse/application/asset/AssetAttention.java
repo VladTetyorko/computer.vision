@@ -13,7 +13,7 @@ import com.drones.vision.warehouse.application.fleet.DefaultFleetSummaryService;
  *
  * <p><b>{@code sourceState} was deliberately left out</b> (docs/plans/done/MVP3-PLAN.md C-a's own instruction:
  * "if nothing is cleanly readable, omit the field and document rather than fake"). Today's {@link
- * com.drones.vision.events.domain.port.EventPublisherPort} is write-only — its only implementation
+ * com.drones.vision.platform.EventPublisherPort} is write-only — its only implementation
  * just logs, with no matching read/query port (see vision-api/MODULE.md's Gotchas, first documented
  * for {@code GET /api/events}'s inability to surface {@code PIPELINE_ERROR}) — and {@link
  * com.drones.vision.perception.application.pipeline.SupervisedPublisher}'s in-progress-outage/backoff state is private bookkeeping inside {@link

@@ -4,8 +4,8 @@ import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Creates and manages {@link User} accounts (docs/plans/done/U-AUTH-PLAN.md, wave 2; management gates added
@@ -34,9 +34,11 @@ public interface UserService {
      *       fall outside anyone's subtree.</li>
      *   <li>For each membership: its group must satisfy {@link VisibilityScope#includesGroup} (else
      *       {@link AccessDeniedException} "cannot grant membership in a group outside your scope"),
-     *       and its {@link com.drones.vision.identity.domain.model.Role} must not exceed
-     *       {@link VisibilityScope#maxGrantableRole()} by ordinal (else {@link AccessDeniedException}
-     *       "cannot grant a role above your own").</li>
+     *       and its {@link com.drones.vision.identity.domain.model.Role} must not exceed the acting
+     *       scope's grant ceiling by ordinal (computed by {@code DefaultUserService#maxGrantableRole},
+     *       private — granting roles is user administration, not visibility, so it does not live on
+     *       {@link VisibilityScope} itself) (else {@link AccessDeniedException} "cannot grant a role
+     *       above your own").</li>
      * </ul>
      *
      * @param spec   the new user's shape

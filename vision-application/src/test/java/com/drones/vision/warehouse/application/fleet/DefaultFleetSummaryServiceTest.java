@@ -39,7 +39,7 @@ import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.category.CategoryCounts;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.StreamService;
 

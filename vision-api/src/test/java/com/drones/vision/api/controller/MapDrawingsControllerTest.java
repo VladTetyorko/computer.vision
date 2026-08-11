@@ -5,7 +5,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.map.application.DrawingPatch;
 import com.drones.vision.map.application.DrawingService;
 import com.drones.vision.map.application.DrawingSpec;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.map.domain.model.DrawKind;
 import com.drones.vision.map.domain.model.Drawing;
 import com.drones.vision.map.domain.model.DrawingId;

@@ -2,7 +2,7 @@ package com.drones.vision.api.demo;
 
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.identity.application.AssignmentService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;

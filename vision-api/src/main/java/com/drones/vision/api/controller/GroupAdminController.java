@@ -24,7 +24,7 @@ import com.drones.vision.api.security.CurrentUser;
  * enforces the ADMIN/MANAGER management gate plus the ≤-own-scope rules (only ADMIN may create a
  * root group; a manager may only create a child under a group they manage; {@code list} is
  * scope-filtered). A PILOT/empty scope is refused with
- * {@link com.drones.vision.identity.application.scope.AccessDeniedException} (403 via {@link ApiExceptionHandler}).
+ * {@link com.drones.vision.platform.AccessDeniedException} (403 via {@link ApiExceptionHandler}).
  * With auth off (default) the dev principal's scope is unbounded, so the default-off build is
  * unchanged.
  */

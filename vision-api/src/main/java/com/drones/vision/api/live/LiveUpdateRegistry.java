@@ -19,7 +19,7 @@ import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.events.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
-import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.platform.Event;
 import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.flight.domain.model.Telemetry;

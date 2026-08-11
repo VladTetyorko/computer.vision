@@ -19,7 +19,7 @@ import com.drones.vision.map.application.MapAccessPolicy.Viewer;
  * state): the creator may always edit/delete their own drawing, or a viewer with {@link
  * MapAccessPolicy#canManage} on its layer may edit/delete any drawing there. An unknown id is {@link
  * java.util.NoSuchElementException} (404); an insufficient access level is {@link
- * com.drones.vision.identity.application.scope.AccessDeniedException} (403).
+ * com.drones.vision.platform.AccessDeniedException} (403).
  *
  * <h2>Threading</h2>
  * Implementations must be safe for concurrent use.
@@ -41,7 +41,7 @@ public interface DrawingService {
      * @param spec what to create
      * @return the created drawing
      * @throws java.util.NoSuchElementException if {@code spec.layerId()} is given and unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canContribute} to the resolved layer
      */
     Drawing create(Viewer v, DrawingSpec spec);
@@ -54,7 +54,7 @@ public interface DrawingService {
      * @param patch the fields to change
      * @return the updated drawing
      * @throws java.util.NoSuchElementException if no drawing has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} is neither the drawing's creator nor a
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} is neither the drawing's creator nor a
      *                                             manager of its layer
      */
     Drawing patch(Viewer v, DrawingId id, DrawingPatch patch);
@@ -65,7 +65,7 @@ public interface DrawingService {
      * @param v  who is deleting it
      * @param id the drawing to delete
      * @throws java.util.NoSuchElementException if no drawing has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} is neither the drawing's creator nor a
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} is neither the drawing's creator nor a
      *                                             manager of its layer
      */
     void delete(Viewer v, DrawingId id);

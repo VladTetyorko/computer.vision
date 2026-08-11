@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 class DefaultGroupServiceTest {
 

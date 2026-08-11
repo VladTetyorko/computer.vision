@@ -34,7 +34,7 @@ import com.drones.vision.api.security.CurrentUser;
  * vision-app), and the one place a model gets promoted to production.
  *
  * <p>Error mapping is entirely {@link ModelRegistryService#promote}'s own exceptions surfacing
- * through {@link ApiExceptionHandler}: {@link com.drones.vision.identity.application.scope.AccessDeniedException}
+ * through {@link ApiExceptionHandler}: {@link com.drones.vision.platform.AccessDeniedException}
  * (caller may not manage the organization) → 403; {@link IllegalStateException} (cv-service
  * refuses the promotion — e.g. an unknown model id, "rsync the artifact first" — or no registry
  * reachable at all) → 409; {@link IllegalArgumentException} ({@link ModelRef}'s own blank

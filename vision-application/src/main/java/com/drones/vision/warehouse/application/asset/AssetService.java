@@ -10,7 +10,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 
 /**

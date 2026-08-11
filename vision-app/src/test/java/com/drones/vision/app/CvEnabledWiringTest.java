@@ -5,7 +5,7 @@ import com.drones.vision.api.controller.ModelRegistryController;
 import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
 import com.drones.vision.learning.application.ModelRegistryService;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.learning.domain.port.ModelRegistryPort;
 import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;

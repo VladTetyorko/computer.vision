@@ -7,7 +7,7 @@ import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.identity.application.GroupService;
 import com.drones.vision.identity.application.GroupSpec;
 import com.drones.vision.identity.application.UserService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;

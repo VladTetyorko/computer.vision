@@ -1,7 +1,7 @@
 package com.drones.vision.warehouse.application.fleet;
 
 import com.drones.vision.warehouse.application.asset.AssetService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 /**
  * The manager dashboard's single aggregated read (docs/plans/done/MVP3-PLAN.md C-a) — a server-side join of
  * per-category counts and per-asset attention facts, so the browser issues one poll per cycle

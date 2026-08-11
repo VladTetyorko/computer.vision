@@ -1,10 +1,10 @@
 package com.drones.vision.identity.application;
 
-import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * A user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 7) — the read side behind

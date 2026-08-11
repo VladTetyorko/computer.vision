@@ -77,7 +77,7 @@ import com.drones.vision.perception.application.stream.StreamService;
  * result — it wraps it in a {@link SupervisedPublisher} so a telemetry source error/completion is
  * retried with the same capped exponential backoff instead of silently ending telemetry for the
  * rest of the usage. Unlike the video path, this does <b>not</b> publish a {@code PIPELINE_ERROR}
- * event on an outage — this class has no {@link com.drones.vision.events.domain.port.EventPublisherPort}
+ * event on an outage — this class has no {@link com.drones.vision.platform.EventPublisherPort}
  * (and no {@code StreamId} to publish one against; telemetry is tracked per-asset/device, not
  * per-stream), and {@link TelemetrySubscriber#onError} was already, deliberately, a completely
  * silent no-op before this task (see the Gotchas below) — reconnection is new, the pre-existing

@@ -5,7 +5,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStats;
 import com.drones.vision.warehouse.application.asset.AssetStatsService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;

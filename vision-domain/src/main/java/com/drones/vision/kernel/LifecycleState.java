@@ -12,7 +12,7 @@ package com.drones.vision.kernel;
  *
  * <p>Deleted things are hidden from normal listings and refuse to stream, so they behave as
  * deleted from the outside while remaining recoverable and auditable. Every transition between
- * these states is written to the audit trail ({@link com.drones.vision.identity.domain.port.AuditTrailPort}).
+ * these states is written to the audit trail ({@link com.drones.vision.platform.AuditTrailPort}).
  *
  * <p>Permitted transitions:
  * <pre>

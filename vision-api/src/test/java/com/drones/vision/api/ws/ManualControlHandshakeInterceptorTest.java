@@ -1,7 +1,7 @@
 package com.drones.vision.api.ws;
 
 import com.drones.vision.map.application.MapAccessPolicy;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;

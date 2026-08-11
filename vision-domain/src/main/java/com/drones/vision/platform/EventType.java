@@ -1,4 +1,4 @@
-package com.drones.vision.events.domain.model;
+package com.drones.vision.platform;
 
 /**
  * Kind of semantic occurrence carried by an {@link Event}.

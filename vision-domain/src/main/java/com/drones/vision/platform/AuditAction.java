@@ -1,4 +1,4 @@
-package com.drones.vision.identity.domain.model;
+package com.drones.vision.platform;
 
 /**
  * What happened to an auditable thing.

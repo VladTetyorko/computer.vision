@@ -9,8 +9,8 @@ import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The one implementation of {@link AssignmentService}.
@@ -60,7 +60,7 @@ public final class DefaultAssignmentService implements AssignmentService {
         Objects.requireNonNull(granterScope, "granterScope must not be null");
         Asset asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + assetId.value()));
-        if (!granterScope.includes(asset)) {
+        if (!granterScope.includes(asset.id(), asset.ownership())) {
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your scope; you may not change its pilots");
         }

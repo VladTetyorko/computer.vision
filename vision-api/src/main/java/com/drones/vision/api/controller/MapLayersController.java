@@ -56,7 +56,7 @@ import java.util.stream.Collectors;
  * Entirely the services' own exceptions surfacing through {@link ApiExceptionHandler}: {@link
  * IllegalArgumentException} (malformed id, unrecognized {@code kind}/{@code level}, blank name) →
  * 400; {@link java.util.NoSuchElementException} (unknown <em>or</em> invisible layer) → 404; {@link
- * com.drones.vision.identity.application.scope.AccessDeniedException} (visible but insufficient access) →
+ * com.drones.vision.platform.AccessDeniedException} (visible but insufficient access) →
  * 403; {@link IllegalStateException} (renaming/deleting the COP layer) → 409.
  */
 @RestController

@@ -1,4 +1,4 @@
-package com.drones.vision.identity.domain.model;
+package com.drones.vision.platform;
 
 import java.util.UUID;
 

@@ -7,7 +7,7 @@ import com.drones.vision.map.application.mark.GeolocateSpec;
 import com.drones.vision.map.application.mark.MarkPatch;
 import com.drones.vision.map.application.mark.MarkService;
 import com.drones.vision.map.application.mark.MarkSpec;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;

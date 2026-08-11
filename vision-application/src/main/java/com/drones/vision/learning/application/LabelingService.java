@@ -10,7 +10,7 @@ import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.events.application.ReplayCaptureSpec;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Capture, correction/labeling and export of {@link TrainingSample}s (docs/plans/done/CV-TRAINING-PLAN.md
@@ -51,7 +51,7 @@ public interface LabelingService {
      * @throws java.util.NoSuchElementException if the dataset is unknown, or the stream has no
      *                                            frame available yet (unknown/not running/no frame
      *                                            published)
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if the dataset, or (when its owning asset can be
+     * @throws com.drones.vision.platform.AccessDeniedException             if the dataset, or (when its owning asset can be
      *                                            resolved) the stream's source asset, is outside
      *                                            {@code scope}
      */
@@ -77,7 +77,7 @@ public interface LabelingService {
      * @throws java.util.NoSuchElementException if the dataset or usage is unknown, the usage has no
      *                                            recorded video stream, or no frame is recorded at
      *                                            the requested instant
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if the dataset, or the usage's asset, is outside
+     * @throws com.drones.vision.platform.AccessDeniedException             if the dataset, or the usage's asset, is outside
      *                                            {@code scope} — unlike {@link #capture}, the
      *                                            usage's asset is never unresolvable, so this gate
      *                                            always applies
@@ -96,7 +96,7 @@ public interface LabelingService {
      * @param scope        the acting user's visibility
      * @return an immutable snapshot
      * @throws java.util.NoSuchElementException if the dataset is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if the dataset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException             if the dataset is outside {@code scope}
      */
     List<TrainingSample> samples(DatasetId id, SampleStatus statusOrNull, int limit, UserId actor,
                                   VisibilityScope scope);
@@ -109,7 +109,7 @@ public interface LabelingService {
      * @param scope the acting user's visibility
      * @return the sample's image
      * @throws java.util.NoSuchElementException if the sample is unknown, or has no stored image
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if the sample's dataset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException             if the sample's dataset is outside {@code scope}
      */
     SampleImage image(TrainingSampleId id, UserId actor, VisibilityScope scope);
 
@@ -130,7 +130,7 @@ public interface LabelingService {
      * @param scope the acting user's visibility
      * @return the updated, persisted sample
      * @throws java.util.NoSuchElementException if the sample is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if the sample's dataset, or (when its asset is
+     * @throws com.drones.vision.platform.AccessDeniedException             if the sample's dataset, or (when its asset is
      *                                            known) source asset, is outside {@code scope}
      * @throws IllegalArgumentException          if any annotation's label is not a member of the
      *                                            dataset's class vocabulary
@@ -154,7 +154,7 @@ public interface LabelingService {
      * @param scope the acting user's visibility
      * @return the completed upload's receipt
      * @throws java.util.NoSuchElementException if the dataset is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if the dataset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException             if the dataset is outside {@code scope}
      * @throws IllegalStateException             if a {@code LABELED} sample has no stored image (a
      *                                            data-integrity condition that should never occur
      *                                            in a well-formed system)

@@ -1,9 +1,9 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 import java.util.List;
@@ -16,7 +16,7 @@ import java.util.Objects;
  * <p>Every asset/device mutation ({@code create}/{@code update}/{@code setState}/{@code delete}/
  * {@code assignDevice}/{@code unassignDevice} — see {@code DefaultAssetService}/{@code
  * DefaultDeviceService}, vision-application) already writes exactly one {@link AuditEntry} through
- * this port, whether or not it also raises a domain {@link com.drones.vision.events.domain.model.Event}
+ * this port, whether or not it also raises a domain {@link com.drones.vision.platform.Event}
  * (e.g. plain edits/deletes never do) — making this the one uniform seam for "an asset or device
  * changed", without adding a new constructor dependency to either service (both already sit at
  * their constructor-parameter ceiling; see {@code .claude/skills/java-clean-code/SKILL.md} §3).

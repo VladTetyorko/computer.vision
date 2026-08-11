@@ -2,7 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.events.domain.port.DetectionRepositoryPort;
-import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
@@ -10,7 +10,7 @@ import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.ManualControlPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;

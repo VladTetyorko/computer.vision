@@ -43,7 +43,7 @@ import com.drones.vision.api.security.CurrentUser;
  * AssetImageRepositoryPort} collaborators.
  *
  * <p>Error mapping is entirely {@link DatasetService}'s own exceptions surfacing through {@link
- * ApiExceptionHandler}: {@link com.drones.vision.identity.application.scope.AccessDeniedException} — {@link
+ * ApiExceptionHandler}: {@link com.drones.vision.platform.AccessDeniedException} — {@link
  * #create}/{@link #delete} by a caller who may not manage the organization, or {@link #get} on a
  * dataset outside the caller's scope (deliberately a 403, not the usual hiding 404, per {@link
  * DatasetService#get}'s own javadoc) — → 403; {@link java.util.NoSuchElementException} (unknown

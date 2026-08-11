@@ -1,6 +1,6 @@
 package com.drones.vision.warehouse.application.usage;
 
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.AssetUsage;
@@ -82,7 +82,7 @@ public final class DefaultUsageService implements UsageService {
         if (asset.isEmpty()) {
             return scope.isUnbounded() ? summaryOf(usage, "") : null;
         }
-        if (!scope.includes(asset.get())) {
+        if (!scope.includes(asset.get().id(), asset.get().ownership())) {
             return null;
         }
         return summaryOf(usage, asset.get().displayName());

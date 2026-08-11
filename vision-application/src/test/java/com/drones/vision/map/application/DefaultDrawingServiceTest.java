@@ -6,7 +6,7 @@ import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.map.domain.model.DrawKind;
 import com.drones.vision.map.domain.model.Drawing;
 import com.drones.vision.map.domain.model.DrawingId;
-import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.platform.Event;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.map.domain.model.LayerId;
@@ -32,7 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;

@@ -10,8 +10,9 @@ import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import java.util.Optional;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The one implementation of {@link UserService}.
@@ -42,7 +43,7 @@ public final class DefaultUserService implements UserService {
                     + "place the user in a group you manage");
         }
         // Present whenever canManageOrg() is true (checked above), so the ceiling below is real.
-        Role maxGrantable = acting.maxGrantableRole()
+        Role maxGrantable = maxGrantableRole(acting)
                 .orElseThrow(() -> new AccessDeniedException("not permitted to grant any role"));
         for (Membership membership : memberships) {
             if (!acting.includesGroup(membership.groupId())) {
@@ -92,5 +93,27 @@ public final class DefaultUserService implements UserService {
         User updated = new User(existing.id(), existing.username(), existing.displayName(), existing.email(),
                 existing.passwordHash(), enabled, existing.memberships());
         return userRepository.save(updated);
+    }
+
+    /**
+     * The highest {@link Role} {@code scope} may grant to someone else — the ≤-own-scope grant
+     * ceiling {@link #create} enforces. An unbounded scope (ADMIN) may grant {@link Role#ADMIN}; a
+     * groups scope (MANAGER) may grant at most {@link Role#MANAGER}; an assigned-assets scope
+     * (PILOT, or no membership at all) may grant nothing — but never reaches here, since
+     * {@link VisibilityScope#canManageOrg()} already gates it out first.
+     *
+     * <p>Granting roles is user administration, not visibility, so this lives here rather than on
+     * {@link VisibilityScope} itself (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6a) — its
+     * only caller was always this class.
+     *
+     * @param scope the acting user's visibility scope
+     * @return the maximum grantable role, or {@link Optional#empty()} if {@code scope} may grant none
+     */
+    private static Optional<Role> maxGrantableRole(VisibilityScope scope) {
+        return switch (scope.kind()) {
+            case UNBOUNDED -> Optional.of(Role.ADMIN);
+            case GROUPS -> Optional.of(Role.MANAGER);
+            case ASSIGNED_ASSETS -> Optional.empty();
+        };
     }
 }

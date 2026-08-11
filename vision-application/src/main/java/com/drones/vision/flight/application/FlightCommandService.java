@@ -5,7 +5,7 @@ import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.flight.domain.model.FlightCapability;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Commands an asset's aircraft (docs/plans/active/DRONE-INFRA-PLAN.md I-e — "bring it home", then Stage 2's
@@ -28,7 +28,7 @@ public interface FlightCommandService {
      * Commands {@code assetId}'s aircraft to return to home (return-to-launch), gated by the acting
      * user's visibility scope (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 3).
      *
-     * <p>The command is refused up front with {@link com.drones.vision.identity.application.scope.AccessDeniedException} (mapped to 403 by
+     * <p>The command is refused up front with {@link com.drones.vision.platform.AccessDeniedException} (mapped to 403 by
      * vision-api) when {@code scope} does not include the asset — an honest "you may not command
      * this," distinct from an unknown-asset 404. An {@link VisibilityScope#unbounded()} scope
      * (ADMIN / auth-off) includes every asset, so behavior is unchanged from before scoping.
@@ -40,7 +40,7 @@ public interface FlightCommandService {
      *         or {@link CommandResult#NO_ACK} if none arrived within the port's timeout — UDP is
      *         lossy, the command may still have landed
      * @throws java.util.NoSuchElementException if {@code assetId} is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException            if the asset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException            if the asset is outside {@code scope}
      * @throws IllegalStateException            if the asset has no active device the configured
      *                                           {@link FlightCommandPort} can command, or the
      *                                           command attempt itself was refused (either by the
@@ -68,7 +68,7 @@ public interface FlightCommandService {
      * @param scope    the acting user's visibility scope
      * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
      * @throws java.util.NoSuchElementException if {@code assetId} is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException            if the asset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException            if the asset is outside {@code scope}
      * @throws IllegalArgumentException         if {@code modeName} is not one the vehicle offers
      * @throws IllegalStateException            if the asset has no commandable device, or the
      *                                           command attempt itself was refused
@@ -87,7 +87,7 @@ public interface FlightCommandService {
      * @param scope   the acting user's visibility scope
      * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
      * @throws java.util.NoSuchElementException if {@code assetId} is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException            if the asset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException            if the asset is outside {@code scope}
      * @throws IllegalStateException            if the asset has no commandable device, or the
      *                                           command attempt itself was refused
      */
@@ -104,7 +104,7 @@ public interface FlightCommandService {
      * @param scope   the acting user's visibility scope
      * @return {@link CommandResult#ACCEPTED} or {@link CommandResult#NO_ACK}
      * @throws java.util.NoSuchElementException if {@code assetId} is unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException            if the asset is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException            if the asset is outside {@code scope}
      * @throws IllegalStateException            if the asset has no commandable device, or the
      *                                           command attempt itself was refused
      */
@@ -116,7 +116,7 @@ public interface FlightCommandService {
      *
      * <p>This is a <em>read</em>, not a command: it is scope-checked the way the scoped asset reads
      * are — an out-of-scope (or unknown) asset yields {@link java.util.NoSuchElementException}
-     * (→ 404, hiding existence), <b>not</b> the {@link com.drones.vision.identity.application.scope.AccessDeniedException} the command methods
+     * (→ 404, hiding existence), <b>not</b> the {@link com.drones.vision.platform.AccessDeniedException} the command methods
      * throw. An in-scope asset with no commandable device at all (e.g. a manager viewing a non-drone
      * asset) simply reports {@link FlightCapability#notCommandable()} rather than throwing. Never
      * audited — reading capabilities sends nothing to any aircraft.

@@ -3,7 +3,7 @@ package com.drones.vision.app.security;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.identity.application.scope.ScopeResolver;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;

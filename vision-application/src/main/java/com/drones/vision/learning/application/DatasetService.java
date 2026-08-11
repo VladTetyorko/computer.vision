@@ -6,7 +6,7 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * CRUD over {@link Dataset}s (docs/plans/done/CV-TRAINING-PLAN.md §2) — one interface, one implementation
@@ -38,7 +38,7 @@ public interface DatasetService {
      * @param scope     the acting user's visibility; must satisfy {@link
      *                  VisibilityScope#canManageOrg()}
      * @return the created, persisted dataset
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException if {@code scope} may not manage the organization
+     * @throws com.drones.vision.platform.AccessDeniedException if {@code scope} may not manage the organization
      */
     Dataset create(DatasetSpec spec, Ownership ownership, UserId actor, VisibilityScope scope);
 
@@ -61,7 +61,7 @@ public interface DatasetService {
      * @param scope the acting user's visibility
      * @return the dataset
      * @throws java.util.NoSuchElementException if no dataset has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException            if {@code id} exists but is outside {@code scope}
+     * @throws com.drones.vision.platform.AccessDeniedException            if {@code id} exists but is outside {@code scope}
      *                                           (audited as a denial, unlike a plain hiding 404)
      */
     Dataset get(DatasetId id, UserId actor, VisibilityScope scope);
@@ -77,7 +77,7 @@ public interface DatasetService {
      * @param scope the acting user's visibility; must satisfy {@link
      *              VisibilityScope#canManageOrg()}
      * @throws java.util.NoSuchElementException if no dataset has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException            if {@code scope} may not manage the organization
+     * @throws com.drones.vision.platform.AccessDeniedException            if {@code scope} may not manage the organization
      */
     void delete(DatasetId id, UserId actor, VisibilityScope scope);
 }

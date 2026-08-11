@@ -7,6 +7,7 @@ import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.platform.VisibilityScope;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

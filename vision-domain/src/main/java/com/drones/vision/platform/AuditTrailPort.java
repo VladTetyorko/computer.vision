@@ -1,7 +1,5 @@
-package com.drones.vision.identity.domain.port;
+package com.drones.vision.platform;
 
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;

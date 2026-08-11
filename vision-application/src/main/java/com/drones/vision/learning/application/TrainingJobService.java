@@ -6,7 +6,7 @@ import com.drones.vision.learning.domain.port.TrainingPort;
 
 import java.util.List;
 import java.util.Optional;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Starts a CV model fine-tune job and holds its pollable state (docs/plans/done/CV-TRAINING-PLAN.md §6/§7,
@@ -36,7 +36,7 @@ public interface TrainingJobService {
      * @param actor who is starting it, for the audit trail
      * @param scope the acting user's visibility; must satisfy {@link VisibilityScope#canManageOrg()}
      * @return the locally generated job id; poll it via {@link #job(String)}
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException             if {@code scope} may not manage the organization
+     * @throws com.drones.vision.platform.AccessDeniedException             if {@code scope} may not manage the organization
      *                                             (audited as a denial before this method throws),
      *                                             or the job's dataset is outside {@code scope}
      * @throws java.util.NoSuchElementException  if the job's dataset is unknown

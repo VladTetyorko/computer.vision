@@ -1,10 +1,10 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.learning.application.TrainingJobService;
 import com.drones.vision.learning.application.TrainingJobView;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.learning.domain.model.JobState;
 import com.drones.vision.kernel.Ownership;

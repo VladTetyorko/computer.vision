@@ -22,6 +22,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * blocker, not a smell. Earlier revisions checked the two layers separately and could not see an
  * edge that crossed both — warehouse's application reaching perception's domain, say.
  *
+ * <p>Two packages are universal rather than contexts: {@code kernel} (pure values, no ports) and,
+ * since W1.6a, {@code platform} (the cross-cutting seams — {@code Event}/{@code EventPublisherPort},
+ * the {@code Audit*} family, {@code VisibilityScope}/{@code AccessDeniedException} — every context
+ * writes to). Both are excluded as origin and target the same way, so a context depending on either
+ * never counts as a cross-context edge.
+ *
  * <p>Why exact equality rather than a set of "must not depend on" rules: this is a burn-down. It
  * fails in <em>both</em> directions — a new cross-context edge breaks the build, and so does an
  * allowance that no longer matches reality. The second half is what forces {@link #DECLARED_EDGES}
@@ -36,6 +42,7 @@ class ContextArchitectureTest {
 
     private static final String VISION_ROOT = "com.drones.vision.";
     private static final String KERNEL = "kernel";
+    private static final String PLATFORM = "platform";
 
     /** The eight bounded contexts, each the root of one future Maven module. */
     private static final Set<String> CONTEXTS = Set.of(
@@ -52,24 +59,26 @@ class ContextArchitectureTest {
             "flight -> warehouse",          // flight commands resolve the asset they act on
             "identity -> warehouse",        // assignment/activity read assets
             "learning -> flight",
-            "learning -> identity",
             "learning -> perception",       // capture a frame from a live stream
             "learning -> warehouse",
             "map -> flight",
-            "map -> identity",
+            "map -> identity",              // MapAccessPolicy.Viewer carries a Role
             "map -> perception",
             "perception -> flight",         // AnnotatedFrame carries Telemetry for the OSD
             "simulation -> perception",
             "simulation -> warehouse",
             "warehouse -> flight",
-            "warehouse -> identity",
 
-            // --- DEBT: the three cross-cutting infrastructure ports (W1 §5 C7) ---
-            // EventPublisherPort, LiveUpdatePublisherPort and AuditTrailPort are platform seams
-            // every context writes to, yet they sit inside `events`/`identity` and their signatures
-            // name Telemetry, DetectionResult, MapEvent, DetectionEvent. That makes those two
-            // contexts hubs that both depend on everyone and are depended on by everyone — five of
-            // the seven module cycles below are this one problem.
+            // --- DEBT: the god-port LiveUpdatePublisherPort (W1 §5 C7, remainder) ---
+            // EventPublisherPort and AuditTrailPort moved to the universal `platform` package in
+            // W1.6a (this wave) — they no longer sit inside `events`/`identity`, which is exactly
+            // why warehouse -> identity, flight -> identity and learning -> identity (each real
+            // only through AuditTrailPort/VisibilityScope/AccessDeniedException, never anything
+            // else identity owns) are gone from this set entirely, and why identity <-> warehouse
+            // is gone from DECLARED_CYCLES below. LiveUpdatePublisherPort is what's left of C7: it
+            // still sits inside `events` and its signature names Telemetry, DetectionResult,
+            // MapEvent, DetectionEvent, so every context that publishes a live update depends on
+            // `events` for it — W1.6b splits it per context.
             "events -> flight",
             "events -> learning",
             "events -> map",
@@ -79,7 +88,6 @@ class ContextArchitectureTest {
             "perception -> events",
             "warehouse -> events",
             "learning -> events",
-            "flight -> identity",
 
             // --- DEBT: AssetUsage (flight) vs the usage read services (warehouse), W1 §5 C8 ---
             // A usage is a flight session; its read side was filed under warehouse. Half of
@@ -101,7 +109,6 @@ class ContextArchitectureTest {
             "events <-> map",
             "events <-> perception",
             "flight <-> warehouse",
-            "identity <-> warehouse",
             "perception <-> warehouse"));
 
     private static JavaClasses classes;
@@ -137,7 +144,7 @@ class ContextArchitectureTest {
 
     /**
      * Maven cannot express a cycle, so one mutual pair blocks extraction for every context at once.
-     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because seven exist today —
+     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because six exist today —
      * the honest state, tracked as a burn-down instead of hidden behind a disabled test.
      */
     @Test
@@ -183,16 +190,42 @@ class ContextArchitectureTest {
         assertThat(leaks).withFailMessage("Shared kernel reached into a context: %s", leaks).isEmpty();
     }
 
+    /**
+     * {@code platform} (W1.6a) is the second universal package, alongside {@code kernel}: every
+     * context writes to it (audit trail, events, visibility scope), so it must depend on nothing but
+     * the kernel itself. A {@code platform} type that reached into a context — say, back into
+     * {@code identity} for {@code Role} — would smuggle that context's coupling into all eight others
+     * at once, since everyone already depends on {@code platform}. This is exactly the failure mode
+     * that made {@code identity <-> warehouse} a cycle before this wave: {@code VisibilityScope} and
+     * {@code AuditTrailPort} sat inside {@code identity} while every other context wrote to them.
+     */
+    @Test
+    void platformDependsOnNothingButTheKernel() {
+        Set<String> leaks = new TreeSet<>();
+        for (JavaClass origin : classes) {
+            if (!PLATFORM.equals(contextOf(origin))) {
+                continue;
+            }
+            for (Dependency dependency : origin.getDirectDependenciesFromSelf()) {
+                String target = contextOf(dependency.getTargetClass());
+                if (target != null && !KERNEL.equals(target) && !PLATFORM.equals(target)) {
+                    leaks.add(origin.getSimpleName() + " -> " + dependency.getTargetClass().getName());
+                }
+            }
+        }
+        assertThat(leaks).withFailMessage("platform reached into a context: %s", leaks).isEmpty();
+    }
+
     private static Set<String> observedEdges() {
         Set<String> observed = new TreeSet<>();
         for (JavaClass origin : classes) {
             String from = contextOf(origin);
-            if (from == null || KERNEL.equals(from)) {
+            if (from == null || KERNEL.equals(from) || PLATFORM.equals(from)) {
                 continue;
             }
             for (Dependency dependency : origin.getDirectDependenciesFromSelf()) {
                 String to = contextOf(dependency.getTargetClass());
-                if (to != null && !KERNEL.equals(to) && !to.equals(from)) {
+                if (to != null && !KERNEL.equals(to) && !PLATFORM.equals(to) && !to.equals(from)) {
                     observed.add(from + " -> " + to);
                 }
             }
@@ -200,7 +233,10 @@ class ContextArchitectureTest {
         return observed;
     }
 
-    /** {@code com.drones.vision.<context>..} &rarr; that context; the kernel answers "kernel". */
+    /**
+     * {@code com.drones.vision.<context>..} &rarr; that context; {@code kernel}/{@code platform}
+     * answer their own name, since both are universal rather than a context.
+     */
     private static String contextOf(JavaClass javaClass) {
         String name = javaClass.getPackageName();
         if (!name.startsWith(VISION_ROOT)) {
@@ -211,6 +247,9 @@ class ContextArchitectureTest {
         String head = dot < 0 ? rest : rest.substring(0, dot);
         if (KERNEL.equals(head)) {
             return KERNEL;
+        }
+        if (PLATFORM.equals(head)) {
+            return PLATFORM;
         }
         return CONTEXTS.contains(head) ? head : null;
     }

@@ -1,34 +1,33 @@
-package com.drones.vision.identity.application.scope;
+package com.drones.vision.platform;
 
-import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GroupId;
-import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.kernel.Ownership;
 
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 /**
  * What a request may see: the resolved boundary of one user's visibility (docs/plans/done/U-SCOPE-PLAN.md,
- * U-e slice 2, feature 1). Computed once per request from the acting user by {@link ScopeResolver}
- * and threaded into the user-facing read paths, which filter by {@link #includes(Asset)}.
+ * U-e slice 2, feature 1). Computed once per request from the acting user by {@code ScopeResolver}
+ * (vision-application) and threaded into the user-facing read paths, which filter by
+ * {@link #includes(AssetId, Ownership)}.
  *
  * <p>Three cases, one per privilege model:
  * <ul>
  *   <li>{@link #unbounded()} — ADMIN, and the dev principal when {@code vision.auth.enabled=false}.
- *       {@link #includes(Asset)} is always {@code true}, so the default-off build behaves exactly as
- *       it does today (this is the slice's guardrail — a scoped read given an unbounded scope
- *       returns precisely the unscoped result).</li>
- *   <li>{@link #groups(Set)} — MANAGER. {@link #includes(Asset)} is {@code true} iff the asset's
- *       {@code ownership().groupId()} is in the scope's group set (the manager's group subtree, which
- *       {@link ScopeResolver} expands from the group tree).</li>
- *   <li>{@link #assignedAssets(Set)} — PILOT. {@link #includes(Asset)} is {@code true} iff the
- *       asset's id is in the scope's assigned-asset set.</li>
+ *       {@link #includes(AssetId, Ownership)} is always {@code true}, so the default-off build behaves
+ *       exactly as it does today (this is the slice's guardrail — a scoped read given an unbounded
+ *       scope returns precisely the unscoped result).</li>
+ *   <li>{@link #groups(Set)} — MANAGER. {@link #includes(AssetId, Ownership)} is {@code true} iff the
+ *       given {@link Ownership#groupId()} is in the scope's group set (the manager's group subtree,
+ *       which {@code ScopeResolver} expands from the group tree).</li>
+ *   <li>{@link #assignedAssets(Set)} — PILOT. {@link #includes(AssetId, Ownership)} is {@code true}
+ *       iff the given asset id is in the scope's assigned-asset set.</li>
  * </ul>
  *
  * <p>An empty {@code groups} or {@code assignedAssets} scope includes nothing — a user with no
- * memberships and no assignments sees nothing until assigned (documented on {@link ScopeResolver}).
+ * memberships and no assignments sees nothing until assigned (documented on {@code ScopeResolver}).
  * Both collections are defensively copied to immutable sets in the compact constructor.
  *
  * @param kind           which case this scope is
@@ -95,17 +94,24 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
     }
 
     /**
-     * Whether this scope includes the given asset.
+     * Whether this scope includes the asset identified by {@code assetId}/{@code ownership}.
      *
-     * @param asset the asset to test
+     * <p>Takes the asset's id and ownership rather than a whole {@code Asset} (warehouse) — this is
+     * a kernel-only seam every context filters by, and an asset's id and ownership are all
+     * {@link #includes(AssetId, Ownership)} has ever used (docs/plans/active/DOMAIN-SEPARATION-W1.md
+     * §15, W1.6a).
+     *
+     * @param assetId   the asset's id
+     * @param ownership the asset's ownership
      * @return {@code true} iff this scope may see the asset
      */
-    public boolean includes(Asset asset) {
-        Objects.requireNonNull(asset, "asset must not be null");
+    public boolean includes(AssetId assetId, Ownership ownership) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(ownership, "ownership must not be null");
         return switch (kind) {
             case UNBOUNDED -> true;
-            case GROUPS -> groups.contains(asset.ownership().groupId());
-            case ASSIGNED_ASSETS -> assignedAssets.contains(asset.id());
+            case GROUPS -> groups.contains(ownership.groupId());
+            case ASSIGNED_ASSETS -> assignedAssets.contains(assetId);
         };
     }
 
@@ -124,9 +130,9 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
     }
 
     /**
-     * Whether this scope includes the given group — the group half of {@link #includes(Asset)},
-     * used by the management gates to check that a grant/parent stays within the acting user's
-     * subtree.
+     * Whether this scope includes the given group — the group half of
+     * {@link #includes(AssetId, Ownership)}, used by the management gates to check that a
+     * grant/parent stays within the acting user's subtree.
      *
      * @param groupId the group to test
      * @return {@code true} for an {@link Kind#UNBOUNDED} scope; for a {@link Kind#GROUPS} scope iff
@@ -138,24 +144,6 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
             case UNBOUNDED -> true;
             case GROUPS -> groups.contains(groupId);
             case ASSIGNED_ASSETS -> false;
-        };
-    }
-
-    /**
-     * The highest {@link Role} the acting user may grant to someone else — the ≤-own-scope grant
-     * ceiling. An {@link Kind#UNBOUNDED} scope (ADMIN) may grant {@link Role#ADMIN}; a
-     * {@link Kind#GROUPS} scope (MANAGER) may grant at most {@link Role#MANAGER}; a
-     * {@link Kind#ASSIGNED_ASSETS} scope may grant nothing.
-     *
-     * <p>Compared against a candidate role by {@link Role}'s ordinal ordering (ADMIN highest).
-     *
-     * @return the maximum grantable role, or {@link Optional#empty()} if this scope may grant none
-     */
-    public Optional<Role> maxGrantableRole() {
-        return switch (kind) {
-            case UNBOUNDED -> Optional.of(Role.ADMIN);
-            case GROUPS -> Optional.of(Role.MANAGER);
-            case ASSIGNED_ASSETS -> Optional.empty();
         };
     }
 }

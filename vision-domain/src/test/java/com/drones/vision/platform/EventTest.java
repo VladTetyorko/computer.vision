@@ -1,4 +1,4 @@
-package com.drones.vision.events.domain.model;
+package com.drones.vision.platform;
 
 import com.drones.vision.kernel.StreamId;
 import org.junit.jupiter.api.Test;

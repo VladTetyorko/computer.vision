@@ -4,7 +4,7 @@ import com.drones.vision.identity.application.GroupService;
 import com.drones.vision.identity.application.GroupSpec;
 import com.drones.vision.identity.application.UserService;
 import com.drones.vision.identity.application.UserSpec;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.identity.domain.model.Role;

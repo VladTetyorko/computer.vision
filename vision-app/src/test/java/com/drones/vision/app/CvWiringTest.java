@@ -3,7 +3,7 @@ package com.drones.vision.app;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.platform.EventPublisherPort;
 import io.grpc.ManagedChannel;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

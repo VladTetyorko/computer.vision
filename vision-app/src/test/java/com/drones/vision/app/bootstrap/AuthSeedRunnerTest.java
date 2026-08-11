@@ -6,7 +6,7 @@ import com.drones.vision.identity.application.DefaultGroupService;
 import com.drones.vision.identity.application.DefaultUserService;
 import com.drones.vision.identity.application.GroupService;
 import com.drones.vision.identity.application.UserService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.identity.domain.port.PasswordHasherPort;

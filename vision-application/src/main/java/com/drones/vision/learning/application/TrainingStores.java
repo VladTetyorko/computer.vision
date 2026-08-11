@@ -17,7 +17,7 @@ import java.util.Objects;
  * DatasetUploadPort} has its own real gRPC implementation), so none of the four is speculative —
  * but {@link DefaultLabelingService} also needs {@link com.drones.vision.perception.application.stream.StreamService}, {@link
  * com.drones.vision.warehouse.domain.port.AssetRepositoryPort}, {@link com.drones.vision.events.application.ReplaySources}, and {@link
- * com.drones.vision.identity.domain.port.AuditTrailPort}, which would push its constructor past the
+ * com.drones.vision.platform.AuditTrailPort}, which would push its constructor past the
  * five-parameter ceiling if all seven were listed individually. Grouping the four that land
  * together, as one T1 wave, keeps every one of them a real (not speculative) collaborator while
  * keeping the constructor small.

@@ -4,7 +4,7 @@ import com.drones.vision.api.dto.LoginRequest;
 import com.drones.vision.api.dto.MeResponse;
 import com.drones.vision.identity.application.AuthService;
 import com.drones.vision.identity.application.GroupService;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.identity.domain.model.User;
 import jakarta.servlet.http.HttpServletRequest;

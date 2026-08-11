@@ -7,10 +7,14 @@ per-bounded-context packages (docs/plans/active/DOMAIN-SEPARATION-W1.md, wave **
 context that owns it, inside this same Maven module, as a pure rename/directory move: zero behavior
 change, `./mvnw -B -pl vision-domain test` green before and after with an unchanged test count.
 
+A ninth, universal package joined the kernel in **W1.6a**: `com.drones.vision.platform` (see its own
+section below).
+
 **Package shape:**
 
 ```
 com.drones.vision.kernel                    — shared kernel, 15 types, no aggregates
+com.drones.vision.platform                  — cross-cutting seams every context writes to, 10 types
 com.drones.vision.<context>.domain.model    — records/enums owned by that context
 com.drones.vision.<context>.domain.port     — that context's driven ports ("`.out`" suffix dropped)
 ```
@@ -37,19 +41,25 @@ implementations. See `.claude/skills/java-clean-code/SKILL.md`.
 | Context | Package root | Owns | Model | Port |
 |---|---|---|---|---|
 | *(kernel)* | `com.drones.vision.kernel` | ids + pure value objects every context may depend on — no aggregates, no behavior beyond `GeoProjection`'s pure math | 15 | — |
+| *(platform)* | `com.drones.vision.platform` | cross-cutting seams every context writes to — events, audit trail, visibility scope (W1.6a; see its own section below) | 8 | 2 |
 | warehouse | `com.drones.vision.warehouse.domain` | asset/device inventory, categories, discovered devices | 5 | 5 |
-| identity | `com.drones.vision.identity.domain` | users, groups, roles, audit trail | 8 | 5 |
+| identity | `com.drones.vision.identity.domain` | users, groups, roles | 4 | 4 |
 | perception | `com.drones.vision.perception.domain` | video pipeline config, detection, tracking, feeds | 20 | 6 |
 | flight | `com.drones.vision.flight.domain` | telemetry, flight state, RC relay, geofencing, asset usage | 11 | 7 |
 | map | `com.drones.vision.map.domain` | tactical marks, drawings, layers, verification (Common Operational Picture) | 16 | 3 |
 | learning | `com.drones.vision.learning.domain` | datasets, training samples, training jobs | 13 | 6 |
-| events | `com.drones.vision.events.domain` | fire-and-forget events, debounced detection events, replay frame extraction | 5 | 5 |
-| **total** | | | **78** | **37** |
+| events | `com.drones.vision.events.domain` | debounced detection events, replay frame extraction | 3 | 4 |
+| **total** | | | **80** | **37** |
 
-78 + 37 + 15 (kernel) = **130 types**, matching the full inventory in
-docs/plans/active/DOMAIN-SEPARATION-W1.md §3. `simulation` is one of the eight bounded contexts at
-the *application* layer (`ContextArchitectureTest`'s `CONTEXTS` set) but owns no domain types of its
-own — it only consumes perception's and warehouse's ports — so it has no package under this module.
+80 + 37 + 15 (kernel) = **132 types** (was 130 before W1.6a: identity lost 5 to platform — `Audit*`
+model types (4) + `AuditTrailPort` (1) — events lost 3 — `Event`, `EventType` (model) +
+`EventPublisherPort` (port) — and platform gained those 8 plus `VisibilityScope`/
+`AccessDeniedException`, which moved in from `vision-application`'s `identity.application.scope`
+rather than out of another package here, so the net is +2 module-wide).
+docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a move.
+`simulation` is one of the eight bounded contexts at the *application* layer
+(`ContextArchitectureTest`'s `CONTEXTS` set) but owns no domain types of its own — it only consumes
+perception's and warehouse's ports — so it has no package under this module.
 
 ## Shared-kernel rule
 
@@ -64,13 +74,56 @@ dependency because the dependency is one-way. Two rules, both enforced by `visio
   typed id, `GeoPosition`, `Ownership`, `LifecycleState`, `Capability`, `StreamDescriptor`, etc. is
   used across most contexts); the kernel never depends back.
 
+## Universal platform package (W1.6a)
+
+`com.drones.vision.platform` is a second universal package, flat like the kernel (no `.model`/`.port`
+subpackages — deliberately, to keep it tiny), holding the **cross-cutting seams every bounded context
+writes to**: `Event`/`EventType`/`EventPublisherPort` (fire-and-forget notifications), the `Audit*`
+family + `AuditTrailPort` (who changed what), and `VisibilityScope`/`AccessDeniedException` (what a
+request may see, and the 403 when it may not). None of these are one context's aggregate — they were
+previously filed by *first mover* (`events`, `identity`) rather than by owner, which is exactly what
+made `identity ↔ warehouse` a module cycle: `warehouse`'s services took an `AuditTrailPort` and a
+`VisibilityScope` constructor argument, both living inside `identity`, while `identity` itself read
+`warehouse.domain.model.Asset` for the reverse reason (docs/plans/active/DOMAIN-SEPARATION-W1.md §14's
+**C7** finding). Moving the seam to a package neither context owns breaks the cycle without picking a
+side.
+
+**The rule:** platform may depend on the kernel and the JDK, nothing else — enforced by
+`platformDependsOnNothingButTheKernel` (`ContextArchitectureTest`), the same shape as
+`kernelDependsOnNothingButItselfAndTheJdk`. A platform type that reached into a context would smuggle
+that context's coupling into all eight others at once, since everyone already depends on platform —
+this is the precise failure this wave fixes, so the new rule guards against reintroducing it.
+
+**`VisibilityScope` needed one signature change to qualify**: `includes(Asset)` (warehouse's
+aggregate) became `includes(AssetId, Ownership)` — both kernel types, and every call site already had
+an `Asset` in hand, so each became `scope.includes(asset.id(), asset.ownership())`. Its
+`maxGrantableRole()` method **moved out entirely**, to a private static method on
+`identity.application.DefaultUserService` (vision-application) — granting roles is user
+administration, not visibility, and that class was its only caller. `ScopeResolver`/
+`DefaultScopeResolver` (turning a `User` into a `VisibilityScope`) stay in `vision-application`'s
+`identity.application.scope` package — resolving a user to a scope is identity's job, only the scope
+*value* itself is universal.
+
+Kills `identity ↔ warehouse`: the four `warehouse -> identity` edges lived in `AuditTrailPort`/
+`VisibilityScope` constructor arguments and had no other cause, so once those two moved out, so did
+every one of `flight -> identity`, `learning -> identity` and `warehouse -> identity` — three edges,
+not the one the plan's own §15 anticipated (`identity -> warehouse` survives on a genuine, unrelated
+dependency: `DefaultAssignmentService`/`DefaultActivityService` reading `AssetRepositoryPort`
+directly). `map -> identity` also survives, for the same reason — `MapAccessPolicy.Viewer` carries a
+`Role`, an identity type platform never touched.
+
 ## Cross-context domain edges
 
-`domainCrossContextReferencesMatchTheDeclaredSetExactly` (same test class) freezes the domain-layer
-context graph as an **exact-match** assertion, in both directions: a new edge fails the build, and so
-does a declared edge that quietly disappeared (that half is what forces the declared set to shrink as
-debt is paid, instead of accumulating stale exemptions). Today's edges — all real bytecode
-dependencies, not javadoc, and acyclic — per docs/plans/active/DOMAIN-SEPARATION-W1.md §5:
+`domainCrossContextReferencesMatchTheDeclaredSetExactly` no longer exists as a separate test — W1.5b
+folded domain-layer and application-layer checking into one combined-graph assertion,
+`crossContextEdgesMatchTheDeclaredSetExactly`, once every context's domain and application code
+shared one package tree. The table below is still accurate as a domain-only view — none of its edges
+involve `identity`/`events`, so W1.6a left it unchanged — but for the authoritative, currently-tested
+edge set (both layers, `kernel`/`platform` excluded as universal), read `DECLARED_EDGES`/
+`DECLARED_CYCLES` directly off `com.drones.vision.app.ContextArchitectureTest` (`vision-app`) — this
+module cannot cite a summary elsewhere without risking the same kind of drift that made this very
+paragraph stale. Today's domain-only edges — all real bytecode dependencies, not javadoc, and
+acyclic — per docs/plans/active/DOMAIN-SEPARATION-W1.md §5:
 
 | Edge | Where | What crosses |
 |---|---|---|
@@ -119,6 +172,18 @@ no entry's text changed.
 - `record UsageId(UUID value)` — `static random()`, `static of(String)`
 - `record UserId(UUID value)` — `static random()`, `static of(String)`
 
+### Shared platform — `com.drones.vision.platform` (W1.6a; flat, no `.model`/`.port` split — see the module-level section above)
+- `class AccessDeniedException extends RuntimeException` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — thrown when a user's `VisibilityScope` forbids an operation on a resource that **does exist** — the command gate (`DefaultFlightCommandService`), the ≤-own-scope grant rule (`DefaultAssignmentService`), and the user/group management gates (`DefaultUserService`/`DefaultGroupService`), all `vision-application`. `vision-api` maps it to **403**. Deliberately distinct from the scoped *read*'s `NoSuchElementException` (404): reads hide existence, commands/grants/management honestly deny. Reused verbatim by the map package (`DefaultMapLayerService`/`DefaultMarkService`/`DefaultDrawingService`), even though those three gate on `MapAccessPolicy`/`Viewer`, not `VisibilityScope` — this type's contract is orthogonal to which scoping model produced the refusal
+- `enum AuditAction` — CREATED, UPDATED, DEACTIVATED, ACTIVATED, DELETED, RESTORED
+- `record AuditEntry(AuditId id, Instant occurredAt, UserId actor, AuditAction action, AuditTargetType targetType, String targetId, String summary, Map<String,String> details)` — immutable trail line; `static of(...)` stamps id + now; `details` carries `before → after` for edits
+- `record AuditId(UUID value)` — `static random()`, `static of(String)`
+- `enum AuditTargetType` — ASSET, DEVICE, **DATASET, MODEL** (docs/plans/done/CV-TRAINING-PLAN.md Wave T1 — a training dataset / a trained CV model version in the registry) — opaque `targetId` string, so new auditable kinds need no storage change
+- `AuditTrailPort`: `AuditEntry record(AuditEntry)` — append-only, never updated or deleted, not even when its target is soft-deleted; `List<AuditEntry> findRecent(int limit)`, `List<AuditEntry> findByTarget(AuditTargetType, String targetId, int limit)`, `List<AuditEntry> findByActor(UserId, int limit)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 7 — the "my activity" feed for one actor), all newest-first
+- `record Event(String id, StreamId streamId, Instant at, EventType type, String message, Map<String,String> attributes)` — **streamId nullable** (device-level events); `static of(StreamId,EventType,String)` generates id+now(); **not the same thing as `DetectionEvent`** (events context) — see that context's Gotchas
+- `EventPublisherPort`: `void publish(Event)` — must not throw on ordinary delivery failure; called on hot pipeline path, must return quickly
+- `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING, GEOFENCE_BREACH (docs/plans/done/OPS-CORE-PLAN.md §G — raised by `GeofenceMonitor`, vision-application, on a breach edge transition; attributes carry `{assetId, zoneId, zoneName, kind, direction}`, `streamId` always `null` since a breach is asset-scoped, not stream-scoped)
+- `record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assignedAssets)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1) — what a request may see, resolved once per request by `vision-application`'s `ScopeResolver` and threaded into user-facing reads/commands. Nested `enum Kind {UNBOUNDED, GROUPS, ASSIGNED_ASSETS}`; three static factories — `unbounded()` (ADMIN/auth-off), `groups(Set<GroupId>)` (MANAGER), `assignedAssets(Set<AssetId>)` (PILOT); both sets defensively copied, null→empty. `boolean includes(AssetId, Ownership)` — **W1.6a signature**, was `includes(Asset)`: takes the asset's id and ownership rather than a whole `Asset` (warehouse's aggregate), the only two components the check ever used — `UNBOUNDED`→true, `GROUPS`→`groups.contains(ownership.groupId())`, `ASSIGNED_ASSETS`→`assignedAssets.contains(assetId)`; every call site already held an `Asset` in hand, so each became `scope.includes(asset.id(), asset.ownership())`. `boolean canManageOrg()` — true iff `UNBOUNDED`/`GROUPS`. `boolean includesGroup(GroupId)` — the group half of `includes`. **`maxGrantableRole()` is gone** — moved to a private static method on `DefaultUserService` (`vision-application`, its only caller): granting roles is user administration, not visibility, so it does not belong on the universal scope value
+
 ### warehouse — `com.drones.vision.warehouse.domain.model`
 - `record Asset(AssetId id, String displayName, CategoryId category, Ownership ownership, Set<DeviceId> devices, Map<String,String> attributes, LifecycleState state)` — devices must be non-empty; 6-arg convenience ctor defaults `state=ACTIVE`; `isActive()`, `isDeleted()`, `withDevices(Set)`, `withAttributes(Map)`, `withDetails(String,CategoryId,Map)`, `withState(LifecycleState)` return copies
 - `record AssetImage(byte[] data, String contentType)` (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — the asset's user-facing photo, one per asset, no history; `data` non-empty, `contentType` non-blank (which types are actually accepted, plus the max-size cap, is a wire-boundary concern enforced by `vision-api`, not this record); `data()` overridden to return a fresh `data.clone()` on every access, mirroring `VideoFrame#data()`'s defensive-copy-on-every-access discipline (adapted for `byte[]` — no read-only-view equivalent for arrays)
@@ -134,10 +199,6 @@ no entry's text changed.
 - `DeviceRepositoryPort`: `Device save(Device)`; `Optional<Device> findById(DeviceId)`; `List<Device> findAll()`; `void deleteById(DeviceId)` — idempotent
 
 ### identity — `com.drones.vision.identity.domain.model`
-- `enum AuditAction` — CREATED, UPDATED, DEACTIVATED, ACTIVATED, DELETED, RESTORED
-- `record AuditEntry(AuditId id, Instant occurredAt, UserId actor, AuditAction action, AuditTargetType targetType, String targetId, String summary, Map<String,String> details)` — immutable trail line; `static of(...)` stamps id + now; `details` carries `before → after` for edits
-- `record AuditId(UUID value)` — `static random()`, `static of(String)`
-- `enum AuditTargetType` — ASSET, DEVICE, **DATASET, MODEL** (docs/plans/done/CV-TRAINING-PLAN.md Wave T1 — a training dataset / a trained CV model version in the registry) — opaque `targetId` string, so new auditable kinds need no storage change
 - `record Group(GroupId id, String name, GroupId parentGroupId)` (docs/plans/done/U-AUTH-PLAN.md, wave 1) — org-chart node a `User` can hold a `Membership` in; `parentGroupId` nullable (`null` = root group); `name` non-blank; no other validation — subtree visibility scoping is a later slice, not part of this record
 - `record Membership(GroupId groupId, Role role)` (docs/plans/done/U-AUTH-PLAN.md, wave 1) — a `User`'s role within one group; both components non-null; rides on the `User` aggregate (saved whole) — no separate membership repository port
 - `enum Role` (docs/plans/done/U-AUTH-PLAN.md, wave 1) — `PILOT`, `MANAGER`, `ADMIN`, declared **least→most privileged**; ordinal ordering is meaningful (`User#topRole()` picks the highest role by natural/ordinal ordering) — reordering these constants would silently change what "top" means. Pure marker otherwise, no dedicated test (same convention as `Capability`/`EventType`)
@@ -145,7 +206,6 @@ no entry's text changed.
 
 ### identity — `com.drones.vision.identity.domain.port` (driven — implemented by adapters)
 - `AssignmentRepositoryPort` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2): the pilot→asset assignment join — `void assign(UserId, AssetId)` (idempotent upsert), `void unassign(UserId, AssetId)` (idempotent), `Set<AssetId> assetsForPilot(UserId)`, `Set<UserId> pilotsForAsset(AssetId)`, `boolean isAssigned(UserId, AssetId)`. A standalone many-to-many join, deliberately independent of both the `User` and `Asset` aggregates (a pilot's roster changes far more often than either identity), with the same "no cross-repository foreign keys" convention every other port follows — pilot/asset existence is the application layer's concern. Empty set (never `null`) means "no links". JPA + in-memory implementations land in waves 2–3
-- `AuditTrailPort`: `AuditEntry record(AuditEntry)` — append-only, never updated or deleted, not even when its target is soft-deleted; `List<AuditEntry> findRecent(int limit)`, `List<AuditEntry> findByTarget(AuditTargetType, String targetId, int limit)`, `List<AuditEntry> findByActor(UserId, int limit)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 7 — the "my activity" feed for one actor), all newest-first
 - `GroupRepositoryPort` (docs/plans/done/U-AUTH-PLAN.md, wave 1): `Optional<Group> findById(GroupId)`; `List<Group> findAll()` — snapshot; `Group save(Group)` — upsert by `GroupId`. Same minimal shape as `AssetRepositoryPort`/`GeofenceRepositoryPort`; no separate membership storage — `Group#parentGroupId` links the tree, `Membership`s ride on the `User` aggregate
 - `PasswordHasherPort` (docs/plans/done/U-AUTH-PLAN.md, wave 2): `String hash(String rawPassword)` — opaque hash string, exactly what `User#passwordHash()` stores; `boolean verify(String rawPassword, String hash)` — constant-time-ish check, `true` iff `rawPassword` produced `hash`; implemented outside the domain/application (BCrypt in production, `vision-app`, wave 3)
 - `UserRepositoryPort` (docs/plans/done/U-AUTH-PLAN.md, wave 1): `Optional<User> findByUsername(String)` — matches case-insensitively against the normalized (lower-cased) username every `User` already stores; `Optional<User> findById(UserId)`; `User save(User)` — upsert by `UserId`, saves the full aggregate including `memberships`; `List<User> findAll()` — snapshot. Implementations enforce actual username uniqueness; this port only declares the lookup contract
@@ -252,13 +312,10 @@ no entry's text changed.
 - `record DetectionEvent(DetectionEventId id, StreamId streamId, AssetId assetId, String label, double peakConfidence, Instant firstSeen, Instant lastSeen, DetectionEventState state, GeoPosition position)` (docs/plans/done/MVP2-PLAN.md §E, E-a) — a debounced "label X was seen for a while" occurrence, opened/evolved by `DetectionEventEngine` (vision-application); `assetId`/`position` nullable (unresolvable device→asset, or no telemetry yet); `peakConfidence` [0,1]; `lastSeen`≥`firstSeen`; `withObservation(Instant,double)` advances `lastSeen`/raises `peakConfidence` (max), `closed()` flips `state`→CLOSED without moving `lastSeen`. `position` is stamped once, at open time, and never updated afterward — see `DetectionEventEngine`'s javadoc
 - `record DetectionEventId(UUID value)` — `static random()`, `static of(String)`
 - `enum DetectionEventState` — OPEN, CLOSED
-- `record Event(String id, StreamId streamId, Instant at, EventType type, String message, Map<String,String> attributes)` — **streamId nullable** (device-level events); `static of(StreamId,EventType,String)` generates id+now(); **not the same thing as `DetectionEvent`** — see Gotchas
-- `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING, GEOFENCE_BREACH (docs/plans/done/OPS-CORE-PLAN.md §G — raised by `GeofenceMonitor`, vision-application, on a breach edge transition; attributes carry `{assetId, zoneId, zoneName, kind, direction}`, `streamId` always `null` since a breach is asset-scoped, not stream-scoped)
 
 ### events — `com.drones.vision.events.domain.port` (driven — implemented by adapters)
 - `DetectionEventRepositoryPort` (docs/plans/done/MVP2-PLAN.md §E, E-a): `DetectionEvent save(DetectionEvent)` — **upsert** by `DetectionEvent#id()` (unlike `DetectionRepositoryPort#save`'s append-only rows, a `DetectionEvent` mutates over its own open lifetime); `List<DetectionEvent> findRecent(Instant sinceInclusive, int limit)` — across every stream, newest-first by `lastSeen`, `sinceInclusive` nullable (no lower bound); `List<DetectionEvent> findByStream(StreamId, int limit)` — one stream, same ordering, empty (not an error) for an unknown/eventless stream
 - `DetectionRepositoryPort`: `void save(DetectionResult)` — append-only; `List<DetectionResult> query(DetectionQuery)`
-- `EventPublisherPort`: `void publish(Event)` — must not throw on ordinary delivery failure; called on hot pipeline path, must return quickly
 - `LiveUpdatePublisherPort` (docs/plans/done/REALTIME-PLAN.md §4): `void publishFleetChanged()` — no payload, a driving adapter re-derives its own snapshot; `void publishTelemetryAppended(AssetId, Telemetry)`; `void publishDetections(AssetId, DetectionResult)` — attributed to the stream's *owning asset*, not the stream itself; `void publishEvent(Event)` — must not throw on ordinary delivery failure and must return quickly, same contract as `EventPublisherPort`, since it's called from the same hot stream-pipeline/telemetry paths (once per completed inference, once per appended sample); `void publishDetectionEvent(DetectionEvent)` (backend follow-up batch, extending the R-c channel for the events UI) — a debounced `DetectionEvent` opened/advanced/closed, carrying the event itself (unlike `publishFleetChanged`'s no-payload shape, since there's no cheaper way for a driving adapter to re-derive "which event, which state"); `void publishMapEvent(MapEvent)` (docs/plans/done/MAP-REWORK-PLAN.md §2.3, Wave A) — **replaces** the former `default void publishMarkCreated(Mark)`/`publishMarkUpdated(Mark)`/`publishMarkCleared(Mark)` trio (docs/plans/done/TACTICAL-MARKS-PLAN.md §5, deleted by this wave): one abstract method now covers marks, drawings, *and* layers. Unlike every other method on this port (and unlike the three it replaces, which were `default`-bodied no-ops precisely so pre-existing implementors kept compiling), `publishMapEvent` is **deliberately not `default`** — scoped per-connection SSE delivery (docs/plans/done/MAP-REWORK-PLAN.md §4.3) is the point of the rework, so an implementor must engage with it rather than silently no-op. This is an intentional breaking change: `vision-api`'s `LiveUpdateRegistry` and `vision-app`'s `NoopLiveUpdatePublisher` **do not compile** until Wave C implements the new method (see Status below)
 - `ReplayFrameExtractionPort` (docs/plans/done/CV-TRAINING-V2-PLAN.md §3, Wave W1) — pull one decoded frame out of a stream's durable recording at a specific instant, the "capture a training frame from replay" counterpart to live capture's `StreamService#latestRawFrame`: `Optional<VideoFrame> frameAt(StreamId, Instant)` — `Optional.empty()` is **honest absence** (no recording configured, recording disabled on the media server, or nothing recorded at that instant), never an error, mirroring `StreamPublisherPort#playbackUrl`'s own posture toward a missing recording; implementations **must** stamp the returned `VideoFrame`'s `capturedAt` with the requested `at` and its `sequence` with `0`, so callers never have to reconcile two notions of "when". No implementation yet — `MediamtxReplayFrameExtractor` (`adapters/adapter-publish-hls`) is a later wave
 

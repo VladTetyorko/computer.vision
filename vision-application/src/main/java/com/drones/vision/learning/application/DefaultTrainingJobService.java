@@ -1,8 +1,8 @@
 package com.drones.vision.learning.application;
 
-import com.drones.vision.identity.domain.model.AuditAction;
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetUpload;
 import com.drones.vision.learning.domain.model.JobState;
@@ -11,7 +11,7 @@ import com.drones.vision.learning.domain.model.TrainingJobSpec;
 import com.drones.vision.learning.domain.model.TrainingProgress;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.learning.domain.port.TrainingPort;
 
 import java.time.Instant;
@@ -27,8 +27,8 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The one implementation of {@link TrainingJobService}.

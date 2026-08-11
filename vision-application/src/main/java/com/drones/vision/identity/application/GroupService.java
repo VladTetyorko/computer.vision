@@ -3,8 +3,8 @@ package com.drones.vision.identity.application;
 import com.drones.vision.identity.domain.model.Group;
 
 import java.util.List;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Creates and lists {@link Group}s (docs/plans/done/U-AUTH-PLAN.md, wave 2; management gates added by

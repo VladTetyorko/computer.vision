@@ -18,7 +18,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 
 /**
  * The one implementation of {@link DrawingService}.

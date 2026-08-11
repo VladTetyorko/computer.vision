@@ -5,9 +5,9 @@ import com.drones.vision.learning.domain.model.AnnotationSource;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.AssetUsage;
-import com.drones.vision.identity.domain.model.AuditAction;
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetUpload;
@@ -23,7 +23,7 @@ import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.learning.domain.port.DatasetUploadPort;
 
 import java.time.Duration;
@@ -38,8 +38,8 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import com.drones.vision.events.application.ReplayCaptureSpec;
 import com.drones.vision.events.application.ReplaySources;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.StreamService;
 
@@ -363,7 +363,7 @@ public final class DefaultLabelingService implements LabelingService {
      */
     private void requireAssetVisible(Asset asset, UserId actor, VisibilityScope scope, DatasetId datasetId,
                                       String action) {
-        if (asset != null && !scope.includes(asset)) {
+        if (asset != null && !scope.includes(asset.id(), asset.ownership())) {
             auditDenied(actor, datasetId, action, "Denied " + action + " on dataset " + datasetId.value()
                     + ": asset " + asset.id().value() + " out of scope");
             throw new AccessDeniedException("Asset " + asset.id().value()
@@ -383,7 +383,7 @@ public final class DefaultLabelingService implements LabelingService {
             return;
         }
         Asset asset = assetRepository.findById(assetId).orElse(null);
-        if (asset != null && !scope.includes(asset)) {
+        if (asset != null && !scope.includes(asset.id(), asset.ownership())) {
             auditDenied(actor, datasetId, action,
                     "Denied " + action + " on dataset " + datasetId.value() + ": asset " + assetId.value()
                             + " out of scope");

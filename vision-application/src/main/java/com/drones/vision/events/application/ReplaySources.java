@@ -14,7 +14,7 @@ import java.util.Objects;
  * implemented, a real {@link ReplayFrameExtractionPort} adapter all exist or are on their way), so
  * none of the three is speculative — but listing all three individually alongside {@link
  * com.drones.vision.learning.application.TrainingStores}, {@link com.drones.vision.perception.application.stream.StreamService}, {@link com.drones.vision.warehouse.domain.port.AssetRepositoryPort}
- * and {@link com.drones.vision.identity.domain.port.AuditTrailPort} would push {@link
+ * and {@link com.drones.vision.platform.AuditTrailPort} would push {@link
  * com.drones.vision.learning.application.DefaultLabelingService}'s constructor past the five-parameter ceiling.
  *
  * @param usages     asset usage lookup — resolves the finished usage a replay capture reads from

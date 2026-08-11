@@ -1,32 +1,22 @@
-package com.drones.vision.identity.application.scope;
+package com.drones.vision.platform;
 
-import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.kernel.CategoryId;
-import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
-import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
-import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VisibilityScopeTest {
 
-    private static final CategoryId DRONE = new CategoryId("drone");
-
-    private static Asset assetIn(GroupId group) {
-        return new Asset(AssetId.random(), "drone", DRONE, new Ownership(UserId.random(), group),
-                Set.of(DeviceId.random()), Map.of());
+    private static Ownership ownershipIn(GroupId group) {
+        return new Ownership(UserId.random(), group);
     }
 
     @Test
@@ -34,7 +24,7 @@ class VisibilityScopeTest {
         VisibilityScope scope = VisibilityScope.unbounded();
 
         assertTrue(scope.isUnbounded());
-        assertTrue(scope.includes(assetIn(GroupId.random())));
+        assertTrue(scope.includes(AssetId.random(), ownershipIn(GroupId.random())));
     }
 
     @Test
@@ -43,28 +33,30 @@ class VisibilityScopeTest {
         VisibilityScope scope = VisibilityScope.groups(Set.of(inScope));
 
         assertFalse(scope.isUnbounded());
-        assertTrue(scope.includes(assetIn(inScope)));
-        assertFalse(scope.includes(assetIn(GroupId.random())));
+        assertTrue(scope.includes(AssetId.random(), ownershipIn(inScope)));
+        assertFalse(scope.includes(AssetId.random(), ownershipIn(GroupId.random())));
     }
 
     @Test
     void emptyGroupScopeIncludesNothing() {
-        assertFalse(VisibilityScope.groups(Set.of()).includes(assetIn(GroupId.random())));
+        assertFalse(VisibilityScope.groups(Set.of()).includes(AssetId.random(), ownershipIn(GroupId.random())));
     }
 
     @Test
     void assignedAssetsScopeIncludesOnlyAssignedIds() {
-        Asset assigned = assetIn(GroupId.random());
-        Asset other = assetIn(GroupId.random());
-        VisibilityScope scope = VisibilityScope.assignedAssets(Set.of(assigned.id()));
+        AssetId assigned = AssetId.random();
+        AssetId other = AssetId.random();
+        Ownership ownership = ownershipIn(GroupId.random());
+        VisibilityScope scope = VisibilityScope.assignedAssets(Set.of(assigned));
 
-        assertTrue(scope.includes(assigned));
-        assertFalse(scope.includes(other));
+        assertTrue(scope.includes(assigned, ownership));
+        assertFalse(scope.includes(other, ownership));
     }
 
     @Test
     void emptyAssignedAssetsScopeIncludesNothing() {
-        assertFalse(VisibilityScope.assignedAssets(Set.of()).includes(assetIn(GroupId.random())));
+        assertFalse(VisibilityScope.assignedAssets(Set.of())
+                .includes(AssetId.random(), ownershipIn(GroupId.random())));
     }
 
     @Test
@@ -76,20 +68,20 @@ class VisibilityScopeTest {
 
         mutable.clear();
 
-        assertTrue(scope.includes(assetIn(group)));
+        assertTrue(scope.includes(AssetId.random(), ownershipIn(group)));
         assertThrows(UnsupportedOperationException.class, () -> scope.groups().add(GroupId.random()));
     }
 
     @Test
     void assignedAssetsSetIsDefensivelyCopied() {
         Set<AssetId> mutable = new HashSet<>();
-        Asset asset = assetIn(GroupId.random());
-        mutable.add(asset.id());
+        AssetId assetId = AssetId.random();
+        mutable.add(assetId);
         VisibilityScope scope = VisibilityScope.assignedAssets(mutable);
 
         mutable.clear();
 
-        assertTrue(scope.includes(asset));
+        assertTrue(scope.includes(assetId, ownershipIn(GroupId.random())));
         assertThrows(UnsupportedOperationException.class, () -> scope.assignedAssets().add(AssetId.random()));
     }
 
@@ -116,12 +108,5 @@ class VisibilityScopeTest {
         assertFalse(groups.includesGroup(outOfScope));
 
         assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).includesGroup(inScope));
-    }
-
-    @Test
-    void maxGrantableRoleAcrossKinds() {
-        assertEquals(Optional.of(Role.ADMIN), VisibilityScope.unbounded().maxGrantableRole());
-        assertEquals(Optional.of(Role.MANAGER), VisibilityScope.groups(Set.of(GroupId.random())).maxGrantableRole());
-        assertEquals(Optional.empty(), VisibilityScope.assignedAssets(Set.of(AssetId.random())).maxGrantableRole());
     }
 }

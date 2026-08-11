@@ -2,14 +2,14 @@ package com.drones.vision.flight.application;
 
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.identity.domain.model.AuditAction;
-import com.drones.vision.identity.domain.model.AuditEntry;
-import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.flight.domain.model.ChannelMap;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.RcChannels;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.flight.domain.port.ManualControlLink;
 import com.drones.vision.flight.domain.port.ManualControlPort;
 
@@ -29,8 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The one implementation of {@link ManualControlService} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md,
@@ -164,7 +164,7 @@ public final class DefaultManualControlService implements ManualControlService {
 
             AssetDetails details = assetService.details(assetId); // NoSuchElementException -> unknown asset
             Asset asset = details.summary().asset();
-            if (!scope.includes(asset)) {
+            if (!scope.includes(asset.id(), asset.ownership())) {
                 // Honest denial, not a hidden read: mirrors DefaultFlightCommandService's own command
                 // gate. The denial is audited -- an authorization refusal is security-relevant.
                 audit(actor, assetId, RESULT_DENIED);

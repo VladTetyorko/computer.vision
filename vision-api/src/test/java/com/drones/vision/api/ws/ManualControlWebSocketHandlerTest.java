@@ -2,10 +2,10 @@ package com.drones.vision.api.ws;
 
 import com.drones.vision.api.dto.ManualControlChannelsRequest;
 import com.drones.vision.api.dto.ManualControlEngageRequest;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.flight.application.ManualControlService;
 import com.drones.vision.flight.application.ManualControlSession;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.ChannelMap;

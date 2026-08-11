@@ -1,12 +1,12 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.learning.application.CaptureSpec;
 import com.drones.vision.learning.application.LabelSpec;
 import com.drones.vision.learning.application.LabelingService;
 import com.drones.vision.events.application.ReplayCaptureSpec;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.learning.domain.model.Annotation;
 import com.drones.vision.learning.domain.model.AnnotationSource;
 import com.drones.vision.kernel.AssetId;

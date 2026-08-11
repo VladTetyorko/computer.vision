@@ -26,7 +26,7 @@ import com.drones.vision.api.security.CurrentUser;
  * {@code currentUser.scope()} into the service, which derives management authority from it (kind
  * maps 1:1 to role — unbounded = ADMIN, groups = MANAGER, else PILOT/empty) and enforces the
  * ADMIN/MANAGER management gate plus the ≤-own-scope grant rule. A PILOT/empty scope is refused with
- * {@link com.drones.vision.identity.application.scope.AccessDeniedException} (403 via {@link ApiExceptionHandler});
+ * {@link com.drones.vision.platform.AccessDeniedException} (403 via {@link ApiExceptionHandler});
  * {@code list} is scope-filtered to the caller's own subtree. With auth off (default) the dev
  * principal's scope is unbounded, so every operation is permitted and unfiltered — the default-off
  * build is unchanged.

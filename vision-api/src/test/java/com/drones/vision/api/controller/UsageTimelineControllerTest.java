@@ -5,7 +5,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.events.application.ReplayService;
 import com.drones.vision.events.application.UsageRecording;
 import com.drones.vision.events.application.UsageTimeline;
-import com.drones.vision.identity.application.scope.VisibilityScope;
+import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.usage.UsageService;
 import com.drones.vision.warehouse.application.usage.UsageSummary;
 import com.drones.vision.kernel.AssetId;

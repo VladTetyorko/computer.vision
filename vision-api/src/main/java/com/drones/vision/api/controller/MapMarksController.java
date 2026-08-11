@@ -41,7 +41,7 @@ import java.util.Objects;
  * IllegalArgumentException} (malformed id, unrecognized {@code kind}/{@code affiliation}/{@code
  * status}/{@code decision}, incomplete telemetry on {@link #geolocate}, an {@code UNVERIFIED}
  * verify decision) → 400; {@link java.util.NoSuchElementException} (unknown mark or unknown target
- * layer) → 404; {@link com.drones.vision.identity.application.scope.AccessDeniedException} → 403.
+ * layer) → 404; {@link com.drones.vision.platform.AccessDeniedException} → 403.
  *
  * <p>Note the deliberate 403-not-404 split the service defines: acting on a mark whose layer the
  * caller cannot even view is {@code 403}, not a hiding {@code 404} — the same stance {@code

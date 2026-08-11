@@ -52,7 +52,7 @@ import com.drones.vision.api.security.CurrentUser;
  * collaborators along with those two handlers, since nothing else here ever needed them.
  *
  * <p>Error mapping is entirely {@link LabelingService}'s own exceptions surfacing through {@link
- * ApiExceptionHandler}: {@link com.drones.vision.identity.application.scope.AccessDeniedException} (a dataset, or
+ * ApiExceptionHandler}: {@link com.drones.vision.platform.AccessDeniedException} (a dataset, or
  * its resolvable source asset, outside the caller's scope) → 403; {@link
  * java.util.NoSuchElementException} (unknown dataset/sample/usage, a stream with no frame published
  * yet, a usage with no recorded video stream, or no recorded frame at the requested replay instant)

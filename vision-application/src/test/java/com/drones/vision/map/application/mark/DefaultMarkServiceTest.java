@@ -47,7 +47,7 @@ import com.drones.vision.map.application.LayerResolver;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 
 class DefaultMarkServiceTest {
 
@@ -641,7 +641,7 @@ class DefaultMarkServiceTest {
         }
 
         @Override
-        public void publishEvent(com.drones.vision.events.domain.model.Event event) {
+        public void publishEvent(com.drones.vision.platform.Event event) {
         }
 
         @Override

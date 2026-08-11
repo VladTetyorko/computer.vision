@@ -38,8 +38,12 @@ class ArchitectureTest {
         // that every context's domain may depend on. It sits at `com.drones.vision.kernel` rather
         // than under a `domain` segment precisely because it belongs to no single context, so the
         // `..domain..` pattern cannot match it. Its own contents are still bound by this same rule.
-        ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..kernel..")
-                .should().dependOnClassesThat().resideOutsideOfPackages("..domain..", "..kernel..", "java..");
+        // `..platform..` joins it for the identical reason, added in W1.6a: the cross-cutting seams
+        // (Event/EventPublisherPort, the Audit* family, VisibilityScope/AccessDeniedException) sit at
+        // `com.drones.vision.platform`, universal like the kernel and depending on nothing but it.
+        ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..kernel..", "..platform..")
+                .should().dependOnClassesThat()
+                .resideOutsideOfPackages("..domain..", "..kernel..", "..platform..", "java..");
         rule.check(classes);
     }
 
@@ -52,9 +56,11 @@ class ArchitectureTest {
         // layer) is fully preserved. Consumed by `TrainingFrameEncoder` to encode a full-resolution
         // JPEG of a captured training frame (docs/plans/done/CV-TRAINING-PLAN.md §D); allowing the layer to hold
         // a BufferedImage but not write one was an inconsistent line, not a principled one.
+        // `..platform..` joins the allowed set in W1.6a for the same reason `..kernel..` already did.
         ArchRule rule = noClasses().that().resideInAPackage("..application..")
                 .should().dependOnClassesThat()
-                .resideOutsideOfPackages("..application..", "..domain..", "..kernel..", "java..", "javax.imageio..");
+                .resideOutsideOfPackages("..application..", "..domain..", "..kernel..", "..platform..", "java..",
+                        "javax.imageio..");
         rule.check(classes);
     }
 
@@ -74,7 +80,8 @@ class ArchitectureTest {
 
     @Test
     void domainAndApplicationAreSpringAnnotationFree() {
-        ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..application..", "..kernel..")
+        ArchRule rule = noClasses().that()
+                .resideInAnyPackage("..domain..", "..application..", "..kernel..", "..platform..")
                 .should().dependOnClassesThat().resideInAPackage("org.springframework..");
         rule.check(classes);
     }

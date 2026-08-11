@@ -7,7 +7,7 @@ import com.drones.vision.map.application.LayerSpec;
 import com.drones.vision.map.application.LayerView;
 import com.drones.vision.map.application.MapLayerService;
 import com.drones.vision.map.application.mark.MarkService;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.map.domain.model.AccessLevel;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.map.domain.model.DrawKind;

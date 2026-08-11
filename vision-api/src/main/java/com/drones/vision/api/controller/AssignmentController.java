@@ -35,7 +35,7 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Status codes</h2>
  * {@code PUT}/{@code DELETE .../pilots/{userId}} → {@code 204}; {@code 404}
  * ({@link java.util.NoSuchElementException}) for an unknown asset; {@code 403}
- * ({@link com.drones.vision.identity.application.scope.AccessDeniedException}, mapped by {@link ApiExceptionHandler})
+ * ({@link com.drones.vision.platform.AccessDeniedException}, mapped by {@link ApiExceptionHandler})
  * when the asset exists but is outside the granter's scope — a manager may not hand out an asset
  * they cannot themselves see (the &le;-own-scope rule). {@code 400} for a malformed asset/user UUID.
  * With auth off the granter's scope is unbounded, so every grant is permitted, exactly as before

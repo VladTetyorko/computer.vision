@@ -47,7 +47,7 @@ import com.drones.vision.map.application.MapLayerService;
  *
  * <p>An unknown mark id is {@link java.util.NoSuchElementException} (404). Every authorization
  * failure above — including on a mark whose layer the actor cannot even view — is {@link
- * com.drones.vision.identity.application.scope.AccessDeniedException} (403), matching how {@code DefaultFlightCommandService}'s own command gate
+ * com.drones.vision.platform.AccessDeniedException} (403), matching how {@code DefaultFlightCommandService}'s own command gate
  * already treats a command (as opposed to a read) on an out-of-scope resource: it is more honest to
  * say "you may not do this" than to hide the mark.
  *
@@ -85,7 +85,7 @@ public interface MarkService {
      * @param spec what to create
      * @return the created mark, {@link MarkStatus#ACTIVE}
      * @throws java.util.NoSuchElementException if {@code spec.layerId()} is given and unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canContribute} to the resolved layer
      */
     Mark create(Viewer v, MarkSpec spec);
@@ -98,7 +98,7 @@ public interface MarkService {
      * @param spec which asset to project from, and the mark's descriptive fields
      * @return the created mark, {@link MarkStatus#ACTIVE}
      * @throws java.util.NoSuchElementException if {@code spec.layerId()} is given and unknown
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canContribute} to the resolved layer
      * @throws IllegalArgumentException           if the asset has never reported telemetry, or its
      *                                             freshest sample is missing latitude/longitude/
@@ -117,7 +117,7 @@ public interface MarkService {
      * @param patch the fields to change
      * @return the updated mark
      * @throws java.util.NoSuchElementException if no mark has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} may not edit this mark
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} may not edit this mark
      */
     Mark patch(Viewer v, MarkId id, MarkPatch patch);
 
@@ -129,7 +129,7 @@ public interface MarkService {
      * @param decision {@link VerificationState#CONFIRMED} or {@link VerificationState#REJECTED}
      * @return the updated mark
      * @throws java.util.NoSuchElementException if no mark has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canManage} its layer
      * @throws IllegalArgumentException           if {@code decision} is {@link
      *                                             VerificationState#UNVERIFIED}
@@ -145,7 +145,7 @@ public interface MarkService {
      * @param targetOrNull the destination layer, or {@code null} to promote to the COP layer
      * @return the updated mark, now on the target layer
      * @throws java.util.NoSuchElementException if no mark, or no target layer, has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canManage} the source layer, or
      *                                             does not {@link MapAccessPolicy#canContribute} to
      *                                             the target
@@ -158,7 +158,7 @@ public interface MarkService {
      * @param v  who is deleting it
      * @param id the mark to delete
      * @throws java.util.NoSuchElementException if no mark has that id
-     * @throws com.drones.vision.identity.application.scope.AccessDeniedException              if {@code v} may not delete this mark
+     * @throws com.drones.vision.platform.AccessDeniedException              if {@code v} may not delete this mark
      */
     void delete(Viewer v, MarkId id);
 }

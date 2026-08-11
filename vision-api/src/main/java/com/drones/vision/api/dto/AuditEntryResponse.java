@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.platform.AuditEntry;
 
 import java.time.Instant;
 import java.util.Map;

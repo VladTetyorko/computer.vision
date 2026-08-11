@@ -1,6 +1,4 @@
-package com.drones.vision.events.domain.port;
-
-import com.drones.vision.events.domain.model.Event;
+package com.drones.vision.platform;
 
 /**
  * Driven port: publish a domain event.

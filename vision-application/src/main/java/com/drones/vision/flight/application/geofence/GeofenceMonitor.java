@@ -1,14 +1,14 @@
 package com.drones.vision.flight.application.geofence;
 
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.events.domain.model.Event;
-import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventType;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
-import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 

@@ -29,7 +29,7 @@ import com.drones.vision.map.application.LayerResolver;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
-import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.platform.AccessDeniedException;
 
 /**
  * The one implementation of {@link MarkService}.
