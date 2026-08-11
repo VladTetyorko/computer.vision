@@ -85,8 +85,6 @@ class ContextArchitectureTest {
             // --- DEBT C3/C6: warehouse asks perception "is this asset live?", and perception's
             // ports accept a whole warehouse Device ---
             "perception -> warehouse",
-            "warehouse -> flight",          // DEBT C9 paid (W1.6c): down to DefaultProbeService -> TelemetrySourcePort
-                                             // alone, the probe path W1.6d moves behind a warehouse-owned port
             "warehouse -> perception"));
 
     /**
@@ -95,7 +93,6 @@ class ContextArchitectureTest {
      * paying a cycle off fails the test until the entry is deleted.
      */
     private static final Set<String> DECLARED_CYCLES = new TreeSet<>(Set.of(
-            "flight <-> warehouse",
             "perception <-> warehouse"));
 
     private static JavaClasses classes;
@@ -131,17 +128,18 @@ class ContextArchitectureTest {
 
     /**
      * Maven cannot express a cycle, so one mutual pair blocks extraction for every context at once.
-     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because two exist today —
+     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because one exists today —
      * the honest state, tracked as a burn-down instead of hidden behind a disabled test. Down from
      * six before W1.6b (docs/plans/active/DOMAIN-SEPARATION-W1.md §15): the four `events <-> ...`
      * cycles are gone now that `events` is a pure downstream reader — see {@link #DECLARED_EDGES}'s
-     * own comment for what killed them. The remaining two are still design debt, but W1.6c
-     * (docs/plans/active/DOMAIN-SEPARATION-W1.md §15) paid one of their two causes: `flight <->
-     * warehouse` used to be half C9 (`AssetUsage`'s split ownership) and half `DefaultProbeService
-     * -> TelemetrySourcePort`; moving `AssetUsage` to warehouse paid C9, so what is left of that
-     * cycle is `DefaultProbeService` alone. Both cycles are W1.6d's job: `perception <-> warehouse`
-     * is C3/C6 ("warehouse asks runtime state"), `flight <-> warehouse` is the probe path — neither
-     * has moved yet.
+     * own comment for what killed them. `flight <-> warehouse` is gone too (W1.6d,
+     * docs/plans/active/DOMAIN-SEPARATION-W1.md §15): it used to be half C9 (`AssetUsage`'s split
+     * ownership, paid off in W1.6c) and half {@code DefaultProbeService -> TelemetrySourcePort};
+     * moving the probe feature itself (`ProbeService`/`DefaultProbeService`/`ProbeResult`/
+     * `ProbeFailedException`) from `warehouse.application.device` to `perception.application.device`
+     * turned that reference into `perception -> flight`, which was already legal, killing the cycle
+     * outright rather than paying it off behind a new port. The one that remains, `perception <->
+     * warehouse`, is C3/C6 ("warehouse asks runtime state") — W1.6e's job.
      */
     @Test
     void moduleCyclesAreOnlyTheKnownOnes() {

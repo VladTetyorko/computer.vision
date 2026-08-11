@@ -48,6 +48,7 @@ import com.drones.vision.flight.application.*;
 import com.drones.vision.flight.application.geofence.*;
 import com.drones.vision.map.application.*;
 import com.drones.vision.map.application.mark.*;
+import com.drones.vision.perception.application.device.*;
 import com.drones.vision.perception.application.pipeline.*;
 import com.drones.vision.events.application.*;
 import com.drones.vision.simulation.application.*;

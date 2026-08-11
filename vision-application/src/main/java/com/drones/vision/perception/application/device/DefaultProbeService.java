@@ -1,4 +1,4 @@
-package com.drones.vision.warehouse.application.device;
+package com.drones.vision.perception.application.device;
 
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -28,6 +28,17 @@ import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
  * com.drones.vision.perception.application.stream.DefaultStreamService} streams from — resolved the same way ({@link
  * VideoSourceRegistry#sourceFor}), opened under a transient, never-persisted {@link StreamId},
  * subscribed for exactly one frame, then closed. See {@link #probe} for the exact sequence.
+ *
+ * <h2>Why perception, not warehouse</h2>
+ * A probe opens a {@link VideoSourcePort} and, for the telemetry side-check, a {@link
+ * TelemetrySourcePort} — exactly the two kinds of connection a live stream opens, just for one
+ * frame/sample instead of a running feed. That is ingest work, the same job {@link
+ * com.drones.vision.perception.application.stream.DefaultStreamService} does for a real stream, not an
+ * inventory concern. It lived under warehouse's {@code device} package until W1.6d
+ * (docs/plans/active/DOMAIN-SEPARATION-W1.md §15) only because a {@link Device} is what gets probed —
+ * that made it look like device administration, but resolving and opening a source is perception's
+ * job regardless of whether the device it names is ever saved. {@link ProbeFailedException} moved
+ * with it for the same reason its javadoc gives: an exception belongs to the context that throws it.
  *
  * <h2>Telemetry detection</h2>
  * {@link ProbeResult#telemetryDetected()} is answered by building a synthetic, never-persisted

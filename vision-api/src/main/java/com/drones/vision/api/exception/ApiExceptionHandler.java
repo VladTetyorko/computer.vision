@@ -5,7 +5,7 @@ import com.drones.vision.api.controller.DeviceProbeController;
 import com.drones.vision.api.proxy.HlsProxyController;
 import com.drones.vision.api.dto.ErrorResponse;
 import com.drones.vision.platform.AccessDeniedException;
-import com.drones.vision.warehouse.application.device.ProbeFailedException;
+import com.drones.vision.perception.application.device.ProbeFailedException;
 import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

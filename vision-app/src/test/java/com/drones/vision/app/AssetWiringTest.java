@@ -41,7 +41,7 @@ import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.map.application.MapLayerService;
 import com.drones.vision.map.application.mark.MarkService;
 import com.drones.vision.api.dto.CvModelResponse;
-import com.drones.vision.warehouse.application.device.ProbeService;
+import com.drones.vision.perception.application.device.ProbeService;
 import com.drones.vision.events.application.ReplayService;
 import com.drones.vision.simulation.application.SimulationService;
 import com.drones.vision.api.security.CurrentUser;

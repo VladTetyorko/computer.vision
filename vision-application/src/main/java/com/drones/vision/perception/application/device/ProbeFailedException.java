@@ -1,8 +1,14 @@
-package com.drones.vision.warehouse.application.device;
+package com.drones.vision.perception.application.device;
 
 /**
  * Thrown by {@link DefaultProbeService} when the descriptor's protocol is recognized (an adapter
  * exists) but the actual connection attempt failed, timed out, or ended before a frame arrived.
+ *
+ * <p>Lives here rather than in {@code warehouse} because its thrower does: W1.2 (rule C1) filed
+ * this in warehouse on the principle that an exception belongs to the context that throws it, and
+ * W1.6d (docs/plans/active/DOMAIN-SEPARATION-W1.md §15) moved {@link DefaultProbeService} itself to
+ * perception, so the same rule carries this exception along with it. It did not drift — it followed
+ * its thrower.
  *
  * <p>Deliberately distinct from
  * {@link com.drones.vision.perception.application.stream.UnsupportedProtocolException} (an unrecognized

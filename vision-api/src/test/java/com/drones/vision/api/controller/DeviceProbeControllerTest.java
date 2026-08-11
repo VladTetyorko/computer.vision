@@ -1,9 +1,9 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.warehouse.application.device.ProbeFailedException;
-import com.drones.vision.warehouse.application.device.ProbeResult;
-import com.drones.vision.warehouse.application.device.ProbeService;
+import com.drones.vision.perception.application.device.ProbeFailedException;
+import com.drones.vision.perception.application.device.ProbeResult;
+import com.drones.vision.perception.application.device.ProbeService;
 import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamId;

@@ -1,7 +1,6 @@
-package com.drones.vision.warehouse.application.device;
+package com.drones.vision.perception.application.device;
 
 import com.drones.vision.kernel.StreamDescriptor;
-import com.drones.vision.warehouse.application.asset.AssetService;
 
 /**
  * Test-before-save connectivity probe (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
@@ -11,7 +10,8 @@ import com.drones.vision.warehouse.application.asset.AssetService;
  *
  * <p><b>Never registers anything.</b> No {@code Device}/{@code Asset} is created, no repository is
  * written to, no audit entry is recorded — this is a read-only connectivity check, the opposite of
- * {@link DeviceService#register}/{@link AssetService#create}.
+ * {@link com.drones.vision.warehouse.application.device.DeviceService#register}/{@link
+ * com.drones.vision.warehouse.application.asset.AssetService#create}.
  *
  * @see com.drones.vision.perception.domain.port.VideoSourcePort
  */

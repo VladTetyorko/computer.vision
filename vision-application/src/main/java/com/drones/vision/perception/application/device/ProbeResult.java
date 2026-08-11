@@ -1,4 +1,4 @@
-package com.drones.vision.warehouse.application.device;
+package com.drones.vision.perception.application.device;
 
 import com.drones.vision.perception.domain.model.VideoFrame;
 

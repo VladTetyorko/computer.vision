@@ -1,4 +1,4 @@
-package com.drones.vision.warehouse.application.device;
+package com.drones.vision.perception.application.device;
 
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -30,7 +30,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import com.drones.vision.warehouse.application.device.ProbeFailedException;
 import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
 import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
 

@@ -353,10 +353,22 @@ usageTracker.latestTelemetry(assetId)      DefaultAssetStatsService, DefaultFlee
 recent DetectionEvents per asset           DefaultFleetSummaryService
 ```
 
-Invert them behind **`warehouse.domain.port.AssetLiveStatePort`**, declared by warehouse and returning
-warehouse-owned records (`LiveStreamRef`, an event summary) rather than `ActiveStream` or
-`DetectionEvent`. **Perception implements it** — `perception -> warehouse` is already legal, so the
-implementation needs no third home and vision-app only wires it.
+Invert them behind **`warehouse.domain.port.AssetLiveStatePort`**, declared by warehouse.
+Measured against what the four services actually consume, the whole port is expressible in kernel
+types — no `ActiveStream`, no `DetectionEvent`, and no new warehouse-owned record either:
+
+```java
+Map<DeviceId, StreamId> activeStreamsByDevice();      // summaries, details, fleet attention
+int   stopStreamsForDevices(Collection<DeviceId>);    // stop before retire/delete
+Optional<Telemetry>     latestTelemetry(AssetId);     // battery, staleness, flight mode
+Map<AssetId, Integer>   openDetectionEventCounts(int scanLimit);
+```
+
+`scanLimit` stays a parameter so the tuning constant stays warehouse's. **Perception implements it**
+(`perception.application.stream.StreamBackedAssetLiveState`, composing `StreamService`,
+`UsageTracker` and `DetectionEventRepositoryPort`) — `perception -> warehouse` is already legal, so
+the implementation needs no third home and vision-app only wires it. The four warehouse services get
+*smaller*: `DefaultFleetSummaryService` drops three collaborators for one.
 
 Stopping a stream before deleting a device stays a synchronous port call here; W2 is where it becomes
 an event warehouse publishes and perception reacts to.

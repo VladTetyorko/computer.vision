@@ -3,8 +3,8 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.ProbeDeviceRequest;
 import com.drones.vision.api.dto.ProbeDeviceResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.warehouse.application.device.ProbeResult;
-import com.drones.vision.warehouse.application.device.ProbeService;
+import com.drones.vision.perception.application.device.ProbeResult;
+import com.drones.vision.perception.application.device.ProbeService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,7 +28,7 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * A malformed request (blank/missing {@code protocol}/{@code uri}, an unparseable {@code uri}, or
  * an unrecognized protocol — {@link com.drones.vision.perception.application.stream.UnsupportedProtocolException})
  * maps to {@code 400}; a recognized protocol whose connection attempt itself fails, times out, or
- * ends without a frame ({@link com.drones.vision.warehouse.application.device.ProbeFailedException}) maps to {@code
+ * ends without a frame ({@link com.drones.vision.perception.application.device.ProbeFailedException}) maps to {@code
  * 422} — both via {@link ApiExceptionHandler}. Success is always {@code 200}, never {@code 201}:
  * nothing is created.
  */
