@@ -17,19 +17,95 @@ enum ImageEncoding {
   IMAGE_ENCODING_BGR24 = 2;
 }
 
+// ---------------------------------------------------------------- NEW enums
+
+// How the two perception loops cooperate for one stream (docs/TRACKING-PLAN.md §3).
+enum TrackingMode {
+  TRACKING_MODE_UNSPECIFIED = 0;  // old client / not stated -> treated as OFF
+  TRACKING_MODE_OFF         = 1;  // detector only, no track ids -- byte-identical to pre-tracking
+  TRACKING_MODE_ASSOCIATE   = 2;  // Mode A: associate every detection across frames
+  TRACKING_MODE_FOLLOW      = 3;  // Mode B: per-frame visual tracker, detector duty-cycled
+}
+
+// Lifecycle state of the track a Detection belongs to.
+enum TrackState {
+  TRACK_STATE_UNSPECIFIED = 0;  // no tracking ran for this detection
+  TRACK_STATE_TENTATIVE   = 1;  // born, below min_hits -- not yet a stable identity
+  TRACK_STATE_CONFIRMED   = 2;  // confirmed by the detector on this or a recent pass
+  TRACK_STATE_COASTING    = 3;  // tracker-predicted; detector has not re-confirmed yet
+  TRACK_STATE_LOST        = 4;  // unmatched past max_age_frames; kept alive for re-acquisition
+}
+
+// Which loop produced this particular box on this particular frame.
+enum DetectionSource {
+  DETECTION_SOURCE_UNSPECIFIED = 0;  // old server / not stated
+  DETECTION_SOURCE_DETECTOR    = 1;  // a full detector pass ran on this frame and produced this box
+  DETECTION_SOURCE_TRACKER     = 2;  // the per-frame visual tracker produced this box
+}
+
+// -------------------------------------------------------------- NEW messages
+
+// WHY a detector pass was spent on this frame. `detector_ran` says whether; this says why.
+// Values match the trigger list of §3.1 one-for-one. See TRACKING-ORCHESTRATION.md §5.1 --
+// without this, "why is my detector still running in FOLLOW mode?" is answerable only by
+// reading cv-service logs, which on a flying companion computer is not answerable at all.
+enum DetectorReason {
+  DETECTOR_REASON_UNSPECIFIED    = 0;  // old server, or no detector pass ran on this frame
+  DETECTOR_REASON_ALWAYS         = 1;  // mode OFF/ASSOCIATE -- every received frame gets a pass
+  DETECTOR_REASON_CADENCE        = 2;  // (a) verify_every_millis elapsed
+  DETECTOR_REASON_TRACKER_FAILED = 3;  // (b) tracker reported failure / sub-threshold confidence
+  DETECTOR_REASON_NO_LOCK        = 4;  // (c) no lock held -- re-acquire
+  DETECTOR_REASON_BOX_INVALID    = 5;  // (d) predicted box left the frame or collapsed
+  DETECTOR_REASON_COASTED_OUT    = 6;  // (e) COASTING longer than max_age_frames
+}
+
+// Which object FOLLOW mode should hold.
+//
+// Identified by `lock_seq`: cv-service applies a lock only when `lock_seq` is strictly
+// greater than the last one it applied for this stream. Restating the identical lock on
+// every frame is therefore idempotent -- which is REQUIRED, see TrackingConfig below.
+message TargetLock {
+  int64 lock_seq  = 1;  // monotonic per stream; 0 = no lock has ever been issued
+  int64 track_id  = 2;  // lock onto an existing track; 0 = use point/box instead
+  float point_x   = 3;  // normalized [0,1] click point, used when track_id == 0
+  float point_y   = 4;
+  BoundingBox box = 5;  // optional explicit box; unset -> a server-side default box around the point
+  bool  release   = 6;  // true = drop the current lock, fall back to the config's mode policy
+}
+
+// Declarative per-stream tracking state, restated on EVERY FrameRequest.
+//
+// Deliberately declarative, never an imperative one-shot control message: cv-service's
+// LatestOnlyMailbox silently DROPS a frame when the sender gets ahead of the consumer
+// (cv-service/MODULE.md, "LatestOnlyMailbox drops a frame with no response at all"), so a
+// one-shot control message could be lost with no error and no retry. A restated desired
+// state is self-healing -- the next frame carries it again.
+message TrackingConfig {
+  TrackingMode mode             = 1;
+  string       engine_id        = 2;  // "" = server default for the mode
+  int32  verify_every_millis    = 3;  // FOLLOW detector re-verify cadence; <=0 = server default (2000)
+  float  redetect_iou_threshold = 4;  // re-anchor when detector<->tracker IoU >= this; <=0 = default (0.3)
+  int32  max_age_frames         = 5;  // unmatched frames before LOST;      <=0 = default (30)
+  int32  min_hits               = 6;  // detector hits TENTATIVE -> CONFIRMED; <=0 = default (3)
+  TargetLock lock               = 7;  // FOLLOW only; absent = no lock held
+}
+
+// ---------------------------------------------------------- CHANGED messages
+
 // A single frame sent to the CV service for inference, plus which model to
 // run it against.
 message FrameRequest {
-  string stream_id = 1;
-  int64 sequence = 2;
-  int64 timestamp_millis = 3;
-  int32 width = 4;
-  int32 height = 5;
-  ImageEncoding encoding = 6;
-  bytes data = 7;
-  string model_id = 8;
-  string model_version = 9;
-  float confidence_threshold = 10;
+  string stream_id             = 1;
+  int64 sequence               = 2;
+  int64 timestamp_millis       = 3;
+  int32 width                  = 4;
+  int32 height                 = 5;
+  ImageEncoding encoding       = 6;
+  bytes data                   = 7;
+  string model_id              = 8;
+  string model_version         = 9;
+  float confidence_threshold   = 10;
+  TrackingConfig tracking      = 11;  // NEW -- absent => TRACKING_MODE_OFF
 }
 
 // Normalized bounding box. Coordinates are in [0, 1] relative to frame
@@ -44,20 +120,31 @@ message BoundingBox {
 }
 
 message Detection {
-  string label = 1;
-  float confidence = 2;
-  BoundingBox box = 3;
+  string label            = 1;
+  float confidence        = 2;
+  BoundingBox box         = 3;
+  int64 track_id          = 4;  // NEW -- 0 = untracked. Real ids start at 1, per stream.
+  TrackState track_state  = 5;  // NEW
+  DetectionSource source  = 6;  // NEW
+  float velocity_x        = 7;  // NEW -- normalized frame-WIDTHS per second (matches BoundingBox units)
+  float velocity_y        = 8;  // NEW -- normalized frame-HEIGHTS per second
+  int32 track_age_frames  = 9;  // NEW -- frames since this track was born
 }
 
 // Inference result for one frame.
 message DetectionResponse {
-  string stream_id = 1;
-  int64 sequence = 2;
-  int64 timestamp_millis = 3;
-  string model_id = 4;
-  string model_version = 5;
+  string stream_id             = 1;
+  int64 sequence               = 2;
+  int64 timestamp_millis       = 3;
+  string model_id              = 4;
+  string model_version         = 5;
   repeated Detection detections = 6;
-  int64 inference_millis = 7;
+  int64 inference_millis       = 7;
+  int64 tracker_millis         = 8;   // NEW -- per-frame tracker cost; 0 when no tracker ran
+  bool  detector_ran           = 9;   // NEW -- false => this frame was tracker-only (duty-cycled)
+  string tracker_engine_id     = 10;  // NEW -- engine that actually served this frame ("" = none)
+  int64 locked_track_id        = 11;  // NEW -- FOLLOW: the track currently held (0 = none)
+  DetectorReason detector_reason = 12; // NEW -- why the pass ran; UNSPECIFIED when it did not
 }
 
 message TrainingJobSpec {
