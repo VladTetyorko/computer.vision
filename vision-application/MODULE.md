@@ -690,16 +690,54 @@ Scope: `vision-application/**` only. Depends on wave T2's domain types (`TrackRe
 - **`byState` counts distinct tracks by newest state in the window, and lives on the stats window, not the book.** The overlap with `TrackBook` is intentional and small: the book answers "which tracks exist now", the window answers "what was going on over the last 30s", and a `LOST` track is correctly present in the second and absent from the first.
 - **`TrackingStats.mode` is a `snapshot(TrackingMode)` parameter, not a cached field.** Mode is a hot knob; caching it per sample would report whichever value happened to be set when the oldest sample landed.
 - **Neither new class takes a clock.** Both stamp everything with `DetectionResult#capturedAt()`, the timebase `DetectionEventEngine` already uses — so no `Supplier<Instant>` seam was needed and the tests assert exact values rather than tolerances. Honest consequence, documented on `TrackingStatsWindow`: a quiet stream keeps describing its last window of traffic rather than decaying to zero.
-- **A present `tracking` patch replaces mode/engine/cadences wholesale, but its `lock` is itself null-means-unchanged.** Otherwise every cadence tweak would silently drop the operator's target; dropping a lock is the explicit `release` form, never an omission.
-- **`lockSeq` is allocated per stream, lazily, in `DefaultStreamService#foldTracking`** from an `AtomicLong` on `RunningStream` — the client's value (always 0) is discarded. Per-stream, not global, so one operator's click cannot advance another stream's sequence; lazy, so a patch without a lock burns no number. A re-issued identical lock still gets a fresh sequence and therefore reports `trackingChanged = true` — a restatement *is* a new request, and that is what makes a replayed stale lock a no-op at cv-service instead of a resurrection.
+- **A present `tracking` patch replaces mode/engine/cadences wholesale, but its `lock` is itself null-means-unchanged.** Otherwise every cadence tweak would silently drop the operator's target; dropping a lock is the explicit `release` form, never an omission. **Superseded** — the wholesale replace was a defect (it reset every knob the caller did not restate); see the follow-up section at the end of this file, where the fold became per-field via `TrackingConfigPatch`. The lock rule survived unchanged.
+- **`lockSeq` is allocated per stream, lazily** (in `DefaultStreamService#foldTracking` at the time; now in `TrackingConfigPatch#foldOnto`, from the same counter) from an `AtomicLong` on `RunningStream` — the client's value (always 0) is discarded. Per-stream, not global, so one operator's click cannot advance another stream's sequence; lazy, so a patch without a lock burns no number. A re-issued identical lock still gets a fresh sequence and therefore reports `trackingChanged = true` — a restatement *is* a new request, and that is what makes a replayed stale lock a no-op at cv-service instead of a resurrection.
 - **`trackingChanged` compares the *folded* config with the running one**, so restating an identical `TrackingConfig` reports `false`. It is independent of `modelReArmed`: a mode/engine change never re-arms the detector.
 
 **Signature changes (all additive; every pre-T3 call site compiles unchanged via an N-1-arg convenience ctor, the module's standing idiom):**
-- `PipelineConfigPatch` — 6th component `TrackingConfig tracking`; the 5-arg canonical becomes a convenience ctor defaulting `null`.
+- `PipelineConfigPatch` — 6th component `TrackingConfig tracking` (**later retyped to `TrackingConfigPatch`**, see the follow-up section); the 5-arg canonical becomes a convenience ctor defaulting `null`.
 - `UpdateOutcome` — 2nd component `boolean trackingChanged`; the 1-arg canonical becomes a convenience ctor defaulting `false`.
-- `StreamPipelineSettings` — 12th/13th components `Duration trackingStatsWindow` (default 30s, `vision-app` binds `vision.tracking.stats-window-seconds` here in T6) and `Duration trackRetention` (default 5s); the 11-arg canonical becomes a convenience ctor.
+- `StreamPipelineSettings` — 12th/13th components `Duration trackingStatsWindow` (default 30s, `vision-app` binds `vision.tracking.stats-window-seconds` here in T6) and `Duration trackRetention` (default 5s); the 11-arg canonical becomes a convenience ctor. (A 14th, `TrackingConfigPatch trackingSeed`, arrived with the follow-up below.)
 - `StreamService` — two new methods, `List<TrackedObject> tracks(StreamId)` and `Optional<TrackingStats> trackingStats(StreamId)`. One implementation, so nothing else needed updating.
 
 **Tests**: `./mvnw -B -pl vision-domain,vision-application test` — **804/804 green** in vision-application (was 758: 46 new tests). Hand-driven, no Spring: `TrackBookTest` (12 new) and `TrackingStatsWindowTest` (10 new); +5 in `DetectionExtrapolatorTest` (20 total), +8 in `StreamPipelineTest` (57 total), +7 in `DefaultStreamServiceTest` (45 total), +2 each in `PipelineConfigPatchTest`/`UpdateOutcomeTest`. The crossing-tracks test is a **paired** pair: identical geometry run with and without ids, asserting the tracked run extrapolates both boxes in the direction they were actually travelling and the untracked run extrapolates both backwards — i.e. the gate really would have swapped them. The follow-sampling test likewise counts real `detect()` calls over 30 frames off a deterministic 30fps clock (10 in `ASSOCIATE`, 15 in `FOLLOW`), not just the `effectiveInferenceFps()` return value.
 
 **Cross-module impact for later waves** (not touched here): `vision-api`'s `UpdateStreamConfigRequest#toPatch()` should start passing a `tracking` object and `UpdateStreamConfigResponse` should carry `trackingChanged`; `GET /api/streams/{id}/tracks` maps `StreamService#tracks`/`trackingStats` (with `window.toSeconds()` → `windowSeconds` and `lockedTrackId` hoisted to the response's top level); `vision-app` binds `vision.tracking.stats-window-seconds` into `StreamPipelineSettings`'s new component. Both modules compile unchanged today.
+
+## docs/TRACKING-PLAN.md T3/T6 follow-up done (per-field tracking patch + deployment seeding moved into this layer)
+
+Two defects left by waves T3 and T6, both fixed here because this is the layer that owns the running configuration. Scope: `vision-application/**`, `vision-api/**`, `vision-app/**`.
+
+**Defect 1 — a partial tracking patch used to lose the cadence knobs.** T3's fold replaced the whole `TrackingConfig` whenever the patch carried one, while the shipped UI sends **one knob at a time** (`{"tracking":{"engineId":"ncc"}}`, an independent verify-cadence slider, an independent follow-fps slider, `{"tracking":{"lock":{"release":true}}}`). T6 worked around it in `StreamController` by reading absent fields back off `StreamService#trackingStats`, which recovers only mode and engine — so changing verify-cadence and then follow-fps silently reverted the first. Both sliders ship today: two clicks reached it.
+
+**New type: `TrackingConfigPatch` (`stream`, beside `PipelineConfigPatch`).** All eight components nullable, `null` = leave that knob unchanged; `TrackingConfigPatch.NOTHING` is the identity.
+
+```java
+public record TrackingConfigPatch(TrackingMode mode, String engineId, Integer verifyEveryMillis, Integer followFps,
+                                  Integer redetectIouPercent, Integer maxAgeFrames, Integer minHits, TargetLock lock) {
+    public static final TrackingConfigPatch NOTHING = /* all null */;
+    public TrackingConfig foldOnto(TrackingConfig current, LongSupplier lockSequence);
+}
+```
+
+- **The fold lives on the record, not in the service**, so it is testable with no stream, no ports and no clock (`TrackingConfigPatchTest`, 9 tests).
+- **`mode` is the domain enum, not a string** — parsing `"FOLLOW"` is the REST edge's job and stays there.
+- **No validation here**: an out-of-range cadence is rejected by `TrackingConfig`'s own compact ctor when the fold produces one, so the rule has one owner and still surfaces as a 400.
+- **`lockSequence` is consulted only when the patch carries a lock**, preserving T3's lazy allocation (a cadence tweak burns no number) and its "the client's `lockSeq` is discarded" rule.
+- `PipelineConfigPatch`'s 6th component is now `TrackingConfigPatch` (was `TrackingConfig`); `DefaultStreamService#foldTracking` is gone, folded into `mergeConfig` as a one-line delegation.
+
+**Defect 2 — the deployment seed lived at the REST edge.** `vision.tracking.*` was applied by `StreamController`/`AssetController` (taking them to 5 and 6 constructor args), and streams started by `DefaultSimulationService` (and `DemoFleet`) built their own `PipelineConfig` and never saw it at all. The seed now lives here:
+
+- **`StreamPipelineSettings` gains a 14th component, `TrackingConfigPatch trackingSeed`** — the one component `StreamPipeline` never reads. It rides this record because `vision-app` already maps `vision.tracking.*` onto it (stats window, track retention), so **no new constructor parameter appeared anywhere**; the 13-arg canonical became a convenience ctor defaulting `NOTHING`.
+- **`DefaultStreamService#start` composes the three layers of docs/TRACKING-ORCHESTRATION.md §4.1 literally**: `requested.foldOnto(seed.foldOnto(config.tracking()))` — **per-stream request > deployment env > code default**. Because the seed is itself a *patch*, a knob the deployment does not own (`redetectIouPercent`/`maxAgeFrames`/`minHits`) stays unstated and falls through to `vision-domain`'s literal: one number, one owner.
+- Every start path converges on that method — device, asset, simulation and demo fleet — so the deployment default can no longer depend on which button the operator pressed.
+
+**Signature changes (additive; every pre-existing call site still compiles):**
+- `StreamService` — `StreamId start(DeviceId, PipelineConfig, TrackingConfigPatch)` beside the 2-arg one, which now means "states nothing about tracking".
+- `AssetService` — `StreamId startStream(AssetId, DeviceId, PipelineConfig, TrackingConfigPatch)` beside the 3-arg one, same relationship.
+- `StreamPipelineSettings` — 14th component `TrackingConfigPatch trackingSeed`.
+- `PipelineConfigPatch` — `tracking` retyped to `TrackingConfigPatch`.
+
+**Gotcha for callers of `start`/`startStream`:** the tracking component of the `PipelineConfig` you pass is the **bottom** layer of the fold, not the final answer — the deployment seed and the request patch are applied on top of it inside the service. Pass `PipelineConfig.defaults()` and say what you mean in the patch.
+
+**Tests**: `./mvnw -B -pl vision-application test` — **819/819 green**. New: `TrackingConfigPatchTest` (9); in `DefaultStreamServiceTest`, the four regressions the fix exists for (two successive cadence patches keep both; an engine-only patch leaves mode, all five cadences and the lock untouched; a lock release stays in `FOLLOW`; a patch with no `tracking` changes nothing) plus two seeding tests (a start that states nothing takes the deployment seed; a start request beats it, and what it leaves unsaid still comes from the seed).

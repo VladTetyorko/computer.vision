@@ -9,7 +9,6 @@ import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TargetLock;
 import com.drones.vision.domain.model.Telemetry;
 import com.drones.vision.domain.model.TrackedObject;
 import com.drones.vision.domain.model.TrackingConfig;
@@ -246,13 +245,28 @@ public final class DefaultStreamService implements StreamService {
         return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
                 base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
                 base.detectionBackoffMaxNanos(), initialNanos, maxNanos, base.extrapolationMaxMillis(),
-                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention());
+                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(),
+                base.trackingSeed());
     }
 
     @Override
     public StreamId start(DeviceId deviceId, PipelineConfig config) {
+        return start(deviceId, config, TrackingConfigPatch.NOTHING);
+    }
+
+    /**
+     * Starts a stream, composing its tracking configuration from all three layers of
+     * docs/TRACKING-ORCHESTRATION.md &sect;4.1 in one place — {@code requested} over the deployment
+     * seed ({@link StreamPipelineSettings#trackingSeed()}) over {@code config}'s own {@link
+     * PipelineConfig#tracking()}, which is the domain's code default on every call site today. Doing
+     * it here rather than at each REST edge is what makes the device, asset, simulation and
+     * demo-fleet start paths seed identically.
+     */
+    @Override
+    public StreamId start(DeviceId deviceId, PipelineConfig requestedConfig, TrackingConfigPatch requestedTracking) {
         Objects.requireNonNull(deviceId, "deviceId must not be null");
-        Objects.requireNonNull(config, "config must not be null");
+        Objects.requireNonNull(requestedConfig, "config must not be null");
+        Objects.requireNonNull(requestedTracking, "tracking must not be null");
 
         Device device = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown device: " + deviceId.value()));
@@ -264,6 +278,11 @@ public final class DefaultStreamService implements StreamService {
         if (streamByDevice.putIfAbsent(deviceId, streamId) != null) {
             throw new IllegalStateException("Device already has an active stream: " + deviceId.value());
         }
+
+        AtomicLong lockSeq = new AtomicLong();
+        PipelineConfig config = withTracking(requestedConfig,
+                requestedTracking.foldOnto(settings.trackingSeed().foldOnto(requestedConfig.tracking(),
+                        lockSeq::incrementAndGet), lockSeq::incrementAndGet));
 
         try {
             VideoSourcePort source = videoSourceRegistry.sourceFor(device.stream());
@@ -299,7 +318,8 @@ public final class DefaultStreamService implements StreamService {
             StreamPipeline pipeline = new StreamPipeline(streamId, device, config, supervisedSource, detectionPort,
                     streamPublisherPort, detectionRepositoryPort, eventPublisher, overlayPort, eventEngine,
                     ownerAssetId, liveUpdatePublisherPort, telemetrySupplier, System::nanoTime, settings);
-            activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pipeline, Instant.now()));
+            activeStreams.put(streamId,
+                    new RunningStream(deviceId, source, supervisedSource, pipeline, Instant.now(), lockSeq));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
@@ -444,6 +464,14 @@ public final class DefaultStreamService implements StreamService {
      * every non-PATCH-able field — {@code maxInFlightInferences}, {@code overlayTelemetry}, {@code
      * eventRule}, {@code overlayBurnIn}, and the model's own {@code version}, frozen contract
      * &sect;3) exactly as {@code current} has it.
+     *
+     * <p>The tracking component folds <b>per field</b> through {@link TrackingConfigPatch#foldOnto}
+     * (docs/TRACKING-PLAN.md &sect;4.D): an absent {@code tracking} leaves it entirely alone, and a
+     * present one changes only the knobs it names — which is why adjusting the verify cadence and
+     * then the follow fps keeps both, and why neither ever drops the operator's target. A lock in
+     * the patch has its {@code lockSeq} stamped from this stream's own {@link AtomicLong}, lazily:
+     * cv-service applies a restated lock only when its sequence exceeds the last it applied, so a
+     * client that could choose the number could replay an abandoned target back into existence.
      */
     private static PipelineConfig mergeConfig(PipelineConfig current, PipelineConfigPatch patch,
                                                AtomicLong lockSeq) {
@@ -456,40 +484,22 @@ public final class DefaultStreamService implements StreamService {
         Set<String> labelFilter = patch.labelFilter() == null ? current.labelFilter() : patch.labelFilter();
         boolean detectionEnabled =
                 patch.detectionEnabled() == null ? current.detectionEnabled() : patch.detectionEnabled();
+        TrackingConfig tracking = patch.tracking() == null
+                ? current.tracking()
+                : patch.tracking().foldOnto(current.tracking(), lockSeq::incrementAndGet);
         return new PipelineConfig(model, confidenceThreshold, inferenceFps, current.maxInFlightInferences(),
                 current.overlayTelemetry(), labelFilter, current.eventRule(), current.overlayBurnIn(),
-                detectionEnabled, foldTracking(current.tracking(), patch.tracking(), lockSeq));
+                detectionEnabled, tracking);
     }
 
-    /**
-     * Folds the patch's {@link TrackingConfig} onto the running one (docs/TRACKING-PLAN.md
-     * &sect;4.D): absent leaves tracking entirely alone; present replaces mode, engine and every
-     * cadence, and then resolves the lock in one of two ways.
-     *
-     * <ul>
-     *   <li><b>No lock in the patch</b> — the running lock is carried through untouched, so
-     *       adjusting a cadence or switching {@code ASSOCIATE}&rarr;{@code FOLLOW} never silently
-     *       drops the operator's target. Releasing is the explicit {@code release} form.</li>
-     *   <li><b>A lock in the patch</b> — its {@code lockSeq} is <b>discarded and replaced</b> with
-     *       the next value from this stream's own {@link AtomicLong}. Clients never allocate one:
-     *       cv-service applies a restated lock only when its sequence exceeds the last it applied,
-     *       so a client that could choose the number could replay an abandoned target back into
-     *       existence, and the UI would have to track a counter it has no business knowing. Allocated
-     *       lazily — a patch without a lock burns no number, keeping the sequence readable in a
-     *       log.</li>
-     * </ul>
-     */
-    private static TrackingConfig foldTracking(TrackingConfig current, TrackingConfig requested, AtomicLong lockSeq) {
-        if (requested == null) {
-            return current;
+    /** {@code config} with its tracking component replaced; {@code config} itself when unchanged. */
+    private static PipelineConfig withTracking(PipelineConfig config, TrackingConfig tracking) {
+        if (tracking.equals(config.tracking())) {
+            return config;
         }
-        TargetLock lock = requested.lock() == null
-                ? current.lock()
-                : new TargetLock(lockSeq.incrementAndGet(), requested.lock().trackId(), requested.lock().pointX(),
-                        requested.lock().pointY(), requested.lock().release());
-        return new TrackingConfig(requested.mode(), requested.engineId(), requested.verifyEveryMillis(),
-                requested.followFps(), requested.redetectIouPercent(), requested.maxAgeFrames(),
-                requested.minHits(), lock);
+        return new PipelineConfig(config.model(), config.confidenceThreshold(), config.inferenceFps(),
+                config.maxInFlightInferences(), config.overlayTelemetry(), config.labelFilter(), config.eventRule(),
+                config.overlayBurnIn(), config.detectionEnabled(), tracking);
     }
 
     /**
@@ -500,13 +510,10 @@ public final class DefaultStreamService implements StreamService {
      *                would make one operator's click advance another's sequence. Starts at 0 and is
      *                only ever incremented, so it never decreases within a stream's life; a stream
      *                restart starts a fresh pipeline (and a fresh cv-service session) at 0 again.
+     *                Created by {@link #start} before the config is composed, since a start request
+     *                could in principle carry a lock and would then need the first number.
      */
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
                                   StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq) {
-
-        RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
-                       StreamPipeline pipeline, Instant startedAt) {
-            this(deviceId, source, supervisedSource, pipeline, startedAt, new AtomicLong());
-        }
     }
 }

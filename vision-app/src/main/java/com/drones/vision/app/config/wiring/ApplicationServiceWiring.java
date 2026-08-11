@@ -330,6 +330,13 @@ public class ApplicationServiceWiring {
      * Both configure per-stream <b>read models</b>, so unlike the mode/cadence seeds they apply to
      * every stream this instance starts from then on. Every default is byte-identical to the literal
      * the settings record's own convenience constructor uses.
+     *
+     * <p>The mode/cadence seeds ({@code default-mode}, {@code verify-every-millis}, {@code
+     * follow-fps}) ride the same record as {@link StreamPipelineSettings#trackingSeed()}, mapped by
+     * {@link TrackingWiring#streamStartTrackingSeed}. They seed <b>new</b> streams only, applied at
+     * {@code DefaultStreamService#start} — the one point every start path passes through, so the
+     * device, asset, simulation and demo-fleet paths cannot disagree about them
+     * (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
      */
     static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties,
                                                           VisionTrackingProperties tracking) {
@@ -343,7 +350,8 @@ public class ApplicationServiceWiring {
                 TimeUnit.MILLISECONDS.toNanos(pipeline.sourceReopenBackoff().maxMs()),
                 extrapolation.maxMillis(), extrapolation.matchGate(),
                 Duration.ofSeconds(tracking.statsWindowSeconds()),
-                Duration.ofSeconds(tracking.trackRetentionSeconds()));
+                Duration.ofSeconds(tracking.trackRetentionSeconds()),
+                TrackingWiring.streamStartTrackingSeed(tracking));
     }
 
     /**

@@ -16,8 +16,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * <ul>
  *   <li>{@link #defaultMode()}/{@link #followFps()}/{@link #verifyEveryMillis()} <b>seed new streams
- *       only</b>. {@code TrackingWiring#streamStartTrackingDefaults} turns them into the {@code
- *       TrackingConfig} the two REST start-stream endpoints merge a request onto. <b>They never
+ *       only</b>. {@code TrackingWiring#streamStartTrackingSeed} turns them into the {@code
+ *       TrackingConfigPatch} that rides {@code StreamPipelineSettings} into {@code
+ *       DefaultStreamService}, which folds it at every stream start — device, asset, simulation and
+ *       demo fleet alike, so the default cannot depend on which button was pressed. <b>They never
  *       reach into a running stream</b> — a running stream's tracking configuration is its own
  *       state, changed only by {@code PATCH /api/streams/{id}/config}; restarting the stream is how
  *       a changed deployment default is picked up, and that is the honest behavior rather than a

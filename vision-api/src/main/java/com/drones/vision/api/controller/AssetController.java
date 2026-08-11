@@ -12,12 +12,12 @@ import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateAssetRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.asset.AssetService;
+import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.domain.model.Asset;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.UsageId;
 import com.drones.vision.domain.port.out.AssetImageRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
@@ -88,28 +88,11 @@ public class AssetController {
     private final StreamPublisherPort streamPublisherPort;
     private final TelemetryRepositoryPort telemetryRepositoryPort;
     private final AssetImageRepositoryPort assetImageRepositoryPort;
-    /**
-     * The deployment's tracking defaults for <b>new</b> streams ({@code vision.tracking.*}, wired in
-     * {@code vision-app} — docs/TRACKING-ORCHESTRATION.md §4.1/§4.3), read by {@link #startStream}
-     * alone. Identical collaborator to {@code StreamController}'s: asset-level and device-level
-     * stream starts are the two entry points a new stream has, and seeding only one of them would
-     * make the deployment default a coin flip depending on which button the operator pressed.
-     *
-     * <p>This takes the constructor to six arguments, one past
-     * {@code .claude/skills/java-clean-code/SKILL.md} §3's ceiling — flagged rather than hidden. The
-     * alternative shapes were worse: threading it through {@code AssetService} would push a
-     * deployment concern into the application layer, and skipping it here would half-wire the
-     * feature. See vision-api/MODULE.md for the note and the follow-up that would actually pay it
-     * down (the seed belongs in the application layer's own stream-start settings, where {@code
-     * StreamPipelineSettings} already lives).
-     */
-    private final TrackingConfig trackingSeed;
 
     public AssetController(AssetService assetService, CurrentUser currentUser,
                             StreamPublisherPort streamPublisherPort,
                             TelemetryRepositoryPort telemetryRepositoryPort,
-                            AssetImageRepositoryPort assetImageRepositoryPort,
-                            TrackingConfig trackingSeed) {
+                            AssetImageRepositoryPort assetImageRepositoryPort) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.streamPublisherPort =
@@ -118,7 +101,6 @@ public class AssetController {
                 Objects.requireNonNull(telemetryRepositoryPort, "telemetryRepositoryPort must not be null");
         this.assetImageRepositoryPort =
                 Objects.requireNonNull(assetImageRepositoryPort, "assetImageRepositoryPort must not be null");
-        this.trackingSeed = Objects.requireNonNull(trackingSeed, "trackingSeed must not be null");
     }
 
     /**
@@ -229,6 +211,11 @@ public class AssetController {
      * {@link StartAssetStreamRequest}); {@code deviceId} absent means "the
      * asset's single video-capable device".
      *
+     * <p>What the body says about {@code tracking} travels as its own patch, folded onto the
+     * deployment's tracking seed inside the application layer — the same path {@code
+     * StreamController#start} and the simulation service take, so the deployment default never
+     * depends on which button the operator pressed (docs/TRACKING-ORCHESTRATION.md §4.1).
+     *
      * @param id      the asset to stream from, as a canonical UUID string
      * @param request optional overrides; {@code null}/absent means use every default
      * @return the started stream's id and (if available) its viewer URLs
@@ -240,10 +227,11 @@ public class AssetController {
         AssetId assetId = AssetId.of(id);
         StartAssetStreamRequest effective = request == null ? StartAssetStreamRequest.EMPTY : request;
         DeviceId device = effective.deviceIdOrNull(); // malformed device id / config is a 400, before the scope 404
-        PipelineConfig config = effective.mergeOntoDefaults(trackingSeed);
+        PipelineConfig config = effective.mergeOntoDefaults();
+        TrackingConfigPatch tracking = effective.trackingPatch();
         requireInScope(assetId);
 
-        StreamId streamId = assetService.startStream(assetId, device, config);
+        StreamId streamId = assetService.startStream(assetId, device, config, tracking);
         return new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
     }
 

@@ -2,6 +2,8 @@ package com.drones.vision.application.pipeline;
 
 import java.time.Duration;
 
+import com.drones.vision.application.stream.TrackingConfigPatch;
+
 /**
  * Tunables for one running stream's {@link StreamPipeline} runtime — frame-cadence measurement,
  * detection-outage backoff, video-source reopen backoff (the bounds {@link DefaultStreamService}
@@ -14,6 +16,16 @@ import java.time.Duration;
  * VisionApplicationProperties} record from {@code application.properties} and maps it onto this
  * record's constructor, one field at a time, before handing it to {@link DefaultStreamService}.
  * Every {@link #defaults()} value is byte-identical to the literal it replaces.
+ *
+ * <p><b>{@link #trackingSeed()} is the one component the pipeline itself never reads</b> — it is the
+ * deployment's tracking default for <b>new</b> streams, consumed by {@code
+ * DefaultStreamService#start} and by nothing else. It lives here rather than at the REST edge so
+ * that every start path (device, asset, simulation, demo fleet) seeds identically from one place
+ * instead of the deployment default applying or not depending on which button the operator pressed;
+ * it rides this record because this is already what {@code vision-app} maps {@code vision.tracking.*}
+ * onto (the stats window and track retention below), so it needed no new collaborator anywhere.
+ * Seeding a start is the only thing it can do: a running stream's tracking configuration is its own
+ * state, changed only by {@code PATCH} (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
  *
  * <p><b>Two distinct backoff pairs are preserved on purpose</b> (not unified): {@link
  * #detectionBackoffInitialNanos()}/{@link #detectionBackoffMaxNanos()} bound how quickly {@link
@@ -53,6 +65,12 @@ import java.time.Duration;
  *                                        vision.tracking.stats-window-seconds}
  * @param trackRetention                 how long a track that stops arriving stays in {@link
  *                                        TrackBook} before being expired; must be positive
+ * @param trackingSeed                   the deployment's tracking defaults for <b>new</b> streams
+ *                                        ({@code vision.tracking.*} — docs/TRACKING-ORCHESTRATION.md
+ *                                        &sect;4.1), read by {@code DefaultStreamService#start}
+ *                                        alone; never {@code null}, use {@link
+ *                                        TrackingConfigPatch#NOTHING} for "the deployment states
+ *                                        nothing"
  */
 public record StreamPipelineSettings(
         int assumedSourceFps,
@@ -67,7 +85,8 @@ public record StreamPipelineSettings(
         long extrapolationMaxMillis,
         double extrapolationMatchGate,
         Duration trackingStatsWindow,
-        Duration trackRetention) {
+        Duration trackRetention,
+        TrackingConfigPatch trackingSeed) {
 
     /** @see #trackRetention() */
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
@@ -87,7 +106,26 @@ public record StreamPipelineSettings(
         this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
                 detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
                 sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate,
-                Duration.ofSeconds(TrackingStatsWindow.DEFAULT_WINDOW_SECONDS), DEFAULT_TRACK_RETENTION);
+                Duration.ofSeconds(TrackingStatsWindow.DEFAULT_WINDOW_SECONDS), DEFAULT_TRACK_RETENTION,
+                TrackingConfigPatch.NOTHING);
+    }
+
+    /**
+     * The canonical constructor before the tracking seed moved into this record, kept as a
+     * convenience constructor defaulting it to {@link TrackingConfigPatch#NOTHING} — "the deployment
+     * states nothing about tracking", which folds to exactly the domain's own literals. Same
+     * "N-1-arg convenience ctor" idiom as above.
+     */
+    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
+                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
+                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
+                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
+                                   double extrapolationMatchGate, Duration trackingStatsWindow,
+                                   Duration trackRetention) {
+        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
+                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
+                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
+                trackRetention, TrackingConfigPatch.NOTHING);
     }
 
     public StreamPipelineSettings {
@@ -128,6 +166,9 @@ public record StreamPipelineSettings(
         }
         if (trackRetention == null || trackRetention.isZero() || trackRetention.isNegative()) {
             throw new IllegalArgumentException("trackRetention must be positive, was " + trackRetention);
+        }
+        if (trackingSeed == null) {
+            throw new IllegalArgumentException("trackingSeed must not be null; use TrackingConfigPatch.NOTHING");
         }
     }
 

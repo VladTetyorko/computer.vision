@@ -68,6 +68,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import com.drones.vision.application.pipeline.DetectionEventEngine;
 import com.drones.vision.application.pipeline.StreamPipeline;
+import com.drones.vision.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
 
@@ -715,8 +716,32 @@ class DefaultStreamServiceTest {
         return new TrackingConfig(mode, "lk", 2000, 15, 30, 30, 3, lock);
     }
 
+    /**
+     * A patch stating <b>every</b> tracking field — what a client that sends the whole object looks
+     * like. The partial-patch cases below each build their own {@link TrackingConfigPatch} inline,
+     * naming only the knob under test, because that is the shape the UI actually sends.
+     */
     private static PipelineConfigPatch trackingPatch(TrackingConfig requested) {
+        return trackingPatch(new TrackingConfigPatch(requested.mode(), requested.engineId(),
+                requested.verifyEveryMillis(), requested.followFps(), requested.redetectIouPercent(),
+                requested.maxAgeFrames(), requested.minHits(), requested.lock()));
+    }
+
+    private static PipelineConfigPatch trackingPatch(TrackingConfigPatch requested) {
         return new PipelineConfigPatch(null, null, null, null, null, requested);
+    }
+
+    /** A patch naming exactly one knob, every other field left {@code null} ("unchanged"). */
+    private static PipelineConfigPatch onlyVerifyEveryMillis(int millis) {
+        return trackingPatch(new TrackingConfigPatch(null, null, millis, null, null, null, null, null));
+    }
+
+    private static PipelineConfigPatch onlyFollowFps(int fps) {
+        return trackingPatch(new TrackingConfigPatch(null, null, null, fps, null, null, null, null));
+    }
+
+    private static PipelineConfigPatch onlyEngineId(String engineId) {
+        return trackingPatch(new TrackingConfigPatch(null, engineId, null, null, null, null, null, null));
     }
 
     private static PipelineConfig startedWith(TrackingConfig tracking) {
@@ -856,6 +881,104 @@ class DefaultStreamServiceTest {
         assertEquals(2L, runningTracking(first, a, 0).lock().lockSeq());
         assertEquals(1L, runningTracking(secondPublisher, b, 0).lock().lockSeq(),
                 "one operator's clicks must not advance another stream's sequence");
+    }
+
+    // --- the per-field fold: the UI sends one knob at a time, and every other knob must survive ---
+
+    @Test
+    void twoSuccessiveCadencePatchesKeepBothCadences() {
+        // The regression this fold exists for: the verify-cadence and follow-fps sliders ship side by
+        // side, so moving one and then the other used to revert the first.
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        StreamId streamId = startCapturable(publisher, startedWith(tracking(TrackingMode.FOLLOW, null)));
+
+        service.updateConfig(streamId, onlyVerifyEveryMillis(5000));
+        service.updateConfig(streamId, onlyFollowFps(25));
+
+        TrackingConfig applied = runningTracking(publisher, streamId, 0);
+        assertEquals(5000, applied.verifyEveryMillis(), "the first slider's value must survive the second");
+        assertEquals(25, applied.followFps());
+    }
+
+    @Test
+    void aPatchCarryingOnlyTheEngineLeavesTheModeEveryCadenceAndTheLockUntouched() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        TrackingConfig running = new TrackingConfig(TrackingMode.FOLLOW, "lk", 5000, 25, 45, 60, 2,
+                new TargetLock(4, 7L, null, null, false));
+        StreamId streamId = startCapturable(publisher, startedWith(running));
+
+        UpdateOutcome outcome = service.updateConfig(streamId, onlyEngineId("ncc"));
+
+        assertTrue(outcome.trackingChanged());
+        assertEquals(new TrackingConfig(TrackingMode.FOLLOW, "ncc", 5000, 25, 45, 60, 2, running.lock()),
+                runningTracking(publisher, streamId, 0),
+                "an engine swap states one field; the other seven are the stream's own state");
+    }
+
+    @Test
+    void aLockReleaseLeavesTheModeAtFollow() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        StreamId streamId = startCapturable(publisher,
+                startedWith(tracking(TrackingMode.FOLLOW, new TargetLock(1, 7L, null, null, false))));
+
+        service.updateConfig(streamId, trackingPatch(new TrackingConfigPatch(null, null, null, null, null, null, null,
+                new TargetLock(0, null, null, null, true))));
+
+        TrackingConfig applied = runningTracking(publisher, streamId, 0);
+        assertEquals(TrackingMode.FOLLOW, applied.mode(), "releasing a target is not leaving FOLLOW");
+        assertTrue(applied.lock().release());
+        assertEquals(1L, applied.lock().lockSeq(), "the release takes the stream's next sequence number");
+    }
+
+    // --- docs/TRACKING-ORCHESTRATION.md §4.1: the deployment seed is applied here, for every start path ---
+
+    @Test
+    void aStartThatStatesNothingAboutTrackingTakesTheDeploymentSeed() {
+        StreamService seeded = serviceSeededWith(
+                new TrackingConfigPatch(TrackingMode.ASSOCIATE, null, 2500, 20, null, null, null, null));
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+
+        StreamId streamId = seeded.start(device.id(), PipelineConfig.defaults());
+
+        TrackingConfig applied = runningTracking(publisher, streamId, 0);
+        assertEquals(TrackingMode.ASSOCIATE, applied.mode(), "the deployment default reaches every start path");
+        assertEquals(2500, applied.verifyEveryMillis());
+        assertEquals(20, applied.followFps());
+        assertEquals(TrackingConfig.DEFAULT_MAX_AGE_FRAMES, applied.maxAgeFrames(),
+                "a knob the deployment does not own falls through to the domain's own literal");
+    }
+
+    @Test
+    void aStartRequestsOwnTrackingWinsOverTheDeploymentSeed() {
+        StreamService seeded = serviceSeededWith(
+                new TrackingConfigPatch(TrackingMode.ASSOCIATE, null, 2500, 20, null, null, null, null));
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+
+        StreamId streamId = seeded.start(device.id(), PipelineConfig.defaults(),
+                new TrackingConfigPatch(TrackingMode.FOLLOW, "lk", null, null, null, null, null, null));
+
+        TrackingConfig applied = runningTracking(publisher, streamId, 0);
+        assertEquals(TrackingMode.FOLLOW, applied.mode(), "request > deployment > code default");
+        assertEquals("lk", applied.engineId());
+        assertEquals(2500, applied.verifyEveryMillis(), "what the request leaves unsaid still comes from the seed");
+    }
+
+    /** A service whose {@link StreamPipelineSettings#trackingSeed()} is {@code seed}. */
+    private StreamService serviceSeededWith(TrackingConfigPatch seed) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, null, null, null,
+                new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
+                        base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
+                        base.detectionBackoffMaxNanos(), base.sourceReopenBackoffInitialNanos(),
+                        base.sourceReopenBackoffMaxNanos(), base.extrapolationMaxMillis(),
+                        base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(), seed));
     }
 
     @Test

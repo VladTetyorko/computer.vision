@@ -209,7 +209,7 @@ Response DTOs (`@JsonInclude(NON_NULL)` unless noted — see Conventions), each 
 
 **Detections** (docs/MVP1-PLAN.md §C8 bullet 3, body of `GET /api/streams/{streamId}/detections`, and the `detections` SSE topic's payload): `BoundingBoxResponse(x, y, width, height)` (no `NON_NULL`; mirrors `domain.model.BoundingBox`, each component normalized [0,1]) · `DetectionResponse(label, confidence, box:BoundingBoxResponse, modelId, modelVersion, track?:DetectionTrackResponse)` · `DetectionResultResponse(streamId, frameSequence, capturedAt, inferenceMillis, detections:List<DetectionResponse>, tracking?:FrameTrackingResponse)`. **The last two gained `@JsonInclude(NON_NULL)` for exactly one field each** (docs/TRACKING-PLAN.md §4.G, wave T6) — every other field is still always present, and an untracked payload is therefore **byte-identical to the pre-tracking wire**, which is the whole reason the track facts are one nested object rather than five flat siblings (docs/TRACKING-ORCHESTRATION.md §6 rule 1). Both keep their pre-T6 canonical constructor as an N-1-arg convenience ctor, so every existing call site compiles unchanged.
 
-**Tracking wire shapes** (docs/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6): `DetectionTrackResponse(id, state, source, velocityX, velocityY)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s) · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, firstSeen, lastSeen)` from `domain.model.TrackedObject` — flat, not nested, because *this is* the track resource · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?)` (`@JsonInclude(NON_NULL)` for `stats`) · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, lock?:TargetLockRequest)` with `toTrackingConfig(base)`/`toStartTrackingConfig(base)` (the latter **rejects a `lock`** — it names a track that cannot exist before the stream produces one) and `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()`, which leaves `lockSeq` at `0` and lets `domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking`, `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking` plus a `mergeOntoDefaults(TrackingConfig seed)` overload.
+**Tracking wire shapes** (docs/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6): `DetectionTrackResponse(id, state, source, velocityX, velocityY)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s) · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, firstSeen, lastSeen)` from `domain.model.TrackedObject` — flat, not nested, because *this is* the track resource · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?)` (`@JsonInclude(NON_NULL)` for `stats`) · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, lock?:TargetLockRequest)` with `toPatch()`/`toStartPatch()` — both map **one-for-one onto `application.stream.TrackingConfigPatch`**, an absent JSON field becoming a `null` the application layer reads as "leave this knob unchanged"; the latter additionally **rejects a `lock`** (it names a track that cannot exist before the stream produces one). **Nothing is merged at this edge**: the running configuration is the application layer's state, and the deployment seed is applied there too — see the follow-up section at the end of this file. `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()` leaves `lockSeq` at `0` and lets `domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking` (→ `toPatch()`), `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking`, exposed to the controllers as a separate `trackingPatch()` beside the plain `mergeOntoDefaults()`.
 
 **Replay library** (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/design/10-replay.md's frozen wire
 contract, body of `GET /api/usages`), `@JsonInclude(NON_NULL)` (`endedAt`/`durationSeconds` genuinely
@@ -1061,36 +1061,25 @@ New: `CvTrackersController` (`GET /api/cv/trackers`), `StreamController#tracks`
 (`GET /api/streams/{streamId}/tracks`), the `tracking` object on `PATCH .../config` and on both
 start-stream bodies, and eight DTOs (see the DTO section above).
 
-**Two judgment calls, both flagged rather than buried:**
+**Two judgment calls, both flagged rather than buried — and both since resolved.** They are kept
+here because the reasoning is what the follow-up acted on; see "T3/T6 follow-up" at the end of this
+file for what the code does now.
 
-1. **`StreamController#updateConfig` merges a partial `tracking` object onto a readback base.** The
-   application layer's fold (`DefaultStreamService#foldTracking`, wave T3) replaces mode/engine/every
-   cadence *wholesale* whenever a `tracking` object is present, while the SPA (wave T7, already
-   written) sends **one knob at a time** — `{"tracking":{"engineId":"ncc"}}`,
-   `{"tracking":{"lock":{"release":true}}}`, `{"tracking":{"verifyEveryMillis":5000}}`. Something has
-   to supply the fields the client omitted, and this edge's only readback is
-   `StreamService#trackingStats`: the stream's configured `mode` and the engine **actually serving**
-   it. Basing on those is what stops a cadence tweak from silently switching tracking off, or a lock
-   release from dropping the operator out of `FOLLOW`.
-   **The residual gap, stated plainly:** the five cadence knobs (`verifyEveryMillis`, `followFps`,
-   `redetectIouPercent`, `maxAgeFrames`, `minHits`) have **no readback anywhere on the API surface**,
-   so a partial patch resets an operator-customized cadence to `TrackingConfig`'s documented default.
-   The real fix is a per-field fold in the application layer — a nullable-field tracking patch beside
-   `PipelineConfigPatch` — which is `vision-application`'s file scope, not this wave's. Until then the
-   observable symptom is bounded: changing *two different* cadences in sequence loses the first.
-2. **`AssetController`'s constructor is now six arguments**, one past
-   `.claude/skills/java-clean-code/SKILL.md` §3's ceiling, for the `TrackingConfig` deployment seed.
-   The alternatives were worse: threading the seed through `AssetService` would push a deployment
-   concern into the application layer, and seeding only `StreamController` would make
-   `vision.tracking.default-mode` apply or not depending on which button the operator pressed
-   (device-level vs asset-level start) — a half-wired feature. `StreamController` went 4→5 (at the
-   ceiling) for the same collaborator. The follow-up that actually pays this down is the same one as
-   above: the seed belongs beside `StreamPipelineSettings` in the application layer, where every other
-   stream-start setting already lives.
-
-**Known non-coverage:** simulation-started streams (`DefaultSimulationService`, vision-application)
-build their own `PipelineConfig` from `PipelineConfig.defaults()` and therefore do **not** pick up
-`vision.tracking.*`. That is out of this module's reach and is recorded here rather than papered over.
+1. **`StreamController#updateConfig` merged a partial `tracking` object onto a readback base.** The
+   application layer's fold (`DefaultStreamService#foldTracking`, wave T3) replaced mode/engine/every
+   cadence *wholesale* whenever a `tracking` object was present, while the SPA (wave T7) sends **one
+   knob at a time** — `{"tracking":{"engineId":"ncc"}}`, `{"tracking":{"lock":{"release":true}}}`,
+   `{"tracking":{"verifyEveryMillis":5000}}`. This edge's only readback was
+   `StreamService#trackingStats` (mode + the engine actually serving), which left the five cadence
+   knobs with no source at all: changing *two different* cadences in sequence lost the first.
+   **Resolved** — the fold is now per-field in the application layer (`TrackingConfigPatch`), and the
+   readback workaround is deleted. This controller passes the body through and reconstructs nothing.
+2. **`AssetController`'s constructor was six arguments**, one past
+   `.claude/skills/java-clean-code/SKILL.md` §3's ceiling, for the `TrackingConfig` deployment seed;
+   `StreamController` went 4→5 for the same collaborator. **Resolved** — the seed moved beside
+   `StreamPipelineSettings` in the application layer, where every other stream-start setting already
+   lives, so both controllers gave the argument back (**6→5** and **5→4**) and every start path —
+   including the simulation-started streams this edge could never reach — seeds identically.
 
 **`stats` is omitted, never zeroed.** `GET .../tracks` leaves the whole `stats` object out until the
 window has recorded at least one detector pass. Two reasons, and the second is the load-bearing one:
@@ -1098,3 +1087,20 @@ the SPA's own contract says an absent `stats` means "hide the flow strip", and `
 reports a `null` `lastDetectorReason` for an empty window — which the strip's formatter
 (`formatDetectorReason`, vision-web) would call `.toLowerCase()` on. Emitting a half-populated object
 would be a runtime error in the client, not a cosmetic one.
+
+## docs/TRACKING-PLAN.md T3/T6 follow-up done (this edge stops reconstructing state it does not own)
+
+The two judgment calls flagged in the T6 section above are paid down. Nothing on the wire changed — request and response JSON are byte-identical, so `vision-web` needed no change; what changed is where the merging happens.
+
+**`StreamController`: 5 constructor arguments → 4.** The `TrackingConfig trackingSeed` collaborator is gone (it moved to the application layer's `StreamPipelineSettings`), and so is `trackingBase(StreamId)` — the T6 workaround that read a running stream's mode and engine back off `StreamService#trackingStats` to fill in the fields a partial `tracking` object omitted. It could not recover the five cadence knobs, so two cadence changes in a row lost the first. `updateConfig` now does exactly one thing: `streamService.updateConfig(id, body.toPatch())`.
+
+**`AssetController`: 6 constructor arguments → 5**, back inside `.claude/skills/java-clean-code/SKILL.md` §3's ceiling, for the same reason.
+
+**DTO changes** (all in `dto/`):
+- `TrackingConfigRequest` — `toTrackingConfig(base)`/`toStartTrackingConfig(base)` became `toPatch()`/`toStartPatch()`, returning `application.stream.TrackingConfigPatch`. No base, no merge: an absent JSON field maps to `null` and the application layer decides what unchanged means. `toStartPatch()` still rejects a `lock` (→400) and `mode` is still parsed here (an unknown mode is still a 400 at the edge, not a startup surprise).
+- `UpdateStreamConfigRequest` — one `toPatch()` again; the `toPatch(TrackingConfig base)` overload is gone.
+- `StartStreamRequest`/`StartAssetStreamRequest` — `mergeOntoDefaults(TrackingConfig seed)` is gone; `mergeOntoDefaults()` leaves the config's tracking at the **domain** default (the bottom layer of the fold) and the request's own tracking travels beside it as `trackingPatch()`. `StartAssetStreamRequest` still delegates both to `StartStreamRequest` so the two shapes share one implementation.
+
+**Why the edge is the wrong place for either job.** A controller cannot fold a partial patch onto a running stream's configuration, because it does not hold that configuration — the readback it improvised recovered two of eight knobs. And seeding a deployment default at two REST endpoints leaves every non-REST start path (simulation, demo fleet) unseeded. Both belong at `DefaultStreamService#start`/`#updateConfig`, which every path goes through.
+
+**Tests**: `./mvnw -B -pl vision-api test` — **551/551 green** (unchanged count). `StreamControllerTest`'s two readback tests were replaced by two that assert the opposite and stronger property: a partial `tracking` object arrives as a partial `TrackingConfigPatch` with every unmentioned knob `null`, and `trackingStats` is never called on the PATCH path at all. The two start tests now assert the request's patch is what travels (`TrackingConfigPatch.NOTHING` when the body says nothing), rather than a pre-merged `TrackingConfig`.

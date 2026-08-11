@@ -51,6 +51,7 @@ import com.drones.vision.application.device.DeviceService;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.stream.ActiveStream;
 import com.drones.vision.application.stream.StreamService;
+import com.drones.vision.application.stream.TrackingConfigPatch;
 
 class DefaultAssetServiceTest {
 
@@ -549,12 +550,12 @@ class DefaultAssetServiceTest {
         when(deviceService.find(cam.id())).thenReturn(Optional.of(cam));
         when(deviceService.find(telemetry.id())).thenReturn(Optional.of(telemetry));
         StreamId expected = StreamId.random();
-        when(streamService.start(eq(cam.id()), any())).thenReturn(expected);
+        when(streamService.start(eq(cam.id()), any(), any())).thenReturn(expected);
 
         StreamId started = service.startStream(stored.id(), null, PipelineConfig.defaults());
 
         assertEquals(expected, started);
-        verify(streamService).start(cam.id(), PipelineConfig.defaults());
+        verify(streamService).start(cam.id(), PipelineConfig.defaults(), TrackingConfigPatch.NOTHING);
     }
 
     @Test
@@ -595,7 +596,7 @@ class DefaultAssetServiceTest {
         Asset stored = asset(Set.of(first.id(), second.id()));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
         StreamId expected = StreamId.random();
-        when(streamService.start(eq(second.id()), any())).thenReturn(expected);
+        when(streamService.start(eq(second.id()), any(), any())).thenReturn(expected);
 
         StreamId started = service.startStream(stored.id(), second.id(), PipelineConfig.defaults());
 
@@ -631,7 +632,7 @@ class DefaultAssetServiceTest {
 
         // Out-of-service sources are invisible to resolution, so one working camera among
         // three video-capable ones is not ambiguity.
-        verify(streamService).start(working.id(), PipelineConfig.defaults());
+        verify(streamService).start(working.id(), PipelineConfig.defaults(), TrackingConfigPatch.NOTHING);
     }
 
     @Test

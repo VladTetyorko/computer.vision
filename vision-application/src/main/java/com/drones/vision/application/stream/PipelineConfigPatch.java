@@ -29,30 +29,25 @@ import com.drones.vision.domain.model.TrackingConfig;
  * a real value meaning "keep all labels", the same semantics an empty {@code labelFilter} already
  * has on {@code PipelineConfig} itself.
  *
- * <p>{@code tracking}, when present, replaces the running {@link TrackingConfig} wholesale — mode,
- * engine and every cadence — with two deliberate exceptions inside it (docs/TRACKING-PLAN.md
- * &sect;4.D):
- * <ul>
- *   <li><b>{@code lock} is itself null-means-unchanged.</b> A present {@code tracking} whose {@code
- *       lock} is {@code null} keeps whatever lock the stream is holding, so adjusting the mode or a
- *       cadence never silently drops the operator's target. Dropping a lock is the explicit {@code
- *       release} form of {@link com.drones.vision.domain.model.TargetLock}, never an omission.</li>
- *   <li><b>{@code lock.lockSeq} is ignored and replaced.</b> A client never allocates one; {@link
- *       DefaultStreamService#updateConfig} stamps a fresh value from the stream's own monotonic
- *       counter. That is what makes a replayed stale lock a no-op rather than a resurrection of an
- *       abandoned target. Callers building this record should leave it {@code 0}.</li>
- * </ul>
+ * <p>{@code tracking} is itself a <b>partial</b> statement — a {@link TrackingConfigPatch}, not a
+ * whole {@link TrackingConfig} (docs/TRACKING-PLAN.md &sect;4.D). {@code null} leaves tracking
+ * entirely alone; a present patch changes only the knobs it names, because the UI adjusts them one
+ * at a time and a whole-value replace made every partial patch silently reset the seven knobs it did
+ * not mention. {@link TrackingConfigPatch} carries the fold and documents the two knobs whose
+ * semantics are not "replace if present" — the target {@code lock}, whose absence never means
+ * release, and its {@code lockSeq}, which {@link DefaultStreamService#updateConfig} always allocates
+ * server-side.
  *
  * @param confidenceThreshold replacement confidence threshold, or {@code null} to keep the current one
  * @param inferenceFps        replacement inference sample rate, or {@code null} to keep the current one
  * @param labelFilter         replacement label set, or {@code null} to keep the current one
  * @param detectionEnabled    replacement detection on/off flag, or {@code null} to keep the current one
  * @param modelId             replacement model checkpoint id, or {@code null} to keep the current one
- * @param tracking            replacement tracking configuration, or {@code null} to keep the current
- *                            one; see this record's own javadoc for how its {@code lock} folds
+ * @param tracking            per-field tracking changes, or {@code null} to leave tracking entirely
+ *                            alone; see {@link TrackingConfigPatch} for how each field folds
  */
 public record PipelineConfigPatch(Double confidenceThreshold, Integer inferenceFps, Set<String> labelFilter,
-                                   Boolean detectionEnabled, String modelId, TrackingConfig tracking) {
+                                   Boolean detectionEnabled, String modelId, TrackingConfigPatch tracking) {
 
     /** A patch that changes nothing — the identity of this operation. */
     public static final PipelineConfigPatch NOTHING = new PipelineConfigPatch(null, null, null, null, null, null);

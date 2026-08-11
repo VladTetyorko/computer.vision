@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.api.controller.CvTrackersController;
 import com.drones.vision.api.dto.CvTrackerResponse;
+import com.drones.vision.app.config.properties.VisionTrackingProperties;
 import com.drones.vision.domain.model.TrackingConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,15 +15,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Context test for the <em>default</em> {@code vision.tracking.*} configuration
- * (docs/TRACKING-PLAN.md &sect;4.F, docs/TRACKING-ORCHESTRATION.md &sect;4.3): the two beans {@code
- * vision-api}'s component-scanned controllers need actually resolve, and the shipped default is the
- * one that <b>leaves stream starts unchanged</b> — {@code TrackingMode.OFF}, the same value {@code
- * PipelineConfig.defaults()} carries until wave T8 flips it.
+ * (docs/TRACKING-PLAN.md &sect;4.F, docs/TRACKING-ORCHESTRATION.md &sect;4.3): the properties bind in
+ * a real context, the shipped default is the one that <b>leaves stream starts unchanged</b>
+ * ({@code TrackingMode.OFF}, the same value {@code PipelineConfig.defaults()} carries until wave T8
+ * flips it), and {@code GET /api/cv/trackers}' roster bean resolves for its component-scanned
+ * controller.
  *
- * <p>The mapping itself is unit-tested without a context in {@code
- * config.wiring.TrackingWiringTest}; this class exists for what only a real context can prove — that
- * the {@code TrackingConfig} bean is unambiguous enough for {@code StreamController}/{@code
- * AssetController} to autowire, and that {@code GET /api/cv/trackers}' controller has its roster.
+ * <p>The property&rarr;seed mapping itself is unit-tested without a context in {@code
+ * config.wiring.TrackingWiringTest}. There is deliberately <b>no seed bean</b> to autowire here: the
+ * seed is not a collaborator of any controller, it rides {@code StreamPipelineSettings} into {@code
+ * DefaultStreamService}, which is the one point every start path passes through
+ * (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
  *
  * <p>{@code vision.publish.enabled=false} for the same determinism reasons as {@link
  * CvWiringTest}/{@link AssetWiringTest}.
@@ -31,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 class TrackingWiringContextTest {
 
     @Autowired
-    private TrackingConfig streamStartTrackingDefaults;
+    private VisionTrackingProperties trackingProperties;
 
     @Autowired
     private List<CvTrackerResponse> cvTrackerRoster;
@@ -41,7 +44,12 @@ class TrackingWiringContextTest {
 
     @Test
     void defaultConfigurationSeedsNewStreamsWithTrackingOff() {
-        assertEquals(TrackingConfig.off(), streamStartTrackingDefaults);
+        // What only a context can prove: the shipped properties bind, and they bind to the values
+        // that leave a stream start byte-identical to before tracking existed. That they then fold
+        // to TrackingConfig.off() is TrackingWiringTest's job, without a context.
+        assertEquals("OFF", trackingProperties.defaultMode());
+        assertEquals(TrackingConfig.off().followFps(), trackingProperties.followFps());
+        assertEquals(TrackingConfig.off().verifyEveryMillis(), trackingProperties.verifyEveryMillis());
     }
 
     @Test

@@ -91,7 +91,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `replayFrameExtractionPort` | `ReplayFrameExtractionPort` | `MediamtxReplayFrameExtractor(mediamtx.playbackBase())` if `vision.publish.enabled` else `NoopReplayFrameExtractor` (devsupport) — docs/CV-TRAINING-V2-PLAN.md §7; same if/else split as `streamPublisherPort`, consumed by `TrainingWiringConfiguration#replaySources` |
 | `hlsProxyUpstreamBase` | `URI` | `properties.mediamtx().hlsBase()` — the collaborator `HlsProxyController` (`vision-api`, component-scanned) needs; see Gotchas for why this is a bean rather than `HlsProxyController` being hand-constructed here |
 | `cvModelRoster` | `List<CvModelResponse>` | a static, in-source constant (docs/CV-CONTROL-PLAN.md §4) — the collaborator `CvModelsController` (`vision-api`, component-scanned) needs, the same "raw collaborator, not a domain port" pattern as `hlsProxyUpstreamBase`; see "Detection-model roster" below |
-| `streamStartTrackingDefaults` | `TrackingConfig` (vision-domain) | `TrackingWiring`: the deployment's tracking seed for **new** streams, built from `VisionTrackingProperties` (docs/TRACKING-PLAN.md §4, docs/TRACKING-ORCHESTRATION.md §4.1/§4.3) — the collaborator `StreamController`/`AssetController` (`vision-api`, component-scanned) need, same "raw collaborator, not a domain port" pattern as `cvModelRoster`/`hlsProxyUpstreamBase`; default `TrackingConfig.off()`, i.e. stream starts are unchanged; see "Tracking engine wiring" below |
+| _(no seed bean)_ | — | `TrackingWiring#streamStartTrackingSeed` maps `vision.tracking.*` to a `TrackingConfigPatch` that rides `StreamPipelineSettings` into `DefaultStreamService` (docs/TRACKING-ORCHESTRATION.md §4.1). It is **not** a bean and no controller is injected with it: a deployment default belongs where streams are started — one place every start path (device, asset, simulation, demo fleet) goes through — not at two REST endpoints. Was a `TrackingConfig` bean in wave T6; see the follow-up section at the end of this file |
 | `cvTrackerRoster` | `List<CvTrackerResponse>` | `TrackingWiring`: a static, in-source constant (docs/TRACKING-PLAN.md §4.F) — the roster `CvTrackersController` serves at `GET /api/cv/trackers`, mirroring `cvModelRoster`'s frozen decision exactly (deploy-time, not runtime) |
 | `cvGrpcChannel` | `ManagedChannel` | one shared gRPC connection to cv-service, present whenever `vision.cv.enabled` or `vision.training.enabled` is `true` (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) — consumed by both `detectionPort` below and `TrainingWiringConfiguration#modelRegistryPort`; see "CV inference wiring" below |
 | `detectionPort` | `DetectionPort` | `GrpcDetectionPort` (adapter-cv-grpc) over the shared `cvGrpcChannel` if `vision.cv.enabled=true`, else `NoopDetectionPort` (devsupport) — see "CV inference wiring" below |
@@ -205,7 +205,7 @@ layering, so it is spelled out rather than left to the reader:
 
 | Key | Default | What it does |
 |---|---|---|
-| `vision.tracking.default-mode` | `OFF` | seeds **new** streams (`TrackingWiring#streamStartTrackingDefaults` → the two REST start-stream endpoints) |
+| `vision.tracking.default-mode` | `OFF` | seeds **new** streams (`TrackingWiring#streamStartTrackingSeed` → `StreamPipelineSettings#trackingSeed` → `DefaultStreamService#start`, i.e. *every* start path) |
 | `vision.tracking.follow-fps` | `15` | same — the *Java*-side sampler's rate while `FOLLOW` is active (cv-service has no such knob and must never care how often it is fed) |
 | `vision.tracking.verify-every-millis` | `2000` | same — `FOLLOW`'s detector re-verify cadence |
 | `vision.tracking.stats-window-seconds` | `30` | configures the per-stream **read model** `TrackingStatsWindow`, via `ApplicationServiceWiring#streamPipelineSettings` → `StreamPipelineSettings#trackingStatsWindow` |
@@ -216,6 +216,11 @@ state, changed only by `PATCH /api/streams/{id}/config`; restarting the stream i
 deployment default is picked up, and that is deliberate — a config edit must not silently re-steer a
 flight in progress. `vision-domain` keeps pure literals (`TrackingConfig.off()`/`.defaults()`), which
 is exactly why this layer lives here.
+
+**The three seed keys are mapped as a `TrackingConfigPatch`, not a whole `TrackingConfig`** — a
+deployment states only the knobs it owns, and the rest fall through to `vision-domain`'s literals
+when `DefaultStreamService` folds it at stream start. That is what keeps `redetectIouPercent`/
+`maxAgeFrames`/`minHits` single-owner (see the paragraph below) without this class restating them.
 
 **`track-retention-seconds` is not in the plan's own knob inventory** (docs/TRACKING-ORCHESTRATION.md
 §4.3 lists four keys). It exists because `StreamPipelineSettings`' canonical constructor requires
@@ -1353,3 +1358,19 @@ ceiling, flagged in vision-api/MODULE.md). The shape that would pay that down is
 beside `StreamPipelineSettings` in `vision-application`, where every other stream-start setting
 already lives; it would also close the one gap this wave cannot reach from here — simulation-started
 streams (`DefaultSimulationService`) build their own `PipelineConfig` and never see `vision.tracking.*`.
+**Done — see the next section.**
+
+## docs/TRACKING-PLAN.md T3/T6 follow-up done (the seed moved to the application layer)
+
+Exactly the follow-up the note above describes.
+
+- **`TrackingWiring#streamStartTrackingDefaults` (a `TrackingConfig` `@Bean`) → `TrackingWiring.streamStartTrackingSeed(VisionTrackingProperties)` (a package-private `static` returning `application.stream.TrackingConfigPatch`).** No bean, because nothing autowires it any more.
+- **`ApplicationServiceWiring#streamPipelineSettings` states it as the 14th component of `StreamPipelineSettings`**, right beside the two window durations it already mapped from the same properties record — so `#streamService` needed **no new argument** and no new collaborator appeared anywhere. `DefaultStreamService` folds it at every stream start.
+- **A patch, not a config.** `default-mode`/`verify-every-millis`/`follow-fps` are stated; `engineId` and the three cv-service-owned knobs stay `null` and fall through to `TrackingConfig`'s own literals. Wave T6 restated those literals here; it no longer does, so "one number, one owner" now holds in code and not just in the comment.
+- Consequences: `StreamController` 5→4 constructor arguments, `AssetController` 6→5 (back inside the java-clean-code §3 ceiling), and simulation- and demo-fleet-started streams pick up `vision.tracking.*` for the first time.
+
+**Behaviour with the shipped defaults is unchanged**, and that is asserted rather than argued: `TrackingWiringTest#theDefaultSeedLeavesStreamStartsByteIdenticalToBeforeTrackingExisted` folds the mapped seed onto `PipelineConfig.defaults().tracking()` and gets the identical value back.
+
+`TrackingWiringContextTest` no longer autowires a seed bean (there is none); it asserts the shipped `vision.tracking.*` values bind in a real context, and the fold itself is proven without Spring in `TrackingWiringTest`. `ArchitectureTest` is untouched and green (9/9) — the seed type is a `vision-application` record, so no rule about adapters, `@ConfigurationProperties` placement or Spring-free layers is involved.
+
+`./mvnw -B -pl vision-app test`: **218/218 green**.

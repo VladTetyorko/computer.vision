@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.TrackingConfig;
 
 import java.util.List;
 import java.util.Set;
@@ -64,30 +64,17 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
     }
 
     /**
-     * Merges this request onto {@link PipelineConfig#defaults()}, tracking included.
+     * Merges this request onto {@link PipelineConfig#defaults()}.
+     *
+     * <p>The tracking component stays the domain's own default here — it is the <b>bottom</b> layer
+     * of the fold, not the answer. What this request states about tracking travels separately as
+     * {@link #trackingPatch()}, and the application layer composes the three layers (request &gt;
+     * deployment seed &gt; this default) when the stream starts, so that every start path seeds
+     * identically (docs/TRACKING-ORCHESTRATION.md §4.1).
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
-        return mergeOntoDefaults(PipelineConfig.defaults().tracking());
-    }
-
-    /**
-     * Merges this request onto {@link PipelineConfig#defaults()}, seeding tracking from the
-     * deployment rather than the domain (docs/TRACKING-ORCHESTRATION.md §4.1/§4.3).
-     *
-     * <p>{@code trackingSeed} is {@code vision.tracking.*} as wired in {@code vision-app}. It seeds
-     * <b>new</b> streams only — nothing here ever reaches into a running stream, whose tracking
-     * configuration is its own state and changes only by {@code PATCH}; restarting a stream is how a
-     * changed deployment default is picked up. {@code vision-domain} keeps pure literals and knows
-     * nothing about it.
-     *
-     * @param trackingSeed the deployment's tracking defaults for new streams; never {@code null}
-     * @return the effective pipeline configuration for the new stream
-     * @throws IllegalArgumentException if the request's {@code tracking} object is invalid, or
-     *                                  carries a {@code lock} (→400)
-     */
-    public PipelineConfig mergeOntoDefaults(TrackingConfig trackingSeed) {
         PipelineConfig defaults = PipelineConfig.defaults();
         double confidence = confidenceThreshold != null ? confidenceThreshold : defaults.confidenceThreshold();
         int fps = inferenceFps != null ? inferenceFps : defaults.inferenceFps();
@@ -97,10 +84,21 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
         Set<String> effectiveLabelFilter = labelFilter != null ? Set.copyOf(labelFilter) : defaults.labelFilter();
         boolean effectiveDetectionEnabled =
                 detectionEnabled != null ? detectionEnabled : defaults.detectionEnabled();
-        TrackingConfig effectiveTracking =
-                tracking != null ? tracking.toStartTrackingConfig(trackingSeed) : trackingSeed;
         return new PipelineConfig(effectiveModel, confidence, fps, defaults.maxInFlightInferences(),
                 defaults.overlayTelemetry(), effectiveLabelFilter, defaults.eventRule(), burnIn,
-                effectiveDetectionEnabled, effectiveTracking);
+                effectiveDetectionEnabled, defaults.tracking());
+    }
+
+    /**
+     * What this request states about tracking, per field (docs/TRACKING-PLAN.md §4.D) — an absent
+     * {@code tracking} object states nothing.
+     *
+     * @return the tracking patch to fold onto the deployment seed; never {@code null}
+     * @throws IllegalArgumentException if the {@code tracking} object is invalid, or carries a
+     *                                  {@code lock} — which names a track that cannot exist before
+     *                                  the stream has produced one (→400)
+     */
+    public TrackingConfigPatch trackingPatch() {
+        return tracking == null ? TrackingConfigPatch.NOTHING : tracking.toStartPatch();
     }
 }

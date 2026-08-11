@@ -28,7 +28,8 @@ import com.drones.vision.application.pipeline.TrackingStats;
 public interface StreamService {
 
     /**
-     * Opens a stream for a device and starts its pipeline.
+     * Opens a stream for a device and starts its pipeline, with the caller stating nothing about
+     * tracking — exactly {@code start(deviceId, config, TrackingConfigPatch.NOTHING)}.
      *
      * @param deviceId the device to pull frames from
      * @param config   pipeline settings for this stream
@@ -37,6 +38,33 @@ public interface StreamService {
      * @throws IllegalStateException            if the device is not in service, or already streaming
      */
     StreamId start(DeviceId deviceId, PipelineConfig config);
+
+    /**
+     * Opens a stream for a device and starts its pipeline, stating the caller's tracking wishes
+     * separately from the rest of the configuration (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
+     *
+     * <p>The new stream's {@link com.drones.vision.domain.model.TrackingConfig} is composed here from
+     * all three configuration layers, precedence running strictly left to right: <b>{@code tracking}
+     * &gt; the deployment seed ({@code vision.tracking.*}, carried on {@link
+     * com.drones.vision.application.pipeline.StreamPipelineSettings#trackingSeed()}) &gt; {@code
+     * config}'s own {@link PipelineConfig#tracking()}</b>, which is the domain's code default. Seeding
+     * in the implementation rather than at each caller is deliberate: the device, asset, simulation
+     * and demo-fleet start paths all converge here, so the deployment default cannot come out
+     * depending on which button an operator pressed.
+     *
+     * @param deviceId the device to pull frames from
+     * @param config   pipeline settings for this stream; its tracking component is the bottom layer
+     *                 of the fold above
+     * @param tracking what this request states about tracking, per field; {@link
+     *                 TrackingConfigPatch#NOTHING} states nothing. Never {@code null}
+     * @return the new stream's id
+     * @throws java.util.NoSuchElementException if no device has that id
+     * @throws IllegalStateException            if the device is not in service, or already streaming
+     * @throws IllegalArgumentException         if the composed tracking configuration fails {@link
+     *                                           com.drones.vision.domain.model.TrackingConfig}'s own
+     *                                           validation
+     */
+    StreamId start(DeviceId deviceId, PipelineConfig config, TrackingConfigPatch tracking);
 
     /**
      * Stops a stream and releases its source. A no-op for an unknown or already-stopped id.

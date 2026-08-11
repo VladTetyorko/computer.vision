@@ -36,6 +36,7 @@ import com.drones.vision.application.device.DeviceService;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.stream.ActiveStream;
 import com.drones.vision.application.stream.StreamService;
+import com.drones.vision.application.stream.TrackingConfigPatch;
 
 /**
  * The one implementation of {@link AssetService}.
@@ -263,7 +264,13 @@ public final class DefaultAssetService implements AssetService {
 
     @Override
     public StreamId startStream(AssetId id, DeviceId device, PipelineConfig config) {
+        return startStream(id, device, config, TrackingConfigPatch.NOTHING);
+    }
+
+    @Override
+    public StreamId startStream(AssetId id, DeviceId device, PipelineConfig config, TrackingConfigPatch tracking) {
         Objects.requireNonNull(config, "config must not be null");
+        Objects.requireNonNull(tracking, "tracking must not be null");
         Asset asset = require(id);
         if (!asset.isActive()) {
             throw new IllegalStateException("Asset is not in service: " + asset.displayName());
@@ -272,7 +279,7 @@ public final class DefaultAssetService implements AssetService {
             throw new IllegalArgumentException(
                     "Device " + device.value() + " does not belong to asset " + id.value());
         }
-        return streamService.start(device != null ? device : resolveSingleVideoDevice(asset), config);
+        return streamService.start(device != null ? device : resolveSingleVideoDevice(asset), config, tracking);
     }
 
     @Override

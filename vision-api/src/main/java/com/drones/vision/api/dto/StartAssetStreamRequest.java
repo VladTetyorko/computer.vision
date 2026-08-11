@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.TrackingConfig;
 
 import java.util.List;
 
@@ -70,25 +70,31 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
 
     /**
      * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()}/{@link
-     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()}/{@link #tracking()} onto {@link
-     * PipelineConfig#defaults()}.
+     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()} onto {@link
+     * PipelineConfig#defaults()}, delegating to {@link StartStreamRequest#mergeOntoDefaults()} so the
+     * two start-stream shapes keep sharing exactly one merge implementation. Tracking travels
+     * separately as {@link #trackingPatch()} — see that method and its device-level twin.
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
-        return mergeOntoDefaults(PipelineConfig.defaults().tracking());
+        return asDeviceLevelRequest().mergeOntoDefaults();
     }
 
     /**
-     * {@link #mergeOntoDefaults()} with the deployment's tracking seed — see {@link
-     * StartStreamRequest#mergeOntoDefaults(TrackingConfig)}, which this delegates to so the two
-     * start-stream shapes keep sharing exactly one merge implementation.
+     * What this request states about tracking, per field — exactly {@link
+     * StartStreamRequest#trackingPatch()}.
      *
-     * @param trackingSeed the deployment's tracking defaults for new streams; never {@code null}
-     * @return the effective pipeline configuration for the new stream
+     * @return the tracking patch to fold onto the deployment seed; never {@code null}
+     * @throws IllegalArgumentException if the {@code tracking} object is invalid, or carries a
+     *                                  {@code lock} (→400)
      */
-    public PipelineConfig mergeOntoDefaults(TrackingConfig trackingSeed) {
+    public TrackingConfigPatch trackingPatch() {
+        return asDeviceLevelRequest().trackingPatch();
+    }
+
+    private StartStreamRequest asDeviceLevelRequest() {
         return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter,
-                detectionEnabled, tracking).mergeOntoDefaults(trackingSeed);
+                detectionEnabled, tracking);
     }
 }

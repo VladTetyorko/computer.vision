@@ -1,7 +1,6 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.application.stream.PipelineConfigPatch;
-import com.drones.vision.domain.model.TrackingConfig;
 
 import java.util.List;
 import java.util.Set;
@@ -57,32 +56,21 @@ public record UpdateStreamConfigRequest(Double confidenceThreshold, Integer infe
     }
 
     /**
-     * Maps this request to the application-level patch, with tracking left untouched.
+     * Maps this request to the application-level patch (docs/TRACKING-PLAN.md §4.D), field for
+     * field: an absent JSON field is a {@code null} the application layer reads as "leave this knob
+     * unchanged", and an absent {@code tracking} object leaves tracking entirely alone.
+     *
+     * <p>Nothing is merged here on purpose. The running configuration is the application layer's
+     * state; this edge cannot read it back, and a controller that reconstructed it from a read model
+     * could only ever restore the fields that happen to be observable — which is exactly how the
+     * cadence knobs used to get reset by an unrelated patch.
      *
      * @return the partial patch to apply
      * @throws IllegalArgumentException if a {@code tracking} object is present but invalid (→400)
      */
     public PipelineConfigPatch toPatch() {
-        return toPatch(TrackingConfig.off());
-    }
-
-    /**
-     * Maps this request to the application-level patch (docs/TRACKING-PLAN.md §4.D).
-     *
-     * <p>{@code trackingBase} is what an <b>absent</b> field inside a present {@code tracking}
-     * object falls back to — see {@link TrackingConfigRequest} for the merge and {@code
-     * StreamController#updateConfig} for how the base is obtained from the running stream. An
-     * absent {@code tracking} object ignores it entirely and leaves the patch's {@code tracking}
-     * {@code null}, which the application layer reads as "leave tracking alone".
-     *
-     * @param trackingBase the running stream's readable tracking state; never {@code null}
-     * @return the partial patch to apply
-     * @throws IllegalArgumentException if a {@code tracking} object is present but invalid (→400)
-     */
-    public PipelineConfigPatch toPatch(TrackingConfig trackingBase) {
         Set<String> filter = labelFilter == null ? null : Set.copyOf(labelFilter);
-        TrackingConfig trackingConfig = tracking == null ? null : tracking.toTrackingConfig(trackingBase);
         return new PipelineConfigPatch(confidenceThreshold, inferenceFps, filter, detectionEnabled, model,
-                trackingConfig);
+                tracking == null ? null : tracking.toPatch());
     }
 }

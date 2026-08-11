@@ -1,7 +1,6 @@
 package com.drones.vision.application.stream;
 
 import com.drones.vision.domain.model.TargetLock;
-import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
 
@@ -64,8 +63,8 @@ class PipelineConfigPatchTest {
     }
 
     @Test
-    void aPresentTrackingConfigIsCarriedThroughVerbatim() {
-        TrackingConfig requested = new TrackingConfig(TrackingMode.FOLLOW, "lk", 2000, 15, 30, 30, 3,
+    void aPresentTrackingPatchIsCarriedThroughVerbatim() {
+        TrackingConfigPatch requested = new TrackingConfigPatch(TrackingMode.FOLLOW, "lk", 2000, 15, 30, 30, 3,
                 new TargetLock(0, 7L, null, null, false));
 
         PipelineConfigPatch patch = new PipelineConfigPatch(null, null, null, null, null, requested);
@@ -73,5 +72,19 @@ class PipelineConfigPatchTest {
         assertEquals(requested, patch.tracking());
         assertEquals(0L, patch.tracking().lock().lockSeq(),
                 "a client leaves lockSeq at 0; DefaultStreamService allocates the real one");
+    }
+
+    @Test
+    void aTrackingPatchStatesOnlyWhatItNamesSoTheRestOfTheRunningConfigSurvives() {
+        // The shape the SPA actually sends: one knob per request.
+        TrackingConfigPatch oneKnob = new TrackingConfigPatch(null, "ncc", null, null, null, null, null, null);
+
+        PipelineConfigPatch patch = new PipelineConfigPatch(null, null, null, null, null, oneKnob);
+
+        assertNull(patch.tracking().mode());
+        assertNull(patch.tracking().verifyEveryMillis());
+        assertNull(patch.tracking().followFps());
+        assertNull(patch.tracking().lock());
+        assertEquals("ncc", patch.tracking().engineId());
     }
 }

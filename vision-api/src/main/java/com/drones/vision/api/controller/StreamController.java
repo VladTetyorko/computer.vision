@@ -10,7 +10,6 @@ import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
 import com.drones.vision.application.pipeline.TrackingStats;
-import com.drones.vision.application.stream.PipelineConfigPatch;
 import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.application.stream.UpdateOutcome;
 import com.drones.vision.domain.model.DetectionQuery;
@@ -18,7 +17,6 @@ import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
 import com.drones.vision.domain.port.out.StreamPublisherPort;
@@ -85,19 +83,10 @@ public class StreamController {
      * this field's previous self-constructed {@code VisionApiProperties.defaults()} stopgap.
      */
     private final SnapshotJpegEncoder snapshotJpegEncoder;
-    /**
-     * The deployment's tracking defaults for <b>new</b> streams ({@code vision.tracking.*}, wired in
-     * {@code vision-app} — docs/TRACKING-ORCHESTRATION.md §4.1/§4.3). A plain domain value rather
-     * than a use-case port, the same "raw collaborator, not a domain port" exception {@code
-     * CvModelsController}'s roster and {@code HlsProxyController}'s upstream {@code URI} already
-     * document: there is no service behind a deployment default. It never reaches a running stream —
-     * only {@link #start} reads it.
-     */
-    private final TrackingConfig trackingSeed;
 
     public StreamController(StreamService streamService, StreamPublisherPort streamPublisherPort,
-                             DetectionRepositoryPort detectionRepositoryPort, SnapshotJpegEncoder snapshotJpegEncoder,
-                             TrackingConfig trackingSeed) {
+                             DetectionRepositoryPort detectionRepositoryPort,
+                             SnapshotJpegEncoder snapshotJpegEncoder) {
         this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
         this.streamPublisherPort =
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
@@ -105,7 +94,6 @@ public class StreamController {
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.snapshotJpegEncoder =
                 Objects.requireNonNull(snapshotJpegEncoder, "snapshotJpegEncoder must not be null");
-        this.trackingSeed = Objects.requireNonNull(trackingSeed, "trackingSeed must not be null");
     }
 
     /**
@@ -113,6 +101,12 @@ public class StreamController {
      * body's fields, if present, override the corresponding defaults from
      * {@link PipelineConfig#defaults()}; everything else comes from the
      * defaults.
+     *
+     * <p>What the body says about {@code tracking} travels as its own patch rather than baked into
+     * the config: the deployment's tracking seed ({@code vision.tracking.*}) is applied inside {@link
+     * StreamService#start(DeviceId, PipelineConfig, com.drones.vision.application.stream.TrackingConfigPatch)},
+     * so this endpoint, asset-level start and the simulation service all seed identically
+     * (docs/TRACKING-ORCHESTRATION.md §4.1).
      *
      * @param deviceId the device to stream from
      * @param request  optional overrides; {@code null}/absent means use every default
@@ -122,9 +116,9 @@ public class StreamController {
     @ResponseStatus(HttpStatus.CREATED)
     public StartStreamResponse start(@PathVariable String deviceId,
                                       @RequestBody(required = false) StartStreamRequest request) {
-        PipelineConfig config =
-                (request == null ? StartStreamRequest.EMPTY : request).mergeOntoDefaults(trackingSeed);
-        StreamId streamId = streamService.start(DeviceId.of(deviceId), config);
+        StartStreamRequest body = request == null ? StartStreamRequest.EMPTY : request;
+        StreamId streamId =
+                streamService.start(DeviceId.of(deviceId), body.mergeOntoDefaults(), body.trackingPatch());
         StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId), whepUrl(streamId));
         LOG.log(System.Logger.Level.INFO, () -> "Started stream " + response.streamId() + " for device " + deviceId
                 + " viewUrl=" + response.viewUrl() + " whepUrl=" + response.whepUrl());
@@ -173,6 +167,13 @@ public class StreamController {
      * exactly this call ({@code {"tracking":{"mode":"FOLLOW","lock":{"trackId":7}}}}) — there is no
      * separate endpoint for it, and a client never sends a {@code lockSeq}.
      *
+     * <p>Every field inside {@code tracking} is independently optional and folds <b>per field</b>
+     * onto the running stream's own configuration in the application layer. This controller passes
+     * the body through and reconstructs nothing: the running configuration is not this module's
+     * state, and the only readback it ever had ({@code StreamService#trackingStats}) could restore
+     * the mode and engine but none of the five cadences — which is precisely how sending {@code
+     * verifyEveryMillis} and then {@code followFps} used to revert the first.
+     *
      * @param streamId the running stream to update, as a canonical UUID string
      * @param request  the knobs to change; the whole body may be absent (a no-op patch)
      * @return the updated stream's id, whether the model was re-armed, and whether tracking changed
@@ -188,45 +189,9 @@ public class StreamController {
                                                      @RequestBody(required = false) UpdateStreamConfigRequest request) {
         UpdateStreamConfigRequest body = request != null ? request : UpdateStreamConfigRequest.EMPTY;
         StreamId id = StreamId.of(streamId);
-        // The base is only read when there is a tracking object to merge onto it — a patch that says
-        // nothing about tracking must not cost a read model lookup.
-        PipelineConfigPatch patch = body.tracking() == null ? body.toPatch() : body.toPatch(trackingBase(id));
-        UpdateOutcome outcome = streamService.updateConfig(id, patch);
+        UpdateOutcome outcome = streamService.updateConfig(id, body.toPatch());
         return new UpdateStreamConfigResponse(id.value().toString(), outcome.modelReArmed(),
                 outcome.trackingChanged());
-    }
-
-    /**
-     * What an <b>absent</b> field inside a present {@code tracking} object falls back to — the
-     * running stream's tracking state, as far as this edge can honestly read it back.
-     *
-     * <p>The application layer's fold ({@code DefaultStreamService#foldTracking}) replaces mode,
-     * engine and every cadence wholesale when a {@code tracking} object is present, while the SPA
-     * sends one knob at a time ({@code {"tracking":{"engineId":"ncc"}}}, {@code
-     * {"tracking":{"lock":{"release":true}}}}). Something has to supply the rest, and the only
-     * readback this module has is {@code StreamService#trackingStats}: the stream's configured
-     * {@link com.drones.vision.application.pipeline.TrackingStats#mode() mode} and the engine
-     * <b>actually serving</b> it. Basing on those is what stops a cadence tweak from silently
-     * switching tracking off, or a lock release from dropping the operator out of {@code FOLLOW}.
-     *
-     * <p><b>The one knob-class this cannot preserve: the cadences.</b> {@code verifyEveryMillis} /
-     * {@code followFps} / {@code redetectIouPercent} / {@code maxAgeFrames} / {@code minHits} have no
-     * readback anywhere on the API surface, so a partial patch resets an operator-customized cadence
-     * to {@link TrackingConfig}'s documented default. Recorded honestly rather than papered over:
-     * the real fix is a per-field fold in the application layer (a nullable-field tracking patch
-     * beside {@code PipelineConfigPatch}), which is vision-application's file scope, not this
-     * wave's. See vision-api/MODULE.md.
-     *
-     * <p>An unknown/stopped stream reads back nothing, so the base is {@link TrackingConfig#off()};
-     * {@code updateConfig} then 404s on its own, as it always did.
-     */
-    private TrackingConfig trackingBase(StreamId streamId) {
-        return streamService.trackingStats(streamId)
-                .map(stats -> new TrackingConfig(stats.mode(), stats.engineId(),
-                        TrackingConfig.DEFAULT_VERIFY_EVERY_MILLIS, TrackingConfig.DEFAULT_FOLLOW_FPS,
-                        TrackingConfig.DEFAULT_REDETECT_IOU_PERCENT, TrackingConfig.DEFAULT_MAX_AGE_FRAMES,
-                        TrackingConfig.DEFAULT_MIN_HITS, null))
-                .orElseGet(TrackingConfig::off);
     }
 
     /**

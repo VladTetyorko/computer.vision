@@ -1,35 +1,33 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.TrackingMode;
 
 import java.util.Arrays;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
  * The {@code tracking} object accepted by {@code PATCH /api/streams/{streamId}/config} and by both
  * start-stream request bodies (docs/TRACKING-PLAN.md &sect;4.D's frozen wire contract).
  *
- * <p>Every field is independently optional and <b>merges onto a base</b> ({@link
- * #toTrackingConfig(TrackingConfig)}): an absent field keeps the base's value. Which base is used
- * depends on the call:
+ * <p>Every field is independently optional, and this record maps <b>one-for-one</b> onto the
+ * application layer's {@link TrackingConfigPatch}: a JSON field that is absent becomes {@code null},
+ * which means "leave this knob unchanged". <b>Nothing is merged here</b> — this edge does not know
+ * what a running stream is configured with, and the layer that does folds each field itself:
  *
  * <ul>
- *   <li><b>On a start request</b> — the deployment seed ({@code vision.tracking.*}, wired in
- *       vision-app), so a new stream starts on the deployment's defaults with whatever the client
- *       stated on top. {@link #toStartTrackingConfig(TrackingConfig)} additionally <b>rejects</b> a
- *       {@code lock}: a lock names a track that cannot exist before the stream produces one
+ *   <li><b>On a start request</b> ({@link #toStartPatch()}) the patch is folded onto the deployment
+ *       seed ({@code vision.tracking.*}) and then the domain's defaults, so a new stream starts on
+ *       the deployment's values with whatever the client stated on top. A {@code lock} is
+ *       <b>rejected</b> outright: it names a track that cannot exist before the stream produces one
  *       (&sect;4.D).</li>
- *   <li><b>On a PATCH</b> — the tracking state the server can actually read back for the running
- *       stream (its mode and the engine actually serving it, from {@code
- *       StreamService#trackingStats}); see {@code StreamController#updateConfig} for the one
- *       knob-class this cannot preserve and why.</li>
+ *   <li><b>On a PATCH</b> ({@link #toPatch()}) the patch is folded onto the stream's own running
+ *       configuration, so an unmentioned knob keeps the value the operator gave it.</li>
  * </ul>
  *
- * <p>{@code lock} is the one field whose absence never means "keep the base's" — it maps to {@code
- * null}, which the application layer reads as "leave whatever lock the stream is holding alone"
- * ({@code PipelineConfigPatch#tracking()}'s own javadoc). Dropping a lock is the explicit {@code
+ * <p>{@code lock}'s absence never means "release" — it means "leave whatever lock the stream is
+ * holding alone" ({@link TrackingConfigPatch}'s own javadoc). Dropping a lock is the explicit {@code
  * release} form, never an omission.
  *
  * <p>{@code redetectIouPercent} is an {@code int} percent [0,100], not a fraction — mirroring the
@@ -55,43 +53,32 @@ public record TrackingConfigRequest(String mode, String engineId, Integer verify
                                      TargetLockRequest lock) {
 
     /**
-     * Merges this request's present fields onto {@code base}.
+     * Maps this request to the application-level tracking patch, field for field.
      *
-     * @param base the configuration an absent field falls back to; never {@code null}
-     * @return the requested tracking configuration
-     * @throws IllegalArgumentException if {@code mode} is not a known mode, the lock is not exactly
-     *                                  one of its three forms, or a merged value fails {@link
-     *                                  TrackingConfig}'s own validation (&rarr; 400)
+     * @return what this request states about tracking; absent fields stay {@code null}
+     * @throws IllegalArgumentException if {@code mode} is not a known mode, or the lock is not
+     *                                  exactly one of its three forms (&rarr; 400)
      */
-    public TrackingConfig toTrackingConfig(TrackingConfig base) {
-        Objects.requireNonNull(base, "base must not be null");
-        return new TrackingConfig(
-                mode == null ? base.mode() : parseMode(mode),
-                engineId == null ? base.engineId() : engineId,
-                verifyEveryMillis == null ? base.verifyEveryMillis() : verifyEveryMillis,
-                followFps == null ? base.followFps() : followFps,
-                redetectIouPercent == null ? base.redetectIouPercent() : redetectIouPercent,
-                maxAgeFrames == null ? base.maxAgeFrames() : maxAgeFrames,
-                minHits == null ? base.minHits() : minHits,
-                lock == null ? null : lock.toTargetLock());
+    public TrackingConfigPatch toPatch() {
+        return new TrackingConfigPatch(mode == null ? null : parseMode(mode), engineId, verifyEveryMillis, followFps,
+                redetectIouPercent, maxAgeFrames, minHits, lock == null ? null : lock.toTargetLock());
     }
 
     /**
-     * {@link #toTrackingConfig(TrackingConfig)} for a stream that does not exist yet: identical,
-     * except a {@code lock} is refused rather than silently ignored (docs/TRACKING-PLAN.md
-     * &sect;4.D — the start bodies carry "the same shape minus {@code lock}").
+     * {@link #toPatch()} for a stream that does not exist yet: identical, except a {@code lock} is
+     * refused rather than silently ignored (docs/TRACKING-PLAN.md &sect;4.D — the start bodies carry
+     * "the same shape minus {@code lock}").
      *
-     * @param base the deployment seed an absent field falls back to; never {@code null}
-     * @return the new stream's tracking configuration
+     * @return what this start request states about tracking
      * @throws IllegalArgumentException if a {@code lock} is present (&rarr; 400), plus every case
-     *                                  {@link #toTrackingConfig(TrackingConfig)} throws for
+     *                                  {@link #toPatch()} throws for
      */
-    public TrackingConfig toStartTrackingConfig(TrackingConfig base) {
+    public TrackingConfigPatch toStartPatch() {
         if (lock != null) {
             throw new IllegalArgumentException(
                     "tracking.lock cannot be set when starting a stream: it names a track that does not exist yet");
         }
-        return toTrackingConfig(base);
+        return toPatch();
     }
 
     /**

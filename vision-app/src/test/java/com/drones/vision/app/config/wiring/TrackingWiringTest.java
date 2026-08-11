@@ -4,6 +4,8 @@ import com.drones.vision.api.dto.CvTrackerResponse;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionTrackingProperties;
 import com.drones.vision.application.pipeline.StreamPipelineSettings;
+import com.drones.vision.application.stream.TrackingConfigPatch;
+import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
@@ -42,34 +44,48 @@ class TrackingWiringTest {
 
     @Test
     void defaultPropertiesSeedNewStreamsWithTrackingOffExactlyAsBeforeTrackingExisted() {
-        TrackingConfig seed = new TrackingWiring().streamStartTrackingDefaults(defaults());
+        TrackingConfigPatch seed = TrackingWiring.streamStartTrackingSeed(defaults());
 
-        assertEquals(TrackingConfig.off(), seed, "the shipped default must leave stream starts unchanged");
+        assertEquals(TrackingConfig.off(), seed.foldOnto(TrackingConfig.off(), () -> 1L),
+                "the shipped default must leave stream starts unchanged");
     }
 
     @Test
-    void deploymentPropertiesSeedTheModeAndTheTwoCadencesTheyOwn() {
-        TrackingConfig seed = new TrackingWiring().streamStartTrackingDefaults(properties("associate", 20, 1500,
-                30, 5));
+    void deploymentPropertiesSeedTheModeAndTheTwoCadencesTheyOwnAndNothingElse() {
+        TrackingConfigPatch seed = TrackingWiring.streamStartTrackingSeed(properties("associate", 20, 1500, 30, 5));
 
         assertEquals(TrackingMode.ASSOCIATE, seed.mode(), "the mode is matched case-insensitively");
         assertEquals(20, seed.followFps());
         assertEquals(1500, seed.verifyEveryMillis());
-        assertEquals("", seed.engineId(), "the engine is cv-service's choice, not a Java-side default");
-        assertEquals(TrackingConfig.DEFAULT_REDETECT_IOU_PERCENT, seed.redetectIouPercent(),
-                "the cv-service-owned knobs keep the domain defaults -- one number, one owner");
-        assertEquals(TrackingConfig.DEFAULT_MAX_AGE_FRAMES, seed.maxAgeFrames());
-        assertEquals(TrackingConfig.DEFAULT_MIN_HITS, seed.minHits());
+        assertNull(seed.engineId(), "the engine is cv-service's choice, not a Java-side default");
+        assertNull(seed.redetectIouPercent(),
+                "a knob with no property stays unstated, so the domain's own literal wins -- one number, one owner");
+        assertNull(seed.maxAgeFrames());
+        assertNull(seed.minHits());
         assertNull(seed.lock(), "a seed never carries a lock -- no stream exists yet to lock onto");
     }
 
     @Test
+    void theSeedFoldsOntoTheDomainDefaultsForEveryKnobItDoesNotState() {
+        TrackingConfigPatch seed = TrackingWiring.streamStartTrackingSeed(properties("associate", 20, 1500, 30, 5));
+
+        TrackingConfig folded = seed.foldOnto(TrackingConfig.off(), () -> 1L);
+
+        assertEquals(TrackingMode.ASSOCIATE, folded.mode());
+        assertEquals(1500, folded.verifyEveryMillis());
+        assertEquals(20, folded.followFps());
+        assertEquals("", folded.engineId());
+        assertEquals(TrackingConfig.DEFAULT_REDETECT_IOU_PERCENT, folded.redetectIouPercent());
+        assertEquals(TrackingConfig.DEFAULT_MAX_AGE_FRAMES, folded.maxAgeFrames());
+        assertEquals(TrackingConfig.DEFAULT_MIN_HITS, folded.minHits());
+    }
+
+    @Test
     void anUnknownDefaultModeFailsAtStartupRatherThanPerRequest() {
-        TrackingWiring wiring = new TrackingWiring();
         VisionTrackingProperties bad = properties("CHASE", 15, 2000, 30, 5);
 
         IllegalArgumentException thrown =
-                assertThrows(IllegalArgumentException.class, () -> wiring.streamStartTrackingDefaults(bad));
+                assertThrows(IllegalArgumentException.class, () -> TrackingWiring.streamStartTrackingSeed(bad));
         assertTrue(thrown.getMessage().contains("ASSOCIATE"), "the message lists the valid modes");
     }
 
@@ -98,6 +114,29 @@ class TrackingWiringTest {
 
         assertEquals(StreamPipelineSettings.defaults().trackingStatsWindow(), mapped.trackingStatsWindow());
         assertEquals(StreamPipelineSettings.defaults().trackRetention(), mapped.trackRetention());
+    }
+
+    @Test
+    void theStreamStartSeedBindsIntoStreamPipelineSettingsSoEveryStartPathSeesIt() {
+        // The one binding that matters for docs/TRACKING-ORCHESTRATION.md §4.1: the seed reaches
+        // DefaultStreamService, which every start path -- device, asset, simulation, demo fleet --
+        // goes through, instead of only the two REST endpoints that used to be injected with it.
+        StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
+                new VisionApplicationProperties(200L, null, null, null, null, null, null, null),
+                properties("FOLLOW", 20, 1500, 30, 5));
+
+        assertEquals(TrackingMode.FOLLOW, mapped.trackingSeed().mode());
+        assertEquals(1500, mapped.trackingSeed().verifyEveryMillis());
+        assertEquals(20, mapped.trackingSeed().followFps());
+    }
+
+    @Test
+    void theDefaultSeedLeavesStreamStartsByteIdenticalToBeforeTrackingExisted() {
+        StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
+                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults());
+
+        assertEquals(PipelineConfig.defaults().tracking(),
+                mapped.trackingSeed().foldOnto(PipelineConfig.defaults().tracking(), () -> 1L));
     }
 
     @Test

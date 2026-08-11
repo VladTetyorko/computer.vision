@@ -4,6 +4,7 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.pipeline.TrackingStats;
 import com.drones.vision.application.stream.ActiveStream;
 import com.drones.vision.application.stream.PipelineConfigPatch;
+import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.application.exception.UnsupportedProtocolException;
 import com.drones.vision.application.stream.UpdateOutcome;
@@ -88,7 +89,7 @@ class StreamControllerTest {
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
-                        new SnapshotJpegEncoder(VisionApiProperties.defaults()), TrackingConfig.off()))
+                        new SnapshotJpegEncoder(VisionApiProperties.defaults())))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -102,7 +103,7 @@ class StreamControllerTest {
     @Test
     void startReturns201WithStreamIdAndViewUrlWhenPublisherHasOne() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId))
                 .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
 
@@ -116,7 +117,7 @@ class StreamControllerTest {
     @Test
     void startOmitsViewUrlWhenPublisherHasNone() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
@@ -130,7 +131,7 @@ class StreamControllerTest {
     @Test
     void startReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId))
                 .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
         when(streamPublisherPort.whepUrl(streamId))
@@ -148,7 +149,7 @@ class StreamControllerTest {
     @Test
     void startOmitsWhepUrlWhenPublisherHasNoWebRtcEndpoint() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId))
                 .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
         when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
@@ -163,21 +164,21 @@ class StreamControllerTest {
     @Test
     void startUsesPipelineConfigDefaultsWhenBodyAbsent() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertEquals(PipelineConfig.defaults(), captor.getValue());
     }
 
     @Test
     void startMergesRequestOverridesOntoDefaults() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -189,7 +190,7 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         PipelineConfig defaults = PipelineConfig.defaults();
         PipelineConfig config = captor.getValue();
         assertEquals(0.75, config.confidenceThreshold());
@@ -203,7 +204,7 @@ class StreamControllerTest {
     @Test
     void startMergesPartialOverrideKeepingOtherDefault() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -215,7 +216,7 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         PipelineConfig defaults = PipelineConfig.defaults();
         PipelineConfig config = captor.getValue();
         assertEquals(defaults.confidenceThreshold(), config.confidenceThreshold());
@@ -227,7 +228,7 @@ class StreamControllerTest {
         // docs/MVP2-PLAN.md §V, V-e: overlayBurnIn is per-stream settable exactly like
         // confidenceThreshold/inferenceFps above.
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -239,7 +240,7 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         PipelineConfig defaults = PipelineConfig.defaults();
         PipelineConfig config = captor.getValue();
         assertFalse(config.overlayBurnIn());
@@ -253,7 +254,7 @@ class StreamControllerTest {
         // comma-composite ("yolo11n.pt,orion12l.pt") cv-service's own registry parses
         // server-side; this DTO/PipelineConfig must carry it through verbatim, unsplit.
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -265,7 +266,7 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         PipelineConfig defaults = PipelineConfig.defaults();
         PipelineConfig config = captor.getValue();
         assertEquals("yolo11n.pt,orion12l.pt", config.model().id());
@@ -277,7 +278,7 @@ class StreamControllerTest {
     @Test
     void startWithoutModelKeepsTheDefaultModel() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -289,14 +290,14 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertEquals(PipelineConfig.defaults().model(), captor.getValue().model());
     }
 
     @Test
     void startTreatsABlankModelAsAbsent() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -308,7 +309,7 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertEquals(PipelineConfig.defaults().model(), captor.getValue().model());
     }
 
@@ -317,7 +318,7 @@ class StreamControllerTest {
     @Test
     void startMergesLabelFilterOverrideOntoDefaults() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -329,28 +330,28 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertEquals(Set.of("person", "car"), captor.getValue().labelFilter());
     }
 
     @Test
     void startWithoutLabelFilterKeepsTheDefaultEmptySet() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertEquals(PipelineConfig.defaults().labelFilter(), captor.getValue().labelFilter());
     }
 
     @Test
     void startMergesDetectionEnabledFalseOverrideOntoDefaults() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = """
@@ -362,27 +363,27 @@ class StreamControllerTest {
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertFalse(captor.getValue().detectionEnabled());
     }
 
     @Test
     void startWithoutDetectionEnabledKeepsTheDefaultTrue() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.start(any(), any())).thenReturn(streamId);
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
                 .andExpect(status().isCreated());
 
         ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
+        verify(streamService).start(eq(deviceId), captor.capture(), any());
         assertTrue(captor.getValue().detectionEnabled());
     }
 
     @Test
     void startReturns404WhenDeviceIsUnknown() throws Exception {
-        when(streamService.start(any(), any()))
+        when(streamService.start(any(), any(), any()))
                 .thenThrow(new NoSuchElementException("Unknown device: " + deviceId.value()));
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
@@ -392,7 +393,7 @@ class StreamControllerTest {
 
     @Test
     void startReturns409WhenDeviceAlreadyStreaming() throws Exception {
-        when(streamService.start(any(), any()))
+        when(streamService.start(any(), any(), any()))
                 .thenThrow(new IllegalStateException("Device already has an active stream: " + deviceId.value()));
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
@@ -402,7 +403,7 @@ class StreamControllerTest {
 
     @Test
     void startReturns400ForUnsupportedProtocol() throws Exception {
-        when(streamService.start(any(), any())).thenThrow(new UnsupportedProtocolException("mjpeg"));
+        when(streamService.start(any(), any(), any())).thenThrow(new UnsupportedProtocolException("mjpeg"));
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
                 .andExpect(status().isBadRequest())
@@ -767,7 +768,7 @@ class StreamControllerTest {
 
         ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
         verify(streamService).updateConfig(eq(streamId), captor.capture());
-        TrackingConfig tracking = captor.getValue().tracking();
+        TrackingConfigPatch tracking = captor.getValue().tracking();
         assertEquals(TrackingMode.FOLLOW, tracking.mode());
         assertEquals("lk", tracking.engineId());
         assertEquals(1500, tracking.verifyEveryMillis());
@@ -847,14 +848,12 @@ class StreamControllerTest {
     }
 
     @Test
-    void updateConfigMergesAPartialTrackingObjectOntoTheRunningStreamsReadableState() throws Exception {
-        // The SPA sends one knob at a time ({"tracking":{"engineId":"ncc"}}), while the application
-        // layer replaces mode/engine/cadences wholesale -- so an absent field falls back to what this
-        // edge can actually read back: the configured mode and the engine actually serving.
+    void updateConfigPassesAPartialTrackingObjectThroughAsAPartialPatchAndReconstructsNothing() throws Exception {
+        // The SPA sends one knob at a time ({"tracking":{"verifyEveryMillis":5000}}). Everything this
+        // edge does not carry stays null -- "leave that knob alone" -- and the fold onto the running
+        // configuration happens in the application layer, which is the only place that holds it. This
+        // controller reading state back off trackingStats is precisely what dropped the cadences.
         StreamId streamId = StreamId.random();
-        when(streamService.trackingStats(streamId)).thenReturn(Optional.of(
-                new TrackingStats(TrackingMode.FOLLOW, "lk", Duration.ofSeconds(30), 12, 348, 0.034, 0.4, 0.9,
-                        DetectorReason.CADENCE, 7L, Map.of())));
         when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false, true));
 
         mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
@@ -864,68 +863,68 @@ class StreamControllerTest {
 
         ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
         verify(streamService).updateConfig(eq(streamId), captor.capture());
-        TrackingConfig tracking = captor.getValue().tracking();
-        assertEquals(TrackingMode.FOLLOW, tracking.mode(), "a cadence tweak must not switch tracking off");
-        assertEquals("lk", tracking.engineId(), "a cadence tweak must not reset the engine to the server default");
+        TrackingConfigPatch tracking = captor.getValue().tracking();
         assertEquals(5000, tracking.verifyEveryMillis());
+        assertNull(tracking.mode(), "a cadence tweak states nothing about the mode");
+        assertNull(tracking.engineId(), "a cadence tweak states nothing about the engine");
+        assertNull(tracking.followFps(), "the other cadence sliders are untouched, not restated");
+        assertNull(tracking.redetectIouPercent());
+        assertNull(tracking.maxAgeFrames());
+        assertNull(tracking.minHits());
         assertNull(tracking.lock(), "an absent lock leaves whatever the stream is holding alone");
+        verify(streamService, never()).trackingStats(any());
     }
 
     @Test
-    void updateConfigFallsBackToOffWhenTheStreamHasNoReadableTrackingState() throws Exception {
+    void updateConfigNeverReadsTheStreamBackToFillInAbsentTrackingFields() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.trackingStats(streamId)).thenReturn(Optional.empty());
         when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false, true));
 
         mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tracking\":{\"mode\":\"ASSOCIATE\"}}"))
+                        .content("{\"tracking\":{\"engineId\":\"ncc\"}}"))
                 .andExpect(status().isOk());
 
         ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
         verify(streamService).updateConfig(eq(streamId), captor.capture());
-        assertEquals(TrackingMode.ASSOCIATE, captor.getValue().tracking().mode());
-        assertEquals(TrackingConfig.DEFAULT_VERIFY_EVERY_MILLIS, captor.getValue().tracking().verifyEveryMillis());
+        assertEquals(new TrackingConfigPatch(null, "ncc", null, null, null, null, null, null),
+                captor.getValue().tracking());
+        verify(streamService, never()).trackingStats(any());
     }
 
     // ---- docs/TRACKING-PLAN.md §4.D: the `tracking` object on POST /api/devices/{id}/stream ----
 
     @Test
-    void startSeedsTrackingFromTheDeploymentDefaultsWhenTheRequestSaysNothing() throws Exception {
-        // The controller under test here is wired with a non-default seed, exactly as vision-app's
-        // TrackingWiring#streamStartTrackingDefaults would when vision.tracking.default-mode is set.
-        TrackingConfig seed = new TrackingConfig(TrackingMode.ASSOCIATE, "", 2500, 20, 30, 30, 3, null);
-        MockMvc seeded = MockMvcBuilders
-                .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
-                        new SnapshotJpegEncoder(VisionApiProperties.defaults()), seed))
-                .setControllerAdvice(new ApiExceptionHandler())
-                .build();
-        when(streamService.start(eq(deviceId), any())).thenReturn(StreamId.random());
+    void startStatesNothingAboutTrackingWhenTheRequestDoesNot() throws Exception {
+        // The deployment seed is applied inside the application layer (one place, every start path),
+        // so this edge hands over the code default plus an empty patch and nothing else.
+        when(streamService.start(eq(deviceId), any(), any())).thenReturn(StreamId.random());
 
-        seeded.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
+        mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
                         .contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isCreated());
 
-        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
-        assertEquals(seed, captor.getValue().tracking());
+        ArgumentCaptor<PipelineConfig> config = ArgumentCaptor.forClass(PipelineConfig.class);
+        ArgumentCaptor<TrackingConfigPatch> tracking = ArgumentCaptor.forClass(TrackingConfigPatch.class);
+        verify(streamService).start(eq(deviceId), config.capture(), tracking.capture());
+        assertEquals(PipelineConfig.defaults().tracking(), config.getValue().tracking());
+        assertEquals(TrackingConfigPatch.NOTHING, tracking.getValue());
     }
 
     @Test
-    void startMergesTheRequestsTrackingObjectOntoTheDeploymentSeed() throws Exception {
-        when(streamService.start(eq(deviceId), any())).thenReturn(StreamId.random());
+    void startPassesTheRequestsTrackingObjectAsAPatchForTheSeedToFoldUnder() throws Exception {
+        when(streamService.start(eq(deviceId), any(), any())).thenReturn(StreamId.random());
 
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tracking\":{\"mode\":\"ASSOCIATE\",\"engineId\":\"bytetrack\"}}"))
                 .andExpect(status().isCreated());
 
-        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
-        verify(streamService).start(eq(deviceId), captor.capture());
-        TrackingConfig tracking = captor.getValue().tracking();
-        assertEquals(TrackingMode.ASSOCIATE, tracking.mode());
-        assertEquals("bytetrack", tracking.engineId());
-        assertEquals(TrackingConfig.DEFAULT_FOLLOW_FPS, tracking.followFps(), "absent fields keep the seed's values");
+        ArgumentCaptor<TrackingConfigPatch> captor = ArgumentCaptor.forClass(TrackingConfigPatch.class);
+        verify(streamService).start(eq(deviceId), any(), captor.capture());
+        assertEquals(TrackingMode.ASSOCIATE, captor.getValue().mode());
+        assertEquals("bytetrack", captor.getValue().engineId());
+        assertNull(captor.getValue().followFps(), "what the request leaves unsaid comes from the deployment seed");
     }
 
     @Test
@@ -936,7 +935,7 @@ class StreamControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
 
-        verify(streamService, never()).start(any(), any());
+        verify(streamService, never()).start(any(), any(), any());
     }
 
     // ---- docs/TRACKING-PLAN.md §4.E: GET /api/streams/{streamId}/tracks ----

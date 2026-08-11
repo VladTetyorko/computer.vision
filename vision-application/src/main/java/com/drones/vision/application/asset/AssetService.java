@@ -12,6 +12,7 @@ import com.drones.vision.domain.model.UserId;
 import java.util.List;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.stream.StreamService;
+import com.drones.vision.application.stream.TrackingConfigPatch;
 
 /**
  * Everything the application does with assets — the user-facing "my drone", one or more devices
@@ -147,7 +148,8 @@ public interface AssetService {
     AssetDeletion delete(AssetId id, UserId actor);
 
     /**
-     * Starts streaming from one of the asset's devices.
+     * Starts streaming from one of the asset's devices, with the caller stating nothing about
+     * tracking — exactly {@code startStream(id, device, config, TrackingConfigPatch.NOTHING)}.
      *
      * @param id     the asset to stream
      * @param device which device to use, or {@code null} to resolve the asset's only active
@@ -160,6 +162,25 @@ public interface AssetService {
      * @throws IllegalStateException            if the asset is not in service
      */
     StreamId startStream(AssetId id, DeviceId device, PipelineConfig config);
+
+    /**
+     * Starts streaming from one of the asset's devices, stating the caller's tracking wishes
+     * separately — the asset-level twin of {@link StreamService#start(DeviceId, PipelineConfig,
+     * TrackingConfigPatch)}, whose javadoc describes how the three configuration layers fold.
+     *
+     * @param id       the asset to stream
+     * @param device   which device to use, or {@code null} to resolve the asset's only active
+     *                 video-capable source
+     * @param config   pipeline settings for this stream
+     * @param tracking what this request states about tracking, per field; never {@code null}
+     * @return the new stream's id
+     * @throws java.util.NoSuchElementException if no asset has that id
+     * @throws IllegalArgumentException         if the device does not belong to the asset, which
+     *                                          device to use is ambiguous, or the composed tracking
+     *                                          configuration is invalid
+     * @throws IllegalStateException            if the asset is not in service
+     */
+    StreamId startStream(AssetId id, DeviceId device, PipelineConfig config, TrackingConfigPatch tracking);
 
     /**
      * Stops every stream this asset's devices are running. A no-op for an unknown asset.
