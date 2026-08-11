@@ -7,7 +7,7 @@ import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import java.util.List;
 
 /**
- * Lists finished (and still-open) {@link com.drones.vision.flight.domain.model.AssetUsage}s as
+ * Lists finished (and still-open) {@link com.drones.vision.warehouse.domain.model.AssetUsage}s as
  * display-ready rows — the read side behind {@code GET /api/usages}, the "replay library"
  * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md). {@link
  * com.drones.vision.events.application.ReplayService} (sibling package) is the detail view over

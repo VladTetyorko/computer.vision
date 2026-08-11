@@ -1,12 +1,18 @@
-package com.drones.vision.flight.domain.model;
+package com.drones.vision.kernel;
 
-import com.drones.vision.kernel.DeviceId;
 import java.time.Instant;
 import java.util.Map;
 
 /**
  * A telemetry sample from a device: position, attitude, battery state, and (docs/plans/done/FC-INTEGRATIONS-PLAN.md
  * F-a) flight-controller-reported state.
+ *
+ * <p><b>Kernel, not flight-owned</b> (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6c): a pure
+ * record naming only {@link DeviceId} (already kernel) and {@link FlightState}, with no ports and no
+ * aggregate references — the same standing as {@link GeoPosition}/{@link BoundingBox}. Five contexts
+ * read it (flight, perception's OSD, warehouse's stats, events' replay, map), which is precisely why
+ * it belongs where every context can already see it rather than behind a flight-owned wall. Revisit
+ * if W2's wire DTOs make per-context divergence real (docs/plans/active/DOMAIN-SEPARATION-PLAN.md §9).
  *
  * <p>All value fields except {@code deviceId} and {@code at} are nullable —
  * not every device reports every field (e.g. a fixed IP camera has no GPS),

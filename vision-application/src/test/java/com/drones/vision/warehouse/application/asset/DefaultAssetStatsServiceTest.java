@@ -1,11 +1,11 @@
 package com.drones.vision.warehouse.application.asset;
 
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
-import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

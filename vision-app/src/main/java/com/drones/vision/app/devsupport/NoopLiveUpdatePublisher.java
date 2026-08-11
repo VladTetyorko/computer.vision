@@ -8,7 +8,7 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.map.domain.port.MapLiveUpdatePort;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 

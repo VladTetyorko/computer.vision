@@ -22,7 +22,7 @@ import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.platform.Event;
 import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.kernel.StreamId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.platform.EventLiveUpdatePort;

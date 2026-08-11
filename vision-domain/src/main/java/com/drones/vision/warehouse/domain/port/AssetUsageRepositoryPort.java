@@ -1,7 +1,7 @@
-package com.drones.vision.flight.domain.port;
+package com.drones.vision.warehouse.domain.port;
 
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.UsageId;
 
 import java.util.List;

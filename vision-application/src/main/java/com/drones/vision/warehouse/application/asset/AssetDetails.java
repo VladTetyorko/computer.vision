@@ -1,6 +1,6 @@
 package com.drones.vision.warehouse.application.asset;
 
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.Device;
 
 import java.util.List;

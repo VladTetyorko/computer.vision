@@ -1,8 +1,8 @@
 package com.drones.vision.events.application;
 
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.perception.domain.model.DetectionResult;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 
 import java.time.Instant;
 import java.util.List;

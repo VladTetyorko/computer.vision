@@ -1,6 +1,5 @@
-package com.drones.vision.flight.domain.model;
+package com.drones.vision.kernel;
 
-import com.drones.vision.kernel.DeviceId;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;

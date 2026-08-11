@@ -16,7 +16,7 @@ import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TargetLock;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.VideoFrame;

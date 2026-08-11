@@ -6,7 +6,7 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.flight.domain.model.GeofenceZone;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
 import com.drones.vision.platform.EventPublisherPort;

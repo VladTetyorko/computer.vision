@@ -1,4 +1,4 @@
-package com.drones.vision.flight.domain.model;
+package com.drones.vision.warehouse.domain.model;
 
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GeoPosition;

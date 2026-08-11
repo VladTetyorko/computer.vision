@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.flight.domain.model.FlightState;
+import com.drones.vision.kernel.FlightState;
 
 import io.dronefleet.mavlink.common.GpsRawInt;
 import io.dronefleet.mavlink.minimal.Heartbeat;

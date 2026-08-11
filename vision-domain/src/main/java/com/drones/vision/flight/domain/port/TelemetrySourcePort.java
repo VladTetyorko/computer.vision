@@ -2,7 +2,7 @@ package com.drones.vision.flight.domain.port;
 
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 
 import java.util.concurrent.Flow;
 

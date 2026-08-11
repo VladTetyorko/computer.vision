@@ -13,7 +13,7 @@ section below).
 **Package shape:**
 
 ```
-com.drones.vision.kernel                    — shared kernel, 15 types, no aggregates
+com.drones.vision.kernel                    — shared kernel, 17 types, no aggregates
 com.drones.vision.platform                  — cross-cutting seams every context writes to, 10 types
 com.drones.vision.<context>.domain.model    — records/enums owned by that context
 com.drones.vision.<context>.domain.port     — that context's driven ports ("`.out`" suffix dropped)
@@ -40,27 +40,36 @@ implementations. See `.claude/skills/java-clean-code/SKILL.md`.
 
 | Context | Package root | Owns | Model | Port |
 |---|---|---|---|---|
-| *(kernel)* | `com.drones.vision.kernel` | ids + pure value objects every context may depend on — no aggregates, no behavior beyond `GeoProjection`'s pure math | 15 | — |
+| *(kernel)* | `com.drones.vision.kernel` | ids + pure value objects every context may depend on — no aggregates, no behavior beyond `GeoProjection`'s pure math | 17 | — |
 | *(platform)* | `com.drones.vision.platform` | cross-cutting seams every context writes to — events, audit trail, visibility scope, and (W1.6b) the one live-update port every context raises an `Event` through | 8 | 3 |
-| warehouse | `com.drones.vision.warehouse.domain` | asset/device inventory, categories, discovered devices | 5 | 6 |
+| warehouse | `com.drones.vision.warehouse.domain` | asset/device inventory, categories, discovered devices, asset usage (W1.6c) | 6 | 7 |
 | identity | `com.drones.vision.identity.domain` | users, groups, roles | 4 | 4 |
 | perception | `com.drones.vision.perception.domain` | video pipeline config, detection, tracking, feeds, debounced detection events (W1.6b) | 23 | 9 |
-| flight | `com.drones.vision.flight.domain` | telemetry, flight state, RC relay, geofencing, asset usage | 11 | 8 |
+| flight | `com.drones.vision.flight.domain` | telemetry, flight state, RC relay, geofencing | 8 | 7 |
 | map | `com.drones.vision.map.domain` | tactical marks, drawings, layers, verification (Common Operational Picture) | 16 | 4 |
 | learning | `com.drones.vision.learning.domain` | datasets, training samples, training jobs | 13 | 6 |
 | events | `com.drones.vision.events.domain` | replay frame extraction — the platform's pure downstream reader (W1.6b): it reads flight/perception history for replay, nothing reads back into it | 0 | 1 |
-| **total** | | | **80** | **41** |
+| **total** | | | **78** | **41** |
 
-80 + 41 + 15 (kernel) = **136 types** (was 132 before W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md
-§15: the god-port `LiveUpdatePublisherPort` (events) was **deleted**, replaced by five per-context
+78 + 41 + 17 (kernel) = **136 types**, unchanged by W1.6c since it only relocates existing types:
+`Telemetry`/`FlightState` (flight → kernel, both pure records with no ports and no aggregate
+references — the same standing as `GeoPosition`/`BoundingBox`) and `AssetUsage`/
+`AssetUsageRepositoryPort` (flight → warehouse, C9 — the record's four readers were already
+warehouse's) — see docs/plans/active/DOMAIN-SEPARATION-W1.md §15's W1.6c section for why. Before
+W1.6c the split was 80 + 41 + 15 (kernel), itself 132 before W1.6b (see below), so this wave moved
+2 types (Model) out of the context sum into the kernel and 2 types (1 Model, 1 Port) between two
+context rows without changing either total.
+
+`events` itself drops from 7 types (3 models + 4 ports) to 1 (0 models + 1 port,
+`ReplayFrameExtractionPort`) since W1.6b — see its own row above for why it still isn't zero) after
+the god-port `LiveUpdatePublisherPort` (events) was **deleted**, replaced by five per-context
 ports — `FleetLiveUpdatePort` (warehouse), `TelemetryLiveUpdatePort` (flight), `DetectionLiveUpdatePort`
 (perception), `MapLiveUpdatePort` (map), `EventLiveUpdatePort` (platform) — a net +4 ports; separately,
 `DetectionRepositoryPort`/`DetectionEvent`/`DetectionEventId`/`DetectionEventState`/
 `DetectionEventRepositoryPort` moved events → perception (3 models + 2 ports, filed by consumer not
 owner before this wave) — a wash for the model/port totals since they simply changed context, not
-count. `events` itself drops from 7 types (3 models + 4 ports) to 1 (0 models + 1 port,
-`ReplayFrameExtractionPort`) — see its own row above for why it still isn't zero).
-docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a/W1.6b moves.
+count.
+docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a/W1.6b/W1.6c moves.
 `simulation` is one of the eight bounded contexts at the *application* layer
 (`ContextArchitectureTest`'s `CONTEXTS` set) but owns no domain types of its own — it only consumes
 perception's and warehouse's ports — so it has no package under this module.
@@ -140,20 +149,23 @@ dependencies, not javadoc, and acyclic:
 | `events → perception` | `ReplayFrameExtractionPort` | `VideoFrame` |
 | `flight → warehouse` | `ManualControlPort`, `ManualControlLink`, `FlightCommandPort`, `TelemetrySourcePort` | a whole `Device` |
 | `perception → warehouse` | `RecordingPort`, `StreamPublisherPort` | a whole `Device` |
-| `perception → flight` | `AnnotatedFrame` | `Telemetry` |
 | `learning → perception` | `ModelRegistryPort` | `ModelRef` |
 
-**Down from seven edges to five in W1.6b** (docs/plans/active/DOMAIN-SEPARATION-W1.md §15):
-`events → map`/`events → flight` are gone outright (both were solely `LiveUpdatePublisherPort`
-naming `MapEvent`/`Telemetry`, and that port no longer exists — deleted, split into five per-context
-ports, none of which live in `events`), and `events → perception` shrank from three causes
-(`DetectionRepositoryPort`, `LiveUpdatePublisherPort`, `ReplayFrameExtractionPort`) to one:
-`DetectionRepositoryPort` moved to `perception` (its real owner — only perception ever constructs a
-`DetectionResult`/`DetectionQuery`), so what's left is `ReplayFrameExtractionPort`'s own
-`VideoFrame` reference, the domain half of `events`'s new role as a pure downstream reader — every
-remaining `events →` edge is `events` reading another context's history, and nothing reads back.
+**Down from seven edges (post-W1.6a) to five in W1.6b, four in W1.6c**
+(docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `events → map`/`events → flight` are gone outright
+(both were solely `LiveUpdatePublisherPort` naming `MapEvent`/`Telemetry`, and that port no longer
+exists — deleted, split into five per-context ports, none of which live in `events`), and
+`events → perception` shrank from three causes (`DetectionRepositoryPort`, `LiveUpdatePublisherPort`,
+`ReplayFrameExtractionPort`) to one: `DetectionRepositoryPort` moved to `perception` (its real
+owner — only perception ever constructs a `DetectionResult`/`DetectionQuery`), so what's left is
+`ReplayFrameExtractionPort`'s own `VideoFrame` reference, the domain half of `events`'s new role as
+a pure downstream reader — every remaining `events →` edge is `events` reading another context's
+history, and nothing reads back. **`perception → flight` (`AnnotatedFrame` naming `Telemetry`) is
+gone in W1.6c**: `Telemetry` moved flight → kernel, and `AnnotatedFrame` named nothing else in
+flight, so the edge simply stopped existing rather than being fixed — see the module-level section
+above for why `Telemetry`/`FlightState` qualify as kernel.
 
-Four of the five remaining are ports taking a whole `Device` from `warehouse` so they can
+Three of the four remaining are ports taking a whole `Device` from `warehouse` so they can
 address/describe the hardware they command or publish to — real coupling, but harmless (they only
 read a few fields off it), and narrowed to just what each port needs by W1 §5 **C6**, not yet
 scheduled. The other is `ModelRegistryPort → ModelRef`, a plain value object crossing a port
@@ -180,6 +192,7 @@ no entry's text changed.
 - `enum Capability` — VIDEO, TELEMETRY, PTZ, AUDIO
 - `record CategoryId(String slug)` — must match `[a-z0-9]+(-[a-z0-9]+)*`; no random-id factories (reference-data key, not a generated id)
 - `record DeviceId(UUID value)` — `static random()`, `static of(String)`
+- `record FlightState(String firmware, String mode, Boolean armed, Boolean failsafe, Integer gpsFixType, Integer satellites, Double hdop, Integer rssiPercent, List<String> armingBlockers)` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a; flight → kernel in **W1.6c**, docs/plans/active/DOMAIN-SEPARATION-W1.md §15 — a pure record naming nothing outside `java.util`, read by every context that reads `Telemetry`) — flight-controller-reported state decoded from ArduPilot/INAV/Betaflight/PX4 telemetry; every field except `armingBlockers` individually nullable (a decoder merges this incrementally as different MAVLink messages arrive — "unknown" and "known false/zero" must stay distinguishable field by field); `firmware` is `"ardupilot"`/`"generic"`/`"px4"`/`null`; `gpsFixType` (MAVLink `GPS_FIX_TYPE` ordinal) ∈[0,8] if present; `rssiPercent` ∈[0,100] if present; `satellites`/`hdop` ≥0 if present; `armingBlockers` non-null, defensively copied via `List.copyOf`, empty meaning "none currently known"; `static empty()` = all null + empty list
 - `record GeoPosition(double latitude, double longitude, Double altitudeMeters)` — lat [-90,90], lon [-180,180], altitude nullable
 - `final class GeoProjection` (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, Wave M1) — pure, stateless geo-math; private ctor, static methods only (no interface — one implementation, no substitution point, per java-clean-code SKILL.md §1). Reuses `GeoPosition` for both input (drone pose) and output (a "ground point" is just a `GeoPosition` with `altitudeMeters=null`) — no second geo type. `EARTH_RADIUS_METERS = 6_371_000.0` (IUGG mean radius, used by both methods); `DEFAULT_DEPRESSION_DEGREES = 45.0` (documented guess — no gimbal telemetry exists to read a real value from). `static GeoPosition project(GeoPosition drone, double headingDegrees, double altitudeMeters, double depressionDegrees)` — estimates the ground point a drone's camera is looking at: slant ground range = `altitudeMeters / tan(depressionDegrees)`, then a spherical destination-point (great-circle forward) projection of that range from `drone` along `headingDegrees`; `depressionDegrees==90` (nadir) or `altitudeMeters==0` short-circuits to the drone's own ground position (range 0) rather than trusting `tan(90°)`'s floating-point behavior; `headingDegrees` normalized mod 360 (any finite value accepted, including negative/>360); throws `IllegalArgumentException` for `drone==null`, negative/non-finite `altitudeMeters`, `depressionDegrees` outside `(0,90]`, or non-finite `headingDegrees`; the returned position's `altitudeMeters` is always `null` (ground elevation unknown — no terrain model). `static BearingDistance bearingDistance(GeoPosition from, GeoPosition to)` — haversine distance (meters) + initial great-circle bearing (degrees, [0,360), clockwise from north); throws `IllegalArgumentException` on either argument `null`. Both methods clamp/wrap internal trig results (asin argument clamped to [-1,1], longitude wrapped across the antimeridian into `[-180,180]`) so no valid input can produce `NaN` or an out-of-range `GeoPosition`/`BearingDistance`. **This is an honest estimate, not a precise fix** — no gimbal orientation or camera-intrinsics data anywhere in the platform; a mark built from `project` is stamped `MarkSource.DETECTION` and stays draggable/editable so an operator can correct it on the map
 - `record GroupId(UUID value)` — `static random()`, `static of(String)`
@@ -187,6 +200,7 @@ no entry's text changed.
 - `record Ownership(UserId ownerId, GroupId groupId)`
 - `record StreamDescriptor(String protocol, URI uri, Map<String,String> options)` — **protocol must be lower-case** (ctor throws otherwise)
 - `record StreamId(UUID value)` — `static random()`, `static of(String)`
+- `record Telemetry(DeviceId deviceId, Instant at, Double latitude, Double longitude, Double altitudeMeters, Double headingDegrees, Double batteryPercent, Map<String,Double> extra, FlightState flightState)` (flight → kernel in **W1.6c**, docs/plans/active/DOMAIN-SEPARATION-W1.md §15 — a pure record naming only `DeviceId` (already kernel) and `FlightState`, with no ports and no aggregate references, read by five contexts: flight, perception's OSD, warehouse's stats, events' replay, map. Revisit if W2's wire DTOs make per-context divergence real, docs/plans/active/DOMAIN-SEPARATION-PLAN.md §9) — a telemetry sample from a device: position, attitude, battery state, and (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a) flight-controller-reported state; all Double fields and `flightState` nullable; an 8-arg convenience ctor defaults `flightState=null` so every pre-existing call site compiles unchanged
 - `record UsageId(UUID value)` — `static random()`, `static of(String)`
 - `record UserId(UUID value)` — `static random()`, `static of(String)`
 
@@ -206,6 +220,7 @@ no entry's text changed.
 ### warehouse — `com.drones.vision.warehouse.domain.model`
 - `record Asset(AssetId id, String displayName, CategoryId category, Ownership ownership, Set<DeviceId> devices, Map<String,String> attributes, LifecycleState state)` — devices must be non-empty; 6-arg convenience ctor defaults `state=ACTIVE`; `isActive()`, `isDeleted()`, `withDevices(Set)`, `withAttributes(Map)`, `withDetails(String,CategoryId,Map)`, `withState(LifecycleState)` return copies
 - `record AssetImage(byte[] data, String contentType)` (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — the asset's user-facing photo, one per asset, no history; `data` non-empty, `contentType` non-blank (which types are actually accepted, plus the max-size cap, is a wire-boundary concern enforced by `vision-api`, not this record); `data()` overridden to return a fresh `data.clone()` on every access, mirroring `VideoFrame#data()`'s defensive-copy-on-every-access discipline (adapted for `byte[]` — no read-only-view equivalent for arrays)
+- `record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition, GeoPosition lastPosition, long sampleCount, StreamId streamId)` (flight → warehouse in **W1.6c**, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, C9 — ownership was split: the record was flight's, but all four readers, `AssetDetails`/`DefaultAssetService`/`DefaultAssetStatsService`/`DefaultUsageService`, were already warehouse's) — a "flight"/session for an `Asset`: opened when the asset starts streaming, closed on stop; endedAt/startPosition/lastPosition/**streamId** nullable, endedAt≥startedAt if present; a 7-arg convenience ctor defaults `streamId=null` (same "N-1-arg convenience ctor" idiom as `Asset`'s 6-arg one); `closed(Instant)`, `withPositions(GeoPosition,GeoPosition)`, `withSampleCount(long)` all preserve `streamId` unchanged. `streamId` (docs/plans/done/MVP2-PLAN.md §R, R-a2) is the `StreamId` of the stream whose start opened this usage, recorded once by `UsageTracker` (vision-application) and never changed afterward — it exists purely so `ReplayService` can join a finished usage back to its `DetectionResult`s; `null` for a legacy usage or one opened by an asset with no video device
 - `record DeviceCategory(CategoryId id, String name, CategoryId parent, List<String> attributeHints)` — parent nullable (top-level)
 - `record Device(DeviceId id, String name, Set<Capability> capabilities, StreamDescriptor stream, LifecycleState state)` — 4-arg convenience ctor defaults `state=ACTIVE`; `isActive()`, `isDeleted()`, `withDetails(String,Set,StreamDescriptor)`, `withState(LifecycleState)`
 - `record DiscoveredDevice(String method, String name, URI address, CategoryId suggestedCategory, StreamDescriptor suggestedStream, Map<String,String> details)` — suggestedCategory/suggestedStream nullable (mechanism may lack enough info, e.g. ONVIF needs creds)
@@ -213,6 +228,7 @@ no entry's text changed.
 ### warehouse — `com.drones.vision.warehouse.domain.port` (driven — implemented by adapters)
 - `AssetImageRepositoryPort` (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3): `void save(AssetId, AssetImage)` — upsert, replaces whatever was stored; `Optional<AssetImage> findByAssetId(AssetId)` — empty for no image, never distinguishing "unknown asset" from "known asset, no image" (this port has no dependency on `AssetRepositoryPort`, same "no referential integrity between repositories" convention every other port already follows); `boolean existsByAssetId(AssetId)` — the cheap presence check a fleet/asset list uses to populate `hasImage` without loading image bytes for every row; `void deleteByAssetId(AssetId)` — idempotent
 - `AssetRepositoryPort`: `Asset save(Asset)`; `Optional<Asset> findById(AssetId)`; `List<Asset> findAll()`; `Optional<Asset> findByDeviceId(DeviceId)` — a device belongs to ≤1 asset; `void deleteById(AssetId)` — idempotent
+- `AssetUsageRepositoryPort` (flight → warehouse in **W1.6c**, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, C9 — see `AssetUsage`'s own entry above for why): `AssetUsage save(AssetUsage)` — upsert by id; `Optional<AssetUsage> findById(UsageId)`; `List<AssetUsage> findRecentByAsset(AssetId, int limit)` — newest first; `List<AssetUsage> findRecent(int limit)` — fleet-wide counterpart (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8); `Optional<AssetUsage> findOpenByAsset(AssetId)` — ≤1 open per asset
 - `CategoryRepositoryPort`: `DeviceCategory save(DeviceCategory)`; `Optional<DeviceCategory> findById(CategoryId)`; `List<DeviceCategory> findAll()`
 - `DeviceDiscoveryPort`: `String method()` — stable lower-case key; `List<DiscoveredDevice> scan(Duration timeout)` — **blocking**, must self-time-box to ~timeout, empty list ≠ error
 - `DeviceRepositoryPort`: `Device save(Device)`; `Optional<Device> findById(DeviceId)`; `List<Device> findAll()`; `void deleteById(DeviceId)` — idempotent
@@ -267,20 +283,16 @@ no entry's text changed.
 - `VideoSourcePort`: `boolean supports(StreamDescriptor)`; `Flow.Publisher<VideoFrame> open(StreamId, StreamDescriptor)` — per-open, hot/live, latest-wins backpressure, unrecoverable failure → `onError`; `void close(StreamId)` — idempotent
 
 ### flight — `com.drones.vision.flight.domain.model`
-- `record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition, GeoPosition lastPosition, long sampleCount, StreamId streamId)` — endedAt/startPosition/lastPosition/**streamId** nullable, endedAt≥startedAt if present; a 7-arg convenience ctor defaults `streamId=null` (same "N-1-arg convenience ctor" idiom as `Asset`'s 6-arg one); `closed(Instant)`, `withPositions(GeoPosition,GeoPosition)`, `withSampleCount(long)` all preserve `streamId` unchanged. `streamId` (docs/plans/done/MVP2-PLAN.md §R, R-a2) is the `StreamId` of the stream whose start opened this usage, recorded once by `UsageTracker` (vision-application) and never changed afterward — it exists purely so `ReplayService` can join a finished usage back to its `DetectionResult`s; `null` for a legacy usage or one opened by an asset with no video device
 - `record ChannelMap(List<ControlBinding> bindings)` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5, RC-CONTROL Phase 1 R1) — a full axis/button → RC-channel map; `bindings` defensively copied via `List.copyOf`; `static defaultMap()` returns the frozen v1 table (gamepad axes 0–3 → RC channels 1–4 centered at 1500µs, gamepad buttons 0–3 → RC channels 5–8, channels 9–18 unused — see `RcChannels`'s own entry for why); `RcChannels apply(List<Double> axes, List<Double> buttons)` reads each binding's source value by index (a missing/out-of-range/`null` index reads as `0.0` — center for an axis, unpressed for a button — never throws), maps it through `ControlBinding#toMicros`, and assembles an `RcChannels` spanning channels 1..N (N = the highest `rcChannel` any binding targets, or `1` if `bindings` is empty); a channel no binding targets is `RcChannels#IGNORE`
 - `enum CommandResult` (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1) — `ACCEPTED`/`NO_ACK`, the outcome of a `FlightCommandPort` call; an explicit refusal is deliberately not a value here — see the port's own javadoc for why that is instead a thrown `IllegalStateException`. Pure marker enum, no behavior, no dedicated test (same convention as `Capability`/`EventType`/`PixelFormat`)
 - `record ControlBinding(Source source, int sourceIndex, int rcChannel, int minMicros, int centerMicros, int maxMicros, double deadband, boolean reversed)` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1, RC-CONTROL Phase 1 R1) — one physical gamepad control (`enum Source { AXIS, BUTTON }`) mapped to one RC channel with linear calibration; compact ctor validates `rcChannel` 1..18, `minMicros<=centerMicros<=maxMicros` each within `[RcChannels.MIN_MICROS, RcChannels.MAX_MICROS]`, `deadband` in [0,1], `sourceIndex>=0`; `int toMicros(double normalized)` — `AXIS` clamps to [-1,1], reverses/deadband-snaps around 0, then piecewise-linear-maps `[-1,0]`→`[minMicros,centerMicros]` and `[0,1]`→`[centerMicros,maxMicros]`; `BUTTON` clamps to [0,1], reverses as `1-normalized`, deadband-snaps near 0 (unpressed), then linear-maps `[0,1]` straight onto `[minMicros,maxMicros]` — `centerMicros` plays no part in a button's own mapping (see Gotchas for why the default map still gives it a value); both clamp the microsecond result to `[minMicros,maxMicros]`
 - `record FlightCapability(boolean commandable, boolean armSupported, boolean modeSelectSupported, List<String> selectableModes)` (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2) — a best-effort snapshot of what flight commands a device's aircraft accepts, derived from the last-heard firmware/vehicle-family; `selectableModes` non-null, defensively copied via `List.copyOf`. A driving UI shows only the controls the snapshot allows. `armSupported`/`modeSelectSupported` are never `true` when `commandable` is `false`; `static notCommandable()` = all-false + empty list (the honest answer for an unheard/unsupported/Betaflight vehicle). Returned by `FlightCommandPort#capabilities`
-- `record FlightState(String firmware, String mode, Boolean armed, Boolean failsafe, Integer gpsFixType, Integer satellites, Double hdop, Integer rssiPercent, List<String> armingBlockers)` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a) — flight-controller-reported state decoded from ArduPilot/INAV/Betaflight/PX4 telemetry; every field except `armingBlockers` individually nullable (a decoder merges this incrementally as different MAVLink messages arrive — "unknown" and "known false/zero" must stay distinguishable field by field); `firmware` is `"ardupilot"`/`"generic"`/`"px4"`/`null`; `gpsFixType` (MAVLink `GPS_FIX_TYPE` ordinal) ∈[0,8] if present; `rssiPercent` ∈[0,100] if present; `satellites`/`hdop` ≥0 if present; `armingBlockers` non-null, defensively copied via `List.copyOf`, empty meaning "none currently known"; `static empty()` = all null + empty list
 - `record GeofenceZone(ZoneId id, String name, ZoneKind kind, List<GeoPosition> polygon, Double maxAltitudeMeters, boolean enabled)` (docs/plans/done/OPS-CORE-PLAN.md §G) — polygon ≥3 vertices (validated, defensively copied), implicitly closed (first vertex not repeated as last); `maxAltitudeMeters` nullable (no ceiling), must not be negative if present; zones are global (no per-asset/per-group scoping yet — docs/plans/done/OPS-CORE-PLAN.md §G, U-e is later). `boolean contains(GeoPosition)` — ray-casting point-in-polygon treating latitude/longitude as planar Cartesian coordinates (longitude=x, latitude=y): accurate at fence scale (tens of meters to a few km), **not** valid near the poles or across the antimeridian (±180°) — see the method's own javadoc for the full caveat, no attempt is made to detect/reject a pathological polygon spanning either. `withEnabled(boolean)`, `withDetails(String,ZoneKind,List<GeoPosition>,Double)` return copies (identity/enabled untouched by `withDetails`, mirroring `Asset`/`Device`'s own `withDetails` leaving identity/lifecycle alone)
 - `record RcChannels(List<Integer> microsByChannel)` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1, RC-CONTROL Phase 1 R1) — one 1-based microsecond value per RC channel, the payload `ManualControlPort` relays as a MAVLink `RC_CHANNELS_OVERRIDE` (#70) frame; constants `RELEASE=0` ("release this channel back to the RC radio"), `IGNORE=0xFFFF` ("leave this channel unchanged"), `MIN_MICROS=1000`, `MAX_MICROS=2000`; compact ctor does `List.copyOf`, length 1..18, each entry within `[MIN_MICROS,MAX_MICROS]` or one of the two sentinels; `int channel(int oneBased)` — validated range; `static released(int channelCount)` — `RELEASE` for channels 1..count. The record itself allows 1..18 channels, but v1's `ChannelMap#defaultMap()` only ever populates channels 1..8 — channels 9..18 use a different, unresolved extension release sentinel (plan Open Questions §4)
-- `record Telemetry(DeviceId deviceId, Instant at, Double latitude, Double longitude, Double altitudeMeters, Double headingDegrees, Double batteryPercent, Map<String,Double> extra, FlightState flightState)` — all Double fields and `flightState` nullable; an 8-arg convenience ctor defaults `flightState=null` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a, same "N-1-arg convenience ctor" idiom as `AssetUsage`'s 7-arg ctor) so every pre-existing call site compiles unchanged
 - `record ZoneId(UUID value)` — `static random()`, `static of(String)`; typed identity for a `GeofenceZone` (docs/plans/done/OPS-CORE-PLAN.md §G)
 - `enum ZoneKind` — `KEEP_IN | KEEP_OUT` (docs/plans/done/OPS-CORE-PLAN.md §G); pure marker read by `GeofenceMonitor` (vision-application) to decide what "inside"/"outside" a `GeofenceZone`'s polygon means for breach purposes — see that enum's own javadoc
 
 ### flight — `com.drones.vision.flight.domain.port` (driven — implemented by adapters)
-- `AssetUsageRepositoryPort`: `AssetUsage save(AssetUsage)` — upsert by id; `Optional<AssetUsage> findById(UsageId)`; `List<AssetUsage> findRecentByAsset(AssetId, int limit)` — newest first; `Optional<AssetUsage> findOpenByAsset(AssetId)` — ≤1 open per asset
 - `FlightCommandPort` (docs/plans/active/DRONE-INFRA-PLAN.md I-e — guarded command TX): `boolean supports(Device)`; four blocking command methods that each send one MAVLink command and wait briefly for the aircraft's own acknowledgement — `CommandResult setMode(Device, String modeName)`, `CommandResult arm(Device, boolean force)`, `CommandResult disarm(Device, boolean force)`, `CommandResult returnToHome(Device)` — plus one non-blocking, never-throwing `FlightCapability capabilities(Device)`. The one deliberate place the platform's RX-only doctrine (`docs/main/CYCLES-PLAN.md` §0) is broken: Stage 1 opened it for `returnToHome`; **Stage 2 (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2)** added `setMode`/`arm`/`disarm`/`capabilities`. `returnToHome` is kept for Stage-1 compatibility and is equivalent to `setMode(device, "RTL")`. `arm`/`disarm`'s `force` uses the MAVLink `21196` magic value (bypasses the autopilot's pre-arm/disarm checks). The four command methods throw `IllegalArgumentException` for an unsupported device, a non-commandable firmware (unrecognized/never-heard, or a firmware whose RC link is known not to process the command, e.g. Betaflight), or (setMode) an unknown mode name; throw `IllegalStateException` when the aircraft's own acknowledgement explicitly refuses (denied/unsupported/failed). A lost or missing acknowledgement is neither — see `CommandResult#NO_ACK`. `capabilities` never throws: it returns `FlightCapability.notCommandable()` for an unheard/unsupported/Betaflight vehicle, and reports commandable (INAV included — its commands honestly `NO_ACK` if its RX ignores them). There is still no fully generic command surface (arbitrary opcodes, mission/fence upload) — later stages. One real implementation today: `adapters/adapter-mavlink`'s `MavlinkFlightCommander` — see that module's MODULE.md
 - `GeofenceRepositoryPort` (docs/plans/done/OPS-CORE-PLAN.md §G): `GeofenceZone save(GeofenceZone)` — upsert by `ZoneId`; `Optional<GeofenceZone> findById(ZoneId)`; `List<GeofenceZone> findAll()` — snapshot, global (no ownership/scoping filter, same convention as `CategoryRepositoryPort`); `void deleteById(ZoneId)` — idempotent
 - `ManualControlLink` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1, RC-CONTROL Phase 1 R1) — opaque, adapter-owned handle to one engaged `ManualControlPort` relay link; `boolean active()` — whether its sender thread is still running

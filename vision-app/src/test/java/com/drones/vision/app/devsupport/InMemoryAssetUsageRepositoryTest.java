@@ -1,7 +1,7 @@
 package com.drones.vision.app.devsupport;
 
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.UsageId;
 import org.junit.jupiter.api.Test;
 

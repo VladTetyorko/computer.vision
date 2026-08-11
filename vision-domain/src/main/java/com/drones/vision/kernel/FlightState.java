@@ -1,11 +1,18 @@
-package com.drones.vision.flight.domain.model;
+package com.drones.vision.kernel;
 
 import java.util.List;
 
 /**
  * Flight-controller-reported state, decoded from ArduPilot/INAV/Betaflight/PX4 telemetry
  * (docs/plans/done/FC-INTEGRATIONS-PLAN.md) — arm state, active mode, failsafe, GPS fix quality, RSSI, and
- * any known arming blockers. Rides {@link Telemetry} as its nullable 9th component: a device with
+ * any known arming blockers.
+ *
+ * <p><b>Kernel, not flight-owned</b> (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6c): a pure
+ * record naming nothing at all outside {@code java.util}, read by every context that reads {@link
+ * Telemetry} — the same standing as {@link GeoPosition}/{@link BoundingBox}. Revisit if W2's wire
+ * DTOs make per-context divergence real (docs/plans/active/DOMAIN-SEPARATION-PLAN.md §9).
+ *
+ * <p>Rides {@link Telemetry} as its nullable 9th component: a device with
  * no flight-controller telemetry (a camera, a legacy sample, or a MAVLink stream that hasn't
  * received a {@code HEARTBEAT} yet) simply carries {@code null} here, same "honest null over fake
  * reading" discipline as every other optional {@link Telemetry} field.

@@ -1,6 +1,6 @@
 package com.drones.vision.flight.domain.port;
 
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.AssetId;
 
 /**

@@ -6,7 +6,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.FeedId;
 import com.drones.vision.perception.domain.model.FeedSpec;
 import com.drones.vision.kernel.StreamDescriptor;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;

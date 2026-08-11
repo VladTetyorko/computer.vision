@@ -5,7 +5,7 @@ import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.ManualControlPort;
@@ -275,7 +275,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Drives {@link com.drones.vision.flight.domain.model.AssetUsage} lifecycle and telemetry sampling
+     * Drives {@link com.drones.vision.warehouse.domain.model.AssetUsage} lifecycle and telemetry sampling
      * from {@link StreamService}'s start/stop notifications. {@code telemetryLiveUpdatePort} and
      * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
      */

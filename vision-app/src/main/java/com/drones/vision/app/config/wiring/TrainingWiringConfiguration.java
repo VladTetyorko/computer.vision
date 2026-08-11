@@ -2,7 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
-import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetUploadPort;

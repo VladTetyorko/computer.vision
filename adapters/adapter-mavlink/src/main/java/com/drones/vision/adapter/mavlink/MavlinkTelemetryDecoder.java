@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.mavlink;
 
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 
 import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.ardupilotmega.EkfStatusReport;
@@ -33,7 +33,7 @@ import java.util.Map;
  * The merged fields split across three package-private mutable holders, by which domain concept
  * they feed: {@link PositionAndPowerState} (position/velocity/battery — {@link
  * Telemetry}'s own named fields plus their {@code extra}-only siblings), {@link FlightStatusState}
- * (everything that materializes {@link com.drones.vision.flight.domain.model.FlightState}), and {@link
+ * (everything that materializes {@link com.drones.vision.kernel.FlightState}), and {@link
  * ArdupilotExtras} (every other {@code extra}-only key, mostly ardupilotmega-dialect messages).
  * This class itself owns only the per-system lock (below) and message-type dispatch to whichever
  * holder owns that message — see each holder's own javadoc for its exact field list.
@@ -55,7 +55,7 @@ import java.util.Map;
  *
  * <h2>Message → field mapping</h2>
  * <ul>
- *   <li>{@code HEARTBEAT} — {@code autopilot} → {@link com.drones.vision.flight.domain.model.FlightState#firmware()} ({@code
+ *   <li>{@code HEARTBEAT} — {@code autopilot} → {@link com.drones.vision.kernel.FlightState#firmware()} ({@code
  *       "ardupilot"}/{@code "generic"}/{@code "px4"}/{@code null}, see {@link FlightModes});
  *       {@code base_mode} bit {@code 128} (safety-armed) → {@code armed}; {@code
  *       base_mode} bit {@code 1} (custom-mode-enabled) gates whether {@code custom_mode} is
@@ -72,7 +72,7 @@ import java.util.Map;
  *       vx}/{@code vy}/{@code vz} (cm/s, NED) → {@code extra} keys {@code vxMps}/{@code
  *       vyMps}/{@code vzMps} (÷ 100) — {@link Telemetry} has no named velocity fields.</li>
  *   <li>{@code GPS_RAW_INT} — {@code fix_type} → {@code gpsFixType} (already the
- *       0..8 ordinal {@link com.drones.vision.flight.domain.model.FlightState} expects); {@code satellites_visible} ({@code 255} =
+ *       0..8 ordinal {@link com.drones.vision.kernel.FlightState} expects); {@code satellites_visible} ({@code 255} =
  *       unknown) → {@code satellites}; {@code eph} (HDOP × 100, {@code 65535} =
  *       invalid) → {@code hdop} (÷ 100, or {@code null}).</li>
  *   <li>{@code RC_CHANNELS} / {@code RC_CHANNELS_RAW} — {@code rssi} (0..254, {@code 255} =

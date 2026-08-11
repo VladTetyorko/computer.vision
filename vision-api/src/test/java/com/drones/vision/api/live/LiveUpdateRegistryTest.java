@@ -43,7 +43,7 @@ import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;

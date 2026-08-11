@@ -17,7 +17,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackingConfig;

@@ -24,7 +24,7 @@ import com.drones.vision.warehouse.application.fleet.DefaultFleetSummaryService;
  * <p>{@code flightMode}/{@code armed}/{@code failsafe} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) are a
  * different case from {@code sourceState} above, not another exception to the same rule: they are
  * cleanly readable today, straight off the freshest telemetry sample's {@link
- * com.drones.vision.flight.domain.model.FlightState}, with the same honest-null behavior as {@code
+ * com.drones.vision.kernel.FlightState}, with the same honest-null behavior as {@code
  * batteryPercent} when no sample (or no flight state on that sample) exists — so they were added,
  * not omitted.
  *
@@ -55,7 +55,7 @@ import com.drones.vision.warehouse.application.fleet.DefaultFleetSummaryService;
  *                       reported telemetry, or has but with no {@code flightState} attached
  *                       (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — same honest-null discipline as {@code
  *                       batteryPercent}, not a fabricated read: this is {@link
- *                       com.drones.vision.flight.domain.model.FlightState#mode()} carried straight
+ *                       com.drones.vision.kernel.FlightState#mode()} carried straight
  *                       through, never guessed at
  * @param armed          the freshest telemetry sample's armed flag, or {@code null} under the same
  *                       condition as {@code flightMode}

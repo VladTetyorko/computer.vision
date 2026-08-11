@@ -1,12 +1,12 @@
 package com.drones.vision.events.application;
 
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.kernel.StreamId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
-import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;

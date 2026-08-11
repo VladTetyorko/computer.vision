@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.mavlink;
 
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.SubmissionPublisher;

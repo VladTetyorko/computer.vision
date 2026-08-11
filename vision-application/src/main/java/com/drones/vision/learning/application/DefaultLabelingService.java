@@ -4,7 +4,7 @@ import com.drones.vision.learning.domain.model.Annotation;
 import com.drones.vision.learning.domain.model.AnnotationSource;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;

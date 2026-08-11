@@ -2,7 +2,7 @@ package com.drones.vision.warehouse.application.asset;
 
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
-import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
@@ -18,7 +18,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
-import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 

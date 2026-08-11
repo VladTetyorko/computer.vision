@@ -49,7 +49,7 @@ import com.drones.vision.perception.domain.model.FeedSpec;
 import com.drones.vision.map.domain.model.LayerKind;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
-import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;

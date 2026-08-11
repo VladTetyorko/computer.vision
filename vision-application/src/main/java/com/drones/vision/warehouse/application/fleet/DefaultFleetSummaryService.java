@@ -6,9 +6,9 @@ import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.FlightState;
+import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.StreamId;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 
 import java.time.Duration;

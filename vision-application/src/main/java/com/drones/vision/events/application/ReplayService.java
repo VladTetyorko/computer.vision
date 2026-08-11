@@ -8,7 +8,7 @@ import java.util.Optional;
 
 /**
  * Serves a scrubbable replay window over one finished (or still-open) {@link
- * com.drones.vision.flight.domain.model.AssetUsage} — the read side of flight replay (docs/plans/done/MVP2-PLAN.md
+ * com.drones.vision.warehouse.domain.model.AssetUsage} — the read side of flight replay (docs/plans/done/MVP2-PLAN.md
  * §R, R-a).
  *
  * <h2>Windowing</h2>
@@ -22,7 +22,7 @@ import java.util.Optional;
  * flight's response stays bounded regardless of sample density.
  *
  * <h2>Detections (docs/plans/done/MVP2-PLAN.md §R, R-a2)</h2>
- * {@link com.drones.vision.flight.domain.model.AssetUsage#streamId()} — recorded once, at open time, by
+ * {@link com.drones.vision.warehouse.domain.model.AssetUsage#streamId()} — recorded once, at open time, by
  * {@code UsageTracker} — is the join key: when it is non-{@code null}, {@link
  * UsageTimeline#detections()} is a real, time-windowed, downsampled query against {@link
  * com.drones.vision.perception.domain.port.DetectionRepositoryPort} for that exact stream, so it can never

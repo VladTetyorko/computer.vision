@@ -3,9 +3,9 @@ package com.drones.vision.adapter.simulation;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.FlightState;
+import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.StreamDescriptor;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;

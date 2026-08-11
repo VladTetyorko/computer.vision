@@ -59,22 +59,19 @@ class ContextArchitectureTest {
             "flight -> warehouse",          // flight commands resolve the asset they act on
             "identity -> warehouse",        // assignment/activity read assets
             "learning -> events",           // capture a training frame from replay (ReplaySources)
-            "learning -> flight",
             "learning -> perception",       // capture a frame from a live stream
             "learning -> warehouse",
-            "map -> flight",
             "map -> identity",              // MapAccessPolicy.Viewer carries a Role
             "map -> perception",
-            "perception -> flight",         // AnnotatedFrame carries Telemetry for the OSD
+            "perception -> flight",         // UsageTracker opens flight's telemetry ports
             "simulation -> perception",
             "simulation -> warehouse",
-            "warehouse -> flight",
 
             // --- events: the pure downstream reader (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md
-            // §15). `ReplayService`/`UsageTimeline` read flight's AssetUsage/Telemetry and
-            // perception's DetectionResult/DetectionQuery/VideoFrame to answer "what happened
-            // during this finished flight" — replay and history, never live state. The four
-            // events <-> ... cycles this wave killed were entirely the god-port
+            // §15). `ReplayService`/`UsageTimeline` read warehouse's AssetUsage, flight's
+            // TelemetryRepositoryPort, and perception's DetectionResult/DetectionQuery/VideoFrame to
+            // answer "what happened during this finished flight" — replay and history, never live
+            // state. The four events <-> ... cycles W1.6b killed were entirely the god-port
             // LiveUpdatePublisherPort (deleted, split one port per publishing context) and the
             // misfiled DetectionRepositoryPort/DetectionEvent family (moved to perception, their
             // real owner) plus ReplayCaptureSpec (moved to learning, W1 §15 C8) — once those
@@ -83,14 +80,13 @@ class ContextArchitectureTest {
             // dataset capture needs the exact frame a finished flight recorded).
             "events -> flight",
             "events -> perception",
-
-            // --- DEBT: AssetUsage (flight) vs the usage read services (warehouse), W1 §15 C9 ---
-            // A usage is a flight session; its read side was filed under warehouse. Half of
-            // flight <-> warehouse is this split ownership, not a real dependency.
+            "events -> warehouse",          // AssetUsage moved flight -> warehouse (W1.6c, C9); the read is unchanged
 
             // --- DEBT C3/C6: warehouse asks perception "is this asset live?", and perception's
             // ports accept a whole warehouse Device ---
             "perception -> warehouse",
+            "warehouse -> flight",          // DEBT C9 paid (W1.6c): down to DefaultProbeService -> TelemetrySourcePort
+                                             // alone, the probe path W1.6d moves behind a warehouse-owned port
             "warehouse -> perception"));
 
     /**
@@ -139,8 +135,13 @@ class ContextArchitectureTest {
      * the honest state, tracked as a burn-down instead of hidden behind a disabled test. Down from
      * six before W1.6b (docs/plans/active/DOMAIN-SEPARATION-W1.md §15): the four `events <-> ...`
      * cycles are gone now that `events` is a pure downstream reader — see {@link #DECLARED_EDGES}'s
-     * own comment for what killed them. The remaining two (W1.6d, not yet scheduled) are the
-     * "warehouse asks runtime state" design debt C3/C6 already named in that section.
+     * own comment for what killed them. The remaining two are still design debt, but W1.6c
+     * (docs/plans/active/DOMAIN-SEPARATION-W1.md §15) paid one of their two causes: `flight <->
+     * warehouse` used to be half C9 (`AssetUsage`'s split ownership) and half `DefaultProbeService
+     * -> TelemetrySourcePort`; moving `AssetUsage` to warehouse paid C9, so what is left of that
+     * cycle is `DefaultProbeService` alone. Both cycles are W1.6d's job: `perception <-> warehouse`
+     * is C3/C6 ("warehouse asks runtime state"), `flight <-> warehouse` is the probe path — neither
+     * has moved yet.
      */
     @Test
     void moduleCyclesAreOnlyTheKnownOnes() {

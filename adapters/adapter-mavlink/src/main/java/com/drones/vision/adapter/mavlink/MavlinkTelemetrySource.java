@@ -4,7 +4,7 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamDescriptor;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 
 import io.dronefleet.mavlink.common.CommandAck;

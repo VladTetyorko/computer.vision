@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.mavlink;
 
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.flight.domain.model.FlightState;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.FlightState;
+import com.drones.vision.kernel.Telemetry;
 
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.MavlinkMessage;

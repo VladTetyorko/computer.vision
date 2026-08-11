@@ -12,7 +12,7 @@ import com.drones.vision.map.domain.model.MarkKind;
 import com.drones.vision.map.domain.model.MarkSource;
 import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.kernel.Ownership;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.map.domain.model.Verification.VerificationState;
 import com.drones.vision.map.domain.port.MapLiveUpdatePort;

@@ -1,6 +1,6 @@
 package com.drones.vision.perception.domain.model;
 
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import java.util.List;
 
 /**

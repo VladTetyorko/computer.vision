@@ -1,4 +1,4 @@
-package com.drones.vision.flight.domain.model;
+package com.drones.vision.kernel;
 
 import org.junit.jupiter.api.Test;
 

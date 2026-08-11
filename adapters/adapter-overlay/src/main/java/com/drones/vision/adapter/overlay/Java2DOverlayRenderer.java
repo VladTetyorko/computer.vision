@@ -3,7 +3,7 @@ package com.drones.vision.adapter.overlay;
 import com.drones.vision.perception.domain.model.AnnotatedFrame;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.PixelFormat;
-import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.OverlayPort;
 

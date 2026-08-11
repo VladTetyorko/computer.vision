@@ -191,8 +191,9 @@ nothing else can be in flight while every import in the repo moves.
       when its name equals the context (no `flight.application.flight`) or when it is the context's
       only feature (no `events.application.replay`); otherwise the feature subpackage is kept.
       Verified: domain 518 · application 819 · api 551 · app 223 · adapters 396, all green.
-- [ ] **W1.6 break the module cycles** — seven of them (§14); specified as four sub-waves in §15
-  - [ ] W1.6a platform seams · [ ] W1.6b events-as-sink · [ ] W1.6c ownership · [ ] W1.6d C3
+- [ ] **W1.6 break the module cycles** — seven of them (§14); specified as five sub-waves in §15
+  - [x] W1.6a platform seams (cycles 7→6) · [x] W1.6b events-as-sink (6→2) · [x] W1.6c ownership (edges 17→16)
+  - [ ] W1.6d probe → perception · [ ] W1.6e C3 proper
 - [ ] W1.7 Maven extraction
 
 ---
@@ -312,33 +313,55 @@ be scoped.
 Also collapses `perception → flight` to just the two telemetry ports `UsageTracker` opens, and
 `warehouse → flight` to `DefaultProbeService` alone — which W1.6d takes.
 
-### W1.6d — C3, warehouse stops reading runtime
+### W1.6d — the probe is not an inventory concern
 
-The last and only design-heavy one. Warehouse's whole reach into perception/flight is five call
-shapes:
+After W1.6c, the whole of `warehouse -> flight` is one class: `DefaultProbeService` opening a
+`TelemetrySourcePort`. And four of `warehouse -> perception`'s references are the same class opening
+a `VideoSourcePort`.
+
+`DefaultProbeService` (287 lines) answers *"does this device's plumbing actually work?"* by opening a
+video source and grabbing a frame, then opening a telemetry source and waiting for a sample. That is
+ingest work, not inventory work — it was filed under `device` because a device is what you probe, not
+because warehouse does the probing. **Move the feature to `perception.application.device`**:
+`ProbeService`, `DefaultProbeService`, `ProbeResult`, `ProbeFailedException` (which follows its
+thrower, the same rule C1 applied when it landed in warehouse).
+
+No new port is needed. Perception may read warehouse and flight; `ProbeResult`'s `VideoFrame` becomes
+a same-context reference; `DeviceProbeController` is an adapter and may call across contexts freely.
+
+**Kills `flight <-> warehouse`.**
+
+### W1.6e — C3 proper, warehouse stops reading runtime
+
+What remains of `warehouse -> perception` is two different problems wearing one label.
+
+**1. Warehouse is orchestrating perception.** `AssetService.startStream(assetId, PipelineConfig,
+TrackingConfigPatch)` resolves a device and calls `StreamService.start(...)`. That is the "core is one
+big orchestrator" complaint in miniature: the CRUD context drives the runtime one and takes its
+configuration types into its own published interface to do it. Move the stream lifecycle off
+`AssetService` into `perception.application.stream.AssetStreamService`, which resolves the asset
+itself (perception -> warehouse, the legal direction) and calls `StreamService` directly.
+`PipelineConfig`, `TrackingConfigPatch` and friends then stay in perception, where they are executed —
+no config cluster has to migrate.
+
+**2. Warehouse genuinely needs to read live state.** Four call shapes survive:
 
 ```
-streamService.activeDeviceIds()            DefaultAssetService
-streamService.streams() / .stop(id)        DefaultAssetService, DefaultDeviceService, DefaultFleetSummaryService
-streamService.start(device, cfg, tracking) DefaultAssetService
+streamService.activeDeviceIds()            DefaultAssetService — the "is live" flag on a summary
+streamService.streams() / .stop(id)        DefaultAssetService, DefaultDeviceService — stop before delete
 usageTracker.latestTelemetry(assetId)      DefaultAssetStatsService, DefaultFleetSummaryService
 recent DetectionEvents per asset           DefaultFleetSummaryService
-VideoSourceRegistry + TelemetrySourcePort  DefaultProbeService
 ```
 
-1. **`PipelineConfig`, `TrackingConfigPatch`, `EventRuleConfig` → warehouse.** CV *configuration* is
-   asset data; CV *execution* is perception. Perception reads them when a stream starts — the correct
-   direction. (This re-homes C4's `EventRuleConfig`, whose W1.2 assignment was made before the config
-   family's owner was settled.)
-2. **`warehouse.domain.port.AssetLiveStatePort`** — warehouse declares what it needs
-   (`activeDeviceIds`, `streamsFor`, `stopStreamsFor`, `latestTelemetry`, `startStream`, `recentDetectionEvents`), returning
-   warehouse-owned records. Perception implements it; vision-app wires it.
-3. **`warehouse.domain.port.DevicePlumbingProbePort`** — `DefaultProbeService`'s body moves behind
-   it, composed in vision-app from `VideoSourceRegistry` + `TelemetrySourcePort`. `ProbeResult` keeps
-   its snapshot as bytes rather than a perception `VideoFrame`.
+Invert them behind **`warehouse.domain.port.AssetLiveStatePort`**, declared by warehouse and returning
+warehouse-owned records (`LiveStreamRef`, an event summary) rather than `ActiveStream` or
+`DetectionEvent`. **Perception implements it** — `perception -> warehouse` is already legal, so the
+implementation needs no third home and vision-app only wires it.
 
-**Kills `perception ↔ warehouse` and `flight ↔ warehouse`** — the last two. `DECLARED_CYCLES` empties
-and W1.7 unblocks.
+Stopping a stream before deleting a device stays a synchronous port call here; W2 is where it becomes
+an event warehouse publishes and perception reacts to.
+
+**Kills `perception <-> warehouse`** — the last one. `DECLARED_CYCLES` empties and W1.7 unblocks.
 
 ### Package scheme (fixed in W1.5a, applies to W1.5b and W1.6)
 
