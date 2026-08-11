@@ -2,6 +2,7 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.TrackingConfig;
 
 import java.util.List;
 
@@ -27,14 +28,35 @@ import java.util.List;
  * @param labelFilter         overrides {@link PipelineConfig#labelFilter()} if present — see {@link
  *                             StartStreamRequest#labelFilter()}'s own javadoc (docs/CV-CONTROL-PLAN.md §2)
  * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present (docs/CV-CONTROL-PLAN.md §2)
+ * @param tracking            overrides the deployment's tracking seed if present — see {@link
+ *                             StartStreamRequest#tracking()}'s own javadoc for the full contract
+ *                             (same shape as {@code PATCH .../config}'s, minus {@code lock})
  */
 public record StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
                                        Boolean overlayBurnIn, String model, List<String> labelFilter,
-                                       Boolean detectionEnabled) {
+                                       Boolean detectionEnabled, TrackingConfigRequest tracking) {
 
     /** No body: no explicit device, use every default from {@link PipelineConfig#defaults()}. */
     public static final StartAssetStreamRequest EMPTY =
-            new StartAssetStreamRequest(null, null, null, null, null, null, null);
+            new StartAssetStreamRequest(null, null, null, null, null, null, null, null);
+
+    /**
+     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * a convenience constructor defaulting it to {@code null} ("use the seed as-is").
+     *
+     * @param deviceId            the device to stream from, or {@code null}
+     * @param confidenceThreshold overrides the default confidence threshold if present
+     * @param inferenceFps        overrides the default inference sample rate if present
+     * @param overlayBurnIn       overrides the default burn-in flag if present
+     * @param model               overrides the default model id if present/non-blank
+     * @param labelFilter         overrides the default label set if present
+     * @param detectionEnabled    overrides the default detection on/off flag if present
+     */
+    public StartAssetStreamRequest(String deviceId, Double confidenceThreshold, Integer inferenceFps,
+                                    Boolean overlayBurnIn, String model, List<String> labelFilter,
+                                    Boolean detectionEnabled) {
+        this(deviceId, confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter, detectionEnabled, null);
+    }
 
     /**
      * Parses {@link #deviceId()}, if present.
@@ -48,12 +70,25 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
 
     /**
      * Merges {@link #confidenceThreshold()}/{@link #inferenceFps()}/{@link #overlayBurnIn()}/{@link
-     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()} onto {@link PipelineConfig#defaults()}.
+     * #model()}/{@link #labelFilter()}/{@link #detectionEnabled()}/{@link #tracking()} onto {@link
+     * PipelineConfig#defaults()}.
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
+        return mergeOntoDefaults(PipelineConfig.defaults().tracking());
+    }
+
+    /**
+     * {@link #mergeOntoDefaults()} with the deployment's tracking seed — see {@link
+     * StartStreamRequest#mergeOntoDefaults(TrackingConfig)}, which this delegates to so the two
+     * start-stream shapes keep sharing exactly one merge implementation.
+     *
+     * @param trackingSeed the deployment's tracking defaults for new streams; never {@code null}
+     * @return the effective pipeline configuration for the new stream
+     */
+    public PipelineConfig mergeOntoDefaults(TrackingConfig trackingSeed) {
         return new StartStreamRequest(confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter,
-                detectionEnabled).mergeOntoDefaults();
+                detectionEnabled, tracking).mergeOntoDefaults(trackingSeed);
     }
 }

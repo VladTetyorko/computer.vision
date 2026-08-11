@@ -12,7 +12,10 @@ layers with grantable access, and drawings (docs/MAP-REWORK-PLAN.md Wave C).
 `org.flywaydb:flyway-core`/`flyway-database-postgresql`, `tools.jackson.core:jackson-databind`
 (Jackson 3, for jsonb columns — see Conventions) · **Used by:** vision-app
 (`PersistenceWiringConfiguration`, opt-in via `vision.persistence.enabled`)
-**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 113 tests (up from 98,
+**Build/test:** `./mvnw -B -pl adapters/adapter-persistence test` — 115 tests (up from 113,
+docs/TRACKING-PLAN.md wave T6 — **no migration, no entity change, no mapper change**: two new
+`DetectionRepositoryTests` cases covering the jsonb's forward/backward compatibility, see the
+tracks bullet under Conventions; up from 98,
 docs/MAP-REWORK-PLAN.md Wave C — new `MapLayerEntity`/`JpaMapLayerRepository`,
 `MapDrawingEntity`/`JpaDrawingRepository`, `LayerGrantEmbeddable`, +7 layer round-trip tests, +6
 drawing round-trip tests, +1 V12 schema test, and `MarkRepositoryTests` 6→7 for the reworked `Mark`;
@@ -152,6 +155,7 @@ No connection pool: Hibernate's default `DriverManagerConnectionProvider` (one p
 ## Conventions
 
 - **jsonb via Hibernate's native JSON support, not a hand-rolled converter.** `attribute_hints`/`stream_options`/`attributes`/`extra`/`detections`/`flight_state`/`polygon`/`memberships`/`points` are `@JdbcTypeCode(SqlTypes.JSON)` fields with `columnDefinition = "jsonb"` — Hibernate 7.4 auto-detects a Jackson `ObjectMapper` on the classpath via its `FormatMapper` SPI and ships `org.hibernate.type.format.jackson.Jackson3JsonFormatMapper` specifically for Jackson 3 (`tools.jackson.*`, this house's Jackson generation under Spring Boot 4) — confirmed present in the `hibernate-core-7.4.1.Final` jar. No `AttributeConverter`, no `PGobject` juggling, no `stringtype=unspecified` JDBC-URL trick.
+- **Tracks ride the existing `detections` jsonb — there is no `tracks` table and no migration for them** (docs/TRACKING-PLAN.md §4.C). `Detection` gained a nullable `TrackRef` component (track id, lifecycle state, source, velocities, age), and because the column already stores the whole record tree, it round-trips for free. **Consequences, stated rather than discovered later:** (1) tracks are **not SQL-queryable** — you cannot ask "where was track #7" without scanning and deserializing blobs, exactly as label filtering already scans in Java; a durable, indexed trajectory table is deferred to S2 (docs/TWO-TARGETS-PLAN.md), which is the first thing that would actually issue that query, and building the index now would be building it for nobody. (2) Rows written **before** the tracking wave still deserialize with `track` reading `null` — verified against a hand-written pre-tracking jsonb literal inserted through native SQL, not assumed (`preTrackingJsonbRowsStillDeserializeWithTrackReadingNull`). (3) `DetectionResult#tracking()` — the **per-frame** duty-cycle telemetry, as opposed to the per-detection `TrackRef` — has no column and is **deliberately not persisted**; it reads back `null`. That is a documented drop rather than the silent kind docs/TRACKING-ORCHESTRATION.md §6 rule 6 warns about: the counters it feeds are a live read model (`TrackingStatsWindow`, vision-application), and persisting them belongs with S2's trajectory table.
 - **`DetectionResultEntity#detections`/`TelemetrySampleEntity#flightState` store the domain `Detection`/`FlightState` record trees directly** (`List<Detection>` with nested `BoundingBox`/`ModelRef`; a single nullable `FlightState` with its own `List<String> armingBlockers`, docs/FC-INTEGRATIONS-PLAN.md F-b) rather than a parallel adapter-local DTO shape — Jackson 3 serializes/deserializes Java records natively (canonical-constructor + component-name introspection, no annotations needed), proven by this module's own round-trip tests. Referencing a plain, framework-annotation-free domain record from an entity field is the same kind of "adapter depends on domain types" the enum reuse below already establishes; it's storage-format coupling to the domain's shape, not a framework leaking into the domain.
 - **No cross-entity foreign keys beyond the join tables' own PKs**, deliberately: `categories.parent_id` is the one exception (self-referencing, satisfiable because `V2__seed_categories.sql` controls insert order), but `assets.category_id` has **no** FK to `categories.id`, `asset_devices.device_id` has **no** FK to `devices.id`, and none of `asset_usages`/`telemetry_samples`/`detection_results` (V3) has any FK at all. The in-memory reference repositories this adapter must stay behavior-compatible with (`InMemory*Repository`, vision-app devsupport) perform zero referential checks — a real constraint here would reject operations (e.g. saving an `Asset` whose category was never separately saved) that the in-memory port happily allows, breaking parity for exactly the "round-trip every port method the same way the in-memory impl does" contract this module is judged against.
 - **`save()` is upsert-by-id** (`EntityManager#merge`) on the three P-a ports and `JpaAssetUsageRepository`, matching each in-memory repository's `Map#put` exactly. **`JpaTelemetryRepository#save`/`JpaDetectionRepository#save` always `persist` a brand-new row** instead (never `merge`) — samples/results are immutable historical records per their ports' contracts, and neither `Telemetry` nor `DetectionResult` carries an id to merge by. **`deleteById()` is a real hard delete, idempotent** (missing id ⇒ no-op) on `Device`/`Asset`, matching `Map#remove` exactly — soft-delete (`LifecycleState.DELETED`) is just a column value round-tripped like any other field; nothing in this module treats it specially, the same as the in-memory fallbacks.
@@ -201,11 +205,20 @@ see Gotchas), one `EntityManagerFactory` opened in `@BeforeAll`/closed in `@Afte
   trips exactly, and a sample built via `Telemetry`'s 8-arg convenience ctor (no `flightState` at
   all) reads back with `flightState() == null`, the same honest-null contract a real pre-V6 row
   would also satisfy.
-- `@Nested DetectionRepositoryTests` (6) — round trip of detections + inference latency, `streamId`
+- `@Nested DetectionRepositoryTests` (8, up from 6 — docs/TRACKING-PLAN.md wave T6) — round trip of
+  detections + inference latency, `streamId`
   filter, `queryTimeRangeIsInclusiveOnBothEndsMatchingInMemoryBehavior` (proves `to` is treated as
   inclusive, mirroring `InMemoryDetectionRepository`'s actual behavior despite `DetectionQuery#to`'s
   javadoc calling it exclusive — see `JpaDetectionRepository`'s javadoc), label filter, newest-first
-  ordering + limit.
+  ordering + limit, plus the two tracking cases:
+  `preTrackingJsonbRowsStillDeserializeWithTrackReadingNull` — **the regression the "no migration"
+  decision rests on**: a row whose `detections` jsonb was written before tracking existed (a
+  hand-written literal with no `track` key, inserted through native SQL precisely so it is genuinely
+  yesterday's bytes rather than today's serializer producing an absent field) still deserializes,
+  with `Detection#track()` reading `null` and every other component intact — and
+  `aTrackedDetectionRoundTripsThroughTheJsonbBlobWithNoMigration`, which saves a `TrackRef`-carrying
+  detection, reads back every component of it, and pins the deliberate omission that
+  `DetectionResult#tracking()` (per-frame telemetry, no column) reads back `null`.
 - `@Nested AssetImageRepositoryTests` (4, docs/UX-REWORK-PLAN.md §U-d item 3) — unknown asset id → empty `Optional` + `existsByAssetId` false, round trip of bytes + content type + `existsByAssetId` true, upsert-replaces (a second `save` for the same asset id fully replaces the first — different bytes, different content type), idempotent delete (also verifying `existsByAssetId` flips back to false, and a second delete call doesn't throw).
 - `@Nested GeofenceRepositoryTests` (6, docs/OPS-CORE-PLAN.md §G, G-b) — unknown id → empty `Optional`, a `KEEP_OUT` zone with an altitude ceiling round trips exactly, a `KEEP_IN` zone with no ceiling round trips `maxAltitudeMeters()==null`/`enabled()==false`, `save` upserts by id (rename/re-kind/re-altitude/re-enable in place, same id), `findAll` returns every saved zone, `deleteById` is idempotent (a second call on an already-deleted id doesn't throw).
 - `@Nested UserRepositoryTests` (5, docs/U-AUTH-PLAN.md wave 3) — unknown id/username → empty `Optional`, a user with jsonb memberships round trips (asserting the username reads back lower-cased and the `List<Membership>` survives), `findByUsername` is case-insensitive (`CaseTest`/`CASETEST`/`casetest` all resolve the same user), `save` upserts by id (display name/hash/enabled/memberships all replaced in place), `findAll` returns every saved user.
@@ -667,3 +680,19 @@ scoped SSE and the wiring/devsupport, are in vision-api/vision-app's own MODULE.
   seed, not by the schema. A `CREATE UNIQUE INDEX ... WHERE kind = 'COP'` would make it structural;
   it was not added because the in-memory reference repository could not enforce the same thing, which
   is the parity rule the rest of this schema follows.
+
+## docs/TRACKING-PLAN.md wave T6 done (tracking rides the jsonb — no migration)
+
+`./mvnw -B -pl adapters/adapter-persistence test`: **115/115 green** (was 113), **docker present, so
+every Testcontainers case actually ran** against a real `postgres:16` — including both new ones; this
+is a verified result, not a skipped-and-assumed one.
+
+**Nothing in `src/main` changed.** No Flyway migration (the next free version stays `V13`), no entity
+field, no mapper line: `Detection`'s new nullable `TrackRef` component rides inside the existing
+`detection_results.detections` jsonb because Hibernate's Jackson 3 `FormatMapper` serializes the whole
+record tree (docs/TRACKING-PLAN.md §4.C). The wave is therefore two tests and two doc paragraphs —
+which is the honest size of it.
+
+See the tracks bullet under Conventions for the three consequences that are now written down: tracks
+are not SQL-queryable (deferred to S2, which is the first query that needs them), pre-tracking rows
+read back untracked, and per-frame `TrackingTelemetry` is deliberately not persisted.

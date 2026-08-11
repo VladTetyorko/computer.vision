@@ -9,6 +9,7 @@ import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
+import com.drones.vision.app.config.properties.VisionTrackingProperties;
 import com.drones.vision.app.bootstrap.SimulationResumeRunner;
 import com.drones.vision.app.devsupport.*;
 import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
@@ -36,6 +37,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -305,20 +307,32 @@ public class ApplicationServiceWiring {
                                         OverlayPort overlayPort,
                                         DetectionEventRepositoryPort detectionEventRepositoryPort,
                                         LiveUpdatePublisherPort liveUpdatePublisherPort,
-                                        VisionApplicationProperties applicationProperties) {
+                                        VisionApplicationProperties applicationProperties,
+                                        VisionTrackingProperties trackingProperties) {
         return new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort,
                 detectionEventRepositoryPort, liveUpdatePublisherPort,
-                streamPipelineSettings(applicationProperties));
+                streamPipelineSettings(applicationProperties, trackingProperties));
     }
 
     /**
      * Maps {@link VisionApplicationProperties.Pipeline}/{@link VisionApplicationProperties.Extrapolation}
-     * onto {@code com.drones.vision.application.pipeline.StreamPipelineSettings} — the two backoff
+     * and {@link VisionTrackingProperties}' two read-model windows onto {@code
+     * com.drones.vision.application.pipeline.StreamPipelineSettings} — the two backoff
      * pairs are bound in milliseconds but the settings record's own unit is nanoseconds, so this is
      * where the conversion happens, once.
+     *
+     * <p>The tracking window pair comes from {@code vision.tracking.*} rather than {@code
+     * vision.application.*} (docs/TRACKING-ORCHESTRATION.md &sect;4.3): {@code stats-window-seconds}
+     * is how far back {@code TrackingStatsWindow}'s duty-cycle counters reach — the number {@code GET
+     * /api/streams/{id}/tracks} reports as {@code stats.windowSeconds} — and {@code
+     * track-retention-seconds} is how long {@code TrackBook} keeps a track that stopped arriving.
+     * Both configure per-stream <b>read models</b>, so unlike the mode/cadence seeds they apply to
+     * every stream this instance starts from then on. Every default is byte-identical to the literal
+     * the settings record's own convenience constructor uses.
      */
-    private static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties) {
+    static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties,
+                                                          VisionTrackingProperties tracking) {
         VisionApplicationProperties.Pipeline pipeline = properties.pipeline();
         VisionApplicationProperties.Extrapolation extrapolation = properties.extrapolation();
         return new StreamPipelineSettings(pipeline.assumedSourceFps(), pipeline.measuredFpsEwmaAlpha(),
@@ -327,7 +341,9 @@ public class ApplicationServiceWiring {
                 TimeUnit.MILLISECONDS.toNanos(pipeline.detectionBackoff().maxMs()),
                 TimeUnit.MILLISECONDS.toNanos(pipeline.sourceReopenBackoff().initialMs()),
                 TimeUnit.MILLISECONDS.toNanos(pipeline.sourceReopenBackoff().maxMs()),
-                extrapolation.maxMillis(), extrapolation.matchGate());
+                extrapolation.maxMillis(), extrapolation.matchGate(),
+                Duration.ofSeconds(tracking.statsWindowSeconds()),
+                Duration.ofSeconds(tracking.trackRetentionSeconds()));
     }
 
     /**

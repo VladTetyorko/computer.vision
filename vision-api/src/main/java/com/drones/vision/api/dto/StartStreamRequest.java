@@ -2,6 +2,7 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.TrackingConfig;
 
 import java.util.List;
 import java.util.Set;
@@ -33,19 +34,60 @@ import java.util.Set;
  *                             is itself a real value with the same "all labels" meaning
  * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present; absent keeps
  *                             the default ({@code true})
+ * @param tracking            overrides the deployment's tracking seed if present (docs/TRACKING-PLAN.md
+ *                             §4.D) — the same object shape {@code PATCH .../config} accepts
+ *                             <b>minus {@code lock}</b>, which names a track that cannot exist before
+ *                             the stream has produced one and is therefore a 400 here; absent keeps
+ *                             the seed exactly
  */
 public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, Boolean overlayBurnIn,
-                                  String model, List<String> labelFilter, Boolean detectionEnabled) {
+                                  String model, List<String> labelFilter, Boolean detectionEnabled,
+                                  TrackingConfigRequest tracking) {
 
     /** No overrides: use every default from {@link PipelineConfig#defaults()}. */
-    public static final StartStreamRequest EMPTY = new StartStreamRequest(null, null, null, null, null, null);
+    public static final StartStreamRequest EMPTY = new StartStreamRequest(null, null, null, null, null, null, null);
 
     /**
-     * Merges this request onto {@link PipelineConfig#defaults()}.
+     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * a convenience constructor defaulting it to {@code null} ("use the seed as-is").
+     *
+     * @param confidenceThreshold overrides the default confidence threshold if present
+     * @param inferenceFps        overrides the default inference sample rate if present
+     * @param overlayBurnIn       overrides the default burn-in flag if present
+     * @param model               overrides the default model id if present/non-blank
+     * @param labelFilter         overrides the default label set if present
+     * @param detectionEnabled    overrides the default detection on/off flag if present
+     */
+    public StartStreamRequest(Double confidenceThreshold, Integer inferenceFps, Boolean overlayBurnIn, String model,
+                               List<String> labelFilter, Boolean detectionEnabled) {
+        this(confidenceThreshold, inferenceFps, overlayBurnIn, model, labelFilter, detectionEnabled, null);
+    }
+
+    /**
+     * Merges this request onto {@link PipelineConfig#defaults()}, tracking included.
      *
      * @return the effective pipeline configuration for the new stream
      */
     public PipelineConfig mergeOntoDefaults() {
+        return mergeOntoDefaults(PipelineConfig.defaults().tracking());
+    }
+
+    /**
+     * Merges this request onto {@link PipelineConfig#defaults()}, seeding tracking from the
+     * deployment rather than the domain (docs/TRACKING-ORCHESTRATION.md §4.1/§4.3).
+     *
+     * <p>{@code trackingSeed} is {@code vision.tracking.*} as wired in {@code vision-app}. It seeds
+     * <b>new</b> streams only — nothing here ever reaches into a running stream, whose tracking
+     * configuration is its own state and changes only by {@code PATCH}; restarting a stream is how a
+     * changed deployment default is picked up. {@code vision-domain} keeps pure literals and knows
+     * nothing about it.
+     *
+     * @param trackingSeed the deployment's tracking defaults for new streams; never {@code null}
+     * @return the effective pipeline configuration for the new stream
+     * @throws IllegalArgumentException if the request's {@code tracking} object is invalid, or
+     *                                  carries a {@code lock} (→400)
+     */
+    public PipelineConfig mergeOntoDefaults(TrackingConfig trackingSeed) {
         PipelineConfig defaults = PipelineConfig.defaults();
         double confidence = confidenceThreshold != null ? confidenceThreshold : defaults.confidenceThreshold();
         int fps = inferenceFps != null ? inferenceFps : defaults.inferenceFps();
@@ -55,8 +97,10 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
         Set<String> effectiveLabelFilter = labelFilter != null ? Set.copyOf(labelFilter) : defaults.labelFilter();
         boolean effectiveDetectionEnabled =
                 detectionEnabled != null ? detectionEnabled : defaults.detectionEnabled();
+        TrackingConfig effectiveTracking =
+                tracking != null ? tracking.toStartTrackingConfig(trackingSeed) : trackingSeed;
         return new PipelineConfig(effectiveModel, confidence, fps, defaults.maxInFlightInferences(),
                 defaults.overlayTelemetry(), effectiveLabelFilter, defaults.eventRule(), burnIn,
-                effectiveDetectionEnabled);
+                effectiveDetectionEnabled, effectiveTracking);
     }
 }

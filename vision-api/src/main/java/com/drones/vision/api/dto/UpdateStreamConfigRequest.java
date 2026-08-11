@@ -1,6 +1,7 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.application.stream.PipelineConfigPatch;
+import com.drones.vision.domain.model.TrackingConfig;
 
 import java.util.List;
 import java.util.Set;
@@ -26,21 +27,62 @@ import java.util.Set;
  *                            explicit empty array is a real value meaning "keep all labels"
  * @param detectionEnabled    replacement detection on/off flag, or absent to keep the current one
  * @param model               replacement model checkpoint id, or absent to keep the current one
+ * @param tracking            replacement tracking configuration (docs/TRACKING-PLAN.md §4.D), or
+ *                            absent to leave tracking entirely alone. <b>A tracking change never
+ *                            re-arms the detector</b> — mode, engine, cadences and the target lock
+ *                            are all hot knobs, exactly like confidence and fps; only {@code model}
+ *                            ever re-arms
  */
 public record UpdateStreamConfigRequest(Double confidenceThreshold, Integer inferenceFps, List<String> labelFilter,
-                                         Boolean detectionEnabled, String model) {
+                                         Boolean detectionEnabled, String model, TrackingConfigRequest tracking) {
 
     /** No body at all: a patch that changes nothing. */
     public static final UpdateStreamConfigRequest EMPTY =
-            new UpdateStreamConfigRequest(null, null, null, null, null);
+            new UpdateStreamConfigRequest(null, null, null, null, null, null);
 
     /**
-     * Maps this request to the application-level patch.
+     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * a convenience constructor defaulting it to {@code null} ("leave tracking alone") — the same
+     * N-1-arg idiom the application's own {@code PipelineConfigPatch} uses.
+     *
+     * @param confidenceThreshold replacement confidence threshold, or {@code null}
+     * @param inferenceFps        replacement inference sample rate, or {@code null}
+     * @param labelFilter         replacement label set, or {@code null}
+     * @param detectionEnabled    replacement detection on/off flag, or {@code null}
+     * @param model               replacement model checkpoint id, or {@code null}
+     */
+    public UpdateStreamConfigRequest(Double confidenceThreshold, Integer inferenceFps, List<String> labelFilter,
+                                      Boolean detectionEnabled, String model) {
+        this(confidenceThreshold, inferenceFps, labelFilter, detectionEnabled, model, null);
+    }
+
+    /**
+     * Maps this request to the application-level patch, with tracking left untouched.
      *
      * @return the partial patch to apply
+     * @throws IllegalArgumentException if a {@code tracking} object is present but invalid (→400)
      */
     public PipelineConfigPatch toPatch() {
+        return toPatch(TrackingConfig.off());
+    }
+
+    /**
+     * Maps this request to the application-level patch (docs/TRACKING-PLAN.md §4.D).
+     *
+     * <p>{@code trackingBase} is what an <b>absent</b> field inside a present {@code tracking}
+     * object falls back to — see {@link TrackingConfigRequest} for the merge and {@code
+     * StreamController#updateConfig} for how the base is obtained from the running stream. An
+     * absent {@code tracking} object ignores it entirely and leaves the patch's {@code tracking}
+     * {@code null}, which the application layer reads as "leave tracking alone".
+     *
+     * @param trackingBase the running stream's readable tracking state; never {@code null}
+     * @return the partial patch to apply
+     * @throws IllegalArgumentException if a {@code tracking} object is present but invalid (→400)
+     */
+    public PipelineConfigPatch toPatch(TrackingConfig trackingBase) {
         Set<String> filter = labelFilter == null ? null : Set.copyOf(labelFilter);
-        return new PipelineConfigPatch(confidenceThreshold, inferenceFps, filter, detectionEnabled, model);
+        TrackingConfig trackingConfig = tracking == null ? null : tracking.toTrackingConfig(trackingBase);
+        return new PipelineConfigPatch(confidenceThreshold, inferenceFps, filter, detectionEnabled, model,
+                trackingConfig);
     }
 }

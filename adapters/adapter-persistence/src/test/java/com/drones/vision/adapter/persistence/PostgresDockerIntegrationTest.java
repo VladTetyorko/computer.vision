@@ -46,7 +46,12 @@ import com.drones.vision.domain.model.SampleImage;
 import com.drones.vision.domain.model.SampleStatus;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.DetectionSource;
+import com.drones.vision.domain.model.DetectorReason;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.domain.model.TrackState;
+import com.drones.vision.domain.model.TrackingTelemetry;
 import com.drones.vision.domain.model.TrainingSample;
 import com.drones.vision.domain.model.TrainingSampleId;
 import com.drones.vision.domain.model.UsageId;
@@ -711,6 +716,87 @@ class PostgresDockerIntegrationTest {
             List<DetectionResult> found = repository.query(new DetectionQuery(streamId, null, null, null, 2));
 
             assertEquals(List.of(3L, 2L), found.stream().map(DetectionResult::frameSequence).toList());
+        }
+
+        /**
+         * docs/TRACKING-PLAN.md &sect;4.C: <b>the regression this whole "no migration" decision rests
+         * on.</b> A {@code detection_results} row written <b>before</b> the tracking wave — its
+         * {@code detections} jsonb carrying no {@code track} key at all — must still deserialize,
+         * with {@link Detection#track()} reading {@code null}.
+         *
+         * <p>Written as a hand-rolled jsonb literal inserted through native SQL rather than by
+         * saving a domain object, deliberately: an untracked {@code Detection} serialized by
+         * <i>today's</i> Jackson would prove nothing about a blob produced by <i>yesterday's</i>
+         * record shape. This is the actual pre-tracking bytes.
+         */
+        @Test
+        void preTrackingJsonbRowsStillDeserializeWithTrackReadingNull() {
+            StreamId streamId = StreamId.random();
+            String preTrackingBlob = """
+                    [{"label":"person","confidence":0.87,\
+                    "box":{"x":0.1,"y":0.2,"width":0.3,"height":0.4},\
+                    "model":{"id":"yolo","version":"v1"}}]""";
+
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                em.getTransaction().begin();
+                em.createNativeQuery("insert into detection_results "
+                                + "(id, stream_id, frame_sequence, captured_at, detections, inference_latency_nanos) "
+                                + "values (?1, ?2, ?3, ?4, cast(?5 as jsonb), ?6)")
+                        .setParameter(1, UUID.randomUUID())
+                        .setParameter(2, streamId.value())
+                        .setParameter(3, 11L)
+                        .setParameter(4, NOW)
+                        .setParameter(5, preTrackingBlob)
+                        .setParameter(6, Duration.ofMillis(42).toNanos())
+                        .executeUpdate();
+                em.getTransaction().commit();
+            } finally {
+                em.close();
+            }
+
+            List<DetectionResult> found = repository.query(new DetectionQuery(streamId, null, null, null, 10));
+
+            assertEquals(1, found.size());
+            Detection detection = found.get(0).detections().get(0);
+            assertNull(detection.track(), "a pre-tracking row must read back as an untracked detection");
+            assertEquals("person", detection.label());
+            assertEquals(0.87, detection.confidence());
+            assertEquals(new BoundingBox(0.1, 0.2, 0.3, 0.4), detection.box());
+            assertEquals(new ModelRef("yolo", "v1"), detection.model());
+            assertEquals(11L, found.get(0).frameSequence());
+            assertEquals(Duration.ofMillis(42), found.get(0).inferenceLatency());
+        }
+
+        /**
+         * The other half of docs/TRACKING-PLAN.md &sect;4.C: a tracked detection rides along in the
+         * existing jsonb blob with <b>no schema change at all</b> — {@link TrackRef} is a plain
+         * record inside the {@code List<Detection>} Jackson already serializes.
+         *
+         * <p>Also pins the deliberate omission: {@code DetectionResult#tracking()} (the <i>per-frame</i>
+         * telemetry, as opposed to this <i>per-detection</i> track reference) has no column and is
+         * <b>not</b> persisted, so it reads back {@code null}. That is a documented drop, not the
+         * silent kind docs/TRACKING-ORCHESTRATION.md &sect;6 rule 6 warns about: the duty-cycle
+         * counters it feeds are a live read model ({@code TrackingStatsWindow}), and a durable
+         * trajectory/telemetry table is deferred to S2, which is the first thing that would query it.
+         */
+        @Test
+        void aTrackedDetectionRoundTripsThroughTheJsonbBlobWithNoMigration() {
+            StreamId streamId = StreamId.random();
+            Detection tracked = new Detection("car", 0.82, new BoundingBox(0.31, 0.44, 0.09, 0.07),
+                    new ModelRef("yolo26n.pt", "latest"),
+                    new TrackRef(7L, TrackState.COASTING, DetectionSource.TRACKER, 0.012, -0.001, 143));
+
+            repository.save(new DetectionResult(streamId, 5, NOW, List.of(tracked), Duration.ofMillis(3),
+                    new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 7L)));
+
+            List<DetectionResult> found = repository.query(new DetectionQuery(streamId, null, null, null, 10));
+
+            assertEquals(1, found.size());
+            assertEquals(List.of(tracked), found.get(0).detections(),
+                    "every TrackRef component must survive the jsonb round trip");
+            assertNull(found.get(0).tracking(),
+                    "per-frame tracking telemetry has no column and is deliberately not persisted (§4.C)");
         }
 
         private DetectionResult emptyDetectionResult(StreamId streamId, long frameSequence, Instant capturedAt) {

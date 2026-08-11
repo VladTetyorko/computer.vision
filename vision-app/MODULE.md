@@ -91,6 +91,8 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 | `replayFrameExtractionPort` | `ReplayFrameExtractionPort` | `MediamtxReplayFrameExtractor(mediamtx.playbackBase())` if `vision.publish.enabled` else `NoopReplayFrameExtractor` (devsupport) — docs/CV-TRAINING-V2-PLAN.md §7; same if/else split as `streamPublisherPort`, consumed by `TrainingWiringConfiguration#replaySources` |
 | `hlsProxyUpstreamBase` | `URI` | `properties.mediamtx().hlsBase()` — the collaborator `HlsProxyController` (`vision-api`, component-scanned) needs; see Gotchas for why this is a bean rather than `HlsProxyController` being hand-constructed here |
 | `cvModelRoster` | `List<CvModelResponse>` | a static, in-source constant (docs/CV-CONTROL-PLAN.md §4) — the collaborator `CvModelsController` (`vision-api`, component-scanned) needs, the same "raw collaborator, not a domain port" pattern as `hlsProxyUpstreamBase`; see "Detection-model roster" below |
+| `streamStartTrackingDefaults` | `TrackingConfig` (vision-domain) | `TrackingWiring`: the deployment's tracking seed for **new** streams, built from `VisionTrackingProperties` (docs/TRACKING-PLAN.md §4, docs/TRACKING-ORCHESTRATION.md §4.1/§4.3) — the collaborator `StreamController`/`AssetController` (`vision-api`, component-scanned) need, same "raw collaborator, not a domain port" pattern as `cvModelRoster`/`hlsProxyUpstreamBase`; default `TrackingConfig.off()`, i.e. stream starts are unchanged; see "Tracking engine wiring" below |
+| `cvTrackerRoster` | `List<CvTrackerResponse>` | `TrackingWiring`: a static, in-source constant (docs/TRACKING-PLAN.md §4.F) — the roster `CvTrackersController` serves at `GET /api/cv/trackers`, mirroring `cvModelRoster`'s frozen decision exactly (deploy-time, not runtime) |
 | `cvGrpcChannel` | `ManagedChannel` | one shared gRPC connection to cv-service, present whenever `vision.cv.enabled` or `vision.training.enabled` is `true` (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) — consumed by both `detectionPort` below and `TrainingWiringConfiguration#modelRegistryPort`; see "CV inference wiring" below |
 | `detectionPort` | `DetectionPort` | `GrpcDetectionPort` (adapter-cv-grpc) over the shared `cvGrpcChannel` if `vision.cv.enabled=true`, else `NoopDetectionPort` (devsupport) — see "CV inference wiring" below |
 | `categoryRepositoryPort` | `CategoryRepositoryPort` | `PersistenceWiringConfiguration`: `JpaCategoryRepository` (adapter-persistence) if `vision.persistence.enabled=true` else `InMemoryCategoryRepository` (devsupport, seeded) — see "Persistence wiring" below |
@@ -175,7 +177,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 
 ## application.properties
 
-`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:18888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below; host-mode value, not mediamtx's own default 8888, for the collision-avoidance reason documented inline in `application.properties`) · `vision.publish.mediamtx.whep-base=http://localhost:18889` (docs/MVP2-PLAN.md L-a — mediamtx's WebRTC/WHEP egress; unlike `hls-base`, handed to viewers verbatim, so this must already be browser-reachable — see "WHEP viewing" below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true` · `vision.cv.enabled=false` (default — no cv-service required; see "CV inference wiring" below) · `vision.cv.endpoint=localhost:50051` (cv-service's `DetectStream` gRPC endpoint, only read when `vision.cv.enabled=true`) · `vision.cv.detect-width`/`vision.cv.jpeg-quality` (docs/REMOTE-CV-PLAN.md P1 item 5, `GrpcDetectionPort`'s wire-tuning knobs — see "CV inference wiring" below; commented out in `application.properties`, documenting their `640`/`0.8` defaults rather than setting them, only read when `vision.cv.enabled=true`) · `vision.persistence.enabled=false` (default — in-memory fleet + history repositories, no database required; see "Persistence wiring" below) · `vision.persistence.jdbc-url=jdbc:postgresql://localhost:5432/vision` / `vision.persistence.username=vision` / `vision.persistence.password=vision` (only read when `vision.persistence.enabled=true`) · `vision.live.enabled=true` (default — server-push `/api/live` SSE endpoint + `LiveUpdatePublisherPort` wired to the real registry; see "Server-push data plane" below) · `vision.simulation.resume-on-boot=true` (default — backend follow-up batch; whether `SimulationResumeRunner` calls `SimulationService#resumeAll()` once at boot; only takes effect when `vision.persistence.enabled=true` too; see "Simulated-feed resume-on-boot" below) · `vision.rc.watchdog-timeout-ms=300` (default, commented out in `application.properties` — docs/RC-CONTROL-PHASE1-PLAN.md R4; `manualControlService`'s input-loss watchdog timeout; SITL-tune against measured glass-to-stick latency before relying on it, per the plan's own verification steps).
+`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:18888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below; host-mode value, not mediamtx's own default 8888, for the collision-avoidance reason documented inline in `application.properties`) · `vision.publish.mediamtx.whep-base=http://localhost:18889` (docs/MVP2-PLAN.md L-a — mediamtx's WebRTC/WHEP egress; unlike `hls-base`, handed to viewers verbatim, so this must already be browser-reachable — see "WHEP viewing" below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true` · `vision.cv.enabled=false` (default — no cv-service required; see "CV inference wiring" below) · `vision.cv.endpoint=localhost:50051` (cv-service's `DetectStream` gRPC endpoint, only read when `vision.cv.enabled=true`) · `vision.cv.detect-width`/`vision.cv.jpeg-quality` (docs/REMOTE-CV-PLAN.md P1 item 5, `GrpcDetectionPort`'s wire-tuning knobs — see "CV inference wiring" below; commented out in `application.properties`, documenting their `640`/`0.8` defaults rather than setting them, only read when `vision.cv.enabled=true`) · `vision.persistence.enabled=false` (default — in-memory fleet + history repositories, no database required; see "Persistence wiring" below) · `vision.persistence.jdbc-url=jdbc:postgresql://localhost:5432/vision` / `vision.persistence.username=vision` / `vision.persistence.password=vision` (only read when `vision.persistence.enabled=true`) · `vision.live.enabled=true` (default — server-push `/api/live` SSE endpoint + `LiveUpdatePublisherPort` wired to the real registry; see "Server-push data plane" below) · `vision.simulation.resume-on-boot=true` (default — backend follow-up batch; whether `SimulationResumeRunner` calls `SimulationService#resumeAll()` once at boot; only takes effect when `vision.persistence.enabled=true` too; see "Simulated-feed resume-on-boot" below) · `vision.tracking.default-mode=OFF` / `.follow-fps=15` / `.verify-every-millis=2000` / `.stats-window-seconds=30` / `.track-retention-seconds=5` (all defaults, all commented out in `application.properties` — docs/TRACKING-PLAN.md, docs/TRACKING-ORCHESTRATION.md §4.3; see "Tracking engine wiring" below for which of them seed a new stream and which configure the read models) · `vision.rc.watchdog-timeout-ms=300` (default, commented out in `application.properties` — docs/RC-CONTROL-PHASE1-PLAN.md R4; `manualControlService`'s input-loss watchdog timeout; SITL-tune against measured glass-to-stick latency before relying on it, per the plan's own verification steps).
 
 **New in docs/LAYERING-REFACTOR-PLAN.md wave D** (all commented out, documenting rather than overriding every default — see "Package shape" above for the full record table): `vision.rtsp.*` (transport/timeouts/probesize/`transmit.*`), `vision.mjpeg.*` (read-timeout/buffer-capacity/`transmit.*`), `vision.v4l2.*` (buffer-capacity/close-join-timeout only — no `default-video-size`/`framerate`/`input-format`, see `VisionV4l2Properties`'s own javadoc for why), `vision.mavlink.*` (bind-host/silence-window/timeouts/`scan.*`/`transmit.*`), `vision.rc.override-hz`/`.min-override-hz`/`.max-override-hz`/`.release-frames` (extends the pre-existing `vision.rc.watchdog-timeout-ms`), `vision.overlay.*` (jpeg-quality/stroke/font/OSD tunables), `vision.cv.response-timeout`/`.keepalive-*`/`.channel-shutdown-timeout`/`.plaintext`/`.upload.*`/`.registry.call-timeout` (extends the pre-existing `vision.cv.enabled`/`.endpoint`/`.detect-width`/`.jpeg-quality`), `vision.discovery.mdns.*`/`.v4l2.*` (extends the pre-existing `vision.discovery.enabled`/`.mavlink-port`), `vision.simulation.video.*`/`.telemetry.*` (extends the pre-existing `vision.simulation.resume-on-boot`), `vision.publish.encoder.*`/`.resilience.*`/`.cadence.*`/`.replay.*` (extends the pre-existing `vision.publish.*`), and `vision.api.*` (Spring-bound counterpart of vision-api's own framework-free `VisionApiProperties`, wiring a real `SnapshotJpegEncoder` bean).
 
@@ -190,6 +192,51 @@ The sixteen port beans (`categoryRepositoryPort`, `deviceRepositoryPort`, `asset
 **Removed from `WiringConfiguration`**: P-a's task removed the `categoryRepositoryPort`/`deviceRepositoryPort`/`assetRepositoryPort` `@Bean` methods (previously always `InMemory*Repository`, unconditionally); this task (P-b) removed `assetUsageRepositoryPort`/`telemetryRepositoryPort`/`detectionRepositoryPort` the same way. All six now live in `PersistenceWiringConfiguration` as described above. `AuditTrailPort` is untouched (still an unconditional `InMemory*` bean in `WiringConfiguration` — never in either cycle's scope).
 
 **docker-compose.yml**: the `vision-app` service now depends on `postgres` (`condition: service_healthy`, alongside its existing `mediamtx`/`cv-service` dependencies) and sets `VISION_PERSISTENCE_ENABLED=true`, `VISION_PERSISTENCE_JDBC_URL=jdbc:postgresql://postgres:5432/${POSTGRES_DB}` (compose-internal hostname/port — mirrors the existing `VISION_PUBLISH_MEDIAMTX_*_BASE` container-vs-host addressing split), `VISION_PERSISTENCE_USERNAME`/`VISION_PERSISTENCE_PASSWORD` from the same `.env`-sourced `${POSTGRES_USER}`/`${POSTGRES_PASSWORD}` the `postgres` service itself already uses. So `docker compose up` now runs persistence-enabled end to end — fleet *and* history, as of this task; a host-run `./mvnw spring-boot:run` (or any other non-compose run) still defaults to `vision.persistence.enabled=false` and needs no database, exactly as before.
+
+## Tracking engine wiring (docs/TRACKING-PLAN.md, docs/TRACKING-ORCHESTRATION.md §4.1/§4.3)
+
+`VisionTrackingProperties` (`@ConfigurationProperties(prefix="vision.tracking")`, same
+record-plus-`@DefaultValue` idiom as `VisionCvProperties`) and `TrackingWiring` (its own
+`@Configuration`, split by concern like `PersistenceWiringConfiguration`/`DiscoveryWiringConfiguration`
+— tracking is configured independently of whether the gRPC detection channel is even built).
+
+**Five keys, two disjoint jobs.** This distinction is the whole point of the plan's configuration
+layering, so it is spelled out rather than left to the reader:
+
+| Key | Default | What it does |
+|---|---|---|
+| `vision.tracking.default-mode` | `OFF` | seeds **new** streams (`TrackingWiring#streamStartTrackingDefaults` → the two REST start-stream endpoints) |
+| `vision.tracking.follow-fps` | `15` | same — the *Java*-side sampler's rate while `FOLLOW` is active (cv-service has no such knob and must never care how often it is fed) |
+| `vision.tracking.verify-every-millis` | `2000` | same — `FOLLOW`'s detector re-verify cadence |
+| `vision.tracking.stats-window-seconds` | `30` | configures the per-stream **read model** `TrackingStatsWindow`, via `ApplicationServiceWiring#streamPipelineSettings` → `StreamPipelineSettings#trackingStatsWindow` |
+| `vision.tracking.track-retention-seconds` | `5` | same, for `TrackBook#retention` |
+
+**The seeds never reach a running stream.** A running stream's tracking configuration is its own
+state, changed only by `PATCH /api/streams/{id}/config`; restarting the stream is how a changed
+deployment default is picked up, and that is deliberate — a config edit must not silently re-steer a
+flight in progress. `vision-domain` keeps pure literals (`TrackingConfig.off()`/`.defaults()`), which
+is exactly why this layer lives here.
+
+**`track-retention-seconds` is not in the plan's own knob inventory** (docs/TRACKING-ORCHESTRATION.md
+§4.3 lists four keys). It exists because `StreamPipelineSettings`' canonical constructor requires
+*both* durations stated once you set either, and its own default is `private` — so the choice was a
+documented knob or a magic `5s` literal duplicated in wiring. The default is byte-identical to the
+literal it mirrors, asserted by `TrackingWiringTest`.
+
+**No `vision.tracking.enabled` flag, deliberately** (docs/TRACKING-PLAN.md §5.G): `vision.cv.enabled`
+already kills CV wholesale, and `TrackingMode.OFF` is a per-stream off-switch strictly better than a
+JVM-wide one — the same reasoning `detectionEnabled` used.
+
+**The three remaining wire knobs — `redetectIouPercent`/`maxAgeFrames`/`minHits` — have no Java
+property on purpose.** They are resolved inside cv-service from `CV_TRACK_IOU`/`CV_TRACK_MAX_AGE`/
+`CV_TRACK_MIN_HITS`; duplicating them here would give one number two owners. The seed passes
+`TrackingConfig`'s own defaults for them, which are the same values cv-service resolves its `<=0`
+sentinels to.
+
+**Roster drift is answered, not prevented** (risk R11): `cvTrackerRoster` is a static list, so it can
+name an engine cv-service failed to construct. The fix is not a roster RPC — cv-service logs the
+roster it really got at startup, every response carries `tracker_engine_id` (the engine that
+*actually* served the frame), and the SPA displays that.
 
 ## HLS proxy (browsers never talk to mediamtx directly)
 
@@ -1277,3 +1324,32 @@ measurements.
   restart mints a *new* COP `LayerId`, so any client that cached the old one sees an unknown layer.
   Harmless today (Wave E refetches `GET /api/map/layers` on connect); worth remembering when
   debugging a dev session that looks like it "lost" its shared marks.
+
+## docs/TRACKING-PLAN.md wave T6 done (tracking wiring + deployment properties)
+
+`./mvnw -B -pl vision-app test`: **215/215 green** (was 205 — +10: `config.wiring.TrackingWiringTest`
+7 pure unit tests, `TrackingWiringContextTest` 3 context tests). **ArchUnit unchanged and green** —
+the new `TrackingConfig`/`List<CvTrackerResponse>` beans are a domain record and a `vision-api` DTO
+list, so no rule about adapter/`@ConfigurationProperties`/package placement is touched.
+
+**The default-config bar, proven:** every default in `VisionTrackingProperties` leaves behavior
+exactly as it was. `default-mode=OFF` is the same value `PipelineConfig.defaults()` carries through
+waves T2–T7, so a stream started with no request-side `tracking` object gets `TrackingConfig.off()` —
+asserted twice, once without Spring (`TrackingWiringTest#defaultPropertiesSeedNewStreamsWithTrackingOffExactlyAsBeforeTrackingExisted`)
+and once through the real context (`TrackingWiringContextTest#defaultConfigurationSeedsNewStreamsWithTrackingOff`).
+The two window keys map to the exact durations `StreamPipelineSettings.defaults()` already used
+(`theDefaultWindowsAreByteIdenticalToTheSettingsRecordsOwnDefaults`).
+
+New/changed here: `config/properties/VisionTrackingProperties.java`, `config/wiring/TrackingWiring.java`,
+`ApplicationServiceWiring#streamService`/`#streamPipelineSettings` (one more properties argument, and
+the settings mapping now states both tracking durations — the method was widened from `private
+static` to package-private `static` purely so the binding could be unit-tested in-package rather than
+inferred through a running stream), and a documented `vision.tracking.*` block in
+`application.properties`.
+
+**Note for whoever picks up the follow-up:** `vision-api`'s `StreamController`/`AssetController` take
+the seed as a constructor argument (4→5 and 5→6 respectively — the latter one past the five-argument
+ceiling, flagged in vision-api/MODULE.md). The shape that would pay that down is moving the seed
+beside `StreamPipelineSettings` in `vision-application`, where every other stream-start setting
+already lives; it would also close the one gap this wave cannot reach from here — simulation-started
+streams (`DefaultSimulationService`) build their own `PipelineConfig` and never see `vision.tracking.*`.

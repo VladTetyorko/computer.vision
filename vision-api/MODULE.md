@@ -64,7 +64,9 @@ literal it replaced (see `VisionApiProperties` below).
 | StreamController | DELETE | `/api/streams/{streamId}` | 204 | never fails (documented no-op) |
 | StreamController | GET | `/api/streams/{streamId}/detections?limit=` | 200 `List<DetectionResultResponse>`, newest first | 400 non-positive `limit` (docs/MVP1-PLAN.md §C8 bullet 3; unknown stream → empty list, `limit` defaults 50) |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | 200 `image/jpeg` bytes, `Cache-Control: no-store` | 404 unknown stream or no frame published yet, 400 bad UUID (docs/MVP3-PLAN.md C-a; downscaled to `SnapshotJpegEncoder.MAX_SNAPSHOT_WIDTH`=480px wide, aspect-preserving; the one binary, non-JSON response in this module) |
-| StreamController | PATCH | `/api/streams/{streamId}/config` | 200 `{streamId, modelReArmed}` | 404 unknown/not-running stream, 400 invalid merged value (docs/CV-CONTROL-PLAN.md §3's frozen wire contract — live per-stream detection control: confidence/inference-fps/labelFilter/detectionEnabled apply hot with no video interruption; a changed `model` briefly re-arms detection instead, reported via `modelReArmed`; body is a true partial patch, every field optional/absent-means-unchanged, whole body may be absent (no-op); no acting user threaded, same stance as every other endpoint on this controller) |
+| StreamController | PATCH | `/api/streams/{streamId}/config` | 200 `{streamId, modelReArmed, trackingChanged}` | 404 unknown/not-running stream, 400 invalid merged value (docs/CV-CONTROL-PLAN.md §3's frozen wire contract — live per-stream detection control: confidence/inference-fps/labelFilter/detectionEnabled apply hot with no video interruption; a changed `model` briefly re-arms detection instead, reported via `modelReArmed`; body is a true partial patch, every field optional/absent-means-unchanged, whole body may be absent (no-op); no acting user threaded, same stance as every other endpoint on this controller; **docs/TRACKING-PLAN.md §4.D** adds an optional `tracking` object — mode/engineId/verifyEveryMillis/followFps/redetectIouPercent/maxAgeFrames/minHits/lock — which is a **hot knob like the rest: it never re-arms the detector**, reported via the new `trackingChanged`; an unknown `mode` and a `lock` that is not exactly one of `{trackId}`/`{pointX,pointY}`/`{release:true}` are both 400, and a client never sends `lockSeq`. **Click-to-follow is this call**, not a new endpoint) |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | 200 `{streamId, lockedTrackId, tracks:[...], stats?}` | 400 bad UUID only (docs/TRACKING-PLAN.md §4.E's frozen wire contract — the running stream's track book plus the duty-cycle counters; **never errors**: an unknown/stopped stream is a 200 with `tracks:[]`, `lockedTrackId:0` and no `stats`, the same forgiving idiom `GET .../detections` uses. `lockedTrackId` is hoisted **above** `stats`, and `stats` is omitted entirely until the window has recorded a detector pass — see the DTO paragraph) |
+| CvTrackersController | GET | `/api/cv/trackers` | 200 `{trackers:[{id, displayName, modes, needsAssets, costHint}]}` | — (docs/TRACKING-PLAN.md §4.F's frozen wire contract; never errors; a static, config-backed `vision-app` bean exactly like `GET /api/cv/models`' roster — the engine list changes at deploy time, not runtime) |
 | CvModelsController | GET | `/api/cv/models` | 200 `{models:[{id, displayName, kind, openVocab, defaultLabelFilter}]}` | — (docs/CV-CONTROL-PLAN.md §4's frozen wire contract; never errors; `yolo26n.pt` listed first, the default; roster is a static, config-backed `vision-app` bean, not the dormant `ModelRegistryPort`) |
 | UsageTimelineController | GET | `/api/usages?limit&assetId` | 200 `List<UsageSummaryResponse>`, newest first | 400 malformed `assetId` UUID (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/design/10-replay.md's frozen contract — the "replay library" list; scoped to `CurrentUser#scope()`, an unknown/out-of-scope `assetId` yields `[]`, never an error; `limit` defaults 50, clamped to `DefaultUsageService.MAX_LIMIT`=500) |
 | UsageTimelineController | GET | `/api/usages/{usageId}/timeline?fromMs&toMs&maxPoints` | 200 `UsageTimelineResponse` | 404 unknown usage, 400 bad UUID/non-positive `maxPoints`/`toMs` before `fromMs` (docs/MVP2-PLAN.md §R, R-a — flight replay; windowed + downsampled, unlike `AssetController`'s older `.../telemetry`; see Gotchas) |
@@ -205,7 +207,9 @@ Response DTOs (`@JsonInclude(NON_NULL)` unless noted — see Conventions), each 
 
 **Flight command 400-vs-409 split (docs/DRONE-INFRA-PLAN.md I-e Stage 2):** `POST /api/assets/{id}/mode`'s **400 unknown mode** and **409 not-commandable** are two distinct outcomes even though both are "the command didn't go." The split lives entirely in `DefaultFlightCommandService` (vision-application), not this module's exception handler: an unknown mode for a mode-capable vehicle is validated against `FlightCapability#selectableModes()` *before* dispatch and thrown as a plain `IllegalArgumentException` → the global `IllegalArgumentException`→400 rule; a not-commandable vehicle (unheard/Betaflight/no MAVLink device) surfaces as `IllegalStateException` → 409, exactly as `return-home` already does. A blank/missing `mode` in the request body is likewise a 400 (`SetModeRequest#requireMode()` throws `IllegalArgumentException`). No new exception type and no change to `ApiExceptionHandler` were needed.
 
-**Detections** (docs/MVP1-PLAN.md §C8 bullet 3, body of `GET /api/streams/{streamId}/detections`), no `NON_NULL` on any of the three (every field is always present): `BoundingBoxResponse(x, y, width, height)` (mirrors `domain.model.BoundingBox`, each component normalized [0,1]) · `DetectionResponse(label, confidence, box:BoundingBoxResponse, modelId, modelVersion)` (mirrors `domain.model.Detection`, `modelId`/`modelVersion` flattened from `ModelRef`) · `DetectionResultResponse(streamId, frameSequence, capturedAt, inferenceMillis, detections:List<DetectionResponse>)` (mirrors `domain.model.DetectionResult`, `inferenceMillis` from `Duration#toMillis()`).
+**Detections** (docs/MVP1-PLAN.md §C8 bullet 3, body of `GET /api/streams/{streamId}/detections`, and the `detections` SSE topic's payload): `BoundingBoxResponse(x, y, width, height)` (no `NON_NULL`; mirrors `domain.model.BoundingBox`, each component normalized [0,1]) · `DetectionResponse(label, confidence, box:BoundingBoxResponse, modelId, modelVersion, track?:DetectionTrackResponse)` · `DetectionResultResponse(streamId, frameSequence, capturedAt, inferenceMillis, detections:List<DetectionResponse>, tracking?:FrameTrackingResponse)`. **The last two gained `@JsonInclude(NON_NULL)` for exactly one field each** (docs/TRACKING-PLAN.md §4.G, wave T6) — every other field is still always present, and an untracked payload is therefore **byte-identical to the pre-tracking wire**, which is the whole reason the track facts are one nested object rather than five flat siblings (docs/TRACKING-ORCHESTRATION.md §6 rule 1). Both keep their pre-T6 canonical constructor as an N-1-arg convenience ctor, so every existing call site compiles unchanged.
+
+**Tracking wire shapes** (docs/TRACKING-PLAN.md §4.D/§4.E/§4.F/§4.G, wave T6): `DetectionTrackResponse(id, state, source, velocityX, velocityY)` — the nested `"track"` object, deliberately **without** `ageFrames` (book-keeping the tracks endpoint carries, not something a box needs 6×/s) · `FrameTrackingResponse(detectorRan, detectorReason?, trackerMillis, engineId, lockedTrackId)` (`@JsonInclude(NON_NULL)`) — the nested `"tracking"` object; **`detectorReason` is present iff `detectorRan`**, and `trackerMillis` is a *fractional* millisecond (nanos/1e6 — `Duration#toMillis()` would report every 0.4 ms tracker pass as `0`, which is precisely the number this feature exists to show) · `TrackResponse(trackId, label, confidence, box, state, source, velocityX, velocityY, ageFrames, firstSeen, lastSeen)` from `domain.model.TrackedObject` — flat, not nested, because *this is* the track resource · `TrackStatsResponse(mode, engineId, windowSeconds, detectorPasses, trackerFrames, dutyRatio, trackerMillisP50, trackerMillisP95, lastDetectorReason, byState:Map<String,Integer>)` from `application.pipeline.TrackingStats` (`window.toSeconds()` → `windowSeconds`; `byState` is a `LinkedHashMap` copy so every state appears, zero included, in lifecycle order; **no `lockedTrackId` here** — §4.E hoists it) · `StreamTracksResponse(streamId, lockedTrackId, tracks, stats?)` (`@JsonInclude(NON_NULL)` for `stats`) · `CvTrackerResponse(id, displayName, modes:List<String>, needsAssets, costHint)` + `CvTrackersResponse(trackers)` (no `NON_NULL`, mirroring `CvModelResponse`/`CvModelsResponse` exactly). Request side: `TrackingConfigRequest(mode?, engineId?, verifyEveryMillis?, followFps?, redetectIouPercent?, maxAgeFrames?, minHits?, lock?:TargetLockRequest)` with `toTrackingConfig(base)`/`toStartTrackingConfig(base)` (the latter **rejects a `lock`** — it names a track that cannot exist before the stream produces one) and `TargetLockRequest(trackId?, pointX?, pointY?, release?)` with `toTargetLock()`, which leaves `lockSeq` at `0` and lets `domain.model.TargetLock`'s own compact ctor be the single arbiter of the one-of-three rule (→400). `UpdateStreamConfigRequest` gained `tracking`, `UpdateStreamConfigResponse` gained `trackingChanged`, and both `StartStreamRequest`/`StartAssetStreamRequest` gained `tracking` plus a `mergeOntoDefaults(TrackingConfig seed)` overload.
 
 **Replay library** (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/design/10-replay.md's frozen wire
 contract, body of `GET /api/usages`), `@JsonInclude(NON_NULL)` (`endedAt`/`durationSeconds` genuinely
@@ -1045,3 +1049,52 @@ implicit and this wave had to settle: **the 403-vs-404 split**. Reads hide (an i
 or drawing is simply absent from its list), commands are honest (acting on something you cannot see
 is a 403, not a hiding 404) — inherited unchanged from Wave B's frozen service javadocs, and the same
 stance `FlightCommandService` already takes.
+
+## docs/TRACKING-PLAN.md wave T6 done (tracking REST surface — PATCH, tracks, trackers, SSE)
+
+`./mvnw -B -pl vision-api test`: **551/551 green** (was 532 — +19: `StreamControllerTest` +17,
+`CvTrackersControllerTest` 2 new). Nothing pre-existing changed shape: the two response DTOs gained
+one nullable field each under `@JsonInclude(NON_NULL)`, so an untracked stream's JSON is byte-for-byte
+what it was, and that is asserted (`anUntrackedDetectionsPayloadIsByteIdenticalToThePreTrackingWire`).
+
+New: `CvTrackersController` (`GET /api/cv/trackers`), `StreamController#tracks`
+(`GET /api/streams/{streamId}/tracks`), the `tracking` object on `PATCH .../config` and on both
+start-stream bodies, and eight DTOs (see the DTO section above).
+
+**Two judgment calls, both flagged rather than buried:**
+
+1. **`StreamController#updateConfig` merges a partial `tracking` object onto a readback base.** The
+   application layer's fold (`DefaultStreamService#foldTracking`, wave T3) replaces mode/engine/every
+   cadence *wholesale* whenever a `tracking` object is present, while the SPA (wave T7, already
+   written) sends **one knob at a time** — `{"tracking":{"engineId":"ncc"}}`,
+   `{"tracking":{"lock":{"release":true}}}`, `{"tracking":{"verifyEveryMillis":5000}}`. Something has
+   to supply the fields the client omitted, and this edge's only readback is
+   `StreamService#trackingStats`: the stream's configured `mode` and the engine **actually serving**
+   it. Basing on those is what stops a cadence tweak from silently switching tracking off, or a lock
+   release from dropping the operator out of `FOLLOW`.
+   **The residual gap, stated plainly:** the five cadence knobs (`verifyEveryMillis`, `followFps`,
+   `redetectIouPercent`, `maxAgeFrames`, `minHits`) have **no readback anywhere on the API surface**,
+   so a partial patch resets an operator-customized cadence to `TrackingConfig`'s documented default.
+   The real fix is a per-field fold in the application layer — a nullable-field tracking patch beside
+   `PipelineConfigPatch` — which is `vision-application`'s file scope, not this wave's. Until then the
+   observable symptom is bounded: changing *two different* cadences in sequence loses the first.
+2. **`AssetController`'s constructor is now six arguments**, one past
+   `.claude/skills/java-clean-code/SKILL.md` §3's ceiling, for the `TrackingConfig` deployment seed.
+   The alternatives were worse: threading the seed through `AssetService` would push a deployment
+   concern into the application layer, and seeding only `StreamController` would make
+   `vision.tracking.default-mode` apply or not depending on which button the operator pressed
+   (device-level vs asset-level start) — a half-wired feature. `StreamController` went 4→5 (at the
+   ceiling) for the same collaborator. The follow-up that actually pays this down is the same one as
+   above: the seed belongs beside `StreamPipelineSettings` in the application layer, where every other
+   stream-start setting already lives.
+
+**Known non-coverage:** simulation-started streams (`DefaultSimulationService`, vision-application)
+build their own `PipelineConfig` from `PipelineConfig.defaults()` and therefore do **not** pick up
+`vision.tracking.*`. That is out of this module's reach and is recorded here rather than papered over.
+
+**`stats` is omitted, never zeroed.** `GET .../tracks` leaves the whole `stats` object out until the
+window has recorded at least one detector pass. Two reasons, and the second is the load-bearing one:
+the SPA's own contract says an absent `stats` means "hide the flow strip", and `TrackingStats`
+reports a `null` `lastDetectorReason` for an empty window — which the strip's formatter
+(`formatDetectorReason`, vision-web) would call `.toLowerCase()` on. Emitting a half-populated object
+would be a runtime error in the client, not a cosmetic one.
