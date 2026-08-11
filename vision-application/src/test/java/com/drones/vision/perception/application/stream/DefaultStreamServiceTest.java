@@ -20,12 +20,12 @@ import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.VideoFrame;
-import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
@@ -426,7 +426,7 @@ class DefaultStreamServiceTest {
         UsageTracker usageTracker = mock(UsageTracker.class);
         AssetId assetId = AssetId.random();
         when(usageTracker.resolveAsset(device.id())).thenReturn(Optional.of(assetId));
-        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
         StreamService withLiveUpdates = new DefaultStreamService(deviceRepository, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher, usageTracker, null, null,
                 liveUpdatePublisherPort);
@@ -444,7 +444,7 @@ class DefaultStreamServiceTest {
     @Test
     void neverResolvesOrAnnouncesLiveUpdatesWhenNoLiveUpdatePublisherIsConfigured() {
         // Documents/protects the nullable-collaborator contract: usageTracker.resolveAsset must
-        // never even be called when there's neither a LiveUpdatePublisherPort to hand the result to
+        // never even be called when there's neither a DetectionLiveUpdatePort to hand the result to
         // nor an OverlayPort that could ever read a telemetry supplier built from it (see the
         // telemetry-supplier tests below).
         UsageTracker usageTracker = mock(UsageTracker.class);

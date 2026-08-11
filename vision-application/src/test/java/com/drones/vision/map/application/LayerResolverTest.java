@@ -1,8 +1,5 @@
 package com.drones.vision.map.application;
 
-import com.drones.vision.kernel.AssetId;
-import com.drones.vision.events.domain.model.DetectionEvent;
-import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.platform.Event;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.map.domain.model.LayerId;
@@ -11,9 +8,8 @@ import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.Role;
-import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,13 +32,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LayerResolverTest {
 
     private FakeMapLayerRepositoryPort mapLayerRepository;
-    private FakeLiveUpdatePublisherPort liveUpdatePublisher;
+    private FakeMapLiveUpdatePort liveUpdatePublisher;
     private LayerResolver resolver;
 
     @BeforeEach
     void setUp() {
         mapLayerRepository = new FakeMapLayerRepositoryPort();
-        liveUpdatePublisher = new FakeLiveUpdatePublisherPort();
+        liveUpdatePublisher = new FakeMapLiveUpdatePort();
         resolver = new LayerResolver(mapLayerRepository, liveUpdatePublisher);
     }
 
@@ -192,29 +188,9 @@ class LayerResolverTest {
         }
     }
 
-    /** Capturing fake {@link LiveUpdatePublisherPort}. */
-    static final class FakeLiveUpdatePublisherPort implements LiveUpdatePublisherPort {
+    /** Capturing fake {@link MapLiveUpdatePort}. */
+    static final class FakeMapLiveUpdatePort implements MapLiveUpdatePort {
         final List<MapEvent> events = new ArrayList<>();
-
-        @Override
-        public void publishFleetChanged() {
-        }
-
-        @Override
-        public void publishTelemetryAppended(AssetId assetId, Telemetry sample) {
-        }
-
-        @Override
-        public void publishDetections(AssetId assetId, DetectionResult result) {
-        }
-
-        @Override
-        public void publishEvent(Event event) {
-        }
-
-        @Override
-        public void publishDetectionEvent(DetectionEvent event) {
-        }
 
         @Override
         public void publishMapEvent(MapEvent event) {

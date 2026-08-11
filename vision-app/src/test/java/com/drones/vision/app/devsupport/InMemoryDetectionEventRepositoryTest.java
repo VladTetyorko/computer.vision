@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.events.domain.model.DetectionEvent;
-import com.drones.vision.events.domain.model.DetectionEventId;
-import com.drones.vision.events.domain.model.DetectionEventState;
+import com.drones.vision.perception.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionEventId;
+import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.kernel.StreamId;
 import org.junit.jupiter.api.Test;
 

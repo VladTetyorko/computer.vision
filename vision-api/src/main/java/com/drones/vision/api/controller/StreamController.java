@@ -18,7 +18,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.VideoFrame;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;

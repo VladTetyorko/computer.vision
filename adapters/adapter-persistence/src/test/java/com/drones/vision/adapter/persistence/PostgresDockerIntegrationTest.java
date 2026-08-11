@@ -67,7 +67,7 @@ import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;

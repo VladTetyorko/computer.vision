@@ -15,7 +15,7 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.map.domain.model.Verification.VerificationState;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 
 import java.time.Instant;
@@ -52,12 +52,12 @@ public final class DefaultMarkService implements MarkService {
 
     private final MarkRepositoryPort markRepository;
     private final UsageTracker usageTracker;
-    private final LiveUpdatePublisherPort liveUpdatePublisher;
+    private final MapLiveUpdatePort liveUpdatePublisher;
     private final MapAccessPolicy policy;
     private final LayerResolver layerResolver;
 
     public DefaultMarkService(MarkRepositoryPort markRepository, UsageTracker usageTracker,
-                               LiveUpdatePublisherPort liveUpdatePublisher, MapAccessPolicy policy,
+                               MapLiveUpdatePort liveUpdatePublisher, MapAccessPolicy policy,
                                LayerResolver layerResolver) {
         this.markRepository = Objects.requireNonNull(markRepository, "markRepository must not be null");
         this.usageTracker = Objects.requireNonNull(usageTracker, "usageTracker must not be null");

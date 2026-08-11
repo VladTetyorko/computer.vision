@@ -35,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import com.drones.vision.events.application.ReplayCaptureSpec;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 

@@ -4,7 +4,7 @@ import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 
 import java.util.List;
 import java.util.Objects;
@@ -30,9 +30,9 @@ import java.util.Objects;
 public final class LiveUpdateAuditTrail implements AuditTrailPort {
 
     private final AuditTrailPort delegate;
-    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final FleetLiveUpdatePort liveUpdatePublisherPort;
 
-    public LiveUpdateAuditTrail(AuditTrailPort delegate, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+    public LiveUpdateAuditTrail(AuditTrailPort delegate, FleetLiveUpdatePort liveUpdatePublisherPort) {
         this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
         this.liveUpdatePublisherPort =
                 Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");

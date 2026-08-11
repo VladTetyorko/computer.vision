@@ -8,7 +8,7 @@ import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -30,11 +30,11 @@ import com.drones.vision.platform.AccessDeniedException;
 public final class DefaultDrawingService implements DrawingService {
 
     private final DrawingRepositoryPort drawingRepository;
-    private final LiveUpdatePublisherPort liveUpdatePublisher;
+    private final MapLiveUpdatePort liveUpdatePublisher;
     private final MapAccessPolicy policy;
     private final LayerResolver layerResolver;
 
-    public DefaultDrawingService(DrawingRepositoryPort drawingRepository, LiveUpdatePublisherPort liveUpdatePublisher,
+    public DefaultDrawingService(DrawingRepositoryPort drawingRepository, MapLiveUpdatePort liveUpdatePublisher,
                                   MapAccessPolicy policy, LayerResolver layerResolver) {
         this.drawingRepository = Objects.requireNonNull(drawingRepository, "drawingRepository must not be null");
         this.liveUpdatePublisher =

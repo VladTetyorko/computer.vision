@@ -1,4 +1,4 @@
-package com.drones.vision.events.domain.port;
+package com.drones.vision.perception.domain.port;
 
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionQuery;

@@ -51,7 +51,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * Detection}s (unlike {@link CvDetectionE2ETest}'s echo servicer, which never populates {@code
  * detections}), a {@code sim}-device stream's sampled frames flow all the way through {@link
  * com.drones.vision.adapter.cvgrpc.GrpcDetectionPort} &rarr; {@code StreamPipeline} &rarr; {@link
- * com.drones.vision.events.domain.port.DetectionRepositoryPort} &rarr; {@code GET
+ * com.drones.vision.perception.domain.port.DetectionRepositoryPort} &rarr; {@code GET
  * /api/streams/{streamId}/detections}, closing the loop on the API side of this feature.
  *
  * <p>Reuses {@link FileSimulationSmokeTest.RecordingPublisherConfig}/{@link

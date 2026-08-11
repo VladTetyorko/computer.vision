@@ -11,7 +11,7 @@ import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.platform.EventLiveUpdatePort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,13 +35,13 @@ class GeofenceMonitorTest {
 
     private GeofenceRepositoryPort geofenceRepository;
     private EventPublisherPort eventPublisher;
-    private LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private EventLiveUpdatePort liveUpdatePublisherPort;
 
     @BeforeEach
     void setUp() {
         geofenceRepository = mock(GeofenceRepositoryPort.class);
         eventPublisher = mock(EventPublisherPort.class);
-        liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        liveUpdatePublisherPort = mock(EventLiveUpdatePort.class);
     }
 
     private GeofenceMonitor monitor() {

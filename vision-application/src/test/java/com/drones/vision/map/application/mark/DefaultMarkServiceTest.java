@@ -21,7 +21,7 @@ import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.map.domain.model.Verification.VerificationState;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +54,7 @@ class DefaultMarkServiceTest {
     private FakeMarkRepositoryPort markRepository;
     private FakeMapLayerRepositoryPort mapLayerRepository;
     private UsageTracker usageTracker;
-    private FakeLiveUpdatePublisherPort liveUpdatePublisher;
+    private FakeMapLiveUpdatePort liveUpdatePublisher;
     private LayerResolver layerResolver;
     private MarkService service;
 
@@ -71,7 +71,7 @@ class DefaultMarkServiceTest {
         markRepository = new FakeMarkRepositoryPort();
         mapLayerRepository = new FakeMapLayerRepositoryPort();
         usageTracker = mock(UsageTracker.class);
-        liveUpdatePublisher = new FakeLiveUpdatePublisherPort();
+        liveUpdatePublisher = new FakeMapLiveUpdatePort();
         layerResolver = new LayerResolver(mapLayerRepository, liveUpdatePublisher);
         service = new DefaultMarkService(markRepository, usageTracker, liveUpdatePublisher, new MapAccessPolicy(),
                 layerResolver);
@@ -620,32 +620,12 @@ class DefaultMarkServiceTest {
         }
     }
 
-    /** Capturing fake {@link LiveUpdatePublisherPort}; only {@link #publishMapEvent} matters here. */
-    static final class FakeLiveUpdatePublisherPort implements LiveUpdatePublisherPort {
+    /** Capturing fake {@link MapLiveUpdatePort}. */
+    static final class FakeMapLiveUpdatePort implements MapLiveUpdatePort {
         final List<MapEvent> events = new ArrayList<>();
 
         void reset() {
             events.clear();
-        }
-
-        @Override
-        public void publishFleetChanged() {
-        }
-
-        @Override
-        public void publishTelemetryAppended(AssetId assetId, Telemetry sample) {
-        }
-
-        @Override
-        public void publishDetections(AssetId assetId, com.drones.vision.perception.domain.model.DetectionResult result) {
-        }
-
-        @Override
-        public void publishEvent(com.drones.vision.platform.Event event) {
-        }
-
-        @Override
-        public void publishDetectionEvent(com.drones.vision.events.domain.model.DetectionEvent event) {
         }
 
         @Override

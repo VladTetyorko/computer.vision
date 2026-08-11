@@ -13,12 +13,12 @@ import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.VideoFrame;
-import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
@@ -84,7 +84,7 @@ public final class DefaultStreamService implements StreamService {
     private final UsageTracker usageTracker;
     private final OverlayPort overlayPort;
     private final DetectionEventRepositoryPort detectionEventRepositoryPort;
-    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final DetectionLiveUpdatePort liveUpdatePublisherPort;
     private final StreamPipelineSettings settings;
 
     /**
@@ -168,7 +168,7 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * Same as the 9-argument constructor, plus a {@link LiveUpdatePublisherPort} collaborator
+     * Same as the 9-argument constructor, plus a {@link DetectionLiveUpdatePort} collaborator
      * (docs/plans/done/REALTIME-PLAN.md §4): threaded into every {@link StreamPipeline} this service starts,
      * alongside the owning asset id resolved once at {@link #start} via {@code usageTracker}, so
      * completed detection results are announced as live updates.
@@ -183,7 +183,7 @@ public final class DefaultStreamService implements StreamService {
                                  DetectionRepositoryPort detectionRepositoryPort,
                                  EventPublisherPort eventPublisher, UsageTracker usageTracker,
                                  OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
-                                 LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                                 DetectionLiveUpdatePort liveUpdatePublisherPort) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
                 eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
                 StreamPipelineSettings.defaults());
@@ -200,7 +200,7 @@ public final class DefaultStreamService implements StreamService {
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
                           OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
-                          LiveUpdatePublisherPort liveUpdatePublisherPort,
+                          DetectionLiveUpdatePort liveUpdatePublisherPort,
                           long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
         this(deviceRepository, videoSourceRegistry, detectionPort, streamPublisherPort, detectionRepositoryPort,
                 eventPublisher, usageTracker, overlayPort, detectionEventRepositoryPort, liveUpdatePublisherPort,
@@ -222,7 +222,7 @@ public final class DefaultStreamService implements StreamService {
                           DetectionRepositoryPort detectionRepositoryPort,
                           EventPublisherPort eventPublisher, UsageTracker usageTracker,
                           OverlayPort overlayPort, DetectionEventRepositoryPort detectionEventRepositoryPort,
-                          LiveUpdatePublisherPort liveUpdatePublisherPort,
+                          DetectionLiveUpdatePort liveUpdatePublisherPort,
                           StreamPipelineSettings settings) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
@@ -301,7 +301,7 @@ public final class DefaultStreamService implements StreamService {
             // docs/plans/done/REALTIME-PLAN.md §4 / telemetry-OSD input: resolved once, here, rather than
             // re-resolved per completed detection result / per published frame -- a device's owning
             // asset does not change while its stream runs. Skipped entirely (not just discarded)
-            // unless something could actually read the result -- a configured LiveUpdatePublisherPort
+            // unless something could actually read the result -- a configured DetectionLiveUpdatePort
             // (announces every completed result), or a configured OverlayPort (may need it to build
             // the telemetry supplier below) -- so a lookup nobody will ever read is never even
             // attempted.

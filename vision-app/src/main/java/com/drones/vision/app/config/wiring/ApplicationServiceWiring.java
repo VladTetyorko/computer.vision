@@ -1,18 +1,21 @@
 package com.drones.vision.app.config.wiring;
 
-import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
+import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.ManualControlPort;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.OverlayPort;
@@ -20,6 +23,7 @@ import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
@@ -51,6 +55,7 @@ import com.drones.vision.perception.application.stream.*;
 import com.drones.vision.warehouse.application.usage.*;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -73,13 +78,19 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Ports that don't yet have a real adapter are wired to in-process dev-support fallbacks so the
  * platform runs end to end from Phase 0 onward. The server-push data plane (docs/plans/done/REALTIME-PLAN.md
- * §4): {@link #liveUpdatePublisherPort} selects between the real {@code LiveUpdateRegistry}
- * (vision-api) and {@code NoopLiveUpdatePublisher} per {@link VisionLiveProperties#enabled()}
- * (default {@code true}), threaded unconditionally into {@link #usageTracker}/{@link
- * #streamService}; {@link #auditTrailPort}/{@link #eventPublisherPort}/{@link
- * #detectionEventRepositoryPort} each gain one more decorator ({@link LiveUpdateAuditTrail}/{@link
- * LiveUpdateEventPublisher}/{@link LiveUpdateDetectionEventRepository}) only when that property is
- * {@code true}.
+ * §4): {@link #fleetLiveUpdatePort}/{@link #telemetryLiveUpdatePort}/{@link
+ * #detectionLiveUpdatePort}/{@link #mapLiveUpdatePort}/{@link #eventLiveUpdatePort} each select
+ * between the real {@code LiveUpdateRegistry} (vision-api, which implements all five — one of the
+ * five ports the former god-port {@code LiveUpdatePublisherPort} split into,
+ * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b) and {@code NoopLiveUpdatePublisher} (same
+ * five-interface shape) per {@link VisionLiveProperties#enabled()} (default {@code true}); when
+ * enabled, every one of the five bean methods resolves to the same {@code LiveUpdateRegistry}
+ * singleton, so a call through any one port still lands on the one shared dispatcher. {@link
+ * #telemetryLiveUpdatePort}/{@link #detectionLiveUpdatePort} are threaded unconditionally into
+ * {@link #usageTracker}/{@link #streamService}; {@link #auditTrailPort}/{@link
+ * #eventPublisherPort}/{@link #detectionEventRepositoryPort} each gain one more decorator ({@link
+ * LiveUpdateAuditTrail}/{@link LiveUpdateEventPublisher}/{@link LiveUpdateDetectionEventRepository})
+ * only when that property is {@code true}.
  */
 @Configuration
 @EnableConfigurationProperties({VisionCvProperties.class, VisionLiveProperties.class, VisionRcProperties.class,
@@ -98,27 +109,79 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public EventPublisherPort eventPublisherPort(DetectionPort detectionPort, VisionCvProperties cvProperties,
-                                                  LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                                  EventLiveUpdatePort eventLiveUpdatePort,
+                                                  FleetLiveUpdatePort fleetLiveUpdatePort,
                                                   VisionLiveProperties liveProperties) {
         EventPublisherPort delegate = new LoggingEventPublisher();
         if (cvProperties.enabled() && detectionPort instanceof GrpcDetectionPort grpcDetectionPort) {
             delegate = new DetectionSessionCleanupEventPublisher(delegate, grpcDetectionPort);
         }
         if (liveProperties.enabled()) {
-            delegate = new LiveUpdateEventPublisher(delegate, liveUpdatePublisherPort);
+            delegate = new LiveUpdateEventPublisher(delegate, eventLiveUpdatePort, fleetLiveUpdatePort);
         }
         return delegate;
     }
 
     /**
-     * Selects the {@link LiveUpdatePublisherPort} implementation per {@link
+     * Selects the {@link FleetLiveUpdatePort} implementation per {@link
      * VisionLiveProperties#enabled()} (docs/plans/done/REALTIME-PLAN.md §4, item 4): {@code true} (the
      * default) wires the real {@code LiveUpdateRegistry} (vision-api, component-scanned); {@code
-     * false} wires {@link NoopLiveUpdatePublisher}.
+     * false} wires {@link NoopLiveUpdatePublisher}. One of five near-identical selector methods —
+     * see this class's own javadoc for why there are five rather than one.
+     *
+     * <p>{@code @Qualifier("liveUpdateRegistry")} on every one of the five methods' {@code registry}
+     * parameter is load-bearing, not decorative: once any one of the five has resolved and cached
+     * its bean (say {@code fleetLiveUpdatePort}), that bean's actual runtime type <em>is</em> {@code
+     * LiveUpdateRegistry}, so a later, unqualified {@code ObjectProvider<LiveUpdateRegistry>}
+     * lookup from a sibling method sees <b>two</b> candidates — the real component-scanned bean and
+     * the already-created sibling — and throws {@code NoSuchBeanDefinitionException} ("expected
+     * single matching bean but found 2"). This never happened with the one former
+     * {@code liveUpdatePublisherPort} bean (nothing else ever looked up {@code LiveUpdateRegistry}
+     * by type after it), but five near-identical methods make the collision real between them.
      */
     @Bean
-    public LiveUpdatePublisherPort liveUpdatePublisherPort(VisionLiveProperties properties,
-                                                            ObjectProvider<LiveUpdateRegistry> registry) {
+    public FleetLiveUpdatePort fleetLiveUpdatePort(VisionLiveProperties properties,
+                                                    @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /** Selects the {@link TelemetryLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort}. */
+    @Bean
+    public TelemetryLiveUpdatePort telemetryLiveUpdatePort(VisionLiveProperties properties,
+                                                            @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /** Selects the {@link DetectionLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort}. */
+    @Bean
+    public DetectionLiveUpdatePort detectionLiveUpdatePort(VisionLiveProperties properties,
+                                                            @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /** Selects the {@link MapLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort}. */
+    @Bean
+    public MapLiveUpdatePort mapLiveUpdatePort(VisionLiveProperties properties,
+                                                @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /** Selects the {@link EventLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort}. */
+    @Bean
+    public EventLiveUpdatePort eventLiveUpdatePort(VisionLiveProperties properties,
+                                                    @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
         if (properties.enabled()) {
             return registry.getObject();
         }
@@ -164,11 +227,11 @@ public class ApplicationServiceWiring {
      * which announces a "fleet changed" live update for every recorded entry.
      */
     @Bean
-    public AuditTrailPort auditTrailPort(LiveUpdatePublisherPort liveUpdatePublisherPort,
+    public AuditTrailPort auditTrailPort(FleetLiveUpdatePort fleetLiveUpdatePort,
                                           VisionLiveProperties liveProperties) {
         AuditTrailPort delegate = new InMemoryAuditTrail();
         if (liveProperties.enabled()) {
-            return new LiveUpdateAuditTrail(delegate, liveUpdatePublisherPort);
+            return new LiveUpdateAuditTrail(delegate, fleetLiveUpdatePort);
         }
         return delegate;
     }
@@ -179,11 +242,11 @@ public class ApplicationServiceWiring {
      * LiveUpdateDetectionEventRepository}, which announces every {@code save} as a live update.
      */
     @Bean
-    public DetectionEventRepositoryPort detectionEventRepositoryPort(LiveUpdatePublisherPort liveUpdatePublisherPort,
+    public DetectionEventRepositoryPort detectionEventRepositoryPort(DetectionLiveUpdatePort detectionLiveUpdatePort,
                                                                        VisionLiveProperties liveProperties) {
         DetectionEventRepositoryPort delegate = new InMemoryDetectionEventRepository();
         if (liveProperties.enabled()) {
-            return new LiveUpdateDetectionEventRepository(delegate, liveUpdatePublisherPort);
+            return new LiveUpdateDetectionEventRepository(delegate, detectionLiveUpdatePort);
         }
         return delegate;
     }
@@ -196,8 +259,8 @@ public class ApplicationServiceWiring {
     @Bean
     public GeofenceMonitor geofenceMonitor(GeofenceRepositoryPort geofenceRepositoryPort,
                                             EventPublisherPort eventPublisherPort,
-                                            LiveUpdatePublisherPort liveUpdatePublisherPort) {
-        return new GeofenceMonitor(geofenceRepositoryPort, eventPublisherPort, liveUpdatePublisherPort);
+                                            EventLiveUpdatePort eventLiveUpdatePort) {
+        return new GeofenceMonitor(geofenceRepositoryPort, eventPublisherPort, eventLiveUpdatePort);
     }
 
     /**
@@ -213,7 +276,7 @@ public class ApplicationServiceWiring {
 
     /**
      * Drives {@link com.drones.vision.flight.domain.model.AssetUsage} lifecycle and telemetry sampling
-     * from {@link StreamService}'s start/stop notifications. {@code liveUpdatePublisherPort} and
+     * from {@link StreamService}'s start/stop notifications. {@code telemetryLiveUpdatePort} and
      * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
      */
     @Bean
@@ -222,12 +285,12 @@ public class ApplicationServiceWiring {
                                       AssetUsageRepositoryPort assetUsageRepositoryPort,
                                       TelemetryRepositoryPort telemetryRepositoryPort,
                                       List<TelemetrySourcePort> telemetrySources,
-                                      LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                      TelemetryLiveUpdatePort telemetryLiveUpdatePort,
                                       GeofenceMonitor geofenceMonitor) {
         // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
         // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort, geofenceMonitor::evaluate);
+                telemetryRepositoryPort, telemetrySources, telemetryLiveUpdatePort, geofenceMonitor::evaluate);
     }
 
     /**
@@ -247,8 +310,8 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public LayerResolver layerResolver(MapLayerRepositoryPort mapLayerRepositoryPort,
-                                        LiveUpdatePublisherPort liveUpdatePublisherPort) {
-        return new LayerResolver(mapLayerRepositoryPort, liveUpdatePublisherPort);
+                                        MapLiveUpdatePort mapLiveUpdatePort) {
+        return new LayerResolver(mapLayerRepositoryPort, mapLiveUpdatePort);
     }
 
     /**
@@ -261,10 +324,10 @@ public class ApplicationServiceWiring {
     @Bean
     public MapLayerService mapLayerService(LayerResolver layerResolver, MarkRepositoryPort markRepositoryPort,
                                             DrawingRepositoryPort drawingRepositoryPort,
-                                            LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                            MapLiveUpdatePort mapLiveUpdatePort,
                                             MapAccessPolicy mapAccessPolicy) {
         return new DefaultMapLayerService(layerResolver, markRepositoryPort, drawingRepositoryPort,
-                liveUpdatePublisherPort, mapAccessPolicy);
+                mapLiveUpdatePort, mapAccessPolicy);
     }
 
     /**
@@ -272,14 +335,14 @@ public class ApplicationServiceWiring {
      * {@code MapMarksController} (vision-api, component-scanned) — reworked in place from the
      * docs/plans/done/TACTICAL-MARKS-PLAN.md M4 bean this replaces, which took no policy and no layer resolver.
      * {@code usageTracker} still backs the cockpit "geolocate" action ({@code
-     * UsageTracker#latestTelemetry}); {@code liveUpdatePublisherPort} is always a real bean, so every
+     * UsageTracker#latestTelemetry}); {@code mapLiveUpdatePort} is always a real bean, so every
      * mutation is announced on the {@code map} SSE topic unconditionally.
      */
     @Bean
     public MarkService markService(MarkRepositoryPort markRepositoryPort, UsageTracker usageTracker,
-                                    LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                    MapLiveUpdatePort mapLiveUpdatePort,
                                     MapAccessPolicy mapAccessPolicy, LayerResolver layerResolver) {
-        return new DefaultMarkService(markRepositoryPort, usageTracker, liveUpdatePublisherPort,
+        return new DefaultMarkService(markRepositoryPort, usageTracker, mapLiveUpdatePort,
                 mapAccessPolicy, layerResolver);
     }
 
@@ -290,9 +353,9 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public DrawingService drawingService(DrawingRepositoryPort drawingRepositoryPort,
-                                          LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                          MapLiveUpdatePort mapLiveUpdatePort,
                                           MapAccessPolicy mapAccessPolicy, LayerResolver layerResolver) {
-        return new DefaultDrawingService(drawingRepositoryPort, liveUpdatePublisherPort, mapAccessPolicy,
+        return new DefaultDrawingService(drawingRepositoryPort, mapLiveUpdatePort, mapAccessPolicy,
                 layerResolver);
     }
 
@@ -314,7 +377,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * {@code liveUpdatePublisherPort} is threaded through unconditionally, same reasoning as {@link
+     * {@code detectionLiveUpdatePort} is threaded through unconditionally, same reasoning as {@link
      * #usageTracker} above — every stream pipeline this service starts announces its completed
      * detection results regardless of {@link VisionLiveProperties#enabled()}.
      */
@@ -328,12 +391,12 @@ public class ApplicationServiceWiring {
                                         UsageTracker usageTracker,
                                         OverlayPort overlayPort,
                                         DetectionEventRepositoryPort detectionEventRepositoryPort,
-                                        LiveUpdatePublisherPort liveUpdatePublisherPort,
+                                        DetectionLiveUpdatePort detectionLiveUpdatePort,
                                         VisionApplicationProperties applicationProperties,
                                         VisionTrackingProperties trackingProperties) {
         return new DefaultStreamService(deviceRepositoryPort, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisherPort, usageTracker, overlayPort,
-                detectionEventRepositoryPort, liveUpdatePublisherPort,
+                detectionEventRepositoryPort, detectionLiveUpdatePort,
                 streamPipelineSettings(applicationProperties, trackingProperties));
     }
 

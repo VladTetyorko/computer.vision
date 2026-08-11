@@ -13,7 +13,7 @@ import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 
@@ -102,7 +102,7 @@ public final class UsageTracker {
     private final AssetUsageRepositoryPort usageRepository;
     private final TelemetryRepositoryPort telemetryRepository;
     private final List<TelemetrySourcePort> telemetrySources;
-    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final TelemetryLiveUpdatePort liveUpdatePublisherPort;
     private final BiConsumer<AssetId, Telemetry> telemetryObserver;
     private final long sourceInitialBackoffNanos;
     private final long sourceMaxBackoffNanos;
@@ -123,7 +123,7 @@ public final class UsageTracker {
     }
 
     /**
-     * Same as the 5-argument constructor, plus a {@link LiveUpdatePublisherPort} collaborator
+     * Same as the 5-argument constructor, plus a {@link TelemetryLiveUpdatePort} collaborator
      * (docs/plans/done/REALTIME-PLAN.md §4): every telemetry sample folded via {@link #applySample} is
      * announced through it.
      *
@@ -133,7 +133,7 @@ public final class UsageTracker {
      */
     public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                          AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
         this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
                 liveUpdatePublisherPort, null);
     }
@@ -157,7 +157,7 @@ public final class UsageTracker {
      */
     public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                          AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                         List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                         List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
                          BiConsumer<AssetId, Telemetry> telemetryObserver) {
         this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
                 liveUpdatePublisherPort, telemetryObserver, SupervisedPublisher.INITIAL_BACKOFF_NANOS,
@@ -171,7 +171,7 @@ public final class UsageTracker {
      */
     UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                  AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
-                 List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                 List<TelemetrySourcePort> telemetrySources, TelemetryLiveUpdatePort liveUpdatePublisherPort,
                  BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
                  long sourceMaxBackoffNanos) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");

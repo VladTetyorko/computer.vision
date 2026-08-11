@@ -4,7 +4,8 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.platform.EventLiveUpdatePort;
+import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -24,14 +25,16 @@ class LiveUpdateEventPublisherTest {
             EventType.DEVICE_OFFLINE, EventType.STREAM_STARTED, EventType.STREAM_STOPPED);
 
     private EventPublisherPort delegate;
-    private LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private EventLiveUpdatePort eventLiveUpdatePort;
+    private FleetLiveUpdatePort fleetLiveUpdatePort;
     private LiveUpdateEventPublisher publisher;
 
     @BeforeEach
     void setUp() {
         delegate = mock(EventPublisherPort.class);
-        liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
-        publisher = new LiveUpdateEventPublisher(delegate, liveUpdatePublisherPort);
+        eventLiveUpdatePort = mock(EventLiveUpdatePort.class);
+        fleetLiveUpdatePort = mock(FleetLiveUpdatePort.class);
+        publisher = new LiveUpdateEventPublisher(delegate, eventLiveUpdatePort, fleetLiveUpdatePort);
     }
 
     @Test
@@ -41,14 +44,15 @@ class LiveUpdateEventPublisherTest {
         publisher.publish(event);
 
         verify(delegate).publish(event);
-        verify(liveUpdatePublisherPort).publishEvent(event);
+        verify(eventLiveUpdatePort).publishEvent(event);
     }
 
     @Test
     void fleetLifecycleEventTypesAlsoAnnounceAFleetChangedUpdate() {
         for (EventType type : FLEET_LIFECYCLE_EVENTS) {
-            LiveUpdatePublisherPort port = mock(LiveUpdatePublisherPort.class);
-            new LiveUpdateEventPublisher(delegate, port).publish(Event.of(StreamId.random(), type, "lifecycle change"));
+            FleetLiveUpdatePort port = mock(FleetLiveUpdatePort.class);
+            new LiveUpdateEventPublisher(delegate, eventLiveUpdatePort, port)
+                    .publish(Event.of(StreamId.random(), type, "lifecycle change"));
 
             verify(port).publishFleetChanged();
         }
@@ -57,8 +61,9 @@ class LiveUpdateEventPublisherTest {
     @Test
     void nonLifecycleEventTypesNeverAnnounceAFleetChangedUpdate() {
         for (EventType type : EnumSet.complementOf(FLEET_LIFECYCLE_EVENTS)) {
-            LiveUpdatePublisherPort port = mock(LiveUpdatePublisherPort.class);
-            new LiveUpdateEventPublisher(delegate, port).publish(Event.of(StreamId.random(), type, "not lifecycle"));
+            FleetLiveUpdatePort port = mock(FleetLiveUpdatePort.class);
+            new LiveUpdateEventPublisher(delegate, eventLiveUpdatePort, port)
+                    .publish(Event.of(StreamId.random(), type, "not lifecycle"));
 
             verify(port, never()).publishFleetChanged();
         }

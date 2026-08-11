@@ -58,6 +58,7 @@ class ContextArchitectureTest {
             // --- ordinary contract calls: a context using another's published surface ---
             "flight -> warehouse",          // flight commands resolve the asset they act on
             "identity -> warehouse",        // assignment/activity read assets
+            "learning -> events",           // capture a training frame from replay (ReplaySources)
             "learning -> flight",
             "learning -> perception",       // capture a frame from a live stream
             "learning -> warehouse",
@@ -69,27 +70,21 @@ class ContextArchitectureTest {
             "simulation -> warehouse",
             "warehouse -> flight",
 
-            // --- DEBT: the god-port LiveUpdatePublisherPort (W1 §5 C7, remainder) ---
-            // EventPublisherPort and AuditTrailPort moved to the universal `platform` package in
-            // W1.6a (this wave) — they no longer sit inside `events`/`identity`, which is exactly
-            // why warehouse -> identity, flight -> identity and learning -> identity (each real
-            // only through AuditTrailPort/VisibilityScope/AccessDeniedException, never anything
-            // else identity owns) are gone from this set entirely, and why identity <-> warehouse
-            // is gone from DECLARED_CYCLES below. LiveUpdatePublisherPort is what's left of C7: it
-            // still sits inside `events` and its signature names Telemetry, DetectionResult,
-            // MapEvent, DetectionEvent, so every context that publishes a live update depends on
-            // `events` for it — W1.6b splits it per context.
+            // --- events: the pure downstream reader (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md
+            // §15). `ReplayService`/`UsageTimeline` read flight's AssetUsage/Telemetry and
+            // perception's DetectionResult/DetectionQuery/VideoFrame to answer "what happened
+            // during this finished flight" — replay and history, never live state. The four
+            // events <-> ... cycles this wave killed were entirely the god-port
+            // LiveUpdatePublisherPort (deleted, split one port per publishing context) and the
+            // misfiled DetectionRepositoryPort/DetectionEvent family (moved to perception, their
+            // real owner) plus ReplayCaptureSpec (moved to learning, W1 §15 C8) — once those
+            // moved, only the sink's own one-way reads were left, and nothing reads back into
+            // events except `learning -> events` above (ReplaySources, kept here deliberately: a
+            // dataset capture needs the exact frame a finished flight recorded).
             "events -> flight",
-            "events -> learning",
-            "events -> map",
             "events -> perception",
-            "flight -> events",
-            "map -> events",
-            "perception -> events",
-            "warehouse -> events",
-            "learning -> events",
 
-            // --- DEBT: AssetUsage (flight) vs the usage read services (warehouse), W1 §5 C8 ---
+            // --- DEBT: AssetUsage (flight) vs the usage read services (warehouse), W1 §15 C9 ---
             // A usage is a flight session; its read side was filed under warehouse. Half of
             // flight <-> warehouse is this split ownership, not a real dependency.
 
@@ -104,10 +99,6 @@ class ContextArchitectureTest {
      * paying a cycle off fails the test until the entry is deleted.
      */
     private static final Set<String> DECLARED_CYCLES = new TreeSet<>(Set.of(
-            "events <-> flight",
-            "events <-> learning",
-            "events <-> map",
-            "events <-> perception",
             "flight <-> warehouse",
             "perception <-> warehouse"));
 
@@ -144,8 +135,12 @@ class ContextArchitectureTest {
 
     /**
      * Maven cannot express a cycle, so one mutual pair blocks extraction for every context at once.
-     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because six exist today —
-     * the honest state, tracked as a burn-down instead of hidden behind a disabled test.
+     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because two exist today —
+     * the honest state, tracked as a burn-down instead of hidden behind a disabled test. Down from
+     * six before W1.6b (docs/plans/active/DOMAIN-SEPARATION-W1.md §15): the four `events <-> ...`
+     * cycles are gone now that `events` is a pure downstream reader — see {@link #DECLARED_EDGES}'s
+     * own comment for what killed them. The remaining two (W1.6d, not yet scheduled) are the
+     * "warehouse asks runtime state" design debt C3/C6 already named in that section.
      */
     @Test
     void moduleCyclesAreOnlyTheKnownOnes() {

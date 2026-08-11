@@ -9,7 +9,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;

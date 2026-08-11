@@ -15,9 +15,9 @@ import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 
@@ -216,7 +216,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final OverlayPort overlayPort;
     private final DetectionEventEngine eventEngine;
     private final AssetId assetId;
-    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final DetectionLiveUpdatePort liveUpdatePublisherPort;
     private final Supplier<Telemetry> telemetrySupplier;
     private final LongSupplier nanoTimeSource;
     private final DetectionExtrapolator extrapolator;
@@ -363,7 +363,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                            EventPublisherPort eventPublisher, OverlayPort overlayPort,
                            DetectionEventEngine eventEngine, AssetId assetId,
-                           LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                           DetectionLiveUpdatePort liveUpdatePublisherPort) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
                 eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, null);
     }
@@ -387,7 +387,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                            EventPublisherPort eventPublisher, OverlayPort overlayPort,
                            DetectionEventEngine eventEngine, AssetId assetId,
-                           LiveUpdatePublisherPort liveUpdatePublisherPort, Supplier<Telemetry> telemetrySupplier) {
+                           DetectionLiveUpdatePort liveUpdatePublisherPort, Supplier<Telemetry> telemetrySupplier) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
                 eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
                 System::nanoTime, StreamPipelineSettings.defaults());
@@ -404,7 +404,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                    EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
-                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource) {
         this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
                 eventPublisher, overlayPort, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
@@ -427,7 +427,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                    Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                    StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
                    EventPublisherPort eventPublisher, OverlayPort overlayPort, DetectionEventEngine eventEngine,
-                   AssetId assetId, LiveUpdatePublisherPort liveUpdatePublisherPort,
+                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
                    Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
                    StreamPipelineSettings settings) {
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");

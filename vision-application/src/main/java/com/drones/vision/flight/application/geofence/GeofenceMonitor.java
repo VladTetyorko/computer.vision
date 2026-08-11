@@ -8,9 +8,9 @@ import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
+import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 import java.time.Instant;
 import java.util.List;
@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * that already persists/live-announces the sample — so {@link #evaluate(AssetId, Telemetry)} must
  * stay cheap: no repository I/O per call beyond the enabled-zone cache (refreshed out of band, see
  * below) and, on an actual breach edge, one {@link EventPublisherPort#publish}/{@link
- * LiveUpdatePublisherPort#publishEvent} call.
+ * EventLiveUpdatePort#publishEvent} call.
  *
  * <h2>Zone cache</h2>
  * The enabled zone set is cached in {@link #enabledZones}, a plain volatile reference swapped by
@@ -66,7 +66,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * (a geofence breach is asset-scoped, not stream-scoped) and {@code attributes} {@code
  * {assetId, zoneId, zoneName, kind, direction}} ({@code direction} is {@code "enter"} or {@code
  * "exit"}) — published via both {@link EventPublisherPort#publish} and {@link
- * LiveUpdatePublisherPort#publishEvent}, mirroring every other event this application layer
+ * EventLiveUpdatePort#publishEvent}, mirroring every other event this application layer
  * raises. Staying in the same state (still breaching, or still compliant) is silent — no repeat
  * spam on every sample while an asset lingers inside a keep-out zone.
  *
@@ -83,7 +83,7 @@ public final class GeofenceMonitor {
 
     private final GeofenceRepositoryPort geofenceRepository;
     private final EventPublisherPort eventPublisher;
-    private final LiveUpdatePublisherPort liveUpdatePublisherPort;
+    private final EventLiveUpdatePort liveUpdatePublisherPort;
 
     /** {@code null} until the first {@link #refresh()} (explicit or lazy); see the class javadoc. */
     private volatile List<GeofenceZone> enabledZones;
@@ -99,7 +99,7 @@ public final class GeofenceMonitor {
      * @param liveUpdatePublisherPort nullable, same convention
      */
     public GeofenceMonitor(GeofenceRepositoryPort geofenceRepository, EventPublisherPort eventPublisher,
-                           LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                           EventLiveUpdatePort liveUpdatePublisherPort) {
         this.geofenceRepository = Objects.requireNonNull(geofenceRepository, "geofenceRepository must not be null");
         this.eventPublisher = eventPublisher; // nullable: no EventPublisherPort announcements when absent
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent

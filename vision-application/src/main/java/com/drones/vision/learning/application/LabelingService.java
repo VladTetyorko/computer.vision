@@ -9,7 +9,6 @@ import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
-import com.drones.vision.events.application.ReplayCaptureSpec;
 import com.drones.vision.platform.VisibilityScope;
 
 /**

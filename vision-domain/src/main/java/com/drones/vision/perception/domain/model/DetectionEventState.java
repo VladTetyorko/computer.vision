@@ -1,4 +1,4 @@
-package com.drones.vision.events.domain.model;
+package com.drones.vision.perception.domain.model;
 
 /**
  * Lifecycle state of a {@link DetectionEvent} (docs/plans/done/MVP2-PLAN.md §E, E-a).

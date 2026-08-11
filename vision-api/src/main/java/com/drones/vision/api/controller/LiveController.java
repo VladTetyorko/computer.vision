@@ -28,8 +28,8 @@ import java.util.Objects;
  * <p>Gated by {@code vision.live.enabled} (default {@code true}, {@code matchIfMissing}): when
  * {@code false}, neither this controller nor {@link LiveUpdateRegistry} is registered as a bean at
  * all, so {@code /api/live} 404s exactly like any other unmapped route (docs/plans/done/REALTIME-PLAN.md §4,
- * item 4) — {@code vision-app}'s wiring still supplies a no-op {@code LiveUpdatePublisherPort} to
- * the application layer in that case (see that module's {@code MODULE.md}).
+ * item 4) — {@code vision-app}'s wiring still supplies a no-op implementation of whichever
+ * live-update port each application-layer collaborator needs (see that module's {@code MODULE.md}).
  *
  * <p>All actual connection/topic/replay/coalescing logic lives in {@link LiveUpdateRegistry} —
  * this class is a thin HTTP-shape translation only (query param/header parsing, path variable),
@@ -53,11 +53,11 @@ public class LiveController {
 
     /**
      * {@code @Qualifier} disambiguates the component-scanned {@code liveUpdateRegistry} bean from
-     * {@code WiringConfiguration#liveUpdatePublisherPort} — that {@code @Bean} method's declared
-     * return type is {@code LiveUpdatePublisherPort}, but once instantiated its actual runtime
-     * instance <em>is</em> this same {@link LiveUpdateRegistry} singleton (when {@code
-     * vision.live.enabled=true}), so Spring's type-based autowiring sees two same-typed candidates
-     * for a plain, unqualified {@code LiveUpdateRegistry} constructor parameter.
+     * {@code ApplicationServiceWiring}'s five {@code *LiveUpdatePort} {@code @Bean} methods — each
+     * one's declared return type is a single-method port interface, but once instantiated its
+     * actual runtime instance <em>is</em> this same {@link LiveUpdateRegistry} singleton (when
+     * {@code vision.live.enabled=true}), so Spring's type-based autowiring sees two same-typed
+     * candidates for a plain, unqualified {@code LiveUpdateRegistry} constructor parameter.
      */
     public LiveController(@Qualifier("liveUpdateRegistry") LiveUpdateRegistry registry,
                            MapVisibility mapVisibility, CurrentUser currentUser) {

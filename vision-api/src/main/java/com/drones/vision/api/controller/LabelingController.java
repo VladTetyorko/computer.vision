@@ -8,7 +8,7 @@ import com.drones.vision.api.dto.SamplesResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.learning.application.CaptureSpec;
 import com.drones.vision.learning.application.LabelingService;
-import com.drones.vision.events.application.ReplayCaptureSpec;
+import com.drones.vision.learning.application.ReplayCaptureSpec;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.SampleImage;
 import com.drones.vision.learning.domain.model.SampleStatus;

@@ -1,6 +1,6 @@
 package com.drones.vision.app.config.wiring;
 
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;

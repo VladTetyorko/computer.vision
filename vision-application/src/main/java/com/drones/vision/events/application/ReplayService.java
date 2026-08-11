@@ -25,7 +25,7 @@ import java.util.Optional;
  * {@link com.drones.vision.flight.domain.model.AssetUsage#streamId()} — recorded once, at open time, by
  * {@code UsageTracker} — is the join key: when it is non-{@code null}, {@link
  * UsageTimeline#detections()} is a real, time-windowed, downsampled query against {@link
- * com.drones.vision.events.domain.port.DetectionRepositoryPort} for that exact stream, so it can never
+ * com.drones.vision.perception.domain.port.DetectionRepositoryPort} for that exact stream, so it can never
  * mix in another asset's/stream's detections. A {@code null} {@code streamId()} — a usage opened
  * before this field existed, or by an asset with no video device — still yields an honestly empty
  * list; there remains no reliable join to fall back to for those. See {@code

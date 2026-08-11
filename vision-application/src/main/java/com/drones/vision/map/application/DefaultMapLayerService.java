@@ -12,7 +12,7 @@ import com.drones.vision.map.domain.model.Mark;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 
 import java.time.Instant;
@@ -36,11 +36,11 @@ public final class DefaultMapLayerService implements MapLayerService {
     private final LayerResolver layerResolver;
     private final MarkRepositoryPort markRepository;
     private final DrawingRepositoryPort drawingRepository;
-    private final LiveUpdatePublisherPort liveUpdatePublisher;
+    private final MapLiveUpdatePort liveUpdatePublisher;
     private final MapAccessPolicy policy;
 
     public DefaultMapLayerService(LayerResolver layerResolver, MarkRepositoryPort markRepository,
-                                   DrawingRepositoryPort drawingRepository, LiveUpdatePublisherPort liveUpdatePublisher,
+                                   DrawingRepositoryPort drawingRepository, MapLiveUpdatePort liveUpdatePublisher,
                                    MapAccessPolicy policy) {
         this.layerResolver = Objects.requireNonNull(layerResolver, "layerResolver must not be null");
         this.markRepository = Objects.requireNonNull(markRepository, "markRepository must not be null");

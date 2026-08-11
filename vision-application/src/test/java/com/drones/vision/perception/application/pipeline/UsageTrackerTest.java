@@ -17,7 +17,7 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import org.junit.jupiter.api.BeforeEach;
@@ -74,7 +74,7 @@ class UsageTrackerTest {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources);
     }
 
-    private UsageTracker tracker(List<TelemetrySourcePort> sources, LiveUpdatePublisherPort liveUpdatePublisherPort) {
+    private UsageTracker tracker(List<TelemetrySourcePort> sources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
                 liveUpdatePublisherPort);
     }
@@ -226,7 +226,7 @@ class UsageTrackerTest {
         when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
-        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        TelemetryLiveUpdatePort liveUpdatePublisherPort = mock(TelemetryLiveUpdatePort.class);
         UsageTracker tracker = tracker(List.of(source), liveUpdatePublisherPort);
 
         tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());

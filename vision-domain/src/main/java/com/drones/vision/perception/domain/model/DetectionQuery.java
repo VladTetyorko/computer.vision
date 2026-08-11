@@ -7,7 +7,7 @@ import java.time.Instant;
  * Filter criteria for reading stored detections.
  *
  * <p>Lives in the domain because it is the vocabulary
- * {@link com.drones.vision.events.domain.port.DetectionRepositoryPort} speaks, not a wire type.
+ * {@link com.drones.vision.perception.domain.port.DetectionRepositoryPort} speaks, not a wire type.
  * Every field except {@code limit} is optional: {@code null} means "do not filter on this".
  *
  * @param streamId restrict to one stream, or {@code null} for all

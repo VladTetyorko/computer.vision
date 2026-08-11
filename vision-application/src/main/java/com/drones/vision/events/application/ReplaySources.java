@@ -1,7 +1,7 @@
 package com.drones.vision.events.application;
 
 import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 
 import java.util.Objects;

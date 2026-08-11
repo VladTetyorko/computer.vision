@@ -10,7 +10,7 @@ import com.drones.vision.platform.VisibilityScope;
  * <p>One interface, one implementation ({@link DefaultFleetSummaryService}), composing {@link
  * AssetService}, {@link com.drones.vision.perception.application.stream.StreamService}, {@link
  * com.drones.vision.perception.application.pipeline.UsageTracker}, and {@link
- * com.drones.vision.events.domain.port.DetectionEventRepositoryPort} rather than reaching past them to
+ * com.drones.vision.perception.domain.port.DetectionEventRepositoryPort} rather than reaching past them to
  * repositories directly — every rule those already enforce (soft-delete visibility, streaming
  * derivation) applies here without duplication.
  */

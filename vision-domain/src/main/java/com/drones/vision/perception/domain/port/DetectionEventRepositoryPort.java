@@ -1,6 +1,6 @@
-package com.drones.vision.events.domain.port;
+package com.drones.vision.perception.domain.port;
 
-import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.kernel.StreamId;
 
 import java.time.Instant;

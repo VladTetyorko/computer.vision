@@ -28,7 +28,7 @@ import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
-import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

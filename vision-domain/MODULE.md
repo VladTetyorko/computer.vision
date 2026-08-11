@@ -41,22 +41,26 @@ implementations. See `.claude/skills/java-clean-code/SKILL.md`.
 | Context | Package root | Owns | Model | Port |
 |---|---|---|---|---|
 | *(kernel)* | `com.drones.vision.kernel` | ids + pure value objects every context may depend on — no aggregates, no behavior beyond `GeoProjection`'s pure math | 15 | — |
-| *(platform)* | `com.drones.vision.platform` | cross-cutting seams every context writes to — events, audit trail, visibility scope (W1.6a; see its own section below) | 8 | 2 |
-| warehouse | `com.drones.vision.warehouse.domain` | asset/device inventory, categories, discovered devices | 5 | 5 |
+| *(platform)* | `com.drones.vision.platform` | cross-cutting seams every context writes to — events, audit trail, visibility scope, and (W1.6b) the one live-update port every context raises an `Event` through | 8 | 3 |
+| warehouse | `com.drones.vision.warehouse.domain` | asset/device inventory, categories, discovered devices | 5 | 6 |
 | identity | `com.drones.vision.identity.domain` | users, groups, roles | 4 | 4 |
-| perception | `com.drones.vision.perception.domain` | video pipeline config, detection, tracking, feeds | 20 | 6 |
-| flight | `com.drones.vision.flight.domain` | telemetry, flight state, RC relay, geofencing, asset usage | 11 | 7 |
-| map | `com.drones.vision.map.domain` | tactical marks, drawings, layers, verification (Common Operational Picture) | 16 | 3 |
+| perception | `com.drones.vision.perception.domain` | video pipeline config, detection, tracking, feeds, debounced detection events (W1.6b) | 23 | 9 |
+| flight | `com.drones.vision.flight.domain` | telemetry, flight state, RC relay, geofencing, asset usage | 11 | 8 |
+| map | `com.drones.vision.map.domain` | tactical marks, drawings, layers, verification (Common Operational Picture) | 16 | 4 |
 | learning | `com.drones.vision.learning.domain` | datasets, training samples, training jobs | 13 | 6 |
-| events | `com.drones.vision.events.domain` | debounced detection events, replay frame extraction | 3 | 4 |
-| **total** | | | **80** | **37** |
+| events | `com.drones.vision.events.domain` | replay frame extraction — the platform's pure downstream reader (W1.6b): it reads flight/perception history for replay, nothing reads back into it | 0 | 1 |
+| **total** | | | **80** | **41** |
 
-80 + 37 + 15 (kernel) = **132 types** (was 130 before W1.6a: identity lost 5 to platform — `Audit*`
-model types (4) + `AuditTrailPort` (1) — events lost 3 — `Event`, `EventType` (model) +
-`EventPublisherPort` (port) — and platform gained those 8 plus `VisibilityScope`/
-`AccessDeniedException`, which moved in from `vision-application`'s `identity.application.scope`
-rather than out of another package here, so the net is +2 module-wide).
-docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a move.
+80 + 41 + 15 (kernel) = **136 types** (was 132 before W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md
+§15: the god-port `LiveUpdatePublisherPort` (events) was **deleted**, replaced by five per-context
+ports — `FleetLiveUpdatePort` (warehouse), `TelemetryLiveUpdatePort` (flight), `DetectionLiveUpdatePort`
+(perception), `MapLiveUpdatePort` (map), `EventLiveUpdatePort` (platform) — a net +4 ports; separately,
+`DetectionRepositoryPort`/`DetectionEvent`/`DetectionEventId`/`DetectionEventState`/
+`DetectionEventRepositoryPort` moved events → perception (3 models + 2 ports, filed by consumer not
+owner before this wave) — a wash for the model/port totals since they simply changed context, not
+count. `events` itself drops from 7 types (3 models + 4 ports) to 1 (0 models + 1 port,
+`ReplayFrameExtractionPort`) — see its own row above for why it still isn't zero).
+docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a/W1.6b moves.
 `simulation` is one of the eight bounded contexts at the *application* layer
 (`ContextArchitectureTest`'s `CONTEXTS` set) but owns no domain types of its own — it only consumes
 perception's and warehouse's ports — so it has no package under this module.
@@ -112,34 +116,48 @@ dependency: `DefaultAssignmentService`/`DefaultActivityService` reading `AssetRe
 directly). `map -> identity` also survives, for the same reason — `MapAccessPolicy.Viewer` carries a
 `Role`, an identity type platform never touched.
 
+**`platform` gained a port in W1.6b**: `EventLiveUpdatePort` (`void publishEvent(Event)`) — one of
+the five ports the former god-port `LiveUpdatePublisherPort` (`events`) split into
+(docs/plans/active/DOMAIN-SEPARATION-W1.md §15). Filed here rather than in any one bounded context
+because every context raises an `Event`, and `Event` itself already lives in `platform` as a
+cross-cutting seam (W1.6a) — the same reasoning that put `EventPublisherPort` here, applied to its
+live-update sibling.
+
 ## Cross-context domain edges
 
 `domainCrossContextReferencesMatchTheDeclaredSetExactly` no longer exists as a separate test — W1.5b
 folded domain-layer and application-layer checking into one combined-graph assertion,
 `crossContextEdgesMatchTheDeclaredSetExactly`, once every context's domain and application code
-shared one package tree. The table below is still accurate as a domain-only view — none of its edges
-involve `identity`/`events`, so W1.6a left it unchanged — but for the authoritative, currently-tested
-edge set (both layers, `kernel`/`platform` excluded as universal), read `DECLARED_EDGES`/
-`DECLARED_CYCLES` directly off `com.drones.vision.app.ContextArchitectureTest` (`vision-app`) — this
-module cannot cite a summary elsewhere without risking the same kind of drift that made this very
-paragraph stale. Today's domain-only edges — all real bytecode dependencies, not javadoc, and
-acyclic — per docs/plans/active/DOMAIN-SEPARATION-W1.md §5:
+shared one package tree. The table below is still accurate as a domain-only view, but for the
+authoritative, currently-tested edge set (both layers, `kernel`/`platform` excluded as universal),
+read `DECLARED_EDGES`/`DECLARED_CYCLES` directly off `com.drones.vision.app.ContextArchitectureTest`
+(`vision-app`) — this module cannot cite a summary elsewhere without risking the same kind of drift
+that made this very paragraph stale once already. Today's domain-only edges — all real bytecode
+dependencies, not javadoc, and acyclic:
 
 | Edge | Where | What crosses |
 |---|---|---|
-| `events → perception` | `DetectionRepositoryPort`, `LiveUpdatePublisherPort`, `ReplayFrameExtractionPort` | `DetectionResult`/`DetectionQuery`/`VideoFrame` |
-| `events → map` | `LiveUpdatePublisherPort` | `MapEvent` |
-| `events → flight` | `LiveUpdatePublisherPort` | `Telemetry` |
+| `events → perception` | `ReplayFrameExtractionPort` | `VideoFrame` |
 | `flight → warehouse` | `ManualControlPort`, `ManualControlLink`, `FlightCommandPort`, `TelemetrySourcePort` | a whole `Device` |
 | `perception → warehouse` | `RecordingPort`, `StreamPublisherPort` | a whole `Device` |
 | `perception → flight` | `AnnotatedFrame` | `Telemetry` |
 | `learning → perception` | `ModelRegistryPort` | `ModelRef` |
 
-Four of the seven are ports taking a whole `Device` from `warehouse` so they can address/describe the
-hardware they command or publish to — real coupling, but harmless (they only read a few fields off
-it), and narrowed to just what each port needs by W1 §5 **C6**, not yet scheduled. The other three are
-plain value objects (`Telemetry`, `MapEvent`, `ModelRef`, `DetectionResult`/`DetectionQuery`,
-`VideoFrame`) crossing a port signature, which is the ordinary shape of a context boundary.
+**Down from seven edges to five in W1.6b** (docs/plans/active/DOMAIN-SEPARATION-W1.md §15):
+`events → map`/`events → flight` are gone outright (both were solely `LiveUpdatePublisherPort`
+naming `MapEvent`/`Telemetry`, and that port no longer exists — deleted, split into five per-context
+ports, none of which live in `events`), and `events → perception` shrank from three causes
+(`DetectionRepositoryPort`, `LiveUpdatePublisherPort`, `ReplayFrameExtractionPort`) to one:
+`DetectionRepositoryPort` moved to `perception` (its real owner — only perception ever constructs a
+`DetectionResult`/`DetectionQuery`), so what's left is `ReplayFrameExtractionPort`'s own
+`VideoFrame` reference, the domain half of `events`'s new role as a pure downstream reader — every
+remaining `events →` edge is `events` reading another context's history, and nothing reads back.
+
+Four of the five remaining are ports taking a whole `Device` from `warehouse` so they can
+address/describe the hardware they command or publish to — real coupling, but harmless (they only
+read a few fields off it), and narrowed to just what each port needs by W1 §5 **C6**, not yet
+scheduled. The other is `ModelRegistryPort → ModelRef`, a plain value object crossing a port
+signature — the ordinary shape of a context boundary.
 
 `perception` and `events` used to point at each other — `PipelineConfig` (perception) referenced
 `EventRuleConfig`, which lived in `events` even though it is a per-stream pipeline setting the event
@@ -179,7 +197,8 @@ no entry's text changed.
 - `record AuditId(UUID value)` — `static random()`, `static of(String)`
 - `enum AuditTargetType` — ASSET, DEVICE, **DATASET, MODEL** (docs/plans/done/CV-TRAINING-PLAN.md Wave T1 — a training dataset / a trained CV model version in the registry) — opaque `targetId` string, so new auditable kinds need no storage change
 - `AuditTrailPort`: `AuditEntry record(AuditEntry)` — append-only, never updated or deleted, not even when its target is soft-deleted; `List<AuditEntry> findRecent(int limit)`, `List<AuditEntry> findByTarget(AuditTargetType, String targetId, int limit)`, `List<AuditEntry> findByActor(UserId, int limit)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 7 — the "my activity" feed for one actor), all newest-first
-- `record Event(String id, StreamId streamId, Instant at, EventType type, String message, Map<String,String> attributes)` — **streamId nullable** (device-level events); `static of(StreamId,EventType,String)` generates id+now(); **not the same thing as `DetectionEvent`** (events context) — see that context's Gotchas
+- `record Event(String id, StreamId streamId, Instant at, EventType type, String message, Map<String,String> attributes)` — **streamId nullable** (device-level events); `static of(StreamId,EventType,String)` generates id+now(); **not the same thing as `DetectionEvent`** (perception context, moved there W1.6b) — see that context's Gotchas
+- `EventLiveUpdatePort` (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `void publishEvent(Event)` — announces a domain `Event` live to a driving adapter; must not throw on ordinary delivery failure, must return quickly (mirrors `EventPublisherPort`'s own contract). One of five ports the former god-port `LiveUpdatePublisherPort` split into; the one filed in `platform` rather than a bounded context, since every context raises an `Event`
 - `EventPublisherPort`: `void publish(Event)` — must not throw on ordinary delivery failure; called on hot pipeline path, must return quickly
 - `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING, GEOFENCE_BREACH (docs/plans/done/OPS-CORE-PLAN.md §G — raised by `GeofenceMonitor`, vision-application, on a breach edge transition; attributes carry `{assetId, zoneId, zoneName, kind, direction}`, `streamId` always `null` since a breach is asset-scoped, not stream-scoped)
 - `record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assignedAssets)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1) — what a request may see, resolved once per request by `vision-application`'s `ScopeResolver` and threaded into user-facing reads/commands. Nested `enum Kind {UNBOUNDED, GROUPS, ASSIGNED_ASSETS}`; three static factories — `unbounded()` (ADMIN/auth-off), `groups(Set<GroupId>)` (MANAGER), `assignedAssets(Set<AssetId>)` (PILOT); both sets defensively copied, null→empty. `boolean includes(AssetId, Ownership)` — **W1.6a signature**, was `includes(Asset)`: takes the asset's id and ownership rather than a whole `Asset` (warehouse's aggregate), the only two components the check ever used — `UNBOUNDED`→true, `GROUPS`→`groups.contains(ownership.groupId())`, `ASSIGNED_ASSETS`→`assignedAssets.contains(assetId)`; every call site already held an `Asset` in hand, so each became `scope.includes(asset.id(), asset.ownership())`. `boolean canManageOrg()` — true iff `UNBOUNDED`/`GROUPS`. `boolean includesGroup(GroupId)` — the group half of `includes`. **`maxGrantableRole()` is gone** — moved to a private static method on `DefaultUserService` (`vision-application`, its only caller): granting roles is user administration, not visibility, so it does not belong on the universal scope value
@@ -197,6 +216,7 @@ no entry's text changed.
 - `CategoryRepositoryPort`: `DeviceCategory save(DeviceCategory)`; `Optional<DeviceCategory> findById(CategoryId)`; `List<DeviceCategory> findAll()`
 - `DeviceDiscoveryPort`: `String method()` — stable lower-case key; `List<DiscoveredDevice> scan(Duration timeout)` — **blocking**, must self-time-box to ~timeout, empty list ≠ error
 - `DeviceRepositoryPort`: `Device save(Device)`; `Optional<Device> findById(DeviceId)`; `List<Device> findAll()`; `void deleteById(DeviceId)` — idempotent
+- `FleetLiveUpdatePort` (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `void publishFleetChanged()` — no payload, a driving adapter re-derives its own snapshot. One of five ports the former god-port `LiveUpdatePublisherPort` (`events`) split into — each publishing context now owns exactly the payload it produces
 
 ### identity — `com.drones.vision.identity.domain.model`
 - `record Group(GroupId id, String name, GroupId parentGroupId)` (docs/plans/done/U-AUTH-PLAN.md, wave 1) — org-chart node a `User` can hold a `Membership` in; `parentGroupId` nullable (`null` = root group); `name` non-blank; no other validation — subtree visibility scoping is a later slice, not part of this record
@@ -213,6 +233,9 @@ no entry's text changed.
 ### perception — `com.drones.vision.perception.domain.model`
 - `record AnnotatedFrame(VideoFrame frame, List<Detection> detections, Telemetry telemetry)` — telemetry nullable; detections defensively copied
 - `record Detection(String label, double confidence, BoundingBox box, ModelRef model, TrackRef track)` — confidence [0,1]; `track` (docs/plans/done/TRACKING-PLAN.md §4.B, Wave T2) nullable = untracked (tracking off for the stream, or not yet associated) — never a sentinel `TrackRef` with `trackId==0` (TRACKING-ORCHESTRATION.md §6 rule 2); a 4-arg convenience ctor defaults `track=null` so every pre-existing call site compiles unchanged (same "N-1-arg convenience ctor" idiom as `Telemetry`'s 8-arg ctor)
+- `record DetectionEvent(DetectionEventId id, StreamId streamId, AssetId assetId, String label, double peakConfidence, Instant firstSeen, Instant lastSeen, DetectionEventState state, GeoPosition position)` (docs/plans/done/MVP2-PLAN.md §E, E-a; moved here from `events` in W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15 — it stores/shapes detections and only perception's `DetectionEventEngine`/`DefaultStreamService` ever construct it, filed by consumer not owner before this wave) — a debounced "label X was seen for a while" occurrence, opened/evolved by `DetectionEventEngine` (vision-application); `assetId`/`position` nullable (unresolvable device→asset, or no telemetry yet); `peakConfidence` [0,1]; `lastSeen`≥`firstSeen`; `withObservation(Instant,double)` advances `lastSeen`/raises `peakConfidence` (max), `closed()` flips `state`→CLOSED without moving `lastSeen`. `position` is stamped once, at open time, and never updated afterward — see `DetectionEventEngine`'s javadoc
+- `record DetectionEventId(UUID value)` — `static random()`, `static of(String)`
+- `enum DetectionEventState` — OPEN, CLOSED
 - `record DetectionQuery(StreamId streamId, Instant from, Instant to, String label, int limit)` — all but `limit` nullable = "don't filter on this"; limit must be positive
 - `record DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections, Duration inferenceLatency, TrackingTelemetry tracking)` — frameSequence≥0, latency≥0; `tracking` (docs/plans/done/TRACKING-PLAN.md §4.B, TRACKING-ORCHESTRATION.md §5.2, Wave T2) nullable = tracking was off for this result — the gap fix that lets `detectorRan` and friends reach the API layer at all: one nullable component, not five flat ones; a 5-arg convenience ctor defaults `tracking=null` so every pre-existing call site compiles unchanged
 - `enum DetectionSource` (docs/plans/done/TRACKING-PLAN.md §4.B, Wave T2) — `DETECTOR | TRACKER`; which of the two tracking loops (docs/plans/done/TRACKING-PLAN.md §1) produced a particular `Detection` on a particular frame. Pure marker, no dedicated test (same convention as `Capability`/`EventType`/`PixelFormat`)
@@ -233,7 +256,10 @@ no entry's text changed.
 - `record VideoFrame(StreamId streamId, long sequence, Instant capturedAt, int width, int height, PixelFormat format, ByteBuffer data)` — sequence≥0, width/height>0; ctor stores `data.asReadOnlyBuffer()`; `data()` overridden to return `data.duplicate()` fresh each call
 
 ### perception — `com.drones.vision.perception.domain.port` (driven — implemented by adapters)
+- `DetectionEventRepositoryPort` (docs/plans/done/MVP2-PLAN.md §E, E-a; moved here from `events` in W1.6b — see `DetectionEvent`'s own entry above for why): `DetectionEvent save(DetectionEvent)` — **upsert** by `DetectionEvent#id()` (unlike `DetectionRepositoryPort#save`'s append-only rows, a `DetectionEvent` mutates over its own open lifetime); `List<DetectionEvent> findRecent(Instant sinceInclusive, int limit)` — across every stream, newest-first by `lastSeen`, `sinceInclusive` nullable (no lower bound); `List<DetectionEvent> findByStream(StreamId, int limit)` — one stream, same ordering, empty (not an error) for an unknown/eventless stream
+- `DetectionLiveUpdatePort` (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `void publishDetections(AssetId, DetectionResult)` — attributed to the stream's *owning asset*, not the stream itself; `void publishDetectionEvent(DetectionEvent)` — a debounced `DetectionEvent` opened/advanced/closed, carrying the event itself (unlike a no-payload shape, since there's no cheaper way for a driving adapter to re-derive "which event, which state"). Both must not throw on ordinary delivery failure and must return quickly (mirrors `EventPublisherPort`'s own contract). Two of the six methods the former god-port `LiveUpdatePublisherPort` (`events`) split into five ports — this context's own slice
 - `DetectionPort`: `CompletionStage<DetectionResult> detect(VideoFrame, PipelineConfig)` — **must not block**; performs no internal queuing/limiting — caller bounds in-flight count and skips (never queues) once at the bound
+- `DetectionRepositoryPort` (moved here from `events` in W1.6b — see `DetectionEvent`'s own entry above for why): `void save(DetectionResult)` — append-only; `List<DetectionResult> query(DetectionQuery)`
 - `FeedTransmitterPort`: `boolean supports(FeedSpec)`; `StreamDescriptor start(FeedId, FeedSpec)` — blocking setup then background transmit, returns the descriptor the RX side (`VideoSourcePort`) can ingest from; `void stop(FeedId)` — idempotent. **TX (transmit) half** of the RX/TX doctrine (`docs/main/CYCLES-PLAN.md` §0): pushes a local media source over a real wire protocol so the platform's own RX adapters ingest it like real hardware — simulation infrastructure, unrelated to `StreamPublisherPort` (viewer-facing egress). Unrecoverable transmit failure just stops the feed, best-effort, no error channel (KISS)
 - `OverlayPort`: `VideoFrame render(AnnotatedFrame)` — synchronous, input frame never mutated, returns a distinct instance
 - `RecordingPort`: `void streamStarted(StreamId, Device)`; `void publish(StreamId, VideoFrame)` — must be cheap, no blocking I/O; `void streamEnded(StreamId)` — idempotent; method shape mirrors StreamPublisherPort but is a distinct port (durable storage vs live egress)
@@ -259,6 +285,7 @@ no entry's text changed.
 - `GeofenceRepositoryPort` (docs/plans/done/OPS-CORE-PLAN.md §G): `GeofenceZone save(GeofenceZone)` — upsert by `ZoneId`; `Optional<GeofenceZone> findById(ZoneId)`; `List<GeofenceZone> findAll()` — snapshot, global (no ownership/scoping filter, same convention as `CategoryRepositoryPort`); `void deleteById(ZoneId)` — idempotent
 - `ManualControlLink` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1, RC-CONTROL Phase 1 R1) — opaque, adapter-owned handle to one engaged `ManualControlPort` relay link; `boolean active()` — whether its sender thread is still running
 - `ManualControlPort` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1, RC-CONTROL Phase 1 R1): driven port for a streaming, ack-less RC-channel-override relay — the fire-and-forget, continuous-stream opposite of `FlightCommandPort`'s request→ack one-shots. `boolean supports(Device)`; `ManualControlLink engage(Device)` — opens a link and starts its fixed-rate sender thread; throws `IllegalArgumentException` if the device is unsupported or not currently reachable ("cannot command what you cannot hear" — no live source address heard from it yet); `void send(ManualControlLink, RcChannels)` — hands the sender thread the newest frame via a single-slot, latest-wins mailbox; non-blocking, must never itself write to the wire (only the link's own sender thread may), no-op once released; `void release(ManualControlLink)` — sends a short release-sentinel burst (`RcChannels#released`) then stops the sender thread; idempotent. No real implementation yet — `adapters/adapter-mavlink`'s `MavlinkManualControlSender` is docs/plans/done/RC-CONTROL-PHASE1-PLAN.md's next wave, R3
+- `TelemetryLiveUpdatePort` (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `void publishTelemetryAppended(AssetId, Telemetry)` — announces one telemetry sample appended to an asset's open usage; must not throw on ordinary delivery failure, must return quickly. One of five ports the former god-port `LiveUpdatePublisherPort` (`events`) split into — this context's own slice
 - `TelemetryRepositoryPort`: `void save(UsageId, Telemetry)` — append-only; `List<Telemetry> findByUsage(UsageId, int limit)`
 - `TelemetrySourcePort`: `boolean supports(Device)`; `Flow.Publisher<Telemetry> open(Device)` — per-open, hot/live, latest-wins backpressure; `void close(DeviceId)` — idempotent
 
@@ -271,7 +298,7 @@ no entry's text changed.
 - `record LayerGrant(SubjectType subjectType, UUID subjectId, AccessLevel level)` (docs/plans/done/MAP-REWORK-PLAN.md §2.1, Wave A) — one explicit "give this user or group this access level" grant on a `MapLayer` (DELTA's own layer-sharing idea); nested `enum SubjectType { USER, GROUP }`; `subjectId` is deliberately a plain `UUID`, not a typed `UserId`/`GroupId` union — which typed id it is depends on `subjectType`, and resolving/matching it against a viewer's identity is `MapAccessPolicy`'s job (vision-application, Wave B), not this record's; all three components non-null
 - `record LayerId(UUID value)` (docs/plans/done/MAP-REWORK-PLAN.md §2.1, Wave A) — `static random()`, `static of(String)`; typed identity for a `MapLayer`, mirrors `MarkId`/`ZoneId` exactly
 - `enum LayerKind` (docs/plans/done/MAP-REWORK-PLAN.md §2.1, Wave A) — `COP | TEAM | PERSONAL`; sets the default visibility/write baseline a `MapLayer`'s `grants` extend — `COP` is the single system-wide shared-picture layer (org-wide view, MANAGER+ writes, exactly one per deployment, the default mark-promotion target), `TEAM` is group-owned (members see+contribute), `PERSONAL` is owner-only by default. Pure marker otherwise, no dedicated test
-- `record MapEvent(EntityType entity, Action action, LayerId layerId, Object payload)` (docs/plans/done/MAP-REWORK-PLAN.md §2.3, Wave A) — a live change to a `Mark`/`Drawing`/`MapLayer`, the payload `LiveUpdatePublisherPort#publishMapEvent` carries; nested `enum EntityType { MARK, DRAWING, LAYER }`, `enum Action { CREATED, UPDATED, CLEARED, DELETED }`; all four components non-null; **`payload`'s runtime type is validated against `entity`** (`MARK`&rarr;`Mark`, `DRAWING`&rarr;`Drawing`, `LAYER`&rarr;`MapLayer`) — a real cross-field invariant, not just documentation, catching a wiring bug at construction rather than letting a mismatched payload reach the API layer's DTO mapping; `Action.CLEARED` is likewise only valid for `entity == MARK` (a drawing/layer has no "cleared" lifecycle state)
+- `record MapEvent(EntityType entity, Action action, LayerId layerId, Object payload)` (docs/plans/done/MAP-REWORK-PLAN.md §2.3, Wave A) — a live change to a `Mark`/`Drawing`/`MapLayer`, the payload `MapLiveUpdatePort#publishMapEvent` carries (that port name since W1.6b — see the port section below); nested `enum EntityType { MARK, DRAWING, LAYER }`, `enum Action { CREATED, UPDATED, CLEARED, DELETED }`; all four components non-null; **`payload`'s runtime type is validated against `entity`** (`MARK`&rarr;`Mark`, `DRAWING`&rarr;`Drawing`, `LAYER`&rarr;`MapLayer`) — a real cross-field invariant, not just documentation, catching a wiring bug at construction rather than letting a mismatched payload reach the API layer's DTO mapping; `Action.CLEARED` is likewise only valid for `entity == MARK` (a drawing/layer has no "cleared" lifecycle state)
 - `record MapLayer(LayerId id, String name, LayerKind kind, Ownership ownership, List<LayerGrant> grants, Instant createdAt)` (docs/plans/done/MAP-REWORK-PLAN.md §2.1, Wave A) — a named, access-controlled layer marks and drawings live on (DELTA's "give N participants access to a layer" idea); `name` non-blank, at most `MAX_NAME_LENGTH` (80) chars; `grants` non-null, defensively copied, may be empty; exactly one `LayerKind.COP` layer per deployment is an application-layer invariant (the service that bootstraps/creates layers enforces it), not checked here since a single record has no way to see the rest of the fleet. `withName(String)`/`withGrants(List<LayerGrant>)` — each replaces one field, everything else (including `id`/`kind`/`ownership`/`createdAt`) kept
 - `record Mark(MarkId id, LayerId layerId, GeoPosition position, MarkKind kind, Affiliation affiliation, String label, String note, Ownership ownership, Instant createdAt, MarkStatus status, MarkSource source, Verification verification)` (docs/plans/done/MAP-REWORK-PLAN.md §2.2, superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §1's shape) — a geolocated tactical mark on the shared operational picture: structurally a *point* version of `GeofenceZone` (one `GeoPosition` instead of a ≥3-vertex polygon, no breach semantics) but, unlike `GeofenceZone`, owned and group-scoped — `ownership` mirrors how `Asset` carries `Ownership` (reused verbatim, no new owner type); `label` must not be blank, `note` nullable (blank normalizes to `null`); every component non-null except `note`. Three components added by the MAP-REWORK: `layerId` (which `MapLayer` the mark lives on — visibility/write access resolves from that, not from `ownership` alone), `affiliation` (APP-6 symbology, orthogonal to `kind`), `verification` (DELTA review state, see `Verification`). `createdBy()` derives `ownership.ownerId()` (display + "creator can edit while unverified"). Wither methods, each replacing only the fields it names: `withPosition(GeoPosition)` — drag-correct; `withDetails(String,String,MarkKind,Affiliation)` — label/note/kind/affiliation (position/layer/status/verification untouched, mirroring how `GeofenceZone#withDetails` leaves `enabled` untouched); `withStatus(MarkStatus)` — ACTIVE⇄CLEARED; `withVerification(Verification)` — review-state transitions; `withLayer(LayerId)` — promotion (or a plain re-file) to a different layer. A `MarkSource.DETECTION` mark is an honest estimate (see `GeoProjection`) — always draggable/editable, never a hidden precise fix
 - `record MarkId(UUID value)` (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, Wave M1) — `static random()`, `static of(String)`; typed identity for a `Mark`, mirrors `ZoneId` exactly
@@ -283,6 +310,7 @@ no entry's text changed.
 ### map — `com.drones.vision.map.domain.port` (driven — implemented by adapters)
 - `MarkRepositoryPort` (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, Wave M1; unchanged by docs/plans/done/MAP-REWORK-PLAN.md Wave A) — mirrors `GeofenceRepositoryPort`'s exact shape: `Mark save(Mark)` upsert by `MarkId`; `Optional<Mark> findById(MarkId)`; `List<Mark> findAll()` — snapshot, **no** ownership/group/layer filter baked in (same "no scope filtering in the repository" convention as every other port) — access filtering over this snapshot is the application layer's job (`MapAccessPolicy`/`MarkService`, Wave B); `void deleteById(MarkId)` — idempotent
 - `MapLayerRepositoryPort` (docs/plans/done/MAP-REWORK-PLAN.md §2.3, Wave A) — same minimal shape as `MarkRepositoryPort`: `MapLayer save(MapLayer)` upsert by `LayerId`; `Optional<MapLayer> findById(LayerId)`; `List<MapLayer> findAll()` — snapshot, no access filter baked in; `void deleteById(LayerId)` — idempotent, **does not cascade** to marks/drawings on the deleted layer (cascading + emitting a `MapEvent` per cascaded object is the application layer's job, docs/plans/done/MAP-REWORK-PLAN.md §3's "layer CRUD" rule)
+- `MapLiveUpdatePort` (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `void publishMapEvent(MapEvent)` — a mark, drawing, or layer created/updated/cleared/deleted; **replaces** the former `default void publishMarkCreated(Mark)`/`publishMarkUpdated(Mark)`/`publishMarkCleared(Mark)` trio (docs/plans/done/TACTICAL-MARKS-PLAN.md §5, deleted by the Wave A rework) — one method covers marks, drawings and layers alike. Delivery is scoped per-connection by which layers a viewer may see (docs/plans/done/MAP-REWORK-PLAN.md §4.3), unlike every other live-update port, which broadcasts unconditionally. One of five ports the former god-port `LiveUpdatePublisherPort` (`events`) split into — this context's own slice
 - `DrawingRepositoryPort` (docs/plans/done/MAP-REWORK-PLAN.md §2.3, Wave A) — same minimal shape as `MarkRepositoryPort`: `Drawing save(Drawing)` upsert by `DrawingId`; `Optional<Drawing> findById(DrawingId)`; `List<Drawing> findAll()` — snapshot, no access filter baked in; `void deleteById(DrawingId)` — idempotent
 
 ### learning — `com.drones.vision.learning.domain.model`
@@ -308,16 +336,13 @@ no entry's text changed.
 - `ModelRegistryPort`: `List<ModelRef> models()`; `void promote(ModelRef)` — must apply atomically (no partial-promotion reads)
 - `TrainingPort` (docs/plans/done/CV-TRAINING-PLAN.md §6/§7, Phase 2): `void startTraining(TrainingJobSpec spec, Consumer<TrainingProgress> onProgress)` — the Java side of `cv.proto`'s `Training.StartTraining` server-streaming RPC; optional, GPU-training-host-only in production (never GB4005 — see the plan's "constraint that shapes everything"). **Contract:** blocks, consuming the underlying gRPC stream and invoking `onProgress` for every `TrainingProgress` until the stream terminates — a terminal `SUCCEEDED`/`FAILED` progress, or the call returns/throws because the transport itself ended (an unrecoverable transport error is a thrown exception, never a synthesized terminal progress); cancellation ends the stream with no terminal message, so a caller cannot distinguish "cancelled" from "closed early" purely from this port. **Threading:** blocks for the job's lifetime — the caller (an application-layer service) runs it on its own executor, not the calling thread; `onProgress` is invoked synchronously from the consuming thread; implementations must be safe to call concurrently for different jobs. Deliberately mirrors a callback shape rather than returning a `Stream`/`Iterator`, keeping this module free of any streaming/reactive framework type. No implementation yet — an adapter (`adapters/adapter-cv-grpc`) wrapping the gRPC stream is a later wave; `vision-application`'s `TrainingJobService` running it off-thread and holding job state is another
 
-### events — `com.drones.vision.events.domain.model`
-- `record DetectionEvent(DetectionEventId id, StreamId streamId, AssetId assetId, String label, double peakConfidence, Instant firstSeen, Instant lastSeen, DetectionEventState state, GeoPosition position)` (docs/plans/done/MVP2-PLAN.md §E, E-a) — a debounced "label X was seen for a while" occurrence, opened/evolved by `DetectionEventEngine` (vision-application); `assetId`/`position` nullable (unresolvable device→asset, or no telemetry yet); `peakConfidence` [0,1]; `lastSeen`≥`firstSeen`; `withObservation(Instant,double)` advances `lastSeen`/raises `peakConfidence` (max), `closed()` flips `state`→CLOSED without moving `lastSeen`. `position` is stamped once, at open time, and never updated afterward — see `DetectionEventEngine`'s javadoc
-- `record DetectionEventId(UUID value)` — `static random()`, `static of(String)`
-- `enum DetectionEventState` — OPEN, CLOSED
+### events — `com.drones.vision.events.domain`
+**No models** (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15) — `DetectionEvent`/`DetectionEventId`/`DetectionEventState` moved to `perception` (see that context's own entries above), the last domain models this context owned. `events` is now a pure downstream reader: it may read every context's history for replay, and nothing reads back into its domain layer.
 
-### events — `com.drones.vision.events.domain.port` (driven — implemented by adapters)
-- `DetectionEventRepositoryPort` (docs/plans/done/MVP2-PLAN.md §E, E-a): `DetectionEvent save(DetectionEvent)` — **upsert** by `DetectionEvent#id()` (unlike `DetectionRepositoryPort#save`'s append-only rows, a `DetectionEvent` mutates over its own open lifetime); `List<DetectionEvent> findRecent(Instant sinceInclusive, int limit)` — across every stream, newest-first by `lastSeen`, `sinceInclusive` nullable (no lower bound); `List<DetectionEvent> findByStream(StreamId, int limit)` — one stream, same ordering, empty (not an error) for an unknown/eventless stream
-- `DetectionRepositoryPort`: `void save(DetectionResult)` — append-only; `List<DetectionResult> query(DetectionQuery)`
-- `LiveUpdatePublisherPort` (docs/plans/done/REALTIME-PLAN.md §4): `void publishFleetChanged()` — no payload, a driving adapter re-derives its own snapshot; `void publishTelemetryAppended(AssetId, Telemetry)`; `void publishDetections(AssetId, DetectionResult)` — attributed to the stream's *owning asset*, not the stream itself; `void publishEvent(Event)` — must not throw on ordinary delivery failure and must return quickly, same contract as `EventPublisherPort`, since it's called from the same hot stream-pipeline/telemetry paths (once per completed inference, once per appended sample); `void publishDetectionEvent(DetectionEvent)` (backend follow-up batch, extending the R-c channel for the events UI) — a debounced `DetectionEvent` opened/advanced/closed, carrying the event itself (unlike `publishFleetChanged`'s no-payload shape, since there's no cheaper way for a driving adapter to re-derive "which event, which state"); `void publishMapEvent(MapEvent)` (docs/plans/done/MAP-REWORK-PLAN.md §2.3, Wave A) — **replaces** the former `default void publishMarkCreated(Mark)`/`publishMarkUpdated(Mark)`/`publishMarkCleared(Mark)` trio (docs/plans/done/TACTICAL-MARKS-PLAN.md §5, deleted by this wave): one abstract method now covers marks, drawings, *and* layers. Unlike every other method on this port (and unlike the three it replaces, which were `default`-bodied no-ops precisely so pre-existing implementors kept compiling), `publishMapEvent` is **deliberately not `default`** — scoped per-connection SSE delivery (docs/plans/done/MAP-REWORK-PLAN.md §4.3) is the point of the rework, so an implementor must engage with it rather than silently no-op. This is an intentional breaking change: `vision-api`'s `LiveUpdateRegistry` and `vision-app`'s `NoopLiveUpdatePublisher` **do not compile** until Wave C implements the new method (see Status below)
+`com.drones.vision.events.domain.port` (driven — implemented by adapters):
 - `ReplayFrameExtractionPort` (docs/plans/done/CV-TRAINING-V2-PLAN.md §3, Wave W1) — pull one decoded frame out of a stream's durable recording at a specific instant, the "capture a training frame from replay" counterpart to live capture's `StreamService#latestRawFrame`: `Optional<VideoFrame> frameAt(StreamId, Instant)` — `Optional.empty()` is **honest absence** (no recording configured, recording disabled on the media server, or nothing recorded at that instant), never an error, mirroring `StreamPublisherPort#playbackUrl`'s own posture toward a missing recording; implementations **must** stamp the returned `VideoFrame`'s `capturedAt` with the requested `at` and its `sequence` with `0`, so callers never have to reconcile two notions of "when". No implementation yet — `MediamtxReplayFrameExtractor` (`adapters/adapter-publish-hls`) is a later wave
+
+**`DetectionRepositoryPort`, `DetectionEventRepositoryPort` and the god-port `LiveUpdatePublisherPort` all moved out in W1.6b** — the first two to `perception` (their real owner — see that context's port section above), the third **deleted outright** and split into five per-context ports (`FleetLiveUpdatePort`/`TelemetryLiveUpdatePort`/`DetectionLiveUpdatePort`/`MapLiveUpdatePort`/`EventLiveUpdatePort`, each documented under its own owning context/`platform`). None of the six methods that port bundled belonged to `events` in the first place — every one named another context's payload (`Telemetry`, `MapEvent`, `DetectionResult`, `DetectionEvent`, a bare `Event`).
 
 ## Conventions
 - **Validation:** every record validates in its compact constructor with manual `if (…) throw new IllegalArgumentException(…)` per field (no Bean Validation, no `Objects.requireNonNull` — that idiom is application-layer only).
@@ -348,6 +373,13 @@ no entry's text changed.
 *`com.drones.vision.domain.model` / `domain.port.out` packages by the names that were correct*
 *at the time each wave landed. See "Package shape" above for where each type actually lives*
 *today; the behavioral claims in every entry below are otherwise unaffected by the move.*
+
+*Entries also predate W1.6b (docs/plans/active/DOMAIN-SEPARATION-W1.md §15) where noted: they cite*
+*`events`'s `DetectionRepositoryPort`/`DetectionEvent`/`DetectionEventId`/`DetectionEventState`/*
+*`DetectionEventRepositoryPort` (moved to `perception`, their real owner) and the god-port*
+*`LiveUpdatePublisherPort` (deleted, split into `FleetLiveUpdatePort`/`TelemetryLiveUpdatePort`/*
+*`DetectionLiveUpdatePort`/`MapLiveUpdatePort`/`EventLiveUpdatePort`) by the names/locations that*
+*were correct when each wave landed. See "Contexts"/"API surface" above for the current shape.*
 docs/plans/done/TRACKING-PLAN.md **Wave T8 done — the default flip** (§5.G, D15): `PipelineConfig.defaults()`
 returns `TrackingConfig.defaults()` (`ASSOCIATE`) instead of `TrackingConfig.off()`. **One line of
 production code in this module**, deliberately its own wave so the moment behavior changes is one

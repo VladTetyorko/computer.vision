@@ -25,9 +25,9 @@ import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.DetectionPort;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.OverlayPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -145,7 +145,7 @@ class StreamPipelineTest {
     }
 
     private StreamPipeline pipeline(ScriptedVideoPublisher publisher, PipelineConfig config, AssetId assetId,
-                                     LiveUpdatePublisherPort liveUpdatePublisherPort) {
+                                     DetectionLiveUpdatePort liveUpdatePublisherPort) {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher, null, null, assetId, liveUpdatePublisherPort);
     }
@@ -506,7 +506,7 @@ class StreamPipelineTest {
                 .thenReturn(CompletableFuture.completedFuture(nonEmpty))
                 .thenReturn(CompletableFuture.completedFuture(empty));
         AssetId assetId = AssetId.random();
-        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
 
         pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort).start();
 
@@ -521,7 +521,7 @@ class StreamPipelineTest {
         VideoFrame f = frame(0);
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
-        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
 
         pipeline(publisher, config(30, 2), null, liveUpdatePublisherPort).start();
 
@@ -1099,7 +1099,7 @@ class StreamPipelineTest {
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
         DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
         AssetId assetId = AssetId.random();
-        LiveUpdatePublisherPort liveUpdatePublisherPort = mock(LiveUpdatePublisherPort.class);
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 30, 2, true, Set.of("person"),
                 EventRuleConfig.defaults(), true, true);
 

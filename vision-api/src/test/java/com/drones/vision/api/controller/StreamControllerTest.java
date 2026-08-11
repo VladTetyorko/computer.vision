@@ -27,7 +27,7 @@ import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.perception.domain.model.VideoFrame;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

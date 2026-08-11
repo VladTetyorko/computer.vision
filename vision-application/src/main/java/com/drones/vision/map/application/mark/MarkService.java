@@ -54,7 +54,7 @@ import com.drones.vision.map.application.MapLayerService;
  * <h2>Live broadcast</h2>
  * Every create/patch/verify/promote/delete publishes a {@link
  * com.drones.vision.map.domain.model.MapEvent} through {@link
- * com.drones.vision.events.domain.port.LiveUpdatePublisherPort#publishMapEvent}, so the shared picture
+ * com.drones.vision.map.domain.port.MapLiveUpdatePort#publishMapEvent}, so the shared picture
  * stays live for every viewer whose {@link Viewer} may see the event's layer (scoped SSE delivery is
  * a Wave C concern). {@link #patch} publishes {@code CLEARED} when the patch flips {@link
  * #patch}'s status to {@link MarkStatus#CLEARED}, {@code UPDATED} otherwise; {@link #delete} now

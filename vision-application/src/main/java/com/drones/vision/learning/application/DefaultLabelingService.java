@@ -36,7 +36,6 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
-import com.drones.vision.events.application.ReplayCaptureSpec;
 import com.drones.vision.events.application.ReplaySources;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;

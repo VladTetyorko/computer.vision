@@ -7,7 +7,7 @@ import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 
 import java.time.Instant;
@@ -66,9 +66,9 @@ public final class LayerResolver {
     static final GroupId SYSTEM_GROUP_ID = new GroupId(new UUID(0, 1));
 
     private final MapLayerRepositoryPort mapLayerRepository;
-    private final LiveUpdatePublisherPort liveUpdatePublisher;
+    private final MapLiveUpdatePort liveUpdatePublisher;
 
-    public LayerResolver(MapLayerRepositoryPort mapLayerRepository, LiveUpdatePublisherPort liveUpdatePublisher) {
+    public LayerResolver(MapLayerRepositoryPort mapLayerRepository, MapLiveUpdatePort liveUpdatePublisher) {
         this.mapLayerRepository = Objects.requireNonNull(mapLayerRepository, "mapLayerRepository must not be null");
         this.liveUpdatePublisher =
                 Objects.requireNonNull(liveUpdatePublisher, "liveUpdatePublisher must not be null");

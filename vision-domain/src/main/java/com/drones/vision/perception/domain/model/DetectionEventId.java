@@ -1,4 +1,4 @@
-package com.drones.vision.events.domain.model;
+package com.drones.vision.perception.domain.model;
 
 import java.util.UUID;
 

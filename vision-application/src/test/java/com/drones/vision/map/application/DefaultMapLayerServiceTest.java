@@ -1,9 +1,6 @@
 package com.drones.vision.map.application;
 
 import com.drones.vision.map.domain.model.AccessLevel;
-import com.drones.vision.kernel.AssetId;
-import com.drones.vision.events.domain.model.DetectionEvent;
-import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.map.domain.model.Drawing;
 import com.drones.vision.map.domain.model.DrawingId;
 import com.drones.vision.platform.Event;
@@ -23,11 +20,10 @@ import com.drones.vision.map.domain.model.MarkSource;
 import com.drones.vision.map.domain.model.MarkStatus;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.Role;
-import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,7 +49,7 @@ class DefaultMapLayerServiceTest {
     private FakeMapLayerRepositoryPort mapLayerRepository;
     private FakeMarkRepositoryPort markRepository;
     private FakeDrawingRepositoryPort drawingRepository;
-    private FakeLiveUpdatePublisherPort liveUpdatePublisher;
+    private FakeMapLiveUpdatePort liveUpdatePublisher;
     private MapLayerService service;
 
     @BeforeEach
@@ -61,7 +57,7 @@ class DefaultMapLayerServiceTest {
         mapLayerRepository = new FakeMapLayerRepositoryPort();
         markRepository = new FakeMarkRepositoryPort();
         drawingRepository = new FakeDrawingRepositoryPort();
-        liveUpdatePublisher = new FakeLiveUpdatePublisherPort();
+        liveUpdatePublisher = new FakeMapLiveUpdatePort();
         LayerResolver layerResolver = new LayerResolver(mapLayerRepository, liveUpdatePublisher);
         service = new DefaultMapLayerService(layerResolver, markRepository, drawingRepository, liveUpdatePublisher,
                 new MapAccessPolicy());
@@ -397,29 +393,9 @@ class DefaultMapLayerServiceTest {
         }
     }
 
-    /** Capturing fake {@link LiveUpdatePublisherPort}. */
-    static final class FakeLiveUpdatePublisherPort implements LiveUpdatePublisherPort {
+    /** Capturing fake {@link MapLiveUpdatePort}. */
+    static final class FakeMapLiveUpdatePort implements MapLiveUpdatePort {
         final List<MapEvent> events = new ArrayList<>();
-
-        @Override
-        public void publishFleetChanged() {
-        }
-
-        @Override
-        public void publishTelemetryAppended(AssetId assetId, Telemetry sample) {
-        }
-
-        @Override
-        public void publishDetections(AssetId assetId, DetectionResult result) {
-        }
-
-        @Override
-        public void publishEvent(Event event) {
-        }
-
-        @Override
-        public void publishDetectionEvent(DetectionEvent event) {
-        }
 
         @Override
         public void publishMapEvent(MapEvent event) {

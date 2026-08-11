@@ -20,7 +20,7 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

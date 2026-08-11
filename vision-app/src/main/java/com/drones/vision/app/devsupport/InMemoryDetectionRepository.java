@@ -3,7 +3,7 @@ package com.drones.vision.app.devsupport;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.kernel.StreamId;
-import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 
 import java.util.Comparator;
 import java.util.Deque;

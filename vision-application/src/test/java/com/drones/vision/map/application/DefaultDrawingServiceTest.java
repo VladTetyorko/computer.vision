@@ -1,8 +1,5 @@
 package com.drones.vision.map.application;
 
-import com.drones.vision.kernel.AssetId;
-import com.drones.vision.events.domain.model.DetectionEvent;
-import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.map.domain.model.DrawKind;
 import com.drones.vision.map.domain.model.Drawing;
 import com.drones.vision.map.domain.model.DrawingId;
@@ -15,10 +12,9 @@ import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.Role;
-import com.drones.vision.flight.domain.model.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
-import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,7 +38,7 @@ class DefaultDrawingServiceTest {
 
     private FakeDrawingRepositoryPort drawingRepository;
     private FakeMapLayerRepositoryPort mapLayerRepository;
-    private FakeLiveUpdatePublisherPort liveUpdatePublisher;
+    private FakeMapLiveUpdatePort liveUpdatePublisher;
     private DrawingService service;
 
     private MapLayer cop;
@@ -54,7 +50,7 @@ class DefaultDrawingServiceTest {
     void setUp() {
         drawingRepository = new FakeDrawingRepositoryPort();
         mapLayerRepository = new FakeMapLayerRepositoryPort();
-        liveUpdatePublisher = new FakeLiveUpdatePublisherPort();
+        liveUpdatePublisher = new FakeMapLiveUpdatePort();
         LayerResolver layerResolver = new LayerResolver(mapLayerRepository, liveUpdatePublisher);
         service = new DefaultDrawingService(drawingRepository, liveUpdatePublisher, new MapAccessPolicy(),
                 layerResolver);
@@ -281,29 +277,9 @@ class DefaultDrawingServiceTest {
         }
     }
 
-    /** Capturing fake {@link LiveUpdatePublisherPort}. */
-    static final class FakeLiveUpdatePublisherPort implements LiveUpdatePublisherPort {
+    /** Capturing fake {@link MapLiveUpdatePort}. */
+    static final class FakeMapLiveUpdatePort implements MapLiveUpdatePort {
         final List<MapEvent> events = new ArrayList<>();
-
-        @Override
-        public void publishFleetChanged() {
-        }
-
-        @Override
-        public void publishTelemetryAppended(AssetId assetId, Telemetry sample) {
-        }
-
-        @Override
-        public void publishDetections(AssetId assetId, DetectionResult result) {
-        }
-
-        @Override
-        public void publishEvent(Event event) {
-        }
-
-        @Override
-        public void publishDetectionEvent(DetectionEvent event) {
-        }
 
         @Override
         public void publishMapEvent(MapEvent event) {
