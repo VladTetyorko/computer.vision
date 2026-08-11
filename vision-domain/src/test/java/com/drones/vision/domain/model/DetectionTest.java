@@ -2,6 +2,8 @@ package com.drones.vision.domain.model;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DetectionTest {
@@ -38,5 +40,23 @@ class DetectionTest {
     void acceptsBoundaryConfidence() {
         new Detection("person", 0.0, box(), model());
         new Detection("person", 1.0, box(), model());
+    }
+
+    @Test
+    void fourArgConstructorEqualsFiveArgConstructorWithNullTrack() {
+        Detection viaConvenience = new Detection("person", 0.9, box(), model());
+        Detection viaCanonical = new Detection("person", 0.9, box(), model(), null);
+
+        assertEquals(viaCanonical, viaConvenience);
+        assertNull(viaConvenience.track());
+    }
+
+    @Test
+    void canonicalConstructorAcceptsAnExplicitTrack() {
+        TrackRef track = new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER);
+
+        Detection detection = new Detection("person", 0.9, box(), model(), track);
+
+        assertEquals(track, detection.track());
     }
 }

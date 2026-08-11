@@ -39,6 +39,13 @@ import java.util.Set;
  * skip itself is enforced by the application layer's {@code StreamPipeline}
  * (Wave C); this record only carries the flag.
  *
+ * <p>{@code tracking} (docs/TRACKING-PLAN.md §4.B) is this stream's {@link TrackingConfig} —
+ * mode, engine, duty-cycle cadences, and an optional {@link TargetLock}. {@link #defaults()}
+ * returns {@link TrackingConfig#off()}, <strong>not</strong> {@link TrackingConfig#defaults()} —
+ * today's byte-identical behavior stays the default through docs/TRACKING-PLAN.md waves T2–T7;
+ * the flip to {@code ASSOCIATE} is wave T8's own single, reviewable commit (§5.G). Do not "fix"
+ * this to {@code TrackingConfig.defaults()} outside of wave T8.
+ *
  * @param model                  model to run
  * @param confidenceThreshold    minimum confidence to keep a detection, range [0,1]
  * @param inferenceFps           target inference sample rate; must be positive
@@ -49,10 +56,13 @@ import java.util.Set;
  * @param overlayBurnIn          whether to render overlays onto published video at all
  * @param detectionEnabled       whether the pipeline runs detection at all; {@code false} skips
  *                               {@code detect()} entirely while video keeps flowing
+ * @param tracking               per-stream tracking configuration; see class javadoc for why
+ *                               {@link #defaults()} ships this {@code OFF}
  */
 public record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps,
                               int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter,
-                              EventRuleConfig eventRule, boolean overlayBurnIn, boolean detectionEnabled) {
+                              EventRuleConfig eventRule, boolean overlayBurnIn, boolean detectionEnabled,
+                              TrackingConfig tracking) {
 
     /** Default for {@link #overlayBurnIn()} on every N-1-arg convenience constructor — unchanged behavior. */
     public static final boolean DEFAULT_OVERLAY_BURN_IN = true;
@@ -81,16 +91,33 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
         if (eventRule == null) {
             throw new IllegalArgumentException("PipelineConfig eventRule must not be null");
         }
+        if (tracking == null) {
+            throw new IllegalArgumentException("PipelineConfig tracking must not be null");
+        }
         labelFilter = Set.copyOf(labelFilter);
+    }
+
+    /**
+     * Convenience constructor for callers that don't care about {@link #tracking()} — defaults it
+     * to {@link TrackingConfig#off()} (unchanged behavior), the same "N-1-arg convenience ctor"
+     * idiom used elsewhere. This was the canonical constructor before docs/TRACKING-PLAN.md §4.B
+     * added {@link #tracking()}; every pre-existing 9-arg call site compiles unchanged.
+     */
+    public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
+                           boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule,
+                           boolean overlayBurnIn, boolean detectionEnabled) {
+        this(model, confidenceThreshold, inferenceFps, maxInFlightInferences, overlayTelemetry, labelFilter,
+                eventRule, overlayBurnIn, detectionEnabled, TrackingConfig.off());
     }
 
     /**
      * Convenience constructor for callers that don't care about {@link #detectionEnabled()} —
      * defaults it to {@link #DEFAULT_DETECTION_ENABLED} (unchanged behavior), the same "N-1-arg
      * convenience ctor" idiom used elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s
-     * 7-arg ctor, this record's own 6-/7-arg ctors below). This was the canonical constructor
-     * before docs/CV-CONTROL-PLAN.md Wave B added {@link #detectionEnabled()}; every pre-existing
-     * 8-arg call site compiles unchanged.
+     * 7-arg ctor, this record's own 6-/7-arg ctors below), chaining onto the 9-arg convenience
+     * ctor above (so {@link #tracking()} also defaults to {@link TrackingConfig#off()}). This was
+     * the canonical constructor before docs/CV-CONTROL-PLAN.md Wave B added {@link
+     * #detectionEnabled()}; every pre-existing 8-arg call site compiles unchanged.
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule,
@@ -129,13 +156,21 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * checkpoint and relied on that silent fallback), a 0.4 confidence
      * threshold, 10 FPS inference sampling, at most 2 in-flight inference
      * calls, telemetry overlay on, no label filtering (all labels kept),
-     * {@link EventRuleConfig#defaults()}, overlay burn-in on, and detection
-     * enabled.
+     * {@link EventRuleConfig#defaults()}, overlay burn-in on, detection
+     * enabled, and tracking {@link TrackingConfig#off() off}.
+     *
+     * <p><strong>Tracking is deliberately {@link TrackingConfig#off()}, not {@link
+     * TrackingConfig#defaults()}</strong> (docs/TRACKING-PLAN.md §5.G, docs/TRACKING-ORCHESTRATION.md
+     * D15): every existing {@code PipelineConfig}/{@code StreamPipeline}/adapter/API test must
+     * keep passing unchanged through waves T2–T7, and the moment tracking turns on by default is
+     * wave T8's own single, reviewable commit — not a side effect of this wave. Do not "fix" this
+     * to {@code TrackingConfig.defaults()} before T8.
      *
      * @return a default {@code PipelineConfig}
      */
     public static PipelineConfig defaults() {
         return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
-                EventRuleConfig.defaults(), DEFAULT_OVERLAY_BURN_IN, DEFAULT_DETECTION_ENABLED);
+                EventRuleConfig.defaults(), DEFAULT_OVERLAY_BURN_IN, DEFAULT_DETECTION_ENABLED,
+                TrackingConfig.off());
     }
 }

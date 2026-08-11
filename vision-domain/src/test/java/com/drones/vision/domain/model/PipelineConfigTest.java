@@ -29,6 +29,10 @@ class PipelineConfigTest {
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
         assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
         assertTrue(defaults.detectionEnabled(), "detection defaults on, unchanged behavior");
+        // docs/TRACKING-PLAN.md §5.G / §6.C: PipelineConfig.defaults() ships TrackingConfig.off()
+        // through waves T2-T7, deliberately NOT TrackingConfig.defaults() (ASSOCIATE) - the flip
+        // is wave T8's own single, reviewable commit. Do not "fix" this assertion before T8.
+        assertEquals(TrackingMode.OFF, defaults.tracking().mode(), "tracking defaults OFF until wave T8");
     }
 
     @Test
@@ -38,6 +42,7 @@ class PipelineConfigTest {
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
         assertTrue(config.overlayBurnIn());
         assertTrue(config.detectionEnabled(), "old 6-arg ctor chain still defaults detectionEnabled=true");
+        assertEquals(TrackingConfig.off(), config.tracking(), "old 6-arg ctor chain still defaults tracking=off");
     }
 
     @Test
@@ -49,6 +54,7 @@ class PipelineConfigTest {
         assertEquals(customRule, config.eventRule());
         assertTrue(config.overlayBurnIn());
         assertTrue(config.detectionEnabled(), "old 7-arg ctor chain still defaults detectionEnabled=true");
+        assertEquals(TrackingConfig.off(), config.tracking(), "old 7-arg ctor chain still defaults tracking=off");
     }
 
     @Test
@@ -62,10 +68,11 @@ class PipelineConfigTest {
         assertFalse(config.overlayBurnIn());
         assertTrue(config.detectionEnabled(),
                 "old 8-arg canonical ctor (pre-Wave-B) still defaults detectionEnabled=true");
+        assertEquals(TrackingConfig.off(), config.tracking(), "old 8-arg ctor chain still defaults tracking=off");
     }
 
     @Test
-    void nineArgCanonicalConstructorRoundTripsAnExplicitDetectionEnabled() {
+    void nineArgConstructorRoundTripsAnExplicitDetectionEnabledAndDefaultsTracking() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
 
         PipelineConfig config =
@@ -74,6 +81,19 @@ class PipelineConfigTest {
         assertEquals(customRule, config.eventRule());
         assertFalse(config.overlayBurnIn());
         assertFalse(config.detectionEnabled());
+        assertEquals(TrackingConfig.off(), config.tracking(),
+                "old 9-arg canonical ctor (pre-TRACKING-PLAN) now defaults tracking=off");
+    }
+
+    @Test
+    void tenArgCanonicalConstructorRoundTripsAnExplicitTracking() {
+        EventRuleConfig customRule = EventRuleConfig.defaults();
+        TrackingConfig tracking = TrackingConfig.defaults();
+
+        PipelineConfig config = new PipelineConfig(
+                new ModelRef("yolo", "1"), 0.5, 5, 2, true, Set.of(), customRule, false, false, tracking);
+
+        assertEquals(tracking, config.tracking());
     }
 
     @Test
@@ -82,6 +102,14 @@ class PipelineConfigTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> new PipelineConfig(model, 0.5, 5, 2, true, Set.of(), null, true, true));
+    }
+
+    @Test
+    void rejectsNullTracking() {
+        ModelRef model = new ModelRef("yolo", "1");
+
+        assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(
+                model, 0.5, 5, 2, true, Set.of(), EventRuleConfig.defaults(), true, true, null));
     }
 
     @Test

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DetectionResultTest {
@@ -58,5 +59,30 @@ class DetectionResultTest {
                 StreamId.random(), 0L, Instant.now(), List.of(), Duration.ZERO);
 
         assertEquals(0, result.detections().size());
+    }
+
+    @Test
+    void fiveArgConstructorEqualsSixArgConstructorWithNullTracking() {
+        StreamId streamId = StreamId.random();
+        Instant now = Instant.now();
+        List<Detection> detections = List.of(detection());
+        Duration latency = Duration.ofMillis(10);
+
+        DetectionResult viaConvenience = new DetectionResult(streamId, 0L, now, detections, latency);
+        DetectionResult viaCanonical = new DetectionResult(streamId, 0L, now, detections, latency, null);
+
+        assertEquals(viaCanonical, viaConvenience);
+        assertNull(viaConvenience.tracking());
+    }
+
+    @Test
+    void canonicalConstructorAcceptsExplicitTracking() {
+        TrackingTelemetry tracking =
+                new TrackingTelemetry(false, null, Duration.ofMillis(0), "lk", 7L);
+
+        DetectionResult result = new DetectionResult(
+                StreamId.random(), 0L, Instant.now(), List.of(detection()), Duration.ofMillis(10), tracking);
+
+        assertEquals(tracking, result.tracking());
     }
 }

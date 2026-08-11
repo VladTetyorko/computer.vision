@@ -650,9 +650,18 @@ untracked detection's payload is byte-identical to today's:
 frame honestly:
 
 ```json
-{ "tracking": { "detectorRan": false, "detectorReason": "CADENCE", "trackerMillis": 0,
+// a tracker-only frame (the common case in FOLLOW: ~29 of every 30)
+{ "tracking": { "detectorRan": false, "trackerMillis": 0.4, "engineId": "lk", "lockedTrackId": 7 } }
+
+// the verify frame that re-anchored it
+{ "tracking": { "detectorRan": true, "detectorReason": "CADENCE", "trackerMillis": 0,
                 "engineId": "lk", "lockedTrackId": 7 } }
 ```
+
+**`detectorReason` is present iff `detectorRan` is true** — it answers *why the pass ran*, so it is
+absent (proto `UNSPECIFIED`) on a tracker-only frame, and `TrackingTelemetry` enforces that pairing.
+The "what was the last reason" question the flow strip asks is answered by `stats.lastDetectorReason`
+(§4.E), which is a window over frames, not a fact about this one.
 
 **Track facts nest; they are not five flat fields** (TRACKING-ORCHESTRATION §5.3 and §6 rule 1). An
 untracked payload stays **byte-identical to today** — one absent key under `NON_NULL` instead of
