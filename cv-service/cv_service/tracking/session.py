@@ -61,6 +61,7 @@ from cv_service.tracking.params import (
     TrackingParams,
     TrackingRequest,
 )
+from cv_service.tracking.predict import predict
 from cv_service.tracking.registry import TrackerRegistry
 from cv_service.tracking.scheduler import (
     REASON_UNSPECIFIED,
@@ -254,7 +255,7 @@ class StreamTrackingSession:
     ) -> list[TrackedBox]:
         """A detector pass ran: re-anchor the held target, or start coasting."""
         boxes = [Box(d.x, d.y, d.width, d.height) for d in detections]
-        index = self._select_target(boxes)
+        index = self._select_target(boxes, now)
 
         if index >= 0:
             try:
@@ -335,9 +336,12 @@ class StreamTrackingSession:
         if self._tracker_stalled:
             # The tracker has already told us it lost this target AND the
             # verify pass that followed could not re-anchor it. Asking it
-            # again every frame buys nothing: it holds the last known box
-            # and coasts on the miss schedule until LOST.
-            box = held.box
+            # again every frame buys nothing: it PREDICTS the box forward at
+            # constant velocity rather than asking the engine again (review
+            # finding C1) -- a stalled target keeps moving, and freezing it
+            # here is exactly what used to make the eventual re-anchor test
+            # fail against a position the object had long since left.
+            box = predict(held, now).box
         else:
             try:
                 update = engine.update(frame())
@@ -346,7 +350,9 @@ class StreamTrackingSession:
                 return None
 
             if update is None or not update.box.valid:
-                box = held.box
+                # Same predict-don't-freeze fix as above, for the one-off
+                # failure that has not yet latched `_tracker_stalled`.
+                box = predict(held, now).box
                 if detector_ran:
                     self._tracker_stalled = True
                 elif update is None:
@@ -355,6 +361,22 @@ class StreamTrackingSession:
                     self._box_invalid = True
             else:
                 box = update.box
+                if not detector_ran and update.confidence < self._params.min_tracker_confidence:
+                    # Review finding C2: both engines compute `confidence`
+                    # and document it as the earliest honest signal that a
+                    # verify pass is worth spending (trigger (b)) -- LK's
+                    # surviving-corner fraction, NCC's own match score
+                    # weakening before the update actually fails outright.
+                    # Wiring it in here, rather than only reacting to a hard
+                    # `None`, is what "wire TrackerUpdate.confidence into
+                    # trigger (b)" means. Restricted to tracker-only frames
+                    # for the exact reason the hard-failure branch above is:
+                    # raising it on a verify frame that just ran would ask
+                    # for a pass that has already happened and collapse the
+                    # duty cycle into continuous detection while the target
+                    # is hardest to hold (same rule this method's docstring
+                    # states for triggers (b)/(d)).
+                    self._tracker_failed = True
 
         observation = Observation(
             key=self._follow_key(),
@@ -375,20 +397,28 @@ class StreamTrackingSession:
             self._lock.unbind()
         return _from_track(track)
 
-    def _select_target(self, boxes: Sequence[Box]) -> int:
+    def _select_target(self, boxes: Sequence[Box], now: float) -> int:
         """Which detection FOLLOW should hold on this pass, or -1. All the
-        actual selection is `lock.py`'s; this only supplies the state."""
+        actual selection is `lock.py`'s; this only supplies the state.
+
+        The held/known box fed into the re-anchor test is the PREDICTED one,
+        not the stale last-committed one (review finding C1's other half):
+        matching this frame's detections against where the target physically
+        was several coasted frames ago is exactly the freeze that used to
+        make a legitimate re-anchor fail its own IoU test.
+        """
+        held_box = predict(self._followed, now).box if self._followed is not None else None
         return lock_module.select_target(
             boxes,
-            held_box=self._followed.box if self._followed is not None else None,
+            held_box=held_box,
             target=self._lock.target,
             min_iou=self._params.redetect_iou_threshold,
-            box_of_track=self._box_of_track,
+            box_of_track=lambda track_id: self._box_of_track(track_id, now),
         )
 
-    def _box_of_track(self, track_id: int) -> Optional[Box]:
+    def _box_of_track(self, track_id: int, now: float) -> Optional[Box]:
         known = self._book.get(track_id)
-        return known.box if known is not None else None
+        return predict(known, now).box if known is not None else None
 
     def _follow_key(self) -> str:
         """A fresh `TrackBook` key per applied lock, so re-acquiring after a
@@ -454,7 +484,16 @@ class StreamTrackingSession:
 
     def _reset_engine(self, exc: BaseException) -> None:
         """An engine raised mid-frame: that frame loses its track facts, the
-        engine is reset, and the stream continues (TRACKING-PLAN §5.I)."""
+        engine is reset, and the stream continues (TRACKING-PLAN §5.I).
+
+        Review finding D1: this used to call `TrackBook.forget_keys()`,
+        wiping every track in the stream over one target's transient OpenCV
+        error. It now bumps the book's key epoch instead (see that method's
+        docstring) -- every track this session was NOT touching when the
+        exception happened keeps its id and keeps coasting untouched, and
+        even the one that hit the exception is only cut off from the
+        restarted engine's future keys, not deleted outright.
+        """
         LOGGER.warning(
             "tracker engine %r raised (%s); resetting it and reporting this frame untracked",
             self._engine_id,
@@ -467,21 +506,38 @@ class StreamTrackingSession:
         except Exception:  # noqa: BLE001 - a failed reset costs the engine, not the stream
             self._engine = None
             self._engine_id = ""
-        self._book.forget_keys()
+        self._book.bump_epoch()
         self._followed = None
         self._tracker_stalled = False
         self._lock.unbind()
 
     def _release_engine(self) -> None:
+        """Drop the current engine instance so the next frame rebuilds one.
+
+        Called on a config change that invalidates the engine (mode/
+        engine_id/max_age_frames) while tracking STAYS active -- review
+        finding D2, the config-change twin of D1 above: an operator
+        switching FOLLOW's engine from `lk` to `ncc` mid-stream keeps every
+        track's id instead of losing the whole scene's numbering. `OFF`
+        (`_reset_state`, below) is the one caller that wants a real wipe.
+        """
         self._engine = None
         self._engine_id = ""
-        self._book.forget_keys()
+        self._book.bump_epoch()
         self._followed = None
         self._tracker_stalled = False
         self._lock.unbind()
 
     def _reset_state(self) -> None:
+        """Tracking just went OFF (or degraded all the way down to it).
+
+        Unlike `_release_engine`'s config-change case, this is a genuine
+        stop -- there is no "still active, still coasting" state for a track
+        to survive as, so the book is actually wiped (`forget_keys`), not
+        just epoch-namespaced.
+        """
         self._release_engine()
+        self._book.forget_keys()
         self._last_detector_millis = None
         self._tracker_failed = False
         self._box_invalid = False

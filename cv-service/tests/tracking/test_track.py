@@ -26,6 +26,13 @@ def params(**overrides) -> TrackingParams:
         redetect_iou_threshold=0.3,
         max_age_frames=3,
         min_hits=3,
+        # Effectively disabled by default -- this file's fake clock reuses
+        # the frame index as "seconds elapsed" purely for test convenience
+        # (up to ~30 "seconds" in some tests below), which is not meant to
+        # exercise the wall-clock LOST rule. Tests that DO exercise it
+        # override this explicitly with a small value.
+        track_max_age_millis=1_000_000,
+        min_tracker_confidence=0.5,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -129,6 +136,40 @@ def test_a_long_occlusion_goes_lost_then_retires_the_id():
     assert reborn.track_id != born.track_id
 
 
+# -- wall-clock ageing (review finding B7) -----------------------------------
+
+
+def test_wall_clock_declares_lost_even_while_misses_stays_at_zero():
+    # FOLLOW's own bug: `misses` only advances on a verify pass that ran and
+    # failed, so a long real-world gap with NO verify pass at all (nothing
+    # but tracker-only touches) could coast forever under the frame-based
+    # rule alone. `track_max_age_millis` is the wall-clock backstop.
+    book = TrackBook(params(min_hits=1, max_age_frames=1000, track_max_age_millis=500))
+    book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)
+
+    still_fresh = book.apply([seen("car", source=SOURCE_TRACKER)], 0.1, detector_ran=False)[0]
+    assert still_fresh.state == STATE_COASTING
+    assert still_fresh.misses == 0
+
+    stale = book.apply([seen("car", source=SOURCE_TRACKER)], 1.0, detector_ran=False)[0]
+
+    assert stale.state == STATE_LOST
+    assert stale.misses == 0  # the frame-based rule never had a chance to fire
+
+
+def test_the_frame_based_rule_still_fires_independently_of_the_wall_clock():
+    # The converse: a tight cadence can exhaust `max_age_frames` in well
+    # under `track_max_age_millis` -- ByteTrack's own `track_buffer`
+    # contract is unaffected by the new wall-clock rule.
+    book = TrackBook(params(min_hits=1, max_age_frames=2, track_max_age_millis=1_000_000))
+    book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)
+
+    for frame in range(1, 4):
+        book.apply([], float(frame) * 0.01, detector_ran=True)
+
+    assert book.get(1).state == STATE_LOST
+
+
 def test_a_tracker_only_frame_never_counts_as_a_miss():
     # This is what makes "FOLLOW runs the detector at the configured cadence
     # and no more" true: a duty-cycled frame did not ask the detector
@@ -183,3 +224,33 @@ def test_forget_keys_retires_tracks_without_re_issuing_ids():
 
     assert book.get(born.track_id) is None
     assert reborn.track_id > born.track_id
+
+
+# -- key epoch (review findings D1/D2) ---------------------------------------
+
+
+def test_bump_epoch_retires_no_track():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("engine-1"), seen("engine-2", x=0.5)], 0.0, detector_ran=True)
+
+    book.bump_epoch()
+
+    # Unlike `forget_keys`, nothing was retired -- both tracks are exactly
+    # as they were, same ids, still live.
+    assert [t.track_id for t in book.tracks] == [t.track_id for t in born]
+    assert book.get(born[0].track_id) is not None
+    assert book.get(born[1].track_id) is not None
+
+
+def test_bump_epoch_stops_a_re_issued_engine_key_from_resurrecting_the_old_track():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("engine-1")], 0.0, detector_ran=True)[0]
+
+    book.bump_epoch()
+    # The SAME raw engine key, re-issued by a just-restarted engine (its own
+    # numbering starts over from the beginning) -- must NOT attach to the
+    # old track.
+    reborn = book.apply([seen("engine-1")], 1.0, detector_ran=True)[0]
+
+    assert reborn.track_id != born.track_id
+    assert book.get(born.track_id) is not None  # the old one still lives too

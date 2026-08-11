@@ -125,3 +125,37 @@ def test_garbage_track_env_vars_fall_back_and_never_raise(monkeypatch):
     assert settings.track_min_hits == Settings().track_min_hits
     assert settings.track_iou == Settings().track_iou
     assert settings.track_follow_engine == Settings().track_follow_engine
+
+
+# -- wave C1 additions: no wire sentinel, straight from Settings ------------
+
+
+def test_resolve_takes_track_max_age_millis_and_min_tracker_confidence_from_settings():
+    settings = dataclasses.replace(
+        SETTINGS, track_max_age_millis=4242, track_min_tracker_confidence=0.42
+    )
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_FOLLOW), settings)
+
+    assert resolved.track_max_age_millis == 4242
+    assert resolved.min_tracker_confidence == 0.42
+
+
+def test_settings_read_the_wave_c1_env_vars(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_MAX_AGE_MILLIS", "9000")
+    monkeypatch.setenv("CV_TRACK_MIN_TRACKER_CONFIDENCE", "0.65")
+
+    settings = Settings.from_env()
+
+    assert settings.track_max_age_millis == 9000
+    assert settings.track_min_tracker_confidence == 0.65
+
+
+def test_garbage_wave_c1_env_vars_fall_back_and_never_raise(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_MAX_AGE_MILLIS", "soon")
+    monkeypatch.setenv("CV_TRACK_MIN_TRACKER_CONFIDENCE", "70")  # percent, not fraction
+
+    settings = Settings.from_env()
+
+    assert settings.track_max_age_millis == Settings().track_max_age_millis
+    assert settings.track_min_tracker_confidence == Settings().track_min_tracker_confidence

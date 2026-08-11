@@ -70,6 +70,7 @@ class FakeFollower:
         self.update_returns = "ok"
         self.raise_on_next = False
         self.drift = 0.0
+        self.confidence = 0.9
 
     def init(self, frame, box):
         self.inits += 1
@@ -86,7 +87,7 @@ class FakeFollower:
         if self.update_returns == "invalid":
             return TrackerUpdate(box=Box(0.1, 0.1, 0.0, 0.0), confidence=0.5)
         self.box = Box(self.box.x + self.drift, self.box.y, self.box.width, self.box.height)
-        return TrackerUpdate(box=self.box, confidence=0.9)
+        return TrackerUpdate(box=self.box, confidence=self.confidence)
 
     def reset(self):
         self.resets += 1
@@ -419,6 +420,69 @@ def test_a_target_the_engine_cannot_anchor_reports_no_lock():
     assert all(box.track is None for box in outcome.boxes)
 
 
+def test_a_coasting_box_moves_instead_of_freezing_where_it_was_last_seen():
+    # THE fix for review finding C1: a tracker that reports lost must not
+    # leave the box sitting exactly where it was last confirmed -- it has to
+    # keep extrapolating from the track's own velocity.
+    subject, engine = follow_session(verify_every_millis=100_000)
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    born_box = born.boxes[0].track.box
+
+    # Establish a non-zero velocity: the held target visibly moves right.
+    engine.drift = 0.01
+    run(subject, now_millis=66.0, detections=[det()])
+    engine.update_returns = "lost"
+
+    coasted = run(subject, now_millis=132.0, detections=[det()])
+
+    assert coasted.boxes[0].track.box.x > born_box.x + 0.01
+
+
+# -- trigger (b): tracker confidence (review finding C2) --------------------
+
+
+def test_a_weakening_tracker_confidence_brings_the_verify_pass_forward():
+    engine = FakeFollower()
+    engine.confidence = 0.1  # well under the default min_tracker_confidence
+    subject, _engine = follow_session(engine, verify_every_millis=2000)
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    # Tracker-only frame: the update itself is a valid, successful box, but
+    # its confidence is weak -- this is trigger (b)'s early-warning half,
+    # not a hard failure.
+    weak = run(subject, now_millis=66.0, detections=[det("bus", x=0.8, y=0.8)])
+    assert weak.detector_ran is False
+
+    # The NEXT frame brings the verify pass forward well before the 2000ms
+    # cadence would have, because the previous frame's weak confidence
+    # raised trigger (b).
+    brought_forward = run(subject, now_millis=132.0, detections=[det("bus", x=0.8, y=0.8)])
+    assert brought_forward.detector_ran is True
+    assert brought_forward.detector_reason == "DETECTOR_REASON_TRACKER_FAILED"
+
+
+def test_a_persistently_weak_confidence_never_forces_two_verify_passes_in_a_row():
+    # Same anti-collapse rule finding C2's fix must obey: even if the
+    # tracker's own confidence never recovers, trigger (b) can only ever be
+    # raised on a tracker-only frame -- so two consecutive frames can never
+    # both be verify passes on its account.
+    engine = FakeFollower()
+    engine.confidence = 0.0
+    subject, _engine = follow_session(engine, verify_every_millis=2000)
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    # Bounded well short of either LOST threshold (the wall-clock rule and
+    # the frame-based one, fix 5) so this stays a clean test of trigger (b)
+    # alone -- once genuinely LOST, continuous NO_LOCK-driven detection is
+    # separately correct behaviour, not a collapse, and is covered by
+    # `test_a_target_lost_past_max_age_drops_the_lock`.
+    consecutive = 0
+    for frame in range(1, 30):
+        outcome = run(subject, now_millis=frame * 66.0, detections=[det("bus", x=0.8, y=0.8)])
+        consecutive = consecutive + 1 if outcome.detector_ran else 0
+        assert consecutive <= 1
+
+
 # -- configuration ----------------------------------------------------------
 
 
@@ -480,6 +544,24 @@ def test_a_raising_engine_degrades_that_frame_to_untracked_without_killing_the_s
 
     survived = run(subject, now_millis=132.0, detections=[det()])
     assert survived.boxes[0].track is not None
+
+
+def test_an_engine_exception_does_not_retire_or_renumber_other_tracks():
+    # Review finding D1: the old fix wiped the WHOLE book (`forget_keys()`)
+    # on any engine exception, so a transient error involving one target
+    # renumbered the entire scene. Both tracks here now survive untouched.
+    engine = FakeAssociator()
+    subject = session(FakeRegistry(associator=engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car"), det("person", x=0.6)])
+    ids_before = {track.label: track.track_id for track in subject.tracks}
+    assert set(ids_before) == {"car", "person"}
+
+    engine.raise_on_next = True
+    run(subject, now_millis=66.0, detections=[det("car"), det("person", x=0.6)])
+
+    ids_after = {track.label: track.track_id for track in subject.tracks}
+    assert ids_after == ids_before
 
 
 def test_no_follow_engine_degrades_to_associate(caplog):

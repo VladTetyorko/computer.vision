@@ -9,6 +9,8 @@ path), same as this directory's other servicer tests.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -327,7 +329,18 @@ def test_the_tracker_update_never_acquires_the_inference_gate(clock):
     config = follow_config(verify_every_millis=100_000)  # exactly one pass, ever
 
     session = servicers_module.StreamTrackingSession(
-        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+        # `track_max_age_millis` overridden well past this test's ~4s window:
+        # this test's target is deliberately never re-confirmed by the
+        # detector after frame 0 (that is the whole point -- it is proving
+        # 59 STRAIGHT tracker-only frames never touch the gate), which is
+        # exactly the wall-clock LOST rule's own trigger condition
+        # (TRACKING-V2-PLAN wave C1, review finding B7). Left at the
+        # production default, this test's target would go LOST partway
+        # through and force a second, gate-acquiring detector pass -- a real
+        # consequence of that fix, but an orthogonal one to what THIS test
+        # checks, so it is decoupled here rather than left to collide.
+        settings=dataclasses.replace(Settings(), track_max_age_millis=1_000_000),
+        registry_provider=subject._resolve_tracker_registry,
     )
     first = subject._handle_request(frame_request(0, config), session)
     assert first.detector_ran is True

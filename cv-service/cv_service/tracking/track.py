@@ -66,6 +66,15 @@ class Track:
     Mutable by design: this is the book's own entry, updated in place once
     per frame. The session copies the fields it needs onto the response;
     nothing outside this module mutates a `Track`.
+
+    `last_confirmed` is deliberately NOT `last_seen`: `_observe` advances
+    `last_seen` on every touch, including a tracker-only coast, so in FOLLOW
+    it is always ~now even while the target has gone unconfirmed for
+    minutes. `last_confirmed` only moves on a `SOURCE_DETECTOR` observation
+    -- a real re-anchor, not an extrapolation -- which is what lets
+    `_settle`'s wall-clock rule (review finding B7) and `predict.py`'s
+    confidence decay ask "how long has it actually been since the detector
+    last agreed this is the object" instead of "how long since any frame".
     """
 
     track_id: int
@@ -75,6 +84,7 @@ class Track:
     confidence: float
     first_seen: float
     last_seen: float
+    last_confirmed: float
     state: str = STATE_TENTATIVE
     source: str = SOURCE_DETECTOR
     velocity_x: float = 0.0
@@ -97,6 +107,7 @@ class TrackBook:
         self._params = params
         self._tracks: dict[object, Track] = {}
         self._next_id = 1
+        self._epoch = 0
 
     def retune(self, params: TrackingParams) -> None:
         self._params = params
@@ -112,13 +123,44 @@ class TrackBook:
                 return track
         return None
 
+    def bump_epoch(self) -> None:
+        """Namespace future engine keys into a fresh epoch, without touching
+        a single live track (review finding D1/D2, TRACKING-V2-PLAN wave C1).
+
+        Called instead of `forget_keys()` when an engine is reset or rebuilt
+        but tracking STAYS active: a restarted engine re-uses its own
+        identity tokens from the beginning (an OpenCV exception on one
+        target, or an operator switching FOLLOW from `lk` to `ncc`), and
+        without this, its first re-issued key would land on whatever track
+        this book still has filed under that same raw key, silently
+        attaching a new object to an old id -- exactly the bug `forget_keys`
+        was written to avoid, just one track at a time instead of the whole
+        book.
+
+        The wipe `forget_keys` performed was strictly more than that bug
+        needed: it also retired every OTHER track that engine key collision
+        could never have touched, and any track that was mid-occlusion lost
+        its chance to recover its id when the object reappeared. Bumping the
+        epoch keeps every existing track exactly as it was -- same id, same
+        state, aging and coasting on the normal miss/LOST schedule -- while
+        making the new epoch's keys structurally unable to collide with the
+        old one's, engine key for engine key, forever. What this does NOT do
+        yet is re-associate a coasting survivor onto the restarted engine's
+        new numbering when the same object reappears -- that correlation is
+        wave C3/C4's `assign.py`/`memory.py`; this wave only stops the
+        instant amnesia of wiping the whole book on one bad frame.
+        """
+        self._epoch += 1
+
     def forget_keys(self) -> None:
         """Retire every live track, keeping the id counter.
 
-        Called when an engine is reset: the restarted engine will re-use its
-        own identity tokens from the beginning, and adopting them onto
-        existing tracks would attach a new object to an old id. Ids already
-        handed out are never re-issued (`_next_id` is untouched).
+        A genuine wipe, for a caller that means it -- tracking going OFF
+        (`StreamTrackingSession._reset_state`), where there is no "still
+        active, still coasting" state for anything to survive as. An engine
+        reset or rebuild while tracking STAYS active wants `bump_epoch`
+        instead (see its docstring for why the difference matters). Ids
+        already handed out are never re-issued (`_next_id` is untouched).
         """
         if self._tracks:
             LOGGER.debug("tracking: retiring %d track(s) after an engine reset", len(self._tracks))
@@ -140,13 +182,14 @@ class TrackBook:
         touched: set[object] = set()
         booked: list[Track] = []
         for observation in observations:
-            track = self._tracks.get(observation.key)
+            book_key = self._namespaced(observation.key)
+            track = self._tracks.get(book_key)
             if track is None:
                 track = self._born(observation, now)
-                self._tracks[observation.key] = track
+                self._tracks[book_key] = track
             else:
                 self._observe(track, observation, now, detector_ran=detector_ran)
-            touched.add(observation.key)
+            touched.add(book_key)
             booked.append(track)
 
         if detector_ran:
@@ -156,10 +199,22 @@ class TrackBook:
 
         for track in self._tracks.values():
             track.age_frames += 1
-            self._settle(track)
+            self._settle(track, now)
 
         self._expire()
         return booked
+
+    def _namespaced(self, key: object) -> object:
+        """Wrap an engine's own identity token with the book's current epoch.
+
+        This is the whole mechanism `bump_epoch` relies on: two keys that
+        are `==` as raw engine tokens (e.g. both `1`, from a restarted
+        engine's numbering) are never `==` once namespaced, because the
+        epoch differs. `Track.key` (below) still stores the RAW token --
+        only the book's own internal dict key is namespaced -- so nothing
+        outside this module ever has to know an epoch exists.
+        """
+        return (self._epoch, key)
 
     # -- state machine ------------------------------------------------------
 
@@ -172,6 +227,11 @@ class TrackBook:
             confidence=observation.confidence,
             first_seen=now,
             last_seen=now,
+            # A track is only ever born from a `SOURCE_DETECTOR` observation
+            # in practice (ASSOCIATE's associator output, or FOLLOW's
+            # authoritative re-anchor) -- `first_seen`/`last_confirmed` start
+            # equal for the same reason they start equal to `last_seen`.
+            last_confirmed=now,
             source=observation.source,
             hits=1 if observation.source == SOURCE_DETECTOR else 0,
             _confirmed=observation.authoritative,
@@ -201,6 +261,7 @@ class TrackBook:
         if observation.authoritative:
             track._confirmed = True
         if observation.source == SOURCE_DETECTOR:
+            track.last_confirmed = now
             track.hits += 1
             track.misses = 0
         elif detector_ran:
@@ -209,8 +270,29 @@ class TrackBook:
             # §3.1, "IoU < threshold -> keep tracking, state COASTING").
             track.misses += 1
 
-    def _settle(self, track: Track) -> None:
-        if track.misses > self._params.max_age_frames:
+    def _settle(self, track: Track, now: float) -> None:
+        # Two ageing rules, deliberately kept both (TRACKING-V2-PLAN §6,
+        # review finding B7): `misses` only advances on a detector pass that
+        # ran and did not touch this track, so `max_age_frames` means "how
+        # many CONSECUTIVE FAILED VERIFY ATTEMPTS" -- in ASSOCIATE that is
+        # every received frame, so at the documented 10 fps sample rate it
+        # is ~3s of real time; in FOLLOW a verify pass only happens on
+        # cadence, so the SAME 30-frame count could otherwise take a whole
+        # minute of real time to reach for a track the detector never
+        # re-confirms even once. `track_max_age_millis` is the wall-clock
+        # backstop that makes both modes mean the same thing regardless of
+        # cadence: however few or many verify attempts have been spent, a
+        # track this long unconfirmed by the detector is stale. Whichever
+        # rule fires first wins -- a tight cadence can still exhaust
+        # `max_age_frames` quickly (its own contract, and what feeds
+        # ByteTrack's `track_buffer`), while a slow one is caught by the
+        # clock instead of quietly outliving both an operator's patience and
+        # the truth.
+        since_confirmed_millis = (now - track.last_confirmed) * 1000.0
+        if (
+            track.misses > self._params.max_age_frames
+            or since_confirmed_millis > self._params.effective_max_age_millis
+        ):
             track.state = STATE_LOST
             return
         if track.hits >= self._params.min_hits:

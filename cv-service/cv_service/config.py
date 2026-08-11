@@ -65,6 +65,22 @@ DEFAULT_TRACK_VERIFY_MILLIS = 2000
 DEFAULT_TRACK_IOU = 0.3
 DEFAULT_TRACK_MAX_AGE_FRAMES = 30
 DEFAULT_TRACK_MIN_HITS = 3
+# TRACKING-V2-PLAN wave C1 (review finding B7): `max_age_frames` means
+# "consecutive failed verify passes", which is ~3s of real time in ASSOCIATE
+# at the documented 10 fps sample rate but could be a full minute in FOLLOW,
+# where a verify pass only happens on cadence. 3000ms = 30 frames / 10 fps is
+# chosen specifically so this new wall-clock backstop is BEHAVIOUR-PRESERVING
+# for ASSOCIATE at that rate (see `track.py`'s `_settle`) while giving FOLLOW
+# the same real-world meaning instead of the frame-count's inflated one.
+DEFAULT_TRACK_MAX_AGE_MILLIS = 3000
+# TRACKING-V2-PLAN wave C1 (review finding C2): below this, a `SingleObject
+# Tracker`'s own reported confidence (LK's surviving-corner fraction, NCC's
+# match score) is treated as an early warning that the target may be
+# drifting, bringing the next verify pass forward (scheduler trigger (b))
+# instead of waiting for the tracker to fail outright. Conservative by
+# construction: a track that has lost half its corners or dropped to a weak
+# correlation is worth double-checking, not yet worth declaring lost.
+DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE = 0.5
 
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
@@ -239,6 +255,8 @@ class Settings:
     track_iou: float = DEFAULT_TRACK_IOU
     track_max_age_frames: int = DEFAULT_TRACK_MAX_AGE_FRAMES
     track_min_hits: int = DEFAULT_TRACK_MIN_HITS
+    track_max_age_millis: int = DEFAULT_TRACK_MAX_AGE_MILLIS
+    track_min_tracker_confidence: float = DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -291,5 +309,15 @@ class Settings:
             ),
             track_min_hits=_parse_positive_int(
                 os.environ.get("CV_TRACK_MIN_HITS"), DEFAULT_TRACK_MIN_HITS, "CV_TRACK_MIN_HITS"
+            ),
+            track_max_age_millis=_parse_positive_int(
+                os.environ.get("CV_TRACK_MAX_AGE_MILLIS"),
+                DEFAULT_TRACK_MAX_AGE_MILLIS,
+                "CV_TRACK_MAX_AGE_MILLIS",
+            ),
+            track_min_tracker_confidence=_parse_unit_fraction(
+                os.environ.get("CV_TRACK_MIN_TRACKER_CONFIDENCE"),
+                DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE,
+                "CV_TRACK_MIN_TRACKER_CONFIDENCE",
             ),
         )

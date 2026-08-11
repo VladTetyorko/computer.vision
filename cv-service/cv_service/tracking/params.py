@@ -51,6 +51,12 @@ MODE_FOLLOW = "TRACKING_MODE_FOLLOW"
 
 # UNSPECIFIED (an old client, or a `tracking` field that was never set) is
 # treated as OFF -- TRACKING-PLAN §4.A's proto3-additivity contract.
+# How many verify opportunities a FOLLOW track gets before the wall clock may
+# declare it LOST. Structural, not an operator knob: the knob is
+# `CV_TRACK_MAX_AGE_MILLIS`, and this is what stops that knob from meaning
+# something different in the two modes -- see `effective_max_age_millis`.
+_LOST_VERIFY_OPPORTUNITIES = 3
+
 _ACTIVE_MODES = frozenset({MODE_ASSOCIATE, MODE_FOLLOW})
 _KNOWN_MODES = frozenset({MODE_UNSPECIFIED, MODE_OFF, MODE_ASSOCIATE, MODE_FOLLOW})
 
@@ -107,11 +113,45 @@ class TrackingParams:
     redetect_iou_threshold: float
     max_age_frames: int
     min_hits: int
+    # TRACKING-V2-PLAN wave C1 additions. Neither has a wire counterpart yet
+    # (the frozen diff in TRACKING-V2-PLAN §2 does not add one) -- both are
+    # deployment-only knobs, resolved straight from `Settings` with no
+    # per-request sentinel to interpret, unlike every field above.
+    track_max_age_millis: int
+    min_tracker_confidence: float
 
     @property
     def active(self) -> bool:
         """Whether any tracking work happens at all (mode is not OFF)."""
         return self.mode in _ACTIVE_MODES
+
+    @property
+    def effective_max_age_millis(self) -> int:
+        """The wall-clock LOST deadline, floored at N verify opportunities.
+
+        `track_max_age_millis` alone unifies the two modes' *rule* but not
+        their *meaning*, because the two modes do not offer the detector
+        opportunities at the same rate. In ASSOCIATE a pass runs on every
+        received frame, so the default is ~30 chances at the documented
+        sample rate. In FOLLOW passes arrive on cadence, so the same flat
+        number is barely one and a half chances -- and a FOLLOW track going
+        LOST unbinds the lock, which makes scheduler trigger (c) spend a
+        detector pass on EVERY frame until something is re-acquired. A knob
+        meant to bound staleness would therefore have quietly destroyed the
+        duty cycle precisely when the target is hardest, which is the failure
+        this floor exists to prevent.
+
+        Expressed as a floor rather than a replacement so an operator who
+        deliberately raises `CV_TRACK_MAX_AGE_MILLIS` still gets what they
+        asked for, and so ASSOCIATE -- where `verify_every_millis` is not
+        consulted at all -- is left exactly as it was.
+        """
+        if self.mode != MODE_FOLLOW:
+            return self.track_max_age_millis
+        return max(
+            self.track_max_age_millis,
+            _LOST_VERIFY_OPPORTUNITIES * self.verify_every_millis,
+        )
 
     def with_mode(self, mode: str, engine_id: str) -> "TrackingParams":
         """A copy one step down the degradation ladder.
@@ -174,4 +214,11 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             request.max_age_frames if request.max_age_frames > 0 else settings.track_max_age_frames
         ),
         min_hits=(request.min_hits if request.min_hits > 0 else settings.track_min_hits),
+        # No wire field exists for either of these yet (TRACKING-V2-PLAN
+        # §2's frozen diff does not add one) -- both come straight from the
+        # deployment layer, same shape `resolve()` already gives every other
+        # `CV_TRACK_*` default, just with no request-level override to fall
+        # back FROM.
+        track_max_age_millis=settings.track_max_age_millis,
+        min_tracker_confidence=settings.track_min_tracker_confidence,
     )

@@ -166,6 +166,7 @@ def test_the_three_shipped_engines_are_advertised(engine_id):
         "cv_service.tracking.registry",
         "cv_service.tracking.session",
         "cv_service.tracking.engines.base",
+        "cv_service.tracking.predict",
     ],
 )
 def test_everything_but_the_engines_stays_pure_stdlib(module_name):
