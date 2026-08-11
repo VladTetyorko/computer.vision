@@ -38,7 +38,7 @@ what it forbids and where it is enforced.
 | **Single responsibility** | a class that both *decides* and *does*: no scheduler that also tracks pixels, no track book that also aggregates stats, no session that also resolves config | §2.1 module table — each file's one-line charter is its acceptance criterion |
 | **Modularity** | an engine that must know the mode it serves; a protocol whose implementers stub methods | §2.2 two protocols; registry hands out **factories**, per stream |
 | **Fast communication** | anything per-frame that is not O(1) and allocation-light: no config re-resolution, no dict rebuild, no gate acquisition on the tracker path, no per-frame INFO log | §3.1 hot path; §4.2 resolve-once rule |
-| **Scalable DTOs** | a sixth flat field on a DTO that already has five track-related ones; a parallel `v2` DTO; a consumer-shaped field in the pipeline | §6 five rules |
+| **Scalable DTOs** | a sixth flat field on a DTO that already has five track-related ones; a parallel `v2` DTO; a consumer-shaped field in the pipeline | §6 six rules |
 | **Visible flow** | a feature whose behaviour can only be confirmed by reading logs on the box it runs on | §7 four tiers, all derived from data already on the wire |
 
 ---
