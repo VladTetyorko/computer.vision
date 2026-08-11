@@ -23,8 +23,9 @@ strings -- so importing this module (and therefore `track.py`, `lock.py` and
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Optional, Protocol, Sequence
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import numpy as np
@@ -181,4 +182,243 @@ class SingleObjectTracker(Protocol):
 
     def reset(self) -> None:
         """Drop all state. Called after the engine raises, per the degradation rule."""
+        ...
+
+
+# -- ego-motion vocabulary (TRACKING-V2-PLAN §3.1) --------------------------
+
+# Descriptor metric names. Each engine declares the metric its own values are
+# meant to be compared under, so a descriptor and the way to compare it never
+# travel separately -- adding an embedding engine later is a new constant plus
+# one branch, not a change to everything that holds a descriptor.
+METRIC_HELLINGER = "hellinger"  # non-negative, sums to 1 (a histogram)
+METRIC_COSINE = "cosine"        # unit-norm vector (an embedding)
+
+
+@dataclass(frozen=True)
+class CameraPose:
+    """Camera attitude at capture, the plain counterpart of `cv_pb2.CameraPose`.
+
+    `known` gates the whole message: without a horizontal FOV an attitude
+    delta cannot be turned into a pixel shift, so a pose-based compensator
+    reports itself unavailable rather than inventing a scale. An all-default
+    `CameraPose` is what a client that never learned to send one produces,
+    and it is a normal state, not an error.
+    """
+
+    yaw_degrees: float = 0.0
+    pitch_degrees: float = 0.0
+    roll_degrees: float = 0.0
+    hfov_degrees: float = 0.0
+    vfov_degrees: float = 0.0
+    timestamp_millis: int = 0
+
+    @property
+    def known(self) -> bool:
+        return self.hfov_degrees > 0.0
+
+
+@dataclass(frozen=True)
+class Transform:
+    """How the image moved between two frames, in normalized coordinates.
+
+        x' = a*x + b*y + c
+        y' = d*x + e*y + f
+
+    **Direction is part of the contract:** a `Transform` maps a point in the
+    PREVIOUS frame to where that same physical point appears in the CURRENT
+    one. That is the direction a track's predicted box has to be warped in,
+    and stating it here is what stops a compensator from silently returning
+    the inverse -- a sign error no test of the compensator alone would catch,
+    because both directions look equally plausible in isolation.
+
+    `IDENTITY` means "no ego-motion, or none could be estimated". It is
+    returned exactly, so `identity` is an exact comparison and this type
+    needs no epsilon: a compensator that finds motion returns numbers, and
+    one that finds none returns this constant.
+    """
+
+    a: float = 1.0
+    b: float = 0.0
+    c: float = 0.0
+    d: float = 0.0
+    e: float = 1.0
+    f: float = 0.0
+
+    @property
+    def identity(self) -> bool:
+        return (self.a, self.b, self.c, self.d, self.e, self.f) == (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+    def apply_point(self, x: float, y: float) -> tuple[float, float]:
+        return (self.a * x + self.b * y + self.c, self.d * x + self.e * y + self.f)
+
+    def apply_box(self, box: Box) -> Box:
+        """Warp a box by transforming its four corners and re-axis-aligning.
+
+        Corner-transform rather than centre-plus-size because roll and any
+        shear term rotate the box: moving only the centre would keep a stale
+        extent, and the extent is exactly what the IoU gate downstream is
+        about to measure.
+        """
+        if self.identity:
+            return box
+        corners = (
+            self.apply_point(box.x, box.y),
+            self.apply_point(box.x + box.width, box.y),
+            self.apply_point(box.x, box.y + box.height),
+            self.apply_point(box.x + box.width, box.y + box.height),
+        )
+        xs = [point[0] for point in corners]
+        ys = [point[1] for point in corners]
+        left, right = min(xs), max(xs)
+        top, bottom = min(ys), max(ys)
+        return Box(left, top, right - left, bottom - top)
+
+    def compose(self, later: "Transform") -> "Transform":
+        """`later` applied after `self` -- accumulating motion across frames."""
+        return Transform(
+            a=later.a * self.a + later.b * self.d,
+            b=later.a * self.b + later.b * self.e,
+            c=later.a * self.c + later.b * self.f + later.c,
+            d=later.d * self.a + later.e * self.d,
+            e=later.d * self.b + later.e * self.e,
+            f=later.d * self.c + later.e * self.f + later.f,
+        )
+
+
+IDENTITY = Transform()
+
+
+@dataclass(frozen=True)
+class Descriptor:
+    """An appearance signature, with the metric it is meant to be compared under.
+
+    `engine_id` guards every comparison: two descriptors produced by different
+    engines are a max-distance no-match, never a silently meaningless number.
+    That matters because the one thing a descriptor is ever used for is
+    deciding whether to hand an operator back a track id they recognise.
+
+    Pure stdlib and plain floats, deliberately: `ObjectMemory` compares these
+    with no `cv` extra installed, and a plain tuple is serializable, which is
+    what keeps a future cross-stream identity tier reachable (§1 D4).
+    """
+
+    engine_id: str
+    values: tuple[float, ...]
+    metric: str = METRIC_HELLINGER
+
+    def distance(self, other: "Optional[Descriptor]") -> float:
+        """Distance on [0, 1]; 1.0 means "no usable comparison" or "no match".
+
+        Never raises and never returns a number outside the range: an absent
+        descriptor, a different engine, a different metric and a length
+        mismatch are all the same answer -- "this tells you nothing" -- which
+        every gate downstream already treats as a rejection.
+        """
+        if other is None or other.engine_id != self.engine_id or other.metric != self.metric:
+            return 1.0
+        if len(other.values) != len(self.values) or not self.values:
+            return 1.0
+        if self.metric == METRIC_HELLINGER:
+            coefficient = sum(
+                math.sqrt(max(0.0, left) * max(0.0, right))
+                for left, right in zip(self.values, other.values)
+            )
+            return math.sqrt(max(0.0, 1.0 - min(1.0, coefficient)))
+        if self.metric == METRIC_COSINE:
+            dot = sum(left * right for left, right in zip(self.values, other.values))
+            left_norm = math.sqrt(sum(value * value for value in self.values))
+            right_norm = math.sqrt(sum(value * value for value in other.values))
+            if left_norm <= 0.0 or right_norm <= 0.0:
+                return 1.0
+            similarity = dot / (left_norm * right_norm)
+            return max(0.0, min(1.0, (1.0 - similarity) / 2.0))
+        return 1.0
+
+    def blend(self, other: "Optional[Descriptor]", alpha: float) -> "Descriptor":
+        """Exponential moving average toward `other`, renormalized for the metric.
+
+        Renormalization is not cosmetic: an un-normalized blend drifts off the
+        simplex (or off the unit sphere) and the metric stops being bounded,
+        which would silently widen every gate that reads it.
+        """
+        if other is None or other.engine_id != self.engine_id or other.metric != self.metric:
+            return self
+        if len(other.values) != len(self.values) or not self.values:
+            return self
+        weight = max(0.0, min(1.0, alpha))
+        blended = tuple(
+            weight * left + (1.0 - weight) * right
+            for left, right in zip(self.values, other.values)
+        )
+        return Descriptor(self.engine_id, _renormalized(blended, self.metric), self.metric)
+
+
+def _renormalized(values: tuple[float, ...], metric: str) -> tuple[float, ...]:
+    if metric == METRIC_HELLINGER:
+        total = sum(max(0.0, value) for value in values)
+        if total <= 0.0:
+            return values
+        return tuple(max(0.0, value) / total for value in values)
+    if metric == METRIC_COSINE:
+        norm = math.sqrt(sum(value * value for value in values))
+        if norm <= 0.0:
+            return values
+        return tuple(value / norm for value in values)
+    return values
+
+
+class MotionCompensator(Protocol):
+    """Estimates how the CAMERA moved between the previous frame and this one.
+
+    A third protocol rather than a mode on an existing one, for the same
+    reason `Associator` and `SingleObjectTracker` are separate: the two
+    implementations that ship share no input. `flow` needs pixels and no
+    telemetry; `pose` needs telemetry and no pixels -- and it is the second
+    one that makes ego-motion compensation available on a build with no
+    OpenCV at all.
+    """
+
+    engine_id: str
+
+    def available(self, pose: CameraPose) -> bool:
+        """Whether this compensator can produce anything for this stream.
+
+        Checked before a frame is decoded, so a pose engine on a client that
+        sends no pose costs nothing per frame instead of failing per frame.
+        """
+        ...
+
+    def estimate(self, frame: "Optional[np.ndarray]", pose: CameraPose) -> Transform:
+        """Previous frame -> current frame. `IDENTITY` when nothing is known.
+
+        Never raises for an unusable input: a first frame, a featureless
+        scene, or a pose that went backwards all return `IDENTITY`, which
+        degrades the association to exactly today's behavior.
+        """
+        ...
+
+    def reset(self) -> None:
+        """Drop inter-frame state. Called after the engine raises."""
+        ...
+
+
+class AppearanceExtractor(Protocol):
+    """Turns image regions into comparable signatures.
+
+    Returns one entry per input box, positionally, with `None` for any box it
+    could not describe (off-frame, sub-pixel). Callers must treat `None` as
+    "no appearance evidence for this box" and fall back to geometry, never as
+    an error -- that is what keeps appearance a *contribution* to the identity
+    decision rather than a precondition for one.
+    """
+
+    engine_id: str
+
+    def describe(
+        self, frame: "np.ndarray", boxes: Sequence[Box]
+    ) -> "list[Optional[Descriptor]]":
+        ...
+
+    def reset(self) -> None:
         ...
