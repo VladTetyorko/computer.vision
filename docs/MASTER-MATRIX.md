@@ -48,15 +48,30 @@ we should · `PUNCH` differentiated, base-side · `GATE` needs explicit go (risk
 (5–20 Hz) FC executes and base may command; guidance, perception and deliberation are always
 base-side. **Advisory before commanded, always.**
 
+**The command-transport rule** — added 2026-08-09 after reviewing an external distributed-C2 plan
+that proposed routing all MAVLink through a cloud NATS broker. "No broker in the command path" is
+too blunt; the correct line falls straight out of the link classes above:
+
+| | Rate | May traverse a broker / relay? |
+|---|---|---|
+| **Class B** one-shot commands — RTL, mode, arm/disarm | 0.1–2 Hz, ack'd | **Yes**, provided a broker outage surfaces as a *visible refusal*. The FC's own failsafes are untouched, so the failure mode is lost capability, not an unsafe aircraft — precisely what `CommandResult.NO_ACK` already encodes |
+| **Class D** closed loops — GUIDED setpoints, `RC_CHANNELS_OVERRIDE` (33 Hz), `LANDING_TARGET` (10–50 Hz) | 5–50 Hz | **No. Direct to FC, single hop.** Broker jitter degrades a loop the aircraft depends on *while engaged*, and adds a failure domain inside it |
+
+**Stale-command guard — mandatory wherever any relay exists.** Brokers buffer and replay. A queued
+`arm` or `RTL` delivered five minutes late is a genuine hazard. Every relayed command carries an
+issue timestamp and is dropped at the sender once older than a few seconds: **a late command must
+fail, never execute.** This applies to Class B too — it is the price of allowing the relay at all.
+
 ---
 
 ## 1. Top 20, ranked — if only this table is read
 
 | # | Capability | Group | Status | Drone | Link | Owner € | Dev | Why here |
 |---|---|---|---|---|---|---|---|---|
-| 1 | Merge `feat/visual-geo` (19 commits) | P | BRANCH | — | — | €0 | — | every position row below is stranded until this lands |
-| 2 | Message inventory + readiness report | I | new | **D0** | A | **€0** | M 70 h | the funnel in front of every other feature |
-| 3 | `SET_MESSAGE_INTERVAL` auto-request | I | new | **D0** | B | **€0** | S 12 h | fixes most degraded setups, writes nothing |
+| 1 | **Tracking engine** — persistent target IDs | **K2** | new | D0 | C | **€0** | L 180 h | `TrackedObject` is a dead type; C12 and C2 are blocked on it. **The one real hole in the core**. Spec: **docs/TRACKING-PLAN.md** |
+| 2 | **Fixed-camera geolocation** — tracked object → map coordinate | **S2** | new | D0 | C | **€0** | M 60 h | the touchable demo, and it needs **no aircraft and no VPR** — known camera pose + `GeoProjection` |
+| 3 | Message inventory + readiness report | I | new | **D0** | A | **€0** | M 70 h | the funnel in front of every other feature |
+| 3b | `SET_MESSAGE_INTERVAL` auto-request | I | new | **D0** | B | **€0** | S 12 h | fixes most degraded setups, writes nothing |
 | 4 | DEM/terrain dependency | X | new | — | — | €0 | M 40 h | unlocks 4 features + visual geo at once |
 | 5 | Energy-aware return decisioning | C3 | PUNCH | **D0** | A | **€0** | M 70 h | answers the pilot's only real question |
 | 6 | Wind field from the fleet | C4 | PUNCH | **D0** | A | **€0** | M 60 h | structurally impossible for one aircraft |
@@ -75,8 +90,15 @@ base-side. **Advisory before commanded, always.**
 | 19 | Coverage planner + on-screen guidance | M2 | PUNCH | **D0** | A | €0 | M 60 h | mission value without command TX |
 | 20 | Tier-A param write + rollback | I4 | new | **D1** | B | €0 | M 60 h | makes the fleet gateway work for real owners |
 
-**Every one of the top 20 is D0 or D1. Total owner cost: €0.** That is not a coincidence — it is
-the ranking criterion.
+**Every row here is D0 or D1, at €0 to the drone owner.** That is not a coincidence — it is the
+ranking criterion.
+
+**No hardware is on the critical path** (corrected 2026-08-11). An earlier draft ranked the RPi
+field node at #2 as "the prerequisite for measuring P7". It is not: **there is no aircraft**, and
+P7 evaluation has been running on public AU-AIR frames against Wayback satellite tiles all along
+(`cv-service/spikes/geo/` — `auair-manifest`, 17 MB tile cache, eval runs through 2026-08-09).
+Retrieval accuracy is a software problem measurable today. T1 stays in Group T as the recipe to
+build **when an aircraft exists**, not before.
 
 ---
 
@@ -214,14 +236,86 @@ this boundary explicitly; do not market base-side terminal guidance.
 
 ---
 
-## 8. Component ladder — features unlocked per euro
+## 8. Group T — transport & field infrastructure
+
+Added 2026-08-09 from an external distributed-C2 plan (RPi + mavp2p + MediaMTX + Tailscale field
+nodes → NATS broker → Redis GEO/H3 spatial routing → automated ground-station handover → Ansible
+fleet ops). **Three claims in the review of that plan were checked against this tree and two came
+back different — the corrected verdicts are below.**
+
+| # | Item | Verdict | Drone | Link | Owner € | Dev | Alignment / reason |
+|---|---|---|---|---|---|---|---|
+| **T1** | **RPi field node** — companion pushing telemetry (mavp2p) + video (MediaMTX) over an IP link | **TAKE** | **D3** | C | €60–120 | M 50 h | **= I9 made concrete.** The survey rig: the only way to capture paired (frame, telemetry) data over a real region and finally measure P7 |
+| T2 | MediaMTX **WebRTC/WHEP** low-latency egress | **ALREADY HAVE** | D0 | C | €0 | **S 8 h (config)** | `MediamtxStreamPublisher.whepUrl()`, signaling `:18889`, ICE UDP `:8189`, `MTX_WEBRTCADDITIONALHOSTS`/`VISION_WEBRTC_HOST` in compose, browser player in `vision-web/shared/player/`. **Real remaining gap is only reachability beyond localhost** — set `VISION_WEBRTC_HOST` to the LAN IP (already documented in `adapter-publish-hls/MODULE.md`). A deployment line, not a feature |
+| T3 | NATS as **telemetry/event** bus | **OPTIONAL** | — | — | €0 | M 60 h | **The seam already exists and is unused by design:** no broker dependency anywhere in the build, and `EventPublisherPort`'s javadoc names MQTT/Kafka as swap-in implementations for multi-instance deployments; `LiveUpdatePublisherPort` fans out live. Adopting any broker is **one adapter class** — so it can never be urgent. Do it the day a second instance exists, not before |
+| T4 | NATS as **command** bus | **DECLINE (refined)** | — | — | — | — | Per the command-transport rule in §0: **Class D closed loops stay direct, single hop.** Class B one-shots *may* relay if outage = visible refusal + stale-command guard. The blanket "no broker in command" is stricter than needed; the blanket "route all MAVLink through NATS" is unsafe |
+| T5 | Redis GEO / H3 spatial routing | **DEFER** | — | — | — | — | Real tech, zero current need. One aircraft does not need spatial routing. Revisit at 5+ nodes |
+| T6 | Automated ground-station handover | **DEFER** | — | — | — | — | Duplicate of B5 (operator handoff) at the infrastructure layer, for stations that do not exist |
+| T7 | Ansible fleet-update of 10+ field nodes | **DEFER** | — | — | — | — | Ops tooling for a fleet that does not exist. Revisit with T5 |
+| T8 | Optical flow + LiDAR for GNSS-denied *stability* | **= P5, onboard** | D2 | — | €20–60 | — | Correctly the aircraft's job. **It does stability, not localization** — it does not touch the where-am-I problem P6–P9 solve. Do not conflate the two |
+
+**The one-line summary of that plan for this project:** it is not a C2 architecture to adopt — it
+is **a hardware recipe for the single companion node the survey needs.** Take its field-node
+phase as a shopping list and a wiring diagram; leave the distribution layer as a description of a
+product worth building only if the coordinate punch earns a fleet.
+
+---
+
+## 9. Group K — core consolidation (the feature freeze)
+
+Added 2026-08-11 after reviewing an external "Autonomous Drone Management & CV Analytics Platform"
+spec (GPU ingest → TensorRT batching → hexagonal domain engine → WS/WebRTC UI). **Roughly 70 % of
+that spec describes subsystems this repo already has**, so its real value was diagnostic: it
+surfaced exactly one foundational hole, and it prompted the right strategic question — *should the
+core be finished before any new feature lands?*
+
+**Verdict on that question: yes, with a scoped list.** Rows K1–K4 are the freeze. Everything in
+Groups B/C/M/T waits behind them. This supersedes §10's ordering for as long as the freeze holds.
+
+| # | Item | Verdict | Effort | Why |
+|---|---|---|---|---|
+| **K1** | **`feat/visual-geo`** | **PARK — do not merge** (revised 2026-08-11) | — | **The engine does not deliver.** Latest eval (`angle-probe-wire-eval-20260809`): correct tile top-1 in **0 of 12** frames, `GEO_NO_FIX` × 12, sequence never converged. Merging 337 files / 57k insertions of research code into `master` is a tax on every future refactor, not an asset. **One redeeming number: `n_confident_wrong: 0`** — it never produced a confident wrong fix even when a wrong tile ranked #1 all 12 times. The abstention machinery is sound; the *ranking* is what fails (correct tile at median rank 14 of ~40 — signal present, not random; matches the plan's own recall@5 0.87–1.00). Revive if and when ranking is solved. **Harvest `adapter-tiles` separately when B6 needs it** — small targeted extraction, not a branch merge |
+| **K2** | **Tracking engine — persistent target IDs across frames** | **REAL GAP — build** | L ~180 h | `TrackedObject` exists in `vision-domain/model` **and its own test, and nowhere else in the tree** — a dead type. No tracker, no ID association, no occlusion handling. This is **core, not a feature**: C12 cross-sensor fusion, C2 click-to-follow, target trajectories and the whole "where is that thing over time" story all sit on it and none can be built without it. **Spec: docs/TRACKING-PLAN.md** — detect-then-track duty cycle (cheap per-frame tracker + duty-cycled detector), pluggable `TrackerRegistry`, frozen proto contract, waves T0–T8 |
+| **K3** | `StreamPipeline` decomposition | **DEBT — pay** | M ~60 h | 927 lines, the largest class in `vision-application`; carries sampling, in-flight bounding, overlay, fan-out, telemetry and usage tracking at once. `DefaultSimulationService` (759) is the next one |
+| **K4** | Dead-type / dead-port audit | **DO** | S ~16 h | K2 was found by grepping one type's usages. Do it for every domain type and port — anything referenced only by its own test is either a gap like K2 or removable |
+| K5 | Cross-stream dynamic batching `[B,C,H,W]` | **DEFER — hardware-gated** | M | Genuinely absent. But it is a *GPU* optimization, and the deployment box has no GPU (see below). Revisit when the hardware does |
+| K6 | Zero-copy NVDEC → CUDA IPC frame path | **N/A on current hardware** | — | We decode via FFmpeg, downscale + JPEG-encode, ship over gRPC (`DetectionFrameCodec`). Real architectural difference, real cost — **and inapplicable**: it needs NVDEC + CUDA, and GB4005 is Intel UHD 600 |
+| K7 | In-memory domain event bus | **DECLINE** | — | The spec's central dispatcher is *weaker* than what we have. Direct port calls are traceable, statically typed and ArchUnit-enforced; an in-memory bus trades that for indirection. `EventPublisherPort`/`LiveUpdatePublisherPort` already cover genuine fan-out |
+| K8 | TimescaleDB / InfluxDB for telemetry | **DEFER** | M | Postgres + JPA is not the bottleneck at current volume. Revisit on measured query pain, not on principle |
+| K9 | Automated failsafe recovery (auto-RTL, land-in-place, rally divert) | **GATE — doctrine** | L | The spec puts an automatic recovery authority *above* operator input. That is the exact inversion of "the base is never a flight dependency". We detect and advise; the FC recovers. Would need an explicit go and would change the product's safety story |
+
+### What the spec got right that we already do — and do more strictly
+
+| Spec claim | Our state |
+|---|---|
+| Ring buffer, `QueueSize=1`, `DropStrategy=LatestFrameOnly` | **Solved twice, independently.** `StreamPipeline` bounds in-flight inferences and *skips rather than queues*; cv-service has `LatestOnlyMailbox` + `InferenceGate` |
+| Dual path — full-rate video to UI, subsampled to analytics | Have: publish at source rate, detect at sample rate |
+| Hexagonal ports & adapters | Have, **ArchUnit-enforced** — the spec only describes the discipline, we test it |
+| Low-latency WebRTC to UI | Have (WHEP + browser player) |
+| MAVLink ingest → domain events; MAVLink command egress | Have (gateway I-a; commander I-e, capability-gated + audited) |
+| 2D pixel → 3D world ray | Have flat-earth (`GeoProjection`, `BearingDistance`). **DEM intersection is row X** — still the missing half |
+| Geofence monitoring | Have (OPS-CORE G) |
+| Mission/waypoint + QGC `.plan` import | **Deliberately declined** — M3 |
+
+### The premise check that matters most
+
+The spec's entire performance architecture — NVDEC, CUDA IPC zero-copy, TensorRT FP16/INT8,
+dynamic GPU batching — assumes an NVIDIA box. **The actual inference host, GB4005, is an Intel
+Gemini Lake mini-PC: 2 cores, 7.6 GB RAM, UHD 600, no CUDA** (`cv-service/DEPLOY-GPU.md`, CPU torch
+wheel, rsync deploys). K5 and K6 are not deferred because they are unimportant; they are deferred
+because **they cannot run on the hardware this system deploys to.** Any plan that opens with a GPU
+pipeline needs that premise checked before its effort estimates mean anything.
+
+---
+
+## 10. Component ladder — features unlocked per euro
 
 | Rank | Component | Owner € | Unlocks | Verdict |
 |---|---|---|---|---|
 | **1** | **Telemetry downlink** — ELRS backpack (€0, already fitted) or ESP32 bridge (€5) | **€0–5** | ~15 rows: all of Group I, C3–C6, C9, B2, geofence, banners, preflight | **best ratio in the system** |
 | **2** | **Video downlink** — present on any FPV aircraft | €0 have / €25 analog / €100+ digital | all CV, P6, P7, C1, C11, C12, target geolocation | already there on nearly every real aircraft |
 | **3** | GNSS module (M8N/M10) | €15–40 | map baseline, geofence, RTH, C3–C5 | **not required for P6–P8 — that is the point** |
-| **4** | Companion + IP link (Pi Zero 2 W + LTE) | €60–100 | Class C/D, I9, C15, C2, C7b, C8, M6 | changes what class of aircraft you are |
+| **4** | Companion + IP link (Pi Zero 2 W + LTE) | €60–100 | Class C/D, **T1**, I9, C15, C2, C7b, C8, M6 | changes what class of aircraft you are — **and it is the survey rig (T1), so this one gets bought first** |
 | 5 | Rangefinder (TFmini) | €40–150 | true AGL, C8, P8, better target geolocation | multi-feature, good value |
 | 6 | Optical flow (PMW3901) | €20 | P5 at low AGL | cheap, narrow |
 | 7 | Gimbal (1-axis / 3-axis) | €50–400 | C2, stable geolocation, much better P7 | first genuinely expensive step |
@@ -236,18 +330,32 @@ Ranks 8–12 are single-purpose.
 
 ---
 
-## 9. Sequence
+## 11. Sequence
+
+**Feature freeze in effect (2026-08-11):** nothing from Groups B / C / M / T starts until K1–K4 are
+done. **Single track — there is no hardware on it.** Development runs on `adapter-simulation` and
+the `infra/sitl/` ArduPilot farm, both already built; P7 measurement runs on the existing bakeoff
+harness. Nothing here waits on a delivery.
+
+**Execution plan: docs/TWO-TARGETS-PLAN.md** — the hardware and software tracks, tiered, with a
+touchable outcome per step.
 
 | Order | What | Rows | Time |
 |---|---|---|---|
-| **1** | Merge `feat/visual-geo` | A3 | — |
-| **2** | Integration funnel | I1, I2, I3 | ~2 wk |
-| **3** | DEM + the advisory cluster | X, C3, C4, C6, C9 | ~6 wk |
-| **4** | Honest position stack | A1, A2, C7a | ~2 wk |
-| **5** | Mission tasking + nav pack | M1, M2, M5 | ~5 wk |
-| **6** | Reach features | C1, B1, B2, B6 | ~5 wk |
-| **7** | COP payoff | C12, C13, I4, I5, I7 | ~7 wk |
-| **later, gated** | P8, P9, C2, C7b, C8, C17, M4, M6 | — | each needs its own go |
+| **1** | **Tracking engine** — the one real foundational hole (docs/TRACKING-PLAN.md) | **K2** | ~4 wk |
+| **2** | **Fixed-camera geolocation** — the first demo you can show someone | **S2** | ~1.5 wk |
+| **3** | `StreamPipeline` decomposition + dead-type audit | **K3, K4** | ~2 wk |
+| 4 | Integration funnel | I1, I2, I3 | ~2 wk |
+| 5 | DEM + the advisory cluster | X, C3, C4, C6, C9 | ~6 wk |
+| 6 | Honest position stack | A1, A2, C7a | ~2 wk |
+| 7 | Mission tasking + nav pack | M1, M2, M5 | ~5 wk |
+| 8 | Reach features | C1, B1, B2, B6 | ~5 wk |
+| 9 | COP payoff (**C12 now buildable — K2 landed**) | C12, C13, I4, I5, I7 | ~7 wk |
+| later, gated | P8, P9, C2, C7b, C8, C17, M4, M6, K9 | — | each needs its own go |
+
+**Steps 1–3 are the freeze.** They add no capability a user can see — that is the point. They
+finish the core so that everything after them is buildable at all: C12 and C2 are *blocked* on K2,
+and every P-row is blocked on K1.
 
 **Sources:** [ArduPilot Guided Mode](https://ardupilot.org/copter/docs/ac2_guidedmode.html) ·
 [MAVLink Offboard Control](https://mavlink.io/en/services/offboard_control.html) ·

@@ -45,3 +45,24 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 ## Delegation model (how this repo is built)
 
 Plans in `docs/*-PLAN.md` are authoritative specs; implementation is delegated to subagents with disjoint file scopes; every task ends with its scoped build green and MODULE.md updated.
+
+## Agentic rules
+
+Work in agents, keep responsibility and slave separation:
+Fable - for architecture only, no code, no tests 
+Opus - for thinking on module lvl, can create a code and configuration. Responsible for flow
+Sonnet - is a slave, for coding, tests etc. Not included in planing
+
+One task is one branch. If there are many sub-tasks related to one big - create a subbranch, then merge 
+Context - for taking the context use mainly documentation, not the code
+Before starting - create a file with a context, then start working on it
+After finishing - summarize the context and update the dockumentation. 
+
+## Overall rules for architecture and building
+
+1) No magic numbers and hardcoding of 
+values should be in the configuration files, like application.properties in root lvl, or, if it's a Mathematic constant - in the code
+If the configuration can varry and be changed during the runtime - chose between having it in database as a constant or in request parameters
+If the configuration can be changed during the runtime - use the database and cache layer to store it
+2) Layered architecture and object orientations are the best practices: Use inversion of control, follow java standard practices and use packages as separators of layers. For example: Controller -> high-lvl service -> "orcestration", feature-based service -> maybe cache->banch of lower services -> banch of repositories -> database.
+3) Standalone principle on modules lvl: Module is independent and doesn't know nothing about who uses it and who listends to it. Communication contract similar to interfaces lvl. Every module should have API description
