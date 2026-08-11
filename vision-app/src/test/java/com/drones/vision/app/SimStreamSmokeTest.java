@@ -1,6 +1,7 @@
 package com.drones.vision.app;
 
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.app.devsupport.DevPrincipal;
@@ -83,6 +84,9 @@ class SimStreamSmokeTest {
     private AssetService assetService;
 
     @Autowired
+    private AssetStreamService assetStreamService;
+
+    @Autowired
     private AssetUsageRepositoryPort assetUsageRepositoryPort;
 
     @Autowired
@@ -104,7 +108,7 @@ class SimStreamSmokeTest {
                 new CategoryId("drone"), Map.of(), List.of(videoDevice, telemetryDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
         try {
             boolean receivedFrame = recordingStreamPublisher.awaitFirstFrame(5, TimeUnit.SECONDS);
             assertTrue(receivedFrame, "expected at least one frame to reach StreamPublisherPort within 5s");

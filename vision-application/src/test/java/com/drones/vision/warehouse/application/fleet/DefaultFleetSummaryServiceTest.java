@@ -3,9 +3,6 @@ package com.drones.vision.warehouse.application.fleet;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
-import com.drones.vision.perception.domain.model.DetectionEvent;
-import com.drones.vision.perception.domain.model.DetectionEventId;
-import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GroupId;
@@ -14,7 +11,7 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,10 +35,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.category.CategoryCounts;
-import com.drones.vision.perception.application.pipeline.UsageTracker;
 import com.drones.vision.platform.VisibilityScope;
-import com.drones.vision.perception.application.stream.ActiveStream;
-import com.drones.vision.perception.application.stream.StreamService;
 
 class DefaultFleetSummaryServiceTest {
 
@@ -49,24 +43,20 @@ class DefaultFleetSummaryServiceTest {
     private static final CategoryId ROBOT = new CategoryId("robot");
 
     private AssetService assetService;
-    private StreamService streamService;
-    private UsageTracker usageTracker;
-    private DetectionEventRepositoryPort detectionEventRepositoryPort;
+    private AssetLiveStatePort assetLiveStatePort;
     private DefaultFleetSummaryService service;
     private Ownership ownership;
 
     @BeforeEach
     void setUp() {
         assetService = mock(AssetService.class);
-        streamService = mock(StreamService.class);
-        usageTracker = mock(UsageTracker.class);
-        detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
-        service = new DefaultFleetSummaryService(assetService, streamService, usageTracker, detectionEventRepositoryPort);
+        assetLiveStatePort = mock(AssetLiveStatePort.class);
+        service = new DefaultFleetSummaryService(assetService, assetLiveStatePort);
         ownership = new Ownership(UserId.random(), GroupId.random());
 
-        when(streamService.streams()).thenReturn(List.of());
-        when(usageTracker.latestTelemetry(any())).thenReturn(Optional.empty());
-        when(detectionEventRepositoryPort.findRecent(any(), anyInt())).thenReturn(List.of());
+        when(assetLiveStatePort.activeStreamsByDevice()).thenReturn(Map.of());
+        when(assetLiveStatePort.latestTelemetry(any())).thenReturn(Optional.empty());
+        when(assetLiveStatePort.openDetectionEventCounts(anyInt())).thenReturn(Map.of());
     }
 
     private Asset asset(String displayName, CategoryId category, LifecycleState state, DeviceId... devices) {
@@ -181,23 +171,16 @@ class DefaultFleetSummaryServiceTest {
         when(assetService.assets(false)).thenReturn(List.of(summary(asset, "Drone", AssetStatus.STREAMING)));
 
         StreamId streamId = StreamId.random();
-        when(streamService.streams()).thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
+        when(assetLiveStatePort.activeStreamsByDevice()).thenReturn(Map.of(deviceId, streamId));
 
         Instant sampleAt = Instant.now().minusMillis(3000);
         FlightState flightState = new FlightState("ardupilot", "RTL", true, true, 3, 12, 0.9, 87, List.of());
         Telemetry sample = new Telemetry(deviceId, sampleAt, 1.0, 2.0, null, null, 42.0, Map.of(), flightState);
-        when(usageTracker.latestTelemetry(asset.id())).thenReturn(Optional.of(sample));
+        when(assetLiveStatePort.latestTelemetry(asset.id())).thenReturn(Optional.of(sample));
 
-        DetectionEvent openForThisAsset = new DetectionEvent(DetectionEventId.random(), streamId, asset.id(),
-                "person", 0.9, Instant.now(), Instant.now(), DetectionEventState.OPEN, null);
-        DetectionEvent closedForThisAsset = new DetectionEvent(DetectionEventId.random(), streamId, asset.id(),
-                "car", 0.9, Instant.now(), Instant.now(), DetectionEventState.CLOSED, null);
-        DetectionEvent openForAnotherAsset = new DetectionEvent(DetectionEventId.random(), streamId, AssetId.random(),
-                "person", 0.9, Instant.now(), Instant.now(), DetectionEventState.OPEN, null);
-        DetectionEvent openWithUnresolvableAsset = new DetectionEvent(DetectionEventId.random(), streamId, null,
-                "person", 0.9, Instant.now(), Instant.now(), DetectionEventState.OPEN, null);
-        when(detectionEventRepositoryPort.findRecent(any(), anyInt())).thenReturn(
-                List.of(openForThisAsset, closedForThisAsset, openForAnotherAsset, openWithUnresolvableAsset));
+        // Counting which detection events are OPEN and per-asset is StreamBackedAssetLiveState's own
+        // concern (tested there); this service only trusts the port's already-counted map.
+        when(assetLiveStatePort.openDetectionEventCounts(anyInt())).thenReturn(Map.of(asset.id(), 1));
 
         FleetSummary result = service.summary(false);
 
@@ -209,10 +192,21 @@ class DefaultFleetSummaryServiceTest {
         assertEquals(42.0, row.batteryPercent());
         assertTrue(row.telemetryAgeMs() >= 2900 && row.telemetryAgeMs() < 15000,
                 "telemetryAgeMs should reflect roughly 3s since the sample: " + row.telemetryAgeMs());
-        assertEquals(1, row.openEventCount(), "only THIS asset's OPEN event must be counted");
+        assertEquals(1, row.openEventCount());
         assertEquals("RTL", row.flightMode());
         assertEquals(true, row.armed());
         assertEquals(true, row.failsafe());
+    }
+
+    @Test
+    void summaryPassesTheConfiguredOpenEventsScanLimitThroughToThePort() {
+        DefaultFleetSummaryService withCustomLimit =
+                new DefaultFleetSummaryService(assetService, assetLiveStatePort, 500, 123);
+        when(assetService.assets(false)).thenReturn(List.of());
+
+        withCustomLimit.summary(false);
+
+        verify(assetLiveStatePort).openDetectionEventCounts(123);
     }
 
     @Test
@@ -222,7 +216,7 @@ class DefaultFleetSummaryServiceTest {
         when(assetService.assets(false)).thenReturn(List.of(summary(asset, "Drone", AssetStatus.OFFLINE)));
 
         Telemetry sample = new Telemetry(deviceId, Instant.now(), 1.0, 2.0, null, null, 42.0, Map.of());
-        when(usageTracker.latestTelemetry(asset.id())).thenReturn(Optional.of(sample));
+        when(assetLiveStatePort.latestTelemetry(asset.id())).thenReturn(Optional.of(sample));
 
         FleetSummary result = service.summary(false);
 

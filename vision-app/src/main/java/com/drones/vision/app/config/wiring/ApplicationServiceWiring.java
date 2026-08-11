@@ -5,6 +5,7 @@ import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.platform.EventPublisherPort;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
@@ -216,10 +217,10 @@ public class ApplicationServiceWiring {
 
     @Bean
     public DeviceService deviceService(DeviceRepositoryPort deviceRepositoryPort,
-                                        StreamService streamService,
+                                        AssetLiveStatePort assetLiveStatePort,
                                         AuditTrailPort auditTrailPort,
                                         EventPublisherPort eventPublisherPort) {
-        return new DefaultDeviceService(deviceRepositoryPort, streamService, auditTrailPort, eventPublisherPort);
+        return new DefaultDeviceService(deviceRepositoryPort, assetLiveStatePort, auditTrailPort, eventPublisherPort);
     }
 
     /**
@@ -441,9 +442,40 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Assets — creation, editing, lifecycle, and asset-level streaming. Devices are reached
-     * through {@link DeviceService} rather than the repository, so rules that belong to a source
-     * live in exactly one place.
+     * Warehouse's declared read of live runtime state (docs/plans/active/DOMAIN-SEPARATION-W1.md
+     * &sect;15, W1.6e) — {@link AssetLiveStatePort} is a warehouse-owned interface, implemented
+     * here by {@code StreamBackedAssetLiveState}, the one class in perception allowed to compose
+     * {@link StreamService}, {@link UsageTracker} and {@link DetectionEventRepositoryPort} to
+     * answer it. Every warehouse service that used to depend on those three runtime collaborators
+     * directly ({@link #assetService}, {@link #deviceService}, {@link #assetStatsService}, {@link
+     * #fleetSummaryService}) now depends on this one port instead.
+     */
+    @Bean
+    public AssetLiveStatePort assetLiveStatePort(StreamService streamService, UsageTracker usageTracker,
+                                                  DetectionEventRepositoryPort detectionEventRepositoryPort) {
+        return new StreamBackedAssetLiveState(streamService, usageTracker, detectionEventRepositoryPort);
+    }
+
+    /**
+     * Asset-level streaming (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e): resolves
+     * which of an asset's devices to use, then calls {@link StreamService} directly — split off
+     * {@link #assetService} because starting a stream hands perception's own configuration types
+     * ({@code PipelineConfig}/{@code TrackingConfigPatch}) to the runtime, which is perception's
+     * job, not inventory's. {@code perception -> warehouse} is the legal direction, so this
+     * resolves the asset itself rather than calling back into {@link AssetService}.
+     */
+    @Bean
+    public AssetStreamService assetStreamService(AssetRepositoryPort assetRepositoryPort,
+                                                  DeviceService deviceService,
+                                                  StreamService streamService) {
+        return new DefaultAssetStreamService(assetRepositoryPort, deviceService, streamService);
+    }
+
+    /**
+     * Assets — creation, editing, lifecycle, and stopping a stream. Devices are reached through
+     * {@link DeviceService} rather than the repository, so rules that belong to a source live in
+     * exactly one place. Starting a stream lives on {@link #assetStreamService} instead — see its
+     * own javadoc.
      */
     @Bean
     public AssetService assetService(AssetRepositoryPort assetRepositoryPort,
@@ -451,9 +483,9 @@ public class ApplicationServiceWiring {
                                       AssetUsageRepositoryPort assetUsageRepositoryPort,
                                       AuditTrailPort auditTrailPort,
                                       DeviceService deviceService,
-                                      StreamService streamService) {
+                                      AssetLiveStatePort assetLiveStatePort) {
         return new DefaultAssetService(assetRepositoryPort, categoryRepositoryPort, assetUsageRepositoryPort,
-                auditTrailPort, deviceService, streamService);
+                auditTrailPort, deviceService, assetLiveStatePort);
     }
 
     @Bean
@@ -510,13 +542,12 @@ public class ApplicationServiceWiring {
      * {@code FleetController} (vision-api, component-scanned).
      */
     @Bean
-    public FleetSummaryService fleetSummaryService(AssetService assetService, StreamService streamService,
-                                                     UsageTracker usageTracker,
-                                                     DetectionEventRepositoryPort detectionEventRepositoryPort,
+    public FleetSummaryService fleetSummaryService(AssetService assetService,
+                                                     AssetLiveStatePort assetLiveStatePort,
                                                      VisionApplicationProperties applicationProperties) {
         VisionApplicationProperties.Fleet fleet = applicationProperties.fleet();
-        return new DefaultFleetSummaryService(assetService, streamService, usageTracker,
-                detectionEventRepositoryPort, fleet.maxAssets(), fleet.openEventsScanLimit());
+        return new DefaultFleetSummaryService(assetService, assetLiveStatePort, fleet.maxAssets(),
+                fleet.openEventsScanLimit());
     }
 
     /**
@@ -526,9 +557,9 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public AssetStatsService assetStatsService(AssetUsageRepositoryPort assetUsageRepositoryPort,
-                                                UsageTracker usageTracker,
+                                                AssetLiveStatePort assetLiveStatePort,
                                                 VisionApplicationProperties applicationProperties) {
-        return new DefaultAssetStatsService(assetUsageRepositoryPort, usageTracker,
+        return new DefaultAssetStatsService(assetUsageRepositoryPort, assetLiveStatePort,
                 applicationProperties.stats().fetchLimit());
     }
 
@@ -553,13 +584,14 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public SimulationService simulationService(AssetService assetService,
+                                                AssetStreamService assetStreamService,
                                                 CategoryRepositoryPort categoryRepositoryPort,
                                                 FeedTransmitterRegistry feedTransmitterRegistry,
                                                 VisionPublishProperties properties,
                                                 VisionApplicationProperties applicationProperties) {
         VisionApplicationProperties.Simulation simulation = applicationProperties.simulation();
-        return new DefaultSimulationService(assetService, categoryRepositoryPort, feedTransmitterRegistry,
-                properties.mediamtx().rtspBase(),
+        return new DefaultSimulationService(assetService, assetStreamService, categoryRepositoryPort,
+                feedTransmitterRegistry, properties.mediamtx().rtspBase(),
                 new SimulationServiceSettings(simulation.mavlinkLoopbackHost(), simulation.fallbackLatitude(),
                         simulation.fallbackLongitude()));
     }

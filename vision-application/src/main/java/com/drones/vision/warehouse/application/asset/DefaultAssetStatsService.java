@@ -3,6 +3,7 @@ package com.drones.vision.warehouse.application.asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import java.time.Duration;
@@ -12,7 +13,6 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import com.drones.vision.warehouse.application.fleet.DefaultFleetSummaryService;
 import com.drones.vision.warehouse.application.fleet.FleetSummaryService;
-import com.drones.vision.perception.application.pipeline.UsageTracker;
 
 /**
  * {@link AssetStatsService}'s one implementation: fetch-then-aggregate over {@link
@@ -43,10 +43,12 @@ import com.drones.vision.perception.application.pipeline.UsageTracker;
  * <h2>Battery</h2>
  * {@link AssetStats#lastKnownBatteryPercent()} reuses exactly the source {@link
  * DefaultFleetSummaryService} derives its own {@code batteryPercent} from — {@link
- * UsageTracker#latestTelemetry(AssetId)}, {@code null} when the asset has never reported
- * telemetry — rounded to the nearest whole percent here purely because this endpoint's own frozen
- * wire contract wants an {@code Integer} KPI figure where {@link FleetSummaryService}'s own
- * {@code AssetAttention} carries the raw {@code Double} reading.
+ * AssetLiveStatePort#latestTelemetry(AssetId)} (docs/plans/active/DOMAIN-SEPARATION-W1.md
+ * &sect;15, W1.6e — the inverted port warehouse reads runtime state through, rather than {@code
+ * UsageTracker} directly), {@code null} when the asset has never reported telemetry — rounded to
+ * the nearest whole percent here purely because this endpoint's own frozen wire contract wants an
+ * {@code Integer} KPI figure where {@link FleetSummaryService}'s own {@code AssetAttention}
+ * carries the raw {@code Double} reading.
  *
  * <h2>No existence check</h2>
  * Deliberately never validates that {@code assetId} is a real, known asset — see {@link
@@ -69,12 +71,12 @@ public final class DefaultAssetStatsService implements AssetStatsService {
     static final int STATS_FETCH_LIMIT = 10_000;
 
     private final AssetUsageRepositoryPort usageRepository;
-    private final UsageTracker usageTracker;
+    private final AssetLiveStatePort assetLiveStatePort;
     private final Supplier<Instant> clock;
     private final int statsFetchLimit;
 
-    public DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, UsageTracker usageTracker) {
-        this(usageRepository, usageTracker, Instant::now, STATS_FETCH_LIMIT);
+    public DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, AssetLiveStatePort assetLiveStatePort) {
+        this(usageRepository, assetLiveStatePort, Instant::now, STATS_FETCH_LIMIT);
     }
 
     /**
@@ -82,9 +84,9 @@ public final class DefaultAssetStatsService implements AssetStatsService {
      * &sect;1.3 config extraction, {@code vision.application.stats.fetch-limit}) instead of {@link
      * #STATS_FETCH_LIMIT}.
      */
-    public DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, UsageTracker usageTracker,
+    public DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, AssetLiveStatePort assetLiveStatePort,
                                      int statsFetchLimit) {
-        this(usageRepository, usageTracker, Instant::now, statsFetchLimit);
+        this(usageRepository, assetLiveStatePort, Instant::now, statsFetchLimit);
     }
 
     /**
@@ -92,16 +94,16 @@ public final class DefaultAssetStatsService implements AssetStatsService {
      * assert an open usage's in-progress duration deterministically instead of racing the real
      * clock. Production always uses the 2-argument constructor's {@link Instant#now()} default.
      */
-    DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, UsageTracker usageTracker,
+    DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, AssetLiveStatePort assetLiveStatePort,
                               Supplier<Instant> clock) {
-        this(usageRepository, usageTracker, clock, STATS_FETCH_LIMIT);
+        this(usageRepository, assetLiveStatePort, clock, STATS_FETCH_LIMIT);
     }
 
     /** Test/wiring seam: same as the 2-argument constructor, with both an explicit clock and fetch bound. */
-    DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, UsageTracker usageTracker,
+    DefaultAssetStatsService(AssetUsageRepositoryPort usageRepository, AssetLiveStatePort assetLiveStatePort,
                               Supplier<Instant> clock, int statsFetchLimit) {
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
-        this.usageTracker = Objects.requireNonNull(usageTracker, "usageTracker must not be null");
+        this.assetLiveStatePort = Objects.requireNonNull(assetLiveStatePort, "assetLiveStatePort must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.statsFetchLimit = statsFetchLimit;
     }
@@ -149,7 +151,8 @@ public final class DefaultAssetStatsService implements AssetStatsService {
     }
 
     private Integer lastKnownBatteryPercent(AssetId assetId) {
-        Double batteryPercent = usageTracker.latestTelemetry(assetId).map(Telemetry::batteryPercent).orElse(null);
+        Double batteryPercent =
+                assetLiveStatePort.latestTelemetry(assetId).map(Telemetry::batteryPercent).orElse(null);
         return batteryPercent == null ? null : (int) Math.round(batteryPercent);
     }
 }

@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.domain.model.Asset;
@@ -69,6 +70,9 @@ class CvDetectionResilienceSmokeTest {
     private AssetService assetService;
 
     @Autowired
+    private AssetStreamService assetStreamService;
+
+    @Autowired
     private FileSimulationSmokeTest.RecordingStreamPublisher recordingStreamPublisher;
 
     @Test
@@ -81,7 +85,7 @@ class CvDetectionResilienceSmokeTest {
                         new CategoryId("drone"), Map.of(), List.of(videoDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+        assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
         try {
             boolean receivedFrame = recordingStreamPublisher.awaitFirstFrame(10, TimeUnit.SECONDS);
             assertTrue(receivedFrame,

@@ -1,6 +1,7 @@
 package com.drones.vision.api.demo;
 
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.simulation.application.SimulatedAsset;
@@ -44,6 +45,7 @@ class DemoFleetTest {
 
     private SimulationService simulations;
     private AssetService assets;
+    private AssetStreamService assetStreams;
 
     private final Ownership ownership = new Ownership(UserId.random(), GroupId.random());
 
@@ -51,6 +53,7 @@ class DemoFleetTest {
     void setUp() {
         simulations = mock(SimulationService.class);
         assets = mock(AssetService.class);
+        assetStreams = mock(AssetStreamService.class);
         when(simulations.simulate(any(), any(), any()))
                 .thenAnswer(invocation -> new SimulatedAsset(AssetId.random(), null));
         when(assets.assets(anyBoolean())).thenReturn(List.of());
@@ -147,7 +150,7 @@ class DemoFleetTest {
     @Test
     void startStreamsStartsOnlyTheRequestedPrefixAndReportsFailures() {
         List<DemoAsset> created = fleet().seed(3, ownership, ownership.ownerId(), problem -> { });
-        when(assets.startStream(any(), any(), any()))
+        when(assetStreams.startStream(any(), any(), any()))
                 .thenThrow(new IllegalStateException("publisher unreachable"))
                 .thenReturn(null);
         List<String> problems = new ArrayList<>();
@@ -157,7 +160,7 @@ class DemoFleetTest {
         assertEquals(1, started);
         assertEquals(1, problems.size());
         assertTrue(problems.getFirst().contains("publisher unreachable"), problems.toString());
-        verify(assets, times(2)).startStream(any(), any(), any());
+        verify(assetStreams, times(2)).startStream(any(), any(), any());
     }
 
     @Test
@@ -168,7 +171,7 @@ class DemoFleetTest {
     }
 
     private DemoFleet fleet() {
-        return new DemoFleet(simulations, assets, new DemoVideoLibrary(videoFolder));
+        return new DemoFleet(simulations, assets, assetStreams, new DemoVideoLibrary(videoFolder));
     }
 
     private AssetSummary summary(String displayName) {

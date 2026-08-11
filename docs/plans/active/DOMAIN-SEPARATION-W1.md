@@ -191,10 +191,16 @@ nothing else can be in flight while every import in the repo moves.
       when its name equals the context (no `flight.application.flight`) or when it is the context's
       only feature (no `events.application.replay`); otherwise the feature subpackage is kept.
       Verified: domain 518 · application 819 · api 551 · app 223 · adapters 396, all green.
-- [ ] **W1.6 break the module cycles** — seven of them (§14); specified as five sub-waves in §15
-  - [x] W1.6a platform seams (cycles 7→6) · [x] W1.6b events-as-sink (6→2) · [x] W1.6c ownership (edges 17→16)
-  - [ ] W1.6d probe → perception · [ ] W1.6e C3 proper
-- [ ] W1.7 Maven extraction
+- [x] **W1.6 break the module cycles** — all seven paid (§14, specified in §15). The graph is a **DAG**:
+      `DECLARED_CYCLES` is now `Set.of()` and the rule that guards it was renamed
+      `theModuleGraphIsAcyclic` — it stopped being a burn-down and became an invariant.
+  - [x] W1.6a platform seams — cycles 7→6, edges 26→23
+  - [x] W1.6b events-as-sink, god-port split — cycles 6→2, edges 23→17
+  - [x] W1.6c Telemetry/FlightState→kernel, AssetUsage→warehouse — edges 17→16
+  - [x] W1.6d probe → perception — cycles 2→1, edges 16→15
+  - [x] W1.6e stream lifecycle off AssetService + `AssetLiveStatePort` — **cycles 1→0**, edges 15→14
+      Reactor-wide green at every one; domain 527 · application 816 · api 551 · app 224 · adapters unchanged.
+- [ ] **W1.7 Maven extraction** — see §16 (measured dependency matrix)
 
 ---
 
@@ -395,3 +401,76 @@ The branch `feat/visual-geo` adds two more adapters (`adapter-geo-grpc`, `adapte
 `vision-model-contracts` module — present in this working tree as untracked leftovers, and in that
 branch's `adapters/pom.xml`, but not on `master`. W1.5 rewrites every import in the repo, so that
 branch must be merged **before** W1.5 or it will conflict with essentially every file it touches.
+
+
+---
+
+## 16. W1.7 — the extraction, measured
+
+The graph is acyclic, so the module list and its build order are no longer a design question. Both
+fall straight out of measurement.
+
+### The 14 surviving edges
+
+```
+events     -> flight(1), perception(7), warehouse(4)
+flight     -> warehouse(11)
+identity   -> warehouse(2)
+learning   -> events(1), perception(12), warehouse(3)
+map        -> identity(2), perception(1)
+perception -> flight(4), warehouse(16)
+simulation -> perception(6), warehouse(7)
+warehouse  -> (nothing)
+```
+
+**Warehouse is a pure leaf.** That is the direction rule of §15 showing up as a property of the graph
+rather than as a convention anyone has to remember: inventory is the layer everything else reads and
+that reads nothing back.
+
+### Modules
+
+`vision-domain` and `vision-application` dissolve. Each context becomes **one** module holding both
+its layers — the package tree already has them under `com.drones.vision.<ctx>.domain` /
+`.application`, so extraction is a directory move, and the layer boundary stays ArchUnit-enforced
+exactly as it is today. A module *pair* per context would double the POMs to re-state a rule the
+tests already state.
+
+| Module | Depends on |
+|---|---|
+| `vision-kernel` | — (17 pure value types) |
+| `vision-platform` | kernel (10 cross-cutting seams) |
+| `contexts/vision-warehouse` | kernel, platform |
+| `contexts/vision-identity` | + warehouse |
+| `contexts/vision-flight` | + warehouse |
+| `contexts/vision-perception` | + warehouse, flight |
+| `contexts/vision-map` | + identity, perception |
+| `contexts/vision-events` | + warehouse, flight, perception |
+| `contexts/vision-learning` | + warehouse, perception, events |
+| `contexts/vision-simulation` | + warehouse, perception |
+
+`contexts/` gets an aggregator POM, mirroring `adapters/`.
+
+### Consumers — measured, not guessed
+
+Most adapters need two or three contexts, which is the first concrete payoff of the whole wave:
+
+| Module | Contexts it actually imports |
+|---|---|
+| adapter-rtsp, adapter-mjpeg, adapter-v4l2, adapter-overlay | kernel, perception |
+| adapter-discovery | kernel, warehouse |
+| adapter-cv-grpc | kernel, perception, learning |
+| adapter-publish-hls | kernel, warehouse, perception, events |
+| adapter-simulation | kernel, warehouse, flight, perception |
+| adapter-mavlink | kernel, warehouse, flight, perception |
+| adapter-persistence | kernel, warehouse, identity, flight, perception, map, learning |
+| vision-api, vision-app | all ten |
+
+**No test-only cross-context edges exist** — every test tree is already context-local, so no
+`<scope>test</scope>` dependency is needed beyond the compile graph above.
+
+### Not in this wave
+
+**Role flags move to W3.** §6's original W1.6 row bundled "`vision.roles` selects modules" with
+extraction; that is conditional wiring in vision-app, it depends on nothing in the module split, and
+W3 (worker role + leases) is where it belongs. W1.7 is extraction only: same wiring, same behaviour,
+same wire contract.

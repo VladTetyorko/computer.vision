@@ -10,9 +10,9 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.StreamDescriptor;
-import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,7 +20,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -37,8 +36,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import com.drones.vision.perception.application.stream.ActiveStream;
-import com.drones.vision.perception.application.stream.StreamService;
 
 class DefaultDeviceServiceTest {
 
@@ -46,7 +43,7 @@ class DefaultDeviceServiceTest {
             new StreamDescriptor("sim", URI.create("sim://cam"), Map.of());
 
     private DeviceRepositoryPort deviceRepository;
-    private StreamService streamService;
+    private AssetLiveStatePort assetLiveStatePort;
     private AuditTrailPort auditTrail;
     private EventPublisherPort eventPublisher;
     private UserId actingUser;
@@ -55,15 +52,14 @@ class DefaultDeviceServiceTest {
     @BeforeEach
     void setUp() {
         deviceRepository = mock(DeviceRepositoryPort.class);
-        streamService = mock(StreamService.class);
+        assetLiveStatePort = mock(AssetLiveStatePort.class);
         auditTrail = mock(AuditTrailPort.class);
         eventPublisher = mock(EventPublisherPort.class);
         actingUser = UserId.random();
 
-        service = new DefaultDeviceService(deviceRepository, streamService, auditTrail, eventPublisher);
+        service = new DefaultDeviceService(deviceRepository, assetLiveStatePort, auditTrail, eventPublisher);
 
         when(deviceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(streamService.streams()).thenReturn(List.of());
     }
 
     private Device stored(String name, LifecycleState state) {
@@ -163,14 +159,13 @@ class DefaultDeviceServiceTest {
     @Test
     void deactivatingStopsTheDeviceStreamSoTheStateIsARuleNotALabel() {
         Device device = stored("cam", LifecycleState.ACTIVE);
-        StreamId streamId = StreamId.random();
-        when(streamService.streams())
-                .thenReturn(List.of(new ActiveStream(streamId, device.id(), Instant.now())));
 
         Device result = service.setState(device.id(), LifecycleState.DEACTIVATED, actingUser);
 
         assertEquals(LifecycleState.DEACTIVATED, result.state());
-        verify(streamService).stop(streamId);
+        // Which stream (if any) actually stops is StreamBackedAssetLiveState's own concern (tested
+        // there) -- this service's job is only to ask the port to stop this one device.
+        verify(assetLiveStatePort).stopStreamsForDevices(Set.of(device.id()));
         assertEquals(AuditAction.DEACTIVATED, recordedAudit().action());
     }
 
@@ -203,13 +198,10 @@ class DefaultDeviceServiceTest {
     @Test
     void deleteStopsAnyRunningStreamFirst() {
         Device device = stored("cam", LifecycleState.ACTIVE);
-        StreamId streamId = StreamId.random();
-        when(streamService.streams())
-                .thenReturn(List.of(new ActiveStream(streamId, device.id(), Instant.now())));
 
         service.delete(device.id(), actingUser);
 
-        verify(streamService).stop(streamId);
+        verify(assetLiveStatePort).stopStreamsForDevices(Set.of(device.id()));
     }
 
     @Test

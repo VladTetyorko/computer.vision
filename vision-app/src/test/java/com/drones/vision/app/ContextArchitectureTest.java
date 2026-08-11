@@ -49,10 +49,10 @@ class ContextArchitectureTest {
             "identity", "warehouse", "perception", "flight", "map", "learning", "events", "simulation");
 
     /**
-     * Every cross-context dependency that exists today, in either layer.
-     *
-     * <p>Entries marked DEBT are the ones that must go before W1.6 can extract modules; the rest
-     * are ordinary contract calls that will survive as such. See W1 §5 for each fix.
+     * Every cross-context dependency that exists today, in either layer. As of W1.6e
+     * (docs/plans/active/DOMAIN-SEPARATION-W1.md §15) none of these are DEBT any more — every entry
+     * is an ordinary contract call that will survive module extraction as such. See W1 §5/§15 for
+     * the fix that retired each one that used to be here.
      */
     private static final Set<String> DECLARED_EDGES = new TreeSet<>(Set.of(
             // --- ordinary contract calls: a context using another's published surface ---
@@ -64,6 +64,7 @@ class ContextArchitectureTest {
             "map -> identity",              // MapAccessPolicy.Viewer carries a Role
             "map -> perception",
             "perception -> flight",         // UsageTracker opens flight's telemetry ports
+            "perception -> warehouse",      // a stream resolves its device; AssetStreamService resolves its asset
             "simulation -> perception",
             "simulation -> warehouse",
 
@@ -80,20 +81,17 @@ class ContextArchitectureTest {
             // dataset capture needs the exact frame a finished flight recorded).
             "events -> flight",
             "events -> perception",
-            "events -> warehouse",          // AssetUsage moved flight -> warehouse (W1.6c, C9); the read is unchanged
-
-            // --- DEBT C3/C6: warehouse asks perception "is this asset live?", and perception's
-            // ports accept a whole warehouse Device ---
-            "perception -> warehouse",
-            "warehouse -> perception"));
+            "events -> warehouse"));         // AssetUsage moved flight -> warehouse (W1.6c, C9); the read is unchanged
 
     /**
-     * Module-level cycles that exist today. Every one blocks W1.6 for <em>all</em> contexts, since
-     * Maven cannot express a cycle — this set must reach empty before extraction. Exact-match, so
-     * paying a cycle off fails the test until the entry is deleted.
+     * Module-level cycles in the graph. Once C3/C6 (docs/plans/active/DOMAIN-SEPARATION-W1.md §15,
+     * W1.6e) paid off the last one, {@code perception <-> warehouse}, this stopped being a
+     * burn-down and became the invariant that keeps the graph extractable: Maven cannot express a
+     * cycle, so this set must <em>stay</em> {@code Set.of()} from here on — a future change that
+     * reintroduces a mutual pair between any two contexts fails this test immediately, rather than
+     * surfacing only once someone tries to cut the module boundary.
      */
-    private static final Set<String> DECLARED_CYCLES = new TreeSet<>(Set.of(
-            "perception <-> warehouse"));
+    private static final Set<String> DECLARED_CYCLES = Set.of();
 
     private static JavaClasses classes;
 
@@ -127,22 +125,22 @@ class ContextArchitectureTest {
     }
 
     /**
-     * Maven cannot express a cycle, so one mutual pair blocks extraction for every context at once.
-     * Held against {@link #DECLARED_CYCLES} rather than asserted empty, because one exists today —
-     * the honest state, tracked as a burn-down instead of hidden behind a disabled test. Down from
-     * six before W1.6b (docs/plans/active/DOMAIN-SEPARATION-W1.md §15): the four `events <-> ...`
-     * cycles are gone now that `events` is a pure downstream reader — see {@link #DECLARED_EDGES}'s
-     * own comment for what killed them. `flight <-> warehouse` is gone too (W1.6d,
-     * docs/plans/active/DOMAIN-SEPARATION-W1.md §15): it used to be half C9 (`AssetUsage`'s split
-     * ownership, paid off in W1.6c) and half {@code DefaultProbeService -> TelemetrySourcePort};
-     * moving the probe feature itself (`ProbeService`/`DefaultProbeService`/`ProbeResult`/
-     * `ProbeFailedException`) from `warehouse.application.device` to `perception.application.device`
-     * turned that reference into `perception -> flight`, which was already legal, killing the cycle
-     * outright rather than paying it off behind a new port. The one that remains, `perception <->
-     * warehouse`, is C3/C6 ("warehouse asks runtime state") — W1.6e's job.
+     * Maven cannot express a cycle, so one mutual pair would block extraction for every context at
+     * once. Down from six before W1.6b (docs/plans/active/DOMAIN-SEPARATION-W1.md §15): the four
+     * `events <-> ...` cycles were killed by making `events` a pure downstream reader — see {@link
+     * #DECLARED_EDGES}'s own comment for what killed them. `flight <-> warehouse` was gone by W1.6d:
+     * it used to be half C9 (`AssetUsage`'s split ownership, paid off in W1.6c) and half {@code
+     * DefaultProbeService -> TelemetrySourcePort}; moving the probe feature itself
+     * (`ProbeService`/`DefaultProbeService`/`ProbeResult`/`ProbeFailedException`) from {@code
+     * warehouse.application.device} to {@code perception.application.device} turned that reference
+     * into `perception -> flight`, already legal. The last one, `perception <-> warehouse` (C3/C6 —
+     * "warehouse asks runtime state"), was paid off in W1.6e: {@code AssetStreamService} moved
+     * stream-starting orchestration out of warehouse, and {@code AssetLiveStatePort} inverted
+     * warehouse's genuine live-state reads onto a port perception implements. {@link
+     * #DECLARED_CYCLES} is asserted empty, not held against a burn-down list — see its own javadoc.
      */
     @Test
-    void moduleCyclesAreOnlyTheKnownOnes() {
+    void theModuleGraphIsAcyclic() {
         Set<String> edges = observedEdges();
         Set<String> mutual = new TreeSet<>();
         for (String edge : edges) {
@@ -155,10 +153,9 @@ class ContextArchitectureTest {
         }
         assertThat(mutual)
                 .withFailMessage("""
-                        Module cycles changed. Maven cannot express a cycle, so W1.6 needs this empty.
-                          now: %s
-                          declared: %s
-                        """, mutual, DECLARED_CYCLES)
+                        The module graph gained a cycle: %s
+                        Maven cannot express a cycle -- this must stay empty (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e).
+                        """, mutual)
                 .isEqualTo(DECLARED_CYCLES);
     }
 

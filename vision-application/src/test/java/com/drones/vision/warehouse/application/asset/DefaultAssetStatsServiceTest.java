@@ -5,6 +5,7 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,30 +21,29 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import com.drones.vision.perception.application.pipeline.UsageTracker;
 
 class DefaultAssetStatsServiceTest {
 
     private static final DeviceId DEVICE_ID = DeviceId.random();
 
     private AssetUsageRepositoryPort usageRepository;
-    private UsageTracker usageTracker;
+    private AssetLiveStatePort assetLiveStatePort;
     private AssetId assetId;
 
     @BeforeEach
     void setUp() {
         usageRepository = mock(AssetUsageRepositoryPort.class);
-        usageTracker = mock(UsageTracker.class);
+        assetLiveStatePort = mock(AssetLiveStatePort.class);
         assetId = AssetId.random();
-        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.empty());
+        when(assetLiveStatePort.latestTelemetry(assetId)).thenReturn(Optional.empty());
     }
 
     private DefaultAssetStatsService service() {
-        return new DefaultAssetStatsService(usageRepository, usageTracker);
+        return new DefaultAssetStatsService(usageRepository, assetLiveStatePort);
     }
 
     private DefaultAssetStatsService serviceWithClock(Instant now) {
-        return new DefaultAssetStatsService(usageRepository, usageTracker, () -> now);
+        return new DefaultAssetStatsService(usageRepository, assetLiveStatePort, () -> now);
     }
 
     private static AssetUsage closedUsage(AssetId assetId, Instant startedAt, Instant endedAt) {
@@ -122,7 +122,7 @@ class DefaultAssetStatsServiceTest {
         when(usageRepository.findRecentByAsset(assetId, DefaultAssetStatsService.STATS_FETCH_LIMIT))
                 .thenReturn(List.of());
         Telemetry sample = new Telemetry(DEVICE_ID, Instant.now(), null, null, null, null, 67.6, Map.of());
-        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.of(sample));
+        when(assetLiveStatePort.latestTelemetry(assetId)).thenReturn(Optional.of(sample));
 
         AssetStats stats = service().statsFor(assetId);
 
@@ -133,7 +133,7 @@ class DefaultAssetStatsServiceTest {
     void statsForLeavesBatteryNullWhenTheAssetHasNeverReportedTelemetry() {
         when(usageRepository.findRecentByAsset(assetId, DefaultAssetStatsService.STATS_FETCH_LIMIT))
                 .thenReturn(List.of());
-        when(usageTracker.latestTelemetry(assetId)).thenReturn(Optional.empty());
+        when(assetLiveStatePort.latestTelemetry(assetId)).thenReturn(Optional.empty());
 
         AssetStats stats = service().statsFor(assetId);
 

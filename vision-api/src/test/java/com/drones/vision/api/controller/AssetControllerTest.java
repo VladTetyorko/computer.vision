@@ -23,12 +23,10 @@ import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
-import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
-import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +50,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -68,7 +65,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AssetControllerTest {
 
     private AssetService assetService;
-    private StreamPublisherPort streamPublisherPort;
     private TelemetryRepositoryPort telemetryRepositoryPort;
     private AssetImageRepositoryPort assetImageRepositoryPort;
     private MockMvc mockMvc;
@@ -80,12 +76,11 @@ class AssetControllerTest {
     @BeforeEach
     void setUp() {
         assetService = mock(AssetService.class);
-        streamPublisherPort = mock(StreamPublisherPort.class);
         telemetryRepositoryPort = mock(TelemetryRepositoryPort.class);
         assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AssetController(assetService, currentUser, streamPublisherPort,
+                .standaloneSetup(new AssetController(assetService, currentUser,
                         telemetryRepositoryPort, assetImageRepositoryPort))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -719,135 +714,10 @@ class AssetControllerTest {
         verifyNoInteractions(assetService);
     }
 
-    // ---- POST /api/assets/{id}/stream ----
-
-    @Test
-    void startStreamWithoutDeviceIdPassesNullDeviceAndReturns201() throws Exception {
-        Device device = videoDevice();
-        Asset asset = asset(device);
-
-        StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenReturn(streamId);
-        when(streamPublisherPort.viewUrl(streamId))
-                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
-
-        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
-                .andExpect(jsonPath("$.viewUrl")
-                        .value("http://localhost:8888/" + streamId.value() + "/index.m3u8"));
-
-        verify(assetService).startStream(eq(asset.id()), isNull(), any(), any());
-    }
-
-    @Test
-    void startStreamWithDeviceIdPassesParsedDeviceIdAndOmitsViewUrlWhenAbsent() throws Exception {
-        Device device = videoDevice();
-        Asset asset = asset(device);
-
-        StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), eq(device.id()), any(), any())).thenReturn(streamId);
-        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
-
-        String body = "{\"deviceId\":\"" + device.id().value() + "\"}";
-
-        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value())
-                        .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
-                .andExpect(jsonPath("$.viewUrl").doesNotExist());
-
-        verify(assetService).startStream(eq(asset.id()), eq(device.id()), any(), any());
-    }
-
-    @Test
-    void startStreamReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
-        Device device = videoDevice();
-        Asset asset = asset(device);
-
-        StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenReturn(streamId);
-        when(streamPublisherPort.viewUrl(streamId))
-                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
-        when(streamPublisherPort.whepUrl(streamId))
-                .thenReturn(Optional.of(URI.create("http://localhost:18889/" + streamId.value() + "/whep")));
-
-        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.viewUrl")
-                        .value("http://localhost:8888/" + streamId.value() + "/index.m3u8"))
-                .andExpect(jsonPath("$.whepUrl")
-                        .value("http://localhost:18889/" + streamId.value() + "/whep"));
-    }
-
-    @Test
-    void startStreamOmitsWhepUrlWhenPublisherHasNoWebRtcEndpoint() throws Exception {
-        Device device = videoDevice();
-        Asset asset = asset(device);
-
-        StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenReturn(streamId);
-        when(streamPublisherPort.viewUrl(streamId))
-                .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
-        when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
-
-        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.whepUrl").doesNotExist());
-    }
-
-    @Test
-    void startStreamReturns400WhenDeviceIsAmbiguous() throws Exception {
-        Device device = videoDevice();
-        Asset asset = asset(device);
-
-        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenThrow(new IllegalArgumentException(
-                "Asset " + asset.id().value() + " has multiple video-capable devices, specify which one to start"));
-
-        mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
-    }
-
-    @Test
-    void startStreamReturns404ForUnknownAsset() throws Exception {
-        AssetId unknown = AssetId.random();
-        when(assetService.startStream(eq(unknown), isNull(), any(), any()))
-                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
-
-        mockMvc.perform(post("/api/assets/{id}/stream", unknown.value()))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
-    }
-
-    @Test
-    void startStreamReturns400ForMalformedAssetUuid() throws Exception {
-        mockMvc.perform(post("/api/assets/{id}/stream", "not-a-uuid"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
-
-        verifyNoInteractions(assetService);
-    }
-
-    // ---- DELETE /api/assets/{id}/stream ----
-
-    @Test
-    void stopStreamReturns204AndDelegatesToService() throws Exception {
-        AssetId assetId = AssetId.random();
-
-        mockMvc.perform(delete("/api/assets/{id}/stream", assetId.value()))
-                .andExpect(status().isNoContent());
-
-        verify(assetService).stopStream(assetId);
-    }
-
-    @Test
-    void stopStreamReturns400ForMalformedUuid() throws Exception {
-        mockMvc.perform(delete("/api/assets/{id}/stream", "not-a-uuid"))
-                .andExpect(status().isBadRequest());
-
-        verifyNoInteractions(assetService);
-    }
+    // ---- POST/DELETE /api/assets/{id}/stream ----
+    // Moved to AssetStreamControllerTest (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e —
+    // AssetStreamController split off AssetController to stay under the five-constructor-parameter
+    // ceiling, .claude/skills/java-clean-code/SKILL.md §3).
 
     // ---- GET /api/usages/{usageId}/telemetry ----
 

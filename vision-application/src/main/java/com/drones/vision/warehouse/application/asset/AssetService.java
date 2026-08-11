@@ -5,22 +5,22 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
-import com.drones.vision.perception.domain.model.PipelineConfig;
-import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.platform.VisibilityScope;
-import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 
 /**
  * Everything the application does with assets — the user-facing "my drone", one or more devices
  * behind one name.
  *
- * <p>One interface, one implementation ({@link DefaultAssetService}). Streaming an asset lives
- * here rather than in a separate service because it is an operation <em>on an asset</em>: it
- * resolves which of the asset's devices to use, then delegates the mechanics to
- * {@link com.drones.vision.perception.application.stream.StreamService}.
+ * <p>One interface, one implementation ({@link DefaultAssetService}). <b>Starting</b> a stream is
+ * not here: {@code com.drones.vision.perception.application.stream.AssetStreamService} owns it
+ * (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e) — it resolves a device and hands it,
+ * with {@code PipelineConfig}/{@code TrackingConfigPatch}, to the runtime, which is perception's
+ * job, not inventory's. {@link #stopStream} stays here: it names no perception type at all, and
+ * goes through {@link com.drones.vision.warehouse.domain.port.AssetLiveStatePort} — the inverted
+ * read/stop port this service now depends on instead of the runtime directly.
  *
  * <p>Ownership is derived from the acting user at call time, never injected at construction.
  *
@@ -145,41 +145,6 @@ public interface AssetService {
      * @throws java.util.NoSuchElementException if no asset has that id
      */
     AssetDeletion delete(AssetId id, UserId actor);
-
-    /**
-     * Starts streaming from one of the asset's devices, with the caller stating nothing about
-     * tracking — exactly {@code startStream(id, device, config, TrackingConfigPatch.NOTHING)}.
-     *
-     * @param id     the asset to stream
-     * @param device which device to use, or {@code null} to resolve the asset's only active
-     *               video-capable source
-     * @param config pipeline settings for this stream
-     * @return the new stream's id
-     * @throws java.util.NoSuchElementException if no asset has that id
-     * @throws IllegalArgumentException         if the device does not belong to the asset, or which
-     *                                          device to use is ambiguous
-     * @throws IllegalStateException            if the asset is not in service
-     */
-    StreamId startStream(AssetId id, DeviceId device, PipelineConfig config);
-
-    /**
-     * Starts streaming from one of the asset's devices, stating the caller's tracking wishes
-     * separately — the asset-level twin of {@link com.drones.vision.perception.application.stream.StreamService#start(DeviceId, PipelineConfig,
-     * TrackingConfigPatch)}, whose javadoc describes how the three configuration layers fold.
-     *
-     * @param id       the asset to stream
-     * @param device   which device to use, or {@code null} to resolve the asset's only active
-     *                 video-capable source
-     * @param config   pipeline settings for this stream
-     * @param tracking what this request states about tracking, per field; never {@code null}
-     * @return the new stream's id
-     * @throws java.util.NoSuchElementException if no asset has that id
-     * @throws IllegalArgumentException         if the device does not belong to the asset, which
-     *                                          device to use is ambiguous, or the composed tracking
-     *                                          configuration is invalid
-     * @throws IllegalStateException            if the asset is not in service
-     */
-    StreamId startStream(AssetId id, DeviceId device, PipelineConfig config, TrackingConfigPatch tracking);
 
     /**
      * Stops every stream this asset's devices are running. A no-op for an unknown asset.

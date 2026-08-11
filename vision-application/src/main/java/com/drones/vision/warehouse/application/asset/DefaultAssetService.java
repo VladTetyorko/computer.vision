@@ -6,7 +6,6 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
-import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.DeviceCategory;
@@ -14,9 +13,8 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
-import com.drones.vision.perception.domain.model.PipelineConfig;
-import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
@@ -34,9 +32,6 @@ import java.util.Set;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.platform.VisibilityScope;
-import com.drones.vision.perception.application.stream.ActiveStream;
-import com.drones.vision.perception.application.stream.StreamService;
-import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 
 /**
  * The one implementation of {@link AssetService}.
@@ -44,6 +39,13 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
  * <p>Devices are reached through {@link DeviceService}, not the device repository: registering,
  * deleting and restoring a source already carry rules (stop its stream, write an audit line) that
  * would otherwise be duplicated here and drift.
+ *
+ * <p>Live runtime state — which devices are streaming, stopping a device's stream before it is
+ * retired or deleted — is reached through {@link AssetLiveStatePort}, not {@code StreamService}
+ * directly (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e): this is a CRUD/inventory
+ * service, and inventory reads runtime through the port it declares, never the runtime module
+ * itself. Starting a stream is not this class's job at all any more — see {@code
+ * com.drones.vision.perception.application.stream.AssetStreamService}.
  *
  * <p>Runtime {@link AssetStatus} and {@link LifecycleState} are separate axes on purpose — "not
  * streaming right now" and "withdrawn from service" are different facts, and collapsing them
@@ -65,17 +67,17 @@ public final class DefaultAssetService implements AssetService {
     private final AssetUsageRepositoryPort usageRepository;
     private final AuditTrailPort auditTrail;
     private final DeviceService deviceService;
-    private final StreamService streamService;
+    private final AssetLiveStatePort assetLiveStatePort;
 
     public DefaultAssetService(AssetRepositoryPort assetRepository, CategoryRepositoryPort categoryRepository,
                                 AssetUsageRepositoryPort usageRepository, AuditTrailPort auditTrail,
-                                DeviceService deviceService, StreamService streamService) {
+                                DeviceService deviceService, AssetLiveStatePort assetLiveStatePort) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.categoryRepository = Objects.requireNonNull(categoryRepository, "categoryRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
         this.deviceService = Objects.requireNonNull(deviceService, "deviceService must not be null");
-        this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
+        this.assetLiveStatePort = Objects.requireNonNull(assetLiveStatePort, "assetLiveStatePort must not be null");
     }
 
     // --- Creating ------------------------------------------------------------
@@ -109,7 +111,7 @@ public final class DefaultAssetService implements AssetService {
 
     @Override
     public List<AssetSummary> assets(boolean includeDeleted) {
-        Set<DeviceId> activeDevices = streamService.activeDeviceIds();
+        Set<DeviceId> activeDevices = assetLiveStatePort.activeStreamsByDevice().keySet();
         return assetRepository.findAll().stream()
                 .filter(asset -> includeDeleted || !asset.isDeleted())
                 .map(asset -> toSummary(asset, activeDevices))
@@ -133,7 +135,7 @@ public final class DefaultAssetService implements AssetService {
                 .map(deviceService::find)
                 .flatMap(Optional::stream)
                 .toList();
-        return new AssetDetails(toSummary(asset, streamService.activeDeviceIds()), devices,
+        return new AssetDetails(toSummary(asset, assetLiveStatePort.activeStreamsByDevice().keySet()), devices,
                 usageRepository.findRecentByAsset(id, RECENT_USAGES_LIMIT));
     }
 
@@ -263,65 +265,15 @@ public final class DefaultAssetService implements AssetService {
     // --- Streaming -----------------------------------------------------------
 
     @Override
-    public StreamId startStream(AssetId id, DeviceId device, PipelineConfig config) {
-        return startStream(id, device, config, TrackingConfigPatch.NOTHING);
-    }
-
-    @Override
-    public StreamId startStream(AssetId id, DeviceId device, PipelineConfig config, TrackingConfigPatch tracking) {
-        Objects.requireNonNull(config, "config must not be null");
-        Objects.requireNonNull(tracking, "tracking must not be null");
-        Asset asset = require(id);
-        if (!asset.isActive()) {
-            throw new IllegalStateException("Asset is not in service: " + asset.displayName());
-        }
-        if (device != null && !asset.devices().contains(device)) {
-            throw new IllegalArgumentException(
-                    "Device " + device.value() + " does not belong to asset " + id.value());
-        }
-        return streamService.start(device != null ? device : resolveSingleVideoDevice(asset), config, tracking);
-    }
-
-    @Override
     public void stopStream(AssetId id) {
         Objects.requireNonNull(id, "id must not be null");
         // Unknown asset: no-op, mirroring StreamService#stop's idempotency for unknown ids.
         assetRepository.findById(id).ifPresent(this::stopStreamsOf);
     }
 
-    /**
-     * Picks the asset's single active video-capable device.
-     *
-     * <p>Deactivated and deleted devices are invisible here: a drone with one retired camera and
-     * one working one should just start the working one, not report ambiguity.
-     */
-    private DeviceId resolveSingleVideoDevice(Asset asset) {
-        List<DeviceId> videoCapable = asset.devices().stream()
-                .filter(deviceId -> deviceService.find(deviceId)
-                        .map(d -> d.isActive() && d.capabilities().contains(Capability.VIDEO))
-                        .orElse(false))
-                .toList();
-        if (videoCapable.isEmpty()) {
-            throw new IllegalArgumentException("Asset " + asset.id().value()
-                    + " has no active video-capable device; specify one explicitly");
-        }
-        if (videoCapable.size() > 1) {
-            throw new IllegalArgumentException("Asset " + asset.id().value()
-                    + " has multiple video-capable devices, specify which one to start: " + videoCapable);
-        }
-        return videoCapable.get(0);
-    }
-
     /** Stops every running stream belonging to this asset's devices; returns how many. */
     private int stopStreamsOf(Asset asset) {
-        int stopped = 0;
-        for (ActiveStream active : streamService.streams()) {
-            if (asset.devices().contains(active.deviceId())) {
-                streamService.stop(active.streamId());
-                stopped++;
-            }
-        }
-        return stopped;
+        return assetLiveStatePort.stopStreamsForDevices(asset.devices());
     }
 
     // --- Device assignment (docs/main/CYCLES-PLAN.md §8) ---------------------------

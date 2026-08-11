@@ -1,6 +1,7 @@
 package com.drones.vision.api.demo;
 
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.simulation.application.RouteMode;
 import com.drones.vision.simulation.application.SimulatedAsset;
 import com.drones.vision.simulation.application.SimulationService;
@@ -37,8 +38,10 @@ import java.util.function.Consumer;
  * {@link SimulationService#simulate} with {@code autoStart} would abort the whole call when a
  * stream fails to open (no mediamtx, a codec the machine cannot decode) — and the asset it already
  * created would be left behind, invisible to the caller. Creating every asset first, then starting
- * only {@link DemoPlan#startStreams()} of them through {@link AssetService#startStream}, keeps a
- * failed stream to one reported line instead of one lost asset.
+ * only {@link DemoPlan#startStreams()} of them through {@link AssetStreamService#startStream}
+ * (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e — split off {@link AssetService},
+ * which this class still uses for {@link #registeredNames}), keeps a failed stream to one reported
+ * line instead of one lost asset.
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.demo", name = "enabled", matchIfMissing = true)
@@ -77,11 +80,14 @@ public class DemoFleet {
 
     private final SimulationService simulations;
     private final AssetService assets;
+    private final AssetStreamService assetStreams;
     private final DemoVideoLibrary videos;
 
-    public DemoFleet(SimulationService simulations, AssetService assets, DemoVideoLibrary videos) {
+    public DemoFleet(SimulationService simulations, AssetService assets, AssetStreamService assetStreams,
+                      DemoVideoLibrary videos) {
         this.simulations = Objects.requireNonNull(simulations, "simulations must not be null");
         this.assets = Objects.requireNonNull(assets, "assets must not be null");
+        this.assetStreams = Objects.requireNonNull(assetStreams, "assetStreams must not be null");
         this.videos = Objects.requireNonNull(videos, "videos must not be null");
     }
 
@@ -134,7 +140,7 @@ public class DemoFleet {
         int started = 0;
         for (DemoAsset asset : fleet.subList(0, Math.max(0, Math.min(howMany, fleet.size())))) {
             try {
-                assets.startStream(asset.id(), null, PipelineConfig.defaults());
+                assetStreams.startStream(asset.id(), null, PipelineConfig.defaults());
                 started++;
             } catch (RuntimeException e) {
                 problems.accept("stream " + asset.displayName() + ": " + describe(e));

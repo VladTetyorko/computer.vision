@@ -17,6 +17,7 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +61,7 @@ class DefaultSimulationServiceTest {
     private static final URI MEDIAMTX_RTSP_BASE = URI.create("rtsp://localhost:8554");
 
     private AssetService assetService;
+    private AssetStreamService assetStreamService;
     private CategoryRepositoryPort categoryRepository;
     private FeedTransmitterPort feedTransmitter;
     private FeedTransmitterPort mjpegTransmitter;
@@ -71,11 +73,12 @@ class DefaultSimulationServiceTest {
     @BeforeEach
     void setUp() {
         assetService = mock(AssetService.class);
+        assetStreamService = mock(AssetStreamService.class);
         categoryRepository = mock(CategoryRepositoryPort.class);
         feedTransmitter = mock(FeedTransmitterPort.class);
         mjpegTransmitter = mock(FeedTransmitterPort.class);
         mavlinkTransmitter = mock(FeedTransmitterPort.class);
-        service = new DefaultSimulationService(assetService, categoryRepository,
+        service = new DefaultSimulationService(assetService, assetStreamService, categoryRepository,
                 new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter, mavlinkTransmitter)),
                 MEDIAMTX_RTSP_BASE);
         actor = UserId.random();
@@ -406,7 +409,7 @@ class DefaultSimulationServiceTest {
         Path file = videoFile(tempDir, "clip.mp4");
         Asset created = stubCreate();
         StreamId startedStream = StreamId.random();
-        when(assetService.startStream(eq(created.id()), eq(null), eq(PipelineConfig.defaults())))
+        when(assetStreamService.startStream(eq(created.id()), eq(null), eq(PipelineConfig.defaults())))
                 .thenReturn(startedStream);
         SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, true);
 
@@ -414,7 +417,7 @@ class DefaultSimulationServiceTest {
 
         assertEquals(created.id(), result.assetId());
         assertEquals(startedStream, result.streamId());
-        verify(assetService).startStream(created.id(), null, PipelineConfig.defaults());
+        verify(assetStreamService).startStream(created.id(), null, PipelineConfig.defaults());
     }
 
     @Test
@@ -427,7 +430,7 @@ class DefaultSimulationServiceTest {
 
         assertEquals(created.id(), result.assetId());
         assertNull(result.streamId());
-        verify(assetService, never()).startStream(any(), any(), any());
+        verify(assetStreamService, never()).startStream(any(), any(), any());
     }
 
     // --- transport ----------------------------------------------------------------
@@ -603,7 +606,7 @@ class DefaultSimulationServiceTest {
         when(feedTransmitter.supports(any())).thenReturn(true);
         when(feedTransmitter.start(any(), any()))
                 .thenReturn(new StreamDescriptor("rtsp", URI.create("rtsp://localhost:8554/feed-y"), Map.of()));
-        when(assetService.startStream(any(), any(), any())).thenThrow(new IllegalStateException("device offline"));
+        when(assetStreamService.startStream(any(), any(), any())).thenThrow(new IllegalStateException("device offline"));
         SimulationSpec spec =
                 new SimulationSpec("My Drone", file.toString(), null, null, true, SimulationTransport.RTSP);
 
@@ -883,7 +886,7 @@ class DefaultSimulationServiceTest {
     void simulateStopsTheMavlinkTelemetryFeedWhenStartStreamThrows(@TempDir Path tempDir) throws IOException {
         Path file = videoFile(tempDir, "clip.mp4");
         Asset created = stubCreate();
-        when(assetService.startStream(any(), any(), any())).thenThrow(new IllegalStateException("device offline"));
+        when(assetStreamService.startStream(any(), any(), any())).thenThrow(new IllegalStateException("device offline"));
         SimulationSpec spec = new SimulationSpec("My Drone", file.toString(), null, null, true,
                 SimulationTransport.DIRECT, null, TelemetryTransport.MAVLINK);
 

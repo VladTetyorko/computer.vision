@@ -2,6 +2,7 @@ package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.domain.model.Asset;
@@ -120,6 +121,9 @@ class TrackingAssociateE2ETest {
     private AssetService assetService;
 
     @Autowired
+    private AssetStreamService assetStreamService;
+
+    @Autowired
     private WebApplicationContext webApplicationContext;
 
     private MockMvc mockMvc;
@@ -140,7 +144,7 @@ class TrackingAssociateE2ETest {
                         new CategoryId("drone"), Map.of(), List.of(videoDevice)),
                 DevPrincipal.OWNERSHIP, DevPrincipal.USER_ID);
 
-        StreamId streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+        StreamId streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
         try {
             assertTrue(servicer.threeTrackedFrames.await(AWAIT_TIMEOUT.toSeconds(), TimeUnit.SECONDS),
                     "expected >=3 frames stating TRACKING_MODE_ASSOCIATE within " + AWAIT_TIMEOUT

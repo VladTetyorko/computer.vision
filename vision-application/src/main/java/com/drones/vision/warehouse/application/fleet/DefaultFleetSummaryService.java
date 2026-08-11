@@ -3,18 +3,15 @@ package com.drones.vision.warehouse.application.fleet;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
-import com.drones.vision.perception.domain.model.DetectionEvent;
-import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
-import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,10 +21,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.category.CategoryCounts;
-import com.drones.vision.perception.application.pipeline.UsageTracker;
 import com.drones.vision.platform.VisibilityScope;
-import com.drones.vision.perception.application.stream.ActiveStream;
-import com.drones.vision.perception.application.stream.StreamService;
 
 /**
  * The one implementation of {@link FleetSummaryService}.
@@ -35,10 +29,12 @@ import com.drones.vision.perception.application.stream.StreamService;
  * <h2>Composition, not new reads</h2>
  * Every fact this class reports already exists behind an existing collaborator: {@link
  * AssetService#assets(boolean)} for the fleet itself (with {@code categoryName}/{@code status}
- * already derived, soft-delete filtering already applied), {@link StreamService#streams()} for
- * which device is on which stream, {@link UsageTracker#latestTelemetry(AssetId)} for battery/
- * staleness, and {@link DetectionEventRepositoryPort#findRecent} for open detection events. This
- * class only joins them — see each private helper below.
+ * already derived, soft-delete filtering already applied), and {@link AssetLiveStatePort} for
+ * everything live — which device is on which stream, battery/staleness, open detection events
+ * (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: warehouse reads runtime state
+ * through the one port it declares, never {@code StreamService}/{@code UsageTracker}/{@code
+ * DetectionEventRepositoryPort} directly). This class only joins them — see each private helper
+ * below.
  *
  * <h2>Bounds</h2>
  * <ul>
@@ -67,45 +63,36 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
     static final int MAX_ASSETS_IN_SUMMARY = 500;
 
     /**
-     * How many of the fleet's most-recently-updated {@link DetectionEvent}s (across every stream,
-     * newest-first by {@code lastSeen}) are scanned to count each asset's currently {@code OPEN}
-     * ones. Generous for this cycle's scale — {@code DetectionEventEngine}'s debounce rules keep
-     * event volume naturally low — but honestly not exhaustive: an asset whose open event has
-     * fallen out of the {@value #OPEN_EVENTS_SCAN_LIMIT} most-recently-updated events fleet-wide
-     * (only plausible with many simultaneously very-active streams) would undercount.
-     * {@link DetectionEventRepositoryPort} has no "count open events per asset" query shape to ask
-     * for instead.
+     * How many of the fleet's most-recently-updated detection events (across every stream,
+     * newest-first by {@code lastSeen}) {@link AssetLiveStatePort#openDetectionEventCounts(int)} is
+     * asked to scan to count each asset's currently open ones. Generous for this cycle's scale —
+     * {@code DetectionEventEngine}'s debounce rules keep event volume naturally low — but honestly
+     * not exhaustive: an asset whose open event has fallen out of the {@value
+     * #OPEN_EVENTS_SCAN_LIMIT} most-recently-updated events fleet-wide (only plausible with many
+     * simultaneously very-active streams) would undercount. This tuning constant stays warehouse's
+     * even though the scan itself now runs behind the port — {@code scanLimit} is threaded through
+     * as a parameter for exactly that reason.
      */
     static final int OPEN_EVENTS_SCAN_LIMIT = 2000;
 
     private final AssetService assetService;
-    private final StreamService streamService;
-    private final UsageTracker usageTracker;
-    private final DetectionEventRepositoryPort detectionEventRepositoryPort;
+    private final AssetLiveStatePort assetLiveStatePort;
     private final int maxAssetsInSummary;
     private final int openEventsScanLimit;
 
-    public DefaultFleetSummaryService(AssetService assetService, StreamService streamService,
-                                       UsageTracker usageTracker,
-                                       DetectionEventRepositoryPort detectionEventRepositoryPort) {
-        this(assetService, streamService, usageTracker, detectionEventRepositoryPort, MAX_ASSETS_IN_SUMMARY,
-                OPEN_EVENTS_SCAN_LIMIT);
+    public DefaultFleetSummaryService(AssetService assetService, AssetLiveStatePort assetLiveStatePort) {
+        this(assetService, assetLiveStatePort, MAX_ASSETS_IN_SUMMARY, OPEN_EVENTS_SCAN_LIMIT);
     }
 
     /**
-     * Same as the 4-argument constructor, plus explicit caps (docs/plans/active/LAYERING-REFACTOR-PLAN.md
+     * Same as the 2-argument constructor, plus explicit caps (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction, {@code vision.application.fleet.*}) instead of {@link
      * #MAX_ASSETS_IN_SUMMARY}/{@link #OPEN_EVENTS_SCAN_LIMIT}.
      */
-    public DefaultFleetSummaryService(AssetService assetService, StreamService streamService,
-                                       UsageTracker usageTracker,
-                                       DetectionEventRepositoryPort detectionEventRepositoryPort,
+    public DefaultFleetSummaryService(AssetService assetService, AssetLiveStatePort assetLiveStatePort,
                                        int maxAssetsInSummary, int openEventsScanLimit) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
-        this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
-        this.usageTracker = Objects.requireNonNull(usageTracker, "usageTracker must not be null");
-        this.detectionEventRepositoryPort =
-                Objects.requireNonNull(detectionEventRepositoryPort, "detectionEventRepositoryPort must not be null");
+        this.assetLiveStatePort = Objects.requireNonNull(assetLiveStatePort, "assetLiveStatePort must not be null");
         this.maxAssetsInSummary = maxAssetsInSummary;
         this.openEventsScanLimit = openEventsScanLimit;
     }
@@ -123,8 +110,8 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
 
     /** Aggregates an already-resolved (scoped or unscoped) asset-summary set into the read model. */
     private FleetSummary summarize(List<AssetSummary> summaries) {
-        Map<DeviceId, StreamId> streamByDevice = streamByDevice();
-        Map<AssetId, Integer> openEventCounts = openEventCounts();
+        Map<DeviceId, StreamId> streamByDevice = assetLiveStatePort.activeStreamsByDevice();
+        Map<AssetId, Integer> openEventCounts = assetLiveStatePort.openDetectionEventCounts(openEventsScanLimit);
         Instant now = Instant.now();
 
         List<AssetAttention> assets = summaries.stream()
@@ -136,24 +123,6 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
         return new FleetSummary(categoryCounts(summaries), assets, summaries.size());
     }
 
-    private Map<DeviceId, StreamId> streamByDevice() {
-        Map<DeviceId, StreamId> byDevice = new HashMap<>();
-        for (ActiveStream active : streamService.streams()) {
-            byDevice.put(active.deviceId(), active.streamId());
-        }
-        return byDevice;
-    }
-
-    private Map<AssetId, Integer> openEventCounts() {
-        Map<AssetId, Integer> counts = new HashMap<>();
-        for (DetectionEvent event : detectionEventRepositoryPort.findRecent(null, openEventsScanLimit)) {
-            if (event.state() == DetectionEventState.OPEN && event.assetId() != null) {
-                counts.merge(event.assetId(), 1, Integer::sum);
-            }
-        }
-        return counts;
-    }
-
     private AssetAttention toAttention(AssetSummary summary, Map<DeviceId, StreamId> streamByDevice,
                                         Map<AssetId, Integer> openEventCounts, Instant now) {
         Asset asset = summary.asset();
@@ -163,7 +132,7 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
                 .findFirst()
                 .orElse(null);
 
-        Telemetry latest = usageTracker.latestTelemetry(asset.id()).orElse(null);
+        Telemetry latest = assetLiveStatePort.latestTelemetry(asset.id()).orElse(null);
         Double batteryPercent = latest == null ? null : latest.batteryPercent();
         Long telemetryAgeMs = latest == null ? null : Duration.between(latest.at(), now).toMillis();
         FlightState flightState = latest == null ? null : latest.flightState();

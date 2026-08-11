@@ -13,6 +13,7 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 
 import java.io.IOException;
@@ -49,9 +50,10 @@ import com.drones.vision.perception.application.pipeline.FeedTransmitterRegistry
  * TelemetryTransport#MAVLINK} (a real UDP feed via {@code MavlinkFeedTransmitter}, adapter-mavlink's
  * own natural follow-up — see {@link #wireMavlinkTelemetryDevice} and adapter-mavlink/MODULE.md's
  * Gotchas), independently of whichever {@link SimulationTransport} the video device uses — and
- * delegates the actual creation/streaming to {@link AssetService}, so every rule {@code
- * AssetService#create}/{@code #startStream} already enforces (category validation, audit, device
- * registration) applies here too instead of being duplicated.
+ * delegates the actual creation to {@link AssetService#create} and the streaming to {@link
+ * AssetStreamService#startStream} (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e split the
+ * two off the one service they used to share), so every rule either already enforces (category
+ * validation, audit, device registration) applies here too instead of being duplicated.
  *
  * <p>{@link #resumeAll} (the simulated-feed resume-on-boot mechanism) is the read side of the same
  * bookkeeping: given a persisted, {@code ACTIVE}, {@code simulated}-category asset whose {@code
@@ -182,6 +184,7 @@ public final class DefaultSimulationService implements SimulationService {
     static final double MAVLINK_FALLBACK_LONGITUDE = SimulationServiceSettings.defaults().fallbackLongitude();
 
     private final AssetService assetService;
+    private final AssetStreamService assetStreamService;
     private final CategoryRepositoryPort categoryRepository;
     private final FeedTransmitterRegistry feedTransmitters;
     private final URI mediamtxRtspBase;
@@ -207,21 +210,24 @@ public final class DefaultSimulationService implements SimulationService {
      *                         rtsp} devices are this app's own TX-fed simulation feeds, structurally
      *                         (host:port match), rather than a real external camera
      */
-    public DefaultSimulationService(AssetService assetService, CategoryRepositoryPort categoryRepository,
+    public DefaultSimulationService(AssetService assetService, AssetStreamService assetStreamService,
+                                     CategoryRepositoryPort categoryRepository,
                                      FeedTransmitterRegistry feedTransmitters, URI mediamtxRtspBase) {
-        this(assetService, categoryRepository, feedTransmitters, mediamtxRtspBase,
+        this(assetService, assetStreamService, categoryRepository, feedTransmitters, mediamtxRtspBase,
                 SimulationServiceSettings.defaults());
     }
 
     /**
-     * Same as the 4-argument constructor, plus explicit MAVLink-transport fallback settings
+     * Same as the 5-argument constructor, plus explicit MAVLink-transport fallback settings
      * (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code
      * vision.application.simulation.*}) instead of {@link SimulationServiceSettings#defaults()}.
      */
-    public DefaultSimulationService(AssetService assetService, CategoryRepositoryPort categoryRepository,
+    public DefaultSimulationService(AssetService assetService, AssetStreamService assetStreamService,
+                                     CategoryRepositoryPort categoryRepository,
                                      FeedTransmitterRegistry feedTransmitters, URI mediamtxRtspBase,
                                      SimulationServiceSettings settings) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
+        this.assetStreamService = Objects.requireNonNull(assetStreamService, "assetStreamService must not be null");
         this.categoryRepository = Objects.requireNonNull(categoryRepository, "categoryRepository must not be null");
         this.feedTransmitters = Objects.requireNonNull(feedTransmitters, "feedTransmitters must not be null");
         this.mediamtxRtspBase = Objects.requireNonNull(mediamtxRtspBase, "mediamtxRtspBase must not be null");
@@ -300,7 +306,7 @@ public final class DefaultSimulationService implements SimulationService {
                 awaitFeedEstablished();
             }
             try {
-                streamId = assetService.startStream(asset.id(), null, PipelineConfig.defaults());
+                streamId = assetStreamService.startStream(asset.id(), null, PipelineConfig.defaults());
             } catch (RuntimeException e) {
                 feedByAsset.remove(asset.id());
                 telemetryFeedByAsset.remove(asset.id());
@@ -314,7 +320,7 @@ public final class DefaultSimulationService implements SimulationService {
 
     /**
      * A short, fixed delay between starting an RTSP feed and opening the RX side via {@link
-     * AssetService#startStream} for {@code autoStart} — empirically required (discovered while
+     * AssetStreamService#startStream} for {@code autoStart} — empirically required (discovered while
      * verifying this class's docker-gated E2E test): {@code RtspFeedTransmitter}'s transmit thread
      * takes on the order of tens of milliseconds to reach mediamtx's ANNOUNCE/SETUP/RECORD
      * handshake, and mediamtx answers the RX side's DESCRIBE with a bare 404 for a path with no

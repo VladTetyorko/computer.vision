@@ -14,11 +14,11 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
-import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
@@ -49,9 +49,6 @@ import static org.mockito.Mockito.when;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.platform.VisibilityScope;
-import com.drones.vision.perception.application.stream.ActiveStream;
-import com.drones.vision.perception.application.stream.StreamService;
-import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 
 class DefaultAssetServiceTest {
 
@@ -62,7 +59,7 @@ class DefaultAssetServiceTest {
     private AssetUsageRepositoryPort usageRepository;
     private AuditTrailPort auditTrail;
     private DeviceService deviceService;
-    private StreamService streamService;
+    private AssetLiveStatePort assetLiveStatePort;
     private Ownership ownership;
     private UserId actingUser;
     private AssetService service;
@@ -74,18 +71,18 @@ class DefaultAssetServiceTest {
         usageRepository = mock(AssetUsageRepositoryPort.class);
         auditTrail = mock(AuditTrailPort.class);
         deviceService = mock(DeviceService.class);
-        streamService = mock(StreamService.class);
+        assetLiveStatePort = mock(AssetLiveStatePort.class);
         actingUser = UserId.random();
         ownership = new Ownership(actingUser, GroupId.random());
 
         service = new DefaultAssetService(assetRepository, categoryRepository, usageRepository, auditTrail,
-                deviceService, streamService);
+                deviceService, assetLiveStatePort);
 
         when(assetRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(streamService.streams()).thenReturn(List.of());
         when(categoryRepository.findById(DRONE))
                 .thenReturn(Optional.of(new DeviceCategory(DRONE, "Drone", null, List.of())));
-        when(streamService.activeDeviceIds()).thenReturn(Set.of());
+        when(assetLiveStatePort.activeStreamsByDevice()).thenReturn(Map.of());
+        when(assetLiveStatePort.stopStreamsForDevices(any())).thenReturn(0);
         when(usageRepository.findRecentByAsset(any(), anyInt())).thenReturn(List.of());
     }
 
@@ -212,7 +209,7 @@ class DefaultAssetServiceTest {
         Device cam = device("cam-1");
         Asset asset = asset(Set.of(cam.id()));
         when(assetRepository.findAll()).thenReturn(List.of(asset));
-        when(streamService.activeDeviceIds()).thenReturn(Set.of(cam.id()));
+        when(assetLiveStatePort.activeStreamsByDevice()).thenReturn(Map.of(cam.id(), StreamId.random()));
 
         List<AssetSummary> summaries = service.assets();
 
@@ -225,7 +222,7 @@ class DefaultAssetServiceTest {
         Device cam = device("cam-1");
         Asset asset = asset(Set.of(cam.id()));
         when(assetRepository.findAll()).thenReturn(List.of(asset));
-        when(streamService.activeDeviceIds()).thenReturn(Set.of());
+        when(assetLiveStatePort.activeStreamsByDevice()).thenReturn(Map.of());
 
         List<AssetSummary> summaries = service.assets();
 
@@ -434,17 +431,14 @@ class DefaultAssetServiceTest {
         DeviceId two = DeviceId.random();
         Asset stored = asset(Set.of(one, two));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        StreamId streamOne = StreamId.random();
-        StreamId elsewhere = StreamId.random();
-        when(streamService.streams()).thenReturn(List.of(
-                new ActiveStream(streamOne, one, Instant.now()),
-                new ActiveStream(elsewhere, DeviceId.random(), Instant.now())));
+        when(assetLiveStatePort.stopStreamsForDevices(stored.devices())).thenReturn(1);
 
         Asset result = service.setState(stored.id(), LifecycleState.DEACTIVATED, actingUser);
 
         assertEquals(LifecycleState.DEACTIVATED, result.state());
-        verify(streamService).stop(streamOne);
-        verify(streamService, never()).stop(elsewhere); // another asset's stream is untouched
+        // Stopping is delegated wholesale to the port -- which devices actually had a running
+        // stream is StreamBackedAssetLiveState's own concern, tested there.
+        verify(assetLiveStatePort).stopStreamsForDevices(stored.devices());
     }
 
     // --- Deleting (soft) -----------------------------------------------------
@@ -539,153 +533,25 @@ class DefaultAssetServiceTest {
         assertEquals(AuditAction.RESTORED, captor.getValue().action());
     }
 
-    // --- Streaming: resolving which device to start ---------------------------
-
-    @Test
-    void startStreamResolvesTheAssetsOnlyActiveVideoCapableDeviceWhenNoneIsNamed() {
-        Device cam = device("cam-1");
-        Device telemetry = telemetryDevice("tel-1");
-        Asset stored = asset(Set.of(cam.id(), telemetry.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        when(deviceService.find(cam.id())).thenReturn(Optional.of(cam));
-        when(deviceService.find(telemetry.id())).thenReturn(Optional.of(telemetry));
-        StreamId expected = StreamId.random();
-        when(streamService.start(eq(cam.id()), any(), any())).thenReturn(expected);
-
-        StreamId started = service.startStream(stored.id(), null, PipelineConfig.defaults());
-
-        assertEquals(expected, started);
-        verify(streamService).start(cam.id(), PipelineConfig.defaults(), TrackingConfigPatch.NOTHING);
-    }
-
-    @Test
-    void startStreamRefusesToGuessWhenTheAssetHasSeveralVideoCapableDevices() {
-        Device first = device("cam-a");
-        Device second = device("cam-b");
-        Asset stored = asset(Set.of(first.id(), second.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        when(deviceService.find(first.id())).thenReturn(Optional.of(first));
-        when(deviceService.find(second.id())).thenReturn(Optional.of(second));
-
-        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
-                () -> service.startStream(stored.id(), null, PipelineConfig.defaults()));
-
-        // The message must name both candidates, so the caller can pick one without a second lookup.
-        assertTrue(thrown.getMessage().contains(first.id().value().toString())
-                        && thrown.getMessage().contains(second.id().value().toString()),
-                "expected message to name both ambiguous candidates: " + thrown.getMessage());
-        verify(streamService, never()).start(any(), any());
-    }
-
-    @Test
-    void startStreamRejectsADeviceThatDoesNotBelongToTheAsset() {
-        Device cam = device("cam-1");
-        Device stranger = device("someone-elses-cam");
-        Asset stored = asset(Set.of(cam.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-
-        assertThrows(IllegalArgumentException.class,
-                () -> service.startStream(stored.id(), stranger.id(), PipelineConfig.defaults()));
-        verify(streamService, never()).start(any(), any());
-    }
-
-    @Test
-    void startStreamUsesTheNamedDeviceWhenItBelongsToTheAsset() {
-        Device first = device("cam-a");
-        Device second = device("cam-b");
-        Asset stored = asset(Set.of(first.id(), second.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        StreamId expected = StreamId.random();
-        when(streamService.start(eq(second.id()), any(), any())).thenReturn(expected);
-
-        StreamId started = service.startStream(stored.id(), second.id(), PipelineConfig.defaults());
-
-        // Naming a device settles the choice outright: no resolution pass runs, so two
-        // video-capable devices are not ambiguous here.
-        assertEquals(expected, started);
-        verify(deviceService, never()).find(any());
-    }
-
-    @Test
-    void startStreamRefusesWhenTheAssetIsNotInService() {
-        Device cam = device("cam-1");
-        Asset stored = asset(Set.of(cam.id())).withState(LifecycleState.DEACTIVATED);
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-
-        assertThrows(IllegalStateException.class,
-                () -> service.startStream(stored.id(), cam.id(), PipelineConfig.defaults()));
-        verify(streamService, never()).start(any(), any());
-    }
-
-    @Test
-    void startStreamSkipsDeactivatedAndDeletedDevicesWhenResolving() {
-        Device working = device("cam-working");
-        Device retired = device("cam-retired").withState(LifecycleState.DEACTIVATED);
-        Device removed = device("cam-removed").withState(LifecycleState.DELETED);
-        Asset stored = asset(Set.of(working.id(), retired.id(), removed.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        when(deviceService.find(working.id())).thenReturn(Optional.of(working));
-        when(deviceService.find(retired.id())).thenReturn(Optional.of(retired));
-        when(deviceService.find(removed.id())).thenReturn(Optional.of(removed));
-
-        service.startStream(stored.id(), null, PipelineConfig.defaults());
-
-        // Out-of-service sources are invisible to resolution, so one working camera among
-        // three video-capable ones is not ambiguity.
-        verify(streamService).start(working.id(), PipelineConfig.defaults(), TrackingConfigPatch.NOTHING);
-    }
-
-    @Test
-    void startStreamRefusesWhenNoDeviceOfTheAssetCanProduceVideo() {
-        Device telemetry = telemetryDevice("tel-1");
-        Asset stored = asset(Set.of(telemetry.id()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        when(deviceService.find(telemetry.id())).thenReturn(Optional.of(telemetry));
-
-        IllegalArgumentException thrown = assertThrows(IllegalArgumentException.class,
-                () -> service.startStream(stored.id(), null, PipelineConfig.defaults()));
-
-        assertTrue(thrown.getMessage().contains("no active video-capable device"));
-        verify(streamService, never()).start(any(), any());
-    }
-
-    @Test
-    void startStreamThrowsForUnknownAsset() {
-        AssetId unknown = AssetId.random();
-        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
-
-        assertThrows(NoSuchElementException.class,
-                () -> service.startStream(unknown, null, PipelineConfig.defaults()));
-    }
-
     // --- Streaming: stopping --------------------------------------------------
+    // Starting a stream moved to perception.application.stream.DefaultAssetStreamServiceTest
+    // (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e); stopping stays here, delegated
+    // wholesale to AssetLiveStatePort.
 
     @Test
-    void stopStreamStopsEveryStreamTheAssetsDevicesAreRunning() {
-        DeviceId mine = DeviceId.random();
-        Asset stored = asset(Set.of(mine));
+    void stopStreamDelegatesToThePortWithTheAssetsWholeDeviceSet() {
+        // Which of these devices actually has a running stream is StreamBackedAssetLiveState's own
+        // concern (tested there) -- this service's job is only to resolve the asset and hand its
+        // device set to the port wholesale.
+        DeviceId one = DeviceId.random();
+        DeviceId two = DeviceId.random();
+        Asset stored = asset(Set.of(one, two));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        StreamId ours = StreamId.random();
-        StreamId elsewhere = StreamId.random();
-        when(streamService.streams()).thenReturn(List.of(
-                new ActiveStream(ours, mine, Instant.now()),
-                new ActiveStream(elsewhere, DeviceId.random(), Instant.now())));
+        when(assetLiveStatePort.stopStreamsForDevices(stored.devices())).thenReturn(1);
 
         service.stopStream(stored.id());
 
-        verify(streamService).stop(ours);
-        verify(streamService, never()).stop(elsewhere);
-    }
-
-    @Test
-    void stopStreamIsANoOpForAnAssetThatIsNotStreaming() {
-        Asset stored = asset(Set.of(DeviceId.random()));
-        when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));
-        when(streamService.streams()).thenReturn(List.of());
-
-        service.stopStream(stored.id());
-
-        verify(streamService, never()).stop(any());
+        verify(assetLiveStatePort).stopStreamsForDevices(stored.devices());
     }
 
     @Test
@@ -695,8 +561,8 @@ class DefaultAssetServiceTest {
 
         service.stopStream(unknown);
 
-        // Mirrors StreamService#stop's idempotency: stopping what is not there is not an error.
-        verify(streamService, never()).stop(any());
+        // Unknown asset: never even resolves to a call against the port.
+        verifyNoInteractions(assetLiveStatePort);
     }
 
     // --- Assigning devices -----------------------------------------------------
@@ -828,11 +694,6 @@ class DefaultAssetServiceTest {
 
     private static Device device(String name) {
         return new Device(DeviceId.random(), name, Set.of(Capability.VIDEO),
-                new StreamDescriptor("sim", URI.create("sim://" + name), Map.of()));
-    }
-
-    private static Device telemetryDevice(String name) {
-        return new Device(DeviceId.random(), name, Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("sim", URI.create("sim://" + name), Map.of()));
     }
 

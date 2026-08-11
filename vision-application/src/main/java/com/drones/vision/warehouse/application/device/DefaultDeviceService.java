@@ -12,6 +12,7 @@ import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
 
@@ -22,8 +23,6 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import com.drones.vision.perception.application.stream.ActiveStream;
-import com.drones.vision.perception.application.stream.StreamService;
 
 /**
  * The one implementation of {@link DeviceService}.
@@ -37,7 +36,10 @@ import com.drones.vision.perception.application.stream.StreamService;
  *
  * <p>Two records are written, for two different questions. {@link EventPublisherPort} answers
  * "what is happening" (operational, transient); {@link AuditTrailPort} answers "who changed this,
- * and when" (permanent).
+ * and when" (permanent). A third, {@link AssetLiveStatePort}, answers "is this device's stream
+ * running right now" — reached through the port warehouse declares rather than {@code
+ * StreamService} directly (docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e), so this
+ * inventory service never compile-depends on the runtime module.
  *
  * <h2>Threading</h2>
  * Holds no mutable state — all shared state is reached through the injected ports.
@@ -45,14 +47,14 @@ import com.drones.vision.perception.application.stream.StreamService;
 public final class DefaultDeviceService implements DeviceService {
 
     private final DeviceRepositoryPort deviceRepository;
-    private final StreamService streamService;
+    private final AssetLiveStatePort assetLiveStatePort;
     private final AuditTrailPort auditTrail;
     private final EventPublisherPort eventPublisher;
 
-    public DefaultDeviceService(DeviceRepositoryPort deviceRepository, StreamService streamService,
+    public DefaultDeviceService(DeviceRepositoryPort deviceRepository, AssetLiveStatePort assetLiveStatePort,
                                  AuditTrailPort auditTrail, EventPublisherPort eventPublisher) {
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
-        this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
+        this.assetLiveStatePort = Objects.requireNonNull(assetLiveStatePort, "assetLiveStatePort must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
     }
@@ -141,11 +143,7 @@ public final class DefaultDeviceService implements DeviceService {
 
     /** Stops the device's stream if one is running; a no-op otherwise. */
     private void stopStreamOf(DeviceId id) {
-        for (ActiveStream active : streamService.streams()) {
-            if (active.deviceId().equals(id)) {
-                streamService.stop(active.streamId());
-            }
-        }
+        assetLiveStatePort.stopStreamsForDevices(Set.of(id));
     }
 
     private Device require(DeviceId id) {

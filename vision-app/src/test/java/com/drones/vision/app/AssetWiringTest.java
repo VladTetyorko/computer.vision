@@ -9,6 +9,7 @@ import com.drones.vision.adapter.rtsp.RtspFeedTransmitter;
 import com.drones.vision.api.controller.ActivityController;
 import com.drones.vision.api.controller.AssetImageController;
 import com.drones.vision.api.controller.AssetStatsController;
+import com.drones.vision.api.controller.AssetStreamController;
 import com.drones.vision.api.controller.AssignmentController;
 import com.drones.vision.api.controller.CvModelsController;
 import com.drones.vision.api.controller.DeviceProbeController;
@@ -24,11 +25,13 @@ import com.drones.vision.api.controller.SimulationController;
 import com.drones.vision.api.controller.UserAdminController;
 import com.drones.vision.identity.application.ActivityService;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.identity.application.AssignmentService;
 import com.drones.vision.identity.application.scope.ScopeResolver;
 import com.drones.vision.warehouse.application.asset.AssetStatsService;
 import com.drones.vision.warehouse.application.category.CategoryService;
 import com.drones.vision.warehouse.application.device.DeviceService;
+import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.perception.application.pipeline.FeedTransmitterRegistry;
 import com.drones.vision.warehouse.application.fleet.FleetSummaryService;
 import com.drones.vision.flight.application.FlightCommandService;
@@ -144,6 +147,18 @@ class AssetWiringTest {
 
     @Autowired
     private AssetService assetService;
+
+    /** docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: asset-level streaming, split off {@link AssetService}. */
+    @Autowired
+    private AssetStreamService assetStreamService;
+
+    /** docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: {@code POST}/{@code DELETE /api/assets/{id}/stream}, split off {@code AssetController} to stay under the five-constructor-parameter ceiling. */
+    @Autowired
+    private AssetStreamController assetStreamController;
+
+    /** docs/plans/active/DOMAIN-SEPARATION-W1.md &sect;15, W1.6e: warehouse's declared read of live runtime state. */
+    @Autowired
+    private AssetLiveStatePort assetLiveStatePort;
 
     @Autowired
     private CategoryService categoryService;
@@ -360,6 +375,9 @@ class AssetWiringTest {
     @Test
     void everyAssetModelServiceAndRepositoryBeanIsRegistered() {
         assertNotNull(assetService, "AssetService bean must be registered");
+        assertNotNull(assetStreamService, "AssetStreamService bean must be registered (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e)");
+        assertNotNull(assetStreamController, "AssetStreamController must resolve its constructor dependencies (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e)");
+        assertNotNull(assetLiveStatePort, "AssetLiveStatePort bean must be registered (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6e)");
         assertNotNull(categoryService, "CategoryService bean must be registered");
         assertNotNull(replayService, "ReplayService bean must be registered (docs/plans/done/MVP2-PLAN.md R-a2)");
         assertNotNull(deviceService, "DeviceService bean must be registered");
