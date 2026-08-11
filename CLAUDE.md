@@ -66,3 +66,26 @@ If the configuration can varry and be changed during the runtime - chose between
 If the configuration can be changed during the runtime - use the database and cache layer to store it
 2) Layered architecture and object orientations are the best practices: Use inversion of control, follow java standard practices and use packages as separators of layers. For example: Controller -> high-lvl service -> "orcestration", feature-based service -> maybe cache->banch of lower services -> banch of repositories -> database.
 3) Standalone principle on modules lvl: Module is independent and doesn't know nothing about who uses it and who listends to it. Communication contract similar to interfaces lvl. Every module should have API description
+4) For docks - prefer to use diagrams, markdowns, but not code snippets. Dock should be useful for both, agent and person who works with the code.
+5) For code comments - prefer to use java docks, but not markdowns. javadocks should be short, and explain WHY, not What. DO not use pure comments untill it's not Understandable from first sight
+6) Follow the SOLID principles, while architecturing and implementing
+7) Records are ok to use in the code
+8) Configuration files should be in the root of the project, and appliable to all modules. If the module is "independent" - changes on main should be reflected on it too
+9) Failsaife and up-to-date are one of priorities in our project. Newest data/telemetry/detections etc should be used, even if previous is still available.
+
+## Deployment maintenance
+- I will run this application on different servers, so the run of application should be reflected in docker-compose.yml
+- If the module is not "core" related - it should be scalable.
+- if the module is "core" related - it should be scalable too, if it contains the calculations logic
+
+## Separate and Standalone
+-  As a developer, i prefer the code where i can add new feature based on previous code.
+- That's why - code and flows should be understandable by it's responsability. 
+- Follow the SOLID principles,
+- Follow IoC principle,
+- Have a layers of application: from dumb - the repositories should work with each table in the database, DTO's service - should work only with it's repository. Next lvl of service - should work with lower services and handle them. The higher services are - the hogher is abstraction of feature. I'ts the main rule for architecturing
+Example: 
+- Controller /position-of-drone - checks the authorisation and authentication, if ok - calls
+- Service /DroneInFLightPositioningService calls 
+- DroneTelemetryService(for telemetry of drone in scape) and DroneGPSService(for drone's position on map) calls
+- Repository /DroneTelemetryRepository, /DroneGPSRepository etc.
