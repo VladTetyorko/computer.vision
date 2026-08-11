@@ -8,7 +8,7 @@ import type { Category } from '../../core/api/models';
 import { canSubmitDataset, parseClassesInput } from './datasets-logic';
 
 /**
- * `DatasetsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — the `/manage/training` dataset list +
+ * `DatasetsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the `/manage/training` dataset list +
  * "New dataset" form. `TrainingStore` (`training`) is the shared dataset-list source of truth;
  * everything else here (the create form's own draft fields, the category picker, per-row delete
  * confirm) is page-local.

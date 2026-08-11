@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Direct unit tests for {@link DetectionBoxPainter}, added in wave T5
- * (docs/TRACKING-PLAN.md §7) alongside {@link Java2DOverlayRendererTest}'s
+ * (docs/plans/done/TRACKING-PLAN.md §7) alongside {@link Java2DOverlayRendererTest}'s
  * renderer-level pixel probes. Two things are deliberately tested here
  * rather than through a rendered frame:
  *

@@ -20,7 +20,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code training_samples} — mirrors {@link
- * com.drones.vision.domain.model.TrainingSample} field-for-field (docs/CV-TRAINING-PLAN.md §1,
+ * com.drones.vision.domain.model.TrainingSample} field-for-field (docs/plans/done/CV-TRAINING-PLAN.md §1,
  * Wave T1/T3); {@link com.drones.vision.adapter.persistence.JpaTrainingSampleRepository} owns
  * the mapping in both directions.
  *

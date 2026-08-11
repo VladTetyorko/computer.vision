@@ -29,12 +29,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * VisionCvProperties#port()}; the full round trip against a real (in-test) gRPC server is
  * covered by {@link CvDetectionE2ETest}. {@code vision.publish.enabled=false} for the same
  * determinism reasons as {@link AssetWiringTest}. {@code vision.live.enabled=false}
- * (docs/REALTIME-PLAN.md §4) isolates this test from the server-push feature's own {@code
+ * (docs/plans/done/REALTIME-PLAN.md §4) isolates this test from the server-push feature's own {@code
  * EventPublisherPort} decorator ({@link LiveUpdateEventPublisher}, which would otherwise wrap
  * {@link DetectionSessionCleanupEventPublisher} one layer further out by default) — see {@link
  * LiveWiringTest}/{@link LiveDisabledWiringTest} for that feature's own coverage.
  *
- * <p>{@code vision.cv.detect-width}/{@code vision.cv.jpeg-quality} (docs/REMOTE-CV-PLAN.md P1
+ * <p>{@code vision.cv.detect-width}/{@code vision.cv.jpeg-quality} (docs/plans/done/REMOTE-CV-PLAN.md P1
  * item 5) are set here to non-default values purely to prove Spring binds the kebab-case
  * property names onto {@link VisionCvProperties#detectWidth()}/{@link
  * VisionCvProperties#jpegQuality()} and the context still starts cleanly with them threaded into
@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * GrpcDetectionPortTest}), so a successful context load plus the {@code GrpcDetectionPort}
  * {@code instanceof} check below is the full extent of what this class can observe.
  *
- * <p>Also proves the detection-only half of the shared-channel wiring (docs/CV-TRAINING-PLAN.md
+ * <p>Also proves the detection-only half of the shared-channel wiring (docs/plans/done/CV-TRAINING-PLAN.md
  * §7/§8, Phase 2 T9): with {@code vision.training.enabled} left at its default {@code false},
  * {@link WiringConfiguration#cvGrpcChannel} is still built (its {@code @ConditionalOnExpression}
  * matches on {@code vision.cv.enabled} alone), but the model registry controller/service/port stay

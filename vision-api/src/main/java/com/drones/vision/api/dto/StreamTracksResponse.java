@@ -5,7 +5,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 
 /**
- * Response body for {@code GET /api/streams/{streamId}/tracks} (docs/TRACKING-PLAN.md &sect;4.E's
+ * Response body for {@code GET /api/streams/{streamId}/tracks} (docs/plans/done/TRACKING-PLAN.md &sect;4.E's
  * frozen wire contract) — the in-memory track book of a running stream, plus the duty-cycle
  * counters over it.
  *

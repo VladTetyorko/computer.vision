@@ -557,7 +557,7 @@ class GrpcDetectionPortTest {
 
     @Test
     void trackingConfigAndTargetLockCapturedExactlyOnTheWire() throws Exception {
-        // docs/TRACKING-PLAN.md §4.A/§4.B, T4: PipelineConfig.tracking() -> FrameRequest.tracking,
+        // docs/plans/done/TRACKING-PLAN.md §4.A/§4.B, T4: PipelineConfig.tracking() -> FrameRequest.tracking,
         // including the TargetLock and the redetectIouPercent (int, [0,100]) -> redetect_iou_threshold
         // (float ratio) unit conversion. Asserted against what the server actually received, not
         // just that encode() ran without throwing.
@@ -595,7 +595,7 @@ class GrpcDetectionPortTest {
         GrpcDetectionPort port = newPort(servicer);
         StreamId streamId = StreamId.random();
 
-        // PipelineConfig.defaults() carries TrackingConfig.defaults() as of docs/TRACKING-PLAN.md
+        // PipelineConfig.defaults() carries TrackingConfig.defaults() as of docs/plans/done/TRACKING-PLAN.md
         // wave T8 -- mode ASSOCIATE, and still no lock, since a lock names a track that cannot
         // exist before the stream has produced one.
         port.detect(frame(streamId, 0, PixelFormat.BGR24), PipelineConfig.defaults())

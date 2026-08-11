@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link ModelRegistryController} (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9),
+ * MockMvc tests for {@link ModelRegistryController} (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9),
  * mirroring {@link DatasetControllerTest}'s style: a standalone {@code MockMvc} over a mocked
  * {@link ModelRegistryService} collaborator, with {@link ApiExceptionHandler} attached so error
  * mapping is exercised exactly as it runs in production.

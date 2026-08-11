@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * One row of {@link TrainingJobService#jobs()}/{@link TrainingJobService#job(String)} — the
- * pollable state of one training job (docs/CV-TRAINING-PLAN.md §6/§7, Phase 2).
+ * pollable state of one training job (docs/plans/done/CV-TRAINING-PLAN.md §6/§7, Phase 2).
  *
  * <p>{@code jobId} is the id {@link TrainingJobService#start} generated and returned to the
  * caller, <b>not</b> necessarily the {@code jobId} the wire {@link TrainingProgress} messages

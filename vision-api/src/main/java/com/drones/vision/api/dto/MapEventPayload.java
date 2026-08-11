@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Locale;
 
 /**
- * The payload of one envelope on the {@code map} SSE topic (docs/MAP-REWORK-PLAN.md §4.3) —
+ * The payload of one envelope on the {@code map} SSE topic (docs/plans/done/MAP-REWORK-PLAN.md §4.3) —
  * replacing the {@code marks}-topic {@code MarkPayload} it supersedes, which carried marks only.
  *
  * <p>Exactly one of {@link #mark()}/{@link #drawing()}/{@link #layer()} is non-null, selected by

@@ -19,7 +19,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code geofence_zones} — mirrors {@link com.drones.vision.domain.model.GeofenceZone}
- * field-for-field (docs/OPS-CORE-PLAN.md §G); {@link
+ * field-for-field (docs/plans/done/OPS-CORE-PLAN.md §G); {@link
  * com.drones.vision.adapter.persistence.JpaGeofenceRepository} owns the mapping in both
  * directions.
  *

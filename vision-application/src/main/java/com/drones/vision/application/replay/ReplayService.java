@@ -9,7 +9,7 @@ import com.drones.vision.application.pipeline.UsageTracker;
 
 /**
  * Serves a scrubbable replay window over one finished (or still-open) {@link
- * com.drones.vision.domain.model.AssetUsage} — the read side of flight replay (docs/MVP2-PLAN.md
+ * com.drones.vision.domain.model.AssetUsage} — the read side of flight replay (docs/plans/done/MVP2-PLAN.md
  * §R, R-a).
  *
  * <h2>Windowing</h2>
@@ -22,7 +22,7 @@ import com.drones.vision.application.pipeline.UsageTracker;
  * equidistant-index thinning that always keeps the first and last point in range, so a long
  * flight's response stays bounded regardless of sample density.
  *
- * <h2>Detections (docs/MVP2-PLAN.md §R, R-a2)</h2>
+ * <h2>Detections (docs/plans/done/MVP2-PLAN.md §R, R-a2)</h2>
  * {@link com.drones.vision.domain.model.AssetUsage#streamId()} — recorded once, at open time, by
  * {@code UsageTracker} — is the join key: when it is non-{@code null}, {@link
  * UsageTimeline#detections()} is a real, time-windowed, downsampled query against {@link
@@ -52,7 +52,7 @@ public interface ReplayService {
     UsageTimeline timeline(UsageId usageId, Instant from, Instant to, int maxPoints);
 
     /**
-     * Resolves a recording/clip-export URL for one usage's flight window (docs/OPS-CORE-PLAN.md
+     * Resolves a recording/clip-export URL for one usage's flight window (docs/plans/done/OPS-CORE-PLAN.md
      * §R): {@code start} is the usage's {@code startedAt}, {@code duration} runs to its {@code
      * endedAt} (or "now" for a still-open usage), and the actual URL comes from {@code
      * StreamPublisherPort#playbackUrl} for that window.

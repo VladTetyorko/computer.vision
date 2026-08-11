@@ -132,7 +132,7 @@ class Java2DOverlayRendererTest {
         assertNotEquals(first, other);
     }
 
-    // -- tracking (docs/TRACKING-PLAN.md §7, wave T5) -------------------------
+    // -- tracking (docs/plans/done/TRACKING-PLAN.md §7, wave T5) -------------------------
 
     @Test
     void trackColorIsStableAcrossCallsAndDiffersBetweenKnownDifferentBuckets() {
@@ -150,7 +150,7 @@ class Java2DOverlayRendererTest {
         // The 4-arg convenience ctor (today's call shape, used by every pre-tracking test above)
         // must render pixel-for-pixel identically to the new 5-arg ctor with an explicit null
         // track — "untracked" has exactly one spelling, and neither call site may look different
-        // to the renderer (docs/TRACKING-ORCHESTRATION.md §6 rule 2).
+        // to the renderer (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 2).
         VideoFrame frameA = solidBgr24Frame(WIDTH, HEIGHT, GRAY);
         VideoFrame frameB = solidBgr24Frame(WIDTH, HEIGHT, GRAY);
         Detection viaConvenienceCtor = new Detection("person", 0.87, new BoundingBox(0.5, 0.5, 0.2, 0.2), MODEL);

@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.GeoPosition;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * A single point on the map, both inbound and outbound (docs/MAP-REWORK-PLAN.md §4.2) — the
+ * A single point on the map, both inbound and outbound (docs/plans/done/MAP-REWORK-PLAN.md §4.2) — the
  * geometry element of {@code CreateDrawingRequest}/{@code PatchDrawingRequest}/{@link
  * DrawingResponse}.
  *

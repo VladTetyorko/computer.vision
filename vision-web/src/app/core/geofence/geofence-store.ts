@@ -16,7 +16,7 @@ const ZONES_POLL_INTERVAL_MS = 30_000;
 
 /**
  * `GeofenceStore` — the app's one shared source of truth for geofence zones
- * (docs/OPS-CORE-PLAN.md §G-c), `providedIn: 'root'` and started at boot like `FleetStore`: zones
+ * (docs/plans/done/OPS-CORE-PLAN.md §G-c), `providedIn: 'root'` and started at boot like `FleetStore`: zones
  * back both Command's Zones panel/map layer and Fly's read-only map layer, and both pages should
  * see the same list without each standing up its own poller.
  *
@@ -26,8 +26,8 @@ const ZONES_POLL_INTERVAL_MS = 30_000;
  * has no partial-patch geofence endpoint, see `GeofenceZoneRequest`'s own doc comment) and adopt
  * the server's own response into `zones` on success, rather than re-`GET`-ting the whole list.
  *
- * **Delete is undoable (docs/OPS-CORE-PLAN.md §G-c, 10s, §Q2's shared `UndoToastService`)**:
- * `remove()` deletes immediately (no confirm dialog — "undo over confirm", docs/UX-REWORK-PLAN.md
+ * **Delete is undoable (docs/plans/done/OPS-CORE-PLAN.md §G-c, 10s, §Q2's shared `UndoToastService`)**:
+ * `remove()` deletes immediately (no confirm dialog — "undo over confirm", docs/plans/done/UX-REWORK-PLAN.md
  * §U-a2), then offers `Undo`, which re-`POST`s a fresh zone with the deleted one's exact fields —
  * mirrors `features/devices/devices.ts#archiveAssetNow`'s own "the mutation already happened,
  * Undo re-creates via the API" idiom exactly (the recreated zone gets a new id; nothing in this

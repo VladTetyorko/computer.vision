@@ -6,7 +6,7 @@ import type { MapMark } from '../../../core/api/models';
 
 /**
  * `<vision-verify-controls>` — DELTA's verify → confirm → share-wider flow, as one small strip
- * (docs/MAP-REWORK-PLAN.md §5.2). Shared by the Fly and Command marks panels.
+ * (docs/plans/done/MAP-REWORK-PLAN.md §5.2). Shared by the Fly and Command marks panels.
  *
  * **Always shows the verification chip; only a manager sees the verbs.** The chip is information
  * every viewer needs — an UNVERIFIED pin is a claim, not a fact, and the map draws it dashed for the

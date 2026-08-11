@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Request body for {@code PUT /api/samples/{id}/annotations} (docs/CV-TRAINING-PLAN.md §3's frozen
+ * Request body for {@code PUT /api/samples/{id}/annotations} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen
  * wire contract) — the operator's confirmed/corrected annotations plus the review outcome.
  *
  * @param status      {@code "LABELED"} or {@code "DISCARDED"}, matched case-insensitively

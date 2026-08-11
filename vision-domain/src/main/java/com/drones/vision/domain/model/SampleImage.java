@@ -1,14 +1,14 @@
 package com.drones.vision.domain.model;
 
 /**
- * Image bytes for one {@link TrainingSample} (docs/CV-TRAINING-PLAN.md §1/§C) — the captured
+ * Image bytes for one {@link TrainingSample} (docs/plans/done/CV-TRAINING-PLAN.md §1/§C) — the captured
  * frame's raw pixels at full resolution, stored via {@code SampleImageStorePort} keyed by {@link
  * TrainingSampleId}.
  *
  * <p>Mirrors {@link AssetImage}'s defensive-copy discipline bit-for-bit (clone in construction,
  * clone out on every {@link #data()} access) — the same bytea-backed, no-history storage
  * precedent, reused deliberately rather than inventing a second binary-payload shape
- * (docs/CV-TRAINING-PLAN.md §C).
+ * (docs/plans/done/CV-TRAINING-PLAN.md §C).
  *
  * @param data        the raw image bytes; defensively copied both in and out (see {@link
  *                    #data()}); must not be empty

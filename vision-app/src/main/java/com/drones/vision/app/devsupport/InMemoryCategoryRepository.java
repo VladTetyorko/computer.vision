@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * In-memory {@link CategoryRepositoryPort}: dev/Phase-0 fallback, seeded at
  * construction with the default category set from
- * docs/ASSET-MODEL-PLAN.md §4 (drone/fpv-drone/ip-camera/esp32-cam/
+ * docs/plans/done/ASSET-MODEL-PLAN.md §4 (drone/fpv-drone/ip-camera/esp32-cam/
  * usb-camera/robot/simulated), no durability across restarts.
  *
  * <p>Replaced by {@code adapter-persistence} (JPA/Postgres), planned for

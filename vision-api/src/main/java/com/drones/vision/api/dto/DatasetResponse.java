@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Wire representation of a {@link Dataset} (docs/CV-TRAINING-PLAN.md §3's frozen wire contract).
+ * Wire representation of a {@link Dataset} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire contract).
  *
  * @param id             typed dataset identity, as its canonical UUID string
  * @param name           human-readable name

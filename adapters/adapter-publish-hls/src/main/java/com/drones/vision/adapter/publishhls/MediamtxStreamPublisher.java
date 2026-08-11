@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * {@link StreamPublisherPort} that re-encodes frames to H.264 and pushes
  * them as an RTSP stream to a <a href="https://github.com/bluenviron/mediamtx">mediamtx</a>
- * sidecar; browsers then watch mediamtx's HLS egress. See {@code docs/PHASE1-PLAN.md}
+ * sidecar; browsers then watch mediamtx's HLS egress. See {@code docs/plans/done/PHASE1-PLAN.md}
  * §0.1/§0.3 and §3 for the design this class implements.
  *
  * <h2>Lifecycle</h2>
@@ -53,7 +53,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * locking; different streams are tracked independently in a {@link
  * ConcurrentHashMap} since their pipelines run on different threads.
  *
- * <h2>Latency measurement (docs/MVP2-PLAN.md V-c)</h2>
+ * <h2>Latency measurement (docs/plans/done/MVP2-PLAN.md V-c)</h2>
  * Every write to the encoder measures capture→encode lag — {@code now -
  * videoFrame.capturedAt()} at the moment the frame is handed to {@code
  * FFmpegFrameRecorder.record} — into a small per-stream rolling window
@@ -65,7 +65,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * together with the player's own "behind live" estimate (V-b) to see the
  * full glass-to-glass picture.
  *
- * <h2>Recording playback (docs/OPS-CORE-PLAN.md §R)</h2>
+ * <h2>Recording playback (docs/plans/done/OPS-CORE-PLAN.md §R)</h2>
  * This class does no recording of its own: mediamtx's native recorder
  * (docker-compose.yml's {@code MTX_PATHDEFAULTS_RECORD}) segments every
  * published path to disk, and {@link #playbackUrl} is pure string formatting
@@ -95,7 +95,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
      *                         unlike {@code hlsViewBase} (which {@code vision-app} typically points at an
      *                         app-relative proxy path, see {@link #viewUrl}'s javadoc), this is handed to
      *                         viewers verbatim — see {@link #whepUrl}
-     * @param playbackViewBase base HTTP URL of mediamtx's playback server (docs/OPS-CORE-PLAN.md §R), e.g.
+     * @param playbackViewBase base HTTP URL of mediamtx's playback server (docs/plans/done/OPS-CORE-PLAN.md §R), e.g.
      *                         {@code http://localhost:19996}; {@code null} when this stream publisher has no
      *                         recording/playback configured, in which case {@link #playbackUrl} always returns
      *                         {@link Optional#empty()} (honest absence, not an error) — unlike {@code
@@ -108,7 +108,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     }
 
     /**
-     * @param settings encoder/resilience/cadence tunables (docs/LAYERING-REFACTOR-PLAN.md wave F3,
+     * @param settings encoder/resilience/cadence tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3,
      *                 {@code vision.publish.encoder.*}/{@code .resilience.*}/{@code .cadence.*}) —
      *                 threaded into every {@link StreamState} this instance creates.
      */
@@ -261,7 +261,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
      * against mediamtx v1.19.3's {@code internal/playback/on_get.go}); {@code duration} is rounded
      * to the nearest whole second (mediamtx's own {@code duration} parameter accepts fractional
      * seconds too, but callers of this port only ever have second-granularity usage windows to
-     * begin with — see docs/OPS-CORE-PLAN.md §R's {@code AssetUsage}-based join — so sub-second
+     * begin with — see docs/plans/done/OPS-CORE-PLAN.md §R's {@code AssetUsage}-based join — so sub-second
      * precision would be false precision, not a real distinction).
      *
      * <p>Returns {@link Optional#empty()} whenever {@code playbackViewBase} is unconfigured (see
@@ -315,7 +315,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
 
     /**
      * Writes one frame to the encoder and, immediately before doing so,
-     * measures docs/MVP2-PLAN.md V-c's capture→encode lag: {@code now -
+     * measures docs/plans/done/MVP2-PLAN.md V-c's capture→encode lag: {@code now -
      * videoFrame.capturedAt()}, i.e. everything upstream of this handoff
      * (capture, ingest decode, {@code StreamPipeline}, overlay burn-in, and
      * this class's own measurement/backoff bookkeeping) — never anything
@@ -388,7 +388,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
      * Per-stream bookkeeping: the lazily-created recorder itself, plus three collaborators each
      * owning one concern that used to live inline here — {@link PublishBackoff} (reconnect
      * throttling), {@link CadenceEstimator} (cadence measurement, PTS quantization, drift
-     * detection), and {@link PublishDiagnostics} (docs/MVP2-PLAN.md V-c lag tracking). Not
+     * detection), and {@link PublishDiagnostics} (docs/plans/done/MVP2-PLAN.md V-c lag tracking). Not
      * thread-safe by design; see class javadoc, "Threading".
      *
      * <p>Package-private (not {@code private}) so unit tests can exercise the collaborators

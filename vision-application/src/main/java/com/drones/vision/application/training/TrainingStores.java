@@ -10,8 +10,8 @@ import com.drones.vision.application.replay.ReplaySources;
 import com.drones.vision.application.stream.StreamService;
 
 /**
- * The four Wave-T1 CV-training ports (docs/CV-TRAINING-PLAN.md §1) — {@code exports} replaced by
- * {@link DatasetUploadPort} (docs/CV-TRAINING-V2-PLAN.md §3/§4: delivery to the training host now
+ * The four Wave-T1 CV-training ports (docs/plans/done/CV-TRAINING-PLAN.md §1) — {@code exports} replaced by
+ * {@link DatasetUploadPort} (docs/plans/done/CV-TRAINING-V2-PLAN.md §3/§4: delivery to the training host now
  * rides a gRPC upload instead of a filesystem export) — bundled into one constructor parameter for
  * {@link DefaultLabelingService} (java-clean-code SKILL.md §3 — "bundle collaborators rather than
  * sprawl"): each port is a genuine, independently-substitutable dependency in its own right (a JPA

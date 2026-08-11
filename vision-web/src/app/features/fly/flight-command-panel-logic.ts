@@ -3,7 +3,7 @@ import { canCommandReturnHome } from '../../core/telemetry/flight-state-logic';
 
 /**
  * Pure, Angular-free logic behind `flight-command-panel.ts`/`arm-confirm-dialog.ts`
- * (docs/DRONE-INFRA-PLAN.md I-e Stage 2 — the Fly cockpit's Arm/Disarm/Mode panel, extending Stage
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — the Fly cockpit's Arm/Disarm/Mode panel, extending Stage
  * 1's "Bring home") — visibility gating, confirm copy, and outcome-toast mapping, split out so
  * every rule is unit-testable without Angular/HTTP, mirroring `shared/ui/return-home-button-logic.ts`'s
  * own split (this cycle's direct precedent) and `core/telemetry/flight-state-logic.ts`'s wider
@@ -16,7 +16,7 @@ import { canCommandReturnHome } from '../../core/telemetry/flight-state-logic';
  * follows). Promote it if/when a second consumer needs it, not before.
  */
 
-// --- Panel visibility (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) ------------------
+// --- Panel visibility (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) ------------------
 
 /**
  * Whether the flight-command panel may render *anything* for the currently-flown asset:
@@ -39,7 +39,7 @@ export function canShowCommandPanel(
   return capabilities !== undefined && capabilities.commandable && canCommandReturnHome(firmware, ageSeconds);
 }
 
-// --- Confirm copy (docs/DRONE-INFRA-PLAN.md I-e Stage 2's own safety-framing wording) -----------
+// --- Confirm copy (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's own safety-framing wording) -----------
 
 /** Mode picker's standard confirm (the plan's own wording, verbatim: `"Set <asset> to <mode>?"`). */
 export function modeConfirmMessage(assetDisplayName: string, mode: string): string {
@@ -86,7 +86,7 @@ export function disarmConfirmMessage(assetDisplayName: string, armed: boolean | 
     : `Disarm ${assetDisplayName}?`;
 }
 
-// --- Outcome toasts (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) ---------------------
+// --- Outcome toasts (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) ---------------------
 
 export type FlightCommandAction = 'mode' | 'arm' | 'disarm';
 

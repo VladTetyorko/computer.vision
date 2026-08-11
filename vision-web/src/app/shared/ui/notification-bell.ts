@@ -13,7 +13,7 @@ import { newlyOpenedEvents, unreadEvents } from './notification-logic';
 import type { DetectionEvent } from '../../core/api/models';
 
 /**
- * The app-shell header bell (docs/UX-REWORK-PLAN.md §U-c's user amendments: "Events become
+ * The app-shell header bell (docs/plans/done/UX-REWORK-PLAN.md §U-c's user amendments: "Events become
  * notifications (header bell + transient toasts via the existing toast system), not a docked
  * module"). Replaces `CommandPage`'s old embedded `<vision-events-rail>` section — the rail itself
  * is unchanged and unmoved (`shared/ui/events-rail.ts`), it just gets a second host: this
@@ -43,14 +43,14 @@ import type { DetectionEvent } from '../../core/api/models';
  * that arrive afterward, and a toast firing does **not** count as "read" — a manager who dismissed a
  * toast without clicking it should still see that event as unread in the dropdown.
  *
- * **Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1)**: clicking a row (or its own toast's
+ * **Event → replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1)**: clicking a row (or its own toast's
  * action) first tries `core/events/events-logic.ts#resolveReplayDeepLink` — a lazy, click-time-only
  * lookup (`VisionApi.getAsset(event.assetId)`, never done per-row on render) for a **finished**
  * usage covering the event's own `firstSeen` — and navigates to `/replay?asset=…&usage=…&t=…`,
  * scrubbed to that exact moment, when one resolves; otherwise falls back to the pre-existing
  * `resolveEventTarget` behavior (asset detail / live cockpit) unchanged.
  *
- * **Geofence breaches (docs/OPS-CORE-PLAN.md §G-c)** ride a *different* feed —
+ * **Geofence breaches (docs/plans/done/OPS-CORE-PLAN.md §G-c)** ride a *different* feed —
  * `LiveStore.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
  * dropdown list (see `LiveEvent`'s own doc comment for why the two are genuinely different domain
  * concepts). This component is still where they toast from (the app's one "background thing just
@@ -60,7 +60,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * `DetectionEvent` and a breach isn't one; a future cycle that wants breaches counted in the badge
  * too would need to widen that typing, out of this batch's own scope.
  *
- * **Signal-backed open state, not `<details>`** (docs/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): the
+ * **Signal-backed open state, not `<details>`** (docs/plans/done/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): the
  * dropdown used to be a native `<details>`, whose `open` state lived in the DOM where nothing could
  * see or reset it — and since this component is mounted once in the always-on shell
  * (`app-sidebar.html`'s foot) and never destroyed on navigation, "the page component is destroyed on
@@ -142,7 +142,7 @@ export class NotificationBell {
       }
     });
 
-    // Geofence breach toasts (docs/OPS-CORE-PLAN.md §G-c) — a separate feed, a separate dedup set,
+    // Geofence breach toasts (docs/plans/done/OPS-CORE-PLAN.md §G-c) — a separate feed, a separate dedup set,
     // identical "seed silently, toast only what arrives after" rule as the effect above.
     effect(() => {
       const current = this.liveStore.liveEvents();
@@ -199,7 +199,7 @@ export class NotificationBell {
   }
 
   /**
-   * Navigates to the replay deep link (docs/OPS-CORE-PLAN.md §Q1) when a finished covering usage
+   * Navigates to the replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1) when a finished covering usage
    * resolves — a lazy, click-time-only lookup (see class doc) — else falls back to
    * `resolveEventTarget`'s pre-existing asset/live-cockpit target, unchanged.
    */

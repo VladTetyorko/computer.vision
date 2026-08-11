@@ -12,10 +12,10 @@ import com.drones.vision.application.stream.StreamService;
 
 /**
  * One asset's attention-relevant facts — one row of {@code GET /api/fleet/summary}'s per-asset list
- * (docs/MVP3-PLAN.md C-a): everything the manager's attention queue needs to decide "does this
+ * (docs/plans/done/MVP3-PLAN.md C-a): everything the manager's attention queue needs to decide "does this
  * asset need a look", without a second poll per asset.
  *
- * <p><b>{@code sourceState} was deliberately left out</b> (docs/MVP3-PLAN.md C-a's own instruction:
+ * <p><b>{@code sourceState} was deliberately left out</b> (docs/plans/done/MVP3-PLAN.md C-a's own instruction:
  * "if nothing is cleanly readable, omit the field and document rather than fake"). Today's {@link
  * com.drones.vision.domain.port.out.EventPublisherPort} is write-only — its only implementation
  * just logs, with no matching read/query port (see vision-api/MODULE.md's Gotchas, first documented
@@ -25,7 +25,7 @@ import com.drones.vision.application.stream.StreamService;
  * is no honest "reconnecting"/"degraded" signal to read today; a future task that adds either a
  * queryable event store or a supervision-state read method can add this field then.
  *
- * <p>{@code flightMode}/{@code armed}/{@code failsafe} (docs/FC-INTEGRATIONS-PLAN.md F-b) are a
+ * <p>{@code flightMode}/{@code armed}/{@code failsafe} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) are a
  * different case from {@code sourceState} above, not another exception to the same rule: they are
  * cleanly readable today, straight off the freshest telemetry sample's {@link
  * com.drones.vision.domain.model.FlightState}, with the same honest-null behavior as {@code
@@ -56,7 +56,7 @@ import com.drones.vision.application.stream.StreamService;
  * @param flightMode     the freshest telemetry sample's flight-controller mode name (e.g.
  *                       {@code "RTL"}, {@code "Loiter"}), or {@code null} if the asset has never
  *                       reported telemetry, or has but with no {@code flightState} attached
- *                       (docs/FC-INTEGRATIONS-PLAN.md F-b) — same honest-null discipline as {@code
+ *                       (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — same honest-null discipline as {@code
  *                       batteryPercent}, not a fabricated read: this is {@link
  *                       com.drones.vision.domain.model.FlightState#mode()} carried straight
  *                       through, never guessed at

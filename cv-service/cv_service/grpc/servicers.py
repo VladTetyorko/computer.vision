@@ -35,7 +35,7 @@ living in ``cv_service/training/`` and ``cv_service/grpc/server.py``.
 * ``Training.UploadDataset`` (client-streaming) receives a YOLO dataset
   archive over gRPC and lands it at ``<CV_DATASET_DIR>/<dataset_id>/``,
   atomically replacing any prior upload for the same id -- the delivery
-  mechanism `docs/CV-TRAINING-V2-PLAN.md` §2 adds in place of a manual rsync.
+  mechanism `docs/plans/done/CV-TRAINING-V2-PLAN.md` §2 adds in place of a manual rsync.
   The zip-landing/path-safety logic lives in ``cv_service/training/dataset.py``;
   this method only reads the wire stream and translates the result.
   ``trainer.py`` is untouched by it: the landed directory is byte-identical
@@ -650,7 +650,7 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
     """Model-registry control plane over the shared `ModelRegistry`.
 
     `ListModels`/`PromoteModel` are the "unblocked half" of CV-TRAINING
-    Phase 2 (`docs/CV-TRAINING-PLAN.md` §6): a model rsync'd onto the host
+    Phase 2 (`docs/plans/done/CV-TRAINING-PLAN.md` §6): a model rsync'd onto the host
     becomes selectable, and the operator promotes it live. Both read/write
     the *same* `ModelRegistry` instance the inference `DetectStream` path
     routes against (wired identically in `cv_service.grpc.server.serve()`),
@@ -670,7 +670,7 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
 
     `UploadDataset` (client-streaming) is the delivery mechanism that lands a
     dataset at `<CV_DATASET_DIR>/<dataset_id>/` over this same gRPC channel,
-    in place of a manual rsync (`docs/CV-TRAINING-V2-PLAN.md` §2). The
+    in place of a manual rsync (`docs/plans/done/CV-TRAINING-V2-PLAN.md` §2). The
     zip-landing/path-safety logic lives in `cv_service/training/dataset.py`;
     it never touches `trainer.py`/`StartTraining` -- the directory it
     produces is byte-identical to what a manual rsync would have produced,
@@ -706,7 +706,7 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
         self._train_fn = train_fn
         # Total content bytes accepted for one UploadDataset call before it
         # aborts RESOURCE_EXHAUSTED -- a realistic dataset is low tens of MB
-        # (docs/CV-TRAINING-V2-PLAN.md design decision D); the 2 GiB default
+        # (docs/plans/done/CV-TRAINING-V2-PLAN.md design decision D); the 2 GiB default
         # is a generous, pinned safety cap, not a target. Overridable via
         # `CV_MAX_UPLOAD_BYTES` (see `Settings`/`cv_service/grpc/server.py`).
         self._max_upload_bytes = max_upload_bytes
@@ -823,7 +823,7 @@ class TrainingServicer(cv_pb2_grpc.TrainingServicer):
     ) -> "cv_pb2.UploadAck":
         """Receive a streamed YOLO dataset archive and land it at
         `<CV_DATASET_DIR>/<dataset_id>/`, atomically replacing any prior
-        upload for the same id (docs/CV-TRAINING-V2-PLAN.md §2).
+        upload for the same id (docs/plans/done/CV-TRAINING-V2-PLAN.md §2).
 
         The concatenation of every `DatasetChunk.content`, in stream order,
         must be a ZIP of the frozen §5 layout (`data.yaml`, `images/<name>`,

@@ -10,7 +10,7 @@ import { buildRosterRows, countAssetsWithoutPilot, searchRosterRows, type Roster
 import { buildPilotRows, parseRosterPivot, searchPilotRows, type RosterPivot, type RosterPilotRow } from '../../core/roster/roster-pivot-logic';
 
 /**
- * `RosterPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — the `/manage/roster` route is already
+ * `RosterPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the `/manage/roster` route is already
  * role-gated (`core/org/org-guard.ts`, same guard `/org` uses — only ADMIN/MANAGER reach this page
  * at all, so unlike `pilots-card.ts` this facade doesn't re-check `canManageOrg` itself, mirroring
  * `OrgSettingsFacade`'s own precedent for a route already behind that guard).
@@ -22,7 +22,7 @@ import { buildPilotRows, parseRosterPivot, searchPilotRows, type RosterPivot, ty
  * directions over the identical source data (`features/roster/roster-logic.ts#buildRosterRows` /
  * `core/roster/roster-pivot-logic.ts#buildPilotRows`).
  *
- * **Wave 3 (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/13-roster.md) — accordion deleted,
+ * **Wave 3 (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/13-roster.md) — accordion deleted,
  * two-pane + pivot added:**
  * - `?by=asset|pilot` (`parseRosterPivot`) drives which list renders; switching pivot clears `?sel=`
  *   (the id namespaces differ — an asset id and a user id are never meant to be compared, so a
@@ -30,7 +30,7 @@ import { buildPilotRows, parseRosterPivot, searchPilotRows, type RosterPivot, ty
  * - `?sel=<id>` drives the two-pane detail — an asset id in the `asset` pivot, a user id in `pilot`.
  *   Resolved against the currently-loaded rows for the *active* pivot only; a `sel` that doesn't
  *   resolve (stale id, or one left over from the other pivot) degrades to "no selection", never a
- *   crash (docs/NAV-IA-REDESIGN-PLAN.md §2.4's own rule).
+ *   crash (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4's own rule).
  * - **One assignment path for both pivots**: `assignPilotToAsset`/`unassignPilotFromAsset` below are
  *   the only two places this facade calls `VisionApi.assignPilot`/`unassignPilot` on the "By pilot"
  *   side; the "By asset" side keeps reusing `<vision-pilots-card>` wholesale (unchanged since before
@@ -71,7 +71,7 @@ export class RosterFacade {
     searchPilotRows(buildPilotRows(this.assets(), this.pilotsByAsset(), this.users()), this.searchQuery()),
   );
 
-  /** `⚠ N assets have no pilot` (docs/design/13-roster.md) — against every loaded asset, not the search-filtered subset. */
+  /** `⚠ N assets have no pilot` (docs/extracts/design/13-roster.md) — against every loaded asset, not the search-filtered subset. */
   readonly assetsWithoutPilotCount = computed(() =>
     countAssetsWithoutPilot(buildRosterRows(this.assets(), this.pilotsByAsset(), this.users())),
   );

@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * docs/DRONE-INFRA-PLAN.md I-a: multi-vehicle single-port ingest through {@link MavlinkSocketHub},
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-a: multi-vehicle single-port ingest through {@link MavlinkSocketHub},
  * exercised end to end over real loopback UDP sockets — several {@link MavlinkFeedTransmitter}
  * feeds at distinct system ids, all pushed at ONE port, ingested by {@link MavlinkTelemetrySource}
  * devices that pin, don't pin, or never open at all.

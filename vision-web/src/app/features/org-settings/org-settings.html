@@ -154,7 +154,7 @@
                 <span class="org-row-name truncate">{{ user.displayName }}</span>
                 <span class="muted org-row-sub truncate">{{ user.username }} · {{ user.email }}</span>
                 @if (user.memberships.length > 0) {
-                  <!-- docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — classification is muted text, not a
+                  <!-- docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — classification is muted text, not a
                        chip; N group memberships collapse to one comma-joined muted list (mirrors
                        `features/roster/roster.html`'s identical N-chips-to-one-text-list fix). -->
                   <span

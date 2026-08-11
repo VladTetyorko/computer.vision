@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests for {@link MapVisibility} (docs/MAP-REWORK-PLAN.md §4.3) — the per-connection {@code
+ * Unit tests for {@link MapVisibility} (docs/plans/done/MAP-REWORK-PLAN.md §4.3) — the per-connection {@code
  * map}-event delivery predicate and its TTL cache.
  *
  * <p>Uses a hand-written {@link MapLayerService} fake rather than Mockito so the number of times the

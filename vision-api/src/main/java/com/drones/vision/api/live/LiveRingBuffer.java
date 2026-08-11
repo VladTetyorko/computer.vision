@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * A bounded, sequence-numbered, per-topic backlog of {@link LiveEnvelopeResponse}s
- * (docs/REALTIME-PLAN.md §4, item 1) — backs both {@code Last-Event-ID} resume and, for a topic
+ * (docs/plans/done/REALTIME-PLAN.md §4, item 1) — backs both {@code Last-Event-ID} resume and, for a topic
  * with nothing better to offer, a fresh connection's "snapshot" (see {@link
  * LiveUpdateRegistry}'s own javadoc for the one topic, {@code fleet}, that has an actual live
  * query to fall back on instead).
@@ -21,7 +21,7 @@ import java.util.List;
  *       none may be silently dropped in favor of a later one.</li>
  *   <li><b>Latest-only</b> ({@code collapseToLatest=true}, {@code fleet}/{@code detections}
  *       topics): appending replaces the single retained entry outright — an older fleet snapshot
- *       or detection result has no value once a newer one has landed (docs/REALTIME-PLAN.md §4,
+ *       or detection result has no value once a newer one has landed (docs/plans/done/REALTIME-PLAN.md §4,
  *       item 3: "detections emit latest-frame-only").</li>
  * </ul>
  *

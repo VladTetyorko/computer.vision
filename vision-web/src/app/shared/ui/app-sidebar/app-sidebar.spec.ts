@@ -78,7 +78,7 @@ function navRowHrefs(root: HTMLElement): (string | null)[] {
 }
 
 describe('AppSidebar — tiering + role gate', () => {
-  it('renders every group as a non-link label (docs/NAV-IA-REDESIGN-PLAN.md F1 — no /operate, /monitor, /manage destination anywhere)', () => {
+  it('renders every group as a non-link label (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1 — no /operate, /monitor, /manage destination anywhere)', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
 
@@ -126,7 +126,7 @@ describe('AppSidebar — tiering + role gate', () => {
     expect(hrefs).toEqual(advancedTier.map((entry) => entry.to));
   });
 
-  it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed and carrying no per-row chip (docs/VISUAL-REFRESH-PLAN.md Wave 1 — the disclosure title already says it)', () => {
+  it('folds badge:"soon" entries under a collapsed Upcoming disclosure, each dimmed and carrying no per-row chip (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 — the disclosure title already says it)', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
     const operateIndex = NAV_MODES.findIndex((mode) => mode.id === 'operate');
@@ -144,7 +144,7 @@ describe('AppSidebar — tiering + role gate', () => {
     }
   });
 
-  it('renders every group label without an icon (docs/VISUAL-REFRESH-PLAN.md Wave 1 — icons compete with each row\'s own icon two rows down)', () => {
+  it('renders every group label without an icon (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 — icons compete with each row\'s own icon two rows down)', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
     for (const label of Array.from(root.querySelectorAll('.group-label'))) {
@@ -284,7 +284,7 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
     expect(root.querySelector('.sidebar')!.classList.contains('mobile-open')).toBe(false);
   });
 
-  it('preserves the identity chip and notification bell, and consolidates live count + online status into one quiet line (docs/VISUAL-REFRESH-PLAN.md Wave 1)', () => {
+  it('preserves the identity chip and notification bell, and consolidates live count + online status into one quiet line (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1)', () => {
     const fixture = render({ streams: [{}, {}] });
     const root = fixture.nativeElement as HTMLElement;
 
@@ -307,7 +307,7 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
   });
 
   /**
-   * docs/UI-STATE-PLAN.md §1 D1/D3, §2.2: the mobile sheet now shares `GlobalOverlayStore` with the
+   * docs/plans/done/UI-STATE-PLAN.md §1 D1/D3, §2.2: the mobile sheet now shares `GlobalOverlayStore` with the
    * identity menu/notification bell it's mounted alongside, so opening one closes the other — this is
    * the same exclusivity `core/ui/overlay-store.spec.ts` proves at the store level, checked here
    * through the real rendered shell (the actual scenario the sheet and the chip share one DOM tree).
@@ -372,7 +372,7 @@ describe('AppSidebar — Advanced/Upcoming disclosures persist via SidebarStore'
  * is a plain persisted-signal store, not something with an HTTP/SSE dependency graph worth stubbing
  * (contrast `FleetStore`/`EventsStore`/`LiveStore` above, faked purely so the tree can mount).
  */
-describe('AppSidebar — theme toggle (docs/VISUAL-REFRESH-PLAN.md F3/Wave 1)', () => {
+describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1)', () => {
   beforeEach(() => localStorage.clear());
 
   it('defaults to light, showing the sun (current theme) with a control that switches to dark', () => {

@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * and asserts mediamtx's HLS playlist for the stream becomes fetchable.
  *
  * <p>Runs the container via the {@code docker} CLI directly (no Testcontainers
- * dependency, per {@code docs/PHASE1-PLAN.md} — this module adds no
+ * dependency, per {@code docs/plans/done/PHASE1-PLAN.md} — this module adds no
  * dependencies beyond javacv/ffmpeg-platform-gpl). Skips cleanly (not a
  * failure) whenever the {@code docker} CLI isn't usable; the container name
  * is randomized and always removed in a {@code finally} block, so a crashed
@@ -63,7 +63,7 @@ class MediamtxDockerIntegrationTest {
     private static final String IMAGE = "bluenviron/mediamtx:latest";
     private static final Duration PLAYLIST_TIMEOUT = Duration.ofSeconds(30);
     /**
-     * docs/OPS-CORE-PLAN.md §R: the recording/playback test below deliberately pins the exact
+     * docs/plans/done/OPS-CORE-PLAN.md §R: the recording/playback test below deliberately pins the exact
      * image tag docker-compose.yml pins ({@code bluenviron/mediamtx:1.19.3}), not the {@code
      * :latest} the other tests in this class use — recording/playback is new, stack-specific
      * config this test is meant to validate against the real version this app actually ships with,
@@ -95,7 +95,7 @@ class MediamtxDockerIntegrationTest {
             // keep arriving (mediamtx tears the muxer down once the RTSP source goes idle), so
             // this pumps frames at ~15fps for as long as it takes the playlist to become
             // fetchable (capped by PLAYLIST_TIMEOUT below), well past the ~1s/15-frame GOP
-            // boundary (docs/MVP2-PLAN.md V-a) a single short burst would need to close its
+            // boundary (docs/plans/done/MVP2-PLAN.md V-a) a single short burst would need to close its
             // first HLS segment.
             Thread pump = startFramePump(publisher, streamId, keepPumping);
             try {
@@ -262,7 +262,7 @@ class MediamtxDockerIntegrationTest {
     }
 
     /**
-     * docs/OPS-CORE-PLAN.md §R end-to-end check: a real mediamtx started with the same
+     * docs/plans/done/OPS-CORE-PLAN.md §R end-to-end check: a real mediamtx started with the same
      * record/playback env vars docker-compose.yml sets ({@code MTX_PATHDEFAULTS_RECORD},
      * {@code MTX_PATHDEFAULTS_RECORDDELETEAFTER}, {@code MTX_PLAYBACK}, {@code
      * MTX_PLAYBACKADDRESS}) records a short published stream to disk, and {@link
@@ -323,7 +323,7 @@ class MediamtxDockerIntegrationTest {
     }
 
     /**
-     * docs/CV-TRAINING-V2-PLAN.md §6 end-to-end check: {@link MediamtxReplayFrameExtractor} pulls a
+     * docs/plans/done/CV-TRAINING-V2-PLAN.md §6 end-to-end check: {@link MediamtxReplayFrameExtractor} pulls a
      * decoded frame back out of the same kind of recorded clip {@link
      * #recordedStreamIsFetchableAsMp4ThroughPlaybackUrl} fetches as raw MP4 bytes — this test
      * decodes it all the way to a {@link VideoFrame} instead of only checking the byte stream is a

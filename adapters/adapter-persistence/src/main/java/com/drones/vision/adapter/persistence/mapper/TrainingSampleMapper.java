@@ -12,7 +12,7 @@ import java.util.UUID;
 
 /**
  * {@link TrainingSample} &harr; {@link TrainingSampleEntity} mapping, extracted from {@code
- * JpaTrainingSampleRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaTrainingSampleRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class TrainingSampleMapper {
 

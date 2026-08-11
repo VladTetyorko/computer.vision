@@ -17,7 +17,7 @@ const LOG_PREFIX = '[labeling]';
 const SAMPLE_LOOKUP_LIMIT = 500;
 
 /**
- * `SampleEditorPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — the confirm/correct step: load one
+ * `SampleEditorPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the confirm/correct step: load one
  * sample + its dataset's class vocabulary, host `vision-sample-box-editor`'s working annotation set,
  * and save it as `LABELED` (confirm) or `DISCARDED`. Injects `VisionApi` directly, same "page-local
  * state" reasoning as `DatasetDetailFacade`'s own doc comment.
@@ -41,7 +41,7 @@ export class SampleEditorFacade {
   readonly validation = computed(() => validateAnnotations(this.annotations(), this.dataset()?.classes ?? []));
   readonly canConfirm = computed(() => this.validation().valid);
   /** "N box(es) use a label…" was a literal placeholder string — `pluralize` (`shared/ui/page-bar`,
-   *  docs/NAV-IA-REDESIGN-PLAN.md §2.2) is this app's one regular-English pluralisation helper;
+   *  docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) is this app's one regular-English pluralisation helper;
    *  "boxes" is irregular, so it's passed explicitly rather than the default `${singular}s`. */
   readonly invalidLabelsMessage = computed(
     () =>

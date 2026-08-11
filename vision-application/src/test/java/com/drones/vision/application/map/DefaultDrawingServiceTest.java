@@ -169,7 +169,7 @@ class DefaultDrawingServiceTest {
         Drawing existing = drawingRepository.save(new Drawing(DrawingId.random(), team.id(), DrawKind.LINE, line(),
                 null, null, new Ownership(creator, group), Instant.now()));
 
-        // An outsider may not learn the drawing exists (docs/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
+        // An outsider may not learn the drawing exists (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
         assertThrows(NoSuchElementException.class,
                 () -> service.patch(pilot(UserId.random()), existing.id(), DrawingPatch.NOTHING));
         assertThrows(NoSuchElementException.class, () -> service.delete(pilot(UserId.random()), existing.id()));

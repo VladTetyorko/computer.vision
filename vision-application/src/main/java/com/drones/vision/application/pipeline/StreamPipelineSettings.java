@@ -8,7 +8,7 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
  * Tunables for one running stream's {@link StreamPipeline} runtime — frame-cadence measurement,
  * detection-outage backoff, video-source reopen backoff (the bounds {@link DefaultStreamService}
  * passes when wrapping a source in a {@link SupervisedPublisher}), and detection-box extrapolation
- * (see {@link DetectionExtrapolator}) — extracted per docs/LAYERING-REFACTOR-PLAN.md &sect;1.3's
+ * (see {@link DetectionExtrapolator}) — extracted per docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3's
  * config-extraction rule: none of these may live as a hardcoded literal inside the classes that use
  * them.
  *
@@ -25,7 +25,7 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
  * it rides this record because this is already what {@code vision-app} maps {@code vision.tracking.*}
  * onto (the stats window and track retention below), so it needed no new collaborator anywhere.
  * Seeding a start is the only thing it can do: a running stream's tracking configuration is its own
- * state, changed only by {@code PATCH} (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
+ * state, changed only by {@code PATCH} (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
  *
  * <p><b>Two distinct backoff pairs are preserved on purpose</b> (not unified): {@link
  * #detectionBackoffInitialNanos()}/{@link #detectionBackoffMaxNanos()} bound how quickly {@link
@@ -60,13 +60,13 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
  *                                        between two completed results, used only where at least
  *                                        one side is untracked; must not be negative
  * @param trackingStatsWindow            how far back {@link TrackingStatsWindow}'s counters reach
- *                                        (docs/TRACKING-PLAN.md &sect;4.E); must be positive.
+ *                                        (docs/plans/done/TRACKING-PLAN.md &sect;4.E); must be positive.
  *                                        {@code vision-app} binds this to {@code
  *                                        vision.tracking.stats-window-seconds}
  * @param trackRetention                 how long a track that stops arriving stays in {@link
  *                                        TrackBook} before being expired; must be positive
  * @param trackingSeed                   the deployment's tracking defaults for <b>new</b> streams
- *                                        ({@code vision.tracking.*} — docs/TRACKING-ORCHESTRATION.md
+ *                                        ({@code vision.tracking.*} — docs/extracts/TRACKING-ORCHESTRATION.md
  *                                        &sect;4.1), read by {@code DefaultStreamService#start}
  *                                        alone; never {@code null}, use {@link
  *                                        TrackingConfigPatch#NOTHING} for "the deployment states
@@ -92,7 +92,7 @@ public record StreamPipelineSettings(
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T3 added the two tracking
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T3 added the two tracking
      * tunables, kept as a convenience constructor defaulting both to {@link #defaults()}'s values,
      * so every pre-existing call site — including {@code vision-app}'s own property mapping —
      * compiles unchanged. Same "N-1-arg convenience ctor" idiom the domain's {@code
@@ -172,7 +172,7 @@ public record StreamPipelineSettings(
         }
     }
 
-    /** Every value byte-identical to the literal it replaces (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
+    /** Every value byte-identical to the literal it replaces (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
     public static StreamPipelineSettings defaults() {
         return new StreamPipelineSettings(
                 30, 0.2, 5, 1.0, 240.0,

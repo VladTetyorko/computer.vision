@@ -3,7 +3,7 @@ package com.drones.vision.application.simulation;
 import java.util.List;
 
 /**
- * A configurable flight plan for a simulated telemetry device (docs/CYCLES-PLAN.md §7, CT-a):
+ * A configurable flight plan for a simulated telemetry device (docs/main/CYCLES-PLAN.md §7, CT-a):
  * speed, loop/bounce/once repeat behavior, and a route of checkpoints — {@link
  * DefaultSimulationService} converts this into {@code SimulatedTelemetrySource}'s (adapter-simulation)
  * {@code route}/{@code speedMps}/{@code routeMode} device options in place of the bare {@code

@@ -5,7 +5,7 @@ import java.util.Arrays;
 /**
  * Pure, fixed-capacity ring buffer of one stream's recent capture→encode lag
  * samples (milliseconds), plus p50/p95 percentile readout. Backs {@link
- * MediamtxStreamPublisher}'s docs/MVP2-PLAN.md V-c latency measurement: "lag"
+ * MediamtxStreamPublisher}'s docs/plans/done/MVP2-PLAN.md V-c latency measurement: "lag"
  * here means the time between a {@code VideoFrame}'s {@code capturedAt} and
  * the moment it is handed to {@code FFmpegFrameRecorder.record} — i.e. the
  * capture→ingest→pipeline→overlay→publisher-handoff span, not anything

@@ -17,12 +17,12 @@ import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.stream.StreamService;
 
 /**
- * Capture, correction/labeling and export of {@link TrainingSample}s (docs/CV-TRAINING-PLAN.md
+ * Capture, correction/labeling and export of {@link TrainingSample}s (docs/plans/done/CV-TRAINING-PLAN.md
  * §2) — the operator-in-the-loop half of the CV model-improvement loop. One interface, one
  * implementation ({@link DefaultLabelingService}); {@link com.drones.vision.domain.model.Dataset}
  * CRUD lives in {@link DatasetService}.
  *
- * <h2>Scope (docs/CV-TRAINING-PLAN.md Open Questions §4)</h2>
+ * <h2>Scope (docs/plans/done/CV-TRAINING-PLAN.md Open Questions §4)</h2>
  * A dataset carrying {@code ownership} is normally group-scoped like every other owned datum, but
  * a {@link VisibilityScope.Kind#ASSIGNED_ASSETS} (pilot) scope carries <b>no</b> group information
  * at all — {@link VisibilityScope#includesGroup} is hard-{@code false} for it. Gating every method
@@ -63,7 +63,7 @@ public interface LabelingService {
 
     /**
      * Captures a training sample from a finished usage's <b>recorded</b> replay at a specific
-     * instant (docs/CV-TRAINING-V2-PLAN.md §4) — the replay counterpart to {@link #capture}'s live
+     * instant (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) — the replay counterpart to {@link #capture}'s live
      * path. Pulls one decoded frame via {@link ReplaySources#frames()} at {@code
      * usage.startedAt() + spec.atSeconds()}, and pre-fills suggested annotations from the nearest
      * stored {@link com.drones.vision.domain.model.DetectionResult} within a ±2s window (server-side
@@ -143,9 +143,9 @@ public interface LabelingService {
 
     /**
      * Composes every {@link SampleStatus#LABELED} sample in a dataset into the frozen §5 YOLO
-     * content (docs/CV-TRAINING-PLAN.md §5: {@code data.yaml} + per-sample image/label entries) and
+     * content (docs/plans/done/CV-TRAINING-PLAN.md §5: {@code data.yaml} + per-sample image/label entries) and
      * ships it to the training host via {@link com.drones.vision.domain.port.out.DatasetUploadPort}
-     * (docs/CV-TRAINING-V2-PLAN.md §4) — the replacement for the deleted manual export step.
+     * (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) — the replacement for the deleted manual export step.
      * {@link SampleStatus#PENDING}/{@link SampleStatus#DISCARDED} samples are skipped. Uploading the
      * same dataset again replaces whatever the training host had before (idempotent — "label more,
      * train again" just works).

@@ -7,7 +7,7 @@ import java.util.List;
  * RC channel override values in microseconds, 1-based (index 0 in {@link #microsByChannel()} is
  * RC channel 1) — the payload {@link com.drones.vision.domain.port.out.ManualControlPort} relays
  * to the aircraft as a MAVLink {@code RC_CHANNELS_OVERRIDE} (#70) frame
- * (docs/RC-CONTROL-PHASE1-PLAN.md §1/§5).
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5).
  *
  * <p>The record itself accepts 1..18 channels (MAVLink #70's own extent), but v1's {@link
  * ChannelMap#defaultMap()} only ever populates channels 1..8 — channels 9..18 use a different,

@@ -183,7 +183,7 @@ class DefaultMapLayerServiceTest {
     void renameOfInvisibleLayerReadsAsUnknown() {
         MapLayer team = save("Old name", LayerKind.TEAM, new Ownership(UserId.random(), GroupId.random()));
 
-        // An outsider may not learn the layer exists (docs/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
+        // An outsider may not learn the layer exists (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
         assertThrows(NoSuchElementException.class,
                 () -> service.rename(pilot(UserId.random()), team.id(), "New name"));
     }

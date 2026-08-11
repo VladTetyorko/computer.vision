@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.UserId;
 import java.util.Set;
 
 /**
- * Driven port: the pilot&rarr;asset assignment join (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2).
+ * Driven port: the pilot&rarr;asset assignment join (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2).
  *
  * <p>An assignment is a plain many-to-many link between a {@link UserId pilot} and an
  * {@link AssetId asset} — "this pilot flies that aircraft." It is deliberately kept as its own

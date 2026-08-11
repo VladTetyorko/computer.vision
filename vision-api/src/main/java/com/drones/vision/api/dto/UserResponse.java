@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 
 /**
- * A managed user on the wire (docs/U-SCOPE-PLAN.md, U-e slice 2) — the element type of {@code GET
+ * A managed user on the wire (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — the element type of {@code GET
  * /api/users} and the body of {@code POST /api/users}/{@code POST /api/users/{id}/enabled}.
  *
  * <p>Distinct from {@link MeResponse} (the authenticated-self view, which resolves group names and

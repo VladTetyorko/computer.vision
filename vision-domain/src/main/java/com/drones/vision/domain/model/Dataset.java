@@ -5,11 +5,11 @@ import java.util.List;
 
 /**
  * A named accumulation of labeled frames aimed at improving detection of one target
- * (docs/CV-TRAINING-PLAN.md §1) — the unit an operator captures samples into and eventually
+ * (docs/plans/done/CV-TRAINING-PLAN.md §1) — the unit an operator captures samples into and eventually
  * exports as a YOLO dataset.
  *
  * <p>{@code classes} is the <b>ordered</b> YOLO class list: an annotation's class index on export
- * is its label's position in this list (docs/CV-TRAINING-PLAN.md §5). It is free-form strings, not
+ * is its label's position in this list (docs/plans/done/CV-TRAINING-PLAN.md §5). It is free-form strings, not
  * {@link CategoryId} slugs — open-vocab detection labels aren't categories (see {@link
  * Annotation}'s own javadoc) — and is defensively copied, preserving order. Every {@link
  * TrainingSample}'s {@link Annotation#label()} must be a member of its dataset's {@code classes},

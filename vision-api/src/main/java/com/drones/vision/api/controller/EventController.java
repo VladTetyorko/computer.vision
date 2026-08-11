@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for debounced {@code DetectionEvent}s (docs/MVP2-PLAN.md §E, E-a):
+ * Driving REST adapter for debounced {@code DetectionEvent}s (docs/plans/done/MVP2-PLAN.md §E, E-a):
  * "a person was seen for a while", not the raw per-frame {@code DetectionResult} stream {@link
  * StreamController#detections} already serves.
  *
@@ -22,7 +22,7 @@ import java.util.Objects;
  * {@link StreamController} already does for {@code DetectionRepositoryPort}) unrelated to any
  * existing controller's own concerns, rather than growing one of them for an unrelated read.
  *
- * <p><b>Polling, not SSE</b> (docs/MVP2-PLAN.md §E, E-a): the simplest thing consistent with the
+ * <p><b>Polling, not SSE</b> (docs/plans/done/MVP2-PLAN.md §E, E-a): the simplest thing consistent with the
  * SPA's existing {@code PollScheduler} pattern (vision-web already polls {@code /api/streams}/
  * detections on an interval rather than holding a server push connection open) — adding a second,
  * different delivery mechanism for one new feed was judged not worth the complexity a first cut

@@ -40,7 +40,7 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
 
 /**
- * docs/U-SCOPE-PLAN.md U-e slice 2, feature 1+2 with {@code vision.auth.enabled=true}: proves the
+ * docs/plans/done/U-SCOPE-PLAN.md U-e slice 2, feature 1+2 with {@code vision.auth.enabled=true}: proves the
  * scoped {@code GET /api/assets} read actually bites once auth is on — a MANAGER sees only assets
  * owned by their group subtree, and a PILOT sees only the assets explicitly assigned to them.
  *

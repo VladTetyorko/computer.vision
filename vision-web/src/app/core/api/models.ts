@@ -15,7 +15,7 @@ export type Capability = 'VIDEO' | 'TELEMETRY' | 'PTZ' | 'AUDIO';
 
 /**
  * Mirrors `domain.model.LifecycleState` as surfaced by `dto.DeviceResponse#state` /
- * `dto.AssetSummaryResponse#lifecycle` (docs/CYCLES-PLAN.md §8) — one axis shared by both
+ * `dto.AssetSummaryResponse#lifecycle` (docs/main/CYCLES-PLAN.md §8) — one axis shared by both
  * devices and assets. A deactivated device/asset refuses to stream; `DELETED` is a soft
  * delete/archive (hidden from default listings, recoverable via restore — see
  * `SettableLifecycleState`).
@@ -23,14 +23,14 @@ export type Capability = 'VIDEO' | 'TELEMETRY' | 'PTZ' | 'AUDIO';
 export type LifecycleState = 'ACTIVE' | 'DEACTIVATED' | 'DELETED';
 
 /**
- * The only two states a client may request via `POST .../state` (docs/CYCLES-PLAN.md §8's
+ * The only two states a client may request via `POST .../state` (docs/main/CYCLES-PLAN.md §8's
  * pinned contract) — `DELETED` is reached only via the `DELETE` (archive) endpoints, and
  * `DEACTIVATED` on an already-`DELETED` thing is how the contract spells "restore" (there is no
  * direct `DELETED` → `ACTIVE` transition).
  */
 export type SettableLifecycleState = Exclude<LifecycleState, 'DELETED'>;
 
-/** Mirrors the `{state}` body every `POST .../state` endpoint takes (docs/CYCLES-PLAN.md §8). */
+/** Mirrors the `{state}` body every `POST .../state` endpoint takes (docs/main/CYCLES-PLAN.md §8). */
 export interface SetLifecycleStateRequest {
   readonly state: SettableLifecycleState;
 }
@@ -40,7 +40,7 @@ export interface SetLifecycleStateRequest {
  *
  * There is no `type` field: the `DeviceType` enum was removed server-side in favor of the
  * data-driven category model, which applies to `Asset`s, not raw devices (see `Category`,
- * `AssetSummary`). `state` can now be `DELETED` too (docs/CYCLES-PLAN.md §8 — a device can be
+ * `AssetSummary`). `state` can now be `DELETED` too (docs/main/CYCLES-PLAN.md §8 — a device can be
  * archived, e.g. as the last source of an asset, without the asset itself going away).
  */
 export interface Device {
@@ -54,7 +54,7 @@ export interface Device {
 }
 
 /**
- * Mirrors `PATCH /api/devices/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every
+ * Mirrors `PATCH /api/devices/{id}`'s body (docs/main/CYCLES-PLAN.md §8's pinned contract): every
  * field optional, `@JsonInclude(NON_NULL)`-style — send only what actually changed. The backend
  * requires `protocol`+`uri` together whenever either (or `options`) is present; the request
  * builder in `features/devices/devices-page-logic.ts` only ever populates `name` today (the UI's
@@ -84,7 +84,7 @@ export interface RegisterDeviceRequest {
  * Mirrors `dto.ActiveStreamResponse`. `viewUrl`/`whepUrl` are each independently absent when the
  * active publisher has no such viewing endpoint wired.
  *
- * `whepUrl` (docs/MVP2-PLAN.md §L, L-a) is mediamtx's own **absolute origin URL** for the WebRTC
+ * `whepUrl` (docs/plans/done/MVP2-PLAN.md §L, L-a) is mediamtx's own **absolute origin URL** for the WebRTC
  * (WHEP) viewing endpoint — unlike `viewUrl`, which can be app-relative (`HlsProxyController`
  * reverse-proxies HLS byte fetches), WHEP is a POST/SDP + ICE exchange a stateless proxy cannot
  * forward, so this is never app-relative and must never be proxied — POST straight to it.
@@ -99,14 +99,14 @@ export interface ActiveStream {
 
 /**
  * Mirrors `dto.StartStreamRequest` — every field falls back to `PipelineConfig.defaults()`.
- * `model` (docs/CV-CONTROL-PLAN.md, extending docs/CV-MODELS-PLAN.md item 4 — the detection-model
+ * `model` (docs/plans/done/CV-CONTROL-PLAN.md, extending docs/plans/done/CV-MODELS-PLAN.md item 4 — the detection-model
  * picker, now data-driven from `GET /api/cv/models`, see `CvModel`/`CvModelsResponse` below) is the
  * raw model id string verbatim, never split here — it may be a comma-composite
  * (`"yolo11n.pt,orion12l.pt"`) that only `cv-service`'s own registry parses; the resulting
  * `ModelRef`'s version always stays the backend default (there is no per-stream version override,
  * only a model-id one).
  *
- * `labelFilter`/`detectionEnabled` (docs/CV-CONTROL-PLAN.md §2's frozen contract) are this cycle's
+ * `labelFilter`/`detectionEnabled` (docs/plans/done/CV-CONTROL-PLAN.md §2's frozen contract) are this cycle's
  * own additions, both optional — an absent `labelFilter` keeps today's "empty = all labels"
  * semantics, an absent `detectionEnabled` defaults `true` server-side (`PipelineConfig`'s own
  * `DEFAULT_DETECTION_ENABLED`). Both are also PATCH-able live afterward — see
@@ -120,7 +120,7 @@ export interface StartStreamRequest {
   readonly detectionEnabled?: boolean;
 }
 
-// --- Live per-stream CV control (docs/CV-CONTROL-PLAN.md §2-4's frozen contract) ----------------
+// --- Live per-stream CV control (docs/plans/done/CV-CONTROL-PLAN.md §2-4's frozen contract) ----------------
 // Gives the Fly cockpit's CV control panel (`features/fly/cv-control-panel.ts`) live control of a
 // *running* stream's detection pipeline, plus a data-driven model roster for the picker (replacing
 // the old hardcoded `DETECTION_MODEL_OPTIONS`/`DetectionModelId` union — see
@@ -137,11 +137,11 @@ export interface StartStreamRequest {
  * a hot-knob drag can never accidentally trigger a model re-arm).
  *
  * `maxInFlightInferences`/`overlayTelemetry`/`overlayBurnIn`/`eventRule`/the model **version** are
- * deliberately **not** fields here — not PATCH-able in v1 (docs/CV-CONTROL-PLAN.md's own non-goals:
+ * deliberately **not** fields here — not PATCH-able in v1 (docs/plans/done/CV-CONTROL-PLAN.md's own non-goals:
  * `overlayBurnIn` changes the encode path, `eventRule` is bound into the event engine at stream
  * start). Start-time only, via `StartStreamRequest` above.
  *
- * `tracking` (docs/TRACKING-PLAN.md §4.D, wave T7) is a **third**, independent family of change
+ * `tracking` (docs/plans/done/TRACKING-PLAN.md §4.D, wave T7) is a **third**, independent family of change
  * alongside the hot knobs above and `model` — never coalesced with either
  * (`cv-control-panel-logic.ts#buildTrackingModePatch`/`buildTrackingEnginePatch`/
  * `buildTrackingCadencePatch`/`buildFollowLockPatch`/`buildReleaseLockPatch` each build a
@@ -161,19 +161,19 @@ export interface UpdateStreamConfigRequest {
  * Mirrors the `200` body of `PATCH /api/streams/{streamId}/config`. `modelReArmed` is `true` **only**
  * when the request's `model` field was present and differed from the stream's running model — every
  * other knob is hot and never re-arms. A brief detection gap happens in that case (video is never
- * interrupted, per docs/CV-CONTROL-PLAN.md §A) — `cv-control-panel-logic.ts#reArmHint` is the one
+ * interrupted, per docs/plans/done/CV-CONTROL-PLAN.md §A) — `cv-control-panel-logic.ts#reArmHint` is the one
  * place this app turns that into operator-facing copy; `404`/`400`/`409` never reach this type at
  * all (an `HttpErrorResponse`, decoded by the caller via `describeHttpError`).
  *
- * `trackingChanged` (docs/TRACKING-PLAN.md §4.D, wave T7) is `true` iff the request's `tracking`
+ * `trackingChanged` (docs/plans/done/TRACKING-PLAN.md §4.D, wave T7) is `true` iff the request's `tracking`
  * object was present **and** produced a different `TrackingConfig` than the one already running — a
  * mode/engine change never re-arms the detector, tracking is a hot knob throughout exactly like
  * confidence/fps. Typed **optional** rather than required, unlike `modelReArmed`: this field is added
- * server-side by docs/TRACKING-PLAN.md wave T6, which lands after this one — a backend this app talks
+ * server-side by docs/plans/done/TRACKING-PLAN.md wave T6, which lands after this one — a backend this app talks
  * to before T6 ships simply omits it, and no reader here should assume a missing key means `false`.
  * The Fly cockpit's own "Following #N" chip does **not** read this flag at all — see
  * `StreamTracksResponse#lockedTrackId`'s own doc comment for why a lock's confirmation comes from a
- * different, polled response instead (docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule).
+ * different, polled response instead (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule).
  */
 export interface PatchStreamConfigResponse {
   readonly streamId: string;
@@ -193,7 +193,7 @@ export interface PatchStreamConfigResponse {
  * no separate hint field, unlike the old `DetectionModelOption#hint`.
  *
  * `openVocab` drives whether the CV panel leads with the class-filter chips for this model
- * (docs/CV-CONTROL-PLAN.md §E: "labelFilter is the primary UX control for the open-vocab model").
+ * (docs/plans/done/CV-CONTROL-PLAN.md §E: "labelFilter is the primary UX control for the open-vocab model").
  * `defaultLabelFilter` is the class set a *closed-set* model's own picker pre-seeds
  * (`cv-control-panel-logic.ts#seedLabelFilterForModel`); an **open-vocab** model's own
  * `defaultLabelFilter` is deliberately **ignored** by that same seeding function — always seeds
@@ -214,31 +214,31 @@ export interface CvModel {
 }
 
 /** Mirrors `GET /api/cv/models`'s `200` body — `yolo26n.pt` (the fast closed-set default) listed
- * first, per docs/CV-CONTROL-PLAN.md §4. Never errors server-side; `FleetStore.models` degrades to
+ * first, per docs/plans/done/CV-CONTROL-PLAN.md §4. Never errors server-side; `FleetStore.models` degrades to
  * an empty list on any transport failure instead (silent, background-enrichment read — see that
  * class's own doc comment). */
 export interface CvModelsResponse {
   readonly models: readonly CvModel[];
 }
 
-// --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
+// --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
 // Two perception loops per stream (`ASSOCIATE`: every detection gets a stable id that survives a
 // brief occlusion; `FOLLOW`: one locked target, the detector duty-cycled to a periodic verify pass)
 // — `features/fly/cv-control-panel.ts`'s new Tracking section + flow strip, `shared/player/player.ts`'s
 // track-aware box label/color/dashed-COASTING/trails/click-to-follow. **The backend for this wire
-// contract had not shipped when this wave landed** (docs/TRACKING-PLAN.md §7: T0-T6 land concurrently,
+// contract had not shipped when this wave landed** (docs/plans/done/TRACKING-PLAN.md §7: T0-T6 land concurrently,
 // T7 integrates last against the frozen contract with nothing live to test against) — every reader
 // below treats every field on this page as possibly absent (an old server, or no server at all yet)
 // and degrades to "hidden"/"—", exactly this file's own long-standing convention, doubly load-bearing
 // here since it was written ahead of the thing it describes.
 
 /** Mirrors `domain.model.TrackingMode` — `OFF` (today's behavior, byte-identical, the default until
- *  docs/TRACKING-PLAN.md wave T8 flips it), `ASSOCIATE` (every detection gets a stable id),
+ *  docs/plans/done/TRACKING-PLAN.md wave T8 flips it), `ASSOCIATE` (every detection gets a stable id),
  *  `FOLLOW` (one locked target; the detector duty-cycles down to a periodic verify pass). */
 export type TrackingMode = 'OFF' | 'ASSOCIATE' | 'FOLLOW';
 
 /**
- * Mirrors `domain.model.TrackState` — the track lifecycle (docs/TRACKING-PLAN.md §3.2):
+ * Mirrors `domain.model.TrackState` — the track lifecycle (docs/plans/done/TRACKING-PLAN.md §3.2):
  * `TENTATIVE` (born, below `minHits` detector confirmations — not yet a stable identity) →
  * `CONFIRMED` (a real, confirmed object) → `COASTING` (tracker-predicted only; the detector hasn't
  * re-confirmed it on the most recent pass — renders as a **dashed** box, the system visibly saying
@@ -252,7 +252,7 @@ export type DetectionSource = 'DETECTOR' | 'TRACKER';
 
 /**
  * Mirrors `domain.model.DetectorReason` — *why* a detector pass was spent on a frame, paired with
- * `FrameTracking#detectorRan` (which only says *whether*) — docs/TRACKING-ORCHESTRATION.md §5.1;
+ * `FrameTracking#detectorRan` (which only says *whether*) — docs/extracts/TRACKING-ORCHESTRATION.md §5.1;
  * without this, "why is the detector still running in FOLLOW mode?" is answerable only by reading
  * cv-service logs on whichever box it happens to run on. The wire's `DETECTOR_REASON_UNSPECIFIED`
  * sentinel (old server, or no pass ran this particular frame) never reaches here as a seventh member
@@ -267,8 +267,8 @@ export type DetectorReason =
   | 'COASTED_OUT';
 
 /**
- * Mirrors the nested `"track"` object on `dto.DetectionResponse` (docs/TRACKING-PLAN.md §4.G,
- * docs/TRACKING-ORCHESTRATION.md §5.3) — **grouped, not five flat fields**, so a single
+ * Mirrors the nested `"track"` object on `dto.DetectionResponse` (docs/plans/done/TRACKING-PLAN.md §4.G,
+ * docs/extracts/TRACKING-ORCHESTRATION.md §5.3) — **grouped, not five flat fields**, so a single
  * `detection.track?.id` check gates all track-aware rendering (the `#id` label prefix, a per-track
  * box color, the dashed `COASTING` stroke, trails, click-to-follow) rather than several fields that
  * could disagree with each other. Absent entirely for an untracked detection — mode `OFF`, or a
@@ -286,9 +286,9 @@ export interface DetectionTrack {
 }
 
 /**
- * Mirrors the nested `"tracking"` object on `dto.DetectionResultResponse` (docs/TRACKING-PLAN.md
+ * Mirrors the nested `"tracking"` object on `dto.DetectionResultResponse` (docs/plans/done/TRACKING-PLAN.md
  * §4.G) — one frame's duty-cycle facts, riding beside `detections` rather than flattened onto
- * `DetectionResult` (docs/TRACKING-ORCHESTRATION.md §5.2's own gap fix: `DetectionResult` had
+ * `DetectionResult` (docs/extracts/TRACKING-ORCHESTRATION.md §5.2's own gap fix: `DetectionResult` had
  * nowhere to carry `detectorRan` before `TrackingTelemetry` existed). Absent entirely while tracking
  * is off for this stream, or on an old server — never a batch of zeroed-out fields.
  */
@@ -301,7 +301,7 @@ export interface FrameTracking {
 }
 
 /**
- * Mirrors the `lock` object nested inside `tracking` on `PATCH .../config` (docs/TRACKING-PLAN.md
+ * Mirrors the `lock` object nested inside `tracking` on `PATCH .../config` (docs/plans/done/TRACKING-PLAN.md
  * §4.D) — exactly one of `trackId` / (`pointX` + `pointY`) / `release` may be present; sending two
  * of the three is a server-validated **400** (not re-checked client-side — every builder in
  * `cv-control-panel-logic.ts` only ever populates one form at a time). `lockSeq` is never sent by a
@@ -316,7 +316,7 @@ export interface TargetLockRequest {
 }
 
 /**
- * Mirrors the `tracking` object accepted by `PATCH /api/streams/{streamId}/config` (docs/TRACKING-PLAN.md
+ * Mirrors the `tracking` object accepted by `PATCH /api/streams/{streamId}/config` (docs/plans/done/TRACKING-PLAN.md
  * §4.D) — every field independently optional, the same partial-patch convention
  * `UpdateStreamConfigRequest` itself already follows: an absent field leaves that knob exactly as it
  * is. `redetectIouPercent` is an `int` percent (0-100), not a fraction — matches the domain's own
@@ -334,10 +334,10 @@ export interface TrackingConfigRequest {
 }
 
 /**
- * Mirrors the `"stats"` object of `GET /api/streams/{streamId}/tracks`'s 200 body (docs/TRACKING-PLAN.md
+ * Mirrors the `"stats"` object of `GET /api/streams/{streamId}/tracks`'s 200 body (docs/plans/done/TRACKING-PLAN.md
  * §4.E) — computed **Java-side** by `TrackingStatsWindow` from responses already flowing through the
  * pipeline (no new wire field, no cv-service read-model concern — invariant P3). Backs the Fly
- * cockpit's flow strip (docs/TRACKING-ORCHESTRATION.md §7, the plan's own "visible flow" deliverable)
+ * cockpit's flow strip (docs/extracts/TRACKING-ORCHESTRATION.md §7, the plan's own "visible flow" deliverable)
  * — the one place this app turns the "the detector stopped running, the tracker took over" claim
  * into something read off the screen. **Absent entirely** (not a zeroed object) whenever the endpoint
  * has nothing to report yet — mode `OFF` with no tracking session ever configured, or an old/absent
@@ -345,7 +345,7 @@ export interface TrackingConfigRequest {
  * (`cv-control-panel-logic.ts#formatFlowStrip`'s caller checks this before ever calling it).
  *
  * `engineId` is the engine **actually serving** this stream right now, not necessarily the one the
- * operator last requested (docs/TRACKING-PLAN.md R11 — a requested engine can fail to construct and
+ * operator last requested (docs/plans/done/TRACKING-PLAN.md R11 — a requested engine can fail to construct and
  * fall back to the mode's default). The flow strip, and the Tracking section's own engine-picker
  * selected-state, both read this field for exactly that reason — never the locally-drafted request.
  */
@@ -363,10 +363,10 @@ export interface TrackStats {
 }
 
 /**
- * One row of `GET /api/streams/{streamId}/tracks`'s `"tracks"` array (docs/TRACKING-PLAN.md §4.E) —
+ * One row of `GET /api/streams/{streamId}/tracks`'s `"tracks"` array (docs/plans/done/TRACKING-PLAN.md §4.E) —
  * the application layer's track-book entry (`TrackedObject`, made live by this plan after sitting as
  * a dead type — see that record's own Java doc comment), ordered by `trackId` ascending server-side.
- * The exact backend DTO class name isn't pinned yet (T6 lands after this wave, docs/TRACKING-PLAN.md
+ * The exact backend DTO class name isn't pinned yet (T6 lands after this wave, docs/plans/done/TRACKING-PLAN.md
  * §7) — this mirrors the *JSON shape* §4.E froze, not a specific Java type name.
  */
 export interface StreamTrack {
@@ -384,7 +384,7 @@ export interface StreamTrack {
 }
 
 /**
- * Mirrors `GET /api/streams/{streamId}/tracks`'s 200 body (docs/TRACKING-PLAN.md §4.E) — never
+ * Mirrors `GET /api/streams/{streamId}/tracks`'s 200 body (docs/plans/done/TRACKING-PLAN.md §4.E) — never
  * errors server-side; an unknown/stopped stream returns an empty `tracks` list and `lockedTrackId:
  * 0` (the same forgiving idiom `GET .../detections` already uses). A **transport failure** (this
  * endpoint not existing yet on an old/absent server, or a genuine network error) is therefore the
@@ -394,7 +394,7 @@ export interface StreamTrack {
  * `lockedTrackId` is `0` when no lock is held — the wire's own "not this" sentinel, never `null`/
  * absent, mirroring the domain's own `TargetLock`/`lockedTrackId` convention. **This is the field
  * the Fly cockpit's "Following #N — release" chip gates on**: the chip renders only once this
- * response confirms a lock, never from local click intent (docs/TRACKING-ORCHESTRATION.md §3.3's
+ * response confirms a lock, never from local click intent (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's
  * honesty rule) — see `cv-control-panel.ts`'s own doc comment.
  */
 export interface StreamTracksResponse {
@@ -405,13 +405,13 @@ export interface StreamTracksResponse {
 }
 
 /**
- * Mirrors one entry of `GET /api/cv/trackers`'s roster (docs/TRACKING-PLAN.md §4.F) — the Tracking
+ * Mirrors one entry of `GET /api/cv/trackers`'s roster (docs/plans/done/TRACKING-PLAN.md §4.F) — the Tracking
  * section's engine picker, filtered to whichever `modes` include the currently-selected
  * `TrackingMode` (`cv-control-panel-logic.ts#engineOptionsForMode`). Config-backed and static, like
- * `CvModel`'s own roster — "changes at deploy time, not runtime" (docs/CV-CONTROL-PLAN.md §D's frozen
+ * `CvModel`'s own roster — "changes at deploy time, not runtime" (docs/plans/done/CV-CONTROL-PLAN.md §D's frozen
  * decision, mirrored here for trackers) — fetched once, never re-polled. `needsAssets` is unused by
  * every one of this wave's three built-in engines (`bytetrack`/`lk`/`ncc`, all `false`) but mirrored
- * from the wire for the deferred ONNX engines (docs/TRACKING-PLAN.md §5.B) that will eventually need it.
+ * from the wire for the deferred ONNX engines (docs/plans/done/TRACKING-PLAN.md §5.B) that will eventually need it.
  */
 export interface CvTracker {
   readonly id: string;
@@ -422,7 +422,7 @@ export interface CvTracker {
 }
 
 /** Mirrors `GET /api/cv/trackers`'s 200 body — never errors server-side, always at least the
- *  built-in roster (docs/TRACKING-PLAN.md §4.F), the same "wrapped list" shape as `CvModelsResponse`. */
+ *  built-in roster (docs/plans/done/TRACKING-PLAN.md §4.F), the same "wrapped list" shape as `CvModelsResponse`. */
 export interface CvTrackersResponse {
   readonly trackers: readonly CvTracker[];
 }
@@ -463,7 +463,7 @@ export interface ScanResult {
   readonly failedMethods: readonly string[];
 }
 
-// --- Device probe (docs/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) -----------
+// --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) -----------
 // `POST /api/devices/probe`: the pinned "test-before-save" contract (UX-DESIGN §5.1) — connects to
 // a candidate device/URI without registering anything, decodes exactly one frame, and reports back
 // what it saw. This is what lets the wizard refuse to advance to Create on a connection that can't
@@ -538,7 +538,7 @@ export interface Category {
 
 /**
  * Mirrors `domain.model.FlightState`, surfaced as `dto.TelemetrySampleResponse#flightState`
- * (docs/FC-INTEGRATIONS-PLAN.md — the frozen wire contract; F-a/F-b land the backend half in
+ * (docs/plans/done/FC-INTEGRATIONS-PLAN.md — the frozen wire contract; F-a/F-b land the backend half in
  * parallel with this UI cycle). Flight-controller state merged from MAVLink telemetry
  * (ArduPilot/INAV/Betaflight, decoded by `adapter-mavlink`) — every field independently absent
  * ("null unknown" in the Java record's own doc comment) except `armingBlockers`, which the
@@ -567,12 +567,12 @@ export interface FlightState {
  * Mirrors `dto.TelemetrySampleResponse`. Every field except `deviceId`/`at` is absent when the
  * underlying sample did not carry that reading — not every device reports every field.
  *
- * `deviceId` (docs/CYCLES-PLAN.md §11, CD-a) is never absent — every `Telemetry` sample carries
+ * `deviceId` (docs/main/CYCLES-PLAN.md §11, CD-a) is never absent — every `Telemetry` sample carries
  * the telemetry device it came from, which is what makes multi-telemetry grouping possible (an
  * asset's usage can mix samples from more than one TELEMETRY-capable device; see
  * `features/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`).
  *
- * `flightState`/`extra` (docs/FC-INTEGRATIONS-PLAN.md, frozen wire contract) are this cycle's own
+ * `flightState`/`extra` (docs/plans/done/FC-INTEGRATIONS-PLAN.md, frozen wire contract) are this cycle's own
  * additions: `flightState` is absent when the sample's device never emitted a `HEARTBEAT` yet
  * (never TELEMETRY-MAVLink-capable at all, or the very first sample or two); `extra` is the
  * previously-dropped-at-this-DTO `Telemetry.extra` map, now surfaced — `groundspeedMps` is the one
@@ -609,14 +609,14 @@ export interface AssetUsage {
  * Mirrors `dto.AssetSummaryResponse`, the shared field set `AssetDetails` extends. `lastUsedAt`
  * and `lastKnownPosition` are absent for an asset that has never been used.
  *
- * `lifecycle` mirrors `AssetSummaryResponse#lifecycle` (docs/CYCLES-PLAN.md §8's pinned contract
+ * `lifecycle` mirrors `AssetSummaryResponse#lifecycle` (docs/main/CYCLES-PLAN.md §8's pinned contract
  * — CW-a exposes the asset's lifecycle state under this name, alongside the derived streaming
  * `status`). It is typed optional rather than required: CW-a lands this field server-side in
  * parallel with this UI, so a backend this app talks to before that ships simply omits it —
  * every reader here treats an absent `lifecycle` as `'ACTIVE'` (see
  * `features/devices/devices-page-logic.ts`), never as a crash.
  *
- * `hasImage` (docs/UX-REWORK-PLAN.md §U-d — the asset image endpoint pair) is optional for the
+ * `hasImage` (docs/plans/done/UX-REWORK-PLAN.md §U-d — the asset image endpoint pair) is optional for the
  * identical reason: a backend that predates the `PUT/GET/DELETE /api/assets/{id}/image` endpoints
  * simply omits the field. Every reader treats an absent value as "no photo" — see
  * `features/asset-detail/asset-detail.ts`'s own image-loading guard, which is the one place this
@@ -647,7 +647,7 @@ export interface AssetDetails extends AssetSummary {
 }
 
 /**
- * Mirrors `dto.AssetStatsResponse` (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen wire
+ * Mirrors `dto.AssetStatsResponse` (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen wire
  * contract) — `GET /api/assets/{assetId}/stats`, the manager page's KPI tile row
  * (`core/fleet/asset-stats-logic.ts#kpiTiles`). `totalFlightSeconds`/`flightCount` are always
  * present (0 for an asset with no usages fetched); `firstFlownAt`/`lastFlownAt`/
@@ -668,7 +668,7 @@ export interface AssetStats {
 }
 
 /**
- * Mirrors `dto.CreateAssetRequest.DeviceSpec` (docs/UX-QUICKWINS-PLAN.md QF-2 — the "Create asset
+ * Mirrors `dto.CreateAssetRequest.DeviceSpec` (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2 — the "Create asset
  * from this device" quick action) — one device to register **alongside** the new asset. This is
  * always a **new** device registration (`name`/`protocol`/`uri`), never a reference to an existing
  * `Device` by id: `CreateAssetRequest`/`AssetSpec` carry no such field (verified by reading
@@ -686,8 +686,8 @@ export interface CreateAssetDeviceSpec {
 }
 
 /**
- * Mirrors `dto.CreateAssetRequest`, the body of `POST /api/assets` (docs/UX-QUICKWINS-PLAN.md QF-2;
- * `deviceIds` added by docs/REALTIME-PLAN.md §4's backend follow-up batch). `attributes` omitted
+ * Mirrors `dto.CreateAssetRequest`, the body of `POST /api/assets` (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2;
+ * `deviceIds` added by docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch). `attributes` omitted
  * rather than sent as `{}`/`null`; `devices`/`deviceIds` may be combined freely, but at least one
  * device between the two is required (`AssetSpec`'s own validation, not re-checked here) — the
  * response is a full `AssetDetails` (`AssetDetailsResponse`, 201).
@@ -708,7 +708,7 @@ export interface CreateAssetRequest {
 }
 
 /**
- * Mirrors `PATCH /api/assets/{id}`'s body (docs/CYCLES-PLAN.md §8's pinned contract): every field
+ * Mirrors `PATCH /api/assets/{id}`'s body (docs/main/CYCLES-PLAN.md §8's pinned contract): every field
  * optional — send only what actually changed. Built by
  * `features/devices/devices-page-logic.ts#buildAssetEdit`.
  */
@@ -718,13 +718,13 @@ export interface AssetEdit {
   readonly attributes?: Record<string, string>;
 }
 
-/** Mirrors `POST /api/assets/{id}/devices`'s body (docs/CYCLES-PLAN.md §8's pinned contract). */
+/** Mirrors `POST /api/assets/{id}/devices`'s body (docs/main/CYCLES-PLAN.md §8's pinned contract). */
 export interface AssignDeviceRequest {
   readonly deviceId: string;
 }
 
 /**
- * Mirrors `dto.AssetDeletionResponse` (docs/CYCLES-PLAN.md §8's pinned contract), the body of
+ * Mirrors `dto.AssetDeletionResponse` (docs/main/CYCLES-PLAN.md §8's pinned contract), the body of
  * `DELETE /api/assets/{id}` — from `application.AssetDeletion`. Told to the user verbatim so an
  * archive confirmation says what survived, not just that the asset is gone.
  */
@@ -737,7 +737,7 @@ export interface AssetDeletionResponse {
 }
 
 /**
- * Mirrors `dto.StartSimulationRequest.RouteMode` values (docs/CYCLES-PLAN.md §7, CT-a's
+ * Mirrors `dto.StartSimulationRequest.RouteMode` values (docs/main/CYCLES-PLAN.md §7, CT-a's
  * `application.RouteMode`), matched case-insensitively server-side but always sent lowercase here.
  * `loop` (default, end→start closing leg) / `bounce` (retrace backwards) / `once` (hold at the end
  * waypoint, still emitting).
@@ -755,7 +755,7 @@ export interface WaypointRequest {
 }
 
 /**
- * Mirrors `dto.StartSimulationRequest.TelemetryRequest` (docs/CYCLES-PLAN.md §7, CT-a's pinned
+ * Mirrors `dto.StartSimulationRequest.TelemetryRequest` (docs/main/CYCLES-PLAN.md §7, CT-a's pinned
  * contract) — a configurable flight plan replacing the bare circular home-point track. `route`
  * must carry at least 2 waypoints (`shared/map/flight-plan-logic.ts#canSavePlan`/`buildTelemetryRequest`
  * enforce this client-side before a request is ever built); `speedMps`/`routeMode` omitted defer
@@ -768,11 +768,11 @@ export interface TelemetryPlanRequest {
 }
 
 /**
- * Mirrors `dto.StartSimulationRequest` (docs/CYCLES-PLAN.md §1c, §3, §7, §9). Optional fields are
+ * Mirrors `dto.StartSimulationRequest` (docs/main/CYCLES-PLAN.md §1c, §3, §7, §9). Optional fields are
  * omitted, never sent as `null`, matching every other request DTO here; the backend's own
  * defaults then apply (`autoStart` → `true`, `transport` → `"direct"`).
  *
- * `videoPath` is optional (docs/CYCLES-PLAN.md §9, CU-a): omitting it entirely registers a fully
+ * `videoPath` is optional (docs/main/CYCLES-PLAN.md §9, CU-a): omitting it entirely registers a fully
  * synthetic VIDEO+TELEMETRY device instead of a `file`-backed one — a moving test drone with no
  * video file at all (`core/fleet/simulation-logic.ts#buildTestDroneRequest`). A `null`/absent
  * `videoPath` requires `transport` to stay `"direct"` (the default) — the backend 400s otherwise,
@@ -780,9 +780,9 @@ export interface TelemetryPlanRequest {
  *
  * `transport` is matched case-insensitively server-side, but this app always sends the fixed
  * lowercase values: `"direct"` (in-process playback) or `"rtsp"` (pushed over the wire and
- * ingested back, docs/CYCLES-PLAN.md §3 — rehearses the full protocol path).
+ * ingested back, docs/main/CYCLES-PLAN.md §3 — rehearses the full protocol path).
  *
- * `telemetry` (docs/CYCLES-PLAN.md §7, CT-a/CT-b) is an optional flight plan replacing the bare
+ * `telemetry` (docs/main/CYCLES-PLAN.md §7, CT-a/CT-b) is an optional flight plan replacing the bare
  * `latitude`/`longitude` circular home-point track; when present, `latitude`/`longitude` are
  * still accepted but ignored server-side (`StartSimulationRequest`'s own Javadoc) —
  * `shared/map/flight-plan-dialog.ts` is the UI that builds this field.
@@ -820,7 +820,7 @@ export interface BoundingBox {
 
 /**
  * Mirrors `dto.DetectionResponse`, embedded in `DetectionResult#detections`. `track` is this
- * cycle's own addition (docs/TRACKING-PLAN.md §4.G, see {@link DetectionTrack}'s own doc comment) —
+ * cycle's own addition (docs/plans/done/TRACKING-PLAN.md §4.G, see {@link DetectionTrack}'s own doc comment) —
  * absent for an untracked detection, which is every detection today and every detection on a
  * pre-tracking server; `shared/player/player.ts`'s box label/color/dashed-stroke/trails/click-to-
  * follow all gate on this one field.
@@ -836,10 +836,10 @@ export interface Detection {
 
 /**
  * Mirrors `dto.DetectionResultResponse`, the body element of `GET
- * /api/streams/{streamId}/detections` (docs/MVP1-PLAN.md §C8 bullet 3) — one completed inference
+ * /api/streams/{streamId}/detections` (docs/plans/done/MVP1-PLAN.md §C8 bullet 3) — one completed inference
  * result. Backs the Live page's detections strip (`core/detections/detections-store.ts`) and, via
  * the same store, the Fly cockpit's player overlay + trails. `tracking` is this cycle's own addition
- * (docs/TRACKING-PLAN.md §4.G, see {@link FrameTracking}'s own doc comment) — absent while tracking
+ * (docs/plans/done/TRACKING-PLAN.md §4.G, see {@link FrameTracking}'s own doc comment) — absent while tracking
  * is off for this stream, or on a pre-tracking server.
  */
 export interface DetectionResult {
@@ -853,7 +853,7 @@ export interface DetectionResult {
 
 /**
  * Mirrors `dto.UsageTimelineResponse`, the body of `GET /api/usages/{usageId}/timeline`
- * (docs/MVP2-PLAN.md §R, R-a/R-a2 — flight replay). No `NON_NULL`-style optionality: `from`/`to`
+ * (docs/plans/done/MVP2-PLAN.md §R, R-a/R-a2 — flight replay). No `NON_NULL`-style optionality: `from`/`to`
  * are always resolved server-side (defaulted from the usage's own `startedAt`/`endedAt`, or "now"
  * for an open usage's `to`), and both list fields are always present, possibly empty.
  *
@@ -872,7 +872,7 @@ export interface UsageTimeline {
 }
 
 /**
- * Mirrors `dto.UsageSummaryResponse` (docs/design/10-replay.md's frozen wire contract, Wave 4 —
+ * Mirrors `dto.UsageSummaryResponse` (docs/extracts/design/10-replay.md's frozen wire contract, Wave 4 —
  * `GET /api/usages?limit=&assetId=`), the fleet-wide flight list behind the replay library
  * (`features/replay/replay-library.ts`). Newest first. `assetName` is resolved server-side for
  * display — `''` when the owning asset is gone (deleted past recovery), never a dropped row: a
@@ -893,7 +893,7 @@ export interface UsageSummary {
 }
 
 /**
- * Mirrors `dto.CategoryCountsResponse`, one row of `FleetSummary#categories` (docs/MVP3-PLAN.md
+ * Mirrors `dto.CategoryCountsResponse`, one row of `FleetSummary#categories` (docs/plans/done/MVP3-PLAN.md
  * C-a) — per-category asset counts, lifecycle crossed with currently-streaming. Every field is
  * always present (no `NON_NULL`-style optionality — nothing here is nullable server-side).
  */
@@ -909,9 +909,9 @@ export interface CategoryCounts {
 }
 
 /**
- * Mirrors `dto.AssetAttentionResponse`, one row of `FleetSummary#assets` (docs/MVP3-PLAN.md C-a) —
+ * Mirrors `dto.AssetAttentionResponse`, one row of `FleetSummary#assets` (docs/plans/done/MVP3-PLAN.md C-a) —
  * one asset's attention-relevant facts, everything the Command dashboard's attention queue and
- * live strip need without a second poll per asset (docs/MVP3-PLAN.md §C-c).
+ * live strip need without a second poll per asset (docs/plans/done/MVP3-PLAN.md §C-c).
  *
  * `streamId`/`batteryPercent`/`telemetryAgeMs` are absent (never `null`) exactly when the backend
  * DTO's own doc comment says so — check for key presence (`!== undefined`), never `!== null`, this
@@ -928,7 +928,7 @@ export interface CategoryCounts {
  * read (see the DTO's own doc comment); `features/command/command-logic.ts`'s attention rules key off
  * `batteryPercent`/`telemetryAgeMs`/`openEventCount` only, never a fabricated fourth signal.
  *
- * `flightMode`/`armed`/`failsafe` (docs/FC-INTEGRATIONS-PLAN.md, frozen wire contract) are this
+ * `flightMode`/`armed`/`failsafe` (docs/plans/done/FC-INTEGRATIONS-PLAN.md, frozen wire contract) are this
  * cycle's own additions — the same "latest-telemetry derivation as `batteryPercent`" the backend
  * DTO's own doc comment describes, so they follow the identical absence rule: absent whenever the
  * asset has never reported a `FlightState`-carrying sample, not `null`. `features/command/command-logic.ts`'s
@@ -955,8 +955,8 @@ export interface AssetAttention {
 }
 
 /**
- * Mirrors `dto.FleetSummaryResponse`, the body of `GET /api/fleet/summary` (docs/MVP3-PLAN.md C-a)
- * — the Command dashboard's one aggregated poll (docs/MVP3-PLAN.md §C-c), driving the attention
+ * Mirrors `dto.FleetSummaryResponse`, the body of `GET /api/fleet/summary` (docs/plans/done/MVP3-PLAN.md C-a)
+ * — the Command dashboard's one aggregated poll (docs/plans/done/MVP3-PLAN.md §C-c), driving the attention
  * queue, the live strip's membership, and the warehouse readiness tiles all from one response.
  * Every field is always present.
  *
@@ -977,7 +977,7 @@ export type DetectionEventState = 'OPEN' | 'CLOSED';
 
 /**
  * Mirrors `dto.DetectionEventResponse`, the body element of `GET /api/events` /
- * `GET /api/streams/{streamId}/events` (docs/MVP2-PLAN.md §E, E-a/E-b) — one debounced detection
+ * `GET /api/streams/{streamId}/events` (docs/plans/done/MVP2-PLAN.md §E, E-a/E-b) — one debounced detection
  * event ("a person was seen for a while"), distinct from the raw per-frame `DetectionResult` the
  * Live page's chip strip already reads.
  *
@@ -989,16 +989,16 @@ export type DetectionEventState = 'OPEN' | 'CLOSED';
  * it is now".
  *
  * **No pipeline-error events here, still.** `EventPublisherPort`'s generic `Event`s
- * (`PIPELINE_ERROR` etc., the docs/MVP2-PLAN.md §U-info ask) are still not exposed by *this* API —
+ * (`PIPELINE_ERROR` etc., the docs/plans/done/MVP2-PLAN.md §U-info ask) are still not exposed by *this* API —
  * `core/events/events-store.ts` and every page reading it are detection events only, labeled as such; the
- * player state chip (docs/CYCLES-PLAN.md §11 item 5 / docs/MVP2-PLAN.md §V, V-b) stays the
- * connectivity surface. docs/REALTIME-PLAN.md §4 (Phase R-c) **does** now expose the generic
+ * player state chip (docs/main/CYCLES-PLAN.md §11 item 5 / docs/plans/done/MVP2-PLAN.md §V, V-b) stays the
+ * connectivity surface. docs/plans/done/REALTIME-PLAN.md §4 (Phase R-c) **does** now expose the generic
  * `Event` for the first time, but only over the new `GET /api/live` SSE `event` topic, as the
  * unrelated {@link LiveEvent} shape below — not this one, and not as a `DetectionEvent`. The two
  * are genuinely different domain concepts (see `LiveEvent`'s own doc comment) — `core/live/live-store.ts`
  * exposes `LiveEvent`s on its own `liveEvents` signal, unconsumed by `EventsStore` this cycle.
  *
- * **Update, docs/REALTIME-PLAN.md §4's backend follow-up batch**: this shape is now *also* the
+ * **Update, docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch**: this shape is now *also* the
  * payload of the `detection-events` `GET /api/live` topic (always-on, FIFO, snapshot-on-connect
  * oldest-first — see {@link LiveEnvelope}) — the "still no SSE topic" claim two paragraphs up (about
  * `LiveEvent`, the *generic*-domain-`Event` topic) never applied to this interface; this is the one
@@ -1018,7 +1018,7 @@ export interface DetectionEvent {
   readonly position?: GeoPosition;
 }
 
-// --- Live updates (docs/REALTIME-PLAN.md §4, Phase R-c — GET /api/live SSE) -------------------
+// --- Live updates (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c — GET /api/live SSE) -------------------
 // The first wire shapes in this app that do not arrive through `VisionApi`/`HttpClient` at all:
 // `LiveConnected`/`LiveEnvelope` are read straight off a raw `EventSource` by `core/live/live-store.ts`,
 // never `JSON`-decoded by Angular's `HttpClient` pipeline — still mirrored here 1:1 with their Java
@@ -1028,7 +1028,7 @@ export interface DetectionEvent {
 
 /**
  * Mirrors `dto.LiveConnectedResponse` — the payload of the `connection`-named SSE event sent once,
- * first, on every new `GET /api/live` connection (docs/REALTIME-PLAN.md §4, item 2). Not wrapped in
+ * first, on every new `GET /api/live` connection (docs/plans/done/REALTIME-PLAN.md §4, item 2). Not wrapped in
  * a {@link LiveEnvelope} (no `seq`, never replayed on resume) — handshake metadata only.
  */
 export interface LiveConnected {
@@ -1044,7 +1044,7 @@ export interface LiveConnected {
  * `STREAM_STOPPED`/`PIPELINE_ERROR`/`DETECTION`/`TRAINING`) — a different, older domain concept
  * than the debounced, tracked-over-time `DetectionEvent` (`OPEN`/`CLOSED`, `peakConfidence`,
  * `label`) that `/api/events` and `core/events/events-store.ts` serve. **`DetectionEvent` gained its own
- * `detection-events` SSE topic** (docs/REALTIME-PLAN.md §4's backend follow-up batch — see that
+ * `detection-events` SSE topic** (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch — see that
  * interface's own doc comment); this `event` topic/`LiveEvent` shape remains the one with no read
  * side beyond this live feed — still no REST endpoint and no consumer in this app. `type` is the
  * domain `EventType` enum's `name()` (e.g. `"STREAM_STARTED"`), not one of this file's own
@@ -1062,7 +1062,7 @@ export interface LiveEvent {
 
 /**
  * Mirrors `dto.DevicesSnapshotResponse` — the payload of the always-on `devices` `GET /api/live`
- * topic (docs/REALTIME-PLAN.md §4's backend follow-up batch, extending the R-c channel beyond its
+ * topic (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch, extending the R-c channel beyond its
  * original scope). The combined device-list + active-stream-list snapshot `core/fleet/fleet-store.ts#FleetStore`
  * otherwise polls via `GET /api/devices`+`GET /api/streams` every 5s — both lists travel in one
  * envelope under the channel's one shared `seq` deliberately, so a consumer can never observe a
@@ -1085,7 +1085,7 @@ export interface DevicesSnapshot {
  * regardless of the `topics` query parameter, so there is no subscribe/unsubscribe management for
  * either on this side, only envelope routing by `type`.
  *
- * **`map` replaced `marks`** (docs/MAP-REWORK-PLAN.md §4.3): same always-on posture, same
+ * **`map` replaced `marks`** (docs/plans/done/MAP-REWORK-PLAN.md §4.3): same always-on posture, same
  * not-snapshot-on-connect caveat (see {@link MapEventPayload}), but it is the one topic with
  * **per-connection filtering** — the server delivers a map event only to connections whose captured
  * viewer may see the event's `layerId`, so this client never filters map data for visibility.
@@ -1101,7 +1101,7 @@ export type LiveEnvelope =
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
- * (docs/REALTIME-PLAN.md §4, item 2). Both fields optional here too, same `@JsonInclude`-adjacent
+ * (docs/plans/done/REALTIME-PLAN.md §4, item 2). Both fields optional here too, same `@JsonInclude`-adjacent
  * convention as every other request DTO in this file — `core/live/live-store.ts` always sends both as
  * plain arrays (possibly empty), never omits either, since the backend already defaults an absent
  * field to `[]` and an empty array is simpler to always construct than conditionally omitting one.
@@ -1117,14 +1117,14 @@ export interface LiveSubscription {
   readonly topics: readonly string[];
 }
 
-// --- Geofencing (docs/OPS-CORE-PLAN.md §G's frozen wire contract) ------------------------------
+// --- Geofencing (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract) ------------------------------
 
 /** Mirrors `domain.model.ZoneKind` — `KEEP_IN` (must stay inside) vs. `KEEP_OUT` (must stay outside). */
 export type ZoneKind = 'KEEP_IN' | 'KEEP_OUT';
 
 /**
  * Mirrors `dto.GeofenceZoneResponse`, the body of `GET/POST /api/geofences` and
- * `PUT /api/geofences/{id}` (docs/OPS-CORE-PLAN.md §G). `polygon` vertices are `{latitude,
+ * `PUT /api/geofences/{id}` (docs/plans/done/OPS-CORE-PLAN.md §G). `polygon` vertices are `{latitude,
  * longitude}` only — a zone's own `maxAltitudeMeters` is the one altitude concept a zone carries,
  * never a per-vertex one (each `GeoPosition`'s own `altitudeMeters` is always absent here).
  * `maxAltitudeMeters` is absent (not `null`) for "no ceiling", same `@JsonInclude(NON_NULL)`
@@ -1153,7 +1153,7 @@ export interface GeofenceZoneRequest {
   readonly enabled: boolean;
 }
 
-// --- The map as a Common Operational Picture (docs/MAP-REWORK-PLAN.md §4's frozen wire contract) -
+// --- The map as a Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §4's frozen wire contract) -
 // Everything under `/api/map/**`: layers (with grantable access), marks (now layered, affiliated and
 // verifiable), and drawings. **Replaces the whole `/api/marks` surface** the TACTICAL-MARKS wave
 // shipped — that base path, its `Mark`/`MarkEvent` types and the `marks` SSE topic are all gone
@@ -1377,7 +1377,7 @@ export interface PatchDrawingRequest {
 
 /**
  * Mirrors `dto.MapEventPayload` — the payload of a {@link LiveEnvelope} whose `type` is `'map'`,
- * the **scoped** topic that replaced `marks` (docs/MAP-REWORK-PLAN.md §4.3). One always-on topic
+ * the **scoped** topic that replaced `marks` (docs/plans/done/MAP-REWORK-PLAN.md §4.3). One always-on topic
  * carries every map lifecycle event for every entity, with the entity and the lifecycle riding in
  * `entity`/`action` rather than three separate topics (mirroring how `detection-events` carries
  * OPEN/CLOSED in one). **Exactly one of `mark`/`drawing`/`layer` is present**, matching `entity`;
@@ -1400,11 +1400,11 @@ export interface MapEventPayload {
   readonly layer?: MapLayer;
 }
 
-// --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------
+// --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) ------------------
 
 /**
  * Mirrors `dto.UsageRecordingResponse`, the body of `GET /api/usages/{usageId}/recording`
- * (docs/OPS-CORE-PLAN.md §R). `url`/`start`/`durationSeconds` are each omitted entirely (not
+ * (docs/plans/done/OPS-CORE-PLAN.md §R). `url`/`start`/`durationSeconds` are each omitted entirely (not
  * `null`) when `available` is `false` — a known usage with nothing to play back is not an error,
  * just an honest `{"available":false}`; `features/replay/**`'s empty state handles it. `url` is
  * mediamtx's own playback `/get` URL for `[start, start + durationSeconds)` — never proxied, POST/
@@ -1417,10 +1417,10 @@ export interface UsageRecording {
   readonly durationSeconds?: number;
 }
 
-// --- Guarded command TX (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) ----------------
+// --- Guarded command TX (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) ----------------
 
 /**
- * Mirrors the `202` body of `POST /api/assets/{assetId}/return-home` (docs/DRONE-INFRA-PLAN.md I-e
+ * Mirrors the `202` body of `POST /api/assets/{assetId}/return-home` (docs/plans/active/DRONE-INFRA-PLAN.md I-e
  * Stage 1's frozen contract) — a command was sent either way; this only says whether the vehicle
  * acknowledged it. `ACCEPTED` = a `COMMAND_ACK` arrived within the timeout; `NO_ACK` = the UDP
  * packet went out with no acknowledgement heard back in time — honest, not necessarily a failure
@@ -1435,11 +1435,11 @@ export interface ReturnHomeResponse {
   readonly result: ReturnHomeResult;
 }
 
-// --- Guarded command TX — arm/disarm/mode select (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+// --- Guarded command TX — arm/disarm/mode select (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
 // contract, extends Stage 1 above) ----------------------------------------------------------------
 
 /**
- * Mirrors the `202` body of `POST /api/assets/{id}/mode`/`arm`/`disarm` (docs/DRONE-INFRA-PLAN.md
+ * Mirrors the `202` body of `POST /api/assets/{id}/mode`/`arm`/`disarm` (docs/plans/active/DRONE-INFRA-PLAN.md
  * I-e Stage 2's frozen contract) — the identical two-value shape as Stage 1's
  * {@link ReturnHomeResult} (a command was sent either way; this only says whether the vehicle
  * acknowledged it), kept as its own type rather than reusing `ReturnHomeResult` so a future
@@ -1453,7 +1453,7 @@ export interface FlightCommandResponse {
 }
 
 /**
- * Mirrors the `200` body of `GET /api/assets/{id}/flight-capabilities` (docs/DRONE-INFRA-PLAN.md
+ * Mirrors the `200` body of `GET /api/assets/{id}/flight-capabilities` (docs/plans/active/DRONE-INFRA-PLAN.md
  * I-e Stage 2's frozen contract) — what `features/fly/flight-command-panel.ts` may show for the
  * asset's currently-tracked vehicle. `commandable` gates the whole panel (`false` for a Betaflight/
  * never-heard vehicle, per the plan's own capability matrix — the same cases Stage 1's `returnHome`
@@ -1470,7 +1470,7 @@ export interface FlightCapability {
   readonly selectableModes: readonly string[];
 }
 
-// --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) --------------
+// --- Guided drone onboarding (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract) --------------
 
 /** One site-local IPv4 address this platform's host is reachable on. Mirrors `dto.NetworkAddressResponse`. */
 export interface NetworkAddress {
@@ -1479,7 +1479,7 @@ export interface NetworkAddress {
 }
 
 /**
- * Mirrors `dto.SystemNetworkResponse`, the body of `GET /api/system/network` (docs/DRONE-INFRA-PLAN.md
+ * Mirrors `dto.SystemNetworkResponse`, the body of `GET /api/system/network` (docs/plans/active/DRONE-INFRA-PLAN.md
  * I-g's frozen wire contract) — every site-local IPv4 address of an up, non-loopback interface, sorted
  * by interface name, plus the MAVLink heartbeat scanner's own listen port (shared with the backend's
  * `vision.discovery.mavlink-port` property so the two can never disagree). This is what lets the
@@ -1495,7 +1495,7 @@ export interface SystemNetworkResponse {
   readonly mavlinkPort: number;
 }
 
-// --- Auth (docs/U-AUTH-PLAN.md wave 3's frozen contract; wave 4 is this app's own UI) -----------
+// --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract; wave 4 is this app's own UI) -----------
 // `core/auth/auth-store.ts` is the only caller of the three `VisionApi` methods these types back —
 // no page/component talks to `/api/auth/**` directly, mirroring every other store in this app.
 
@@ -1515,7 +1515,7 @@ export interface Membership {
 
 /**
  * Mirrors `dto.MeResponse` — the frozen shape of `GET /api/auth/me` and `POST /api/auth/login`
- * (docs/U-AUTH-PLAN.md wave 3). `authEnabled` is what lets the SPA decide whether a login screen
+ * (docs/plans/done/U-AUTH-PLAN.md wave 3). `authEnabled` is what lets the SPA decide whether a login screen
  * makes sense at all: while `vision.auth.enabled=false` (the default), every one of these
  * endpoints is a no-op that reports this same shape for a fixed dev admin, `authEnabled: false` —
  * `core/auth/auth-store.ts` treats that response as already-logged-in (dev parity: the app works
@@ -1524,7 +1524,7 @@ export interface Membership {
  * account always carries at least one membership, per that method's own contract).
  *
  * **No visibility scoping rides on this type** — every logged-in user still sees the whole fleet
- * (docs/U-AUTH-PLAN.md's own "identity becomes real; nothing is visibility-scoped yet" framing);
+ * (docs/plans/done/U-AUTH-PLAN.md's own "identity becomes real; nothing is visibility-scoped yet" framing);
  * `memberships`/`topRole` back the identity chip's role badge only, in this slice.
  */
 export interface MeResponse {
@@ -1538,7 +1538,7 @@ export interface MeResponse {
 }
 
 // --- Org settings: users, groups, pilot assignment, activity ------------------------------------
-// docs/U-SCOPE-PLAN.md, U-e slice 2's frozen wire contract (waves 1–2, backend done). `core/org/`
+// docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2's frozen wire contract (waves 1–2, backend done). `core/org/`
 // (users/groups), `features/asset-detail/pilots-card.ts` (assignment), and `features/activity/`
 // (activity) are the only callers of the `VisionApi` methods these types back — same "no page talks
 // to a URL directly" rule as everywhere else here.
@@ -1576,7 +1576,7 @@ export interface UserSummary {
  * Mirrors `dto.CreateUserRequest` — the invite/create body for `POST /api/users`. `memberships`
  * and `enabled` are optional (the backend defaults an omitted `enabled` to `true` and an omitted
  * `memberships` to an empty list); the scope rule — an inviter may only grant a role at or below
- * their own — is enforced server-side (docs/U-SCOPE-PLAN.md), surfaced to this UI as a `403`.
+ * their own — is enforced server-side (docs/plans/done/U-SCOPE-PLAN.md), surfaced to this UI as a `403`.
  */
 export interface CreateUserRequest {
   readonly username: string;
@@ -1611,7 +1611,7 @@ export interface Assignment {
 }
 
 /**
- * Mirrors `dto.AuditEntryResponse` — one entry of `GET /api/me/activity` (docs/U-SCOPE-PLAN.md
+ * Mirrors `dto.AuditEntryResponse` — one entry of `GET /api/me/activity` (docs/plans/done/U-SCOPE-PLAN.md
  * feature 7), the acting user's own recent actions. `summary` is written to read on its own (no id
  * reconstruction needed); `details` carries before→after specifics. `action` is one of
  * `CREATED`/`UPDATED`/`DEACTIVATED`/`ACTIVATED`/`DELETED`/`RESTORED`, `targetType` one of
@@ -1630,7 +1630,7 @@ export interface AuditEntry {
   readonly details: Readonly<Record<string, string>>;
 }
 
-// --- Manual control relay (docs/RC-CONTROL-PHASE1-PLAN.md §4 — WS /ws/manual-control) -----------
+// --- Manual control relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4 — WS /ws/manual-control) -----------
 // Like `LiveConnected`/`LiveEnvelope` above, these frames arrive over a raw `WebSocket`
 // (`core/rc/manual-control-client.ts`), never through `VisionApi`/`HttpClient` — mirrored here 1:1
 // with the plan's own frozen JSON shapes per this file's own top doc comment: this is exactly as
@@ -1736,7 +1736,7 @@ export type ManualControlServerMessage =
   | ManualControlReleasedMessage
   | ManualControlWatchdogMessage;
 
-// --- CV training / dataset improvement loop (docs/CV-TRAINING-PLAN.md §3-4's frozen wire contract,
+// --- CV training / dataset improvement loop (docs/plans/done/CV-TRAINING-PLAN.md §3-4's frozen wire contract,
 // Wave T5) ------------------------------------------------------------------------------------
 // Every endpoint below is gated server-side by `vision.training.enabled` (default `false`) — the
 // whole `DatasetController`/`LabelingController` pair is absent, not just erroring, when it's off,
@@ -1831,7 +1831,7 @@ export interface LabelAnnotationsRequest {
   readonly annotations: readonly Annotation[];
 }
 
-// --- CV model registry (docs/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) -------------------------
+// --- CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) -------------------------
 // The dynamic model registry — every model reference cv-service's own `Training/ListModels` RPC
 // actually reports, live, and the one place a model gets promoted to production. **Not** the same
 // roster as `CvModelsResponse`/`GET /api/cv/models` above (a static, config-backed picker for the
@@ -1862,7 +1862,7 @@ export interface PromoteModelRequest {
   readonly version: string;
 }
 
-// --- CV training-job flow (docs/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) -------------
+// --- CV training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) -------------
 // Starting a fine-tune run against a dataset and polling its progress — the run in between
 // `DatasetController`/`LabelingController` (build the dataset) and `ModelRegistryController`
 // (promote the result). Gated by the same `vision.training.enabled` flag as every other CV-training

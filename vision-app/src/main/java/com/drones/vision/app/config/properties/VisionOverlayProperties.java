@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Configuration for {@code adapter-overlay}'s detection/OSD burn-in ({@code vision.overlay.*}),
- * docs/LAYERING-REFACTOR-PLAN.md &sect;2.2, wave F3.
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;2.2, wave F3.
  *
  * <p>Mapped by {@code wiring.PublishWiring} onto {@code
  * com.drones.vision.adapter.overlay.OverlaySettings} — every {@code @DefaultValue} below is

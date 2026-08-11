@@ -1,9 +1,9 @@
 package com.drones.vision.domain.model;
 
 /**
- * Per-stream tracking configuration (docs/TRACKING-PLAN.md §4.A/§4.B), restated on every wire
+ * Per-stream tracking configuration (docs/plans/done/TRACKING-PLAN.md §4.A/§4.B), restated on every wire
  * frame request — deliberately declarative, never an imperative one-shot control message, so a
- * dropped frame or a reconnect can never desynchronize the tracker (docs/TRACKING-PLAN.md
+ * dropped frame or a reconnect can never desynchronize the tracker (docs/plans/done/TRACKING-PLAN.md
  * invariant P2).
  *
  * <p>Joins {@link PipelineConfig} as its {@code tracking} component. {@code engineId} empty means
@@ -29,19 +29,19 @@ package com.drones.vision.domain.model;
 public record TrackingConfig(TrackingMode mode, String engineId, int verifyEveryMillis, int followFps,
                               int redetectIouPercent, int maxAgeFrames, int minHits, TargetLock lock) {
 
-    /** Default {@code FOLLOW} detector re-verify cadence (docs/TRACKING-PLAN.md §4.A), milliseconds. */
+    /** Default {@code FOLLOW} detector re-verify cadence (docs/plans/done/TRACKING-PLAN.md §4.A), milliseconds. */
     public static final int DEFAULT_VERIFY_EVERY_MILLIS = 2000;
 
-    /** Default Java-side sampler rate while {@code FOLLOW} is active (docs/TRACKING-ORCHESTRATION.md §4.3, D12). */
+    /** Default Java-side sampler rate while {@code FOLLOW} is active (docs/extracts/TRACKING-ORCHESTRATION.md §4.3, D12). */
     public static final int DEFAULT_FOLLOW_FPS = 15;
 
-    /** Default re-anchor IoU threshold, percent (docs/TRACKING-PLAN.md §4.A: 0.3 &rarr; 30). */
+    /** Default re-anchor IoU threshold, percent (docs/plans/done/TRACKING-PLAN.md §4.A: 0.3 &rarr; 30). */
     public static final int DEFAULT_REDETECT_IOU_PERCENT = 30;
 
-    /** Default unmatched-frames-before-{@code LOST} budget (docs/TRACKING-PLAN.md §4.A). */
+    /** Default unmatched-frames-before-{@code LOST} budget (docs/plans/done/TRACKING-PLAN.md §4.A). */
     public static final int DEFAULT_MAX_AGE_FRAMES = 30;
 
-    /** Default detector-hits-to-{@code CONFIRMED} budget (docs/TRACKING-PLAN.md §4.A). */
+    /** Default detector-hits-to-{@code CONFIRMED} budget (docs/plans/done/TRACKING-PLAN.md §4.A). */
     public static final int DEFAULT_MIN_HITS = 3;
 
     public TrackingConfig {
@@ -75,7 +75,7 @@ public record TrackingConfig(TrackingMode mode, String engineId, int verifyEvery
      * is byte-identical to how the pipeline behaved before tracking existed. Reachable two ways:
      * {@code PATCH /api/streams/{id}/config} for one stream, {@code vision.tracking.default-mode=OFF}
      * for a deployment. It is <strong>no longer</strong> what {@link PipelineConfig#defaults()}
-     * returns — that flipped to {@link #defaults()} in docs/TRACKING-PLAN.md wave T8 (§5.G).
+     * returns — that flipped to {@link #defaults()} in docs/plans/done/TRACKING-PLAN.md wave T8 (§5.G).
      *
      * <p>Still the value every {@link PipelineConfig} <em>convenience</em> constructor defaults to,
      * so a call site written before tracking existed behaves exactly as it did.
@@ -90,7 +90,7 @@ public record TrackingConfig(TrackingMode mode, String engineId, int verifyEvery
     /**
      * The Mode-A default: every detection tracked across frames with a stable id, server-default
      * engine, and every cadence at its documented default. <strong>This is what {@link
-     * PipelineConfig#defaults()} ships</strong> as of docs/TRACKING-PLAN.md wave T8 (§5.G) — a new
+     * PipelineConfig#defaults()} ships</strong> as of docs/plans/done/TRACKING-PLAN.md wave T8 (§5.G) — a new
      * stream associates unless something says otherwise.
      *
      * <p>{@code ASSOCIATE} costs one association pass per <em>sampled</em> frame (measured ~0.78 ms

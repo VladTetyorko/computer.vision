@@ -12,13 +12,13 @@ import java.util.Locale;
 
 /**
  * Draws the telemetry on-screen-display block, split out of {@link
- * Java2DOverlayRenderer} (docs/LAYERING-REFACTOR-PLAN.md §5.1). One line per
+ * Java2DOverlayRenderer} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1). One line per
  * present {@link Telemetry} field, each independently skippable; draws
  * nothing if every field is {@code null} (distinct from the top-level "no
  * detections and no telemetry" fast path in {@code Java2DOverlayRenderer},
  * which covers "no {@code Telemetry} object at all").
  *
- * <p><b>Latent-bug fix (docs/LAYERING-REFACTOR-PLAN.md §5.1):</b> the OSD
+ * <p><b>Latent-bug fix (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1):</b> the OSD
  * font used to be pinned at the raw {@code MIN_FONT_SIZE} literal regardless
  * of frame resolution, making it a fixed, unreadably small 12px even at 4K.
  * It now scales the same way the detection-label font already did — {@code

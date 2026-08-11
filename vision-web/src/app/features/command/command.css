@@ -1,4 +1,4 @@
-/* ---- Shell — full-bleed within <main> (docs/UX-REWORK-PLAN.md §U-c bullet 1/5; docs/NAV-IA-REDESIGN-PLAN.md
+/* ---- Shell — full-bleed within <main> (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 1/5; docs/plans/done/NAV-IA-REDESIGN-PLAN.md
    §2.1 for the `height: 100dvh` change) -------------------------------------------------------------
    Mirrors `features/fly/fly.css`'s `.cockpit` — the other page in this app that opts out of the
    shared `.page` (centered, max-width, padded) wrapper in favor of genuinely filling its container.
@@ -67,7 +67,7 @@
   align-items: stretch;
 }
 
-/* ---- Entity rail (docs/UX-REWORK-PLAN.md §U-c bullet 1) — the slim, always-attention-sorted list,
+/* ---- Entity rail (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 1) — the slim, always-attention-sorted list,
    reusing the pre-§U-c attention queue's data/severity rules, just as a full asset list rather than
    a filtered "needs attention" queue. -------------------------------------------------------------- */
 .command-rail {
@@ -129,7 +129,7 @@
 
 /* Declared after .critical/.warning so "which row did I click" always wins the shared
    border-left channel; severity stays visible via the row's own chip. F4's selection language
-   (docs/VISUAL-REFRESH-PLAN.md) — `--color-info-soft` background + `--color-info` accent, the same
+   (docs/plans/done/VISUAL-REFRESH-PLAN.md) — `--color-info-soft` background + `--color-info` accent, the same
    pairing `.nav-row.active` (sidebar) and `tr.row-selectable.selected`/`.asset-card.selected`
    (assets/devices) all use — so the rail and the fleet map's own `.selected` marker ring
    (`shared/map/fleet-map/fleet-map.css`) read as the same "this is what's selected" concept. */
@@ -156,7 +156,7 @@
   letter-spacing: 0.03em;
 }
 
-/* Failsafe rail chip (docs/FC-INTEGRATIONS-PLAN.md F-d) — `--live` red, this app's one color
+/* Failsafe rail chip (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — `--live` red, this app's one color
    reserved exclusively for a genuine failsafe (never the generic `--danger` a plain critical
    severity chip already uses), so a failsafe row reads as distinctly more urgent than any other
    critical reason at a glance. */
@@ -209,7 +209,7 @@
   background: var(--bg);
 }
 
-/* The drawing toolbar card (docs/MAP-REWORK-PLAN.md §5.2), pinned top-centre over the map on the
+/* The drawing toolbar card (docs/plans/done/MAP-REWORK-PLAN.md §5.2), pinned top-centre over the map on the
    8px grid (frontend-style §7). `z-index` puts it above Leaflet's own panes but below the page's
    docked panels, which are real grid-track siblings rather than overlays (see
    `command-logic.ts#commandGridColumns`) and therefore never overlap it. */
@@ -259,7 +259,7 @@
   margin-top: var(--space-8);
 }
 
-/* ---- Detail panel (docs/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------- */
+/* ---- Detail panel (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------- */
 .command-panel {
   display: block;
   min-width: 0;

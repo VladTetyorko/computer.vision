@@ -27,7 +27,7 @@
   gap: var(--space-8);
 }
 
-/* The verb accent (docs/design/09-activity.md: "Created green / Updated blue / Archived amber /
+/* The verb accent (docs/extracts/design/09-activity.md: "Created green / Updated blue / Archived amber /
    Deleted red" — see `core/activity/activity-logic.ts#activityAccentTone`'s own doc comment for how
    the four design-doc verbs map onto this app's real six-value `AuditAction`). Replaces the old
    `.chip.accent` verb badge — three fewer chip elements per row, same information (the summary text
@@ -63,7 +63,7 @@
   flex-wrap: wrap;
 }
 
-/* A fixed-width gutter (docs/design/09-activity.md's own mockup: "absolute times in a left
+/* A fixed-width gutter (docs/extracts/design/09-activity.md's own mockup: "absolute times in a left
    gutter") — every row's time lines up in one column instead of drifting with its own text width. */
 .activity-time {
   flex: none;

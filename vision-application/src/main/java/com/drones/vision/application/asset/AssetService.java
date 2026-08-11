@@ -70,7 +70,7 @@ public interface AssetService {
     List<AssetSummary> assets(boolean includeDeleted);
 
     /**
-     * Lists the assets a given visibility scope may see, as summaries (docs/U-SCOPE-PLAN.md, U-e
+     * Lists the assets a given visibility scope may see, as summaries (docs/plans/done/U-SCOPE-PLAN.md, U-e
      * slice 2, feature 1).
      *
      * <p>Filters the unscoped {@link #assets(boolean)} result by {@link VisibilityScope#includes};
@@ -94,7 +94,7 @@ public interface AssetService {
     AssetDetails details(AssetId id);
 
     /**
-     * Assembles the full detail view of one asset the given scope may see (docs/U-SCOPE-PLAN.md,
+     * Assembles the full detail view of one asset the given scope may see (docs/plans/done/U-SCOPE-PLAN.md,
      * U-e slice 2, feature 1).
      *
      * <p>When the asset exists but is outside {@code scope}, this throws {@link
@@ -190,7 +190,7 @@ public interface AssetService {
     void stopStream(AssetId id);
 
     /**
-     * Assigns an existing, unowned device to this asset (docs/CYCLES-PLAN.md §8's pinned
+     * Assigns an existing, unowned device to this asset (docs/main/CYCLES-PLAN.md §8's pinned
      * contract).
      *
      * @param id       the asset to assign the device to
@@ -204,7 +204,7 @@ public interface AssetService {
     Asset assignDevice(AssetId id, DeviceId deviceId, UserId actor);
 
     /**
-     * Removes one of this asset's devices, leaving the device itself untouched (docs/CYCLES-PLAN.md
+     * Removes one of this asset's devices, leaving the device itself untouched (docs/main/CYCLES-PLAN.md
      * §8's pinned contract).
      *
      * @param id       the asset to unassign the device from

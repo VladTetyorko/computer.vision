@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 
 /**
- * A generic, mandatory confirm modal (docs/DRONE-INFRA-PLAN.md I-e Stage 1's own poka-yoke
+ * A generic, mandatory confirm modal (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's own poka-yoke
  * requirement — "ALWAYS a confirm dialog … never auto-triggered, no keyboard shortcut") — a true
  * `position: fixed` modal (mirrors `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`'s /
  * `features/command/geofence-zone-dialog.ts`'s own backdrop convention, `z-index: 150`, same as

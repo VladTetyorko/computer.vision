@@ -3,7 +3,7 @@ import { relativeTimeLabel } from '../events/events-logic';
 
 /**
  * Pure logic behind the asset manager page's KPI tile row and "Recent flights" utilization chart
- * (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4) — split out so the formatting/aggregation
+ * (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4) — split out so the formatting/aggregation
  * math is unit-testable without HTTP, timers, or the DOM, mirroring `asset-detail-logic.ts`'s own
  * split.
  *
@@ -16,7 +16,7 @@ import { relativeTimeLabel } from '../events/events-logic';
 /**
  * Seconds elapsed for one usage, open or closed — an open usage (`endedAt` absent) counts up to
  * `nowMs`, the same "open flights count toward flight time up to now" rule the backend's
- * `AssetStats` aggregation itself uses (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A). Shared by
+ * `AssetStats` aggregation itself uses (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A). Shared by
  * `flightBars` below and `AssetDetailPage#usageDuration` (the Usage history table), so both read
  * off one definition of "how long was this flight."
  */
@@ -26,7 +26,7 @@ export function usageDurationSeconds(usage: AssetUsage, nowMs: number): number {
 }
 
 /**
- * `"12h 34m"` / `"34m"` — the KPI row's flight-time formatting (docs/ASSET-MANAGER-PAGE-PLAN.md,
+ * `"12h 34m"` / `"34m"` — the KPI row's flight-time formatting (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md,
  * Wave B item 3). `null` renders `'—'` — the caller (`kpiTiles`) is the one place that decides
  * *when* a duration is honestly unknown (no flights fetched at all) versus honestly zero (flights
  * fetched, their total just happens to be zero seconds) — this function only ever renders the

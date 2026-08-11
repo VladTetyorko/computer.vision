@@ -7,7 +7,7 @@ package com.drones.vision.adapter.simulation;
  * a given {@link com.drones.vision.domain.model.StreamDescriptor}'s {@code width}/{@code
  * height}/{@code fps} options are absent — a per-{@code open()} option always takes priority (see
  * {@link SimulatedVideoSource} for that lenient-parsing convention). Per
- * docs/LAYERING-REFACTOR-PLAN.md §1.3, this module never imports a {@code @ConfigurationProperties}
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3, this module never imports a {@code @ConfigurationProperties}
  * type; a later wave binds {@code vision.simulation.video.*} in {@code vision-app} and constructs
  * this record there.
  *

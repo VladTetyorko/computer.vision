@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.GroupId;
 
 /**
  * {@link Group} &harr; {@link GroupEntity} mapping, extracted from {@code JpaGroupRepository}
- * (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class GroupMapper {
 

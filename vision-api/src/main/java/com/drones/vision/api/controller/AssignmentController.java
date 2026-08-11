@@ -21,7 +21,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for the pilot&rarr;asset assignment roster (docs/U-SCOPE-PLAN.md, U-e slice
+ * Driving REST adapter for the pilot&rarr;asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, U-e slice
  * 2, feature 2): a manager grants/revokes "who flies what" within their own scope, and a pilot
  * reads their own assignments.
  *

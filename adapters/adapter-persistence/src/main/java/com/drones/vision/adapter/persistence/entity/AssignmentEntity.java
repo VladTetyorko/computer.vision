@@ -9,7 +9,7 @@ import jakarta.persistence.Table;
 import java.util.UUID;
 
 /**
- * JPA row for {@code pilot_assignments} — one pilot&rarr;asset assignment (docs/U-SCOPE-PLAN.md,
+ * JPA row for {@code pilot_assignments} — one pilot&rarr;asset assignment (docs/plans/done/U-SCOPE-PLAN.md,
  * U-e slice 2, feature 2). {@link com.drones.vision.adapter.persistence.JpaAssignmentRepository}
  * owns the mapping.
  *

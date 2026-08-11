@@ -1,7 +1,7 @@
 import type { Detection, DetectionResult } from '../../core/api/models';
 
 /**
- * Pure logic behind the client-side vector detection overlay (docs/CYCLES-PLAN.md §11, CD-b item
+ * Pure logic behind the client-side vector detection overlay (docs/main/CYCLES-PLAN.md §11, CD-b item
  * 6): which completed `DetectionResult` batch best matches the frame currently on-screen, given
  * HLS's live-edge latency. Split out so the sync math is unit-testable without a `<canvas>`,
  * hls.js, or a poller — mirrors `shared/player/player-recovery.ts`.
@@ -12,7 +12,7 @@ export type BoxesMode = 'overlay' | 'burned' | 'off';
 
 /**
  * How much slack (in units of "one detection batch interval") to tolerate beyond the raw latency
- * estimate before discarding a result as "not on screen yet" — docs/CYCLES-PLAN.md §11 item 6's
+ * estimate before discarding a result as "not on screen yet" — docs/main/CYCLES-PLAN.md §11 item 6's
  * "±1 batch of slack", covering ordinary jitter between the CV pipeline's sampling cadence and the
  * poll cycle that fetched `results`.
  */
@@ -78,7 +78,7 @@ function averageBatchIntervalMs(results: readonly DetectionResult[]): number {
  * Whether the canvas overlay should actually draw boxes right now.
  *
  * `'burned'` and `'off'` both suppress the client canvas — disabling the server's own burn-in is
- * out of scope for this cycle (docs/CYCLES-PLAN.md §11 item 6: "no server change"), so there is no
+ * out of scope for this cycle (docs/main/CYCLES-PLAN.md §11 item 6: "no server change"), so there is no
  * way to make the video itself show *zero* boxes; the two states differ only in what they claim
  * about intent (trusting the baked-in boxes vs. wanting no detection UI, including no hover/click)
  * and in whichever future cycle does add a server-side burn-in toggle, that is where `'off'` would
@@ -88,10 +88,10 @@ export function shouldDrawOverlay(mode: BoxesMode, hasResult: boolean): boolean 
   return mode === 'overlay' && hasResult;
 }
 
-// --- Composite-model box hues (docs/OPS-CORE-PLAN.md §Q3b) --------------------------------------
+// --- Composite-model box hues (docs/plans/done/OPS-CORE-PLAN.md §Q3b) --------------------------------------
 
 /**
- * The key `modelHue` colors a box by — cv-service's composite mode (docs/CV-MODELS-PLAN.md item
+ * The key `modelHue` colors a box by — cv-service's composite mode (docs/plans/done/CV-MODELS-PLAN.md item
  * 4, `registry.py#detect_composite`) prefixes every `label` `"{short_name}:{label}"` (e.g.
  * `"orion12l:tank"`) only when more than one member model actually ran, so this is the *one*
  * signal that distinguishes which member produced a given box.
@@ -131,7 +131,7 @@ function hashHue(key: string): number {
 }
 
 /**
- * Stable per-model box color (docs/OPS-CORE-PLAN.md §Q3b): `DEFAULT_MODEL_KEY` always resolves to
+ * Stable per-model box color (docs/plans/done/OPS-CORE-PLAN.md §Q3b): `DEFAULT_MODEL_KEY` always resolves to
  * the exact color every box has always been drawn in — a single-model stream (the overwhelming
  * common case, whichever model it happens to be) sees zero visual change. Any other key hashes
  * deterministically into a hue at a fixed saturation/lightness, so the same model always draws the
@@ -163,7 +163,7 @@ export function distinctModelKeys(detections: readonly Pick<Detection, 'label'>[
   return [...seen];
 }
 
-// --- Track-aware rendering (docs/TRACKING-PLAN.md §4/§10, wave T7) ------------------------------
+// --- Track-aware rendering (docs/plans/done/TRACKING-PLAN.md §4/§10, wave T7) ------------------------------
 // Everything below gates on `detection.track` alone — one null check (per §4.G's own "the client
 // gets a single null check gating all track rendering" design) — so a stream running an old/absent
 // server, or a detection tracking hasn't (yet) assigned an id to, draws byte-identically to before
@@ -172,7 +172,7 @@ export function distinctModelKeys(detections: readonly Pick<Detection, 'label'>[
 
 /**
  * The box label `shared/player/player.ts#drawBox` draws — `"#7 car 82%"` once `detection.track` is
- * present (docs/TRACKING-PLAN.md §10 touchable outcome #1's "stable box numbers"), the exact,
+ * present (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #1's "stable box numbers"), the exact,
  * unchanged `"car 82%"` otherwise. Also used for the hover tooltip's own text, so the two always
  * agree on whether a box is carrying an id.
  */
@@ -184,10 +184,10 @@ export function formatDetectionLabel(detection: Detection): string {
 }
 
 /**
- * Stable per-track box color (docs/TRACKING-PLAN.md §10 touchable outcome #1) — the same hash-to-hue
+ * Stable per-track box color (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #1) — the same hash-to-hue
  * mechanism as {@link modelHue}, keyed on `trackId` instead of a model key, so one tracked object
  * keeps one color across every frame **even as its label flips** (composite-mode member handoff,
- * docs/TRACKING-PLAN.md §5.I risk R9) — a track's identity is its id, never its current label.
+ * docs/plans/done/TRACKING-PLAN.md §5.I risk R9) — a track's identity is its id, never its current label.
  * `drawBox` calls this instead of `modelHue` whenever `detection.track` is present; the two never
  * mix on the same box. A distinct hash seed (`"track-"` prefix) from `modelHue`'s own model-key hash
  * is deliberate, not load-bearing — the two are never compared or blended, only each internally
@@ -206,12 +206,12 @@ export interface TrailPoint {
   readonly y: number;
 }
 
-/** How far back a trail reaches (docs/TRACKING-PLAN.md §10 touchable outcome #3 — "a trail behind a
+/** How far back a trail reaches (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3 — "a trail behind a
  *  tracked car", not a full trajectory history; S2's map trails are the durable, longer-lived kind). */
 export const TRAIL_WINDOW_MS = 2_000;
 
 /**
- * Per-track fading trails (docs/TRACKING-PLAN.md §10 touchable outcome #3), recomputed fresh on
+ * Per-track fading trails (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3), recomputed fresh on
  * every call from `results` — `DetectionsStore.results()`, which already retains a short
  * newest-first history (up to 50 batches, `DetectionsStore#DETECTIONS_LIMIT`). **Not a mutable
  * accumulator**: there is nothing stateful in this module for `results` to be cleared *from* — a

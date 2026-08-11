@@ -9,7 +9,7 @@ import type { AssetDetails, AssetSummary } from '../../core/api/models';
  * Every *request-building* concern this file used to hold (`buildSimulationRequest`/
  * `buildSyntheticRegisterRequest`/`SimulateMode`/`FileSimulateForm`, the `direct`/`rtsp`/`synthetic`
  * modes; `buildTestDroneRequest`/`TestDroneForm`, `testDrone`, before that) moved to
- * `core/fleet/simulation-logic.ts` (docs/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Connect
+ * `core/fleet/simulation-logic.ts` (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Connect
  * step needs every mode, not just the ones this page still calls directly) — see that module's own
  * doc comment for the full history. This file keeps only what stays Warehouse-only: mapping
  * assets/devices that already exist back to "is this simulated, and by which asset" for display.

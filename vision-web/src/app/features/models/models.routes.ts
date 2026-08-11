@@ -1,8 +1,8 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/manage/training/models` (docs/CV-TRAINING-PLAN.md Phase 2 T10) — own lazy chunk, split per
- * vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
+ * `/manage/training/models` (docs/plans/done/CV-TRAINING-PLAN.md Phase 2 T10) — own lazy chunk, split per
+ * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
  * `authGuard`-wrapped children group, **before** `LABELING_ROUTES` — that array's own
  * `manage/training/:datasetId` is a param route that would otherwise swallow the literal segment
  * `models` (Angular matches routes in array order; a static path must be registered ahead of a

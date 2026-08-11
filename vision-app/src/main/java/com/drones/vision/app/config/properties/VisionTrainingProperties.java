@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Configuration for the CV model-improvement training loop ({@code vision.training.*}),
- * per docs/CV-TRAINING-PLAN.md §3, Wave T4, as delta'd by docs/CV-TRAINING-V2-PLAN.md §7.
+ * per docs/plans/done/CV-TRAINING-PLAN.md §3, Wave T4, as delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md §7.
  *
  * <p>Selected by {@code wiring.TrainingWiring}: {@link #enabled()} {@code false} (the
  * default, today's behavior) keeps every training bean/controller entirely absent — {@code

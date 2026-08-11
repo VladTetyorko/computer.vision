@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.DeviceCategory;
 
 /**
  * {@link DeviceCategory} &harr; {@link CategoryEntity} mapping, extracted from {@code
- * JpaCategoryRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaCategoryRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class CategoryMapper {
 

@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Unit-level checks of {@link RealtimePacer}, the shared pacing logic extracted out of {@code
  * FfmpegVideoSource}'s grab loop and {@code RtspFeedTransmitter}'s transmit loop
- * (docs/LAYERING-REFACTOR-PLAN.md §5.1), previously only exercised indirectly through those two
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1), previously only exercised indirectly through those two
  * classes' own real-decode tests (e.g. {@code FfmpegVideoSourceTest#fileSourceIsPacedToItsNativeFrameRate}).
  * Deliberately generous lower-bound-only assertions, same idiom as that test — CI scheduling
  * jitter must never flake a wall-clock-timing test, so no upper bound is ever asserted.

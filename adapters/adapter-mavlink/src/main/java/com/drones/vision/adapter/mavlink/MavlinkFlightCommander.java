@@ -25,7 +25,7 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * {@link FlightCommandPort} implementation sending guarded MAVLink 2 UDP commands to an aircraft
- * this platform is already ingesting telemetry from (docs/DRONE-INFRA-PLAN.md I-e). Stage 1 opened
+ * this platform is already ingesting telemetry from (docs/plans/active/DRONE-INFRA-PLAN.md I-e). Stage 1 opened
  * the RX-only doctrine for exactly one command, return-to-home; Stage 2 adds the two next
  * capability-gated command classes — arbitrary mode select ({@code MAV_CMD_DO_SET_MODE}) and
  * arm/disarm ({@code MAV_CMD_COMPONENT_ARM_DISARM}) — plus a {@link #capabilities(Device)} snapshot.
@@ -118,7 +118,7 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     /**
      * @param ackTimeout how long to wait for a {@code COMMAND_ACK} before reporting {@link
      *                   CommandResult#NO_ACK} — {@code vision.mavlink.ack-timeout}
-     *                   (docs/LAYERING-REFACTOR-PLAN.md wave F2), replacing this class's own
+     *                   (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F2), replacing this class's own
      *                   {@link #ACK_TIMEOUT_MILLIS} constant as the actual value used
      */
     public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource, Duration ackTimeout) {

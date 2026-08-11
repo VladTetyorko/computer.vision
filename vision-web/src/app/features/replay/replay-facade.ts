@@ -38,20 +38,20 @@ export interface ReplayRouteInputs {
 }
 
 /**
- * `ReplayPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — owns every read-model/command the page
+ * `ReplayPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — owns every read-model/command the page
  * used to own directly: the cached `timeline`/`asset`/`recording` fetch, every scrub-time `computed`
  * derivation (`replay-logic.ts`), the `requestAnimationFrame` playback clock, clip export, and (new,
- * docs/CV-TRAINING-V2-PLAN.md §8) the "Add to dataset" replay-capture action. Every value/behavior
+ * docs/plans/done/CV-TRAINING-V2-PLAN.md §8) the "Add to dataset" replay-capture action. Every value/behavior
  * here is byte-for-byte what `ReplayPage` owned before this refactor.
  *
- * **What stays on the page instead** (docs/UI-ARCHITECTURE-PLAN.md's own "truly-ephemeral,
+ * **What stays on the page instead** (docs/plans/done/UI-ARCHITECTURE-PLAN.md's own "truly-ephemeral,
  * self-contained local view state" carve-out): the `<video>` element's own `viewChild` query and the
  * two-way `atMs`↔`<video>.currentTime` DOM sync (the guarded-effect pair keyed off
  * `videoDrivenUpdate`) — both need direct access to the video DOM node, which only the component
  * itself can hold. This facade still owns every *value* that sync reads/writes (`atMs`,
  * `recordingStartMs`, `playing`) — only the DOM plumbing stays component-side.
  *
- * **"Add to dataset" (docs/CV-TRAINING-V2-PLAN.md §8) — a second capture entry point, alongside
+ * **"Add to dataset" (docs/plans/done/CV-TRAINING-V2-PLAN.md §8) — a second capture entry point, alongside
  * `DatasetDetailFacade`'s own live-stream capture.** `training` (`TrainingStore`, `providedIn:
  * 'root'`) supplies the dataset picker's own list for free — the same store `features/labeling/**`
  * already reads, refreshed here too (mirrors `DatasetsFacade`'s own unconditional
@@ -89,7 +89,7 @@ export class ReplayFacade {
   readonly notFound = signal(false);
   readonly errorMessage = signal<string | undefined>(undefined);
 
-  // --- Recording video pane (docs/OPS-CORE-PLAN.md §R, R-c) -----------------------------------
+  // --- Recording video pane (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) -----------------------------------
   readonly recording = signal<UsageRecording | undefined>(undefined);
   readonly videoErrored = signal(false);
   readonly videoAvailable = computed(
@@ -101,7 +101,7 @@ export class ReplayFacade {
     return start !== undefined ? Date.parse(start) : undefined;
   });
 
-  // --- Clip export (docs/OPS-CORE-PLAN.md §R, R-c) ---------------------------------------------
+  // --- Clip export (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) ---------------------------------------------
   readonly clipSelectionStartMs = signal<number | undefined>(undefined);
   readonly clipSelectionEndMs = signal<number | undefined>(undefined);
   readonly hasClipSelection = computed(
@@ -121,7 +121,7 @@ export class ReplayFacade {
     return url && window ? buildClipDownloadUrl(url, window) : undefined;
   });
 
-  // --- Add to dataset, from a replay frame (docs/CV-TRAINING-V2-PLAN.md §8) ---------------------
+  // --- Add to dataset, from a replay frame (docs/plans/done/CV-TRAINING-V2-PLAN.md §8) ---------------------
 
   /** The "Add to dataset" picker's current selection — `''` = none chosen yet. */
   readonly datasetId = signal('');
@@ -169,7 +169,7 @@ export class ReplayFacade {
   // --- Detections-at-scrub + the scrub bar's density strip ------------------------------------
 
   /**
-   * Capped at the latest `DETECTION_STRIP_CAP` (200) buckets (docs/OPS-CORE-PLAN.md §Q3a) — see
+   * Capped at the latest `DETECTION_STRIP_CAP` (200) buckets (docs/plans/done/OPS-CORE-PLAN.md §Q3a) — see
    * `capDetectionBuckets`'s own doc comment for why this rarely trims anything under today's
    * `DEFAULT_DETECTION_BUCKETS`; kept as a real slice regardless so a future denser strip stays cheap.
    */
@@ -294,7 +294,7 @@ export class ReplayFacade {
     return assetId ? ['/assets', assetId] : ['/command'];
   });
 
-  // --- Clip export (docs/OPS-CORE-PLAN.md §R, R-c) ---------------------------------------------
+  // --- Clip export (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) ---------------------------------------------
 
   /** "Mark clip start" — captures the current scrub position as the clip's own opening frame. */
   markClipStart(): void {
@@ -311,7 +311,7 @@ export class ReplayFacade {
     this.clipSelectionEndMs.set(undefined);
   }
 
-  // --- Add to dataset, from a replay frame (docs/CV-TRAINING-V2-PLAN.md §8) ---------------------
+  // --- Add to dataset, from a replay frame (docs/plans/done/CV-TRAINING-V2-PLAN.md §8) ---------------------
 
   /**
    * Captures the frame at the current scrub position into the selected dataset — the replay-driven
@@ -380,7 +380,7 @@ export class ReplayFacade {
     this.atMs.set(clampToRange(Number(rawMs), this.fromMs(), this.toMs()));
   }
 
-  /** Clicking a detection density marker jumps the scrub there and pauses (docs/MVP2-PLAN.md §R, R-b). */
+  /** Clicking a detection density marker jumps the scrub there and pauses (docs/plans/done/MVP2-PLAN.md §R, R-b). */
   jumpTo(atMs: number): void {
     this.pause();
     this.atMs.set(clampToRange(atMs, this.fromMs(), this.toMs()));

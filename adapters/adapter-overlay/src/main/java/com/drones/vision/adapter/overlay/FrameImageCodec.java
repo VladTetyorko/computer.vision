@@ -20,7 +20,7 @@ import java.util.Iterator;
 /**
  * Pure pixel/byte &lt;-&gt; {@link BufferedImage} conversion for the two
  * overlay-supported {@link PixelFormat}s, split out of {@link
- * Java2DOverlayRenderer} (docs/LAYERING-REFACTOR-PLAN.md §5.1) so the
+ * Java2DOverlayRenderer} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1) so the
  * renderer's dispatch logic isn't tangled with codec detail.
  *
  * <p>Every decode/encode failure here is recoverable from the caller's point

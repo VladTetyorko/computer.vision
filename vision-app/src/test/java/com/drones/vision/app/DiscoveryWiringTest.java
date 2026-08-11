@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * Context test for the <em>default</em> configuration (no {@code
  * vision.discovery.*} overrides): asserts {@link DiscoveryWiringConfiguration}
  * registers all three {@code adapter-discovery} scanners plus {@code
- * adapter-mavlink}'s {@code MavlinkHeartbeatScanner} (docs/DRONE-INFRA-PLAN.md
+ * adapter-mavlink}'s {@code MavlinkHeartbeatScanner} (docs/plans/active/DRONE-INFRA-PLAN.md
  * I-b) per {@code vision.discovery.enabled}'s default of {@code true}.
  *
  * <p>{@code vision.publish.enabled=false} is set for determinism, same as
@@ -48,7 +48,7 @@ class DiscoveryWiringTest {
     }
 
     /**
-     * docs/DRONE-INFRA-PLAN.md I-g wave A: {@link DiscoveryWiringConfiguration#mavlinkPort}
+     * docs/plans/active/DRONE-INFRA-PLAN.md I-g wave A: {@link DiscoveryWiringConfiguration#mavlinkPort}
      * defaults to {@link VisionDiscoveryProperties#DEFAULT_MAVLINK_PORT}, and {@code
      * vision-api}'s {@link SystemNetworkController} (asserted present here, confirming the raw
      * {@code int} bean autowires into it across the module boundary) reports that exact value.

@@ -1,11 +1,11 @@
-<!-- `.surface-dark` (docs/VISUAL-REFRESH-PLAN.md F3/W4) on this page's own root: the Wall is
+<!-- `.surface-dark` (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4) on this page's own root: the Wall is
      genuinely a video surface end to end, not a themed page with a video region inside it — its
      one job is a grid of live tiles, and the page-bar/notice/events-rail around that grid are all
      part of the same "watching a wall of live feeds" picture, not separate light chrome (compare
      the replay library, which stays themed because it never shows video pixels at all). Matches
      `fly.routes.ts`'s cockpit precedent. -->
 <div class="page surface-dark">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/03-wall.md — `page-head` (title + a two-line
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/03-wall.md — `page-head` (title + a two-line
        "how this works" paragraph) becomes the bar; per 03-wall.md the description is redundant
        once "Wall" + a live count says the same thing, so it is deleted outright rather than moved
        behind a `?` hint. `Tiles per row` moves into `[pageBarFilters]` unchanged — the density
@@ -50,7 +50,7 @@
       }
     </div>
 
-    <!-- ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1; docs/MVP3-PLAN.md §C-c: extracted
+    <!-- ---- Events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1; docs/plans/done/MVP3-PLAN.md §C-c: extracted
          to shared/ui/events-rail.ts so the Command dashboard could reuse it — see that component's own
          doc comment) ------------------------------------------------------------------------ -->
     <vision-events-rail class="events-rail" (open)="facade.openEvent($event)" />

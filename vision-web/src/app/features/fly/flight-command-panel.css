@@ -1,6 +1,6 @@
 /* This is now drawer *content* only — `<vision-side-panel>` (flight-command-panel.html) owns the
    head/close chrome, the drawer surface, and the bottom-sheet collapse below `--bp-sm`
-   (docs/UI-REDESIGN-PLAN.md Wave 2, D-E: migration deleted the old hand-rolled frosted-pill
+   (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-E: migration deleted the old hand-rolled frosted-pill
    `.command-cluster` "island" entirely — see `mode-picker`/`arm-btn` below for what's left).
    `:host { display: contents }` keeps this component from introducing its own box in `fly.html`'s
    `.grid-main` layout, mirroring `cv-control-panel.css`'s identical convention. */

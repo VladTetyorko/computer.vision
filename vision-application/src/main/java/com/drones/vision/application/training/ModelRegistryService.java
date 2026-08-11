@@ -9,7 +9,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * The CV model registry control plane (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2): list every known
+ * The CV model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2): list every known
  * model and see which one is live, and promote one to production. One interface, one
  * implementation ({@link DefaultModelRegistryService}) — {@link ModelRegistryPort} itself is the
  * substitutable boundary (gRPC to cv-service today); this service adds nothing but the

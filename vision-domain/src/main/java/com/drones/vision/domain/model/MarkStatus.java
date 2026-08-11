@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * The lifecycle state of a {@link Mark} (docs/TACTICAL-MARKS-PLAN.md §1).
+ * The lifecycle state of a {@link Mark} (docs/plans/done/TACTICAL-MARKS-PLAN.md §1).
  */
 public enum MarkStatus {
 

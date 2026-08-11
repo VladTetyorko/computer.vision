@@ -26,7 +26,7 @@ import java.util.Set;
 
 /**
  * {@link DeviceDiscoveryPort} implementation for plug-and-fly MAVLink heartbeat discovery
- * (docs/DRONE-INFRA-PLAN.md I-b): every distinct MAVLink system id heard on the well-known GCS
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-b): every distinct MAVLink system id heard on the well-known GCS
  * port becomes a {@link DiscoveredDevice} — no manual sysid typing, no manual {@code udp://} URI
  * entry, matching the "operator will not hand-edit sysids" field reality I-b was written for.
  *
@@ -127,7 +127,7 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
 
     /**
      * @param scan this module's {@code vision.mavlink.scan.*} poll/self-bind-timeout budget
-     *             (docs/LAYERING-REFACTOR-PLAN.md wave F2) — replaces this class's own
+     *             (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F2) — replaces this class's own
      *             {@code ACTIVE_HUB_POLL_COUNT}/{@code ACTIVE_HUB_MIN_POLL_INTERVAL_MILLIS}/
      *             {@code SELF_BIND_MIN_READ_TIMEOUT_MILLIS}/{@code SELF_BIND_MAX_READ_TIMEOUT_MILLIS}
      *             constants

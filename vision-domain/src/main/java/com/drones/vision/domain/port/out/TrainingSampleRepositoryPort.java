@@ -9,7 +9,7 @@ import java.util.Optional;
 import java.util.List;
 
 /**
- * Driven port: persist and query {@link TrainingSample}s (docs/CV-TRAINING-PLAN.md §1).
+ * Driven port: persist and query {@link TrainingSample}s (docs/plans/done/CV-TRAINING-PLAN.md §1).
  *
  * <p>A sample mutates over its own review lifecycle (annotations and status evolve as the operator
  * labels it), so {@link #save} is a genuine upsert keyed by the sample's own id, not an append —

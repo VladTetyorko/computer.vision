@@ -16,7 +16,7 @@
     height: 12rem;
 }
 
-/* ---- Header (docs/NAV-IA-REDESIGN-PLAN.md §2.2) -------------------------------------------- */
+/* ---- Header (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) -------------------------------------------- */
 /* The identity chips (`.header-chips` in asset-detail.html) ride `<vision-page-bar>`'s own
    `[pageBarFilters]` slot with no extra local CSS — the shared `.row` class (src/styles.css)
    already supplies the flex row + gap, and that slot's own `page-bar.css` handles wrapping. */
@@ -29,7 +29,7 @@
     background: transparent;
 }
 
-/* ---- Registration/tail number inline edit (docs/UX-REWORK-PLAN.md §U-d item 3) --------------- */
+/* ---- Registration/tail number inline edit (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) --------------- */
 
 .registration-row {
     gap: var(--space-8);
@@ -39,7 +39,7 @@
     max-width: 12rem;
 }
 
-/* ---- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3 — advanced mode) ------------------ */
+/* ---- Attributes editor (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — advanced mode) ------------------ */
 
 .attributes-editor {
     margin-top: var(--space-16);
@@ -61,7 +61,7 @@
     margin-bottom: var(--space-8);
 }
 
-/* ---- Overview grid (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) — the frozen `.grid12`/`.col-N`
+/* ---- Overview grid (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3, D-F) — the frozen `.grid12`/`.col-N`
    utilities from `src/styles.css` replace this page's own `.detail-grid`/`.span-2`/900px-breakpoint
    copy outright: every section below is placed with `.col-8`/`.col-4`/`.col-12` instead of a
    uniform `span-2`, and the breakpoint collapse (single column below 900px, the `--bp-md` token —
@@ -74,7 +74,7 @@
     margin-bottom: 0;
 }
 
-/* A section header preceded by a small accent icon (docs/UI-REDESIGN-PLAN.md Wave 3: "use
+/* A section header preceded by a small accent icon (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3: "use
    <vision-icon> to accent section titles where it aids scanning") — `vision-section-header` itself
    has no icon input (Wave 0's frozen contract), so the icon sits as a plain sibling in a flex row;
    `vision-section-header`'s own host renders `display:block` (its own component style), so it just
@@ -96,11 +96,11 @@
     min-width: 0;
 }
 
-/* ---- Cockpit band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the old
+/* ---- Cockpit band (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — replaces the old
    Video/Stream cards; a compact status strip, never a player. Button-alignment audit (Wave B item
    6): primary CTA first, secondary second, both default-sized (no mixed `small`/default in this
    row), consistent gap/vertical-centering via the shared global `.row`. No `vision-section-header`
-   here on purpose (docs/UI-REDESIGN-PLAN.md Wave 3) — it's an action strip, not a titled section;
+   here on purpose (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3) — it's an action strip, not a titled section;
    the leading `<vision-icon name="cockpit">` beside the status chip is the scanning accent instead. */
 
 .cockpit-band {
@@ -124,7 +124,7 @@
     flex-wrap: wrap;
 }
 
-/* ---- Drill-in launcher (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) — the overview's one exhaustive
+/* ---- Drill-in launcher (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3, D-F) — the overview's one exhaustive
    index into every heavier area; individual overview cards (Position, Recent flights) also carry
    their own single most-relevant shortcut in their own `[actions]` slot, so this row is the
    complete menu, not the only way in. ------------------------------------------------------------ */
@@ -147,7 +147,7 @@
     margin-bottom: var(--space-16);
 }
 
-/* ---- Freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3) — the Position card's compact
+/* ---- Freshest-telemetry summary (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3) — the Position card's compact
    facts strip under the map, fed by the same `telemetryFactRows` the "Full telemetry" drawer's
    per-device panels use. -------------------------------------------------------------------------- */
 
@@ -155,8 +155,8 @@
     margin-top: var(--space-16);
 }
 
-/* ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — the individual tiles are now
-   the shared `<vision-stat>` component (docs/STYLE-TOKENS-PLAN.md §Shared primitives), which owns the
+/* ---- KPI tile row (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — the individual tiles are now
+   the shared `<vision-stat>` component (docs/plans/done/STYLE-TOKENS-PLAN.md §Shared primitives), which owns the
    `dataviz` stat-tile contract (semibold proportional value over a muted uppercase caption). Only the
    responsive grid that lays them out stays local. ------ */
 
@@ -166,7 +166,7 @@
     gap: var(--space-16);
 }
 
-/* ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) — one bar per
+/* ---- "Recent flights" chart (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) — one bar per
    `AssetDetails#recentUsages` entry (`core/fleet/asset-stats-logic.ts#flightBars`), oldest to
    newest. `dataviz` mark spec: bars ≤24px thick, 4px rounded data-end, square baseline, a single
    accent hue (one series → no legend, the card title already names it). Fixed-width columns +
@@ -240,7 +240,7 @@
 .fact dd {
     margin: var(--space-2) 0 0;
     font-size: 0.85rem;
-    /* docs/UX-REWORK-PLAN.md §U-b item 3 — mirrors `shared/player/stream-info-panel.ts`'s own
+    /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — mirrors `shared/player/stream-info-panel.ts`'s own
        identical rule: tabular-nums only (not the mono font), since this grid mixes numeric
        telemetry readouts with text facts (category, transport) the mono font shouldn't touch. */
     font-variant-numeric: tabular-nums;
@@ -250,7 +250,7 @@
     color: var(--color-danger);
 }
 
-/* ---- Telemetry panels (docs/CYCLES-PLAN.md §11 item 3 — one per source device) ------------- */
+/* ---- Telemetry panels (docs/main/CYCLES-PLAN.md §11 item 3 — one per source device) ------------- */
 
 .telemetry-grid {
     display: grid;
@@ -323,7 +323,7 @@ td.actions {
 }
 
 /* Pre-existing bug surfaced by browser verification while moving this exact form under the new
-   page bar (docs/NAV-IA-REDESIGN-PLAN.md §2.2): `.inline-form input`'s `flex: 1 1 12rem` sets the
+   page bar (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2): `.inline-form input`'s `flex: 1 1 12rem` sets the
    flex-basis along the *main* axis, which `.inline-form.column` switches to vertical — so the
    basis was being read as a 12rem (192px) height, not the intended 12rem width, ballooning the
    rename form's two inputs into giant boxes. `.edit-asset` is the only `.inline-form.column` user
@@ -343,14 +343,14 @@ td.actions {
     border-bottom: 1px solid var(--border);
 }
 
-/* Per-row kebab (⋯) menu (docs/UX-REWORK-PLAN.md §U-a item 7): `.kebab`/`.kebab-trigger`/
+/* Per-row kebab (⋯) menu (docs/plans/done/UX-REWORK-PLAN.md §U-a item 7): `.kebab`/`.kebab-trigger`/
    `.kebab-menu`/`.kebab-item`/`.kebab-divider`/`.kebab-reason`/`.danger-action` are now a shared
    global primitive in `src/styles.css` (see that stylesheet's own doc comment for the expected
    `<details>`/`<summary>` shape). This page used to carry its own local copy of the same rules
    (mirroring `features/devices/devices.css`'s own) before that global version existed; removed
    once it did, rather than left as a shadowing duplicate. */
 
-/* ---- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) — mirrors features/wall/wall.css's own rail rows,
+/* ---- Events (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 2) — mirrors features/wall/wall.css's own rail rows,
    minus the click affordance (this list is informational, not a navigation target). ------------ */
 
 .event-list {
@@ -376,7 +376,7 @@ td.actions {
     border-color: var(--color-live);
 }
 
-/* Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the row's dot alone used to be the only
+/* Status legibility pass (docs/plans/done/UX-QUICKWINS-PLAN.md QF-3): the row's dot alone used to be the only
    carrier of OPEN vs. CLOSED. The dot stays (fast at-a-glance scan), but `event.state` itself (the
    API's own term) now always renders next to it, in the same chip/dot idiom
    `shared/ui/events-rail.css#.event-state` already uses — replicated locally rather than imported,

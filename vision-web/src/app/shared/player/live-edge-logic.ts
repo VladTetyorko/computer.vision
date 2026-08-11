@@ -1,8 +1,8 @@
 import type { Transport } from './player-recovery';
 
 /**
- * Pure logic behind `shared/player/player.ts`'s live-edge behavior (docs/MVP2-PLAN.md §V, V-b; the
- * badge text itself extended by docs/UX-QUICKWINS-PLAN.md QF-4): when a stale HLS buffer is worth
+ * Pure logic behind `shared/player/player.ts`'s live-edge behavior (docs/plans/done/MVP2-PLAN.md §V, V-b; the
+ * badge text itself extended by docs/plans/done/UX-QUICKWINS-PLAN.md QF-4): when a stale HLS buffer is worth
  * an active catch-up seek, and how the player chrome's latency badge should read given whichever
  * transport is live. Split out so both decisions are unit-testable without hls.js, timers, or a
  * `<video>` element — mirrors `shared/player/player-recovery.ts`/`shared/player/detection-overlay-logic.ts`.
@@ -60,9 +60,9 @@ export function shouldSnapToLive(
   return behindLiveSeconds !== null && behindLiveSeconds > thresholdSeconds;
 }
 
-// --- Latency badge (honest, always-on — docs/UX-QUICKWINS-PLAN.md QF-4) --------------------
+// --- Latency badge (honest, always-on — docs/plans/done/UX-QUICKWINS-PLAN.md QF-4) --------------------
 //
-// Superseded the earlier hysteresis-gated "live · HLS[· Ns behind]" chip (docs/MVP2-PLAN.md §V,
+// Superseded the earlier hysteresis-gated "live · HLS[· Ns behind]" chip (docs/plans/done/MVP2-PLAN.md §V,
 // V-b): the fleet/military honesty ethos this quick-win batch is built around (UX-DESIGN §T1) asks
 // for the measured number *always* visible, updating as it changes, not hidden behind a dead-band
 // until it crosses a few-second threshold. There is nothing left to debounce once the badge always
@@ -72,7 +72,7 @@ export function shouldSnapToLive(
 
 /**
  * The player chrome's latency badge text, e.g. `'WebRTC 0.4s'`, `'HLS ~6s'`, or `'WebRTC —'`/
- * `'HLS —'` while unmeasured (docs/UX-QUICKWINS-PLAN.md QF-4) — `transport` always leads, exactly
+ * `'HLS —'` while unmeasured (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4) — `transport` always leads, exactly
  * as the plan's own example format shows. WebRTC shows one decimal (`estimateWhepLatencySeconds`,
  * `player-recovery.ts`, is a real getStats()-derived estimate, precise enough to be worth a
  * decimal); HLS rounds to a whole second with a leading `~` (`measureBehindLive`'s own live-edge

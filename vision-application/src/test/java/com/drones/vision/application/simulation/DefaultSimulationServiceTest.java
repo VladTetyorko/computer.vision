@@ -680,7 +680,7 @@ class DefaultSimulationServiceTest {
         verify(feedTransmitter, times(1)).stop(any());
     }
 
-    // --- mavlink telemetry transport (docs/DRONE-INFRA-PLAN.md's natural follow-up) ----------------
+    // --- mavlink telemetry transport (docs/plans/active/DRONE-INFRA-PLAN.md's natural follow-up) ----------------
 
     @Test
     void simulateDefaultsTelemetryTransportToSimAndNeverTouchesMavlinkTransmitter(@TempDir Path tempDir)

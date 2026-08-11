@@ -2,13 +2,13 @@ import type { Routes } from '@angular/router';
 
 /**
  * `/assets/:assetId/replay/:usageId` — the asset detail page's usage history "Replay" target for a
- * finished usage (docs/MVP2-PLAN.md §R, R-b), unchanged — and `/replay` — the replay library
- * (docs/design/10-replay.md, Wave 4, F8) **and** the event → replay deep link's own flat,
- * query-param route (docs/OPS-CORE-PLAN.md §Q1: `?asset=…&usage=…&t=…`), both at once: `/replay`
+ * finished usage (docs/plans/done/MVP2-PLAN.md §R, R-b), unchanged — and `/replay` — the replay library
+ * (docs/extracts/design/10-replay.md, Wave 4, F8) **and** the event → replay deep link's own flat,
+ * query-param route (docs/plans/done/OPS-CORE-PLAN.md §Q1: `?asset=…&usage=…&t=…`), both at once: `/replay`
  * now loads `ReplayLibraryPage`, which renders the library when no `?usage=` is given and defers
  * straight to `ReplayPage` (embedded, not routed) when one is — see that component's own class doc
  * comment for the full "how the two are told apart" writeup. Split into its own file per
- * vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s doc
+ * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s doc
  * comment for why.
  *
  * **Wave 1's own "why the bare route can't be deleted" reasoning still holds, updated for who

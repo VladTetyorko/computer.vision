@@ -1,6 +1,6 @@
 /**
  * Per-user `localStorage` persistence for a single boolean panel-state toggle (collapsed/pinned/
- * shown) — docs/UX-REWORK-PLAN.md §U-b item 7 ("panel state persists per user via localStorage,
+ * shown) — docs/plans/done/UX-REWORK-PLAN.md §U-b item 7 ("panel state persists per user via localStorage,
  * Traccar-style: explicit collapse, reopen via toggle chip").
  *
  * Deliberately **not** routed through `core/settings/settings-store.ts`: that store owns
@@ -23,7 +23,7 @@ export function writePersistedFlag(key: string, value: boolean): void {
 }
 
 /**
- * The string-valued sibling of `readPersistedFlag`/`writePersistedFlag` above (docs/UI-REDESIGN-PLAN.md
+ * The string-valued sibling of `readPersistedFlag`/`writePersistedFlag` above (docs/plans/done/UI-REDESIGN-PLAN.md
  * Frozen contract F3) — added for `PanelState`'s own active-panel-id persistence below, generalized
  * enough for any future plain string preference. `fallback`/the return type are `string | null`
  * (not just `string`) so "nothing persisted yet" and "explicitly persisted as closed" can both be
@@ -46,7 +46,7 @@ export function writePersistedString(key: string, value: string | null): void {
 
 /*
  * The `PanelState` class that used to live here — the one-open-at-a-time overlay coordinator — has
- * been generalized and moved to `core/ui/ui-store.ts` as `UiStore` (docs/UI-ARCHITECTURE-PLAN.md).
+ * been generalized and moved to `core/ui/ui-store.ts` as `UiStore` (docs/plans/done/UI-ARCHITECTURE-PLAN.md).
  * This file now holds only the small per-key `localStorage` persistence helpers above, which several
  * facades still use directly for non-overlay toggles (a persisted `railOpen`, `mapInsetVisible`, a
  * remembered tab). The filename is kept to avoid churning those import sites.

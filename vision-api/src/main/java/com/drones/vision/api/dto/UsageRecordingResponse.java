@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * Response body for {@code GET /api/usages/{usageId}/recording} (docs/OPS-CORE-PLAN.md §R): is a
+ * Response body for {@code GET /api/usages/{usageId}/recording} (docs/plans/done/OPS-CORE-PLAN.md §R): is a
  * recorded clip available for one usage's flight window, and if so, where to fetch it.
  *
  * <p>{@code url}/{@code start}/{@code durationSeconds} are omitted entirely (rather than

@@ -18,7 +18,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** {@link AuthSeedRunner}: seeds exactly once and is idempotent (docs/U-AUTH-PLAN.md, wave 3). */
+/** {@link AuthSeedRunner}: seeds exactly once and is idempotent (docs/plans/done/U-AUTH-PLAN.md, wave 3). */
 class AuthSeedRunnerTest {
 
     private final InMemoryUserRepository userRepository = new InMemoryUserRepository();

@@ -8,16 +8,16 @@ import com.drones.vision.domain.model.GeoProjection;
 import com.drones.vision.domain.model.MarkKind;
 
 /**
- * Request body for {@code POST /api/map/marks/geolocate} (docs/MAP-REWORK-PLAN.md §4.1) — the
+ * Request body for {@code POST /api/map/marks/geolocate} (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — the
  * cockpit "mark target" action: the mark's position is <em>projected</em> from the named asset's
  * freshest telemetry rather than supplied, so this body carries no coordinates at all.
  *
  * <p>Three fields default rather than fail, preserving the one-tap cockpit gesture the
- * docs/TACTICAL-MARKS-PLAN.md version already had: an absent {@code kind}/{@code affiliation}/{@code
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md version already had: an absent {@code kind}/{@code affiliation}/{@code
  * label}/{@code depressionDegrees} becomes {@link MarkKind#TARGET}/{@link Affiliation#HOSTILE}/
  * {@value #DEFAULT_LABEL}/{@link GeoProjection#DEFAULT_DEPRESSION_DEGREES}. {@code HOSTILE} is the
  * honest default for a geolocated contact — it is the affiliation the old {@code MarkKind.TARGET}
- * carried implicitly, and the same one docs/MAP-REWORK-PLAN.md §2.2's migration table assigns to
+ * carried implicitly, and the same one docs/plans/done/MAP-REWORK-PLAN.md §2.2's migration table assigns to
  * every pre-existing {@code TARGET} mark.
  *
  * @param assetId           which asset to project from; required

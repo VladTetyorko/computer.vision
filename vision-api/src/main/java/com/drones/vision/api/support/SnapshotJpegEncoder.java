@@ -25,7 +25,7 @@ import com.drones.vision.api.controller.StreamController;
 
 /**
  * Encodes a {@link VideoFrame} to a downscaled JPEG for {@code GET /api/streams/{streamId}/snapshot}
- * (docs/MVP3-PLAN.md C-a). Deliberately lives here, not in an adapter: {@code vision-api} may not
+ * (docs/plans/done/MVP3-PLAN.md C-a). Deliberately lives here, not in an adapter: {@code vision-api} may not
  * depend on any adapter module (ArchUnit-enforced, see vision-app/MODULE.md's {@code
  * ArchitectureTest}), and this endpoint's owning layer is Spring-full already, so {@code
  * javax.imageio} is a fine dependency to take directly here rather than inventing a new port for
@@ -34,13 +34,13 @@ import com.drones.vision.api.controller.StreamController;
  * <p>An instance, constructor-injected with its {@link VisionApiProperties} — one call site
  * ({@link StreamController#snapshot}), no second implementation ever plausible (see {@code
  * .claude/skills/java-clean-code/SKILL.md} §1), but no longer a static utility
- * (docs/LAYERING-REFACTOR-PLAN.md §7 row B): {@link #MAX_SNAPSHOT_WIDTH}/the JPEG quality are now
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 row B): {@link #MAX_SNAPSHOT_WIDTH}/the JPEG quality are now
  * tunables carried on {@link VisionApiProperties#snapshot()} rather than hardcoded constants.
  *
  * <h2>Idiom</h2>
  * The {@code BGR24}&rarr;{@link BufferedImage} bulk-copy and explicit-{@link ImageWriter} JPEG
  * encode below mirror {@code adapter-cv-grpc}'s {@code GrpcDetectionPort} downscale/encode path
- * (docs/CYCLES-PLAN.md §12, CP-b) exactly — the same idiom, independently implemented here since
+ * (docs/main/CYCLES-PLAN.md §12, CP-b) exactly — the same idiom, independently implemented here since
  * this module cannot depend on that adapter.
  *
  * <h2>Supported formats</h2>
@@ -55,13 +55,13 @@ import com.drones.vision.api.controller.StreamController;
 public final class SnapshotJpegEncoder {
 
     /**
-     * Max width a snapshot is downscaled to before JPEG encoding (docs/MVP3-PLAN.md C-a); height
+     * Max width a snapshot is downscaled to before JPEG encoding (docs/plans/done/MVP3-PLAN.md C-a); height
      * scales to preserve aspect ratio. Keeps a manager dashboard's many-thumbnail poll cycle cheap
      * — at this width a JPEG is a few KB to a few tens of KB, not the hundreds of KB to low-MB a
      * full-resolution frame could be.
      *
      * <p>Kept as a named constant, equal to {@link VisionApiProperties.Snapshot#defaults()}'s own
-     * {@code maxWidth} (docs/LAYERING-REFACTOR-PLAN.md §1.3 config extraction), purely so callers
+     * {@code maxWidth} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 config extraction), purely so callers
      * outside an instance (this class's own javadoc {@code {@value}} references, existing tests)
      * can still read the default by name; an instance's actual working value always comes from the
      * {@link VisionApiProperties} supplied to its constructor.

@@ -8,7 +8,7 @@ import java.util.Optional;
 
 /**
  * A partial edit to a {@link Drawing} — geometry (drag a vertex) and/or descriptive fields
- * (docs/MAP-REWORK-PLAN.md §4.2's {@code PatchDrawingRequest}).
+ * (docs/plans/done/MAP-REWORK-PLAN.md §4.2's {@code PatchDrawingRequest}).
  *
  * <p>Every component is an {@link Optional}, matching {@code MarkPatch}'s own idiom rather than
  * {@code AssetEdit}/{@code DeviceEdit}'s bare-nullable one: a present-but-blank {@link #label()} is

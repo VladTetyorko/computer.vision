@@ -9,7 +9,7 @@ import type { CreateGroupRequest, CreateUserRequest, GroupSummary, UserSummary }
 const LOG_PREFIX = '[org]';
 
 /**
- * The org-settings surface's source of truth for users and groups (docs/U-SCOPE-PLAN.md, U-e slice
+ * The org-settings surface's source of truth for users and groups (docs/plans/done/U-SCOPE-PLAN.md, U-e slice
  * 2) — `providedIn: 'root'`, one instance app-wide, mirroring `AuthStore`'s posture rather than a
  * page-scoped provider (the pilots-assignment card also reads its user list, so this outlives any
  * one page). **Lazy, not self-initializing**: unlike `FleetStore`/`AuthStore`, it does *not* fetch

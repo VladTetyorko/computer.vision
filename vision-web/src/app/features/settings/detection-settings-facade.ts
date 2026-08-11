@@ -4,9 +4,9 @@ import { BUILT_IN_PROFILES, SettingsStore } from '../../core/settings/settings-s
 import { computeDeltaFromDefaults } from './detection-settings-logic';
 
 /**
- * `DetectionSettingsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — the **fleet-wide** half of what
- * used to be one combined `SettingsFacade`/`SettingsPage` (docs/NAV-IA-REDESIGN-PLAN.md §2.5,
- * docs/design/11-settings.md, Wave 4's F7 split): Detection profile, model, and the raw
+ * `DetectionSettingsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the **fleet-wide** half of what
+ * used to be one combined `SettingsFacade`/`SettingsPage` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5,
+ * docs/extracts/design/11-settings.md, Wave 4's F7 split): Detection profile, model, and the raw
  * confidence/fps knobs, all applied to *every* stream anyone starts, not just this user's own — see
  * `AccountSettingsFacade`'s own doc comment for the per-account half this used to share a page with.
  *
@@ -14,7 +14,7 @@ import { computeDeltaFromDefaults } from './detection-settings-logic';
  * hatch: "if the underlying store genuinely applies instantly… make that explicit… do not build a
  * fake Save button"). `SettingsStore.effective()` (draft-over-profile) is what `WallFacade`/
  * `FleetStore.start()` read live, at the moment a stream actually starts — there is no pending value
- * this facade could lose by not being "saved" first. `docs/CV-CONTROL-PLAN.md §4` traces the same
+ * this facade could lose by not being "saved" first. `docs/plans/done/CV-CONTROL-PLAN.md §4` traces the same
  * path end to end: `settings.effective()` posts straight through to `StartStreamRequest`, no
  * destructuring in between. The one genuine "save" action below, `saveAs`, is a *different* verb: it
  * persists the current (already-live) draft under a name so it can be picked again later — not a
@@ -40,7 +40,7 @@ export class DetectionSettingsFacade {
 
   /** Also used by the template to show a profile's model in its compact values line — degrades to
    * the bare id when the roster hasn't loaded yet (or no longer lists it), never a blank/fabricated
-   * label (docs/CV-CONTROL-PLAN.md Wave E — the roster replaced the old closed `DetectionModelId` set). */
+   * label (docs/plans/done/CV-CONTROL-PLAN.md Wave E — the roster replaced the old closed `DetectionModelId` set). */
   modelLabel(id: string): string {
     return this.modelOptions().find((option) => option.id === id)?.displayName ?? id;
   }

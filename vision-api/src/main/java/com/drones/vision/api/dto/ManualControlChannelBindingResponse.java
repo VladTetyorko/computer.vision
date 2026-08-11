@@ -4,7 +4,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 /**
  * One entry of the {@code channelMap} array on the {@code /ws/manual-control} {@code engaged}
- * frame (docs/RC-CONTROL-PHASE1-PLAN.md §4) — which gamepad axis/button drives which RC channel,
+ * frame (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — which gamepad axis/button drives which RC channel,
  * with a short human label for the cockpit UI to display next to it.
  *
  * <p>{@code source}/{@code sourceIndex}/{@code rcChannel} mirror {@code
@@ -12,7 +12,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
  * ({@code source} as its enum name, e.g. {@code "AXIS"}/{@code "BUTTON"}) rather than exposing the
  * domain record itself across the boundary. {@code label} has no domain counterpart —
  * {@code ControlBinding} carries no label field — so {@code ManualControlWebSocketHandler} builds
- * it itself from {@code (source, rcChannel)}, matching docs/RC-CONTROL-PHASE1-PLAN.md §5's default
+ * it itself from {@code (source, rcChannel)}, matching docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5's default
  * map (e.g. {@code "Roll"} for {@code AXIS} channel 1).
  *
  * @param source      {@code "AXIS"} or {@code "BUTTON"}

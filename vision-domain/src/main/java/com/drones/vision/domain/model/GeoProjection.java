@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * Pure geo-math (docs/TACTICAL-MARKS-PLAN.md §1, "New piece #2") — no gimbal orientation or
+ * Pure geo-math (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, "New piece #2") — no gimbal orientation or
  * camera-intrinsics data anywhere in the platform, so {@link #project} is an <b>honest estimate</b>
  * (assumed camera depression angle, flat-forward projection along a great circle), not a precise
  * fix. A mark created from it is stamped {@link MarkSource#DETECTION} and stays draggable/editable

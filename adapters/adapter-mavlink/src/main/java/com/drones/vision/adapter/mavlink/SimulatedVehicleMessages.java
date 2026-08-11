@@ -17,7 +17,7 @@ import java.math.BigInteger;
 
 /**
  * Stateless MAVLink message builders for {@link MavlinkFeedTransmitter}'s synthetic flight
- * (docs/LAYERING-REFACTOR-PLAN.md E2 split out of {@code MavlinkFeedTransmitter.FeedRuntime}) —
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2 split out of {@code MavlinkFeedTransmitter.FeedRuntime}) —
  * pure functions from the current simulated flight values to a wire-ready message, no field state,
  * no IO. {@link MavlinkFeedTransmitter.FeedRuntime} owns pacing/threading/sending; this class only
  * knows how to build the four message types it sends.
@@ -38,7 +38,7 @@ final class SimulatedVehicleMessages {
     /**
      * @param failsafeTriggered {@code true} once the drained battery has fallen below {@code
      *                          failsafeBatteryPercent} — switches {@code custom_mode} to RTL
-     *                          and {@code system_status} to CRITICAL (docs/FC-INTEGRATIONS-PLAN.md F-a)
+     *                          and {@code system_status} to CRITICAL (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a)
      */
     static Heartbeat heartbeat(boolean failsafeTriggered) {
         return Heartbeat.builder()

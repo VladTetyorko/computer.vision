@@ -1,7 +1,7 @@
 import type { ActiveStream, Dataset, Device } from '../../core/api/models';
 
 /**
- * Pure logic behind `DatasetDetailPage` (`/manage/training/:datasetId`, docs/CV-TRAINING-PLAN.md
+ * Pure logic behind `DatasetDetailPage` (`/manage/training/:datasetId`, docs/plans/done/CV-TRAINING-PLAN.md
  * Wave T5) — the capture-stream picker's labels and the "Train a model" button's enabled predicate.
  */
 
@@ -20,19 +20,19 @@ export function streamCaptureLabel(
 }
 
 /** A sane starting point for the "Train a model" form's base-model field — a small, fast-to-fine-
- *  tune YOLO checkpoint (docs/CV-TRAINING-PLAN.md's own frozen wire-contract example). Prefilled,
+ *  tune YOLO checkpoint (docs/plans/done/CV-TRAINING-PLAN.md's own frozen wire-contract example). Prefilled,
  *  not forced — the field stays free text (with a `<datalist>` of whatever the CV registry already
  *  knows about) so an operator can fine-tune from an existing custom model just as easily as a
  *  stock checkpoint. */
 export const DEFAULT_BASE_MODEL = 'yolo26n.pt';
 
-/** A sane default epoch count for the same form — matches docs/CV-TRAINING-PLAN.md's own frozen
+/** A sane default epoch count for the same form — matches docs/plans/done/CV-TRAINING-PLAN.md's own frozen
  *  wire-contract example. */
 export const DEFAULT_TRAINING_EPOCHS = 50;
 
 /** Whether "Train a model" is meaningful right now — an all-`PENDING`/`DISCARDED` dataset has
  *  nothing to fine-tune on (`POST /api/datasets/{id}/train` 400s an all-`PENDING` dataset server-side
- *  too, docs/CV-TRAINING-V2-PLAN.md §5), so the button stays gated on at least one `LABELED` sample. */
+ *  too, docs/plans/done/CV-TRAINING-V2-PLAN.md §5), so the button stays gated on at least one `LABELED` sample. */
 export function canStartTrainingDataset(dataset: Pick<Dataset, 'sampleCounts'> | null): boolean {
   return (dataset?.sampleCounts.LABELED ?? 0) > 0;
 }

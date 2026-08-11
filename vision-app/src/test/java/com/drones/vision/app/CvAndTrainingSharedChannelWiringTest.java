@@ -20,14 +20,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * Context test for {@code vision.cv.enabled=true} <strong>and</strong> {@code
- * vision.training.enabled=true} together (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): the one
+ * vision.training.enabled=true} together (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): the one
  * scenario that actually exercises channel <em>sharing</em> — {@link CvEnabledWiringTest} and
  * {@link TrainingEnabledWiringTest} each only enable one flag at a time.
  *
  * <p>Asserts exactly one {@link ManagedChannel} bean exists in the context and that {@code
  * detectionPort} (a {@link GrpcDetectionPort}), {@code modelRegistryPort} (a {@link
  * GrpcModelRegistryPort}), and {@code trainingPort} (a {@link GrpcTrainingPort},
- * docs/CV-TRAINING-PLAN.md §7/§8 Phase 2's last backend wave) were all constructed successfully
+ * docs/plans/done/CV-TRAINING-PLAN.md §7/§8 Phase 2's last backend wave) were all constructed successfully
  * against it — by Spring singleton-bean semantics, a single {@code @Bean} method invoked exactly
  * once (there being only one candidate bean of type {@link ManagedChannel} in the whole context,
  * verified below) is necessarily the same instance handed to all three consumers, so there is no

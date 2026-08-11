@@ -333,7 +333,7 @@
                               <span class="faint">unknown</span>
                             }
                           </td>
-                          <!-- docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — at most one chip per row; this
+                          <!-- docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — at most one chip per row; this
                                row already has none, so an unbounded per-key chip dump collapses to
                                one muted, comma-joined cell (see `drone-scan-logic.ts#detailsSummary`,
                                same idiom `features/devices/devices.html`'s Capabilities column uses). -->
@@ -355,7 +355,7 @@
               }
             }
 
-            <!-- ---- "Listen for drones" (docs/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only
+            <!-- ---- "Listen for drones" (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only
                  scan, distinct from the general "Discover on network" method above. No timeout
                  picker: the scanner self-time-boxes (~5-10s). -->
             @case ('listen') {
@@ -418,7 +418,7 @@
               }
             }
 
-            <!-- ---- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — a guided firmware×link picker
+            <!-- ---- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — a guided firmware×link picker
                  then parameterized copy-paste config, both sub-states of this one method (not a
                  WizardStep of their own — see onboarding-logic.ts's ConnectMethod doc comment).
                  Finishing the config hands off straight to the "listen" case above, verbatim. -->

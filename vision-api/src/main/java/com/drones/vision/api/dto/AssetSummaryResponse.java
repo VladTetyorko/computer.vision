@@ -24,13 +24,13 @@ import com.drones.vision.api.controller.AssetController;
  * @param categoryName       human-readable name of the asset's category
  * @param owner              the owning user's id, as a canonical UUID string
  * @param status             {@code OFFLINE} or {@code STREAMING}, derived from active streams
- * @param lifecycle          {@code ACTIVE}, {@code DEACTIVATED}, or {@code DELETED} (docs/CYCLES-PLAN.md
+ * @param lifecycle          {@code ACTIVE}, {@code DEACTIVATED}, or {@code DELETED} (docs/main/CYCLES-PLAN.md
  *                           §8's pinned contract); a separate axis from {@code status}, since "idle
  *                           right now" and "withdrawn from service" are different facts
  * @param lastUsedAt         start time of the asset's most recent usage, or absent if never used
  * @param lastKnownPosition  last known position across usages, or absent if none is known
  * @param attributes         free-form key/value attributes
- * @param hasImage           whether an image is stored for this asset (docs/UX-REWORK-PLAN.md
+ * @param hasImage           whether an image is stored for this asset (docs/plans/done/UX-REWORK-PLAN.md
  *                           §U-d item 3, CONTRACT 2) — never the image bytes themselves, only
  *                           whether {@code GET /api/assets/{id}/image} would return one
  */

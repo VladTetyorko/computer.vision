@@ -14,10 +14,10 @@ import type { AssignedPilot, UserSummary } from '../../core/api/models';
 const LOG_PREFIX = '[pilots]';
 
 /**
- * The assigned-pilots card on the asset **manager** page (docs/U-SCOPE-PLAN.md, U-e slice 2 feature
+ * The assigned-pilots card on the asset **manager** page (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 feature
  * 2) — lists the pilots assigned to one asset with add (pick a user) / remove (unassign). Mounted
  * by `features/asset-detail/asset-detail.html` inside the manager-only "Pilots" `vision-side-panel`
- * drawer (docs/UI-REDESIGN-PLAN.md Wave 3 — previously a `span-2` grid child of the old single-
+ * drawer (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3 — previously a `span-2` grid child of the old single-
  * column detail grid; the drawer trigger itself is separately gated by `AssetDetailPage.canManagePilots`
  * so a non-manager never even sees the affordance, not just an empty drawer behind it).
  *
@@ -34,7 +34,7 @@ const LOG_PREFIX = '[pilots]';
  * read means the asset is unknown/out-of-scope — the card simply shows its empty state rather than a
  * scary error, matching the backend's "don't reveal existence" rule.
  *
- * **`changed` output** (docs/UI-REDESIGN-PLAN.md Wave 4, new, optional) — emitted after a
+ * **`changed` output** (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4, new, optional) — emitted after a
  * successful add/remove, for a host that keeps its own separate summary of this asset's pilots in
  * sync (`features/roster/**`'s collapsed-row badges, the one other place this asset's pilot list is
  * shown besides this card itself). `AssetDetailPage`'s own drawer host doesn't bind it — nothing

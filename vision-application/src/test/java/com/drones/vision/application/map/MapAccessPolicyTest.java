@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Covers every rule row of docs/MAP-REWORK-PLAN.md §3's access table, plus combinations.
+ * Covers every rule row of docs/plans/done/MAP-REWORK-PLAN.md §3's access table, plus combinations.
  */
 class MapAccessPolicyTest {
 

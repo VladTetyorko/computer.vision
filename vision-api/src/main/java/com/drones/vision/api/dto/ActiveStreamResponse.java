@@ -10,7 +10,7 @@ import java.time.Instant;
  * <p>{@code viewUrl}/{@code whepUrl} are each omitted from the JSON entirely (rather than
  * serialized as {@code null}) when the active {@code StreamPublisherPort} has no matching viewing
  * endpoint for this stream — see {@link com.drones.vision.domain.port.out.StreamPublisherPort#viewUrl}/
- * {@link com.drones.vision.domain.port.out.StreamPublisherPort#whepUrl} (docs/MVP2-PLAN.md §L).
+ * {@link com.drones.vision.domain.port.out.StreamPublisherPort#whepUrl} (docs/plans/done/MVP2-PLAN.md §L).
  * {@code whepUrl}, when present, is the media server's own origin URL, not app-relative like
  * {@code viewUrl} can be — see {@code whepUrl}'s port-level javadoc for why (WHEP cannot be proxied
  * the way HLS segments are).

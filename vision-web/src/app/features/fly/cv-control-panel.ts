@@ -41,21 +41,21 @@ const HOT_KNOB_DEBOUNCE_MS = 400;
 
 /**
  * How often the Tracking section polls `GET /api/streams/{id}/tracks` while the drawer is open and
- * a stream is running (docs/TRACKING-PLAN.md §4.E) — feeds the flow strip and is the **only** source
- * the "Following #N" chip is allowed to confirm from (docs/TRACKING-ORCHESTRATION.md §3.3's honesty
+ * a stream is running (docs/plans/done/TRACKING-PLAN.md §4.E) — feeds the flow strip and is the **only** source
+ * the "Following #N" chip is allowed to confirm from (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty
  * rule). Mirrors `DetectionsStore`'s own poll cadence (`POLL_INTERVAL_MS`) — fast enough that the
  * chip/flow-strip feel live, slow enough to be a background read, never a user-facing spinner.
  */
 const TRACKS_POLL_INTERVAL_MS = 2_000;
 
 /**
- * The Fly cockpit's live CV control panel (docs/CV-CONTROL-PLAN.md Wave E) — model picker,
+ * The Fly cockpit's live CV control panel (docs/plans/done/CV-CONTROL-PLAN.md Wave E) — model picker,
  * confidence/inference-rate sliders, a class-filter chip checklist, a detection on/off toggle, and
  * (per direct user request) the detection-boxes rendering-mode control formerly owned by its own
  * standalone `layers` drawer — see {@link boxesMode}/{@link boxesModeChange} and this component's own
  * "Boxes rendering" section (`cv-control-panel.html`); `fly-logic.ts`'s `ToolRailPanelId` no longer
  * carries `layers` at all.
- * Migrated into the shared `vision-side-panel` drawer shell (docs/UI-REDESIGN-PLAN.md Wave 2, D-E):
+ * Migrated into the shared `vision-side-panel` drawer shell (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-E):
  * this component used to own its own toggle button + hand-rolled `.cv-toggle`/`.cv-drawer`/
  * `.cv-drawer-head` chrome and a self-persisted `cvPanelOpen` flag; both are gone now — the tool-rail
  * button and the drawer's open/closed state both live on `FlyPage`'s own `PanelState` (`panels`,
@@ -68,12 +68,12 @@ const TRACKS_POLL_INTERVAL_MS = 2_000;
  * is set** (a stream is actually running), the same edit *additionally* PATCHes the live stream:
  * hot knobs (confidence/fps/labelFilter/detectionEnabled) debounced via `FleetStore.patchStreamConfig`,
  * a model change immediately, both via the frozen `PATCH /api/streams/{id}/config` contract
- * (docs/CV-CONTROL-PLAN.md §3). No optimistic lies about the model change specifically: the
+ * (docs/plans/done/CV-CONTROL-PLAN.md §3). No optimistic lies about the model change specifically: the
  * "re-arming detection" toast only ever fires off the server's own `modelReArmed` field, never
  * assumed client-side (`cv-control-panel-logic.ts#reArmHint`).
  *
  * **Class-filter chips are a checklist built from real data, not a hardcoded class list**
- * (docs/CV-CONTROL-PLAN.md Wave E, coordinator amendment after cv-service Wave A's real-vocabulary
+ * (docs/plans/done/CV-CONTROL-PLAN.md Wave E, coordinator amendment after cv-service Wave A's real-vocabulary
  * measurement: prompt-free YOLOE's true vocabulary is ~4585 classes with many synonym/scene labels
  * for one real-world thing) — the candidate set is the union of the current filter and labels
  * actually observed in {@link detectionResults} (`chip-candidates`, `cv-control-panel-logic.ts`),
@@ -82,7 +82,7 @@ const TRACKS_POLL_INTERVAL_MS = 2_000;
  * silently-narrowing preset; `applyPreset`'s "People + vehicles + buildings" chip-fill is an
  * explicit, opt-in convenience button, not an enforced default.
  *
- * **Tracking section** (docs/TRACKING-PLAN.md, wave T7) — mode segmented control (Off/Associate/
+ * **Tracking section** (docs/plans/done/TRACKING-PLAN.md, wave T7) — mode segmented control (Off/Associate/
  * Follow), an engine picker filtered to the roster's own `modes` for whichever is selected, and (in
  * Follow only) verify-cadence/follow-fps sliders. Deliberately **not** part of the "live vs. draft"
  * rule above — there is no `StartStreamRequest.tracking` in this app's scope, so every tracking
@@ -90,11 +90,11 @@ const TRACKS_POLL_INTERVAL_MS = 2_000;
  * "Tracking" field-group doc comment for the full reasoning, including why mode/engine sync from the
  * tracks poll while the cadence sliders don't). **The "Following #N — release" chip is the one place
  * this panel is stricter than every other control here**: it never appears from a click, only once
- * `GET .../tracks` echoes the lock back — docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule, the
+ * `GET .../tracks` echoes the lock back — docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule, the
  * same "reflect the wire, never local intent" doctrine the dashed `COASTING` box expresses at the
  * pixel level in `shared/player/player.ts`. The flow strip beside it (`stats`-fed, hidden entirely
  * when `stats` is absent — an old/absent server, or tracking never configured this session) is this
- * app's own "visible flow" surface (docs/TRACKING-ORCHESTRATION.md §7) — see `cv-control-panel-logic.ts#formatFlowStrip`.
+ * app's own "visible flow" surface (docs/extracts/TRACKING-ORCHESTRATION.md §7) — see `cv-control-panel-logic.ts#formatFlowStrip`.
  */
 @Component({
   selector: 'vision-cv-control-panel',
@@ -123,7 +123,7 @@ export class CvControlPanel {
   readonly boxesModeChange = output<BoxesMode>();
 
   /** Whether the drawer is open — driven by the host's `PanelState` (`fly.ts`'s `panels`), not this
-   * component's own state (docs/UI-REDESIGN-PLAN.md D-E). */
+   * component's own state (docs/plans/done/UI-REDESIGN-PLAN.md D-E). */
   readonly open = input<boolean>(false);
   /** Emitted when the drawer's own close control (`<vision-side-panel>`'s head button, or Esc) fires
    * — the host is the one that actually closes it (`panels.close()`). */
@@ -165,13 +165,13 @@ export class CvControlPanel {
     }
   }, HOT_KNOB_DEBOUNCE_MS);
 
-  // --- Tracking (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------------
+  // --- Tracking (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------------
   // Unlike the model/classes/confidence sections above, there is no `SettingsStore` draft behind
   // any of this — `StartStreamRequest` doesn't carry a `tracking` object in this app (out of this
   // wave's own scope), so every control here is a **live-only** PATCH, meaningful only once
   // {@link streamId} is set. `trackingMode`/`trackingEngineId` are re-synced from the tracks poll's
   // own `stats.mode`/`stats.engineId` whenever a poll succeeds (see the constructor `effect` below)
-  // — the honest "what's actually running" figure, per docs/TRACKING-PLAN.md R11 (an engine, or even
+  // — the honest "what's actually running" figure, per docs/plans/done/TRACKING-PLAN.md R11 (an engine, or even
   // a whole mode, can silently fall back if what the operator picked won't construct). The
   // verify-cadence/follow-fps sliders have **no such readback** — `TrackStats` carries no such
   // figure on the wire — so those two stay pure local draft, seeded from the server's own defaults.
@@ -199,11 +199,11 @@ export class CvControlPanel {
   /**
    * `0` = no lock held. **This is the one and only signal the "Following #N — release" chip reads**
    * — never the trackId just clicked, never an optimistic local flag. See this class's own doc
-   * comment and docs/TRACKING-ORCHESTRATION.md §3.3.
+   * comment and docs/extracts/TRACKING-ORCHESTRATION.md §3.3.
    */
   protected readonly lockedTrackId = computed(() => this.tracksResponse()?.lockedTrackId ?? 0);
 
-  /** The flow strip's own text, or `null` to hide it entirely (`stats` absent — docs/TRACKING-PLAN.md
+  /** The flow strip's own text, or `null` to hide it entirely (`stats` absent — docs/plans/done/TRACKING-PLAN.md
    * §10 touchable outcome #2). */
   protected readonly flowStripText = computed(() => {
     const stats = this.tracksResponse()?.stats;

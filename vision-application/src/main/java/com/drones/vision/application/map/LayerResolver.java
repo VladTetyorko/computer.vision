@@ -49,7 +49,7 @@ public final class LayerResolver {
     /**
      * Fixed system principal used to satisfy {@link Ownership}'s non-null-{@code groupId}/{@code
      * ownerId} contract when there is no acting user to attribute a bootstrap to — {@link
-     * #copLayerId()} takes no {@link Viewer} at all (docs/MAP-REWORK-PLAN.md §3 pins it as a
+     * #copLayerId()} takes no {@link Viewer} at all (docs/plans/done/MAP-REWORK-PLAN.md §3 pins it as a
      * zero-arg method, called lazily by whichever request happens to trigger it first, or by a Wave
      * C startup initializer with no user context), so "use the acting admin/manager's ownership" is
      * unreachable literally as stated; this sentinel is the fallback. Same well-known {@code
@@ -139,7 +139,7 @@ public final class LayerResolver {
 
     /**
      * Resolves the layer a mark/drawing lands on when its creator didn't name one
-     * (docs/MAP-REWORK-PLAN.md §3): the viewer's first {@link LayerKind#TEAM} layer (a team layer
+     * (docs/plans/done/MAP-REWORK-PLAN.md §3): the viewer's first {@link LayerKind#TEAM} layer (a team layer
      * whose {@code ownership().groupId()} is one of {@link Viewer#groups()}, picked deterministically
      * — sorted by layer name case-insensitively, then by id, so ties never depend on repository
      * iteration order) — else the viewer's own {@link LayerKind#PERSONAL} layer, found or lazily

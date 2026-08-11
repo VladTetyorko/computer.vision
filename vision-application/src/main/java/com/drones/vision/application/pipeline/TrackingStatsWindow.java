@@ -29,7 +29,7 @@ import java.util.Set;
  *
  * <h2>Why this is a peer of {@link TrackBook}, not a field on it</h2>
  * The two are separate entries on {@link StreamPipeline}'s existing fan-out — a deliberate deviation
- * from docs/TRACKING-PLAN.md &sect;5.E's "one line", recorded in TRACKING-ORCHESTRATION.md &sect;2.3.
+ * from docs/plans/done/TRACKING-PLAN.md &sect;5.E's "one line", recorded in TRACKING-ORCHESTRATION.md &sect;2.3.
  * Folding these counters into {@link TrackBook} would give that class two responsibilities in order
  * to save one line in a list that already has five entries. They genuinely differ: the book is a
  * read model of the tracks that <i>exist right now</i>, retained by track lifetime and carrying each

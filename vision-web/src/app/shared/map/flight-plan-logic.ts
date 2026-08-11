@@ -1,10 +1,10 @@
 import type { RouteMode, TelemetryPlanRequest, WaypointRequest } from '../../core/api/models';
 
 /**
- * Pure logic behind `shared/map/flight-plan-dialog.ts` (docs/CYCLES-PLAN.md §7, CT-b) — waypoint list
+ * Pure logic behind `shared/map/flight-plan-dialog.ts` (docs/main/CYCLES-PLAN.md §7, CT-b) — waypoint list
  * editing (add/move/delete/altitude), the demo-triangle seed, the manual `lat,lon[,altM]` text
  * fallback, and serialization to the `TelemetryPlan` wire shape (`StartSimulationRequest.telemetry`,
- * docs/CYCLES-PLAN.md §7 CT-a's pinned contract). Split out so the editor's behavior is
+ * docs/main/CYCLES-PLAN.md §7 CT-a's pinned contract). Split out so the editor's behavior is
  * unit-testable without Leaflet, a component, or the DOM — mirrors `shared/player/detection-overlay-logic.ts`
  * and `shared/player/player-recovery.ts`'s split of pure state/derivation from the component that drives it.
  */
@@ -32,7 +32,7 @@ export interface FlightPlanForm {
   readonly routeMode: RouteMode;
 }
 
-/** `SimulatedTelemetrySource`'s own adapter default (docs/CYCLES-PLAN.md §7, CT-a) — used as this editor's seed too. */
+/** `SimulatedTelemetrySource`'s own adapter default (docs/main/CYCLES-PLAN.md §7, CT-a) — used as this editor's seed too. */
 export const DEFAULT_SPEED_MPS = 12;
 
 /** A reasonable per-waypoint default when the map-click/manual-entry path doesn't specify one. */
@@ -48,7 +48,7 @@ export const FALLBACK_HOME_POINT: HomePoint = { latitude: 37.7749, longitude: -1
  * Offsets (relative to a home point) reproducing `scripts/demo.sh`'s own 3-waypoint patrol
  * triangle's shape/scale — computed once from that script's fixed Golden Gate Park coordinates
  * relative to their own centroid, then reapplied to *any* home point here, so "the demo triangle
- * is a fine seed near the chosen home point" (docs/CYCLES-PLAN.md §7, CT-b) works for whichever
+ * is a fine seed near the chosen home point" (docs/main/CYCLES-PLAN.md §7, CT-b) works for whichever
  * home position the user picked, not just San Francisco.
  */
 const SEED_OFFSETS: readonly { readonly dLat: number; readonly dLon: number; readonly altitudeMeters: number }[] = [
@@ -106,9 +106,9 @@ export function removeWaypoint(waypoints: readonly EditorWaypoint[], index: numb
 }
 
 /**
- * Parses the manual `lat,lon[,altM]` text fallback (docs/CYCLES-PLAN.md §7, CT-b: "a manual
+ * Parses the manual `lat,lon[,altM]` text fallback (docs/main/CYCLES-PLAN.md §7, CT-b: "a manual
  * `lat,lon` text fallback") — one waypoint per non-blank line, `,`-or-whitespace separated.
- * Lenient like every option parser in this app (docs/CYCLES-PLAN.md §7 CT-a's own "bad points →
+ * Lenient like every option parser in this app (docs/main/CYCLES-PLAN.md §7 CT-a's own "bad points →
  * fallback" convention on the backend): a line that doesn't parse to two/three finite numbers
  * within range is silently skipped rather than rejecting the whole paste.
  */
@@ -166,7 +166,7 @@ export function canSavePlan(waypoints: readonly EditorWaypoint[]): boolean {
 
 /**
  * Serializes a draft into the `TelemetryPlan` wire shape (`StartSimulationRequest.telemetry`,
- * docs/CYCLES-PLAN.md §7 CT-a's pinned contract: `{speedMps?, routeMode?, route:[{latitude,
+ * docs/main/CYCLES-PLAN.md §7 CT-a's pinned contract: `{speedMps?, routeMode?, route:[{latitude,
  * longitude, altitudeMeters?}]}`) — `undefined` when there aren't enough waypoints to send
  * (`canSavePlan`), so a caller can pass the result straight through to `StartSimulationRequest`'s
  * own `telemetry?` field without a separate guard. `speedMps`/per-waypoint `altitudeMeters` are

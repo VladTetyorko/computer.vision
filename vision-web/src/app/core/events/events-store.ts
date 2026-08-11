@@ -14,7 +14,7 @@ const POLL_INTERVAL_MS = 5_000;
 const EVENTS_LIMIT = 50;
 
 /**
- * The single shared feed behind docs/MVP2-PLAN.md §E, E-b's three consumers — the Wall page's
+ * The single shared feed behind docs/plans/done/MVP2-PLAN.md §E, E-b's three consumers — the Wall page's
  * events rail, the fleet map's event markers, and the asset detail page's "recent events by
  * matching assetId" fallback — polling `GET /api/events` once for all three rather than three times
  * over, and (the real reason it needs to be one long-lived singleton rather than three page-scoped
@@ -26,10 +26,10 @@ const EVENTS_LIMIT = 50;
  *
  * **Cost, updated from the plan's original ask**: this is a `providedIn: 'root'` singleton. It used
  * to be injected only from lazy route components (`WallPage`/`MapPage`/`AssetDetailPage`), never
- * from `app.ts` or any other eager path, giving it "O(visible) discipline" (docs/MVP2-PLAN.md §E,
+ * from `app.ts` or any other eager path, giving it "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E,
  * E-b bullet 5): no events poll ran at all while the user was on Devices/Settings/Debug/Live/Replay,
  * however long that lasted. **That is no longer this store's behavior.** The app-shell header bell
- * (`shared/ui/notification-bell.ts`, docs/UX-REWORK-PLAN.md §U-c) is now a third, permanently-mounted
+ * (`shared/ui/notification-bell.ts`, docs/plans/done/UX-REWORK-PLAN.md §U-c) is now a third, permanently-mounted
  * consumer — alive for the whole session, never destroyed until the tab itself closes/reloads — so
  * `activate()`/`release()` still exist and still gate the poll in principle, but in practice the
  * refcount never returns to zero once the app has booted: this store is now effectively always-on,
@@ -37,7 +37,7 @@ const EVENTS_LIMIT = 50;
  * doc comment for the full rationale — a header bell that only showed unread events while the
  * operator happened to be on Wall/Command/an asset page would defeat the point of a persistent
  * notification affordance). `MapPage` itself no longer exists either (`/map` redirects to
- * `/command`, docs/UX-REWORK-PLAN.md §U-c) — `WallPage`/`AssetDetailPage` remain the two page-scoped
+ * `/command`, docs/plans/done/UX-REWORK-PLAN.md §U-c) — `WallPage`/`AssetDetailPage` remain the two page-scoped
  * consumers alongside the always-on bell.
  *
  * **`ignoreHidden: true`, the one deliberate exception in this app** (see
@@ -52,7 +52,7 @@ const EVENTS_LIMIT = 50;
  * above is still mounted underneath — the SPA route doesn't unmount just because the OS-level
  * window/tab loses focus.
  *
- * **Projection of `LiveStore`'s `detection-events` topic** (docs/REALTIME-PLAN.md §4's backend
+ * **Projection of `LiveStore`'s `detection-events` topic** (docs/plans/done/REALTIME-PLAN.md §4's backend
  * follow-up batch — the same poll-vs-live pattern `TelemetryStore`/`DetectionsStore` established in
  * R-c, and `FleetStore` now shares too): while `LiveStore` is `'open'`, the 5s poll below is paused
  * entirely and this store instead reacts to `LiveStore.detectionEvents()` — every arrival is folded
@@ -159,7 +159,7 @@ export class EventsStore {
     }
     void this.pollOnce();
     // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
-    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    // `FleetStore`'s identical comment (docs/plans/done/MVP2-PLAN.md §S, S-b).
     this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(), {
       ignoreHidden: true,
     });

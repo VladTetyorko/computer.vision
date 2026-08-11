@@ -45,7 +45,7 @@ export interface ZoneDraft {
 }
 
 /**
- * The zone-boundary draw dialog (docs/OPS-CORE-PLAN.md §G-c) — a modal, reusing
+ * The zone-boundary draw dialog (docs/plans/done/OPS-CORE-PLAN.md §G-c) — a modal, reusing
  * `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`'s own click-to-add-vertices/drag-to-move
  * technique verbatim (same "click the mini-map to append a numbered marker + dashed polyline
  * preview, drag a marker to reposition, remove from a list below" shape), adapted from an ordered
@@ -61,7 +61,7 @@ export interface ZoneDraft {
  * (`core/geofence/geofence-logic.ts#zoneLayerStyle`) matches exactly what the zone will look like
  * once saved, so the operator is drawing *with* the real visual language, not a generic shape.
  *
- * **KEEP_IN save-time advisory** (docs/OPS-CORE-PLAN.md §G-c: "3 assets currently outside this
+ * **KEEP_IN save-time advisory** (docs/plans/done/OPS-CORE-PLAN.md §G-c: "3 assets currently outside this
  * zone" — poka-yoke, informational, never blocking): `assetPositions` (every asset with a
  * currently-known position, from `CommandPage`'s own `FleetMapStore.markers()`) is compared against
  * the draft polygon via `assetsOutsideZoneCount`; shown only for `KEEP_IN` (a KEEP_OUT zone
@@ -89,7 +89,7 @@ export class GeofenceZoneDialog {
   protected readonly settings = inject(SettingsStore);
   protected readonly theme = inject(ThemeStore);
 
-  /** The layer actually rendered (docs/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
+  /** The layer actually rendered (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
    * field's own doc comment for the full "explicit pick always wins" contract. */
   protected readonly activeLayerId = computed<MapLayerId>(() =>
     effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
@@ -123,7 +123,7 @@ export class GeofenceZoneDialog {
     afterNextRender(() => void this.initMap());
 
     effect(() => this.drawVertices(this.vertices()));
-    // `activeLayerId()` tracks both `settings.mapLayer()` and `theme.theme()` (docs/VISUAL-REFRESH-PLAN.md F7).
+    // `activeLayerId()` tracks both `settings.mapLayer()` and `theme.theme()` (docs/plans/done/VISUAL-REFRESH-PLAN.md F7).
     effect(() => this.applyLayer());
 
     inject(DestroyRef).onDestroy(() => this.teardown());
@@ -207,7 +207,7 @@ export class GeofenceZoneDialog {
   }
 
   /** A layer-picker click — an explicit pick always wins over the theme default from here on
-   * (docs/VISUAL-REFRESH-PLAN.md F7); see `FleetMap#setLayer`'s identical doc comment. */
+   * (docs/plans/done/VISUAL-REFRESH-PLAN.md F7); see `FleetMap#setLayer`'s identical doc comment. */
   protected setLayer(id: MapLayerId): void {
     markMapLayerExplicit();
     this.settings.mapLayer.set(id);

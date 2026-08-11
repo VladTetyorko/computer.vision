@@ -15,7 +15,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * own "fake every transitive dependency purely so the tree can mount" approach. `GlobalOverlayStore`
  * is left real (root-provided, no HTTP deps of its own) — its own behavior is covered by
  * `core/ui/overlay-store.spec.ts`; this file only checks that the bell wires into it correctly
- * (docs/UI-STATE-PLAN.md §1 D1/D2/D4/D5, closed by `identity-chip.ts`/`notification-bell.ts` moving
+ * (docs/plans/done/UI-STATE-PLAN.md §1 D1/D2/D4/D5, closed by `identity-chip.ts`/`notification-bell.ts` moving
  * off native `<details>`).
  */
 function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
@@ -62,7 +62,7 @@ function trigger(fixture: { nativeElement: HTMLElement }): HTMLButtonElement {
   return fixture.nativeElement.querySelector('.bell-trigger') as HTMLButtonElement;
 }
 
-describe('NotificationBell — dropdown state (docs/UI-STATE-PLAN.md)', () => {
+describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)', () => {
   it('starts closed: aria-expanded=false, no dropdown, no badge with zero events', () => {
     const fixture = render([]);
     const btn = trigger(fixture);

@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * {@link ManualControlPort} implementation sending a persistent, fixed-rate, ack-less MAVLink 2
  * {@code RC_CHANNELS_OVERRIDE} (#70) stream to an aircraft this platform is already ingesting
- * telemetry from (docs/RC-CONTROL-PHASE1-PLAN.md §3) — the streaming, opposite-shape sibling of
+ * telemetry from (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §3) — the streaming, opposite-shape sibling of
  * {@link MavlinkFlightCommander}'s request→ack one-shots.
  *
  * <h2>Borrows the RX gateway; opens no socket of its own</h2>
@@ -69,12 +69,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Every frame sets {@code chan1Raw}..{@code chan8Raw} from the mailbox (unset entries — a shorter
  * {@link RcChannels} than 8 — become {@link RcChannels#IGNORE}) and {@code chan9Raw}..{@code
  * chan18Raw} to {@link RcChannels#IGNORE} unconditionally, matching {@code
- * ChannelMap.defaultMap()}'s own ch1..8 scope (docs/RC-CONTROL-PHASE1-PLAN.md §5) and sidestepping
+ * ChannelMap.defaultMap()}'s own ch1..8 scope (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5) and sidestepping
  * the ambiguous extension release sentinel for channels 9..18 (the plan's Open Questions §4).
  *
- * <h2>Cadence settings (docs/LAYERING-REFACTOR-PLAN.md E2)</h2>
+ * <h2>Cadence settings (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2)</h2>
  * The fixed send rate and release-burst tick count come from a {@link MavlinkSettings.Rc},
- * defaulted and clamped exactly as docs/RC-CONTROL-PHASE1-PLAN.md §3 pins them: {@code overrideHz}
+ * defaulted and clamped exactly as docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §3 pins them: {@code overrideHz}
  * (default 33Hz, see {@link MavlinkSettings.Rc#defaults()}, clamped to {@code [minOverrideHz,
  * maxOverrideHz]} — default 10/50 — via {@link MavlinkSettings.Rc#clampedOverrideHz()}) and {@code
  * releaseFrames} (default 3, any positive value accepted). This replaces the {@code
@@ -92,7 +92,7 @@ public final class MavlinkManualControlSender implements ManualControlPort {
 
     private static final System.Logger LOG = System.getLogger(MavlinkManualControlSender.class.getName());
 
-    /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/RC-CONTROL-PHASE1-PLAN.md §5). */
+    /** v1 scope: {@code RC_CHANNELS_OVERRIDE} channels 1..8 only (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5). */
     static final int CHANNEL_COUNT = 8;
 
     private static final RcChannels ALL_IGNORE =

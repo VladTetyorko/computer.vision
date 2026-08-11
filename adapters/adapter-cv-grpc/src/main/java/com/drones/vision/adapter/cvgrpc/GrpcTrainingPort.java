@@ -15,7 +15,7 @@ import java.util.function.Consumer;
 /**
  * {@link TrainingPort} over the generated {@code Training/StartTraining} server-streaming gRPC RPC
  * — the Java client half of the (optional, GPU-training-host-only) training seam
- * {@code docs/CV-TRAINING-PLAN.md} Phase 2 §7 describes (see {@code proto/vision/v1/cv.proto}'s
+ * {@code docs/plans/done/CV-TRAINING-PLAN.md} Phase 2 §7 describes (see {@code proto/vision/v1/cv.proto}'s
  * {@code Training} service). Never wired against the GB4005 inference box; production GB4005
  * deployments leave {@code Training/StartTraining} {@code UNIMPLEMENTED} (cv-service side).
  *

@@ -9,7 +9,7 @@ import java.time.Duration;
 /**
  * Configuration for device discovery ({@code vision.discovery.*}), mirroring {@link
  * VisionCvProperties}'s record-plus-{@code @DefaultValue} idiom, extended by
- * docs/LAYERING-REFACTOR-PLAN.md §2.2 (wave F4) with {@code adapter-discovery}'s mDNS scan-timing
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2 (wave F4) with {@code adapter-discovery}'s mDNS scan-timing
  * budget and V4L2 filesystem bases.
  *
  * <p>{@link #mavlinkPort()} is the single source of truth for the UDP port a MAVLink heartbeat scan

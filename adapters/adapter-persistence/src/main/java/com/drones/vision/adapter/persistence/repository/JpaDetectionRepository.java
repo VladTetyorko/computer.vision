@@ -33,7 +33,7 @@ import java.util.UUID;
  * implementation's exact semantics" brief (see MODULE.md).
  *
  * <h2>Retention</h2>
- * docs/MVP2-PLAN.md P-b's retention guard, same mechanism as {@link
+ * docs/plans/done/MVP2-PLAN.md P-b's retention guard, same mechanism as {@link
  * com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository} but keyed by {@code
  * streamId} (the only grouping key {@link DetectionResult}/{@link DetectionQuery} actually
  * carry — there is no {@code usageId} on a detection): {@link #save} prunes a stream's oldest

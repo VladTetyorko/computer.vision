@@ -13,22 +13,22 @@ export interface PageBarCrumb {
  * Regular English pluralisation for the bar's count chip — exported (and unit-tested) rather than
  * inlined so the `asset(s)`/`device(s)` placeholder-looking parenthetical this app rendered on
  * `/assets`, `/devices` and `/manage/reports` has exactly one replacement, not one per page
- * (docs/NAV-IA-REDESIGN-PLAN.md §2.2). Callers that need an irregular plural pass it explicitly.
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2). Callers that need an irregular plural pass it explicitly.
  */
 export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
 /**
- * The one page header for every routed page (docs/NAV-IA-REDESIGN-PLAN.md §2.2,
- * docs/design/00-shell.md) — replacing the `.page-head` block (an `<h1>` plus a two-to-four-line
+ * The one page header for every routed page (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2,
+ * docs/extracts/design/00-shell.md) — replacing the `.page-head` block (an `<h1>` plus a two-to-four-line
  * explanatory `<p>`, plus an action row) that every page carried its own copy of.
  *
  * **Why this is a component and not just tighter CSS.** `.page-head` cost ~130px of vertical space
  * before the first control on every page — on `/monitor/alerts` that was 130px of instructions above
  * a feed, and on `/operate/preflight` the header was larger than the content it introduced. But the
  * height was a symptom: the real problem was that "what page am I on" was being answered by prose,
- * because the old top bar could not answer it (docs/NAV-IA-REDESIGN-PLAN.md F2). Now that the
+ * because the old top bar could not answer it (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F2). Now that the
  * sidebar marks the active page permanently, the prose is redundant and the title can collapse to
  * one 48px row. Making that row a component — rather than a CSS class each page composes by hand —
  * is what stops the count chip, the filter slot and the action row drifting apart across 18 pages,
@@ -48,7 +48,7 @@ export function pluralize(count: number, singular: string, plural = `${singular}
  * - `[pageBarFilters]` — search inputs, filter chips/selects. Sits left of the actions, wraps first.
  * - `[pageBarActions]` — the primary button and any icon buttons. Always rightmost.
  *
- * **The `?` hint popover closes on `Escape` and on an outside click** (docs/UI-STATE-PLAN.md §2.4) —
+ * **The `?` hint popover closes on `Escape` and on an outside click** (docs/plans/done/UI-STATE-PLAN.md §2.4) —
  * before this, it only closed by clicking its own trigger a second time, so an operator who hit
  * `Escape` expecting *whatever is floating* to go away (the same instinct §2.2's `GlobalOverlayStore`
  * serves for the shell's identity menu/notification bell) had no way to know this one specific popover
@@ -80,7 +80,7 @@ export class PageBar {
   readonly crumb = input<PageBarCrumb | null>(null);
   /**
    * Optional thumbnail rendered before the icon/title — the asset photo on `/assets/:id`
-   * (docs/UX-REWORK-PLAN.md §U-d item 3). Degrades silently: the endpoint 404s for an asset with no
+   * (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3). Degrades silently: the endpoint 404s for an asset with no
    * uploaded photo, and a broken `<img>` must never leave a torn icon in the page header, so a
    * failed load simply hides the element (`showAvatar` below).
    */

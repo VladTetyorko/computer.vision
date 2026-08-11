@@ -13,8 +13,8 @@ import {
 /**
  * The lifecycle-action-menu/edit-builder tests (`availableDeviceActions`, `buildDeviceRenameEdit`,
  * `RESTORE_TARGET_STATE`) live in `core/fleet/warehouse-logic.spec.ts` alongside the functions
- * themselves (docs/CYCLES-PLAN.md §11, CD-b); the category-picker tests (`deriveCategoryOptions`)
- * live in `core/fleet/category-logic.spec.ts` the same way (docs/UX-REWORK-PLAN.md §U-d). The
+ * themselves (docs/main/CYCLES-PLAN.md §11, CD-b); the category-picker tests (`deriveCategoryOptions`)
+ * live in `core/fleet/category-logic.spec.ts` the same way (docs/plans/done/UX-REWORK-PLAN.md §U-d). The
  * asset-first list's own tests
  * (`buildAssetListRows`/`filterAssetListRowsByArchived`/`filterAssetListRowsByCategory` and friends)
  * moved to `features/assets/assets-logic.spec.ts` once the Assets page split out of this one — this
@@ -186,7 +186,7 @@ describe('findWarehouseRowById', () => {
     expect(findWarehouseRowById(rows, 'dev-2')?.device.id).toBe('dev-2');
   });
 
-  it('degrades to undefined for an id matching no loaded row (stale ?sel=, docs/NAV-IA-REDESIGN-PLAN.md §2.4)', () => {
+  it('degrades to undefined for an id matching no loaded row (stale ?sel=, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4)', () => {
     expect(findWarehouseRowById(rows, 'not-a-real-id')).toBeUndefined();
   });
 
@@ -233,7 +233,7 @@ describe('describeDeviceState', () => {
   });
 });
 
-describe('buildCreateAssetRequestForDevice (docs/UX-QUICKWINS-PLAN.md QF-2 — "Promote to asset…", now via deviceIds per docs/REALTIME-PLAN.md §4)', () => {
+describe('buildCreateAssetRequestForDevice (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2 — "Promote to asset…", now via deviceIds per docs/plans/done/REALTIME-PLAN.md §4)', () => {
   it("assigns the existing device by id — no devices array, no duplicate registration", () => {
     const request = buildCreateAssetRequestForDevice(
       device({ id: 'dev-1', name: 'front-gate', protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' }),

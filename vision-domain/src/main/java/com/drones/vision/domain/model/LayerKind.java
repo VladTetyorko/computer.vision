@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * What kind of {@link MapLayer} this is (docs/MAP-REWORK-PLAN.md §2.1) — drives default visibility
+ * What kind of {@link MapLayer} this is (docs/plans/done/MAP-REWORK-PLAN.md §2.1) — drives default visibility
  * and who may write to it before any explicit {@link LayerGrant} is consulted; see {@code
  * MapAccessPolicy} (vision-application) for the exact resolution rules.
  */

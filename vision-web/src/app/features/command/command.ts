@@ -14,8 +14,8 @@ import { ZonesPanel } from './zones-panel';
 import { MarksPanel } from './marks-panel';
 import { CommandFacade } from './command-facade';
 
-/** Command's mutually-exclusive overlay group (docs/UI-ARCHITECTURE-PLAN.md) — Zones, Marks (since
- * docs/TACTICAL-MARKS-PLAN.md M5), and, since docs/MAP-REWORK-PLAN.md §5.2, **Layers** (the layer
+/** Command's mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — Zones, Marks (since
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md M5), and, since docs/plans/done/MAP-REWORK-PLAN.md §5.2, **Layers** (the layer
  * manager) and **Draw** (the drawing toolbar card floating over the map); typed as a union (not a
  * bare string) so a typo'd id can't compile, mirroring `flight-command-panel.ts#CommandDialog`'s
  * identical precedent. **Deliberately different shells**: Zones stays its pre-existing full backdrop
@@ -30,11 +30,11 @@ import { CommandFacade } from './command-facade';
 type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
 
 /**
- * `/command` — the manager dashboard (docs/UX-REWORK-PLAN.md §U-c, superseding docs/MVP3-PLAN.md
+ * `/command` — the manager dashboard (docs/plans/done/UX-REWORK-PLAN.md §U-c, superseding docs/plans/done/MVP3-PLAN.md
  * §C-c's stacked-cards layout with the plan's own map-first, three-panel model: FlytBase Fleet View
  * 2.0's "full-bleed map as canvas, slim entity rail docked left, detail panel docked right").
  *
- * **Dumb by design** (docs/UI-ARCHITECTURE-PLAN.md wave W2): every read-model/command the template
+ * **Dumb by design** (docs/plans/done/UI-ARCHITECTURE-PLAN.md wave W2): every read-model/command the template
  * uses lives on `CommandFacade` (`command-facade.ts`) — this component injects only that facade plus
  * its own `UiStore` for the Zones panel's open/closed state (the one mutually-exclusive overlay this
  * page has). See `CommandFacade`'s own class doc comment for the full "what moved and why" account
@@ -45,7 +45,7 @@ type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
  * for why these are real grid-track siblings, not `position: absolute` overlays, and how that
  * avoids the map's own zoom/layer controls entirely by construction rather than z-index
  * coordination). Both panels persist their collapsed state per user (`core/panel-state.ts`,
- * docs/UX-REWORK-PLAN.md §U-b item 7's "explicit collapse, reopen via toggle chip" — mirrors
+ * docs/plans/done/UX-REWORK-PLAN.md §U-b item 7's "explicit collapse, reopen via toggle chip" — mirrors
  * `features/live/live.ts`'s `railOpen`/`features/fly/fly.ts`'s `mapVisible` exactly) — now owned by
  * the facade, not this component.
  *
@@ -58,7 +58,7 @@ type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
  * the asset panel's own Video tab. `<vision-tactical-map>`'s `(preview)` handler is retargeted from
  * "resolve a device and dock `LiveDock`" to "select this asset" (`CommandFacade.selectAsset`).
  *
- * **The map component is dumb now** (docs/MAP-REWORK-PLAN.md §5.1 Wave D): the deleted `FleetMap`
+ * **The map component is dumb now** (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D): the deleted `FleetMap`
  * injected `FleetMapStore`/`EventsStore` itself; `<vision-tactical-map>` takes `[assets]`/`[events]`/
  * `[unplottedAssets]` as plain inputs from `CommandFacade` instead. Every other binding — zones,
  * marks, focus, attention, selection, and all three outputs — is unchanged.
@@ -90,7 +90,7 @@ export class CommandPage {
   protected readonly facade = inject(CommandFacade);
 
   /**
-   * `?asset=<id>` deep link (docs/UX-REWORK-PLAN.md §U-c's "preserve ?asset deep links if map
+   * `?asset=<id>` deep link (docs/plans/done/UX-REWORK-PLAN.md §U-c's "preserve ?asset deep links if map
    * supported any"). Query params bind to inputs by name/alias automatically
    * (`withComponentInputBinding()`, `app.config.ts`) — no route-table change needed. An `input()`
    * can only be declared on the component itself, so `CommandFacade.trackRequestedAsset` is handed
@@ -99,7 +99,7 @@ export class CommandPage {
   readonly requestedAssetId = input<string | undefined>(undefined, { alias: 'asset' });
 
   /**
-   * The Zones panel's own mutually-exclusive overlay group (docs/UI-ARCHITECTURE-PLAN.md) —
+   * The Zones panel's own mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) —
    * generalizes the old `zonesPanelOpen` boolean `signal(false)` into a `UiStore`, transient (no
    * `storageKey`, matching the prior behavior: the panel never survived a reload either). Kept as a
    * plain field on the component, not the facade — mirrors `flight-command-panel.ts`'s own `dialog`
@@ -136,7 +136,7 @@ export class CommandPage {
   constructor() {
     this.facade.trackRequestedAsset(this.requestedAssetId);
 
-    // Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — see `fly.ts`'s identical effect's own doc
+    // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — see `fly.ts`'s identical effect's own doc
     // comment: a map click always produces a `MarksStore.draft()` regardless of whether the Marks
     // panel happens to be open; this is what keeps a draft from landing out of sight.
     effect(() => {

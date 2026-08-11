@@ -21,7 +21,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for the guarded return-to-home command (docs/DRONE-INFRA-PLAN.md I-e, Stage
+ * Driving REST adapter for the guarded return-to-home command (docs/plans/active/DRONE-INFRA-PLAN.md I-e, Stage
  * 1 — "bring it home"). The one deliberate place this platform commands an aircraft rather than
  * only observing it; see {@link FlightCommandService}'s own javadoc for the doctrine this breaks
  * and how narrowly.
@@ -42,7 +42,7 @@ import com.drones.vision.api.security.CurrentUser;
  * deliberately distinct from the not-commandable 409, see {@code DefaultFlightCommandService}); and
  * {@code 403} when the asset exists but is outside the caller's {@link CurrentUser#scope()}
  * ({@link com.drones.vision.application.scope.AccessDeniedException}, mapped by {@link
- * ApiExceptionHandler} — docs/U-SCOPE-PLAN.md, feature 3).
+ * ApiExceptionHandler} — docs/plans/done/U-SCOPE-PLAN.md, feature 3).
  *
  * <p>{@code GET /api/assets/{id}/flight-capabilities} is instead a <em>read</em>: {@code 200} with
  * the capability snapshot, and {@code 404} for an unknown <em>or</em> out-of-scope asset (hiding

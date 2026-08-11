@@ -7,7 +7,7 @@ import com.drones.vision.application.geofence.GeofenceZoneSpec;
 import com.drones.vision.application.mark.MarkSpec;
 
 /**
- * {@link DatasetService#create}'s command record (docs/CV-TRAINING-PLAN.md §2/§3) — the wire
+ * {@link DatasetService#create}'s command record (docs/plans/done/CV-TRAINING-PLAN.md §2/§3) — the wire
  * shape for {@code POST /api/datasets}.
  *
  * <p>Duplicates {@link com.drones.vision.domain.model.Dataset}'s own blank-name check so a

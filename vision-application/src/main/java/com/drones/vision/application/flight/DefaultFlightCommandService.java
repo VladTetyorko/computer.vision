@@ -34,7 +34,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * (not soft-deleted, not deactivated — the same {@link Device#isActive()} filter {@link
  * DefaultAssetService#startStream} already applies when resolving a video device) devices {@link
  * FlightCommandPort#supports} claims. Zero matches is {@link IllegalStateException} ("not
- * commandable" → 409, docs/DRONE-INFRA-PLAN.md I-e's frozen wire contract); more than one match
+ * commandable" → 409, docs/plans/active/DRONE-INFRA-PLAN.md I-e's frozen wire contract); more than one match
  * silently takes the first — Stage 1/2 fleets pair exactly one flight controller per asset, so this
  * is not yet a real ambiguity to disambiguate.
  *
@@ -71,7 +71,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * value; {@link AuditAction#UPDATED} is used as the closest existing fit — the free-form {@code
  * summary}/{@code details} carry the actual specifics ({@code command}, {@code result}).
  *
- * <h2>Scope gate (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 3)</h2>
+ * <h2>Scope gate (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 3)</h2>
  * Each <em>command</em> takes the acting user's {@link VisibilityScope}; when it does not include
  * the resolved asset the command is refused up front with {@link AccessDeniedException} (403),
  * <em>and audited</em> with {@code result=DENIED:out of scope} — an authorization refusal is a

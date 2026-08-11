@@ -35,7 +35,7 @@ import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.simulation.SimulationSpec;
 
 /**
- * The one implementation of {@link ManualControlService} (docs/RC-CONTROL-PHASE1-PLAN.md,
+ * The one implementation of {@link ManualControlService} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md,
  * RC-CONTROL Phase 1 R2).
  *
  * <h2>Device resolution &amp; scope gate</h2>
@@ -91,7 +91,7 @@ import com.drones.vision.application.simulation.SimulationSpec;
  */
 public final class DefaultManualControlService implements ManualControlService {
 
-    /** Default input-loss watchdog timeout, docs/RC-CONTROL-PHASE1-PLAN.md §2 — 300&nbsp;ms. */
+    /** Default input-loss watchdog timeout, docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §2 — 300&nbsp;ms. */
     public static final long DEFAULT_WATCHDOG_TIMEOUT_MS = 300L;
 
     private static final String WATCHDOG_THREAD_NAME = "rc-watchdog";

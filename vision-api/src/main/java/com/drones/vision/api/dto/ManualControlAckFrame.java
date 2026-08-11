@@ -2,7 +2,7 @@ package com.drones.vision.api.dto;
 
 /**
  * Server&rarr;client {@code /ws/manual-control} frame acknowledging one {@code channels} frame
- * (docs/RC-CONTROL-PHASE1-PLAN.md §4) — one {@code ack} per {@code channels} frame, echoing the
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — one {@code ack} per {@code channels} frame, echoing the
  * client's own {@code seq}/{@code tSent} plus the server's receive timestamp, so the client can
  * compute glass-to-stick round-trip latency as {@code now - tSent}.
  *

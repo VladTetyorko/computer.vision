@@ -3,8 +3,8 @@ import type { GeofenceBreach } from '../../core/geofence/geofence-logic';
 import { REASON_RANK, attentionReasons, type AttentionReason, type AttentionSeverity } from '../../core/fleet/attention-logic';
 
 /**
- * Pure, Angular-free logic behind `CommandPage` (docs/UX-REWORK-PLAN.md §U-c — the map-first
- * manager dashboard, superseding docs/MVP3-PLAN.md §C-c's stacked-cards layout) — the entity
+ * Pure, Angular-free logic behind `CommandPage` (docs/plans/done/UX-REWORK-PLAN.md §U-c — the map-first
+ * manager dashboard, superseding docs/plans/done/MVP3-PLAN.md §C-c's stacked-cards layout) — the entity
  * rail's attention-sort order and the collapsible-rail/collapsible-panel grid layout arithmetic,
  * split out so every rule is unit-testable without HTTP, the router, or a component, mirroring
  * every other page's own `*-logic.ts` split.
@@ -20,7 +20,7 @@ import { REASON_RANK, attentionReasons, type AttentionReason, type AttentionSeve
  * consumer (grep-verified before deleting).
  *
  * **The "attention rules" section (severity thresholds, `attentionReasons`, `attentionAgeLabel`)
- * moved to `core/fleet/attention-logic.ts` in docs/UI-REDESIGN-PLAN.md Wave 4** — the Inventory
+ * moved to `core/fleet/attention-logic.ts` in docs/plans/done/UI-REDESIGN-PLAN.md Wave 4** — the Inventory
  * reports page (`features/reports/**`) needed the identical rules for its own read-only attention
  * list, and this codebase has no precedent for one page importing another page's module (see
  * `core/fleet/device-logic.ts`'s doc comment). Every name below is re-exported so this file's own
@@ -40,7 +40,7 @@ export {
   type BatteryAttentionSeverity,
 } from '../../core/fleet/attention-logic';
 
-// --- Entity rail (docs/UX-REWORK-PLAN.md §U-c bullet 1) -----------------------------------------
+// --- Entity rail (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 1) -----------------------------------------
 
 export interface EntityRow {
   readonly asset: AssetAttention;
@@ -65,12 +65,12 @@ function rowRank(row: EntityRow): number {
  *    this is also what orders the quiet assets among themselves, once every flagged one sorts
  *    ahead of them.
  *
- * `gpsFixTypeByAssetId` (docs/FC-INTEGRATIONS-PLAN.md F-d, optional) feeds each asset's own
+ * `gpsFixTypeByAssetId` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, optional) feeds each asset's own
  * `gps-degraded` reason (see `gpsDegradedReason`'s own doc comment) — `CommandPage` builds this from
  * `FleetMapStore.markers()`; an asset with no entry (not currently plotted/live) simply never
  * triggers that one reason, exactly like every other "unknown, not fabricated" gap in this app.
  *
- * `geofenceBreachesByAssetId` (docs/OPS-CORE-PLAN.md §G-c, optional) is the identical shape for the
+ * `geofenceBreachesByAssetId` (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional) is the identical shape for the
  * new top-rank `geofence-breach` reason — `CommandPage` builds this from
  * `core/geofence/geofence-logic.ts#groupBreachesByAsset(activeGeofenceBreaches(liveStore.liveEvents()))`.
  */
@@ -99,7 +99,7 @@ export function buildEntityRows(
   });
 }
 
-// --- Layout grid (docs/UX-REWORK-PLAN.md §U-c bullet 5 — geometric separation, not z-index) -----
+// --- Layout grid (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 5 — geometric separation, not z-index) -----
 
 /** `'hidden'`: nothing selected, no reopen chip. `'collapsed'`: selected, but shrunk to a chip. */
 export type DetailPanelState = 'hidden' | 'open' | 'collapsed';
@@ -123,7 +123,7 @@ export const COMMAND_PANEL_WIDTH = '380px';
  * are fixed at `top:0.5rem` in its *own* corners (its own CSS, out of this task's reach — the plan
  * explicitly rules out reworking `fleet-map`/`live-map` themselves) — an absolutely-positioned rail
  * sharing that same corner would occlude them, reproducing exactly the "switcher unreachable under
- * the map inset" incident (docs/UX-QUICKWINS-PLAN.md QF-1, `features/fly/fly.css`'s own `.hud-map`
+ * the map inset" incident (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1, `features/fly/fly.css`'s own `.hud-map`
  * doc comment) this task was told to learn from. Docking the panels as real layout siblings instead
  * means the map's own corner controls and this app's own chrome never share a pixel — geometric
  * separation by construction, zero z-index coordination needed with a component this task cannot

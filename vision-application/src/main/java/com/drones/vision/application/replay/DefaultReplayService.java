@@ -37,7 +37,7 @@ import java.util.Optional;
  * the port, called out as a future contract-cleanup task in {@code adapter-persistence}'s and this
  * module's MODULE.md, not attempted in this task.
  *
- * <h2>Detections (docs/MVP2-PLAN.md §R, R-a2)</h2>
+ * <h2>Detections (docs/plans/done/MVP2-PLAN.md §R, R-a2)</h2>
  * Unlike telemetry, {@link DetectionRepositoryPort#query} <b>is</b> a real, time-bounded query
  * (filtered server-side/in-adapter, not fetched-then-filtered here) — so detections are queried
  * directly for the resolved window whenever {@link AssetUsage#streamId()} is non-{@code null}:
@@ -57,7 +57,7 @@ import java.util.Optional;
  * behavior) — the mirror image of telemetry's earliest-biased truncation, and just as real a limit
  * for a very long/high-rate flight, though far less likely to bite at this cap.
  *
- * <h2>Recording (docs/OPS-CORE-PLAN.md §R)</h2>
+ * <h2>Recording (docs/plans/done/OPS-CORE-PLAN.md §R)</h2>
  * {@link #recordingFor(UsageId)} is a second, much smaller read: {@code streamId()} is again the
  * join key (empty when {@code null}), and the resolved {@code [startedAt, endedAt-or-now)} window
  * is handed straight to {@link StreamPublisherPort#playbackUrl} — no telemetry/detection fetch, no
@@ -69,7 +69,7 @@ public final class DefaultReplayService implements ReplayService {
      * Default cap the API layer falls back to when the caller omits {@code maxPoints} — the
      * {@link ReplayServiceSettings#defaults()} value, exposed here purely so same-package tests
      * (and any external reader still using this constant) can read it by name
-     * (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction); this instance's own working
+     * (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction); this instance's own working
      * value always comes from the {@link ReplayServiceSettings} supplied to its constructor.
      */
     public static final int DEFAULT_MAX_POINTS = ReplayServiceSettings.defaults().defaultMaxPoints();
@@ -91,7 +91,7 @@ public final class DefaultReplayService implements ReplayService {
 
     /**
      * @param streamPublisherPort resolves the actual recording/clip-export URL for {@link
-     *                            #recordingFor(UsageId)} (docs/OPS-CORE-PLAN.md §R); required —
+     *                            #recordingFor(UsageId)} (docs/plans/done/OPS-CORE-PLAN.md §R); required —
      *                            {@code vision-app} always wires a real bean here (either the
      *                            mediamtx-backed publisher or its no-op fallback), so there is no
      *                            nullable-collaborator case to handle.
@@ -106,7 +106,7 @@ public final class DefaultReplayService implements ReplayService {
 
     /**
      * Same as the 4-argument constructor, plus an explicit {@link ReplayServiceSettings}
-     * (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code vision.application.replay.*})
+     * (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code vision.application.replay.*})
      * instead of {@link ReplayServiceSettings#defaults()}.
      */
     public DefaultReplayService(AssetUsageRepositoryPort usageRepository,

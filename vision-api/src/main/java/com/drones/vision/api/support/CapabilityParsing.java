@@ -13,7 +13,7 @@ import java.util.stream.Collectors;
  * and {@code CreateAssetRequest.DeviceSpec} (both {@code ...api.dto}).
  *
  * <p>Public only because it now lives in {@code ...api.support}, a different package from its
- * {@code ...api.dto} callers (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row B) — this is still
+ * {@code ...api.dto} callers (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row B) — this is still
  * de-duplicated request-parsing logic, not part of the wire contract itself, and still has no
  * second implementation ({@code .claude/skills/java-clean-code/SKILL.md} §1).
  */

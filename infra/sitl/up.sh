@@ -3,7 +3,7 @@
 #
 # Launches N real ArduPilot SITL instances (docker), each a distinct
 # MAVLink sysid, each pushing MAVLink 2 UDP to the host and flying a
-# default circuit -- docs/DRONE-INFRA-PLAN.md I-c.
+# default circuit -- docs/plans/active/DRONE-INFRA-PLAN.md I-c.
 #
 # Usage:
 #   ./up.sh          # 1 instance (CI-style smoke)

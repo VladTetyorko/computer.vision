@@ -12,7 +12,7 @@ import java.util.List;
  * results can be persisted and replayed independently of frame lifetime.
  * {@code detections} is defensively copied to an immutable list.
  *
- * <p>{@code tracking} (docs/TRACKING-PLAN.md §4.B, docs/TRACKING-ORCHESTRATION.md §5.2) is
+ * <p>{@code tracking} (docs/plans/done/TRACKING-PLAN.md §4.B, docs/extracts/TRACKING-ORCHESTRATION.md §5.2) is
  * {@code null} when tracking was off for this result — the gap fix that lets {@code detectorRan}
  * and friends reach the API layer at all; see {@link TrackingTelemetry}'s own javadoc for why
  * this is one nullable component and not five flat ones.
@@ -52,7 +52,7 @@ public record DetectionResult(StreamId streamId, long frameSequence, Instant cap
     /**
      * Convenience constructor for a result with tracking off — defaults {@link #tracking()} to
      * {@code null}, the same "N-1-arg convenience ctor" idiom used elsewhere. This was the
-     * canonical constructor before docs/TRACKING-PLAN.md §4.B added {@link #tracking()}; every
+     * canonical constructor before docs/plans/done/TRACKING-PLAN.md §4.B added {@link #tracking()}; every
      * pre-existing 5-arg call site compiles unchanged.
      */
     public DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections,

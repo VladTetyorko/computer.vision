@@ -8,7 +8,7 @@ import { OnboardingStore } from './onboarding-store';
 import { OnboardingFacade } from './onboarding-facade';
 
 /**
- * The onboarding wizard's own route (`/add-source`, docs/UX-REWORK-PLAN.md §U-d) — replaces the
+ * The onboarding wizard's own route (`/add-source`, docs/plans/done/UX-REWORK-PLAN.md §U-d) — replaces the
  * inline "+ Add source" card the pre-wizard Devices/Warehouse page used to open on itself. Four
  * steps, one visible at a time, back-navigable, all state kept in `OnboardingStore` (this
  * component's own page-provided "component store" — see that class's own doc comment): Profile
@@ -19,12 +19,12 @@ import { OnboardingFacade } from './onboarding-facade';
  *
  * This component itself is deliberately thin — a `@switch` over `store.step()` plus a Back/Next
  * footer — every decision and request shape lives in `onboarding-logic.ts`/`OnboardingStore`,
- * orchestrated by `OnboardingFacade` (docs/UI-ARCHITECTURE-PLAN.md), which this component injects
+ * orchestrated by `OnboardingFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md), which this component injects
  * exclusively. `onPhotoSelected` is the one bit of DOM-specific glue left here (resetting the raw
  * `<input type="file">`'s own value so the same file can be re-selected later) — a truly
  * self-contained view concern no other component/route could ever need to stay in sync with.
  *
- * **Page bar + centered form (docs/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3, docs/design/07-add-source.md,
+ * **Page bar + centered form (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3, docs/extracts/design/07-add-source.md,
  * wave 2).** `page-head`'s three-line description is gone outright, not moved into a `hint` — the
  * step body already carries its own subtitle ("What is it, and what does it look like?") for exactly
  * this job, so the header would only have restated it. `.page--form` (`styles.css`) centers the whole
@@ -34,7 +34,7 @@ import { OnboardingFacade } from './onboarding-facade';
  * `--field-sm`/`--field-md`/`--field-lg` size buckets (`onboarding.html`) — the rest of the wizard's
  * inputs already sit inside a responsive grid (`.register-form`/`.option-row`) that was never the
  * 1075px offender the plan named. The step-bar redesign (a dot rail), the photo dropzone, and moving
- * the disabled-`Next` reason onto the button itself are all `docs/design/07-add-source.md`'s
+ * the disabled-`Next` reason onto the button itself are all `docs/extracts/design/07-add-source.md`'s
  * "Suggested design" — bigger changes this wave deliberately leaves alone (its own "note anything left
  * for later" instruction).
  */

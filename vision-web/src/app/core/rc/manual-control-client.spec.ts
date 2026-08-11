@@ -8,7 +8,7 @@ import { sendIntervalMs } from './manual-control-logic';
 /** A minimal `WebSocket` test double — captures every `send()` call and lets a test drive
  * `onopen`/`onmessage`/`onclose`/`onerror` directly, standing in for the real socket lifecycle
  * `ManualControlClient` never gets to exercise against a real backend in this suite (R4, the
- * backend half of docs/RC-CONTROL-PHASE1-PLAN.md §4, lands separately). */
+ * backend half of docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4, lands separately). */
 class MockWebSocket {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;

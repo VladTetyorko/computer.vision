@@ -15,7 +15,7 @@ import com.drones.vision.api.controller.SystemNetworkController;
 
 /**
  * Enumerates this host's site-local IPv4 addresses for {@link SystemNetworkController}
- * (docs/DRONE-INFRA-PLAN.md I-g's guided drone-onboarding wizard — the "Configure-your-drone"
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-g's guided drone-onboarding wizard — the "Configure-your-drone"
  * step pre-fills copy-paste FC/companion-computer snippets with one of these).
  *
  * <p>Stateless, no interface ({@code .claude/skills/java-clean-code/SKILL.md} §1) — {@link
@@ -23,7 +23,7 @@ import com.drones.vision.api.controller.SystemNetworkController;
  * same "small helper, not a domain/application port" shape {@code SnapshotJpegEncoder} already
  * establishes for this module's own byte-level infrastructure. Public only because it now lives in
  * {@code ...api.support}, a different package from {@link SystemNetworkController}
- * ({@code ...api.controller}) (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row B). The {@link
+ * ({@code ...api.controller}) (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row B). The {@link
  * NetworkInterface} enumeration itself sits behind an injectable {@link NetworkInterfaceSource}
  * (the package-private second constructor) purely so a unit test can feed a fixed, fake interface
  * list — including one that throws {@link SocketException} — instead of depending on whatever
@@ -50,7 +50,7 @@ public final class LocalNetworkAddresses {
      *         sorted by {@link NetworkAddressResponse#interfaceName()} then {@link
      *         NetworkAddressResponse#address()}; empty — never throws — when nothing qualifies,
      *         enumeration itself fails, or a single interface's own up/loopback status can't be
-     *         queried (per docs/DRONE-INFRA-PLAN.md I-g's frozen contract: "no addresses" is a
+     *         queried (per docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen contract: "no addresses" is a
      *         valid, non-error result)
      */
     public List<NetworkAddressResponse> list() {

@@ -72,7 +72,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Pure unit tests for {@link LiveUpdateRegistry}'s coalescing and resume logic
- * (docs/REALTIME-PLAN.md §4, extended for the {@code devices}/{@code detection-events} topics) — a
+ * (docs/plans/done/REALTIME-PLAN.md §4, extended for the {@code devices}/{@code detection-events} topics) — a
  * directly-executing {@link ScheduledExecutorService} test double makes {@link
  * LiveUpdateRegistry#publishFleetChanged()}/{@link LiveUpdateRegistry#publishEvent}/{@link
  * LiveUpdateRegistry#publishDetectionEvent} run synchronously, and {@link
@@ -313,7 +313,7 @@ class LiveUpdateRegistryTest {
         assertEquals("layer", payload.entity());
         assertEquals("Bravo team", payload.layer().name());
         assertNull(payload.layer().grants(),
-                "docs/MAP-REWORK-PLAN.md §4.3: layer events over SSE never include grants");
+                "docs/plans/done/MAP-REWORK-PLAN.md §4.3: layer events over SSE never include grants");
         assertNull(payload.layer().myAccess(), "myAccess is per-viewer and has no single value on a broadcast");
     }
 

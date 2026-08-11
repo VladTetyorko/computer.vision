@@ -48,7 +48,7 @@ interface DragState {
 }
 
 /**
- * The editable annotation canvas for a training sample (docs/CV-TRAINING-PLAN.md §4, Wave T5) — an
+ * The editable annotation canvas for a training sample (docs/plans/done/CV-TRAINING-PLAN.md §4, Wave T5) — an
  * `<img>` of the captured frame with its `annotations` drawn as draggable/resizable boxes, plus a
  * side list for label (constrained to `classes`) and delete. A **fork** of the live detection
  * overlay's box-drawing idiom (`shared/player/player.ts`'s own `letterboxRect`/`DrawnBox`/`drawBox`),
@@ -143,7 +143,7 @@ export class SampleBoxEditor {
     }
   }
 
-  /** Inserts a default centered box (docs/CV-TRAINING-PLAN.md §4) — a precise, no-drag-skill-needed way to add a box the model missed entirely, still fully draggable/resizable afterward. */
+  /** Inserts a default centered box (docs/plans/done/CV-TRAINING-PLAN.md §4) — a precise, no-drag-skill-needed way to add a box the model missed entirely, still fully draggable/resizable afterward. */
   addBox(): void {
     if (this.disabled()) {
       return;

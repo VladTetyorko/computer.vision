@@ -22,7 +22,7 @@ import java.util.Optional;
  * <p><strong>{@code passwordHash} is opaque to the domain.</strong> This record stores exactly
  * the hashed string it is given and never hashes, verifies, or otherwise interprets it — hashing
  * (BCrypt in production) lives behind the application layer's {@code PasswordVerifier} seam
- * (docs/U-AUTH-PLAN.md, wave 2). Nobody should add hashing logic here.
+ * (docs/plans/done/U-AUTH-PLAN.md, wave 2). Nobody should add hashing logic here.
  *
  * <p>{@code memberships} is defensively copied via {@link List#copyOf}; it may be empty — a user
  * with no membership is a valid, if inert, state (they exist but belong to no group yet), so

@@ -11,7 +11,7 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.support.CapabilityParsing;
 
 /**
- * Request body for {@code POST /api/users} (docs/U-SCOPE-PLAN.md, U-e slice 2) — create/invite a
+ * Request body for {@code POST /api/users} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — create/invite a
  * user. Converts to {@link UserSpec} via {@link #toSpec()}.
  *
  * <p>Validation follows this module's "map shapes, let the domain/spec validate" idiom:
@@ -23,7 +23,7 @@ import com.drones.vision.api.support.CapabilityParsing;
  * as {@code SetLifecycleStateRequest}/{@code CapabilityParsing}.
  *
  * <p><strong>Deferred:</strong> the "a granter may only assign a role/group &le; their own scope"
- * rule (docs/U-SCOPE-PLAN.md) is <em>not</em> enforced here or in {@link UserSpec}/{@code
+ * rule (docs/plans/done/U-SCOPE-PLAN.md) is <em>not</em> enforced here or in {@link UserSpec}/{@code
  * UserService} — wave 1 built {@code UserService.create} unscoped and this wave's file scope does
  * not extend into {@code vision-application}. Documented as a follow-up rather than faked at the
  * controller edge.

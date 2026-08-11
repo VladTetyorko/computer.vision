@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory {@link AssetImageRepositoryPort}: dev fallback with no durability across restarts
- * (docs/UX-REWORK-PLAN.md §U-d item 3).
+ * (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3).
  *
  * <p>Replaced by {@code adapter-persistence}'s {@code JpaAssetImageRepository} behind {@code
  * vision.persistence.enabled}.

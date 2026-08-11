@@ -17,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link SystemNetworkController} (docs/DRONE-INFRA-PLAN.md I-g's frozen wire
+ * MockMvc tests for {@link SystemNetworkController} (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire
  * contract), same {@code standaloneSetup} style as {@link CategoryControllerTest}. {@link
  * LocalNetworkAddresses} — this controller's one collaborator — is a mocked test double here
  * (its own filtering/sorting behavior is {@link LocalNetworkAddressesTest}'s job); these tests

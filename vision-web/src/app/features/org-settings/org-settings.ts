@@ -5,7 +5,7 @@ import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { OrgSettingsFacade } from './org-settings-facade';
 
 /**
- * The org-settings surface (`/org`, docs/U-SCOPE-PLAN.md, U-e slice 2) — a manager/admin's
+ * The org-settings surface (`/org`, docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — a manager/admin's
  * users-and-groups management page. Route-guarded (`core/auth/auth-guard.ts`, session required) and
  * role-gated (`core/org/org-guard.ts` — only ADMIN/MANAGER reach it; a pilot is redirected); the
  * nav link into it (`shared/ui/identity-chip.ts`) is itself only shown when `canManageOrg`, so a
@@ -14,14 +14,14 @@ import { OrgSettingsFacade } from './org-settings-facade';
  *
  * Two sections behind a segmented tab (this app's `.segmented` idiom, `styles.css`): **Users**
  * (list + invite form + enable/disable toggle) and **Groups** (hierarchy tree + create form). Dumb
- * by convention (docs/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation and its one-toast handling
+ * by convention (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation and its one-toast handling
  * lives in `OrgStore`, every pure derivation (group tree, role options) in `core/org/org-logic.ts`,
  * and all of it is orchestrated by `OrgSettingsFacade`, which this component injects exclusively.
  * Reuses the existing management-page look wholesale (`.page`/`.card`/`.btn`/`.chip`/`.segmented`/
  * `.empty`), no new colors. Responsive: the page is a single scrolling column of cards; each list row
  * and each form wraps rather than overflowing on a narrow viewport (see `org-settings.css`).
  *
- * **Page bar (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/12-org.md, wave 2).** The old
+ * **Page bar (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/12-org.md, wave 2).** The old
  * description was two sentences doing two different jobs: "Manage the people and groups in your
  * organization" only restated what the title "Organization" already says, so it's deleted outright;
  * "Grants are limited to your own scope" is a genuine, non-obvious fact about how this page behaves,

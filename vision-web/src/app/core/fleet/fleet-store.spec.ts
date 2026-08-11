@@ -9,7 +9,7 @@ import { LiveStore, type LiveConnectionState } from '../live/live-store';
 import type { ActiveStream, Device, DevicesSnapshot } from '../api/models';
 
 /**
- * Targeted specs for `FleetStore`'s new `LiveStore` projection (docs/REALTIME-PLAN.md §4's backend
+ * Targeted specs for `FleetStore`'s new `LiveStore` projection (docs/plans/done/REALTIME-PLAN.md §4's backend
  * follow-up batch) — this class had no dedicated spec file before (its pre-existing surface is a
  * thin, `run()`-wrapped pass-through over `VisionApi`, exercised indirectly by every page/store
  * that consumes it), but the poll-vs-live transport switch introduced here is exactly the kind of
@@ -106,7 +106,7 @@ function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-describe('FleetStore — LiveStore projection (docs/REALTIME-PLAN.md §4 backend follow-up batch)', () => {
+describe('FleetStore — LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4 backend follow-up batch)', () => {
   it('polls devices/streams immediately at construction, regardless of LiveStore', async () => {
     const api = stubApi({ listDevices: vi.fn().mockResolvedValue([device()]), listStreams: vi.fn().mockResolvedValue([]) });
     create(api);
@@ -175,7 +175,7 @@ describe('FleetStore — LiveStore projection (docs/REALTIME-PLAN.md §4 backend
   });
 });
 
-describe('FleetStore — tracking engine passthroughs (docs/TRACKING-PLAN.md §4, wave T7)', () => {
+describe('FleetStore — tracking engine passthroughs (docs/plans/done/TRACKING-PLAN.md §4, wave T7)', () => {
   it('getStreamTracks delegates straight to VisionApi, with no run()-wrapped toast on failure', async () => {
     const getStreamTracks = vi.fn().mockResolvedValue({ streamId: 's-1', lockedTrackId: 7, tracks: [] });
     const api = stubApi({ getStreamTracks });

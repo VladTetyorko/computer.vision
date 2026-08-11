@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, HostListener, computed, inject } fr
 import { UndoToastService, type UndoToastState } from './undo-toast.service';
 
 /**
- * Renders `UndoToastService`'s single active toast (docs/OPS-CORE-PLAN.md §Q2) — mounted once at
+ * Renders `UndoToastService`'s single active toast (docs/plans/done/OPS-CORE-PLAN.md §Q2) — mounted once at
  * the app root (`app.html`, next to `<vision-toast-host>`), bottom-**left** (see the service's own
  * doc comment for why that corner). A shrinking progress bar (pure CSS animation, timed off the
  * toast's own `timeoutMs` — no interval/rAF ticking needed) gives the countdown a visual, not just

@@ -11,7 +11,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for a user's own activity feed (docs/U-SCOPE-PLAN.md, U-e slice 2, feature
+ * Driving REST adapter for a user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature
  * 7): {@code GET /api/me/activity} — the audit entries the acting user themselves made, newest
  * first.
  *

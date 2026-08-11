@@ -46,7 +46,7 @@ const MAX_LIVE_DETECTION_EVENTS = 300;
 const MAX_LIVE_MAP_EVENTS = 300;
 
 /**
- * Owns the app's **one** `GET /api/live` connection (docs/REALTIME-PLAN.md §4, Phase R-c) — the
+ * Owns the app's **one** `GET /api/live` connection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — the
  * server-push replacement for steady-state polling. `TelemetryStore`/`DetectionsStore` project this
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
@@ -54,8 +54,8 @@ const MAX_LIVE_MAP_EVENTS = 300;
  * <h2>Seven topics now, seven projected stores — read before wiring a new consumer</h2>
  * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
  * `detections:<assetId>`) and grew three more, always-on like `fleet`/`event`: `devices` and
- * `detection-events` (docs/REALTIME-PLAN.md §4's backend follow-up batch), then `map`
- * (docs/MAP-REWORK-PLAN.md §4.3, which replaced the TACTICAL-MARKS wave's own `marks` topic — same
+ * `detection-events` (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), then `map`
+ * (docs/plans/done/MAP-REWORK-PLAN.md §4.3, which replaced the TACTICAL-MARKS wave's own `marks` topic — same
  * always-on posture, but scoped per connection and carrying layers/drawings as well as marks). All
  * four of the original plan's own stores have a matching topic:
  * - `telemetry:<assetId>` ↔ `TelemetryStore` (same domain — {@link TelemetrySample}s for one asset).
@@ -79,7 +79,7 @@ const MAX_LIVE_MAP_EVENTS = 300;
  *   unconsumed (no store's domain matches it — `liveEvents` below is exposed anyway, arriving for
  *   free, for a future consumer that doesn't exist yet).
  * - `map` ↔ all three `core/map-data/**` stores (`LayersStore`/`MarksStore`/`DrawingsStore`,
- *   docs/MAP-REWORK-PLAN.md §4.3) — the Common Operational Picture. **One topic, three consumers**:
+ *   docs/plans/done/MAP-REWORK-PLAN.md §4.3) — the Common Operational Picture. **One topic, three consumers**:
  *   each folds in only the arrivals whose `entity` is its own, so `mapEvents()` is read by three
  *   independent `effect()`s over the same append-only log (each keeping its own processed-count
  *   cursor), rather than this store fanning it out into three signals it would then have to keep in
@@ -102,7 +102,7 @@ const MAX_LIVE_MAP_EVENTS = 300;
  * auto-retry when the server rejects the request outright (non-2xx status, or the wrong content
  * type) — the spec has the browser set `readyState` to `CLOSED` and give up permanently. That is
  * exactly what happens against a pre-R-c backend, or `vision.live.enabled=false` (`/api/live` 404s
- * like any unmapped route — docs/REALTIME-PLAN.md §4, item 4's own note). `onerror` distinguishes
+ * like any unmapped route — docs/plans/done/REALTIME-PLAN.md §4, item 4's own note). `onerror` distinguishes
  * the two by reading `readyState` at the moment it fires: `CLOSED` means fatal — this store falls
  * back to `'closed'` and schedules its **own** retry every {@link SSE_RETRY_INTERVAL_MS} (60s,
  * since a repeatedly-404ing endpoint is not worth hammering); anything else means the browser is
@@ -118,14 +118,14 @@ const MAX_LIVE_MAP_EVENTS = 300;
  * current ref-counted topics every time it runs.
  *
  * <h2>Reconnect topic restoration</h2>
- * Topics only survive server-side on the *same* connection (docs/REALTIME-PLAN.md §4's own
+ * Topics only survive server-side on the *same* connection (docs/plans/done/REALTIME-PLAN.md §4's own
  * framing) — a brand new connection (this store's own manual retry, or a fresh page load) carries
  * no memory of what the *previous* connection was subscribed to. `connect()` always rebuilds the
  * `topics` query parameter from `topicRefs`' current keys (this store's own in-memory ref-count
  * map, untouched by a reconnect), so every asset any consumer is still tracking at the moment of a
  * reconnect is re-requested from scratch — no page-level code needs to notice a reconnect at all.
  *
- * <h2>Ref-counting (docs/REALTIME-PLAN.md §4, item 2)</h2>
+ * <h2>Ref-counting (docs/plans/done/REALTIME-PLAN.md §4, item 2)</h2>
  * `trackTelemetry`/`trackDetections` (and their `untrack*` pairs) are called once per *consumer*
  * (a `TelemetryStore`/`DetectionsStore` instance) — several consumers can track the same asset at
  * once (e.g. a Fly cockpit and a Wall tile both watching the same drone), and the server only needs
@@ -193,7 +193,7 @@ export class LiveStore {
 
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
-  /** Per-topic subscriber counts (docs/REALTIME-PLAN.md §4, item 2) — see class doc's "Ref-counting". */
+  /** Per-topic subscriber counts (docs/plans/done/REALTIME-PLAN.md §4, item 2) — see class doc's "Ref-counting". */
   private readonly topicRefs = new Map<string, number>();
 
   private eventSource: EventSource | null = null;

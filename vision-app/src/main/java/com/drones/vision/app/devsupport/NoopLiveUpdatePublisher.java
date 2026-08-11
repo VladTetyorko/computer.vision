@@ -10,7 +10,7 @@ import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
 
 /**
  * No-op {@link LiveUpdatePublisherPort}: every method is a no-op. Wired when {@code
- * vision.live.enabled=false} (docs/REALTIME-PLAN.md §4, item 4) — {@code vision-api}'s {@code
+ * vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md §4, item 4) — {@code vision-api}'s {@code
  * /api/live} endpoint itself 404s in that case (its controller/registry beans are conditionally
  * absent), but the application layer ({@code StreamPipeline}/{@code UsageTracker}/{@code
  * DefaultStreamService}) still needs <em>some</em> {@link LiveUpdatePublisherPort} bean to satisfy

@@ -1,5 +1,5 @@
 """Exported-YOLO dataset layout, path-safety guards, and zip landing for
-``Training.UploadDataset`` (docs/CV-TRAINING-V2-PLAN.md §2).
+``Training.UploadDataset`` (docs/plans/done/CV-TRAINING-V2-PLAN.md §2).
 
 Stdlib-only (``os``, ``shutil``, ``zipfile``, ``uuid``, ``pathlib``) --
 importable without the ``cv`` extra, same discipline as
@@ -26,7 +26,7 @@ from pathlib import Path
 # trainable (Phase 1's FilesystemDatasetExport layout). Format contract
 # shared with another process (the platform's dataset exporter) -- these
 # names are NOT environment/tuning literals, so they stay plain constants
-# (see docs/LAYERING-REFACTOR-PLAN.md §1.3's "explicitly out of scope" list).
+# (see docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3's "explicitly out of scope" list).
 DATASET_DIRNAME = "datasets"
 DATA_YAML_NAME = "data.yaml"
 IMAGES_DIRNAME = "images"

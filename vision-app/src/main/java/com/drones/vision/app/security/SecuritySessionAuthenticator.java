@@ -16,7 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The {@link SessionAuthenticator} wired when {@code vision.auth.enabled=true} (docs/U-AUTH-PLAN.md,
+ * The {@link SessionAuthenticator} wired when {@code vision.auth.enabled=true} (docs/plans/done/U-AUTH-PLAN.md,
  * wave 3).
  *
  * <p>Verifies credentials through the application-layer {@link AuthService} (BCrypt, via {@code

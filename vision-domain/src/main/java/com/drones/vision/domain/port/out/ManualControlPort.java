@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.RcChannels;
 
 /**
- * Driven port: a streaming, ack-less RC-channel-override relay (docs/RC-CONTROL-PHASE1-PLAN.md
+ * Driven port: a streaming, ack-less RC-channel-override relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md
  * §1) — the fire-and-forget, continuous-stream opposite of {@link FlightCommandPort}'s
  * request→ack one-shots. An implementation owns a fixed-rate sender thread per {@link
  * #engage(Device) engaged} link; the caller only ever hands it the <em>latest</em> channel frame,

@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import java.util.List;
 
 /**
- * One entry in {@code GET /api/cv/models}'s roster (docs/CV-CONTROL-PLAN.md §4's frozen wire
+ * One entry in {@code GET /api/cv/models}'s roster (docs/plans/done/CV-CONTROL-PLAN.md §4's frozen wire
  * contract) — a detection model the Fly cockpit's model picker can select.
  *
  * <p>No {@code @JsonInclude(NON_NULL)} here — every field is always present, including {@code

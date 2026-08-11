@@ -2,7 +2,7 @@ import type { TelemetrySample } from '../api/models';
 
 /**
  * Pure logic behind `core/live-store.ts` and the stores that project it (`TelemetryStore`/
- * `DetectionsStore` — docs/REALTIME-PLAN.md §4, Phase R-c frontend) — split out so the
+ * `DetectionsStore` — docs/plans/done/REALTIME-PLAN.md §4, Phase R-c frontend) — split out so the
  * switchover/ref-counting/merge decisions are unit-testable without a real `EventSource` (jsdom has
  * none, confirmed — see `live-store.ts`'s own doc comment), mirroring this app's standing
  * `*-logic.ts`/store split (`telemetry-logic.ts`, `events-logic.ts`, ...).
@@ -43,7 +43,7 @@ export const SSE_RETRY_INTERVAL_MS = 60_000;
 /**
  * Which transport a per-asset-scoped consumer (`TelemetryStore`/`DetectionsStore`) should use right
  * now. Live requires **both** an open connection **and** an asset id — the `telemetry:<assetId>`/
- * `detections:<assetId>` topics are asset-scoped only (docs/REALTIME-PLAN.md §4, item 2); a caller
+ * `detections:<assetId>` topics are asset-scoped only (docs/plans/done/REALTIME-PLAN.md §4, item 2); a caller
  * with no asset id (`LivePage`/`WallTile`, a bare `deviceId` with no asset context — see
  * `telemetry-store.ts`'s own R-a doc comment) has nothing to subscribe to regardless of whether
  * live is otherwise available, and must always poll.
@@ -60,7 +60,7 @@ export function resolveAssetScopedTransport(
 /**
  * A stable key for "the session `track(primaryId, assetId?)` would start" — `TelemetryStore`/
  * `DetectionsStore` compare this against the key their *current* (or in-flight) session was opened
- * with, and no-op a `track()` call whose key is unchanged (docs/REALTIME-PLAN.md §4 Phase R-c
+ * with, and no-op a `track()` call whose key is unchanged (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c
  * follow-up — see either store's own `lastTrackKey` doc comment for why this matters beyond
  * avoiding a wasted re-fetch: re-entering `track()` re-runs its internal teardown, which reads that
  * store's own `currentAssetIdSignal` while a *caller's* effect may still be the active reactive
@@ -72,7 +72,7 @@ export function trackSessionKey(primaryId: string, assetId: string | undefined):
   return `${primaryId} ${assetId ?? ''}`;
 }
 
-// --- Per-asset topic ref-counting (docs/REALTIME-PLAN.md §4, item 2) --------------------------
+// --- Per-asset topic ref-counting (docs/plans/done/REALTIME-PLAN.md §4, item 2) --------------------------
 // Several consumers can track the same asset's telemetry/detections at once (e.g. a Fly cockpit
 // and a Wall tile both watching the same drone) — the server only needs one subscription per topic
 // per connection, so `LiveStore` ref-counts locally and only PATCHes on the first subscriber in /
@@ -118,7 +118,7 @@ export function buildTopicsParam(topics: Iterable<string>): string {
   return [...topics].join(',');
 }
 
-// --- Telemetry merge semantics (docs/REALTIME-PLAN.md §4, item 3) -----------------------------
+// --- Telemetry merge semantics (docs/plans/done/REALTIME-PLAN.md §4, item 3) -----------------------------
 
 /**
  * How many samples `LiveStore` retains per tracked asset (bounded, generous — mirrors
@@ -129,7 +129,7 @@ export function buildTopicsParam(topics: Iterable<string>): string {
 export const LIVE_TELEMETRY_MAX_SAMPLES = 500;
 
 /**
- * Merges a coalesced SSE telemetry batch (`docs/REALTIME-PLAN.md §4, item 3`: "telemetry emits
+ * Merges a coalesced SSE telemetry batch (`docs/plans/done/REALTIME-PLAN.md §4, item 3`: "telemetry emits
  * appended samples as deltas") into the samples already held, deduplicating by `(deviceId, at)` —
  * a resumed/re-subscribed connection can replay a `LiveRingBuffer`'s currently-buffered entries
  * (vision-api's own snapshot-on-subscribe behavior), which may overlap with samples this store

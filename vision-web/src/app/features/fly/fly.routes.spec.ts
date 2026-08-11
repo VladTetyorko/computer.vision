@@ -3,7 +3,7 @@ import { FLY_ROUTES } from './fly.routes';
 import { flyRedirectGuard } from './fly-redirect-guard';
 
 /**
- * `/fly` route-table shape (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — "the cockpit is not
+ * `/fly` route-table shape (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — "the cockpit is not
  * addressable"). A pure, no-`TestBed` structural check on the real `FLY_ROUTES` array, mirroring
  * `app.routes.spec.ts`'s own "resolves to its own component, not X" precedent, scoped to this one
  * feature's own route file (in-scope per this cycle's own file boundaries, unlike the app-wide

@@ -24,7 +24,7 @@ import java.util.List;
 
 /**
  * Wires {@code adapter-discovery}'s scanners and the {@link
- * DiscoveryService} implementation, per docs/DISCOVERY-PLAN.md Task D4.
+ * DiscoveryService} implementation, per docs/plans/done/DISCOVERY-PLAN.md Task D4.
  *
  * <p>The four scanner beans ({@link OnvifWsDiscoveryScanner}, {@link
  * MdnsScanner}, {@link V4l2Scanner}, {@link MavlinkHeartbeatScanner}) are
@@ -34,7 +34,7 @@ import java.util.List;
  * restricted environments (e.g. no multicast, no {@code /dev}) without
  * touching the discovery feature's other wiring.
  *
- * <p>{@link #mavlinkHeartbeatScanner} (docs/DRONE-INFRA-PLAN.md I-b) lives in
+ * <p>{@link #mavlinkHeartbeatScanner} (docs/plans/active/DRONE-INFRA-PLAN.md I-b) lives in
  * {@code adapter-mavlink}, not {@code adapter-discovery} like the other
  * three — adapters never depend on each other (ArchUnit-enforced), and this
  * scanner needs to see {@link MavlinkTelemetrySource} directly so it can
@@ -43,7 +43,7 @@ import java.util.List;
  * javadoc for the full hub-borrow/self-bind split). It is wired with the
  * same {@link MavlinkTelemetrySource} bean {@link WiringConfiguration}
  * registers for real telemetry ingest, and {@link
- * VisionDiscoveryProperties#mavlinkPort()} (docs/DRONE-INFRA-PLAN.md I-g wave
+ * VisionDiscoveryProperties#mavlinkPort()} (docs/plans/active/DRONE-INFRA-PLAN.md I-g wave
  * A — previously a hardcoded constant, since none of this class's other
  * three scanners had a per-scanner property either; promoted to a real,
  * shared {@code vision.discovery.mavlink-port} property so the scanner and
@@ -80,7 +80,7 @@ public class DiscoveryWiringConfiguration {
 
     /**
      * {@code scanBudget} maps {@link VisionDiscoveryProperties.Mdns} onto {@code
-     * adapter-discovery}'s framework-free {@code ScanBudget} (docs/LAYERING-REFACTOR-PLAN.md wave
+     * adapter-discovery}'s framework-free {@code ScanBudget} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave
      * F4) — the timeout-budget cushions carved out of a caller-requested scan window.
      */
     @Bean
@@ -92,7 +92,7 @@ public class DiscoveryWiringConfiguration {
 
     /**
      * {@code devBase}/{@code sysBase} map onto {@code V4l2Scanner}'s existing {@code (Path, Path)}
-     * constructor (docs/LAYERING-REFACTOR-PLAN.md wave F4) — only two tunables, no dedicated
+     * constructor (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F4) — only two tunables, no dedicated
      * settings record needed (§1.3 rule 4).
      */
     @Bean
@@ -103,10 +103,10 @@ public class DiscoveryWiringConfiguration {
     }
 
     /**
-     * docs/DRONE-INFRA-PLAN.md I-b: plug-and-fly MAVLink heartbeat discovery, sharing {@code
+     * docs/plans/active/DRONE-INFRA-PLAN.md I-b: plug-and-fly MAVLink heartbeat discovery, sharing {@code
      * mavlinkTelemetrySource}'s already-running {@code MavlinkSocketHub} whenever a real telemetry
      * device already has the port open (see class javadoc). {@code scan} maps {@link
-     * VisionMavlinkProperties#scan()} onto {@code MavlinkSettings.Scan} (docs/LAYERING-REFACTOR-PLAN.md
+     * VisionMavlinkProperties#scan()} onto {@code MavlinkSettings.Scan} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * wave F2) — the same poll/self-bind-timeout budget {@code TelemetryWiring} builds a full {@code
      * MavlinkSettings} from, but this scanner needs only that one slice.
      */
@@ -131,7 +131,7 @@ public class DiscoveryWiringConfiguration {
     /**
      * The raw MAVLink heartbeat port value {@code vision-api}'s {@code SystemNetworkController}
      * (component-scanned from {@code com.drones.vision.api}) needs for {@code GET
-     * /api/system/network}'s {@code mavlinkPort} field (docs/DRONE-INFRA-PLAN.md I-g).
+     * /api/system/network}'s {@code mavlinkPort} field (docs/plans/active/DRONE-INFRA-PLAN.md I-g).
      *
      * <p>Supplied as a plain {@code int} bean — the same "hand the controller its one raw
      * collaborator as a bean, rather than constructing the controller here" pattern {@code

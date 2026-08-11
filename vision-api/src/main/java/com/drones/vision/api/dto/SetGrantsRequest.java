@@ -5,7 +5,7 @@ import com.drones.vision.domain.model.LayerGrant;
 import java.util.List;
 
 /**
- * Body of {@code PUT /api/map/layers/{id}/grants} (docs/MAP-REWORK-PLAN.md §4.1) — a
+ * Body of {@code PUT /api/map/layers/{id}/grants} (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — a
  * <strong>wholesale replacement</strong> of the layer's access list, not a delta: whatever is sent
  * becomes the complete grant set, and an absent/empty list clears every grant.
  *

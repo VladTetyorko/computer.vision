@@ -48,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc test for the {@code GET /api/live} SSE endpoint (docs/REALTIME-PLAN.md §4) — connect,
+ * MockMvc test for the {@code GET /api/live} SSE endpoint (docs/plans/done/REALTIME-PLAN.md §4) — connect,
  * receive the connection handshake + fleet snapshot, receive a delta after a port emission, and
  * {@code Last-Event-ID} resume. Uses a real {@link LiveUpdateRegistry} (its own background
  * scheduler, not a test double) constructed directly rather than through Spring wiring, exactly

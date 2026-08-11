@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * A named, access-controlled map layer (docs/MAP-REWORK-PLAN.md §2.1/§4.4, {@code
+ * A named, access-controlled map layer (docs/plans/done/MAP-REWORK-PLAN.md §2.1/§4.4, {@code
  * V12__map_layers.sql}) — mirrors the domain {@code MapLayer} field for field.
  *
  * <p>{@code id} is the domain's own {@code LayerId}, not synthetic — a layer has real identity.

@@ -7,7 +7,7 @@ import { findVideoDevice } from '../../core/fleet/device-logic';
  * writeup: Assets and Devices became separate pages, Warehouse became a two-tile launcher): the
  * asset → view-model builder plus every search/filter this page's grid needs. Moved wholesale out of
  * `features/devices/devices-page-logic.ts` (where it lived as the "asset-first primary list"'s own
- * logic, docs/CYCLES-PLAN.md §11 CD-b) once the Devices page stopped rendering assets at all — this
+ * logic, docs/main/CYCLES-PLAN.md §11 CD-b) once the Devices page stopped rendering assets at all — this
  * codebase's own precedent (`core/fleet/device-logic.ts`'s doc comment) is that cross-page logic
  * moves to `core/`, but here there is exactly **one** consumer left (this page), so it stays local,
  * unit-tested, Angular-free, mirroring `features/devices/devices-page-logic.ts`'s own split.
@@ -20,10 +20,10 @@ import { findVideoDevice } from '../../core/fleet/device-logic';
  * `streaming` are the card's status decoration. Built from `AssetDetails` (not just `AssetSummary`)
  * because `deviceCount` needs the resolved device list.
  *
- * `asset` is typed `AssetDetails`, not `AssetSummary` (docs/NAV-IA-REDESIGN-PLAN.md §2.4 Wave 3) —
+ * `asset` is typed `AssetDetails`, not `AssetSummary` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4 Wave 3) —
  * widened from the pre-two-pane version, which only ever exposed the `AssetSummary` field subset
  * even though `buildAssetListRows` has always been handed full `AssetDetails`. The two-pane detail
- * panel needs `asset.devices` (the per-device chip list, docs/design/04-assets.md's own mockup) and
+ * panel needs `asset.devices` (the per-device chip list, docs/extracts/design/04-assets.md's own mockup) and
  * this row is the panel's only data source, so the field is widened rather than threading a second
  * `AssetDetails` lookup through the facade for the one row currently selected.
  */
@@ -62,7 +62,7 @@ export function filterAssetListRowsByArchived(
 }
 
 /**
- * `?category=<slug>` filter (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's
+ * `?category=<slug>` filter (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2/QF-3 — the Command dashboard's
  * readiness-tile drill-down target; also the Assets page's own category `<select>`). Blank/absent
  * leaves every row; an unknown slug legitimately narrows to zero rows rather than falling back to
  * "show everything", since a caller linking here already knows the category exists.
@@ -114,8 +114,8 @@ export function searchAssetListRowsByName(
 }
 
 /**
- * Resolves the two-pane detail panel's row from `?sel=<assetId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4,
- * docs/design/04-assets.md) — looked up against **every** loaded row, not the search/filter-narrowed
+ * Resolves the two-pane detail panel's row from `?sel=<assetId>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4,
+ * docs/extracts/design/04-assets.md) — looked up against **every** loaded row, not the search/filter-narrowed
  * `assetRows()`, so narrowing the filters never silently evicts an already-open selection out from
  * under the user. Returns `undefined` for a missing/blank id and equally for one that matches no
  * currently-loaded row (an asset archived or deleted by someone else since the link was shared) — the
@@ -130,7 +130,7 @@ export function findAssetRowById(rows: readonly AssetListRow[], id: string | und
 }
 
 /**
- * docs/VISUAL-REFRESH-PLAN.md F5's "at most one chip per row" — collapses a row's lifecycle +
+ * docs/plans/done/VISUAL-REFRESH-PLAN.md F5's "at most one chip per row" — collapses a row's lifecycle +
  * streaming facts into the one state a glance actually needs, priority archived > deactivated >
  * live > the default "offline" (an active, non-streaming asset — this app's own steady state,
  * rendered as a dot + plain text everywhere it's used rather than a fourth chip color, so the
@@ -165,7 +165,7 @@ export function describeAssetState(row: Pick<AssetListRow, 'lifecycle' | 'archiv
   return { kind: 'offline', label: 'Offline' };
 }
 
-/** The `▤ ▦` list/card view toggle (docs/design/04-assets.md's suggested design) — persisted per user
+/** The `▤ ▦` list/card view toggle (docs/extracts/design/04-assets.md's suggested design) — persisted per user
  *  via `core/panel-state.ts#readPersistedString`/`writePersistedString`, the same idiom
  *  `features/command/command.ts`'s `railOpen`/`panelOpen` already use for their own collapse state. */
 export type AssetViewMode = 'list' | 'card';
@@ -174,7 +174,7 @@ export type AssetViewMode = 'list' | 'card';
  * Defends the persisted view-mode read against a corrupted/hand-edited `localStorage` value —
  * `readPersistedString` returns whatever string was last written (or `null`), with no type-level
  * guarantee it is still `'list' | 'card'`. Anything else falls back to `'list'`, the dense default
- * docs/design/04-assets.md calls for (F5 — a card grid is the wrong default for record browsing).
+ * docs/extracts/design/04-assets.md calls for (F5 — a card grid is the wrong default for record browsing).
  */
 export function parseAssetViewMode(raw: string | null): AssetViewMode {
   return raw === 'card' ? 'card' : 'list';

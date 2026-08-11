@@ -19,7 +19,7 @@ import java.util.List;
  *   <li>{@link #findByTarget(AuditTargetType, String, int)} returns the newest entries for one
  *       thing, newest first — the history shown on an asset's page.</li>
  *   <li>{@link #findByActor(UserId, int)} returns the newest entries made by one actor, newest
- *       first — the "my activity" feed shown to a user (docs/U-SCOPE-PLAN.md, feature 7).</li>
+ *       first — the "my activity" feed shown to a user (docs/plans/done/U-SCOPE-PLAN.md, feature 7).</li>
  * </ul>
  *
  * <p>Recording must never break the operation being audited: implementations that can fail

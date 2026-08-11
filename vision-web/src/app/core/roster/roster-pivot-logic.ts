@@ -2,7 +2,7 @@ import type { AssetSummary, AssignedPilot, UserSummary } from '../api/models';
 
 /**
  * Pure, Angular-free logic behind `/manage/roster`'s `By asset | By pilot` pivot
- * (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/13-roster.md — task 3: "the pivot itself is a pure
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/13-roster.md — task 3: "the pivot itself is a pure
  * function in `core/` (unit-tested), not view logic"). The **by-asset** direction was already correct
  * and stays exactly where it was (`features/roster/roster-logic.ts#buildRosterRows`, unchanged,
  * single-consumer, per this codebase's own "single consumer stays feature-local" precedent —
@@ -33,7 +33,7 @@ export interface RosterPilotRow {
 
 /**
  * The reverse pivot: every user in `users` — **not just ones with ≥1 assignment**
- * (docs/design/13-roster.md: "'By pilot' lists every pilot with their assets, including pilots with
+ * (docs/extracts/design/13-roster.md: "'By pilot' lists every pilot with their assets, including pilots with
  * zero assignments — that is the question the page's own name implies and currently cannot answer")
  * — each carrying the assets currently assigned to them, alphabetical both by pilot name and, within
  * a pilot, by asset name. Built from the same three inputs `buildRosterRows` already takes (assets,

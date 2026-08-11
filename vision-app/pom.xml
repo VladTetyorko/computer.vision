@@ -76,7 +76,7 @@
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
         <!--
-          Session auth (docs/U-AUTH-PLAN.md, wave 3). Spring Security lives ONLY here in vision-app,
+          Session auth (docs/plans/done/U-AUTH-PLAN.md, wave 3). Spring Security lives ONLY here in vision-app,
           never in vision-api (a driving adapter): the SecurityContext-reading seam
           (PrincipalResolver/SessionAuthenticator) is implemented in this module. Version managed by
           spring-boot-starter-parent.

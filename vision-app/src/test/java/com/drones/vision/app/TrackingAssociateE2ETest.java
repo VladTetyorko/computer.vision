@@ -52,7 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 /**
- * The end-to-end proof of docs/TRACKING-PLAN.md wave T8: with tracking on by default, a stream's
+ * The end-to-end proof of docs/plans/done/TRACKING-PLAN.md wave T8: with tracking on by default, a stream's
  * detections carry a <strong>stable {@code trackId} across frames</strong>, and {@code GET
  * /api/streams/{streamId}/tracks} reports each id <em>once</em> — as one track observed repeatedly,
  * not as a new anonymous box per frame.

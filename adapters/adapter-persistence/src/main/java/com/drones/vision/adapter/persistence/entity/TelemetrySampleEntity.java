@@ -24,7 +24,7 @@ import java.util.UUID;
  * identified only by {@code (usageId, deviceId, at)}, exactly as the in-memory reference
  * implementation identifies samples (by list position within a usage, i.e. not at all).
  *
- * <p>{@code flightState} (docs/FC-INTEGRATIONS-PLAN.md F-b) stores the whole {@link FlightState}
+ * <p>{@code flightState} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) stores the whole {@link FlightState}
  * as one nullable jsonb column via the same Hibernate native JSON support {@code
  * DetectionResultEntity#detections} already uses for a plain immutable record tree — no
  * persistence-local wrapper type is needed, {@link FlightState} (plus its {@code List<String>

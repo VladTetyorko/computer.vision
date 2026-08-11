@@ -1,4 +1,4 @@
--- History schema for docs/MVP2-PLAN.md P-b: asset usages, telemetry samples,
+-- History schema for docs/plans/done/MVP2-PLAN.md P-b: asset usages, telemetry samples,
 -- detection results. Telemetry/detections are append-heavy (one row per
 -- sample/result while a usage/stream is active), so both are indexed on
 -- (usage_id|stream_id, timestamp) for the read pattern this task and the

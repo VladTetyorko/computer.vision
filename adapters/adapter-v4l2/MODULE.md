@@ -1,8 +1,8 @@
 # adapter-v4l2
 
-USB/V4L2 local camera ingest — docs/MVP2-PLAN.md X-b. **RX only**: a local capture device has no
+USB/V4L2 local camera ingest — docs/plans/done/MVP2-PLAN.md X-b. **RX only**: a local capture device has no
 wire to transmit *to* — the same "no TX half" situation as `adapter-simulation`'s `sim` source and
-`adapter-rtsp`'s `file` source (`docs/CYCLES-PLAN.md` §0's RX/TX doctrine). There is no
+`adapter-rtsp`'s `file` source (`docs/main/CYCLES-PLAN.md` §0's RX/TX doctrine). There is no
 `V4l2FeedTransmitter`, and none is planned — you cannot "simulate" a webcam plug-in the way a
 network protocol can be simulated by pushing to a local server; the only way to exercise this
 adapter for real is a real device node (see "v4l2loopback test recipe" below).
@@ -19,7 +19,7 @@ happened to exist here (see below); elsewhere it skips cleanly.
 
 ## Deviation from the plan's brief — protocol/URI shape (read this first)
 
-docs/MVP2-PLAN.md X-b's brief proposed protocol `"usb"` with `uri = v4l2:///dev/videoN`. **This
+docs/plans/done/MVP2-PLAN.md X-b's brief proposed protocol `"usb"` with `uri = v4l2:///dev/videoN`. **This
 adapter does not implement that shape.** Reading `adapter-discovery`'s already-shipped
 `V4l2Scanner` (its source and its own test, `V4l2ScannerTest`) shows it actually emits:
 
@@ -37,7 +37,7 @@ accept that real shape, not the brief's originally-imagined one. This class ther
 scheme-only check `adapter-rtsp`'s `FfmpegVideoSource` uses for its own `"file"` protocol), and
 explicitly rejects both `protocol = "usb"` and a `v4l2://` scheme URI (see
 `V4l2VideoSourceTest#rejectsTheOriginallyProposedUsbProtocolString`/
-`#rejectsTheOriginallyProposedV4l2SchemeUri`). `docs/MVP2-PLAN.md`'s X-b row has been corrected in
+`#rejectsTheOriginallyProposedV4l2SchemeUri`). `docs/plans/done/MVP2-PLAN.md`'s X-b row has been corrected in
 place to record this (see its own done-note).
 
 No collision risk with `FfmpegVideoSource`'s `"file"` protocol: the two adapters key off different
@@ -55,7 +55,7 @@ scan never has to choose between them for the same descriptor.
   - `public V4l2VideoSource(int publisherBufferCapacity, long closeJoinTimeoutMillis)` — canonical
     constructor; validates `publisherBufferCapacity >= 1` and `closeJoinTimeoutMillis > 0`
     (`IllegalArgumentException` otherwise). Only two tunables exist, so per
-    `docs/LAYERING-REFACTOR-PLAN.md` §1.3 rule 4 this class takes them as plain constructor
+    `docs/plans/active/LAYERING-REFACTOR-PLAN.md` §1.3 rule 4 this class takes them as plain constructor
     parameters rather than a settings record (the plan itself names `adapter-v4l2` alongside
     `adapter-overlay`/`adapter-discovery` as a ≤2-tunable module). A later wave (F1, after
     `vision-app`'s wiring split) adds `VisionV4l2Properties` bound from `vision.v4l2.*` and passes
@@ -74,7 +74,7 @@ scan never has to choose between them for the same descriptor.
       `"yuyv422"` — independent of the `BGR24` format this class always decodes *to* before
       publishing (see Conventions).
 
-    `docs/LAYERING-REFACTOR-PLAN.md` §2.2's `vision.v4l2` row also lists
+    `docs/plans/active/LAYERING-REFACTOR-PLAN.md` §2.2's `vision.v4l2` row also lists
     `default-video-size`/`default-framerate`/`default-input-format` keys, each documented there as
     "absent = driver default" — i.e. today's actual behavior above, verbatim. There is no
     corresponding literal in this class to extract: nothing here falls back to an operator-set
@@ -196,18 +196,18 @@ elevation, no udev rule management); a permission-denied device simply fails the
 
 ## Status
 
-Fully implemented per docs/MVP2-PLAN.md X-b: `V4l2VideoSource` (RX only, no TX half — see the
+Fully implemented per docs/plans/done/MVP2-PLAN.md X-b: `V4l2VideoSource` (RX only, no TX half — see the
 module's own opening paragraph for why), wired into `vision-app`
 (`WiringConfiguration#v4l2VideoSource`, joining `videoSourceRegistry`'s `List<VideoSourcePort>`).
 22 tests, all passing (`./mvnw -B -pl adapters/adapter-v4l2 test`).
 
-**Deviation from the brief, corrected in `docs/MVP2-PLAN.md`'s own X-b row**: protocol `"v4l2"`
+**Deviation from the brief, corrected in `docs/plans/done/MVP2-PLAN.md`'s own X-b row**: protocol `"v4l2"`
 with a `file:`-scheme URI (matching `adapter-discovery`'s real `V4l2Scanner` emission), not the
 brief's originally-proposed `"usb"`/`v4l2://` shape — see "Deviation from the plan's brief" above
 for the full writeup and why matching discovery, not the brief's guess, is what actually makes
 "Discover → register → stream" work.
 
-**docs/LAYERING-REFACTOR-PLAN.md E-phase (E1, config-extraction only, no class splits — this
+**docs/plans/active/LAYERING-REFACTOR-PLAN.md E-phase (E1, config-extraction only, no class splits — this
 module was already "Healthy" per the plan's §5.1 table):** `V4l2VideoSource`'s two literals
 (`PUBLISHER_BUFFER_CAPACITY=4`, `CLOSE_JOIN_TIMEOUT_MILLIS=20_000L`) are now validated constructor
 parameters instead of `private static final` constants; the no-arg constructor still uses the

@@ -10,7 +10,7 @@ package com.drones.vision.adapter.simulation;
  * option always takes priority (see {@link SimulatedTelemetrySource} for that lenient-parsing
  * convention). {@code trackRadiusMeters} and {@code periodMillis} are not exposed as per-device
  * options at all; they are fixed for the life of a {@link SimulatedTelemetrySource} instance. Per
- * docs/LAYERING-REFACTOR-PLAN.md §1.3, this module never imports a {@code @ConfigurationProperties}
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3, this module never imports a {@code @ConfigurationProperties}
  * type; a later wave binds {@code vision.simulation.telemetry.*} in {@code vision-app} and
  * constructs this record there.
  *

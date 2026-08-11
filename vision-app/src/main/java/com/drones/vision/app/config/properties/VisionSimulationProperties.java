@@ -8,7 +8,7 @@ import java.time.Duration;
 
 /**
  * Configuration for simulated-feed resume-on-boot ({@code vision.simulation.*}) — see {@code
- * com.drones.vision.app.bootstrap.SimulationResumeRunner} — extended by docs/LAYERING-REFACTOR-PLAN.md
+ * com.drones.vision.app.bootstrap.SimulationResumeRunner} — extended by docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * §2.2 (wave F4) with {@code adapter-simulation}'s synthetic video/telemetry generation tunables.
  *
  * <p>{@link #video()} maps onto {@code com.drones.vision.adapter.simulation.VideoSettings}; {@link

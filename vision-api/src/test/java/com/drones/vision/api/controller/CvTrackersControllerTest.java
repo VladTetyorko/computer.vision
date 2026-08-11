@@ -15,7 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * docs/TRACKING-PLAN.md §4.F's frozen wire contract: {@code GET /api/cv/trackers} just wraps
+ * docs/plans/done/TRACKING-PLAN.md §4.F's frozen wire contract: {@code GET /api/cv/trackers} just wraps
  * whatever roster it was constructed with — the roster's actual content is {@code vision-app}'s
  * wiring concern ({@code TrackingWiring#cvTrackerRoster}), so this class proves only the
  * controller's own shape, exactly as {@link CvModelsControllerTest} does for its sibling endpoint.

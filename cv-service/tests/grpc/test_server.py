@@ -12,12 +12,12 @@ from __future__ import annotations
 import cv_service.grpc.server as server_module
 from cv_service.config import Settings
 
-# --- serve(): keepalive server options (docs/REMOTE-CV-PLAN.md "Transport decisions" P1) -----
+# --- serve(): keepalive server options (docs/plans/done/REMOTE-CV-PLAN.md "Transport decisions" P1) -----
 
 
 def test_keepalive_server_options_match_transport_decisions():
     """`_KEEPALIVE_SERVER_OPTIONS` must permit the client's idle-channel
-    pings and reciprocate with its own, per the values docs/REMOTE-CV-PLAN.md
+    pings and reciprocate with its own, per the values docs/plans/done/REMOTE-CV-PLAN.md
     "Transport decisions" settled on: `min_ping_interval_without_data_ms`
     (10s) is half of `GrpcDetectionPort.KEEPALIVE_TIME_SECONDS` (20s),
     leaving jitter headroom."""

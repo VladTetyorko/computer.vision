@@ -47,7 +47,7 @@ import java.util.List;
  * here — see {@link DetectionStreamSession} for that; this class only ever converts one frame or one
  * response at a time and never touches a network call.
  *
- * <h2>Payload shrinking for large {@code BGR24} frames (CP-b, docs/CYCLES-PLAN.md &sect;CP-b)</h2>
+ * <h2>Payload shrinking for large {@code BGR24} frames (CP-b, docs/main/CYCLES-PLAN.md &sect;CP-b)</h2>
  * The RTSP/file RX path produces full-resolution raw {@code BGR24} frames (e.g. 1280&times;720
  * &asymp; 2.7&nbsp;MB uncompressed) — too large to push over gRPC at a useful detection rate. A
  * {@code BGR24} frame wider than this instance's {@code detectWidth} is downscaled to exactly
@@ -62,7 +62,7 @@ import java.util.List;
  * come back normalized to {@code [0,1]} and {@link DetectionResult} never references the source
  * frame's pixel dimensions.
  *
- * <h2>Tracking (docs/TRACKING-PLAN.md &sect;4.A/&sect;4.B, docs/TRACKING-ORCHESTRATION.md &sect;5.1/&sect;5.2)</h2>
+ * <h2>Tracking (docs/plans/done/TRACKING-PLAN.md &sect;4.A/&sect;4.B, docs/extracts/TRACKING-ORCHESTRATION.md &sect;5.1/&sect;5.2)</h2>
  * {@link #encode} maps {@link PipelineConfig#tracking()} onto every outbound {@code FrameRequest} —
  * {@code redetectIouPercent} (an {@code int} percent) converts to the wire's {@code float} ratio via
  * {@code / 100f}; a present {@link TrackingConfig#lock()} maps to a wire {@code TargetLock}, absent
@@ -81,7 +81,7 @@ import java.util.List;
  * pre-tracking behavior; this is indistinguishable at the wire level from a modern server explicitly
  * reporting all-default values, which never legitimately happens because a modern cv-service always
  * reports {@code detector_ran}/{@code detector_reason} on every response regardless of mode
- * (docs/TRACKING-PLAN.md T1 wave).
+ * (docs/plans/done/TRACKING-PLAN.md T1 wave).
  *
  * <h2>Failure shape</h2>
  * {@link #encode} throws {@link IllegalArgumentException} for an unsupported {@link PixelFormat}
@@ -153,8 +153,8 @@ final class DetectionFrameCodec {
     }
 
     /**
-     * Maps the response's five per-frame tracking fields (docs/TRACKING-PLAN.md &sect;4.A fields
-     * 8-12) onto a {@link TrackingTelemetry} — the docs/TRACKING-ORCHESTRATION.md &sect;5.2 gap fix
+     * Maps the response's five per-frame tracking fields (docs/plans/done/TRACKING-PLAN.md &sect;4.A fields
+     * 8-12) onto a {@link TrackingTelemetry} — the docs/extracts/TRACKING-ORCHESTRATION.md &sect;5.2 gap fix
      * this wave exists to close. Returns {@code null} (tracking off for this result, matching this
      * class's pre-tracking behavior byte-for-byte) only when every one of the five fields is still
      * at its proto zero-value — the shape an old, pre-tracking server's response has, since a modern
@@ -171,7 +171,7 @@ final class DetectionFrameCodec {
                 && wireReason == com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_UNSPECIFIED) {
             return null;
         }
-        // detector_reason is meaningful only when detector_ran is true (docs/TRACKING-PLAN.md
+        // detector_reason is meaningful only when detector_ran is true (docs/plans/done/TRACKING-PLAN.md
         // §4.G); an UNSPECIFIED reason on a detector-ran frame is a contract violation, not
         // something to guess at, and is left to fail via TrackingTelemetry's own compact-ctor
         // validation (caught per-response by DetectionStreamSession#onResponse).
@@ -204,7 +204,7 @@ final class DetectionFrameCodec {
 
     /**
      * {@code box} is deliberately never set: the domain {@link TargetLock} carries no box component
-     * (docs/TRACKING-PLAN.md §4.D — the PATCH surface accepts only {@code trackId}/point/{@code
+     * (docs/plans/done/TRACKING-PLAN.md §4.D — the PATCH surface accepts only {@code trackId}/point/{@code
      * release}), so the wire's optional explicit-box override is a cv-service-only affordance this
      * adapter has nothing to populate it from.
      */
@@ -256,7 +256,7 @@ final class DetectionFrameCodec {
      * Maps a wire {@code Detection}'s track fields (4-9) onto a {@link TrackRef}, or {@code null} if
      * untracked. {@code track_id == 0} is the wire's untracked sentinel and short-circuits everything
      * else — it never reaches {@link TrackRef}'s constructor as a guessed {@code trackId}, regardless
-     * of what the other track fields say (docs/TRACKING-ORCHESTRATION.md §6 rule 2). An {@code
+     * of what the other track fields say (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 2). An {@code
      * UNSPECIFIED}/unrecognized {@code TrackState} or {@code DetectionSource} on an otherwise-tracked
      * detection decodes defensively to {@code null} too — never a guessed state/source.
      */

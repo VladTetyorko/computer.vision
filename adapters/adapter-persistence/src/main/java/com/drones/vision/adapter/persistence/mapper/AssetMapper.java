@@ -15,7 +15,7 @@ import java.util.UUID;
 
 /**
  * {@link Asset} &harr; {@link AssetEntity} mapping, extracted from {@code JpaAssetRepository}
- * (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class AssetMapper {
 

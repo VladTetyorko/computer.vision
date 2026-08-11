@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Per-{@code open} runtime for {@link FfmpegVideoSource}: one dedicated grab thread feeding a
  * {@link SubmissionPublisher}. Promoted out of {@code FfmpegVideoSource} (formerly the nested
- * {@code StreamRuntime} class, docs/LAYERING-REFACTOR-PLAN.md §5.1) into its own top-level,
+ * {@code StreamRuntime} class, docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1) into its own top-level,
  * package-private class with <b>zero references back to the {@link FfmpegVideoSource} instance</b>
  * that created it — every dependency it needs ({@link FfmpegSettings}, the shared consecutive-open-
  * failure counter map) is passed in explicitly through its constructor, exactly as before (the

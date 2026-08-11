@@ -6,7 +6,7 @@ import java.util.UUID;
 
 /**
  * Composite-key class for {@link AssignmentEntity} — the (pilot, asset) pair that uniquely
- * identifies one pilot&rarr;asset assignment (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2).
+ * identifies one pilot&rarr;asset assignment (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2).
  *
  * <p>A plain mutable class with a public no-arg constructor and matching field names, as JPA's
  * {@code @IdClass} contract requires (a record cannot satisfy it — no no-arg constructor). Field

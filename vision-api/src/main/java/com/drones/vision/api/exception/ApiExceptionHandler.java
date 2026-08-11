@@ -44,7 +44,7 @@ import java.util.NoSuchElementException;
  *       here.</li>
  *   <li>{@link DeviceProbeController} throws {@link ProbeFailedException} when a probe's protocol
  *       is recognized but the connection itself fails, times out, or ends without a frame —
- *       mapped to {@code 422} (docs/UX-REWORK-PLAN.md §U-d item 3), distinct from {@link
+ *       mapped to {@code 422} (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3), distinct from {@link
  *       UnsupportedProtocolException}'s {@code 400} (an unrecognized protocol is a malformed
  *       request, not a probe failure).</li>
  *   <li>{@link AssetImageController} throws {@link PayloadTooLargeException} when an uploaded
@@ -71,7 +71,7 @@ public class ApiExceptionHandler {
 
     /**
      * A scoped <em>command/grant</em> against an asset the caller cannot see maps to {@code 403}
-     * (docs/U-SCOPE-PLAN.md, U-e slice 2) — deliberately distinct from the {@code 404} a scoped
+     * (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — deliberately distinct from the {@code 404} a scoped
      * <em>read</em> gives ({@link NoSuchElementException}, which hides existence) and the {@code
      * 409} an ordinary {@link IllegalStateException} gives. For a command the honest answer is "you
      * may not do this," not "it isn't there."

@@ -223,7 +223,7 @@ describe('findAssetRowById', () => {
     expect(findAssetRowById(rows, 'a-2')?.asset.assetId).toBe('a-2');
   });
 
-  it('degrades to undefined for an id matching no loaded row (stale ?sel=, docs/NAV-IA-REDESIGN-PLAN.md §2.4)', () => {
+  it('degrades to undefined for an id matching no loaded row (stale ?sel=, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4)', () => {
     expect(findAssetRowById(rows, 'not-a-real-id')).toBeUndefined();
   });
 

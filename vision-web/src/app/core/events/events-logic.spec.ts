@@ -310,7 +310,7 @@ describe('eventNotificationText', () => {
   });
 });
 
-describe('findCoveringUsage (docs/OPS-CORE-PLAN.md §Q1)', () => {
+describe('findCoveringUsage (docs/plans/done/OPS-CORE-PLAN.md §Q1)', () => {
   it('finds the finished usage whose window covers the given instant', () => {
     const usages = [usage({ usageId: 'u-2', startedAt: '2026-07-23T11:00:00.000Z', endedAt: '2026-07-23T11:10:00.000Z' }), usage()];
     expect(findCoveringUsage(usages, '2026-07-23T10:05:00.000Z')?.usageId).toBe('u-1');
@@ -330,7 +330,7 @@ describe('findCoveringUsage (docs/OPS-CORE-PLAN.md §Q1)', () => {
   });
 });
 
-describe('resolveReplayDeepLink (docs/OPS-CORE-PLAN.md §Q1)', () => {
+describe('resolveReplayDeepLink (docs/plans/done/OPS-CORE-PLAN.md §Q1)', () => {
   it('resolves the covering finished usage and the offset from its own start', () => {
     const e = event({ firstSeen: '2026-07-23T10:02:30.000Z' });
     const deepLink = resolveReplayDeepLink(e, [usage()]);

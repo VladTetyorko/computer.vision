@@ -1,6 +1,6 @@
 """Lock arbitration: `lock_seq` monotonicity and target selection.
 
-`docs/TRACKING-PLAN.md` §4.A (`TargetLock`), `docs/TRACKING-ORCHESTRATION.md`
+`docs/plans/done/TRACKING-PLAN.md` §4.A (`TargetLock`), `docs/extracts/TRACKING-ORCHESTRATION.md`
 §2.1, §3.3.
 
 A lock is **declarative and restated on every frame**, never an imperative

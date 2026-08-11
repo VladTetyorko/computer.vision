@@ -2,7 +2,7 @@ package com.drones.vision.domain.model;
 
 /**
  * Outcome of a flight command sent through {@link
- * com.drones.vision.domain.port.out.FlightCommandPort} (docs/DRONE-INFRA-PLAN.md I-e, Stage 1).
+ * com.drones.vision.domain.port.out.FlightCommandPort} (docs/plans/active/DRONE-INFRA-PLAN.md I-e, Stage 1).
  *
  * <p>An explicit refusal by the aircraft is deliberately <b>not</b> a value of this enum — see
  * {@link com.drones.vision.domain.port.out.FlightCommandPort}'s own javadoc for why that is

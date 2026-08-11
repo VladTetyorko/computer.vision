@@ -69,7 +69,7 @@ describe('ToastService', () => {
     expect(service.toasts().every((t) => t.action === undefined)).toBe(true);
   });
 
-  it('warn() pushes a warning-kind toast (docs/DRONE-INFRA-PLAN.md I-e Stage 1\'s NO_ACK outcome)', () => {
+  it('warn() pushes a warning-kind toast (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1\'s NO_ACK outcome)', () => {
     const service = create();
     service.warn('no acknowledgement');
     expect(service.toasts()).toEqual([{ id: expect.any(Number), kind: 'warning', text: 'no acknowledgement', action: undefined }]);

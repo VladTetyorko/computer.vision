@@ -1,4 +1,4 @@
-# Full demo stack (docs/MVP1-PLAN.md §C9 — see that section's exit criteria
+# Full demo stack (docs/plans/done/MVP1-PLAN.md §C9 — see that section's exit criteria
 # checklist, folded into README.md's "Demo" section too).
 #
 # Usage (see README.md "Demo" for the full walkthrough):
@@ -9,20 +9,20 @@
 #
 # Services:
 #   postgres    - fleet persistence (categories/devices/assets, adapter-persistence,
-#                 docs/MVP2-PLAN.md P-a): vision-app below wires VISION_PERSISTENCE_ENABLED=true
+#                 docs/plans/done/MVP2-PLAN.md P-a): vision-app below wires VISION_PERSISTENCE_ENABLED=true
 #                 against it, Flyway-migrated on first use. History (usages/telemetry/
 #                 detections) is P-b, still in-memory for now.
 #   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
-#   cv-service  - Python gRPC YOLO inference service (docs/MVP1-PLAN.md §C7)
+#   cv-service  - Python gRPC YOLO inference service (docs/plans/done/MVP1-PLAN.md §C7)
 #   vision-app  - the Java application (this repo's root ./Dockerfile)
 #
-# Resilience demo (docs/MVP1-PLAN.md §C9 exit criterion 4): the stack also
+# Resilience demo (docs/plans/done/MVP1-PLAN.md §C9 exit criterion 4): the stack also
 # works with cv-service missing entirely --
 #   docker compose up -d --scale cv-service=0
 # -- Compose skips depends_on/healthy waits for a service explicitly scaled to
 # zero (verified against this Compose version), so vision-app still starts;
 # `vision.cv.enabled=true` but every gRPC call fails fast, and StreamPipeline's
-# outage policy (docs/MVP1-PLAN.md §C7 bullet 3) degrades to "video/telemetry
+# outage policy (docs/plans/done/MVP1-PLAN.md §C7 bullet 3) degrades to "video/telemetry
 # keep running, boxes just don't appear" -- exactly the same path a mid-demo
 # `docker compose stop cv-service` exercises (see README.md).
 
@@ -59,7 +59,7 @@ services:
     # streams cross-origin. 1.19.3 now returns a literal "*", which is
     # credential-less by browser rules.
     #
-    # Bumped 1.19.2 -> 1.19.3 with a full WHEP re-test (docs/REALTIME-PLAN.md
+    # Bumped 1.19.2 -> 1.19.3 with a full WHEP re-test (docs/plans/done/REALTIME-PLAN.md
     # exit criteria: healthy-stream soak + feed-kill/ICE-restart/recovery) —
     # see that test run's results for this bump. Re-run the same re-test on
     # every future bump, same as this one.
@@ -83,7 +83,7 @@ services:
       # vision.publish.mediamtx.hls-base's host-mode default in vision-app's
       # application.properties.
       - "18888:8888" # HLS
-      # WHEP (docs/MVP2-PLAN.md L-a): same collision-avoidance rationale and
+      # WHEP (docs/plans/done/MVP2-PLAN.md L-a): same collision-avoidance rationale and
       # host/container split as HLS above -- host 18889, container's own
       # default 8889 unaffected. Unlike HLS, WHEP has no vision-app-side
       # proxy, so *browsers* hit this mapped port directly; must match
@@ -98,7 +98,7 @@ services:
       # port or the browser will try to reach a UDP port nothing is actually
       # listening on.
       - "8189:8189/udp" # WebRTC media (ICE/RTP)
-      # Playback server (docs/OPS-CORE-PLAN.md §R): host 19996, same 1:1
+      # Playback server (docs/plans/done/OPS-CORE-PLAN.md §R): host 19996, same 1:1
       # host:container style as the other mediamtx ports above -- container's
       # own default is 9996 (mediamtx's own PlaybackAddress default,
       # ":9996"), set explicitly below via MTX_PLAYBACKADDRESS for the same
@@ -117,7 +117,7 @@ services:
       # 1:1 UDP mapping above), which WHEP viewing needs to work at all
       # through this compose stack.
       #
-      # docs/MVP2-PLAN.md V-e: parametrized via VISION_WEBRTC_HOST (see
+      # docs/plans/done/MVP2-PLAN.md V-e: parametrized via VISION_WEBRTC_HOST (see
       # .env.example) instead of a hardcoded 127.0.0.1 -- defaults to
       # 127.0.0.1 (same-host-only, unchanged behavior) when unset. LAN
       # operators should set VISION_WEBRTC_HOST to this machine's own LAN IP
@@ -150,7 +150,7 @@ services:
       # MODULE.md and vision-app/MODULE.md ("WHEP viewing" section) for the
       # full WHEP-in-Docker writeup.
       MTX_WEBRTCADDITIONALHOSTS: "${VISION_WEBRTC_HOST:-127.0.0.1}"
-      # docs/MVP2-PLAN.md V-a (glass-to-glass latency): mediamtx's own default
+      # docs/plans/done/MVP2-PLAN.md V-a (glass-to-glass latency): mediamtx's own default
       # already *is* Low-Latency HLS (verified against the actual pulled
       # bluenviron/mediamtx:latest image, v1.19.2, by extracting its baked-in
       # mediamtx.yml -- hlsVariant: lowLatency, hlsSegmentDuration: 1s,
@@ -182,7 +182,7 @@ services:
       MTX_HLSSEGMENTDURATION: "1s"
       MTX_HLSPARTDURATION: "200ms"
       MTX_HLSSEGMENTCOUNT: "7"
-      # docs/OPS-CORE-PLAN.md §R (recording + clip export): mediamtx's own
+      # docs/plans/done/OPS-CORE-PLAN.md §R (recording + clip export): mediamtx's own
       # native recorder, not a custom sidecar. Env var names verified against
       # mediamtx v1.19.3's own source (internal/conf/env/env.go builds each
       # var as "MTX_" + the struct field's json tag, uppercased, with no
@@ -197,7 +197,7 @@ services:
       #     playback server's /get endpoint below serves back out.
       #   - MTX_PATHDEFAULTS_RECORDDELETEAFTER=1h: retention.
       #     **Deliberately far below** mediamtx's own 24h default and below the
-      #     72h docs/OPS-CORE-PLAN.md §R specifies for a real deployment --
+      #     72h docs/plans/done/OPS-CORE-PLAN.md §R specifies for a real deployment --
       #     because MTX_PATHDEFAULTS_RECORD above records *every* path, and in
       #     this dev stack most paths are simulated drones (adapter-simulation)
       #     that stream continuously for as long as the app is up. Measured on
@@ -233,7 +233,7 @@ services:
       MTX_PLAYBACK: "yes"
       MTX_PLAYBACKADDRESS: ":9996"
     volumes:
-      # Named volume, NOT a repo bind mount (docs/OPS-CORE-PLAN.md §R) --
+      # Named volume, NOT a repo bind mount (docs/plans/done/OPS-CORE-PLAN.md §R) --
       # recordings are potentially large fMP4 segments with a 72h retention
       # window; keeping them on a Docker-managed volume keeps the worktree
       # clean and lets `docker volume rm mediamtx-recordings` wipe them
@@ -283,7 +283,7 @@ services:
       VISION_PUBLISH_MEDIAMTX_RTSP_BASE: rtsp://mediamtx:8554
       VISION_PUBLISH_MEDIAMTX_HLS_BASE: http://mediamtx:8888
       # Deliberately NOT mirroring the compose-internal-hostname pattern above
-      # (docs/MVP2-PLAN.md L-a): rtsp-base/hls-base are consumed by vision-app
+      # (docs/plans/done/MVP2-PLAN.md L-a): rtsp-base/hls-base are consumed by vision-app
       # itself (server-side), so the compose-internal "mediamtx" hostname is
       # correct and resolvable from inside this container. whep-base is
       # different -- vision-app never connects to it, it only hands the URL
@@ -295,7 +295,7 @@ services:
       # than left to the default) so this reasoning is visible at the compose
       # level, not just in source.
       VISION_PUBLISH_MEDIAMTX_WHEP_BASE: http://localhost:18889
-      # docs/MVP2-PLAN.md P-a: wire fleet persistence (categories/devices/
+      # docs/plans/done/MVP2-PLAN.md P-a: wire fleet persistence (categories/devices/
       # assets) against the postgres service above -- compose-internal
       # hostname/port, not the host-mapped ${POSTGRES_PORT} below (same
       # container-vs-host addressing split as mediamtx's ports). Credentials
@@ -304,7 +304,7 @@ services:
       VISION_PERSISTENCE_JDBC_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       VISION_PERSISTENCE_USERNAME: ${POSTGRES_USER}
       VISION_PERSISTENCE_PASSWORD: ${POSTGRES_PASSWORD}
-      # docs/U-AUTH-PLAN.md wave 3: turn on real Spring Security session auth
+      # docs/plans/done/U-AUTH-PLAN.md wave 3: turn on real Spring Security session auth
       # for anyone using `docker compose up`. The *compiled* default
       # (vision.auth.enabled=false in vision-app's application.properties)
       # stays off on purpose -- ~26 unrelated @SpringBootTest classes plus
@@ -332,7 +332,7 @@ services:
 
 volumes:
   postgres-data:
-  # docs/OPS-CORE-PLAN.md §R: mediamtx's recorded fMP4 segments (72h
+  # docs/plans/done/OPS-CORE-PLAN.md §R: mediamtx's recorded fMP4 segments (72h
   # retention, MTX_PATHDEFAULTS_RECORDDELETEAFTER above). Docker-managed, not
   # a bind mount -- see the mediamtx service's own volumes: comment.
   mediamtx-recordings:

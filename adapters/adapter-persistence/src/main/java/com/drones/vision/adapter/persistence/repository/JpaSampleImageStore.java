@@ -13,7 +13,7 @@ import java.util.Optional;
 
 /**
  * {@link SampleImageStorePort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the {@code JpaAssetImageRepository} shape, verbatim,
+ * docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the {@code JpaAssetImageRepository} shape, verbatim,
  * reused for training-sample frames instead of asset photos.
  *
  * <p>{@link #save} is an upsert (merge-by-{@code sampleId}), matching {@code

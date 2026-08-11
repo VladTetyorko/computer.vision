@@ -1,7 +1,7 @@
 import { Injectable, computed, effect, signal } from '@angular/core';
 
 /**
- * A named set of pipeline values — Tier 1 of the disclosure model in docs/UX-DESIGN.md §4.
+ * A named set of pipeline values — Tier 1 of the disclosure model in docs/main/UX-DESIGN.md §4.
  *
  * A profile is not a simplified parallel system: it is a saved set of the very same fields
  * the advanced controls edit, which is what makes "preset" and "expert" two views of one
@@ -24,7 +24,7 @@ export interface PipelineProfile {
 
 /**
  * `model` used to be a closed TS union (`DetectionModelId`) over a hardcoded three-entry array
- * (`DETECTION_MODEL_OPTIONS`) — docs/CV-CONTROL-PLAN.md Wave E drops both: the roster now comes
+ * (`DETECTION_MODEL_OPTIONS`) — docs/plans/done/CV-CONTROL-PLAN.md Wave E drops both: the roster now comes
  * from `GET /api/cv/models` (`core/api/models.ts#CvModel`/`CvModelsResponse`, cached by
  * `core/fleet/fleet-store.ts#FleetStore.models`), which can grow/change at deploy time without a
  * frontend release. `model` is therefore a plain, unvalidated `string` here — exactly the
@@ -41,7 +41,7 @@ export interface PipelineProfile {
 export const DEFAULT_DETECTION_MODEL: string = 'yolo26n.pt';
 
 /** `balanced` mirrors `PipelineConfig.defaults()` exactly, so "no override" and it agree —
- * including the fast NMS-free `yolo26n.pt` default (docs/CV-CONTROL-PLAN.md §1: the domain's own
+ * including the fast NMS-free `yolo26n.pt` default (docs/plans/done/CV-CONTROL-PLAN.md §1: the domain's own
  * `defaults()` bug-fix, replacing the dead `"yolo"` id these profiles used to carry). `labelFilter:
  * []` ("all classes") and `detectionEnabled: true` on every built-in mirror `PipelineConfig`'s own
  * defaults too — none of the three built-ins target the open-vocabulary model, so none of them
@@ -88,14 +88,14 @@ export interface PipelineSettings {
   readonly inferenceFps: number;
   readonly model: string;
   /**
-   * Which detection labels to keep, applied Java-side (docs/CV-CONTROL-PLAN.md §A) —
+   * Which detection labels to keep, applied Java-side (docs/plans/done/CV-CONTROL-PLAN.md §A) —
    * **empty means "keep every label"**, the existing/unchanged semantics `StartStreamRequest`'s own
    * doc comment already states. Never validated against the roster here — an entry that doesn't
    * (yet) match anything the current model emits is simply never drawn, not rejected; see
    * `features/fly/cv-control-panel-logic.ts` for how the panel seeds/edits this on a model switch.
    */
   readonly labelFilter: readonly string[];
-  /** Server-side detection on/off (docs/CV-CONTROL-PLAN.md §1) — `false` means zero inference CPU
+  /** Server-side detection on/off (docs/plans/done/CV-CONTROL-PLAN.md §1) — `false` means zero inference CPU
    * spent on this stream; video keeps flowing regardless either way. Defaults `true`, mirroring
    * `PipelineConfig.DEFAULT_DETECTION_ENABLED`. Distinct from `FlyPage`'s own `boxesMode` (a purely
    * client-side render toggle for detections already computed) — see `cv-control-panel.html`'s own
@@ -104,7 +104,7 @@ export interface PipelineSettings {
 }
 
 /**
- * The four base map layers (docs/CYCLES-PLAN.md §9, CU-b item 6) — shared by the fleet map
+ * The four base map layers (docs/main/CYCLES-PLAN.md §9, CU-b item 6) — shared by the fleet map
  * (`shared/map/fleet-map.ts`) and the live cockpit's map inset (`shared/map/live-map.ts`) via this
  * one persisted choice, rather than each map remembering its own. Definitions (tile URL,
  * attribution, max zoom) live in `shared/map/leaflet-loader.ts#MAP_LAYERS`, keyed by this id — this file
@@ -114,7 +114,7 @@ export type MapLayerId = 'standard' | 'night' | 'relief' | 'satellite';
 
 /**
  * `night` (CARTO Dark Matter) rather than `standard` (plain OSM) — this console is dark by
- * default (docs/UX-DESIGN.md §7.7), and `night` is the true-dark-tile replacement for what used
+ * default (docs/main/UX-DESIGN.md §7.7), and `night` is the true-dark-tile replacement for what used
  * to be an always-on CSS invert filter over OSM, so it is the closer match to the app's existing
  * look out of the box.
  */
@@ -137,7 +137,7 @@ const STORAGE_KEY = 'vision.settings.v1';
 export class SettingsStore {
   /**
    * Account-level, not per-page: an expert flips this once and stays expert
-   * (docs/UX-DESIGN.md §4, rule 4).
+   * (docs/main/UX-DESIGN.md §4, rule 4).
    */
   readonly advancedMode = signal(false);
 
@@ -148,7 +148,7 @@ export class SettingsStore {
   readonly mapLayer = signal<MapLayerId>(DEFAULT_MAP_LAYER);
 
   /**
-   * Opt-in browser `Notification`s for newly-opened detection events (docs/MVP2-PLAN.md §E, E-b)
+   * Opt-in browser `Notification`s for newly-opened detection events (docs/plans/done/MVP2-PLAN.md §E, E-b)
    * — off by default, both because it's a permission-gated browser feature a user should
    * deliberately turn on, and because `Notification.requestPermission()` must be called from a
    * direct user gesture in most browsers, which only the Settings page's toggle can provide.
@@ -159,7 +159,7 @@ export class SettingsStore {
   readonly eventNotifications = signal(false);
 
   /**
-   * The operator's last-chosen drone for the Fly cockpit (docs/MVP3-PLAN.md §C-b) — `null` until a
+   * The operator's last-chosen drone for the Fly cockpit (docs/plans/done/MVP3-PLAN.md §C-b) — `null` until a
    * first pick is made. `null` is what tells `FlyPage` to show the asset picker instead of jumping
    * straight into a cockpit; every later visit (and every use of the in-cockpit switcher, which
    * writes here too) skips the picker. Not validated against the live fleet here — an id for an
@@ -186,7 +186,7 @@ export class SettingsStore {
    *
    * Editing a preset must not be a trap: the draft is what actually gets applied, the UI
    * badges it as `Custom (based on …)`, and both Revert and Save-as-new stay one click away
-   * (docs/UX-DESIGN.md §4, rule 3).
+   * (docs/main/UX-DESIGN.md §4, rule 3).
    */
   private readonly draftSignal = signal<PipelineSettings | null>(null);
 
@@ -335,7 +335,7 @@ function isStringArray(value: unknown): value is readonly string[] {
  * existed (or a tampered/stale value) reads exactly as if it had always carried the honest default,
  * never a reason to drop the rest of the profile.
  *
- * **`model` is no longer checked against a closed set** (docs/CV-CONTROL-PLAN.md Wave E — see
+ * **`model` is no longer checked against a closed set** (docs/plans/done/CV-CONTROL-PLAN.md Wave E — see
  * `DEFAULT_DETECTION_MODEL`'s own doc comment for why): any non-empty string passes through
  * unchanged, including an id the current roster no longer lists — the picker degrades that to a
  * bare id display, it is never treated as corrupt data. Only a missing/non-string value falls back

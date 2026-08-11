@@ -7,7 +7,7 @@ import com.drones.vision.application.exception.UnsupportedProtocolException;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
 
 /**
- * Test-before-save connectivity probe (docs/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
+ * Test-before-save connectivity probe (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
  * resolves the {@link VideoSourcePort} that would open a given {@link StreamDescriptor}, opens it,
  * waits for exactly one frame, then closes it again — proving a device can actually produce a
  * frame before anything about it is ever saved.

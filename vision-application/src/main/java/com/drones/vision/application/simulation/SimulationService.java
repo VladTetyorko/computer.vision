@@ -8,7 +8,7 @@ import java.util.List;
 import com.drones.vision.application.asset.AssetService;
 
 /**
- * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §0-1): a video file path
+ * The one-call, zero-hardware simulation entry point (docs/main/CYCLES-PLAN.md §0-1): a video file path
  * in, a registered, categorized, optionally already-streaming asset out.
  *
  * <p>One interface, one implementation ({@link DefaultSimulationService}) — see
@@ -39,7 +39,7 @@ public interface SimulationService {
 
     /**
      * Stops a simulated asset's stream and, if it was created with {@link
-     * SimulationTransport#RTSP}, its transmitted feed too — docs/CYCLES-PLAN.md §3's TX-side
+     * SimulationTransport#RTSP}, its transmitted feed too — docs/main/CYCLES-PLAN.md §3's TX-side
      * teardown.
      *
      * <p>Idempotent and tolerant of an unknown asset, mirroring {@link AssetService#stopStream(AssetId)}'s

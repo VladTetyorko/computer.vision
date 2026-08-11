@@ -44,7 +44,7 @@ import com.drones.vision.api.security.CurrentUser;
  * models the UI leads with, and start/stop streaming at the asset level.
  * Also exposes a usage's raw telemetry trail (unwindowed, un-downsampled — see
  * {@link #telemetry}). For a windowed, downsampled, 404-on-unknown-usage replay view (telemetry
- * plus, in future, detections), see {@link UsageTimelineController} instead (docs/MVP2-PLAN.md
+ * plus, in future, detections), see {@link UsageTimelineController} instead (docs/plans/done/MVP2-PLAN.md
  * §R, R-a) — the two endpoints live on separate controllers, see that class's javadoc for why.
  *
  * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and three driven ports
@@ -53,7 +53,7 @@ import com.drones.vision.api.security.CurrentUser;
  * is no service method for "read a usage's telemetry trail" yet, so this controller reads the
  * driven port directly, the same precedent {@link StreamController} already sets for {@code
  * viewUrl}), and {@link AssetImageRepositoryPort} (populating {@code hasImage} on every summary/
- * detail response — docs/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
+ * detail response — docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
  * existsByAssetId} check; the image bytes themselves are served by {@link AssetImageController}).
  * Per the hexagonal dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this
  * module depends only on {@code vision-domain} and {@code vision-application} — never on an
@@ -63,7 +63,7 @@ import com.drones.vision.api.security.CurrentUser;
  * The acting user comes from {@link CurrentUser} and is passed to every mutating call, so the
  * audit trail records a principal without any service knowing how it was authenticated.
  *
- * <h2>Visibility scoping (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
+ * <h2>Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
  * Every read is scoped to {@link CurrentUser#scope()}: {@link #list} filters to the assets the
  * caller may see, and {@link #details} (and every post-mutation detail render) 404s an asset
  * outside the caller's scope exactly as it 404s an unknown id — existence is never revealed. Each
@@ -140,7 +140,7 @@ public class AssetController {
     }
 
     /**
-     * Moves an asset between {@code ACTIVE} and {@code DEACTIVATED} (docs/CYCLES-PLAN.md §8's
+     * Moves an asset between {@code ACTIVE} and {@code DEACTIVATED} (docs/main/CYCLES-PLAN.md §8's
      * pinned contract).
      *
      * <p>Idempotent. {@code DEACTIVATED} on an already-{@code DELETED} asset restores it —
@@ -214,7 +214,7 @@ public class AssetController {
      * <p>What the body says about {@code tracking} travels as its own patch, folded onto the
      * deployment's tracking seed inside the application layer — the same path {@code
      * StreamController#start} and the simulation service take, so the deployment default never
-     * depends on which button the operator pressed (docs/TRACKING-ORCHESTRATION.md §4.1).
+     * depends on which button the operator pressed (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
      *
      * @param id      the asset to stream from, as a canonical UUID string
      * @param request optional overrides; {@code null}/absent means use every default
@@ -250,7 +250,7 @@ public class AssetController {
     }
 
     /**
-     * Assigns an existing, unowned device to this asset (docs/CYCLES-PLAN.md §8's pinned
+     * Assigns an existing, unowned device to this asset (docs/main/CYCLES-PLAN.md §8's pinned
      * contract).
      *
      * @param id      the asset to assign the device to, as a canonical UUID string
@@ -267,7 +267,7 @@ public class AssetController {
     }
 
     /**
-     * Removes one of this asset's devices, leaving the device itself untouched (docs/CYCLES-PLAN.md
+     * Removes one of this asset's devices, leaving the device itself untouched (docs/main/CYCLES-PLAN.md
      * §8's pinned contract).
      *
      * @param id       the asset to unassign the device from, as a canonical UUID string

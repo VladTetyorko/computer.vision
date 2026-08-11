@@ -7,10 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Direct unit tests for {@link PublishDiagnostics}: docs/MVP2-PLAN.md V-c's capture→encode lag
+ * Direct unit tests for {@link PublishDiagnostics}: docs/plans/done/MVP2-PLAN.md V-c's capture→encode lag
  * summary log gating, and that its {@link LagTracker} is a plain per-stream accumulator. (Moved
  * out of {@code StreamStateTest} when {@code StreamState}'s lag-diagnostics bookkeeping was split
- * into this class, docs/LAYERING-REFACTOR-PLAN.md §5.1.)
+ * into this class, docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1.)
  */
 class PublishDiagnosticsTest {
 

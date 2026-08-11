@@ -23,7 +23,7 @@ interface SubjectOption {
 
 /**
  * `<vision-layer-manager>` — create layers, rename/delete the ones you manage, and grant access to
- * users and groups (docs/MAP-REWORK-PLAN.md §5.2's "layer manager"). Shared by the Fly cockpit's Map
+ * users and groups (docs/plans/done/MAP-REWORK-PLAN.md §5.2's "layer manager"). Shared by the Fly cockpit's Map
  * drawer and Command's Layers panel.
  *
  * **Deviation from §5.2, flagged.** The plan places this "from the data-layer panel": the map's own

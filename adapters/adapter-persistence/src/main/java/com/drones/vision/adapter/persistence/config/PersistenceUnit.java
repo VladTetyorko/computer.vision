@@ -42,7 +42,7 @@ import org.hibernate.cfg.Configuration;
  * argument (JDBC URL/user/password) or a fixed protocol/design constant (the JDBC driver class,
  * the SQL dialect, {@code hibernate.hbm2ddl.auto=validate}) — there is no hardcoded
  * connection-pool sizing, batch size, or timeout here to externalize into a settings record
- * (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C item 5): this module has no framework dependency of
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C item 5): this module has no framework dependency of
  * its own to read such a setting from, and none of these three properties varies per environment
  * the way a pool size or timeout would.
  */
@@ -90,7 +90,7 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(DatasetEntity.class);
         configuration.addAnnotatedClass(TrainingSampleEntity.class);
         configuration.addAnnotatedClass(SampleImageEntity.class);
-        // docs/MAP-REWORK-PLAN.md Wave C (V12__map_layers.sql). LayerGrantEmbeddable needs no
+        // docs/plans/done/MAP-REWORK-PLAN.md Wave C (V12__map_layers.sql). LayerGrantEmbeddable needs no
         // registration of its own -- Hibernate discovers an @Embeddable through the @ElementCollection
         // field that uses it, unlike an @Entity, which must be named explicitly here.
         configuration.addAnnotatedClass(MapLayerEntity.class);

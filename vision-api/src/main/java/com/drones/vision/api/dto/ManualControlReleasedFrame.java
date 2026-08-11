@@ -4,7 +4,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 /**
  * Server&rarr;client {@code /ws/manual-control} frame confirming the relay session ended
- * (docs/RC-CONTROL-PHASE1-PLAN.md §4).
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4).
  *
  * @param type   always {@code "released"}
  * @param reason {@code "EXPLICIT"} (the client sent a {@code release} frame) or {@code
@@ -14,7 +14,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
  */
 public record ManualControlReleasedFrame(String type, String reason) {
 
-    /** The two frozen reason values (docs/RC-CONTROL-PHASE1-PLAN.md §4). */
+    /** The two frozen reason values (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4). */
     public static final String REASON_EXPLICIT = "EXPLICIT";
     public static final String REASON_SOCKET_CLOSE = "SOCKET_CLOSE";
 

@@ -6,7 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
- * A subscribable {@code GET /api/live} topic (docs/REALTIME-PLAN.md §4, item 2) — {@code fleet},
+ * A subscribable {@code GET /api/live} topic (docs/plans/done/REALTIME-PLAN.md §4, item 2) — {@code fleet},
  * {@code event}, {@code devices}, {@code detection-events}, and {@code marks} are implicit and
  * always-on (every connection gets all five regardless of the {@code topics} query parameter);
  * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in, named explicitly by the
@@ -30,7 +30,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
     /** The always-on debounced-detection-event topic (extends the R-c channel — see {@link LiveTopicKind#DETECTION_EVENTS}). */
     static final LiveTopic DETECTION_EVENTS = new LiveTopic(LiveTopicKind.DETECTION_EVENTS, null);
 
-    /** The always-on common-operational-picture topic (docs/MAP-REWORK-PLAN.md §4.3 — see {@link LiveTopicKind#MAP}); the only topic whose delivery is filtered per connection. */
+    /** The always-on common-operational-picture topic (docs/plans/done/MAP-REWORK-PLAN.md §4.3 — see {@link LiveTopicKind#MAP}); the only topic whose delivery is filtered per connection. */
     static final LiveTopic MAP = new LiveTopic(LiveTopicKind.MAP, null);
 
     static LiveTopic telemetry(AssetId assetId) {

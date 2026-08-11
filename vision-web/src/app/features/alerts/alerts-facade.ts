@@ -22,15 +22,15 @@ import type { DetectionEvent } from '../../core/api/models';
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * `AlertsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/monitor/alerts`, Wave 3 of
- * docs/NAV-IA-REDESIGN-PLAN.md (§2.4, docs/design/08-alerts.md): a two-pane triage view over the
+ * `AlertsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/monitor/alerts`, Wave 3 of
+ * docs/plans/done/NAV-IA-REDESIGN-PLAN.md (§2.4, docs/extracts/design/08-alerts.md): a two-pane triage view over the
  * shared `EventsStore` feed. Saved threshold rules + acknowledge are still not built (the page's own
  * honest `<vision-notice>` covers that, unchanged from before this task).
  *
  * **No longer embeds `<vision-events-rail>`** (the pre-Wave-3 shape, see this file's own git
  * history) — that component's own `EVENTS_DISPLAY_LIMIT`=20 cap and 300px-rail layout are right for
  * a "recent activity" sidebar, wrong for this page's job as the *full* triage list
- * (docs/design/08-alerts.md's own acceptance: "≥20 events visible… without scrolling", which implies
+ * (docs/extracts/design/08-alerts.md's own acceptance: "≥20 events visible… without scrolling", which implies
  * more than 20 may exist beyond that). This facade re-derives the identical label/asset filtering
  * `EventsRail` used to own internally (`distinctLabels`/`filterEvents`, the same pure functions,
  * unchanged) now that this page renders its own list of `vision-event-row[dense]` instead of
@@ -71,7 +71,7 @@ export class AlertsFacade {
   );
 
   /**
-   * `?sel=<eventId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4) — read straight off the route, not via a
+   * `?sel=<eventId>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4) — read straight off the route, not via a
    * component input, since this facade already owns navigation (`select`/`clearSelection` below)
    * and every other piece of page state; keeping the two together avoids a third layer relaying the
    * param between the route and this class.
@@ -87,7 +87,7 @@ export class AlertsFacade {
    * describing it, since the point of `?sel=` surviving refresh/Back is that it survives, not that
    * it's contingent on today's filter state too). Degrades to `undefined` — never a crash — the
    * moment the id doesn't match anything currently retained: a bogus id typed into the URL, or one
-   * evicted from `EventsStore`'s own `MAX_RETAINED_EVENTS` cap (docs/NAV-IA-REDESIGN-PLAN.md §2.4's
+   * evicted from `EventsStore`'s own `MAX_RETAINED_EVENTS` cap (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4's
    * own "must degrade to no selection" rule).
    */
   readonly selectedEvent = computed(() => this.events.events().find((event) => event.id === this.selectedId()));
@@ -140,10 +140,10 @@ export class AlertsFacade {
   }
 
   /**
-   * `docs/design/08-alerts.md`'s two actions, split out of the old single "smart" row-click
+   * `docs/extracts/design/08-alerts.md`'s two actions, split out of the old single "smart" row-click
    * (`resolveEventTarget` then `resolveReplayDeepLink`) this page used to do on every click before
    * selecting became the row's job instead — an asset-tied event opens `/fly?asset=…` (the same
-   * `?asset=` deep-link `FlyPage`/`CommandPage` already read, docs/MVP3-PLAN.md §C-b), a
+   * `?asset=` deep-link `FlyPage`/`CommandPage` already read, docs/plans/done/MVP3-PLAN.md §C-b), a
    * device-only one with a live stream opens `/live/:deviceId` (the single-device cockpit) — both
    * genuinely "a cockpit", just two different pages depending on whether an asset resolved.
    */

@@ -1,10 +1,10 @@
 /* Reuses `.page`/`vision-page-bar`/`.card`/`.chip`/`.chip.warn`/`.empty`/`.btn`/`.segmented` from
    `src/styles.css` — no new colors. The old accordion styling (`.roster-summary`/`.roster-chevron`/
-   `details[open]`) is gone with the accordion itself (docs/NAV-IA-REDESIGN-PLAN.md §2.4). */
+   `details[open]`) is gone with the accordion itself (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4). */
 
 /* Explicit width, not just `min-width` — the global `input { width: 100% }` rule would otherwise
    stretch this to the full page-bar row once it wraps onto its own line
-   (docs/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
 .roster-search {
   width: 16rem;
   min-height: 40px;
@@ -43,7 +43,7 @@
   background: var(--panel-hover);
 }
 
-/* Selected row per docs/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
+/* Selected row per docs/plans/done/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
    `--color-info` left inset bar plus a `--color-info-soft` background tint — replaces the
    pre-refresh left-bar-only treatment (`--panel-hover`'s own hover tint was doing the "raised"
    half of the job, which read identically to plain `:hover`). */
@@ -59,7 +59,7 @@
   color: var(--text);
 }
 
-/* Classification, not state (docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — "category/classification is
+/* Classification, not state (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — "category/classification is
    muted text, not a chip"); the old `.chip` wrapper is gone. */
 .roster-category {
   flex: none;

@@ -7,7 +7,7 @@ import type {
 } from '../api/models';
 
 /**
- * Pure helpers behind `manual-control-client.ts` (docs/RC-CONTROL-PHASE1-PLAN.md §4, R5) — client→
+ * Pure helpers behind `manual-control-client.ts` (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4, R5) — client→
  * server frame builders, defensive server→client frame parsing, and the latency/send-rate math.
  * Frame-free and dependency-free so it unit-tests without a browser/`TestBed`/a real `WebSocket` —
  * mirrors `core/rc/rc-input-logic.ts`'s own split (the one browser-touching part, the `WebSocket`
@@ -124,7 +124,7 @@ export function parseManualControlServerMessage(raw: string): ManualControlServe
   }
 }
 
-// --- Latency (glass-to-stick RTT, docs/RC-CONTROL-PHASE1-PLAN.md's own "the watchdog is the
+// --- Latency (glass-to-stick RTT, docs/plans/done/RC-CONTROL-PHASE1-PLAN.md's own "the watchdog is the
 // feature, latency is a safety property" framing) --------------------------------------------------
 
 /** RTT for one `ack`, clamped at 0 (defensive against clock skew — `tSent` is this client's own

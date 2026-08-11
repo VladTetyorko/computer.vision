@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import java.util.List;
 
 /**
- * Payload of the {@code devices} {@code GET /api/live} topic (docs/REALTIME-PLAN.md §4, extended
+ * Payload of the {@code devices} {@code GET /api/live} topic (docs/plans/done/REALTIME-PLAN.md §4, extended
  * for the fleet/warehouse UI) — the combined device-list + active-stream-list snapshot {@code
  * FleetStore} (vision-web) otherwise polls via {@code GET /api/devices}+{@code GET /api/streams}
  * every 5s.

@@ -4,7 +4,7 @@ package com.drones.vision.domain.model;
  * An org-chart node a {@link User} can hold a {@link Membership} in.
  *
  * <p>Groups form a tree: {@code parentGroupId} points at the enclosing group, and {@code null}
- * marks a root group (a group with no parent). Slice 1 (docs/U-AUTH-PLAN.md) only stores and
+ * marks a root group (a group with no parent). Slice 1 (docs/plans/done/U-AUTH-PLAN.md) only stores and
  * lists groups — subtree visibility scoping is a later slice.
  *
  * @param id            typed group identity

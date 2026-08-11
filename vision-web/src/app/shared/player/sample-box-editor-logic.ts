@@ -2,7 +2,7 @@ import type { BoundingBox } from '../../core/api/models';
 
 /**
  * Pure geometry behind `sample-box-editor.ts` — the editable annotation canvas for a training
- * sample (docs/CV-TRAINING-PLAN.md §4, Wave T5). Split out so drag/resize/create math is
+ * sample (docs/plans/done/CV-TRAINING-PLAN.md §4, Wave T5). Split out so drag/resize/create math is
  * unit-testable with no `<canvas>`/pointer events, mirroring `player-recovery.ts`/
  * `detection-overlay-logic.ts`'s own precedent in this folder.
  *

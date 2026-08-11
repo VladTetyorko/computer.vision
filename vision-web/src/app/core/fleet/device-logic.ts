@@ -3,8 +3,8 @@ import type { Device } from '../api/models';
 /**
  * Pure, Angular-free device-resolution helpers shared across pages.
  *
- * `findVideoDevice` started life in `features/devices/simulate-logic.ts` (docs/CYCLES-PLAN.md §4 —
- * the "Simulate a source" wizard's Watch action). docs/CYCLES-PLAN.md §6's `/map` tab needs the
+ * `findVideoDevice` started life in `features/devices/simulate-logic.ts` (docs/main/CYCLES-PLAN.md §4 —
+ * the "Simulate a source" wizard's Watch action). docs/main/CYCLES-PLAN.md §6's `/map` tab needs the
  * exact same resolution for its own marker-popup Watch action, and this codebase has no
  * precedent for one page importing another page's module (every cross-page dependency runs
  * through `core/`), so it was lifted here rather than imported across `pages/devices` →
@@ -22,7 +22,7 @@ export function findVideoDevice(devices: readonly Device[]): Device | undefined 
 }
 
 /**
- * Every `VIDEO`-capable device on an asset (docs/MVP3-PLAN.md §C-b) — the Fly cockpit's secondary
+ * Every `VIDEO`-capable device on an asset (docs/plans/done/MVP3-PLAN.md §C-b) — the Fly cockpit's secondary
  * tile strip renders one small preview per entry beyond whichever is currently primary. Mirrors
  * `core/telemetry/telemetry-logic.ts#telemetryDevices`'s identical capability-filter shape for the other axis.
  */

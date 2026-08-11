@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 /**
  * Unit tests for {@link LocalNetworkAddresses}, feeding a fixed, fake {@link
  * NetworkInterface}/{@link InetAddress} list via its package-private test-seam constructor
- * (docs/DRONE-INFRA-PLAN.md I-g) rather than depending on whatever NICs the build machine
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-g) rather than depending on whatever NICs the build machine
  * actually has. {@link InetAddress} instances are real, not mocked — {@link
  * InetAddress#getByName(String)} on a numeric literal (IPv4 or IPv6) resolves purely locally, no
  * DNS/network access, so a genuine {@code Inet4Address}/{@code Inet6Address} with correct {@code

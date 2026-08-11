@@ -15,7 +15,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * docs/U-SCOPE-PLAN.md U-e slice 2 — deferred slice-2 cleanup, with {@code vision.auth.enabled=true}:
+ * docs/plans/done/U-SCOPE-PLAN.md U-e slice 2 — deferred slice-2 cleanup, with {@code vision.auth.enabled=true}:
  * proves the ADMIN/MANAGER management gate and the ≤-own-scope grant rule actually bite once auth is
  * on. Uses the seeded {@code admin}/{@code manager}/{@code pilot} accounts (all members of the seeded
  * {@code Root} group — {@code AuthSeedRunner}). The security filter chain is applied to MockMvc

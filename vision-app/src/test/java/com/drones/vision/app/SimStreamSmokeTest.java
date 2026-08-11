@@ -50,13 +50,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * telemetry samples from {@code SimulatedTelemetrySource} accumulating on
  * the asset's open {@code AssetUsage}, then stops the stream and asserts the
  * usage closed with a populated start/last position and sample count — the
- * extended scenario from docs/ASSET-MODEL-PLAN.md M4.
+ * extended scenario from docs/plans/done/ASSET-MODEL-PLAN.md M4.
  *
  * <p>{@code vision.publish.enabled=false} is set here for determinism even
  * though it wouldn't otherwise matter: {@link RecordingPublisherConfig}'s
  * {@code RecordingStreamPublisher} is {@code @Primary} and always wins the
  * autowiring, and {@code MediamtxStreamPublisher} tolerates a missing
- * mediamtx by design (see docs/PHASE1-PLAN.md §0.3) — but this test
+ * mediamtx by design (see docs/plans/done/PHASE1-PLAN.md §0.3) — but this test
  * shouldn't depend on that resilience, nor on mediamtx being reachable at
  * all, to stay green.
  *

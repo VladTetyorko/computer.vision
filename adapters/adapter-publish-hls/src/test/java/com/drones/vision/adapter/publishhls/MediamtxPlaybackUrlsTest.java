@@ -36,7 +36,7 @@ class MediamtxPlaybackUrlsTest {
 
     /**
      * {@link MediamtxReplayFrameExtractor} always requests a one-second window — this is the exact
-     * query shape it builds (docs/CV-TRAINING-V2-PLAN.md §6: "one-second window starting at the
+     * query shape it builds (docs/plans/done/CV-TRAINING-V2-PLAN.md §6: "one-second window starting at the
      * wanted instant").
      */
     @Test

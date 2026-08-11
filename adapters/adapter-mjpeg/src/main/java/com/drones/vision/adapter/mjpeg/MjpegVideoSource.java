@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>The multipart body is parsed by hand via {@link MjpegStreamParser} — no
  * multipart/MIME library dependency on the read path, matching {@code
- * docs/CYCLES-PLAN.md} §5's "transparent, dependency-free" requirement. Each
+ * docs/main/CYCLES-PLAN.md} §5's "transparent, dependency-free" requirement. Each
  * extracted JPEG part is passed through unmodified ({@link PixelFormat#JPEG}
  * <b>passthrough</b> — the pipeline already knows how to handle JPEG frames,
  * see {@code adapter-simulation}'s {@code SimulatedVideoSource}); width/height

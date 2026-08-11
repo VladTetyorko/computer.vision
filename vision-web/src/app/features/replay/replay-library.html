@@ -1,9 +1,9 @@
 @if (usageIdParam(); as usageId) {
-  <!-- Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) — the exact same `ReplayPage` component
+  <!-- Event → replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1) — the exact same `ReplayPage` component
        this URL has always loaded, just reached one component deeper. See class doc comment. -->
   <vision-replay [asset]="assetIdParam()" [usage]="usageId" [t]="deepLinkOffsetParam()" />
 } @else {
-  <!-- The replay library (docs/design/10-replay.md, Wave 4, F8) -->
+  <!-- The replay library (docs/extracts/design/10-replay.md, Wave 4, F8) -->
   <div class="page">
     <vision-page-bar
       title="Replay library"
@@ -44,7 +44,7 @@
       }
     </vision-page-bar>
 
-    <!-- Two-pane (docs/NAV-IA-REDESIGN-PLAN.md §2.4): the preview docks beside the list ≥1200px and
+    <!-- Two-pane (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4): the preview docks beside the list ≥1200px and
          overlays it below that — see `vision-two-pane`'s own doc comment. Selection lives in
          `?sel=<usageId>`, never a bare component signal, so refresh/Back/sharing all keep working. -->
     <vision-two-pane
@@ -121,7 +121,7 @@
         }
       </section>
 
-      <!-- Preview (docs/design/10-replay.md, Wave 4): every field here is already loaded on the row
+      <!-- Preview (docs/extracts/design/10-replay.md, Wave 4): every field here is already loaded on the row
            itself — no extra fetch on selection, see class doc comment for why. -->
       @if (facade.selectedUsage(); as usage) {
         <div twoPaneDetail>

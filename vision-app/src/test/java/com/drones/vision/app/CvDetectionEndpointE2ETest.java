@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 /**
- * End-to-end proof for docs/MVP1-PLAN.md §C8 bullet 3's API-side done criterion: with a real (in-test,
+ * End-to-end proof for docs/plans/done/MVP1-PLAN.md §C8 bullet 3's API-side done criterion: with a real (in-test,
  * loopback-TCP) {@code Inference/DetectStream} gRPC server that actually returns non-empty {@code
  * Detection}s (unlike {@link CvDetectionE2ETest}'s echo servicer, which never populates {@code
  * detections}), a {@code sim}-device stream's sampled frames flow all the way through {@link
@@ -122,7 +122,7 @@ class CvDetectionEndpointE2ETest {
 
             assertEquals(streamId.value().toString(), JsonPath.read(responseJson, "$[0].streamId"));
             assertEquals("person", JsonPath.read(responseJson, "$[0].detections[0].label"));
-            // docs/CV-CONTROL-PLAN.md Wave B: PipelineConfig.defaults()'s model id is now the real
+            // docs/plans/done/CV-CONTROL-PLAN.md Wave B: PipelineConfig.defaults()'s model id is now the real
             // "yolo26n.pt" checkpoint (was the dead "yolo" id that matched no real checkpoint).
             assertEquals("yolo26n.pt", JsonPath.read(responseJson, "$[0].detections[0].modelId"));
             assertEquals("latest", JsonPath.read(responseJson, "$[0].detections[0].modelVersion"));

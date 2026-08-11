@@ -10,7 +10,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * Starts a CV model fine-tune job and holds its pollable state (docs/CV-TRAINING-PLAN.md §6/§7,
+ * Starts a CV model fine-tune job and holds its pollable state (docs/plans/done/CV-TRAINING-PLAN.md §6/§7,
  * Phase 2). One interface, one implementation ({@link DefaultTrainingJobService}) — {@link
  * TrainingPort} itself is the substitutable boundary (a GPU-training-host gRPC client, or a
  * refusing offline default); this service adds the manager gate/audit, the off-thread run, the
@@ -29,7 +29,7 @@ public interface TrainingJobService {
     /**
      * Starts a fine-tune job off-thread and returns immediately with the id a poller uses to track
      * it — never blocks on the (potentially long-running, multi-epoch) training stream itself. The
-     * job's dataset is uploaded to the training host as part of the off-thread run (docs/CV-TRAINING-V2-PLAN.md
+     * job's dataset is uploaded to the training host as part of the off-thread run (docs/plans/done/CV-TRAINING-V2-PLAN.md
      * §4) — see {@link DefaultTrainingJobService}'s own javadoc for the upload-then-train sequence
      * and its synchronous pre-check.
      *

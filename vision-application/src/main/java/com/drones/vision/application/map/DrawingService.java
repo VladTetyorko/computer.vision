@@ -9,7 +9,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
 
 /**
  * Lines, polygons, arrows and text annotations on a {@link com.drones.vision.domain.model.MapLayer}
- * (docs/MAP-REWORK-PLAN.md §3/§5.1) — the substrate for a later "plans" slice. One interface, one
+ * (docs/plans/done/MAP-REWORK-PLAN.md §3/§5.1) — the substrate for a later "plans" slice. One interface, one
  * implementation ({@link DefaultDrawingService}).
  *
  * <h2>Authorization</h2>

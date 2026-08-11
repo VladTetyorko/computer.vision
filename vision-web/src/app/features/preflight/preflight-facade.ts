@@ -11,8 +11,8 @@ import type { AssetDetails, AssetSummary } from '../../core/api/models';
 import { defaultPreflightAssetId, sortAssetsByName } from './preflight-logic';
 
 /**
- * `PreflightPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/operate/preflight`,
- * docs/UI-REDESIGN-PLAN.md Wave 4's **SPLIT** "Pre-flight checklist": a live status card for a
+ * `PreflightPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/operate/preflight`,
+ * docs/plans/done/UI-REDESIGN-PLAN.md Wave 4's **SPLIT** "Pre-flight checklist": a live status card for a
  * selected drone, reusing `core/telemetry/flight-state-logic.ts#derivePreflight` byte-for-byte
  * (the exact function `FlyFacade.preflightItems` already calls) fed by this page's own, much
  * smaller, asset-selection/telemetry-tracking wiring. Saved, editable checklist templates are not
@@ -67,7 +67,7 @@ export class PreflightFacade {
     // Any device on the asset resolves the same owning-asset/open-usage pair (see
     // `TelemetryStore`'s own doc comment) — passing `assetId` lets it resolve the open usage with
     // one `getAsset()` instead of listing the whole fleet. Guarded on the derived deviceId
-    // primitive (docs/REALTIME-PLAN.md Phase R-a item 2, R-c follow-up) so re-entering `track()`
+    // primitive (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2, R-c follow-up) so re-entering `track()`
     // with an unchanged id on every ~5s asset refresh never becomes a self-sustaining loop.
     effect(() => {
       const devices = this.asset()?.devices ?? [];

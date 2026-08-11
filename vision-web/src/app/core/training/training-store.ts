@@ -9,7 +9,7 @@ import type { CreateDatasetRequest, Dataset } from '../api/models';
 const LOG_PREFIX = '[training]';
 
 /**
- * The `features/labeling/**` surface's source of truth for the dataset list (docs/CV-TRAINING-PLAN.md
+ * The `features/labeling/**` surface's source of truth for the dataset list (docs/plans/done/CV-TRAINING-PLAN.md
  * Wave T5) — `providedIn: 'root'`, mirroring `OrgStore`'s posture: lazy, not self-initializing
  * (`DatasetsPage`'s own facade calls {@link refresh} once it's actually reached, the same "don't hit
  * an admin-flavored endpoint from app boot" reasoning `OrgStore`'s own doc comment gives, even though

@@ -322,7 +322,7 @@ class DefaultAssetServiceTest {
         assertEquals(List.of(live, gone), service.assets(true).stream().map(AssetSummary::asset).toList());
     }
 
-    // --- Scoped reads (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1) ----------
+    // --- Scoped reads (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1) ----------
 
     @Test
     void scopedAssetsUnboundedReturnsExactlyTheUnscopedResult() {
@@ -401,7 +401,7 @@ class DefaultAssetServiceTest {
 
     @Test
     void updateAppliesAnAttributesOnlyEditIncludingRegistrationNumber() {
-        // Confirms attributes patch end-to-end (docs/UX-REWORK-PLAN.md §U-d item 3): the wizard's
+        // Confirms attributes patch end-to-end (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3): the wizard's
         // registrationNumber field is just an attributes key, no special-cased field needed.
         Asset stored = asset(Set.of(DeviceId.random()));
         when(assetRepository.findById(stored.id())).thenReturn(Optional.of(stored));

@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * A line, polygon, arrow, or text annotation on a {@link MapLayer} (docs/MAP-REWORK-PLAN.md §2.1)
+ * A line, polygon, arrow, or text annotation on a {@link MapLayer} (docs/plans/done/MAP-REWORK-PLAN.md §2.1)
  * — the substrate for "plans" (a later slice groups drawings into an operation plan), modeled on
  * DELTA's Mission Control drawing tools (trenches, positions, routes).
  *

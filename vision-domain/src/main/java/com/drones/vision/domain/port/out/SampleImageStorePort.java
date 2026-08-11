@@ -7,7 +7,7 @@ import java.util.Optional;
 
 /**
  * Driven port: stores and retrieves one {@link SampleImage} per {@link TrainingSampleId}
- * (docs/CV-TRAINING-PLAN.md §1/§C) — the {@code AssetImageRepositoryPort} shape, verbatim, reused
+ * (docs/plans/done/CV-TRAINING-PLAN.md §1/§C) — the {@code AssetImageRepositoryPort} shape, verbatim, reused
  * for training-sample frames rather than asset photos.
  *
  * <h2>Contract</h2>

@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * Lifecycle state of the track a {@link Detection} belongs to (docs/TRACKING-PLAN.md §3.2):
+ * Lifecycle state of the track a {@link Detection} belongs to (docs/plans/done/TRACKING-PLAN.md §3.2):
  * {@code TENTATIVE → CONFIRMED → COASTING → LOST → (expired, id retired)}.
  *
  * <p>{@code TENTATIVE} is born, below {@link TrackingConfig#minHits()} detector confirmations —

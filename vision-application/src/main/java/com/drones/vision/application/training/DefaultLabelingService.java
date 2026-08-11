@@ -64,7 +64,7 @@ import com.drones.vision.application.stream.StreamService;
  * case, not an error. {@link #captureFromReplay} has no such gap — a {@link AssetUsage#assetId()}
  * is never {@code null} — so its own asset gate always applies.
  *
- * <h2>Replay's suggested annotations are looked up server-side (docs/CV-TRAINING-V2-PLAN.md §F)</h2>
+ * <h2>Replay's suggested annotations are looked up server-side (docs/plans/done/CV-TRAINING-V2-PLAN.md §F)</h2>
  * {@link #captureFromReplay} queries {@link ReplaySources#detections()} for a ±{@link
  * #NEAREST_DETECTION_TOLERANCE} window around the requested instant and picks the nearest {@link
  * DetectionResult} (ties broken toward the earlier one, for determinism) rather than trusting a
@@ -113,7 +113,7 @@ public final class DefaultLabelingService implements LabelingService {
     }
 
     /**
-     * Same as the 5-argument constructor, plus an explicit JPEG quality (docs/LAYERING-REFACTOR-PLAN.md
+     * Same as the 5-argument constructor, plus an explicit JPEG quality (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction, {@code vision.application.training.jpeg-quality}) for captured
      * training frames, instead of {@link TrainingFrameEncoder}'s own default.
      */
@@ -311,7 +311,7 @@ public final class DefaultLabelingService implements LabelingService {
     }
 
     /**
-     * The suggested annotations for a replay capture (docs/CV-TRAINING-V2-PLAN.md §4/§F): queries
+     * The suggested annotations for a replay capture (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§F): queries
      * stored detections in a ±{@link #NEAREST_DETECTION_TOLERANCE} window around {@code at} and maps
      * the single nearest {@link DetectionResult} (ties broken toward the earlier one) to {@code
      * MODEL} annotations. Empty when nothing was recorded in the window — never a fabricated box.

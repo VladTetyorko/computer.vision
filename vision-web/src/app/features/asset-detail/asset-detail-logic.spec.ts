@@ -13,7 +13,7 @@ function sample(partial: Partial<TelemetrySample> = {}): TelemetrySample {
 }
 
 // `groupTelemetryByDevice`/`telemetryDevices` themselves are tested in `core/telemetry/telemetry-logic.spec.ts`
-// now that they live there (docs/MVP2-PLAN.md §R, R-b) — `groupTelemetryByDevice` is still used
+// now that they live there (docs/plans/done/MVP2-PLAN.md §R, R-b) — `groupTelemetryByDevice` is still used
 // here, re-exported, purely as a test-data builder for `freshestSample`'s own coverage below.
 
 describe('freshestSample', () => {

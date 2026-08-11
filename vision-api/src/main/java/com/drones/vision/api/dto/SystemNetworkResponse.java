@@ -4,7 +4,7 @@ import java.util.List;
 import com.drones.vision.api.controller.SystemNetworkController;
 
 /**
- * Body of {@code GET /api/system/network} (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract)
+ * Body of {@code GET /api/system/network} (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract)
  * — the guided drone-onboarding wizard's "what address/port should the drone-side config point
  * at" read.
  *

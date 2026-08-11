@@ -19,18 +19,18 @@ import {
   type WarehouseRow,
 } from './devices-page-logic';
 
-/** "Create asset from this device" renamed to its outcome (docs/UX-REWORK-PLAN.md §U-a2 §3). */
+/** "Create asset from this device" renamed to its outcome (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3). */
 const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
 
 /**
  * The Devices page (`/devices`) — the raw device table: search, lifecycle actions, the archived
  * toggle, and the register/discover/simulate-adjacent "+ Add source"/"Promote to asset…" flows. Split
- * out of the old combined Devices/Warehouse page (docs/CYCLES-PLAN.md §11's asset-first list moved
+ * out of the old combined Devices/Warehouse page (docs/main/CYCLES-PLAN.md §11's asset-first list moved
  * wholesale to `features/assets/**`, and `/warehouse` itself became a two-tile launcher — see
  * `features/assets/assets.ts`/`features/warehouse/warehouse.ts`'s own class doc comments) once Assets
  * and Devices earned separate pages.
  *
- * **Layered per docs/UI-ARCHITECTURE-PLAN.md**: every store/service injection, the warehouse-row
+ * **Layered per docs/plans/done/UI-ARCHITECTURE-PLAN.md**: every store/service injection, the warehouse-row
  * read-model, and every HTTP-backed command lives in {@link DevicesFacade}. This component is left
  * holding only: the route-bound `addSource`/`sel` inputs (only a component can receive one); the
  * "one inline row open at a time" pointer (`rowAction`) and its drafts (`renameDraft`/`assignDraft`);
@@ -38,7 +38,7 @@ const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
  * `createAssetCategory`/`createAssetSubmitting`, submitting through the facade); and a handful of
  * pure, stateless label/action-list helpers.
  *
- * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/06-devices.md):
+ * **`page-head` → `vision-page-bar`** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/06-devices.md):
  * both old subtitle sentences are deleted outright — "Devices" needs no explanation, and the second
  * ("Looking for an asset instead? …") was migration signage left over from the Assets/Devices split
  * that had already outlived its purpose. Search and the archived toggle move into `[pageBarFilters]`;
@@ -46,7 +46,7 @@ const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
  * dropped too — it repeated the page title and the bar's own count chip now carries the number it
  * used to show.
  *
- * **Wave 3 — one action + a panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)**:
+ * **Wave 3 — one action + a panel (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md)**:
  * the table's own action cell used to render two-to-four full-size buttons, wrapping onto a second
  * line on most rows (the design doc's own named problem). It now renders exactly one primary verb
  * (Watch live / Start stream, whichever applies) plus the kebab — every other action (Stop
@@ -68,13 +68,13 @@ const PROMOTE_TO_ASSET_LABEL = 'Promote to asset…';
 })
 export class DevicesPage {
   /**
-   * `?addSource=` — redirects straight to the onboarding wizard (docs/UX-REWORK-PLAN.md §U-d).
+   * `?addSource=` — redirects straight to the onboarding wizard (docs/plans/done/UX-REWORK-PLAN.md §U-d).
    * Any non-empty value redirects; the value itself is never read.
    */
   readonly addSource = input<string | undefined>(undefined);
 
   /**
-   * `?sel=<deviceId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4) — bound the same way `addSource` above is
+   * `?sel=<deviceId>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4) — bound the same way `addSource` above is
    * (`withComponentInputBinding()`, `app.config.ts`); forwarded into the facade by the constructor
    * `effect()` below, since only a component can receive a route input.
    */
@@ -86,7 +86,7 @@ export class DevicesPage {
 
   /**
    * One inline row open at a time per device — a rename form or an assign picker; both need the
-   * user to actually type/pick something, unlike Archive (docs/UX-REWORK-PLAN.md §U-a2 item 3b —
+   * user to actually type/pick something, unlike Archive (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3b —
    * "Undo over confirm"), which fires immediately from the kebab menu with no inline step at all.
    */
   protected readonly rowAction = signal<{ deviceId: string; mode: 'rename' | 'assign' } | null>(null);
@@ -98,7 +98,7 @@ export class DevicesPage {
   }
 
   /**
-   * The table row/detail panel's one merged state indicator (docs/VISUAL-REFRESH-PLAN.md F5 — "at
+   * The table row/detail panel's one merged state indicator (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — "at
    * most one chip per row"): replaces the old separate Lifecycle + Live/Stopped chips. See
    * `devices-page-logic.ts#describeDeviceState`'s own doc comment for the priority order.
    */
@@ -110,7 +110,7 @@ export class DevicesPage {
     this.facade.searchQuery.set('');
   }
 
-  // --- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) --
+  // --- Create asset from a device (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) --
 
   protected readonly createAssetFor = signal<Device | null>(null);
   protected readonly createAssetName = signal('');
@@ -146,7 +146,7 @@ export class DevicesPage {
   }
 
   /**
-   * The per-row kebab menu (docs/UX-REWORK-PLAN.md §U-a item 7): every device lifecycle action,
+   * The per-row kebab menu (docs/plans/done/UX-REWORK-PLAN.md §U-a item 7): every device lifecycle action,
    * reasoned (item 3a) — `row.owner?.deviceCount` is what lets Unassign disable itself *before* the
    * click when this device is its asset's only one, instead of only after the backend's own 409.
    */

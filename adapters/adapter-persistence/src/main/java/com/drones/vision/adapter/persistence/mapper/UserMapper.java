@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.UserId;
 
 /**
  * {@link User} &harr; {@link UserEntity} mapping, extracted from {@code JpaUserRepository}
- * (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class UserMapper {
 

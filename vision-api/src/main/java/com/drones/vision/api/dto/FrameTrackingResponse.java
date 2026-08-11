@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.TrackingTelemetry;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * The nested {@code "tracking"} object on {@link DetectionResultResponse} (docs/TRACKING-PLAN.md
+ * The nested {@code "tracking"} object on {@link DetectionResultResponse} (docs/plans/done/TRACKING-PLAN.md
  * &sect;4.G) — one frame's duty-cycle facts, so a client can render a tracker-only frame honestly
  * instead of pretending the detector ran.
  *
@@ -16,7 +16,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * frames rather than a fact about this one.
  *
  * <p>{@code trackerMillis} is a fractional millisecond count on purpose — the per-frame tracker cost
- * this whole design exists to make small is ~0.4 ms (docs/TRACKING-PLAN.md &sect;8), and a {@code
+ * this whole design exists to make small is ~0.4 ms (docs/plans/done/TRACKING-PLAN.md &sect;8), and a {@code
  * Duration#toMillis()} would report every one of them as {@code 0}.
  *
  * @param detectorRan    {@code false} means this frame was tracker-only — the duty cycle's whole point
@@ -26,7 +26,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param trackerMillis  the per-frame tracker cost in milliseconds, fractional; {@code 0} when no
  *                       tracker ran on this frame
  * @param engineId       the engine that actually served this frame ({@code ""} = none) — not
- *                       necessarily the one requested, see docs/TRACKING-PLAN.md R11
+ *                       necessarily the one requested, see docs/plans/done/TRACKING-PLAN.md R11
  * @param lockedTrackId  the track {@code FOLLOW} is currently holding; {@code 0} = none
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)

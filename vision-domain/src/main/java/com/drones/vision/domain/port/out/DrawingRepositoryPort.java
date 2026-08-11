@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link Drawing}s (docs/MAP-REWORK-PLAN.md §2.3) — the same
+ * Driven port: persist and retrieve {@link Drawing}s (docs/plans/done/MAP-REWORK-PLAN.md §2.3) — the same
  * minimal upsert/find/delete shape as {@link MarkRepositoryPort}/{@link GeofenceRepositoryPort}.
  *
  * <p>This port has no layer- or group-aware query: {@link #findAll()} always returns every

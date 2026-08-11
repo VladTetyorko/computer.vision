@@ -17,15 +17,15 @@ const POLL_INTERVAL_MS = 2_000;
 /** How often the "n seconds ago" readout ticks, independent of when a poll last landed. */
 const CLOCK_TICK_MS = 1_000;
 
-/** Matches `AssetController#telemetry`'s own default-overriding call site (docs/CYCLES-PLAN.md §2). */
+/** Matches `AssetController#telemetry`'s own default-overriding call site (docs/main/CYCLES-PLAN.md §2). */
 const TELEMETRY_LIMIT = 200;
 
 /**
  * Tracks one device's live telemetry: resolves the owning asset's currently-open usage, then either
- * subscribes to that asset's live SSE telemetry (docs/REALTIME-PLAN.md §4, Phase R-c) or polls that
+ * subscribes to that asset's live SSE telemetry (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) or polls that
  * usage's trail every 2s — whichever `LiveStore.connectionState()` currently supports.
  *
- * **`track(deviceId, assetId?)`** (docs/REALTIME-PLAN.md Phase R-a item 3, `assetId` new) resolves
+ * **`track(deviceId, assetId?)`** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3, `assetId` new) resolves
  * the device's owning asset and its open usage, same as before R-c. **New in R-c**: `track()` always
  * does exactly **one** `GET /api/usages/{usageId}/telemetry` — history backfill, not the start of a
  * repeating poll — then, only when `assetId` is given, subscribes to `telemetry:<assetId>` on the
@@ -80,7 +80,7 @@ export class TelemetryStore {
   private currentUsageId: string | undefined;
   /**
    * The `(deviceId, assetId)` pair the current/in-flight `track()` session is for, or `undefined`
-   * after `reset()` — defense in depth (docs/REALTIME-PLAN.md Phase R-c follow-up,
+   * after `reset()` — defense in depth (docs/plans/done/REALTIME-PLAN.md Phase R-c follow-up,
    * `core/telemetry/telemetry-logic.ts#trackingIdChanged`'s own doc comment) against a caller that
    * re-enters `track()` with an unchanged id: without this, every call unconditionally tore down and
    * rebuilt the session, and doing so from inside an already-executing caller effect let a write deep
@@ -132,7 +132,7 @@ export class TelemetryStore {
     // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops, for as long as a
     // `track()` session is in effect — the *initial* choice is made directly, synchronously, in
     // `startTracking` below; this effect only ever handles a *later* transition mid-session
-    // (docs/REALTIME-PLAN.md §4, item 5). Deliberately does **not** touch the live subscription
+    // (docs/plans/done/REALTIME-PLAN.md §4, item 5). Deliberately does **not** touch the live subscription
     // itself (`LiveStore.trackTelemetry`/`untrackTelemetry`) — only `applyTransport`'s local poll
     // scheduler toggles here; see the class doc for why a transient drop must not spuriously
     // unsubscribe/resubscribe.
@@ -245,14 +245,14 @@ export class TelemetryStore {
       void this.pollOnce(usageId);
     }
     // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
-    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    // `FleetStore`'s identical comment (docs/plans/done/MVP2-PLAN.md §S, S-b).
     this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(usageId));
   }
 
   /**
    * A device belongs to at most one asset; that asset's open usage is what we poll/subscribe to.
    *
-   * **O(1) path** (docs/REALTIME-PLAN.md Phase R-a item 3): when `assetId` is given, one
+   * **O(1) path** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3): when `assetId` is given, one
    * `getAsset(assetId)` resolves the open usage directly — no need to find *which* asset owns
    * `deviceId` when the caller already knows. Falls back to the O(fleet-size) list-then-find below
    * only when `assetId` is omitted.

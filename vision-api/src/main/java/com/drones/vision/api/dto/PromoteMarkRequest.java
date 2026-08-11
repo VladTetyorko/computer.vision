@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.LayerId;
 
 /**
- * Body of {@code POST /api/map/marks/{id}/promote} (docs/MAP-REWORK-PLAN.md §4.1) — DELTA's
+ * Body of {@code POST /api/map/marks/{id}/promote} (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — DELTA's
  * "verify, then share wider" step.
  *
  * <p>The whole body is optional, and so is its one field: an absent {@code targetLayerId} promotes

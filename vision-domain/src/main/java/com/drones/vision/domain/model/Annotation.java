@@ -1,14 +1,14 @@
 package com.drones.vision.domain.model;
 
 /**
- * One ground-truth box on a captured frame (docs/CV-TRAINING-PLAN.md §1) — ready to export into a
+ * One ground-truth box on a captured frame (docs/plans/done/CV-TRAINING-PLAN.md §1) — ready to export into a
  * YOLO label line.
  *
  * <p>Reuses {@link BoundingBox} rather than inventing a second box type; unlike {@link Detection},
  * there is deliberately <b>no confidence</b> here — this is a human-confirmed truth, not a
  * model's guess. {@code label} is a free-form string (matching {@link Detection#label()}), not a
  * {@link CategoryId} — open-vocab detection labels (e.g. {@code "skyscraper"}) aren't categories,
- * so {@link Dataset#classes()} stays free-form too (docs/CV-TRAINING-PLAN.md Open Questions §5).
+ * so {@link Dataset#classes()} stays free-form too (docs/plans/done/CV-TRAINING-PLAN.md Open Questions §5).
  * Whether a sample's annotation labels are members of its dataset's {@link Dataset#classes()} is
  * an application-layer check ({@code LabelingService.label}), not enforced here.
  *

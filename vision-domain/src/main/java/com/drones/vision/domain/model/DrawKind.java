@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * The geometry shape a {@link Drawing} represents (docs/MAP-REWORK-PLAN.md §2.1). Drives that
+ * The geometry shape a {@link Drawing} represents (docs/plans/done/MAP-REWORK-PLAN.md §2.1). Drives that
  * record's own point-count invariant — see {@link Drawing}'s javadoc.
  */
 public enum DrawKind {

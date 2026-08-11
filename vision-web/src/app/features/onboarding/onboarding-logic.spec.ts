@@ -120,13 +120,13 @@ describe('canAdvanceFromConnect', () => {
     ).toBe(false);
   });
 
-  it('never advances directly from listen either (docs/DRONE-INFRA-PLAN.md I-b) — same candidate-must-flip-to-register rule', () => {
+  it('never advances directly from listen either (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — same candidate-must-flip-to-register rule', () => {
     expect(
       canAdvanceFromConnect(connectDraft({ method: 'listen', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })),
     ).toBe(false);
   });
 
-  it('never advances directly from drone either (docs/DRONE-INFRA-PLAN.md I-g) — it hands off to listen before anything can advance', () => {
+  it('never advances directly from drone either (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — it hands off to listen before anything can advance', () => {
     expect(
       canAdvanceFromConnect(connectDraft({ method: 'drone', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })),
     ).toBe(false);

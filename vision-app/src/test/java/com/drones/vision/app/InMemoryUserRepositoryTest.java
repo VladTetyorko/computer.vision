@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** {@link InMemoryUserRepository}: case-insensitive lookup + upsert (docs/U-AUTH-PLAN.md, wave 3). */
+/** {@link InMemoryUserRepository}: case-insensitive lookup + upsert (docs/plans/done/U-AUTH-PLAN.md, wave 3). */
 class InMemoryUserRepositoryTest {
 
     private final UserRepositoryPort repository = new InMemoryUserRepository();

@@ -41,7 +41,7 @@
 
 /* The same `dl.facts`/`.fact` telemetry-facts idiom already duplicated independently by
    `features/asset-detail/asset-detail.css`, `shared/player/stream-info-panel.ts`, and
-   `features/replay/replay.css` (docs/UX-REWORK-PLAN.md §U-b's own audit found three copies) — a
+   `features/replay/replay.css` (docs/plans/done/UX-REWORK-PLAN.md §U-b's own audit found three copies) — a
    fourth here is consistent with that established precedent, not a new pattern. */
 .facts {
   display: grid;
@@ -67,7 +67,7 @@
   color: var(--color-danger);
 }
 
-/* GPS fix severity (docs/FC-INTEGRATIONS-PLAN.md F-d) — kept distinct from `.stale-text` above:
+/* GPS fix severity (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — kept distinct from `.stale-text` above:
    one primary signal color per severity, amber for a degraded-but-present fix, red only for
    no-fix/no-GPS (never for the plain '—' unknown state — see `asset-panel.html`'s own guard). */
 .gps-warn-text {
@@ -78,7 +78,7 @@
   color: var(--color-danger);
 }
 
-/* Diagnostics rows (docs/FC-INTEGRATIONS-PLAN.md F-e) — same one-color-per-severity idiom as the
+/* Diagnostics rows (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — same one-color-per-severity idiom as the
    GPS facts above, kept as its own pair rather than reusing `.gps-warn-text`/`.gps-critical-text`
    verbatim so a non-GPS row's class name doesn't read as GPS-specific. */
 .diag-warn-text {
@@ -117,7 +117,7 @@
   color: var(--text-muted);
 }
 
-/* Button-alignment audit (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 6): this row used to stretch
+/* Button-alignment audit (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 6): this row used to stretch
    its own two plain `.btn` children to equal width (`flex: 1; justify-content: center`) — but the
    third, conditional member (`<vision-return-home-button>`) renders its actual `<button>` inside
    its *own* template, so Angular's emulated view encapsulation means that inner button never

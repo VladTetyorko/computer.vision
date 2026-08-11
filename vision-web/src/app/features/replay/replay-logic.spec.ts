@@ -273,7 +273,7 @@ describe('advancePlaybackClock', () => {
   });
 });
 
-describe('videoOffsetSeconds (docs/OPS-CORE-PLAN.md §R, R-c — the `<video>` DOM sync; also the exact `atSeconds` conversion `ReplayFacade.addToDataset()` reuses, docs/CV-TRAINING-V2-PLAN.md §8)', () => {
+describe('videoOffsetSeconds (docs/plans/done/OPS-CORE-PLAN.md §R, R-c — the `<video>` DOM sync; also the exact `atSeconds` conversion `ReplayFacade.addToDataset()` reuses, docs/plans/done/CV-TRAINING-V2-PLAN.md §8)', () => {
   it('converts a scrub position into the video\'s own currentTime, seconds', () => {
     expect(videoOffsetSeconds(sec(30), T0)).toBe(30);
   });
@@ -282,12 +282,12 @@ describe('videoOffsetSeconds (docs/OPS-CORE-PLAN.md §R, R-c — the `<video>` D
     expect(videoOffsetSeconds(T0 - 5000, T0)).toBe(0);
   });
 
-  it('carries sub-second precision — the new POST /api/usages/{usageId}/samples endpoint accepts a fractional atSeconds (docs/CV-TRAINING-V2-PLAN.md §5)', () => {
+  it('carries sub-second precision — the new POST /api/usages/{usageId}/samples endpoint accepts a fractional atSeconds (docs/plans/done/CV-TRAINING-V2-PLAN.md §5)', () => {
     expect(videoOffsetSeconds(T0 + 412_500, T0)).toBe(412.5);
   });
 });
 
-describe('videoTimeToAtMs (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+describe('videoTimeToAtMs (docs/plans/done/OPS-CORE-PLAN.md §R, R-c)', () => {
   it('converts the video\'s own currentTime back into an absolute atMs', () => {
     expect(videoTimeToAtMs(30, T0, T0, sec(100))).toBe(sec(30));
   });
@@ -298,7 +298,7 @@ describe('videoTimeToAtMs (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
   });
 });
 
-describe('shouldSeekVideo (docs/OPS-CORE-PLAN.md §R, R-c — the guarded-effect threshold)', () => {
+describe('shouldSeekVideo (docs/plans/done/OPS-CORE-PLAN.md §R, R-c — the guarded-effect threshold)', () => {
   it('is false for drift within the threshold (ordinary 1x playback)', () => {
     expect(shouldSeekVideo(30, 30.1)).toBe(false);
   });
@@ -313,7 +313,7 @@ describe('shouldSeekVideo (docs/OPS-CORE-PLAN.md §R, R-c — the guarded-effect
   });
 });
 
-describe('wholeFlightClipWindow (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+describe('wholeFlightClipWindow (docs/plans/done/OPS-CORE-PLAN.md §R, R-c)', () => {
   it('spans the whole replay window, anchored off the recording\'s own start', () => {
     expect(wholeFlightClipWindow(T0, T0, sec(120))).toEqual({ startOffsetMs: 0, durationMs: 120_000 });
   });
@@ -323,7 +323,7 @@ describe('wholeFlightClipWindow (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
   });
 });
 
-describe('selectedClipWindow (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+describe('selectedClipWindow (docs/plans/done/OPS-CORE-PLAN.md §R, R-c)', () => {
   it('uses the current selection when both marks are set and well-ordered', () => {
     expect(selectedClipWindow(T0, sec(10), sec(40), T0, sec(120))).toEqual({ startOffsetMs: 10_000, durationMs: 30_000 });
   });
@@ -341,7 +341,7 @@ describe('selectedClipWindow (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
   });
 });
 
-describe('buildClipDownloadUrl (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
+describe('buildClipDownloadUrl (docs/plans/done/OPS-CORE-PLAN.md §R, R-c)', () => {
   const baseUrl = 'http://mediamtx.local:19996/get?path=stream-1&start=2026-07-23T10%3A00%3A00Z&duration=600';
 
   it('replaces start/duration for a sub-window, keeping path and every other part of the URL', () => {
@@ -373,7 +373,7 @@ describe('buildClipDownloadUrl (docs/OPS-CORE-PLAN.md §R, R-c)', () => {
   });
 });
 
-describe('parseDeepLinkOffsetMs (docs/OPS-CORE-PLAN.md §Q1)', () => {
+describe('parseDeepLinkOffsetMs (docs/plans/done/OPS-CORE-PLAN.md §Q1)', () => {
   it('parses a numeric string', () => {
     expect(parseDeepLinkOffsetMs('1500')).toBe(1500);
   });

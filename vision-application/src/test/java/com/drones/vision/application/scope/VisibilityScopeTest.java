@@ -93,7 +93,7 @@ class VisibilityScopeTest {
         assertThrows(UnsupportedOperationException.class, () -> scope.assignedAssets().add(AssetId.random()));
     }
 
-    // --- management-authority derivation (docs/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
+    // --- management-authority derivation (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
 
     @Test
     void canManageOrgAcrossKinds() {

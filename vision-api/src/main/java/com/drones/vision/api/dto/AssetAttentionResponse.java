@@ -4,7 +4,7 @@ import com.drones.vision.application.asset.AssetAttention;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * One row of {@code GET /api/fleet/summary}'s {@code assets} array (docs/MVP3-PLAN.md C-a) — one
+ * One row of {@code GET /api/fleet/summary}'s {@code assets} array (docs/plans/done/MVP3-PLAN.md C-a) — one
  * asset's attention-relevant facts, everything the manager dashboard's attention queue needs
  * without a second poll per asset.
  *
@@ -28,7 +28,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param openEventCount   how many {@code OPEN} detection events currently name this asset
  * @param flightMode       the freshest telemetry sample's flight-controller mode name (e.g.
  *                         {@code "RTL"}), absent under the same condition as {@code batteryPercent}
- *                         (docs/FC-INTEGRATIONS-PLAN.md F-b)
+ *                         (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b)
  * @param armed            the freshest telemetry sample's armed flag, absent under the same
  *                         condition as {@code flightMode}
  * @param failsafe         the freshest telemetry sample's failsafe flag, absent under the same

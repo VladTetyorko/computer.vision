@@ -13,7 +13,7 @@ import {
   sendIntervalMs,
 } from './manual-control-logic';
 
-/** Same-origin endpoint (docs/RC-CONTROL-PHASE1-PLAN.md §4) — a relative `WebSocket` URL resolves
+/** Same-origin endpoint (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — a relative `WebSocket` URL resolves
  * against the document's own origin/scheme (ws:// under http, wss:// under https) per the
  * WebSocket constructor spec, the identical "no URL to configure" convention
  * `core/live/live-store.ts`'s `new EventSource('/api/live')` already established. Same-origin
@@ -24,7 +24,7 @@ const MANUAL_CONTROL_WS_URL = '/ws/manual-control';
 export type ManualControlEngageState = 'idle' | 'engaging' | 'engaged' | 'denied' | 'released';
 
 /**
- * `ManualControlClient` — the browser half of the SITL RC relay (docs/RC-CONTROL-PHASE1-PLAN.md §4,
+ * `ManualControlClient` — the browser half of the SITL RC relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4,
  * R5). Opens one `WebSocket` per {@link engage} call, streams `RcInputService`'s live axes/buttons
  * back at the server-confirmed rate once `engaged`, and tracks glass-to-stick latency from each
  * `ack`. Frame encode/decode/latency math is pure (`manual-control-logic.ts`); this class is the

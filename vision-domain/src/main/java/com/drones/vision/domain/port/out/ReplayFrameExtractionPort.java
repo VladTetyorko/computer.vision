@@ -8,7 +8,7 @@ import java.util.Optional;
 
 /**
  * Driven port: pull one decoded frame out of a stream's durable recording, at a specific instant
- * (docs/CV-TRAINING-V2-PLAN.md §3) — the "capture a training frame from replay" counterpart to
+ * (docs/plans/done/CV-TRAINING-V2-PLAN.md §3) — the "capture a training frame from replay" counterpart to
  * live capture's {@code StreamService#latestRawFrame}.
  *
  * <h2>Contract</h2>

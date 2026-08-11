@@ -180,7 +180,7 @@
 /* Leaflet-owned DOM (the numbered vertex markers) never gets Angular's `_ngcontent-*` attribute —
    the standard `::ng-deep` workaround, scoped under `:host`, mirrors `flight-plan-dialog.css`. Map
    overlay chrome is a light card, never a `--scrim*`/`--hairline` frosted-dark ring
-   (docs/VISUAL-REFRESH-PLAN.md F3/F7 — legal only inside `.surface-dark`, which this dialog never
+   (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/F7 — legal only inside `.surface-dark`, which this dialog never
    carries): the vertex dot's own `--panel-raised` border already separates it from the basemap. */
 :host ::ng-deep .zone-vertex-marker .zone-vertex-dot {
   display: flex;

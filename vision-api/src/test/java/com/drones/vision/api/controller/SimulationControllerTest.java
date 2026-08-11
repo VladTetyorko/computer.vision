@@ -182,7 +182,7 @@ class SimulationControllerTest {
 
     @Test
     void simulateWithJustATelemetryBlockYieldsAFullySyntheticMovingDrone() throws Exception {
-        // docs/CYCLES-PLAN.md §9, CU-a: "POST /api/simulations {} with just a telemetry block
+        // docs/main/CYCLES-PLAN.md §9, CU-a: "POST /api/simulations {} with just a telemetry block
         // yields a complete moving drone" -- the synthetic telemetry test in one call.
         when(simulationService.simulate(any(), eq(ownership), eq(ownerId)))
                 .thenReturn(new SimulatedAsset(AssetId.random(), StreamId.random()));
@@ -278,7 +278,7 @@ class SimulationControllerTest {
                 .andExpect(jsonPath("$.viewUrl").doesNotExist());
     }
 
-    // ---- docs/MVP2-PLAN.md §L: whepUrl beside viewUrl ----
+    // ---- docs/plans/done/MVP2-PLAN.md §L: whepUrl beside viewUrl ----
 
     @Test
     void simulateReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
@@ -402,7 +402,7 @@ class SimulationControllerTest {
         verifyNoInteractions(simulationService);
     }
 
-    // ---- telemetryTransport (docs/DRONE-INFRA-PLAN.md's own natural follow-up) ----
+    // ---- telemetryTransport (docs/plans/active/DRONE-INFRA-PLAN.md's own natural follow-up) ----
 
     @Test
     void simulateDefaultsTelemetryTransportToSimWhenFieldIsAbsent() throws Exception {

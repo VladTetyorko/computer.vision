@@ -3,7 +3,7 @@ import type { FlightBanner } from '../../core/telemetry/flight-state-logic';
 import { Icon } from '../../shared/ui/icon';
 
 /**
- * The Fly cockpit's failsafe/RTH/landing banner (docs/FC-INTEGRATIONS-PLAN.md F-d) — a full-width
+ * The Fly cockpit's failsafe/RTH/landing banner (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — a full-width
  * strip that is a real CSS-grid row (`fly.css`'s `banner` area, above `main`), appearing/
  * disappearing purely from `flight-state-logic.ts#flightBanner(telemetry.latest())` — `fly.ts`
  * computes that once and passes it straight through; this component owns no state of its own, only
@@ -66,7 +66,7 @@ import { Icon } from '../../shared/ui/icon';
 
     /* Advisory, not an emergency — this app's ordinary caution family (identical pairing to
        styles.css's own .chip.warn), same tinted-bar-plus-accent treatment as failsafe above.
-       "-text", not the bare --color-warn this read until docs/VISUAL-REFRESH-PLAN.md W4's own
+       "-text", not the bare --color-warn this read until docs/plans/done/VISUAL-REFRESH-PLAN.md W4's own
        sweep caught it — the same AA-contrast fix .chip.warn already got in Wave 0 (see that
        rule's own comment in styles.css): --color-warn is tuned to read as a fill/border, not as
        text on its own "-soft" tint, and in light theme specifically that pairing falls under 4.5:1.

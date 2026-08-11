@@ -18,9 +18,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.web.context.SecurityContextRepository;
 
 /**
- * Wires identity/auth (docs/U-AUTH-PLAN.md, wave 3) — a separate {@code @Configuration} from
+ * Wires identity/auth (docs/plans/done/U-AUTH-PLAN.md, wave 3) — a separate {@code @Configuration} from
  * {@code ApplicationServiceWiring}, same split-out-by-concern precedent as {@link
- * DiscoveryWiringConfiguration}/{@link PersistenceWiringConfiguration} (docs/LAYERING-REFACTOR-PLAN.md
+ * DiscoveryWiringConfiguration}/{@link PersistenceWiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * wave D moved all four into this {@code wiring} package alongside {@code
  * VideoSourceWiring}/{@code TelemetryWiring}/{@code PublishWiring}/{@code CvWiring}/{@code
  * ApplicationServiceWiring}/{@code FeedTransmitterWiring}, the pieces {@code WiringConfiguration}'s
@@ -69,7 +69,7 @@ public class AuthWiringConfiguration {
     }
 
     /**
-     * Visibility-scope resolution (docs/U-SCOPE-PLAN.md, U-e slice 2) — turns the acting user's
+     * Visibility-scope resolution (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — turns the acting user's
      * memberships + the group tree + their pilot assignments into a {@link
      * com.drones.vision.application.scope.VisibilityScope}. Wired unconditionally (auth on or off): {@link
      * SecurityContextPrincipalResolver} uses it when auth is on; the {@code DevPrincipalResolver}
@@ -81,14 +81,14 @@ public class AuthWiringConfiguration {
         return new DefaultScopeResolver(groupRepositoryPort, assignmentRepositoryPort);
     }
 
-    /** Pilot→asset assignment roster (docs/U-SCOPE-PLAN.md, feature 2) — behind the assignment endpoints. */
+    /** Pilot→asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, feature 2) — behind the assignment endpoints. */
     @Bean
     public AssignmentService assignmentService(AssignmentRepositoryPort assignmentRepositoryPort,
                                                AssetRepositoryPort assetRepositoryPort) {
         return new DefaultAssignmentService(assignmentRepositoryPort, assetRepositoryPort);
     }
 
-    /** A user's own activity feed (docs/U-SCOPE-PLAN.md, feature 7) — behind {@code GET /api/me/activity}. */
+    /** A user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, feature 7) — behind {@code GET /api/me/activity}. */
     @Bean
     public ActivityService activityService(AuditTrailPort auditTrailPort) {
         return new DefaultActivityService(auditTrailPort);

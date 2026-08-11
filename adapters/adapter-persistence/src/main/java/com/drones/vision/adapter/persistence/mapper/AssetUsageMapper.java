@@ -9,7 +9,7 @@ import com.drones.vision.domain.model.UsageId;
 
 /**
  * {@link AssetUsage} &harr; {@link AssetUsageEntity} mapping, extracted from {@code
- * JpaAssetUsageRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaAssetUsageRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class AssetUsageMapper {
 

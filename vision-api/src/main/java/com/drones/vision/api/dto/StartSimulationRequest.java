@@ -14,16 +14,16 @@ import com.drones.vision.api.support.CapabilityParsing;
 
 /**
  * Request body for {@code POST /api/simulations} — the one-call, zero-hardware simulation entry
- * point (docs/CYCLES-PLAN.md §0-1, §3, §7, §9).
+ * point (docs/main/CYCLES-PLAN.md §0-1, §3, §7, §9).
  *
  * @param displayName human-readable name; may be {@code null}/blank, in which case {@code
  *                     SimulationService} derives one from {@code videoPath}'s file name — or, when
  *                     {@link #videoPath()} is itself absent, a generic synthetic name
- *                     (docs/CYCLES-PLAN.md §9, CU-a)
+ *                     (docs/main/CYCLES-PLAN.md §9, CU-a)
  * @param videoPath   absolute path to a local video file on the server; {@code null}/blank (the two
  *                     are equivalent here, unlike {@link SimulationSpec}'s own stricter distinction)
  *                     resolves to {@code null} — a fully synthetic simulation with no video file
- *                     (docs/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations} with just a
+ *                     (docs/main/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations} with just a
  *                     {@link #telemetry()} block (or nothing at all) is enough. A {@code null} path
  *                     requires {@link #transport()} to be {@code "direct"} (the default) — {@code
  *                     "rtsp"}/{@code "mjpeg"} have no in-process renderer output to push over the
@@ -36,10 +36,10 @@ import com.drones.vision.api.support.CapabilityParsing;
  * @param autoStart   whether to start streaming immediately; {@code null}/absent defaults to
  *                     {@code true} — most callers simulating a drone want to watch it right away
  * @param transport   {@code "direct"} (in-process playback), {@code "rtsp"}, or {@code "mjpeg"}
- *                     (both pushed over the wire and ingested back, docs/CYCLES-PLAN.md §3, §5),
+ *                     (both pushed over the wire and ingested back, docs/main/CYCLES-PLAN.md §3, §5),
  *                     matched case-insensitively; {@code null}/absent defaults to {@code "direct"}
  *                     — today's behavior
- * @param telemetry   an optional configurable flight plan (docs/CYCLES-PLAN.md §7, CT-a) replacing
+ * @param telemetry   an optional configurable flight plan (docs/main/CYCLES-PLAN.md §7, CT-a) replacing
  *                     the bare circular home-point track with a piecewise-linear route; {@code
  *                     null}/absent keeps today's behavior
  * @param telemetryTransport how the telemetry device reaches its {@code TelemetrySourcePort} —
@@ -67,14 +67,14 @@ public record StartSimulationRequest(String displayName, String videoPath, Doubl
     /**
      * Converts this request into a {@link SimulationSpec}, defaulting {@link #autoStart()} to
      * {@code true}, {@link #transport()} to {@link SimulationTransport#DIRECT} when absent, and
-     * blank {@link #videoPath()} to {@code null} (docs/CYCLES-PLAN.md §9, CU-a — a fully synthetic
+     * blank {@link #videoPath()} to {@code null} (docs/main/CYCLES-PLAN.md §9, CU-a — a fully synthetic
      * simulation).
      *
      * @return the input for {@code SimulationService#simulate}
      * @throws IllegalArgumentException if {@link #transport()} or {@link #telemetryTransport()}
      *                                   doesn't match a known enum name, a {@code null}/blank
      *                                   {@link #videoPath()} is combined with a non-{@code
-     *                                   "direct"} {@link #transport()} (docs/CYCLES-PLAN.md §9), or
+     *                                   "direct"} {@link #transport()} (docs/main/CYCLES-PLAN.md §9), or
      *                                   {@link #telemetry()} is present but invalid (see {@link
      *                                   TelemetryRequest#toPlan()})
      */
@@ -123,7 +123,7 @@ public record StartSimulationRequest(String displayName, String videoPath, Doubl
     }
 
     /**
-     * The wire shape of a {@link TelemetryPlan} (docs/CYCLES-PLAN.md §7, CT-a) — nested here rather
+     * The wire shape of a {@link TelemetryPlan} (docs/main/CYCLES-PLAN.md §7, CT-a) — nested here rather
      * than top-level, mirroring {@code CreateAssetRequest.DeviceSpec}'s nested-request convention.
      *
      * @param speedMps  cruise speed in meters/second; {@code null} defers to the adapter's own

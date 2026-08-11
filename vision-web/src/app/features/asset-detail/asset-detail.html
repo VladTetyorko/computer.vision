@@ -13,7 +13,7 @@
       </vision-empty>
     </div>
   } @else if (facade.asset(); as a) {
-    <!-- Header (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/05-asset-detail.md) — one
+    <!-- Header (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/05-asset-detail.md) — one
          `<vision-page-bar>` replaces the loading/loaded `.page-head` pair; the identity chips ride
          `[pageBarFilters]` (the bar's own doc comment names "filter chips" as that slot's job, and
          this is the closest fit its frozen contract offers for a chip row), actions ride
@@ -36,7 +36,7 @@
         }
         @if (facade.assetLifecycleAction(); as entry) {
           @if (entry.action === 'archive') {
-            <!-- Destructive action lives behind the kebab, never beside Rename (docs/design/
+            <!-- Destructive action lives behind the kebab, never beside Rename (docs/extracts/design/
                  05-asset-detail.md's own acceptance criterion) — and now goes through a genuine
                  confirm (asset-detail.ts's own `requestArchiveAsset` doc comment explains the
                  departure from the older "Undo over confirm, no dialog" convention). -->
@@ -91,14 +91,14 @@
       />
     }
 
-    <!-- ==== Overview — a compact glanceable landing (docs/UI-REDESIGN-PLAN.md Wave 3, D-F). Only
+    <!-- ==== Overview — a compact glanceable landing (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3, D-F). Only
          the identity band above, the cockpit band, KPI tiles, the recent-flights chart, and a
          position map + freshest-telemetry summary live here; everything heavier is one of the six
          drill-ins below (three side-panel drawers, two full-width sub-views, one drawer gated to
          managers). ==================================================================== -->
     @if (subView() === 'overview') {
       <div class="grid12 overview-grid">
-        <!-- ---- Cockpit band (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — this page never
+        <!-- ---- Cockpit band (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 2) — this page never
              mounts a player or starts/stops a stream; piloting and live video are the cockpit's
              job (`/fly`) and the lightweight `/live/:deviceId` watch page, one click away. Offline
              is fine — "Open cockpit" still navigates, since the cockpit owns start/stop. -->
@@ -121,7 +121,7 @@
           </div>
         </section>
 
-        <!-- ---- Position + freshest-telemetry summary (docs/UI-REDESIGN-PLAN.md Wave 3, D-F) —
+        <!-- ---- Position + freshest-telemetry summary (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3, D-F) —
              the single freshest sample across every source device, not the old landing page's full
              per-device dump (that lives in the "Full telemetry" drawer now). -->
         @if (facade.assetTelemetryDevices().length > 0) {
@@ -135,7 +135,7 @@
                 </button>
               </vision-section-header>
             </div>
-            <!-- Zones + marks are new here (docs/MAP-REWORK-PLAN.md §5.1): the old inset dropped
+            <!-- Zones + marks are new here (docs/plans/done/MAP-REWORK-PLAN.md §5.1): the old inset dropped
                  both silently, so this card showed a different picture from Command's map. -->
             <vision-tactical-map
               [assets]="facade.mapAssets()"
@@ -160,7 +160,7 @@
           </section>
         }
 
-        <!-- ---- KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) --------------- -->
+        <!-- ---- KPI tile row (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) --------------- -->
         <section class="card col-8">
           <div class="icon-heading">
             <vision-icon name="gauge" [size]="18" />
@@ -173,7 +173,7 @@
           </div>
         </section>
 
-        <!-- ---- "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) ------ -->
+        <!-- ---- "Recent flights" chart (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 4) ------ -->
         <section class="card col-6">
           <div class="icon-heading">
             <vision-icon name="history" [size]="18" />
@@ -211,7 +211,7 @@
         </section>
 
         <!-- ---- Drill-in launcher — every heavier area is one click away, never dumped onto the
-             landing (docs/UI-REDESIGN-PLAN.md Wave 3, D-F). Pilots is the one manager-only entry
+             landing (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3, D-F). Pilots is the one manager-only entry
              (`canManagePilots`) — hidden outright for anyone else, not just an empty drawer. ---- -->
         <section class="card col-6 drill-in-launcher">
           <div class="icon-heading">
@@ -284,7 +284,7 @@
                   <td>{{ usage.sampleCount }}</td>
                   <td class="actions">
                     @if (usage.endedAt) {
-                      <!-- Finished usages only (docs/MVP2-PLAN.md §R, R-b) — an open usage is
+                      <!-- Finished usages only (docs/plans/done/MVP2-PLAN.md §R, R-b) — an open usage is
                            still growing, so replaying it isn't meaningful; watch it live instead. -->
                       <a class="btn secondary small" [routerLink]="['/assets', a.assetId, 'replay', usage.usageId]">
                         Replay
@@ -366,7 +366,7 @@
                   }
                 </td>
                 <td class="actions">
-                  <!-- Per-row kebab (docs/UX-REWORK-PLAN.md §U-a item 7): same actions as before,
+                  <!-- Per-row kebab (docs/plans/done/UX-REWORK-PLAN.md §U-a item 7): same actions as before,
                        labeled verb+object, reasoned (§U-a2 item 3a) — Archive at the bottom, behind
                        a divider, in danger-action. -->
                   <vision-kebab-menu [label]="'More actions for ' + device.name">
@@ -430,7 +430,7 @@
       </section>
     }
 
-    <!-- ==== Drawers (docs/UI-REDESIGN-PLAN.md Wave 3) — `panels` (one open at a time) mounts
+    <!-- ==== Drawers (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3) — `panels` (one open at a time) mounts
          these; they float above whichever overview/sub-view content is on screen and stay open
          across an overview/sub-view switch. ================================================= -->
 
@@ -497,7 +497,7 @@
 
     @if (panels.isOpen('attributes')) {
       <!-- Characteristics + registration/attribute editors — both still behind their own explicit
-           "Edit…" disclosure (docs/UI-REDESIGN-PLAN.md Wave 3 guardrail 3), unchanged. -->
+           "Edit…" disclosure (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3 guardrail 3), unchanged. -->
       <vision-side-panel title="Characteristics" icon="list" (close)="panels.close()">
         <dl class="facts">
           <div class="fact"><dt>Owner</dt><dd class="mono">{{ a.owner }}</dd></div>
@@ -505,7 +505,7 @@
           @if (a.lastUsedAt) {
             <div class="fact"><dt>Last used</dt><dd class="mono">{{ a.lastUsedAt }}</dd></div>
           }
-          <!-- Registration/tail number (docs/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
+          <!-- Registration/tail number (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
                attributes-key convention, display + inline edit. -->
           <div class="fact">
             <dt>Registration</dt>
@@ -546,7 +546,7 @@
           <p class="muted hint">No extra attributes recorded.</p>
         }
 
-        <!-- Attributes editor (docs/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
+        <!-- Attributes editor (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
              key/value surgery, including the registrationNumber key the inline edit above already
              covers more conveniently for the common case. -->
         @if (facade.settings.advancedMode()) {

@@ -25,7 +25,7 @@ import {
 } from './assets-logic';
 
 /**
- * `AssetsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection, the
+ * `AssetsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection, the
  * search/filter read-model, and every command for the `/assets` grid, so the page component itself
  * only injects this class. Every filter/search signal below is public and directly settable from the
  * template (`[ngModel]="facade.searchQuery()" (ngModelChange)="facade.searchQuery.set($event)"`) —
@@ -36,7 +36,7 @@ import {
  * "moves into its feature facade, out of the component" even though it isn't mutually-exclusive
  * overlay state (so it does **not** go through `UiStore`).
  *
- * **Wave 3 addition (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md)**: the `?sel=`-
+ * **Wave 3 addition (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md)**: the `?sel=`-
  * addressable two-pane selection (`selectedId`/`selectedRow`/`selectRow`/`clearSelection`) and the
  * detail panel's "Open cockpit" action (`openCockpitFor`) — everything else below predates this wave
  * and, per the doc comment further down, carries over byte-for-byte.
@@ -49,7 +49,7 @@ export class AssetsFacade {
   private readonly router = inject(Router);
   /** Scoped to this page's own route, since `AssetsFacade` is provided in `AssetsPage`'s own
    *  `providers` array — the same injector that resolves `ActivatedRoute` for the component itself.
-   *  Only used as `selectRow`/`clearSelection`'s `relativeTo` anchor (docs/NAV-IA-REDESIGN-PLAN.md
+   *  Only used as `selectRow`/`clearSelection`'s `relativeTo` anchor (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
    *  §2.4) so `router.navigate([], …)` patches `?sel=` on the current URL rather than resolving `[]`
    *  against the router root. */
   private readonly route = inject(ActivatedRoute);
@@ -116,7 +116,7 @@ export class AssetsFacade {
    *  matched nothing" for the empty state (never a fabricated "no assets" when the fleet has some). */
   readonly hasAnyAssets = computed(() => this.assets().length > 0);
 
-  // --- Two-pane selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) ----------
+  // --- Two-pane selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md) ----------
   // `AssetsPage`'s own constructor `effect()` forwards its route-bound `sel` input straight into this
   // signal on every change — the same "only a component can receive a route input" split `category`
   // above already documents. Read against `allRows`, not the filtered `assetRows`, so narrowing the
@@ -156,7 +156,7 @@ export class AssetsFacade {
   }
 
   /**
-   * `?category=<slug>` (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3) — the page's own constructor `effect()`
+   * `?category=<slug>` (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2/QF-3) — the page's own constructor `effect()`
    * forwards its route-bound `category` input straight into {@link categoryFilter} on every change
    * (only a component can receive a route input, so that wiring stays there — see `assets.ts`'s own
    * doc comment); `currentCategory` is passed in imperatively here only to decide whether Clear
@@ -173,7 +173,7 @@ export class AssetsFacade {
     }
   }
 
-  /** "+ Add source" (docs/UX-REWORK-PLAN.md §U-d) — the onboarding wizard is the only way in now. */
+  /** "+ Add source" (docs/plans/done/UX-REWORK-PLAN.md §U-d) — the onboarding wizard is the only way in now. */
   goToAddSource(): Promise<boolean> {
     return this.router.navigate(['/add-source']);
   }
@@ -183,7 +183,7 @@ export class AssetsFacade {
   }
 
   /**
-   * "Open full ›" (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) — the two-pane
+   * "Open full ›" (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md) — the two-pane
    * detail panel's own escape hatch to `/assets/:id` for deep work (rename, KPIs, recent flights,
    * pilots). Selecting a row itself (`selectRow`, above) deliberately does **not** navigate any more
    * — this is the one action that still does, kept named/shaped exactly as it was pre-Wave-3 so its
@@ -203,10 +203,10 @@ export class AssetsFacade {
   }
 
   /**
-   * Archive executes immediately, no confirm dialog (docs/UX-REWORK-PLAN.md §U-a2 item 3b —
+   * Archive executes immediately, no confirm dialog (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3b —
    * "Undo over confirm"). Calls `VisionApi.deleteAsset` directly rather than `FleetStore.deleteAsset`
    * — that method's own `run()`-wrapped success toast has no Undo action, so this page fires its own
-   * `UndoToastService` toast instead (docs/OPS-CORE-PLAN.md §Q2).
+   * `UndoToastService` toast instead (docs/plans/done/OPS-CORE-PLAN.md §Q2).
    */
   async archiveAssetNow(row: AssetListRow): Promise<void> {
     const assetId = row.asset.assetId;

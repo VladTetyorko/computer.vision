@@ -87,7 +87,7 @@ class HlsProxyControllerTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md V-a proxy audit: mediamtx marks live LL-HLS media
+     * docs/plans/done/MVP2-PLAN.md V-a proxy audit: mediamtx marks live LL-HLS media
      * playlists {@code Cache-Control: no-cache} — before this fix that
      * header was silently dropped rather than forwarded, which risked a
      * stock (pre-lowLatencyMode) hls.js polling loop getting served a stale

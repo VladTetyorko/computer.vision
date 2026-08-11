@@ -11,7 +11,7 @@
 
     <artifactId>adapter-mjpeg</artifactId>
     <name>adapter-mjpeg</name>
-    <description>MJPEG HTTP ingest (RX) and file-loop transmit simulator (TX) adapter — docs/CYCLES-PLAN.md §5.</description>
+    <description>MJPEG HTTP ingest (RX) and file-loop transmit simulator (TX) adapter — docs/main/CYCLES-PLAN.md §5.</description>
 
     <dependencies>
         <dependency>

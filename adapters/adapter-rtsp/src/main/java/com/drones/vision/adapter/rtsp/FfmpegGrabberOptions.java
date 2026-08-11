@@ -9,7 +9,7 @@ import java.util.Map;
 
 /**
  * Per-protocol {@link FFmpegFrameGrabber} option/default configuration for {@link
- * FfmpegVideoSource} — promoted out of that class (docs/LAYERING-REFACTOR-PLAN.md §5.1) so its
+ * FfmpegVideoSource} — promoted out of that class (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1) so its
  * option surface (rtsp/srt/udp tuning) doesn't crowd the actual {@code VideoSourcePort} entry point.
  * Package-private static test seams, same idiom as before this split: constructing an {@link
  * FFmpegFrameGrabber} and calling {@code setOption}/{@code setMaxDelay} only assigns fields — no
@@ -18,15 +18,15 @@ import java.util.Map;
  * camera or RTSP/SRT/UDP server.
  *
  * <p>Every tunable <b>default value</b> below now lives in {@link FfmpegSettings} (see that record
- * for the full field-by-field provenance and docs/LAYERING-REFACTOR-PLAN.md §2.2's frozen {@code
+ * for the full field-by-field provenance and docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2's frozen {@code
  * vision.rtsp} property-key contract); this class still owns every FFmpeg AVOption <i>name</i> and
  * the fixed protocol-vocabulary constants ({@code caller}/{@code listener}, {@code mpegts}) — those
  * are registry/protocol constants, explicitly out of the config-extraction scope
- * (docs/LAYERING-REFACTOR-PLAN.md §1.3).
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3).
  */
 final class FfmpegGrabberOptions {
 
-    // -- docs/MVP2-PLAN.md V-c: low-latency RTSP demuxer tuning (rtsp scheme only, never file) --
+    // -- docs/plans/done/MVP2-PLAN.md V-c: low-latency RTSP demuxer tuning (rtsp scheme only, never file) --
     // Every default value now in FfmpegSettings was verified against FFmpeg 6.1.1's own source
     // (libavformat/options_table.h, demux.c, rtsp.c) rather than assumed from common blog-post
     // folklore -- see this module's MODULE.md "V-c: RTSP demuxer latency tuning" section for the
@@ -72,7 +72,7 @@ final class FfmpegGrabberOptions {
      * packets for {@code udp}.
      * <p>{@link FfmpegSettings#reorderQueueSize()} pins {@code 0}: for this module's actual
      * TCP-default path that is a no-op — documents, doesn't change, today's behavior (same spirit as
-     * {@code MediamtxStreamPublisher}'s {@code setMaxBFrames(0)}, docs/MVP2-PLAN.md V-a) — but it is
+     * {@code MediamtxStreamPublisher}'s {@code setMaxBFrames(0)}, docs/plans/done/MVP2-PLAN.md V-a) — but it is
      * a genuine guard against a silent multi-hundred-packet buffer if a device option ever overrides
      * {@link #OPTION_RTSP_TRANSPORT} to {@code udp}: without this pin, that source would inherit the
      * 500-packet default, which at typical RTP packet rates can mean seconds of demuxer-side
@@ -94,7 +94,7 @@ final class FfmpegGrabberOptions {
      * overwrites it immediately afterwards with {@code oc.max_delay(this.maxDelay)} — the grabber's
      * own {@code maxDelay} Java field, default {@code -1} — silently discarding anything set the
      * {@code setOption} way. This is exactly the "check how options are set — setOption vs specific
-     * setters" pitfall docs/MVP2-PLAN.md V-c's brief warns about, caught by reading JavaCV's source
+     * setters" pitfall docs/plans/done/MVP2-PLAN.md V-c's brief warns about, caught by reading JavaCV's source
      * rather than assuming.
      * <p><b>{@link FfmpegSettings#maxDelay()} is deliberately not the commonly-cited "500ms, vs. a 7s
      * default".</b> Verified against {@code rtsp.c}: the RTSP demuxer's own built-in default (unset
@@ -116,7 +116,7 @@ final class FfmpegGrabberOptions {
     static final String OPTION_RTSP_TRANSPORT = "rtsp_transport";
     static final String OPTION_TIMEOUT_MICROS = "timeout";
 
-    // -- docs/DRONE-INFRA-PLAN.md I-h: SRT (srt scheme only) --
+    // -- docs/plans/active/DRONE-INFRA-PLAN.md I-h: SRT (srt scheme only) --
     // Every FFmpeg AVOption name/default below was verified against this module's actual pinned
     // ffmpeg-platform-gpl 6.1.1-1.5.10 native binary (libavformat.so.60 built with --enable-libsrt,
     // confirmed present by extracting the jar and grepping its strings for SRTO_LATENCY/
@@ -125,7 +125,7 @@ final class FfmpegGrabberOptions {
 
     /**
      * {@code StreamDescriptor#options()} key for SRT receive latency, in <b>milliseconds</b> — this
-     * is the platform's own contract unit (docs/DRONE-INFRA-PLAN.md I-h: "{@code latency} (ms, SRT's
+     * is the platform's own contract unit (docs/plans/active/DRONE-INFRA-PLAN.md I-h: "{@code latency} (ms, SRT's
      * core knob)"). <b>FFmpeg's own {@code latency} AVOption (libavformat's {@code libsrt.c},
      * confirmed present in this build's binary via the {@code "receive latency (in
      * microseconds)"}/{@code "peer latency (in microseconds)"} help strings on its sibling {@code
@@ -142,7 +142,7 @@ final class FfmpegGrabberOptions {
      * (verified present in this build's binary: the {@code caller}/{@code listener}/{@code
      * rendezvous} AVOption constant names appear verbatim in {@code libavformat.so.60}'s strings).
      * Only {@code caller} (the app dials the encoder) and {@code listener} (the app binds; encoder
-     * dials in) are exposed per docs/DRONE-INFRA-PLAN.md I-h's frozen contract — {@code rendezvous}
+     * dials in) are exposed per docs/plans/active/DRONE-INFRA-PLAN.md I-h's frozen contract — {@code rendezvous}
      * exists in FFmpeg but is out of scope here. When absent, {@link #defaultSrtMode(URI)} infers
      * {@code listener} for an any-address host ({@code 0.0.0.0}/{@code ::}/unset — the natural
      * reading of {@code srt://0.0.0.0:port}: the app binds and waits) and {@code caller} otherwise (a
@@ -179,7 +179,7 @@ final class FfmpegGrabberOptions {
     private static final String FFMPEG_OPTION_SRT_PBKEYLEN = "pbkeylen";
     private static final String DEFAULT_SRT_PBKEYLEN = "16";
 
-    // -- docs/DRONE-INFRA-PLAN.md I-h: UDP/MPEG-TS (udp scheme only) --
+    // -- docs/plans/active/DRONE-INFRA-PLAN.md I-h: UDP/MPEG-TS (udp scheme only) --
 
     /**
      * {@code StreamDescriptor#options()} key mapping directly to FFmpeg's {@code fifo_size} AVOption
@@ -254,7 +254,7 @@ final class FfmpegGrabberOptions {
      * FFmpegFrameGrabber#setFormat(String)} — a raw {@code udp://} URL carries no container-level
      * self-description the way {@code rtsp://}'s SDP {@code DESCRIBE} response does, so without an
      * explicit format hint {@code avformat_open_input}'s format probe must guess from whatever
-     * datagrams it happens to receive during probing. docs/DRONE-INFRA-PLAN.md I-h's frozen contract
+     * datagrams it happens to receive during probing. docs/plans/active/DRONE-INFRA-PLAN.md I-h's frozen contract
      * already assumes MPEG-TS for {@code udp} ("MPEG-TS assumed"), so forcing it here is not a guess
      * — it names the one container this protocol is contracted to carry, and removes format
      * auto-detection as a failure mode entirely rather than trusting it to keep guessing right.
@@ -285,7 +285,7 @@ final class FfmpegGrabberOptions {
 
     /**
      * Applies this class's RTSP-only grabber options — the pre-existing {@code rtsp_transport}/
-     * {@code timeout}/{@code rw_timeout} plus docs/MVP2-PLAN.md V-c's low-latency demuxer tuning
+     * {@code timeout}/{@code rw_timeout} plus docs/plans/done/MVP2-PLAN.md V-c's low-latency demuxer tuning
      * ({@code probesize}/{@code analyzeduration}/{@code reorder_queue_size}/{@code max_delay}, see
      * each constant's javadoc above for the verified FFmpeg/JavaCV facts behind its default).
      *
@@ -332,7 +332,7 @@ final class FfmpegGrabberOptions {
     }
 
     /**
-     * Applies this class's SRT-only grabber options — docs/DRONE-INFRA-PLAN.md I-h.
+     * Applies this class's SRT-only grabber options — docs/plans/active/DRONE-INFRA-PLAN.md I-h.
      *
      * <p><b>Applied via {@code setOption}, not the {@code srt://} URL's query string</b> — both are
      * documented FFmpeg mechanisms for SRT protocol options, and both were actually tried (not
@@ -379,7 +379,7 @@ final class FfmpegGrabberOptions {
     }
 
     /**
-     * Applies this class's UDP/MPEG-TS-only grabber options — docs/DRONE-INFRA-PLAN.md I-h.
+     * Applies this class's UDP/MPEG-TS-only grabber options — docs/plans/active/DRONE-INFRA-PLAN.md I-h.
      *
      * <p>Always forces the demuxer format to {@code mpegts} via {@link
      * FFmpegFrameGrabber#setFormat(String)} — see {@link #FORMAT_MPEGTS}'s javadoc for why a raw

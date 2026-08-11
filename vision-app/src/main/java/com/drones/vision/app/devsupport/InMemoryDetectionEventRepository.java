@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 
 /**
  * In-memory {@link DetectionEventRepositoryPort}: dev/Phase-0 fallback with no durability across
- * restarts — same posture as {@link InMemoryDetectionRepository} (docs/MVP2-PLAN.md §E, E-a).
+ * restarts — same posture as {@link InMemoryDetectionRepository} (docs/plans/done/MVP2-PLAN.md §E, E-a).
  *
  * <p>Ring per stream: each stream's events live in their own bounded deque, capped at {@value
  * #MAX_EVENTS_PER_STREAM} entries, oldest evicted first once full. Unlike {@link
@@ -41,7 +41,7 @@ import java.util.stream.Stream;
  * InMemoryDetectionRepository}'s own ring cap for the identical tradeoff).
  *
  * <p>Replaced by {@code adapter-persistence} (JPA/Postgres) — explicitly deferred for this feature
- * (docs/MVP2-PLAN.md §E, E-a's own scope boundary: domain/application/api only), planned for a
+ * (docs/plans/done/MVP2-PLAN.md §E, E-a's own scope boundary: domain/application/api only), planned for a
  * future persistence cycle alongside the other repository ports it already covers.
  */
 public final class InMemoryDetectionEventRepository implements DetectionEventRepositoryPort {

@@ -2,8 +2,8 @@
     font-weight: 500;
 }
 
-/* ---- Page-bar filters: search + selects + archived toggle (docs/NAV-IA-REDESIGN-PLAN.md §2.2,
-   docs/design/04-assets.md) — the old `.asset-toolbar` card is gone; every control below now
+/* ---- Page-bar filters: search + selects + archived toggle (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2,
+   docs/extracts/design/04-assets.md) — the old `.asset-toolbar` card is gone; every control below now
    projects into `<vision-page-bar>`'s `[pageBarFilters]` slot. Each one gets an explicit width here
    because `input, select { width: 100% }` (src/styles.css) would otherwise stretch it to the full
    page-bar row the moment it wraps onto its own line — the exact "1075px-wide" finding NAV-IA-
@@ -38,7 +38,7 @@
     color: currentColor;
 }
 
-/* ---- Assets: the "N of M" line (docs/design/04-assets.md problem 6 — fixed pluralisation,
+/* ---- Assets: the "N of M" line (docs/extracts/design/04-assets.md problem 6 — fixed pluralisation,
    `pluralize()` shared with the page bar) --------------------------------------------------------- */
 
 .assets-shown {
@@ -46,7 +46,7 @@
     font-size: 0.85rem;
 }
 
-/* ---- Assets: the dense list (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) —
+/* ---- Assets: the dense list (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md) —
    default view. Plain `<table>` reusing the global `table`/`th`/`td` rules (src/styles.css); only
    the numeric-column alignment, the merged-state indicator, and row-selection need page-local
    rules. -------------------------------------------------------------------------------------- */
@@ -88,7 +88,7 @@ td:first-child {
     white-space: nowrap;
 }
 
-/* Numeric column (docs/VISUAL-REFRESH-PLAN.md F5 rule 2 — "numbers right-aligned in `.mono`",
+/* Numeric column (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 2 — "numbers right-aligned in `.mono`",
    naming the Devices column by name): `th`/`td` share the class so the header sits directly over
    the right-aligned values instead of merely over the column. See
    `features/devices/devices.css`'s identical copy — no shared table-utility class exists yet
@@ -110,7 +110,7 @@ td.col-num {
 
 /* Every data row is clickable + keyboard-operable (F6 — selecting opens the detail panel, never
    navigates); `cursor: pointer` and the hover/selected treatment below are what make that legible.
-   Selected row per docs/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
+   Selected row per docs/plans/done/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
    `--color-info` left inset bar plus a `--color-info-soft` background tint — `box-shadow: inset`
    stands in for a real `border-left` since `border-collapse` on a `<table>` won't reliably render a
    per-cell left border. Replaces the pre-refresh `--panel-raised` background + 3px accent. */
@@ -142,7 +142,7 @@ tbody tr.row-selectable.archived {
     text-align: right;
 }
 
-/* ---- Assets: the card grid (opt-in, docs/design/04-assets.md) ---------------------------------- */
+/* ---- Assets: the card grid (opt-in, docs/extracts/design/04-assets.md) ---------------------------------- */
 
 .asset-card-grid {
     display: grid;
@@ -172,7 +172,7 @@ tbody tr.row-selectable.archived {
     outline-offset: -2px;
 }
 
-/* Selected card per docs/VISUAL-REFRESH-PLAN.md F4 — the identical left-bar + soft-tint idiom the
+/* Selected card per docs/plans/done/VISUAL-REFRESH-PLAN.md F4 — the identical left-bar + soft-tint idiom the
    dense list's own `tbody tr.row-selectable.selected` uses, not a second "this is chosen" language
    for the opt-in card view. */
 .asset-card.selected {
@@ -221,7 +221,7 @@ tbody tr.row-selectable.archived {
    `.kebab-reason`/`.danger-action` are a shared global primitive (src/styles.css) — see
    `features/devices/devices.css`'s identical note. */
 
-/* ---- Assets: the detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy — title row [the pane's own
+/* ---- Assets: the detail panel (docs/plans/done/VISUAL-REFRESH-PLAN.md F6 anatomy — title row [the pane's own
    head] → status chip row → key-value fact grid → h3 sections → actions row). Content projected
    into `vision-two-pane`'s `[twoPaneDetail]` slot — the pane's own chrome (header, close button,
    docked/overlay layout) lives in that shared, frozen component; only the body's own layout is this

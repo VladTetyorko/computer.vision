@@ -3,7 +3,7 @@ import type { IconName } from '../../shared/ui/icon-registry';
 /**
  * The route→mode map, as data — the **one** source of truth for app navigation.
  *
- * **Now a single renderer (docs/NAV-IA-REDESIGN-PLAN.md F1, docs/design/19-hubs.md).** This array
+ * **Now a single renderer (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1, docs/extracts/design/19-hubs.md).** This array
  * used to feed *two* parallel navigation surfaces: the top bar's three mode dropdowns and the three
  * hub launcher pages (`operate-hub.ts`/`monitor-hub.ts`/`manage-hub.ts`), which rendered exactly the
  * same entries as a `vision-tile-grid`. Landing on a hub therefore cost a click and a lazy-chunk load
@@ -13,7 +13,7 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * redirect to `primaryRoute` (see below). One renderer is what makes the drift structurally
  * impossible rather than merely fixed.
  *
- * **De-duplicated nav (docs/UX-SIMPLIFY-REVIEW.md F1) — every destination has exactly one canonical
+ * **De-duplicated nav (docs/conclusions/UX-SIMPLIFY-REVIEW.md F1) — every destination has exactly one canonical
  * entry.** Before this task, `/command` was linked 3× (Operate's "Geofence & safety zones", Monitor's
  * "Map", Monitor's "Command dashboard"), `/wall` 2× (Operate's "Live view", Monitor's "Wall"), and
  * `/fly` 2× (Operate's "Cockpit", Operate's "Vision" — the CV console lives inline on the cockpit, so
@@ -31,12 +31,12 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * live-stream wall is always **"Wall"** (`/wall`). The manager's map-first dashboard is always
  * **"Command"** (`/command`).
  *
- * **`badge: 'soon'`** marks every remaining pure-**SCAFFOLD** entry (docs/UI-REDESIGN-PLAN.md Wave 4's
+ * **`badge: 'soon'`** marks every remaining pure-**SCAFFOLD** entry (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4's
  * Additions table) — its `to` still routes somewhere real (the shared `ComingSoon` placeholder,
- * `coming-soon.ts`), never a dead link (docs/UI-REDESIGN-PLAN.md §D-G: "a scaffold never renders
+ * `coming-soon.ts`), never a dead link (docs/plans/done/UI-REDESIGN-PLAN.md §D-G: "a scaffold never renders
  * invented rows"). Entries with no badge are functional — routed straight at a real page.
  *
- * **Assets is the one home for "what I own/fly" (docs/UX-SIMPLIFY-REVIEW.md F2).** `Assets` → `/assets`
+ * **Assets is the one home for "what I own/fly" (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2).** `Assets` → `/assets`
  * is the asset-first grid (search, filter, cards) and stays the primary, ungated Manage entry — the
  * label is deliberately unchanged ("Assets", not "Sources"/"Fleet"). Two things that used to compete
  * with it as peer "where are my cameras" doors are gone:
@@ -51,7 +51,7 @@ import type { IconName } from '../../shared/ui/icon-registry';
  *   top-level Manage door. It now carries `group: 'advanced'` + `managerOnly: true` (see below) — an
  *   admin/manager still finds it one section down, a pilot never sees it at all.
  *
- * **Manage is grouped + role-scoped (docs/UX-SIMPLIFY-REVIEW.md F3).** Two extra, Manage-only
+ * **Manage is grouped + role-scoped (docs/conclusions/UX-SIMPLIFY-REVIEW.md F3).** Two extra, Manage-only
  * `NavEntry` fields:
  * - **`group`** — `'configuration'` (Categories/Training/Firmware/Reports — set up once, not every
  *   day), `'diagnostics'` (Health/Debug), or `'advanced'` (Devices). Omitted means "everyday,
@@ -72,7 +72,7 @@ import type { IconName } from '../../shared/ui/icon-registry';
 export type NavModeId = 'operate' | 'monitor' | 'manage';
 
 /**
- * Where `/operate`, `/monitor`, `/manage` now redirect (docs/design/19-hubs.md). The three hub
+ * Where `/operate`, `/monitor`, `/manage` now redirect (docs/extracts/design/19-hubs.md). The three hub
  * launcher pages are gone — `NAV_MODES` feeds exactly one renderer, the sidebar — but the paths stay
  * routable so old bookmarks and external links still land somewhere real, mirroring the same
  * fold-a-removed-launcher-into-its-successor precedent `features/map/map.routes.ts` (`/map` →
@@ -88,12 +88,12 @@ export interface NavEntry {
   /** Set to `'soon'` for every F4 scaffold entry; omitted for functional entries. */
   readonly badge?: string;
   /**
-   * Manage-hub-only sub-grouping (docs/UX-SIMPLIFY-REVIEW.md F3) — `undefined` renders flat, at the
+   * Manage-hub-only sub-grouping (docs/conclusions/UX-SIMPLIFY-REVIEW.md F3) — `undefined` renders flat, at the
    * top of the Manage hub, ungrouped. Ignored by Operate/Monitor (neither hub currently groups).
    */
   readonly group?: 'configuration' | 'diagnostics' | 'advanced';
   /**
-   * Hidden unless `canManageOrg(topRole)` (docs/UX-SIMPLIFY-REVIEW.md F3) — see this file's own class
+   * Hidden unless `canManageOrg(topRole)` (docs/conclusions/UX-SIMPLIFY-REVIEW.md F3) — see this file's own class
    * doc comment. Only `ManageHub` reads this field today.
    */
   readonly managerOnly?: boolean;
@@ -110,7 +110,7 @@ export interface NavMode {
 
 /**
  * How the sidebar (`shared/ui/app-sidebar/**`) splits one mode's entries into its three visual tiers
- * (docs/design/00-shell.md). Kept here, next to the data it partitions, so "which tier is this entry
+ * (docs/extracts/design/00-shell.md). Kept here, next to the data it partitions, so "which tier is this entry
  * in" has one answer rather than one per renderer — the same single-source-of-truth reasoning that
  * put `NAV_MODES` itself in this file.
  *
@@ -119,7 +119,7 @@ export interface NavMode {
  *   collapsed `Advanced` disclosure. `configuration` stays primary — Categories/CV training/Reports
  *   are things a manager opens, not troubleshooting tools.
  * - **`upcoming`** — every `badge: 'soon'` scaffold: behind a collapsed `Upcoming` disclosure, so an
- *   unbuilt area can never outrank a built one (docs/NAV-IA-REDESIGN-PLAN.md F9).
+ *   unbuilt area can never outrank a built one (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F9).
  */
 export interface NavTiers {
   readonly primary: readonly NavEntry[];
@@ -297,7 +297,7 @@ export const NAV_MODES: readonly NavMode[] = [
         managerOnly: true,
       },
       // --- Advanced — raw device plumbing; most device actions already live inside each asset's
-      //     own Hardware section (docs/UX-SIMPLIFY-REVIEW.md F2). ADMIN/MANAGER only. -----------
+      //     own Hardware section (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2). ADMIN/MANAGER only. -----------
       {
         icon: 'chip',
         name: 'Devices',

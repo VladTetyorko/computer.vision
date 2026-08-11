@@ -30,13 +30,13 @@ import java.util.function.Consumer;
  * <p>Both passes are name-idempotent: a second press adds neither a duplicate zone nor a duplicate
  * mark, so the button can be pressed repeatedly without turning the map into a pile.
  *
- * <h2>Which layer the demo marks land on (docs/MAP-REWORK-PLAN.md Wave C)</h2>
+ * <h2>Which layer the demo marks land on (docs/plans/done/MAP-REWORK-PLAN.md Wave C)</h2>
  * The COP layer, explicitly — {@link MapLayerService#copLayerId()}, not the default layer {@code
  * LayerResolver} would pick. A demo exists to show the shared picture, and the COP layer is the one
  * every role can see; letting the marks fall onto the pressing user's own TEAM/PERSONAL layer would
  * make them invisible to exactly the other-role windows a demo is usually being shown in.
  *
- * <p>Their affiliations follow docs/MAP-REWORK-PLAN.md §2.2's own old-kind → (kind, affiliation)
+ * <p>Their affiliations follow docs/plans/done/MAP-REWORK-PLAN.md §2.2's own old-kind → (kind, affiliation)
  * migration table, so the seeded set matches what a pre-rework deployment's marks become after
  * {@code V12__map_layers.sql} runs: {@code TARGET→(TARGET, HOSTILE)}, {@code HAZARD→(HAZARD,
  * UNKNOWN)}, {@code POI→(POI, NEUTRAL)}, {@code FRIENDLY→(UNIT, FRIENDLY)}.
@@ -148,7 +148,7 @@ public class DemoOperations {
     }
 
     /**
-     * The five demo marks, each carrying the (kind, affiliation) pair docs/MAP-REWORK-PLAN.md §2.2's
+     * The five demo marks, each carrying the (kind, affiliation) pair docs/plans/done/MAP-REWORK-PLAN.md §2.2's
      * migration table assigns to its pre-rework kind — so a freshly seeded demo and a migrated
      * deployment show the same symbology. Note "Demo ground team" is now {@code (UNIT, FRIENDLY)}:
      * the old {@code MarkKind.FRIENDLY} is gone, since "whose it is" became {@link Affiliation}.

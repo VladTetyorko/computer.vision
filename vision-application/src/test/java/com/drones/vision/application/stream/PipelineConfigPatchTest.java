@@ -56,7 +56,7 @@ class PipelineConfigPatchTest {
 
     @Test
     void theFiveArgConvenienceConstructorLeavesTrackingUntouched() {
-        // docs/TRACKING-PLAN.md §4.D: absent tracking = leave tracking as-is, and every pre-T3
+        // docs/plans/done/TRACKING-PLAN.md §4.D: absent tracking = leave tracking as-is, and every pre-T3
         // call site (vision-api's UpdateStreamConfigRequest#toPatch among them) keeps compiling.
         assertNull(new PipelineConfigPatch(0.5, null, null, null, null).tracking());
         assertNull(PipelineConfigPatch.NOTHING.tracking());

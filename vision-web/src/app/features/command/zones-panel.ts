@@ -6,7 +6,7 @@ import type { GeoPosition, GeofenceZone, ZoneKind } from '../../core/api/models'
 import { GeofenceZoneDialog, type ZoneDraft } from './geofence-zone-dialog';
 
 /**
- * The Zones management panel (docs/OPS-CORE-PLAN.md §G-c) — a modal overlay opened from Command's
+ * The Zones management panel (docs/plans/done/OPS-CORE-PLAN.md §G-c) — a modal overlay opened from Command's
  * topbar "Zones" button (mirrors `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`'s own
  * "modal, not embedded inline" choice, for the identical reason: doesn't touch
  * `command-logic.ts#commandGridColumns`'s own rail/map/panel grid arithmetic at all — a fourth
@@ -18,7 +18,7 @@ import { GeofenceZoneDialog, type ZoneDraft } from './geofence-zone-dialog';
  * `features/devices/devices.ts`'s own "one inline row open at a time" `rowAction`/`renameDraft`
  * idiom, simplified to this panel's single action kind), and delete — **undoable** (10s, via the
  * shared `UndoToastService`, `GeofenceStore.remove` — see that store's own doc comment) rather than
- * a confirm dialog, the "undo over confirm" poka-yoke (docs/UX-REWORK-PLAN.md §U-a2) already
+ * a confirm dialog, the "undo over confirm" poka-yoke (docs/plans/done/UX-REWORK-PLAN.md §U-a2) already
  * established for archive/deactivate.
  *
  * "New keep-in/keep-out zone" opens `<vision-geofence-zone-dialog>` with `kind` fixed for that

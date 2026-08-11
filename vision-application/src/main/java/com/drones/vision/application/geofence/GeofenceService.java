@@ -10,7 +10,7 @@ import com.drones.vision.application.category.CategoryService;
 import com.drones.vision.application.device.DeviceService;
 
 /**
- * CRUD/list over {@link GeofenceZone}s (docs/OPS-CORE-PLAN.md §G).
+ * CRUD/list over {@link GeofenceZone}s (docs/plans/done/OPS-CORE-PLAN.md §G).
  *
  * <p>One interface, one implementation ({@link DefaultGeofenceService}). Zones are global
  * reference data — no ownership, no per-user scoping, no audit trail (unlike {@code

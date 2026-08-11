@@ -12,7 +12,7 @@ import com.drones.vision.api.support.CapabilityParsing;
 
 /**
  * Request body for {@code POST /api/geofences} and {@code PUT /api/geofences/{id}}
- * (docs/OPS-CORE-PLAN.md §G's frozen wire contract) — one shape for both create and update, since
+ * (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract) — one shape for both create and update, since
  * the wire contract's bodies are identical (the response's shape minus {@code id}), mirroring
  * {@link GeofenceZoneSpec} (vision-application) itself.
  *

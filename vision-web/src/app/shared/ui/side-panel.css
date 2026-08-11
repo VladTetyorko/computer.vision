@@ -2,7 +2,7 @@
   display: contents;
 }
 
-/* Fixed right column, docked to the viewport top (docs/NAV-IA-REDESIGN-PLAN.md — there is no more
+/* Fixed right column, docked to the viewport top (docs/plans/done/NAV-IA-REDESIGN-PLAN.md — there is no more
    global header to dock under; the app shell's own nav is a left sidebar now, not a top bar) —
    z-index 120 sits above the toast host (100, `shared/ui/toast-host.ts`) so a notification firing
    while a drawer is open never renders behind it, and below a true modal dialog (150,

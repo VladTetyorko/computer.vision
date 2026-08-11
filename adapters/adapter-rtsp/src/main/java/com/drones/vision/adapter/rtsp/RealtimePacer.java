@@ -8,9 +8,9 @@ import java.util.concurrent.TimeUnit;
  * FFmpegFrameGrabber#getTimestamp()}) and sleeps the difference between that delta and the
  * wall-clock time actually spent since the previous paced frame, clamped to zero (never a negative
  * sleep) — no drift compensation beyond this one monotonic baseline, deliberately kept simple per
- * docs/CYCLES-PLAN.md §1a.
+ * docs/main/CYCLES-PLAN.md §1a.
  *
- * <p>Extracted out of {@code FfmpegVideoSource}'s grab loop (docs/LAYERING-REFACTOR-PLAN.md §5.1,
+ * <p>Extracted out of {@code FfmpegVideoSource}'s grab loop (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1,
  * "Share a {@code RealtimePacer} with {@code RtspFeedTransmitter}") where this exact logic was
  * duplicated verbatim in both {@link FfmpegGrabLoop} ({@code file}-scheme sources) and {@link
  * RtspFeedTransmitter}'s own transmit loop. Sharing it here is intra-module, not cross-adapter — both

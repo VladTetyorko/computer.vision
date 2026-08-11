@@ -27,7 +27,7 @@ final class PublishBackoff {
     }
 
     /**
-     * @param resilience {@code vision.publish.resilience.*} (docs/LAYERING-REFACTOR-PLAN.md wave
+     * @param resilience {@code vision.publish.resilience.*} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave
      *                   F3) — replaces this class's own {@code INITIAL_BACKOFF_MS}/{@code
      *                   MAX_BACKOFF_MS} constants.
      */

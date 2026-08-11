@@ -112,7 +112,7 @@ describe('VisionApi', () => {
     await promise;
   });
 
-  // --- Warehouse lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) ------------------------
+  // --- Warehouse lifecycle (docs/main/CYCLES-PLAN.md §8's pinned contract) ------------------------
 
   it('lists devices without includeDeleted by default', async () => {
     const promise = api.listDevices();
@@ -214,7 +214,7 @@ describe('VisionApi', () => {
     await promise;
   });
 
-  // --- Detection events (docs/MVP2-PLAN.md §E, E-a/E-b) --------------------------------------
+  // --- Detection events (docs/plans/done/MVP2-PLAN.md §E, E-a/E-b) --------------------------------------
 
   it('lists recent events with a default limit and no sinceMs on the first poll', async () => {
     const promise = api.events();
@@ -242,7 +242,7 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual([]);
   });
 
-  // --- Fleet summary + stream snapshots (docs/MVP3-PLAN.md C-a/C-c) --------------------------
+  // --- Fleet summary + stream snapshots (docs/plans/done/MVP3-PLAN.md C-a/C-c) --------------------------
 
   it('fetches the fleet summary without includeArchived by default', async () => {
     const promise = api.fleetSummary();
@@ -269,7 +269,7 @@ describe('VisionApi', () => {
     expect(api.snapshotUrl('s/1 x')).toBe('/api/streams/s%2F1%20x/snapshot');
   });
 
-  // --- Device probe (docs/UX-REWORK-PLAN.md §U-d) --------------------------------------------
+  // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d) --------------------------------------------
 
   it('probes a candidate connection', async () => {
     const promise = api.probeDevice({ protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' });
@@ -302,7 +302,7 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toMatchObject({ ok: true, codec: 'mjpeg' });
   });
 
-  // --- Asset image (docs/UX-REWORK-PLAN.md §U-d) --------------------------------------------
+  // --- Asset image (docs/plans/done/UX-REWORK-PLAN.md §U-d) --------------------------------------------
 
   it('builds an asset image URL without issuing any request', () => {
     expect(api.assetImageUrl('a-1')).toBe('/api/assets/a-1/image');
@@ -328,7 +328,7 @@ describe('VisionApi', () => {
     await promise;
   });
 
-  // --- Geofencing (docs/OPS-CORE-PLAN.md §G's frozen wire contract) --------------------------
+  // --- Geofencing (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract) --------------------------
 
   it('lists geofence zones', async () => {
     const promise = api.listGeofences();
@@ -378,7 +378,7 @@ describe('VisionApi', () => {
     await promise;
   });
 
-  // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) -------------
+  // --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) -------------
 
   it('fetches a usage recording', async () => {
     const promise = api.usageRecording('u-1');
@@ -386,7 +386,7 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual({ available: false });
   });
 
-  // --- Guarded command TX (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
+  // --- Guarded command TX (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
 
   it('commands an asset to return home with an empty body', async () => {
     const promise = api.returnHome('a-1');
@@ -402,7 +402,7 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual({ result: 'NO_ACK' });
   });
 
-  // --- Guarded command TX — arm/disarm/mode select (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+  // --- Guarded command TX — arm/disarm/mode select (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
   // contract) -------------------------------------------------------------------------------------
 
   it('fetches the flight-capabilities matrix', async () => {
@@ -463,7 +463,7 @@ describe('VisionApi', () => {
     await disarmPromise;
   });
 
-  // --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -------------
+  // --- Guided drone onboarding (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -------------
 
   it('fetches this platform\'s own reachable addresses + mavlink port', async () => {
     const promise = api.systemNetwork();
@@ -481,7 +481,7 @@ describe('VisionApi', () => {
     await expect(promise).resolves.toEqual({ addresses: [], mavlinkPort: 14550 });
   });
 
-  // --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
+  // --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
 
   it('fetches the tracker-engine roster', async () => {
     const promise = api.getCvTrackers();

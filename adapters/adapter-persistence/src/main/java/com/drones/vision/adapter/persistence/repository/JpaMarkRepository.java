@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /**
  * {@link MarkRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/TACTICAL-MARKS-PLAN.md §3.
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md §3.
  *
  * <p>{@link #save} is an upsert (merge-by-id), matching {@code InMemoryMarkRepository}'s
  * ({@code vision-app} devsupport) {@code Map#put} semantics exactly. {@link #deleteById} is a

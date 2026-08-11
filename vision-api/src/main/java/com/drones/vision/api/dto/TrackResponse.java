@@ -8,13 +8,13 @@ import java.time.Instant;
 
 /**
  * One entry of {@code GET /api/streams/{streamId}/tracks}'s {@code "tracks"} array
- * (docs/TRACKING-PLAN.md &sect;4.E's frozen wire contract) — the application layer's track-book
+ * (docs/plans/done/TRACKING-PLAN.md &sect;4.E's frozen wire contract) — the application layer's track-book
  * entry ({@code TrackedObject}, vision-domain) flattened for the wire.
  *
  * <p>Flat here, unlike {@link DetectionResponse}'s nested {@code "track"} object, and deliberately
  * so: this <i>is</i> the track resource, so there is no parent for the track facts to be nested
  * inside — grouping exists to keep an unrelated payload byte-identical when tracking is off
- * (docs/TRACKING-ORCHESTRATION.md &sect;6 rule 1), which does not apply to a response that is
+ * (docs/extracts/TRACKING-ORCHESTRATION.md &sect;6 rule 1), which does not apply to a response that is
  * nothing but tracks.
  *
  * <p>No {@code @JsonInclude(NON_NULL)} — every field is always present. A book entry always carries

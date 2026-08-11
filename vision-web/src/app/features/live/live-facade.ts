@@ -12,14 +12,14 @@ import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
 
-/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
+/** Panel-state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
  * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
  * for why this isn't routed through `SettingsStore`. */
 const RAIL_OPEN_KEY = 'vision.live.railOpen';
 const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
 
 /**
- * `LivePage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsStore`/
+ * `LivePage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsStore`/
  * `TelemetryStore`/`DetectionsStore`/`Router`, exactly what the page injected directly before this
  * refactor. `TelemetryStore`/`DetectionsStore` stay listed in `LivePage`'s own `providers` array
  * (unchanged) alongside this facade, so this facade and the page's child components
@@ -27,7 +27,7 @@ const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
  * still DI-share the exact same store instances as before — only *who injects them* moved.
  *
  * `railOpen`/`mapInsetVisible` are non-exclusive toggles (persisted, but not mutually exclusive with
- * anything else on this page), so per docs/UI-ARCHITECTURE-PLAN.md they stay plain signals here
+ * anything else on this page), so per docs/plans/done/UI-ARCHITECTURE-PLAN.md they stay plain signals here
  * rather than a `UiStore` group — this page has no two overlays that could ever conflict.
  *
  * `deviceId` is a route-bound input and must stay on the page (Angular requirement); `bindDeviceId`
@@ -43,14 +43,14 @@ export class LiveFacade {
 
   /**
    * The two shared operational-picture stores (both `providedIn: 'root'`, started at boot) —
-   * **new here** (docs/MAP-REWORK-PLAN.md §5.1 Wave D's own bug fix): this page's map inset used to
+   * **new here** (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D's own bug fix): this page's map inset used to
    * silently drop zones and marks, showing the operator a different picture from the one Command and
    * the Fly cockpit were looking at. `<vision-tactical-map>` now gets both, read-only for zones and
    * click/drag-interactive for marks, exactly as the other two hosts do.
    */
   readonly geofence = inject(GeofenceStore);
   readonly marks = inject(MarksStore);
-  /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/MAP-REWORK-PLAN.md §5.2). */
+  /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
   readonly layers = inject(LayersStore);
   readonly drawings = inject(DrawingsStore);
 
@@ -59,7 +59,7 @@ export class LiveFacade {
   readonly busy = signal(false);
 
   /**
-   * Video-first layout (docs/CYCLES-PLAN.md §9, CU-b item 4): the player is the dominant surface;
+   * Video-first layout (docs/main/CYCLES-PLAN.md §9, CU-b item 4): the player is the dominant surface;
    * OSD + detections strip + settings all live in a right rail that collapses to give the player
    * the full width. `mapInsetVisible` is a second, independent toggle — the map inset can be
    * hidden even while the rail stays open — with a keyboard shortcut (`M`, ignored while typing
@@ -72,10 +72,10 @@ export class LiveFacade {
   /** The player's own measured seconds-behind-live, piped into `StreamInfoPanel` — see its doc comment. */
   readonly latencySeconds = signal<number | null>(null);
 
-  /** The player's own live transport (docs/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
+  /** The player's own live transport (docs/plans/done/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
   readonly transport = signal<Transport>('hls');
 
-  /** Per-tile "boxes: overlay/burned/off" toggle (docs/CYCLES-PLAN.md §11 item 6) — defaults to
+  /** Per-tile "boxes: overlay/burned/off" toggle (docs/main/CYCLES-PLAN.md §11 item 6) — defaults to
    * `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s own
    * `boxesMode` input default matches for the same reason). */
   readonly boxesMode = signal<BoxesMode>('burned');
@@ -90,7 +90,7 @@ export class LiveFacade {
   });
   readonly live = computed(() => this.stream() !== undefined);
 
-  // --- Deliberately-stopped state (docs/MVP2-PLAN.md §S, S-b) ---------------------------------
+  // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) ---------------------------------
   // `explicitlyStopped` is this page's own Stop action; `hasBeenLive` tracks whether *this page
   // instance* ever saw the stream live at all. Combined, `stopped` covers both the reported bug
   // (click Stop → calm terminal state, not a reconnect storm) and "someone else stopped it" —
@@ -106,11 +106,11 @@ export class LiveFacade {
   /**
    * Capability-driven panels: a fixed camera and a drone are not the same viewing
    * experience, and `Device.capabilities` already says which is which
-   * (docs/UX-DESIGN.md §5.2).
+   * (docs/main/UX-DESIGN.md §5.2).
    */
   readonly hasTelemetry = computed(() => (this.device()?.capabilities ?? []).includes('TELEMETRY'));
 
-  // --- Map inset (docs/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
+  // --- Map inset (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
   // `<vision-tactical-map>` is dumb — the deleted `<vision-live-map>` read this facade's own
   // `TelemetryStore` through DI, the new one takes inputs — so the single followed marker is built
   // here from the same trail/latest signals. This route carries a bare `deviceId` and no asset
@@ -137,12 +137,12 @@ export class LiveFacade {
     Object.entries(this.device()?.options ?? {}).map(([key, value]) => ({ key, value })),
   );
 
-  /** docs/CV-CONTROL-PLAN.md §4 — the roster is now data-driven (`GET /api/cv/models`, cached by
+  /** docs/plans/done/CV-CONTROL-PLAN.md §4 — the roster is now data-driven (`GET /api/cv/models`, cached by
    * `FleetStore.models`), replacing the old hardcoded `DETECTION_MODEL_OPTIONS` array. */
   readonly modelOptions = computed(() => this.fleet.models());
 
   constructor() {
-    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
+    // Panel state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
     // actually changes; the initial `signal()` value above already restored whatever was last
     // saved (or the existing default, on a first visit).
     effect(() => writePersistedFlag(RAIL_OPEN_KEY, this.railOpen()));
@@ -158,7 +158,7 @@ export class LiveFacade {
     // Only devices that declare TELEMETRY are worth looking up an asset/usage for at all —
     // `hasTelemetry()` flips true once `FleetStore` has loaded the device, so this also covers
     // the brief window before that first fetch resolves.
-    // No `assetId` to pass here (docs/REALTIME-PLAN.md Phase R-a item 3) — this route only carries
+    // No `assetId` to pass here (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3) — this route only carries
     // a bare `deviceId`, no asset context; `TelemetryStore` falls back to its own list-then-find
     // lookup for this call site, unchanged.
     effect(() => {
@@ -174,7 +174,7 @@ export class LiveFacade {
     });
 
     // Detections only make sense while a stream is actually running — there is no streamId to
-    // poll otherwise (docs/MVP1-PLAN.md §C8 bullet 4).
+    // poll otherwise (docs/plans/done/MVP1-PLAN.md §C8 bullet 4).
     effect(() => {
       const streamId = this.stream()?.streamId;
       if (streamId) {
@@ -184,7 +184,7 @@ export class LiveFacade {
       }
     });
 
-    // `M` toggles the map inset (docs/CYCLES-PLAN.md §9, CU-b item 4) — ignored while a form
+    // `M` toggles the map inset (docs/main/CYCLES-PLAN.md §9, CU-b item 4) — ignored while a form
     // field has focus (typing "m" into the name/URI fields elsewhere in the app must not fight
     // this) and while the device has no telemetry to show a map for in the first place.
     const onKeydown = (event: KeyboardEvent): void => {
@@ -206,7 +206,7 @@ export class LiveFacade {
   /**
    * Fed from `LivePage`'s own route-bound `deviceId` input — see this class's own doc comment.
    *
-   * **Resets the deliberately-stopped state on a device switch** (docs/UI-STATE-PLAN.md §2 — a stale
+   * **Resets the deliberately-stopped state on a device switch** (docs/plans/done/UI-STATE-PLAN.md §2 — a stale
    * value surviving into a context where it's wrong). `/live/:deviceId` is reachable from many direct
    * links to a *different* device while already on this route (the notification bell, Wall tiles,
    * Assets/Devices/asset-detail "Watch live", Replay's "Watch live") — Angular reuses this same routed

@@ -35,7 +35,7 @@ RUN apt-get update \
 # doesn't balloon with CUDA libraries this CPU-first service never uses.
 #
 # TRACKING ENGINES NEED NO NEW INSTALL STEP HERE -- verified, not assumed.
-# The three shipped engines (docs/TRACKING-PLAN.md §5.B) are `bytetrack`
+# The three shipped engines (docs/plans/done/TRACKING-PLAN.md §5.B) are `bytetrack`
 # (ultralytics' own BYTETracker + `lap`, both in the `cv` extra) and `lk` /
 # `ncc`, which use only core-OpenCV `video`/`imgproc` entry points
 # (`calcOpticalFlowPyrLK`, `goodFeaturesToTrack`, `matchTemplate`,
@@ -52,7 +52,7 @@ RUN pip install --no-cache-dir --retries 15 --timeout 120 \
       -e ".[cv]" openvino \
     && ./scripts/gen_proto.sh
 
-# DEFERRED (docs/TRACKING-PLAN.md §5.B, decision D14): the ONNX-backed
+# DEFERRED (docs/plans/done/TRACKING-PLAN.md §5.B, decision D14): the ONNX-backed
 # single-object trackers `cv2.TrackerNano` and `cv2.TrackerVit`. They exist
 # as symbols in opencv-python 5.x but raise on construction because the
 # package ships no weights for them, which is exactly why `TrackerRegistry`
@@ -70,7 +70,7 @@ RUN pip install --no-cache-dir --retries 15 --timeout 120 \
 #       https://github.com/opencv/opencv_zoo/raw/main/models/object_tracking_vittrack/object_tracking_vittrack_2023sep.onnx
 #
 # NOTE: this image stays SINGLE-ARCH (linux/amd64) on purpose -- no buildx
-# multi-arch target (docs/TRACKING-PLAN.md §3.3.3, decision D9). Its whole
+# multi-arch target (docs/plans/done/TRACKING-PLAN.md §3.3.3, decision D9). Its whole
 # reason to exist is the OpenVINO IR export below, an Intel-CPU
 # optimization; maintaining a second architecture of a ~1.5GB image whose
 # defining feature does not apply to that architecture is cost with no

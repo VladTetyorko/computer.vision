@@ -5,13 +5,13 @@ import type { IconName } from './icon-registry';
 export type IconButtonVariant = 'ghost' | 'hud' | 'danger';
 
 /**
- * `vision-icon-button` — the tool-rail/close/kebab trigger (docs/UI-REDESIGN-PLAN.md Frozen contract
+ * `vision-icon-button` — the tool-rail/close/kebab trigger (docs/plans/done/UI-REDESIGN-PLAN.md Frozen contract
  * F3), replacing this app's existing per-file `.icon-btn` copies (`fly.css`, `cv-control-panel.css`,
  * …) one call site at a time in later waves — this wave only adds the shared component, it does not
  * migrate any existing consumer.
  *
  * `label` is a **required** input, not optional-with-a-default: the rule this component exists to
- * enforce (docs/UI-REDESIGN-PLAN.md's own "Understandability & standards" section — "every icon-only
+ * enforce (docs/plans/done/UI-REDESIGN-PLAN.md's own "Understandability & standards" section — "every icon-only
  * control is a `vision-icon-button` with a required `label`") is a compile-time error if a call site
  * omits it, not a runtime a11y gap discovered later. It drives both `title` (mouse hover) and
  * `aria-label` (screen reader) from the one string, so the visible tooltip and the accessible name
@@ -68,7 +68,7 @@ export type IconButtonVariant = 'ghost' | 'hud' | 'danger';
     }
 
     /* hud variant: the tool-rail-over-video look — reuses the exact --hud-* tokens .surface-hud
-       itself is built from (docs/UI-REDESIGN-PLAN.md F1/F3), so a HUD icon button always matches
+       itself is built from (docs/plans/done/UI-REDESIGN-PLAN.md F1/F3), so a HUD icon button always matches
        whatever frosted-pill surface it sits inside. Round (--radius-pill), not the square
        --radius-sm the other two variants use — a pill button reads distinctly as "floating over
        content", not "sitting in a toolbar". */

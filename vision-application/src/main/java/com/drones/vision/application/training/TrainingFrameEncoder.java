@@ -19,7 +19,7 @@ import java.util.Iterator;
 
 /**
  * Encodes a raw {@link VideoFrame} to <b>full-resolution</b> JPEG bytes for a captured {@link
- * com.drones.vision.domain.model.TrainingSample} (docs/CV-TRAINING-PLAN.md §D) — training truth
+ * com.drones.vision.domain.model.TrainingSample} (docs/plans/done/CV-TRAINING-PLAN.md §D) — training truth
  * wants real pixels, never the downscaled thumbnail {@code vision-api}'s own snapshot encoder
  * produces for a dashboard.
  *
@@ -33,7 +33,7 @@ import java.util.Iterator;
  *
  * <p>Package-private, no interface — one call site ({@link DefaultLabelingService#capture}), no
  * second implementation ever plausible (java-clean-code SKILL.md §1). Holds a single {@code
- * jpegQuality} tunable (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code
+ * jpegQuality} tunable (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code
  * vision.application.training.jpeg-quality}) rather than a bare {@code static} constant, so {@code
  * vision-app} can configure it; otherwise stateless.
  *

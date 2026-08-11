@@ -126,7 +126,7 @@ describe('flightBanner', () => {
   });
 });
 
-describe('canCommandReturnHome (docs/DRONE-INFRA-PLAN.md I-e Stage 1)', () => {
+describe('canCommandReturnHome (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1)', () => {
   it('is true for ardupilot firmware with fresh telemetry', () => {
     expect(canCommandReturnHome('ardupilot', 0)).toBe(true);
     expect(canCommandReturnHome('ardupilot', 5)).toBe(true); // exactly STALE_AFTER_SECONDS — not stale yet

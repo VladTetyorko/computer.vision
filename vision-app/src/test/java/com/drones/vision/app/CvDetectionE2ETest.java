@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end echo round trip for docs/MVP1-PLAN.md §C7 bullet 4: with {@code
+ * End-to-end echo round trip for docs/plans/done/MVP1-PLAN.md §C7 bullet 4: with {@code
  * vision.cv.enabled=true} pointed at a real (in-test, loopback-TCP) {@code Inference/DetectStream}
  * gRPC server, a {@code sim}-device stream's sampled frames actually reach the server as {@code
  * FrameRequest}s (proving {@link com.drones.vision.adapter.cvgrpc.GrpcDetectionPort} is wired all

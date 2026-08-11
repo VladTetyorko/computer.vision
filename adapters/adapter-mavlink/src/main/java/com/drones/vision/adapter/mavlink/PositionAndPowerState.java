@@ -6,7 +6,7 @@ import io.dronefleet.mavlink.common.GlobalPositionInt;
  * {@link MavlinkTelemetryDecoder}'s accumulated position/velocity/battery fields —
  * {@code GLOBAL_POSITION_INT} and {@code SYS_STATUS}/{@code BATTERY_STATUS} — the subset that maps
  * onto {@link com.drones.vision.domain.model.Telemetry}'s own named fields plus the velocity/
- * battery-voltage {@code extra} keys (docs/LAYERING-REFACTOR-PLAN.md E2 split out of {@code
+ * battery-voltage {@code extra} keys (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2 split out of {@code
  * MavlinkTelemetryDecoder}'s original 35-field flat state). See {@code MavlinkTelemetryDecoder}'s
  * own javadoc for the full unit-conversion table.
  *

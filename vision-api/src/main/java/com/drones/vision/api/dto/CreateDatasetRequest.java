@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.CategoryId;
 import java.util.List;
 
 /**
- * Request body for {@code POST /api/datasets} (docs/CV-TRAINING-PLAN.md §3's frozen wire
+ * Request body for {@code POST /api/datasets} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire
  * contract).
  *
  * @param name           human-readable name; must not be blank ({@link DatasetSpec}'s own compact

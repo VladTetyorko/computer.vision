@@ -18,7 +18,7 @@ import type { Affiliation, MapMark, MarkKind } from '../../../core/api/models';
 
 /**
  * `<vision-mark-palette>` — what the next mark will be, and where it lands
- * (docs/MAP-REWORK-PLAN.md §5.2). Shared verbatim by the Fly cockpit's Marks drawer and Command's
+ * (docs/plans/done/MAP-REWORK-PLAN.md §5.2). Shared verbatim by the Fly cockpit's Marks drawer and Command's
  * Marks panel, which is why it lives in `shared/map/map-controls/` rather than either feature
  * folder (this codebase's own "a second consumer moves it to `shared/`" rule).
  *

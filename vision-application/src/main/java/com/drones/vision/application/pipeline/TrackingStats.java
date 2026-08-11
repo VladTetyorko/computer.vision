@@ -10,7 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * A snapshot of one stream's tracking flow over the last {@link #window} (docs/TRACKING-PLAN.md
+ * A snapshot of one stream's tracking flow over the last {@link #window} (docs/plans/done/TRACKING-PLAN.md
  * &sect;4.E, TRACKING-ORCHESTRATION.md &sect;5.4) — the read model behind {@code GET
  * /api/streams/{streamId}/tracks}'s {@code stats} object and the operator-facing flow strip.
  *
@@ -29,7 +29,7 @@ import java.util.Objects;
  * @param engineId           the engine that is actually <i>serving</i>, from the newest sample's
  *                           telemetry — not necessarily the one the stream's {@code TrackingConfig}
  *                           requested, since a degradation fallback may have swapped it
- *                           (docs/TRACKING-PLAN.md &sect;5.I); empty when nothing has been sampled
+ *                           (docs/plans/done/TRACKING-PLAN.md &sect;5.I); empty when nothing has been sampled
  * @param window             the rolling window these counters cover; the API layer reports it as
  *                           {@code windowSeconds} ({@link Duration#toSeconds()})
  * @param detectorPasses     frames in the window that spent a detector pass ({@code detectorRan})

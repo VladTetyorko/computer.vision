@@ -7,7 +7,7 @@ import java.util.Optional;
 
 /**
  * Driven port: stores and retrieves one {@link AssetImage} per {@link AssetId} — the asset's
- * user-facing photo (docs/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1). No history: {@link
+ * user-facing photo (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1). No history: {@link
  * #save} replaces whatever was stored for that asset wholesale.
  *
  * <h2>Contract</h2>

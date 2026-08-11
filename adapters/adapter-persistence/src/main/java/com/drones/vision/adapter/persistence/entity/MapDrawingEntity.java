@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * A line/polygon/arrow/text annotation on a map layer (docs/MAP-REWORK-PLAN.md §2.1/§4.4, {@code
+ * A line/polygon/arrow/text annotation on a map layer (docs/plans/done/MAP-REWORK-PLAN.md §2.1/§4.4, {@code
  * V12__map_layers.sql}) — mirrors the domain {@code Drawing} field for field.
  *
  * <p>{@code points} stores the whole ordered {@code List<GeoPosition>} as one jsonb column, the same

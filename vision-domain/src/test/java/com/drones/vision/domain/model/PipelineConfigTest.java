@@ -19,7 +19,7 @@ class PipelineConfigTest {
     void defaultsMatchSpec() {
         PipelineConfig defaults = PipelineConfig.defaults();
 
-        // docs/CV-CONTROL-PLAN.md §1/§B: fixes the previously-dead "yolo" model id (matched no
+        // docs/plans/done/CV-CONTROL-PLAN.md §1/§B: fixes the previously-dead "yolo" model id (matched no
         // real checkpoint, silently relied on cv-service's own fallback) to the real checkpoint
         // id cv-service already defaults to.
         assertEquals(new ModelRef("yolo26n.pt", "latest"), defaults.model());
@@ -31,7 +31,7 @@ class PipelineConfigTest {
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
         assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
         assertTrue(defaults.detectionEnabled(), "detection defaults on, unchanged behavior");
-        // docs/TRACKING-PLAN.md §5.G, wave T8: this is the flip. PipelineConfig.defaults() shipped
+        // docs/plans/done/TRACKING-PLAN.md §5.G, wave T8: this is the flip. PipelineConfig.defaults() shipped
         // TrackingConfig.off() through waves T2-T7 so every pre-tracking test stayed green while the
         // chain was built; T8 turns it on, and this assertion is the line that says so. A new stream
         // associates, so every detection it produces carries a stable trackId.

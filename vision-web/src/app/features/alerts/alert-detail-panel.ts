@@ -4,7 +4,7 @@ import { formatConfidence } from '../../core/events/events-logic';
 import type { DetectionEvent } from '../../core/api/models';
 
 /**
- * `vision-alert-detail-panel` — `/monitor/alerts`'s two-pane detail body (docs/design/08-alerts.md's
+ * `vision-alert-detail-panel` — `/monitor/alerts`'s two-pane detail body (docs/extracts/design/08-alerts.md's
  * own refactor list: "Add `alert-detail-panel.ts` with the frame + box render"). Dumb, presentational,
  * feature-local (single consumer — `AlertsPage`, mirroring `pilots-card.ts`'s own precedent for a
  * non-routed child that still lives beside its one page rather than in `shared/ui/`).

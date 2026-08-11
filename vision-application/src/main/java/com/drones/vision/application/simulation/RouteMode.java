@@ -1,7 +1,7 @@
 package com.drones.vision.application.simulation;
 
 /**
- * How a {@link TelemetryPlan}'s route repeats once its far end is reached (docs/CYCLES-PLAN.md §7,
+ * How a {@link TelemetryPlan}'s route repeats once its far end is reached (docs/main/CYCLES-PLAN.md §7,
  * CT-a) — converted by {@link DefaultSimulationService} into the {@code routeMode} device option
  * {@code SimulatedTelemetrySource} (adapter-simulation) parses.
  *

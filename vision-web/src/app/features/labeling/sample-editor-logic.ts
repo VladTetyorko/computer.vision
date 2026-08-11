@@ -2,7 +2,7 @@ import type { Annotation, SampleStatus } from '../../core/api/models';
 
 /**
  * Pure logic behind `SampleEditorPage` (`/manage/training/:datasetId/samples/:sampleId`,
- * docs/CV-TRAINING-PLAN.md Wave T5) — the confirm/correct step. Split out so the vocabulary and
+ * docs/plans/done/CV-TRAINING-PLAN.md Wave T5) — the confirm/correct step. Split out so the vocabulary and
  * box-sanity checks that gate the "Confirm" button are unit-testable without mounting
  * `vision-sample-box-editor`.
  */
@@ -11,7 +11,7 @@ export interface AnnotationValidation {
   readonly valid: boolean;
   /** Every distinct label present that isn't a member of the dataset's own `classes` — the
    *  server's own `LabelingService#label` rejects these with a 400, so this is the client-side
-   *  mirror of that one rule (docs/CV-TRAINING-PLAN.md §2). */
+   *  mirror of that one rule (docs/plans/done/CV-TRAINING-PLAN.md §2). */
   readonly invalidLabels: readonly string[];
   /** `true` when any box has collapsed to zero width/height (e.g. an aborted drag) — never a valid ground-truth box. */
   readonly hasDegenerateBox: boolean;

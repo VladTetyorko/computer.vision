@@ -18,7 +18,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for the CV model registry (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2) — the
+ * Driving REST adapter for the CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2) — the
  * ingest/promote control plane that sits behind {@link ModelRegistryService}: {@code GET
  * /api/cv/registry/models} lists every known model reference and which one is active, {@code POST
  * /api/cv/registry/models/{id}/promote} promotes one to production.

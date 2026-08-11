@@ -15,7 +15,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
- * Pure unit test for {@link LiveUpdateEventPublisher} (docs/REALTIME-PLAN.md §4) — no Spring
+ * Pure unit test for {@link LiveUpdateEventPublisher} (docs/plans/done/REALTIME-PLAN.md §4) — no Spring
  * context.
  */
 class LiveUpdateEventPublisherTest {

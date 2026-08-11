@@ -29,13 +29,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Resilience smoke test for docs/MVP1-PLAN.md §C7 bullet 4's done criterion "killing the [CV]
+ * Resilience smoke test for docs/plans/done/MVP1-PLAN.md §C7 bullet 4's done criterion "killing the [CV]
  * service mid-stream leaves video/telemetry running": with {@code vision.cv.enabled=true} but
  * {@code vision.cv.endpoint} pointed at a port nothing is listening on, a {@code sim}-device
  * stream must still flow video to {@link com.drones.vision.domain.port.out.StreamPublisherPort}
  * and must not crash the pipeline or the application context — proving a real, wired {@code
  * GrpcDetectionPort} degrades exactly like {@code NoopDetectionPort} once {@code
- * StreamPipeline}'s detection-outage/backoff policy (vision-application, docs/MVP1-PLAN.md §C7
+ * StreamPipeline}'s detection-outage/backoff policy (vision-application, docs/plans/done/MVP1-PLAN.md §C7
  * bullet 3) takes over.
  *
  * <p>The unreachable port is obtained by briefly binding a {@link ServerSocket} to an ephemeral

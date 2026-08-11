@@ -9,7 +9,7 @@ import java.util.Objects;
  * rather than adding on top of it, so that {@code JmDNS} setup, the two
  * concurrent {@code list()} calls and their join all fit inside the
  * deadline. Extracted from {@code private static final long} literals per
- * {@code docs/LAYERING-REFACTOR-PLAN.md} §1.3/§2.2 (property prefix {@code
+ * {@code docs/plans/active/LAYERING-REFACTOR-PLAN.md} §1.3/§2.2 (property prefix {@code
  * vision.discovery.mdns}). Framework-free settings record — {@code
  * vision-app}'s wiring is expected to bind {@code vision.discovery.mdns.*}
  * onto an instance of this type (a later wave) and pass it to one of {@link

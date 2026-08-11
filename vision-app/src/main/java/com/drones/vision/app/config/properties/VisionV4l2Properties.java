@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import java.time.Duration;
 
 /**
- * Configuration for {@code adapter-v4l2}'s RX ({@code vision.v4l2.*}), docs/LAYERING-REFACTOR-PLAN.md
+ * Configuration for {@code adapter-v4l2}'s RX ({@code vision.v4l2.*}), docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * &sect;2.2, wave F1.
  *
  * <p>{@code adapter-v4l2} has only two tunables and, per &sect;1.3 rule 4, has no dedicated settings

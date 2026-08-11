@@ -45,7 +45,7 @@ import com.drones.vision.application.stream.StreamService;
  *       owning asset; if this is the asset's <b>first</b> currently-active
  *       device, opens a new {@link AssetUsage} (persisted via {@link
  *       AssetUsageRepositoryPort}), stamping it with the given {@code
- *       streamId} (docs/MVP2-PLAN.md §R, R-a2 — the live stream that opened
+ *       streamId} (docs/plans/done/MVP2-PLAN.md §R, R-a2 — the live stream that opened
  *       it, later joined against {@link com.drones.vision.domain.model.DetectionResult}
  *       for replay), and subscribes to a {@link TelemetrySourcePort} for
  *       each of the asset's {@link Capability#TELEMETRY}-capable devices
@@ -60,7 +60,7 @@ import com.drones.vision.application.stream.StreamService;
  *       sampleCount} — via {@link #applySample}, kept in one method per the
  *       port's "single write path" note so it can be batched later. The same
  *       method also feeds the sample to {@link GeofenceMonitor#evaluate}
- *       (docs/OPS-CORE-PLAN.md §G) when one is configured, right alongside the
+ *       (docs/plans/done/OPS-CORE-PLAN.md §G) when one is configured, right alongside the
  *       existing persist/live-update steps.</li>
  *   <li>{@link #onStreamStopped(DeviceId)} — if this was the asset's
  *       <b>last</b> currently-active device, closes the open usage ({@link
@@ -71,7 +71,7 @@ import com.drones.vision.application.stream.StreamService;
  * <p>Plain class with no framework dependency; constructor-injected ports and
  * collaborators only, consistent with the rest of this module.
  *
- * <h2>Telemetry source supervision (docs/MVP2-PLAN.md &sect;S, S-a)</h2>
+ * <h2>Telemetry source supervision (docs/plans/done/MVP2-PLAN.md &sect;S, S-a)</h2>
  * Exactly like {@code DefaultStreamService} does for the video source, {@link #subscribeTelemetry}
  * never subscribes a {@link TelemetrySubscriber} straight to a {@link TelemetrySourcePort#open}
  * result — it wraps it in a {@link SupervisedPublisher} so a telemetry source error/completion is
@@ -124,7 +124,7 @@ public final class UsageTracker {
 
     /**
      * Same as the 5-argument constructor, plus a {@link LiveUpdatePublisherPort} collaborator
-     * (docs/REALTIME-PLAN.md §4): every telemetry sample folded via {@link #applySample} is
+     * (docs/plans/done/REALTIME-PLAN.md §4): every telemetry sample folded via {@link #applySample} is
      * announced through it.
      *
      * @param liveUpdatePublisherPort nullable, following the same convention as {@code
@@ -140,7 +140,7 @@ public final class UsageTracker {
 
     /**
      * Same as the 6-argument constructor, plus a {@link GeofenceMonitor} collaborator
-     * (docs/OPS-CORE-PLAN.md §G): every telemetry sample folded via {@link #applySample} is also
+     * (docs/plans/done/OPS-CORE-PLAN.md §G): every telemetry sample folded via {@link #applySample} is also
      * evaluated for geofence breaches, right alongside the existing persist/live-update steps.
      *
      * @param geofenceMonitor nullable, following the same convention as {@code
@@ -203,7 +203,7 @@ public final class UsageTracker {
 
     /**
      * Resolves the asset that owns {@code deviceId}, if any — best-effort, used by {@code
-     * DetectionEventEngine} (docs/MVP2-PLAN.md §E, E-a) to stamp a {@code DetectionEvent}'s {@code
+     * DetectionEventEngine} (docs/plans/done/MVP2-PLAN.md §E, E-a) to stamp a {@code DetectionEvent}'s {@code
      * assetId} at open time.
      *
      * @param deviceId the device to resolve
@@ -216,7 +216,7 @@ public final class UsageTracker {
 
     /**
      * Best-effort freshest known position for {@code assetId}'s currently open usage
-     * (docs/MVP2-PLAN.md §E, E-a) — the same {@code lastPosition} an {@link AssetUsage}
+     * (docs/plans/done/MVP2-PLAN.md §E, E-a) — the same {@code lastPosition} an {@link AssetUsage}
      * accumulates as telemetry samples arrive (see {@link #applySample}), read back rather than
      * queried fresh from {@link TelemetryRepositoryPort} directly, which has no "give me the
      * latest sample" shape to ask for one. Empty when the asset has no currently open usage, or
@@ -237,7 +237,7 @@ public final class UsageTracker {
     }
 
     /**
-     * The most recent telemetry sample ever received for {@code assetId} (docs/MVP3-PLAN.md C-a) —
+     * The most recent telemetry sample ever received for {@code assetId} (docs/plans/done/MVP3-PLAN.md C-a) —
      * used to derive a fleet-summary attention row's battery percent and telemetry staleness.
      *
      * <p>Deliberately <b>not</b> scoped to the currently open usage the way {@link
@@ -314,7 +314,7 @@ public final class UsageTracker {
             for (TelemetrySourcePort source : telemetrySources) {
                 if (source.supports(device)) {
                     TelemetrySubscriber subscriber = new TelemetrySubscriber(asset.id());
-                    // docs/MVP2-PLAN.md §S, S-a: supervised exactly like the video source (see this
+                    // docs/plans/done/MVP2-PLAN.md §S, S-a: supervised exactly like the video source (see this
                     // class's own javadoc for why no PIPELINE_ERROR is published here).
                     SupervisedPublisher<Telemetry> supervised = new SupervisedPublisher<>(() -> source.open(device),
                             cause -> { }, retryScheduler, sourceInitialBackoffNanos, sourceMaxBackoffNanos);
@@ -333,7 +333,7 @@ public final class UsageTracker {
      * Unsubscribes and releases every telemetry subscription opened for a now-closed usage.
      * {@link SupervisedPublisher#stop()} runs synchronously here — cheap, in-memory, and it must
      * happen before this method returns so a pending scheduled reopen can never race a legitimate
-     * close (docs/MVP2-PLAN.md §S, S-a, same reasoning as {@code DefaultStreamService#stop}). The
+     * close (docs/plans/done/MVP2-PLAN.md §S, S-a, same reasoning as {@code DefaultStreamService#stop}). The
      * actual {@link Flow.Subscription#cancel()}/{@link TelemetrySourcePort#close} calls run on a
      * background thread instead, for the same reason {@code DefaultStreamService} defers its own
      * source teardown: an adapter's {@code close()} is not guaranteed to be fast, and this method is
@@ -388,14 +388,14 @@ public final class UsageTracker {
             updated = tracking.usage.withPositions(startPosition, lastPosition)
                     .withSampleCount(tracking.usage.sampleCount() + 1);
             tracking.usage = updated;
-            tracking.lastSample = sample; // docs/MVP3-PLAN.md C-a: outlives the usage, see latestTelemetry's javadoc
+            tracking.lastSample = sample; // docs/plans/done/MVP3-PLAN.md C-a: outlives the usage, see latestTelemetry's javadoc
         }
         telemetryRepository.save(usageId, sample);
         usageRepository.save(updated);
-        if (liveUpdatePublisherPort != null) { // docs/REALTIME-PLAN.md §4
+        if (liveUpdatePublisherPort != null) { // docs/plans/done/REALTIME-PLAN.md §4
             liveUpdatePublisherPort.publishTelemetryAppended(assetId, sample);
         }
-        if (geofenceMonitor != null) { // docs/OPS-CORE-PLAN.md §G
+        if (geofenceMonitor != null) { // docs/plans/done/OPS-CORE-PLAN.md §G
             geofenceMonitor.evaluate(assetId, sample);
         }
     }
@@ -411,7 +411,7 @@ public final class UsageTracker {
     private static final class Tracking {
         private int activeDevices;
         private AssetUsage usage;
-        /** docs/MVP3-PLAN.md C-a: the freshest sample ever seen, kept even once {@link #usage} closes — see {@link #latestTelemetry(AssetId)}. */
+        /** docs/plans/done/MVP3-PLAN.md C-a: the freshest sample ever seen, kept even once {@link #usage} closes — see {@link #latestTelemetry(AssetId)}. */
         private Telemetry lastSample;
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
     }
@@ -428,7 +428,7 @@ public final class UsageTracker {
      * stream start/stop call that (indirectly) created it.
      *
      * <p>{@code onSubscribe} is called again, updating {@link #subscription}, every time {@link
-     * SupervisedPublisher} (docs/MVP2-PLAN.md §S, S-a) reopens the source after an outage — this
+     * SupervisedPublisher} (docs/plans/done/MVP2-PLAN.md §S, S-a) reopens the source after an outage — this
      * class needs no reconnect logic of its own, it just keeps receiving the normal {@code
      * onSubscribe}/{@code onNext} traffic the wrapper forwards.
      */
@@ -457,7 +457,7 @@ public final class UsageTracker {
 
         @Override
         public void onError(Throwable throwable) {
-            // docs/MVP2-PLAN.md §S, S-a: unreachable in production -- subscribeTelemetry always
+            // docs/plans/done/MVP2-PLAN.md §S, S-a: unreachable in production -- subscribeTelemetry always
             // wraps the source in a SupervisedPublisher, which intercepts onError/onComplete
             // itself (to retry) and never forwards either one downstream. Left as a harmless no-op
             // (not e.g. an AssertionError) since this class still implements the public

@@ -21,13 +21,13 @@ import java.util.List;
  * @param deviceId            the device to stream from, as a canonical UUID string; {@code null} means "the asset's single video-capable device"
  * @param confidenceThreshold overrides {@link PipelineConfig#confidenceThreshold()} if present
  * @param inferenceFps        overrides {@link PipelineConfig#inferenceFps()} if present
- * @param overlayBurnIn       overrides {@link PipelineConfig#overlayBurnIn()} if present (docs/MVP2-PLAN.md §V, V-e)
+ * @param overlayBurnIn       overrides {@link PipelineConfig#overlayBurnIn()} if present (docs/plans/done/MVP2-PLAN.md §V, V-e)
  * @param model               overrides {@link PipelineConfig#model()}'s {@code id} if present/non-blank — see
  *                             {@link StartStreamRequest#model()}'s own javadoc for the full contract (raw,
  *                             never split; version comes from the default)
  * @param labelFilter         overrides {@link PipelineConfig#labelFilter()} if present — see {@link
- *                             StartStreamRequest#labelFilter()}'s own javadoc (docs/CV-CONTROL-PLAN.md §2)
- * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present (docs/CV-CONTROL-PLAN.md §2)
+ *                             StartStreamRequest#labelFilter()}'s own javadoc (docs/plans/done/CV-CONTROL-PLAN.md §2)
+ * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present (docs/plans/done/CV-CONTROL-PLAN.md §2)
  * @param tracking            overrides the deployment's tracking seed if present — see {@link
  *                             StartStreamRequest#tracking()}'s own javadoc for the full contract
  *                             (same shape as {@code PATCH .../config}'s, minus {@code lock})
@@ -41,7 +41,7 @@ public record StartAssetStreamRequest(String deviceId, Double confidenceThreshol
             new StartAssetStreamRequest(null, null, null, null, null, null, null, null);
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
      * a convenience constructor defaulting it to {@code null} ("use the seed as-is").
      *
      * @param deviceId            the device to stream from, or {@code null}

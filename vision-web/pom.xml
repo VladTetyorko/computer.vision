@@ -14,7 +14,7 @@
     <description>
         Angular SPA (driving adapter). Contains no Java: the production bundle is emitted into
         META-INF/resources so Spring Boot serves it straight off the classpath, keeping the whole
-        product one artifact. See docs/WEB-PLAN.md.
+        product one artifact. See docs/plans/done/WEB-PLAN.md.
     </description>
 
     <properties>

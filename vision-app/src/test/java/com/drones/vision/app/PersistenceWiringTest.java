@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Context test for the <em>default</em> {@code vision.persistence.*} configuration (no override,
  * per {@link VisionPersistenceProperties#enabled()}'s default of {@code false}): asserts {@link
- * PersistenceWiringConfiguration} keeps today's behavior — every fleet-side (docs/MVP2-PLAN.md
+ * PersistenceWiringConfiguration} keeps today's behavior — every fleet-side (docs/plans/done/MVP2-PLAN.md
  * P-a) and history (P-b) repository port stays its devsupport in-memory fallback — and,
  * critically, that no {@link EntityManagerFactory}
  * bean exists at all, proving {@code persistenceEntityManagerFactory}'s {@code

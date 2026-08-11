@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.DatasetId;
 
 /**
- * Request body for {@code POST /api/usages/{usageId}/samples} (docs/CV-TRAINING-V2-PLAN.md §5) —
+ * Request body for {@code POST /api/usages/{usageId}/samples} (docs/plans/done/CV-TRAINING-V2-PLAN.md §5) —
  * the usage id itself is a path parameter, so the body carries only the target dataset and the
  * replay offset to capture from.
  *

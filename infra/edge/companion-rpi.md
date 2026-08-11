@@ -91,4 +91,4 @@ full rate.
   pinned settings.
 - `adapters/adapter-publish-hls/MODULE.md` — this platform's own RTSP→mediamtx encoding
   profile, mirrored here for the companion-side push.
-- `docs/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing).
+- `docs/plans/active/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing).

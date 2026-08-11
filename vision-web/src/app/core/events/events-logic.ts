@@ -2,7 +2,7 @@ import type { ActiveStream, AssetUsage, DetectionEvent, Device } from '../api/mo
 import { formatDuration } from '../stream-info-logic';
 
 /**
- * Pure derivations behind `core/events-store.ts` and every page that reads it (docs/MVP2-PLAN.md
+ * Pure derivations behind `core/events-store.ts` and every page that reads it (docs/plans/done/MVP2-PLAN.md
  * §E, E-b: the Wall rail, the asset detail Events section, the fleet map's event markers, and the
  * notification-decision gate) — split out so the merge/cursor/filter/marker-selection/
  * notification-gating logic is unit-testable without HTTP, timers, or the `Notification` API,
@@ -13,7 +13,7 @@ import { formatDuration } from '../stream-info-logic';
 // --- Merge, dedupe, cursor advance (sinceMs handling) -----------------------------------------
 
 /**
- * How many events `EventsStore` keeps in memory across polls (docs/MVP2-PLAN.md §E, E-b's own
+ * How many events `EventsStore` keeps in memory across polls (docs/plans/done/MVP2-PLAN.md §E, E-b's own
  * "small shared events-store singleton" cost note) — generous for a rail/marker feed, bounded so a
  * long-running session doesn't grow the in-memory list forever.
  */
@@ -161,7 +161,7 @@ export function resolveEventTarget(
   return stream ? { kind: 'live', id: stream.deviceId } : undefined;
 }
 
-// --- Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) --------------------------------------
+// --- Event → replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1) --------------------------------------
 
 /**
  * The usage from `usages` whose own window covers `atIso` — an open usage's window runs to `now`
@@ -185,7 +185,7 @@ export interface ReplayDeepLink {
 }
 
 /**
- * Resolves the `/replay?asset=…&usage=…&t=…` deep link for `event` (docs/OPS-CORE-PLAN.md §Q1),
+ * Resolves the `/replay?asset=…&usage=…&t=…` deep link for `event` (docs/plans/done/OPS-CORE-PLAN.md §Q1),
  * given the owning asset's already-fetched `recentUsages` (a lazy, click-time-only lookup — see
  * `shared/ui/notification-bell.ts`'s own doc comment for why this is never done per-row on render).
  * `undefined` when no usage covers the event's own `firstSeen`, **or** when the covering usage is
@@ -241,7 +241,7 @@ export interface NotificationDecisionInput {
   readonly permission: NotificationPermission;
   /**
    * `document.hidden` at decision time. The visible app already shows the newly-seen event in the
-   * rail — a notification is only for when the user isn't looking (docs/MVP2-PLAN.md §E, E-b:
+   * rail — a notification is only for when the user isn't looking (docs/plans/done/MVP2-PLAN.md §E, E-b:
    * "only when document.hidden").
    */
   readonly documentHidden: boolean;
@@ -249,7 +249,7 @@ export interface NotificationDecisionInput {
 
 /**
  * Whether a genuinely new, currently-OPEN event should fire a browser `Notification` — every gate
- * from docs/MVP2-PLAN.md §E, E-b's own bullet 4 ("new-open-event × permission × hidden"), each
+ * from docs/plans/done/MVP2-PLAN.md §E, E-b's own bullet 4 ("new-open-event × permission × hidden"), each
  * independently necessary:
  *
  * - `!alreadySeen` — dedupe by event id (a still-OPEN event reappears on every poll while its

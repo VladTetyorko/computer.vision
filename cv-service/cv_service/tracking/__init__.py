@@ -1,6 +1,6 @@
 """Per-stream tracking engine: the detect-then-track duty cycle.
 
-`docs/TRACKING-PLAN.md` §3/§5.A + `docs/TRACKING-ORCHESTRATION.md` §2.1. One
+`docs/plans/done/TRACKING-PLAN.md` §3/§5.A + `docs/extracts/TRACKING-ORCHESTRATION.md` §2.1. One
 charter per module, and the charter is the review criterion:
 
 ===================  ====================================================

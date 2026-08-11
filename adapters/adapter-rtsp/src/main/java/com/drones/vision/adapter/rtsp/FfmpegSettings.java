@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /**
  * Framework-free tunables for this module's FFmpeg-backed RX ({@link FfmpegVideoSource}) and TX
- * ({@link RtspFeedTransmitter}) halves — docs/LAYERING-REFACTOR-PLAN.md §1.3/§2.2's frozen {@code
+ * ({@link RtspFeedTransmitter}) halves — docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3/§2.2's frozen {@code
  * vision.rtsp} property-key contract, extracted structurally out of what were previously scattered
  * {@code private static final} constants on those two classes. {@link #defaults()} reproduces every
  * one of those old literals exactly — this is a structural move, not a retune; see each field's own
@@ -13,7 +13,7 @@ import java.util.Objects;
  * verified-fact provenance of each number (FFmpeg source citations, measured behavior, etc.), which
  * is unchanged by this extraction.
  *
- * <p>A later wave (docs/LAYERING-REFACTOR-PLAN.md §7, F1) adds a Spring {@code VisionRtspProperties}
+ * <p>A later wave (docs/plans/active/LAYERING-REFACTOR-PLAN.md §7, F1) adds a Spring {@code VisionRtspProperties}
  * record in {@code vision-app} and binds it to this one — this module stays entirely framework-free
  * and has no idea that binding exists; it only ever sees a plain {@code FfmpegSettings} instance,
  * constructor-injected exactly like every other plain value this module already takes.
@@ -22,7 +22,7 @@ import java.util.Objects;
  * FfmpegGrabberOptions.DEFAULT_UDP_OVERRUN_NONFATAL} (a fixed "survive rather than abort" posture,
  * not a scalar the frozen key table names) and the SRT {@code pbkeylen} pin (living documentation of
  * libsrt's own already-built-in default, not a deployment choice — same "protocol/spec constant"
- * category docs/LAYERING-REFACTOR-PLAN.md §1.3 keeps static). Both stay as named constants next to
+ * category docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 keeps static). Both stay as named constants next to
  * the option they configure; see their own javadoc there.
  *
  * @param transport               RTSP RX {@code rtsp_transport} AVOption default (e.g. {@code

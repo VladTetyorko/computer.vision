@@ -1,13 +1,13 @@
 package com.drones.vision.domain.model;
 
 /**
- * Which object {@code FOLLOW} mode should hold (docs/TRACKING-PLAN.md §4.A) — one of three
+ * Which object {@code FOLLOW} mode should hold (docs/plans/done/TRACKING-PLAN.md §4.A) — one of three
  * mutually exclusive forms: lock onto an existing track by id, lock onto a clicked point, or
  * release the current lock.
  *
  * <p>Restated on every frame; cv-service applies it only when {@code lockSeq} is strictly greater
  * than the last one it applied for the stream, making restatement idempotent by construction — a
- * dropped frame or a reconnect cannot desynchronize the lock (docs/TRACKING-PLAN.md invariant
+ * dropped frame or a reconnect cannot desynchronize the lock (docs/plans/done/TRACKING-PLAN.md invariant
  * P2). {@code lockSeq} is allocated by the application layer's own monotonic counter, never by a
  * client; this record only rejects a negative one, it does not itself enforce monotonicity across
  * instances.

@@ -9,7 +9,7 @@ import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
 
 /**
- * {@link Drawing} ⟷ {@link MapDrawingEntity} (docs/MAP-REWORK-PLAN.md §4.4).
+ * {@link Drawing} ⟷ {@link MapDrawingEntity} (docs/plans/done/MAP-REWORK-PLAN.md §4.4).
  *
  * <p>{@code points} passes straight through as the domain {@code List<GeoPosition>} — Hibernate's
  * Jackson-backed {@code FormatMapper} serializes the record list into the jsonb column with no

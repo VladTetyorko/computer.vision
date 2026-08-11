@@ -15,7 +15,7 @@ import java.util.Optional;
  *
  * <p>Every mutation (create/update/delete) refreshes {@link GeofenceMonitor}'s enabled-zone cache
  * immediately afterward, so a zone change is visible to the very next telemetry sample evaluated —
- * per docs/OPS-CORE-PLAN.md §G's "cheap: zones cached in the monitor, refreshed on CRUD" design
+ * per docs/plans/done/OPS-CORE-PLAN.md §G's "cheap: zones cached in the monitor, refreshed on CRUD" design
  * note.
  *
  * <h2>Threading</h2>

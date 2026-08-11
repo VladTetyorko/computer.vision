@@ -8,8 +8,8 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * Creates and manages {@link User} accounts (docs/U-AUTH-PLAN.md, wave 2; management gates added
- * by docs/U-SCOPE-PLAN.md, U-e slice 2 — deferred slice-2 cleanup).
+ * Creates and manages {@link User} accounts (docs/plans/done/U-AUTH-PLAN.md, wave 2; management gates added
+ * by docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 — deferred slice-2 cleanup).
  *
  * <p><strong>Management authority is derived from the acting {@link VisibilityScope}</strong>, whose
  * kind maps 1:1 to role: unbounded = ADMIN, groups = MANAGER, else PILOT/empty. Every method takes
@@ -22,7 +22,7 @@ public interface UserService {
 
     /**
      * Creates a new user, hashing {@link UserSpec#rawPassword()} before storage, subject to the
-     * acting user's management authority (docs/U-SCOPE-PLAN.md, U-e slice 2).
+     * acting user's management authority (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2).
      *
      * <p>Enforcement, in order:
      * <ul>
@@ -48,7 +48,7 @@ public interface UserService {
     User create(UserSpec spec, VisibilityScope acting);
 
     /**
-     * Lists the users visible to the acting scope (docs/U-SCOPE-PLAN.md, U-e slice 2):
+     * Lists the users visible to the acting scope (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2):
      * {@link VisibilityScope#unbounded() unbounded} → every user; a {@link VisibilityScope.Kind#GROUPS
      * groups} scope → only users with at least one membership in a group the scope
      * {@link VisibilityScope#includesGroup includes}; any other scope → an empty list.

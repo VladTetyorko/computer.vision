@@ -280,7 +280,7 @@ class DetectionExtrapolatorTest {
         assertEquals(laterSequenceDetection.box().x(), at.get(0).box().x(), DELTA);
     }
 
-    // --- docs/TRACKING-PLAN.md §5.F: trackId makes matching exact ---
+    // --- docs/plans/done/TRACKING-PLAN.md §5.F: trackId makes matching exact ---
 
     private static Detection trackedDetection(String label, long trackId, double x, double y,
                                                double width, double height) {

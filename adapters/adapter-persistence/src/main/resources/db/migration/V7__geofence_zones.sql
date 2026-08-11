@@ -1,5 +1,5 @@
--- docs/OPS-CORE-PLAN.md §G: geofence zones (global reference data -- every asset is evaluated
--- against every enabled zone; per-group scoping is a later cycle, docs/OPS-CORE-PLAN.md §G, U-e).
+-- docs/plans/done/OPS-CORE-PLAN.md §G: geofence zones (global reference data -- every asset is evaluated
+-- against every enabled zone; per-group scoping is a later cycle, docs/plans/done/OPS-CORE-PLAN.md §G, U-e).
 --
 -- polygon is jsonb (the whole List<GeoPosition>, at least 3 vertices, enforced application-side
 -- by GeofenceZone/GeofenceZoneSpec's own compact constructors -- not a database CHECK constraint,

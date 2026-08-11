@@ -3,7 +3,7 @@ import type { PipelineProfile, PipelineSettings } from '../../core/settings/sett
 /**
  * Pure, Angular-free diff between the currently effective pipeline values and the backend's own
  * shipped defaults (`BUILT_IN_PROFILES[0]`, "Balanced") — pulled out of the old combined
- * `SettingsFacade` (docs/NAV-IA-REDESIGN-PLAN.md §2.5, docs/design/11-settings.md, Wave 4's F7
+ * `SettingsFacade` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5, docs/extracts/design/11-settings.md, Wave 4's F7
  * split) so this comparison is unit-testable without Angular DI, matching this codebase's own
  * "logic, not components" precedent (`features/fly/cv-control-panel-logic.ts`,
  * `features/onboarding/drone-config-logic.ts`).

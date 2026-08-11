@@ -1,6 +1,6 @@
 """Integration tests for V-d: DetectStream's per-stream/cross-stream concurrency.
 
-Covers the four scenarios called out by docs/MVP2-PLAN.md's V-d row:
+Covers the four scenarios called out by docs/plans/done/MVP2-PLAN.md's V-d row:
 * receive/infer overlap within one stream (a slow-arriving iterator paired
   with a slow detector finishes faster than the naive receive-then-infer
   bound would allow);

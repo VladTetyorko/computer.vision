@@ -1,6 +1,6 @@
 """`ncc` -- the FOLLOW alternative: normalized cross-correlation template match.
 
-`docs/TRACKING-PLAN.md` §5.B. Keeps the locked box's greyscale patch as a
+`docs/plans/done/TRACKING-PLAN.md` §5.B. Keeps the locked box's greyscale patch as a
 template and finds it each frame with `cv2.matchTemplate(TM_CCOEFF_NORMED)`
 inside a search window twice the template's size. Core OpenCV only.
 

@@ -31,22 +31,22 @@ interface AssetTracker {
 }
 
 /**
- * Polls the whole fleet for the fleet map (originally the `/map` tab, docs/CYCLES-PLAN.md §6; now
- * embedded in the Command dashboard, docs/MVP3-PLAN.md §C-c — see class doc below): `GET /api/assets` every 5s
+ * Polls the whole fleet for the fleet map (originally the `/map` tab, docs/main/CYCLES-PLAN.md §6; now
+ * embedded in the Command dashboard, docs/plans/done/MVP3-PLAN.md §C-c — see class doc below): `GET /api/assets` every 5s
  * drives `buckets`/`markers`; each asset currently bucketed `streaming` additionally gets its own
  * 2s telemetry poller — the fleet map's per-asset analog of `TelemetryStore`, reusing its pure
  * helper (`selectOpenUsage`, and `deriveTrail` via `map-logic.ts`) rather than the class itself:
  * this store already starts from the asset id (its own 5s poll already fetched it), so it resolves
  * the open usage directly with one `getAsset()` per newly-streaming asset rather than going through
  * `TelemetryStore` at all. `TelemetryStore.track(deviceId, assetId?)` itself gained this same
- * asset-id-first shortcut in docs/REALTIME-PLAN.md Phase R-a item 3 (it re-derives the owning asset
+ * asset-id-first shortcut in docs/plans/done/REALTIME-PLAN.md Phase R-a item 3 (it re-derives the owning asset
  * via `listAssets()`+`getAsset()` per fleet asset only when a caller has no `assetId` to give it) —
  * this store still doesn't use that class, since it needs *per-asset* trackers keyed by asset id,
  * not one poller for a single device. Every one of this store's timers — the 5s
  * asset poll, the 1s clock, and every per-asset 2s telemetry poller — runs off the app's single
- * shared `PollScheduler` (docs/CYCLES-PLAN.md §9, CU-b item 3) rather than its own `setInterval`s.
+ * shared `PollScheduler` (docs/main/CYCLES-PLAN.md §9, CU-b item 3) rather than its own `setInterval`s.
  *
- * **Concurrency cap (docs/CYCLES-PLAN.md §6's called-out risk):** only assets currently bucketed
+ * **Concurrency cap (docs/main/CYCLES-PLAN.md §6's called-out risk):** only assets currently bucketed
  * `streaming` ever get a telemetry poller. `reconcileTrackers` runs after every asset refresh and
  * tears down any tracker whose asset is no longer streaming (stopped, or vanished) on the very
  * next 5s tick — a referee's fleet is a handful of machines, not hundreds, but an idle map tab
@@ -65,7 +65,7 @@ interface AssetTracker {
  * not a user-initiated action, so a failed poll just leaves signals at their last-known values
  * rather than raising a toast.
  *
- * Moved here from `pages/map/map-store.ts` in docs/MVP3-PLAN.md §C-c when the Command dashboard
+ * Moved here from `pages/map/map-store.ts` in docs/plans/done/MVP3-PLAN.md §C-c when the Command dashboard
  * needed to embed `shared/map/fleet-map.ts` (which injects this store) as a second page — this codebase's
  * own "move a page-scoped thing to a shared home once a second page needs it" precedent (see
  * `core/map-logic.ts`'s doc comment). `features/command/command.ts` is that store's sole importer now
@@ -94,7 +94,7 @@ export class FleetMapStore {
   constructor() {
     void this.refresh();
     // Returns `refresh()`'s own promise so `PollScheduler`'s in-flight guard applies — see
-    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    // `FleetStore`'s identical comment (docs/plans/done/MVP2-PLAN.md §S, S-b).
     this.stopAssetPolling = this.scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refresh());
     this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(() => this.teardown());
@@ -162,7 +162,7 @@ export class FleetMapStore {
         return;
       }
       // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
-      // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+      // `FleetStore`'s identical comment (docs/plans/done/MVP2-PLAN.md §S, S-b).
       tracker.stopPolling = this.scheduler.schedule(TELEMETRY_POLL_INTERVAL_MS, () =>
         this.pollTelemetry(assetId, usageId),
       );

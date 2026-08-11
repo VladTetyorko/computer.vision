@@ -10,10 +10,10 @@ import java.util.Set;
 
 /**
  * {@link EventPublisherPort} decorator that additionally announces every event as a live update
- * (docs/REALTIME-PLAN.md §4) — and, for the subset of event types that represent fleet-level
+ * (docs/plans/done/REALTIME-PLAN.md §4) — and, for the subset of event types that represent fleet-level
  * lifecycle ({@link EventType#DEVICE_ONLINE}/{@link EventType#DEVICE_OFFLINE}/{@link
  * EventType#STREAM_STARTED}/{@link EventType#STREAM_STOPPED}), also announces a "fleet changed"
- * update — the {@code streams lifecycle} third of docs/REALTIME-PLAN.md §4 item 1's "assets/
+ * update — the {@code streams lifecycle} third of docs/plans/done/REALTIME-PLAN.md §4 item 1's "assets/
  * devices/streams lifecycle" (asset/device CRUD itself flows through {@link
  * LiveUpdateAuditTrail}, which never touches this port).
  *

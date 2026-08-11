@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * The wire envelope every {@code GET /api/live} (docs/REALTIME-PLAN.md §4) SSE {@code data:} line
+ * The wire envelope every {@code GET /api/live} (docs/plans/done/REALTIME-PLAN.md §4) SSE {@code data:} line
  * carries, one per event.
  *
  * @param seq      a globally increasing sequence number (shared across every topic on the
@@ -21,7 +21,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  *                  EventResponse} for {@code event}, a single {@code DevicesSnapshotResponse} for
  *                  {@code devices}, a single {@code DetectionEventResponse} for {@code
  *                  detection-events}, and a single {@link MapEventPayload} for {@code map}
- *                  (docs/MAP-REWORK-PLAN.md §4.3 — the only payload whose delivery is filtered per
+ *                  (docs/plans/done/MAP-REWORK-PLAN.md §4.3 — the only payload whose delivery is filtered per
  *                  connection, by its own {@code layerId})
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)

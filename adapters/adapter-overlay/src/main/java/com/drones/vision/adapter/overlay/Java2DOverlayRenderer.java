@@ -36,13 +36,13 @@ import java.nio.ByteBuffer;
  *
  * <p>Dispatch/format handling stays here; the actual codec and painting work
  * is split into {@link FrameImageCodec}, {@link DetectionBoxPainter} and
- * {@link TelemetryOsdPainter} (docs/LAYERING-REFACTOR-PLAN.md §5.1) so this
+ * {@link TelemetryOsdPainter} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1) so this
  * class stays a thin orchestrator.
  *
  * <p>Plain class, no Spring. The no-arg constructor keeps today's callers
  * (and {@code vision-app}'s wiring) compiling unchanged, rendering with
  * {@link OverlaySettings#defaults()}; the {@link OverlaySettings}-taking
- * constructor is what a later wiring wave (docs/LAYERING-REFACTOR-PLAN.md F3)
+ * constructor is what a later wiring wave (docs/plans/active/LAYERING-REFACTOR-PLAN.md F3)
  * uses to inject real {@code vision.overlay.*} configuration.
  */
 public final class Java2DOverlayRenderer implements OverlayPort {
@@ -53,7 +53,7 @@ public final class Java2DOverlayRenderer implements OverlayPort {
      * hashing its text, so the same label always renders the same color and
      * different frames of the same stream stay visually consistent.
      *
-     * <p>Deliberately not a configurable value (docs/LAYERING-REFACTOR-PLAN.md
+     * <p>Deliberately not a configurable value (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * §1.3): its length is baked into {@link #colorForLabel}'s {@code
      * floorMod(label.hashCode(), 8)} and the pixel-probe tests assert the
      * stable label→color mapping — changing it would break that mapping.
@@ -159,7 +159,7 @@ public final class Java2DOverlayRenderer implements OverlayPort {
      * tracked detection keeps one color for the life of its track even when
      * its label flips between frames (composite-mode detectors can report
      * different labels for the same physical object,
-     * docs/TRACKING-PLAN.md §9 risk R9) — coloring by id rather than by
+     * docs/plans/done/TRACKING-PLAN.md §9 risk R9) — coloring by id rather than by
      * label is exactly what makes that stable. An untracked detection is
      * unaffected: it still colors by {@link #colorForLabel}.
      *

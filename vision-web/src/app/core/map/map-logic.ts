@@ -2,12 +2,12 @@ import type { AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from '..
 import { ageSeconds, deriveTrail } from '../telemetry/telemetry-logic';
 
 /**
- * Pure derivations behind the fleet map (docs/CYCLES-PLAN.md §6's `/map` tab), split out so
+ * Pure derivations behind the fleet map (docs/main/CYCLES-PLAN.md §6's `/map` tab), split out so
  * bucketing/trail-windowing/auto-fit/marker-building are unit-testable without HTTP, timers, or
  * Leaflet — mirrors `core/telemetry/telemetry-logic.ts`'s split of pure logic from the injectable
  * (`core/map-store.ts`) that drives it.
  *
- * Moved here from `pages/map/map-logic.ts` in docs/MVP3-PLAN.md §C-c when the Command dashboard
+ * Moved here from `pages/map/map-logic.ts` in docs/plans/done/MVP3-PLAN.md §C-c when the Command dashboard
  * needed the identical fleet map embed (`shared/map/fleet-map.ts`, `core/map-store.ts`) a second page —
  * this codebase has no precedent for one page importing another page's module (see
  * `core/fleet/device-logic.ts`'s doc comment for the original precedent this follows, most recently
@@ -17,7 +17,7 @@ import { ageSeconds, deriveTrail } from '../telemetry/telemetry-logic';
  * sole importer today; nothing about its own behavior changed by either move.
  */
 
-/** How many recent trail points a live fleet marker keeps (docs/CYCLES-PLAN.md §6: "short recent trail"). */
+/** How many recent trail points a live fleet marker keeps (docs/main/CYCLES-PLAN.md §6: "short recent trail"). */
 export const TRAIL_WINDOW = 60;
 
 /** Which of the three ways an asset appears on the fleet map, derived from `AssetSummary` alone. */
@@ -96,7 +96,7 @@ export function snapshotFromSamples(samples: readonly TelemetrySample[]): AssetT
 /**
  * One asset's fully-derived marker: where to plot it and what its popup shows.
  *
- * `flightMode`/`armed`/`failsafe`/`gpsFixType` (docs/FC-INTEGRATIONS-PLAN.md F-d) all come from the
+ * `flightMode`/`armed`/`failsafe`/`gpsFixType` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) all come from the
  * same place `headingDegrees`/`batteryPercent` already do — the streaming asset's own latest
  * telemetry sample's `flightState` (see `buildMarker`) — never from `AssetSummary` itself, which
  * carries none of this (unlike `AssetAttention`'s own `flightMode`/`armed`/`failsafe`, a *different*,
@@ -106,7 +106,7 @@ export function snapshotFromSamples(samples: readonly TelemetrySample[]): AssetT
  * read from, not the fleet-summary row). Absent for the `offline` bucket (no live telemetry poller
  * — see `buildMarker`) or before the first sample of a freshly-`streaming` asset arrives.
  *
- * `firmware` (docs/DRONE-INFRA-PLAN.md I-e Stage 1, new) — the identical "same place, same
+ * `firmware` (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1, new) — the identical "same place, same
  * absence rule" as the four fields above, added specifically so
  * `features/command/asset-panel.ts`'s "Bring home" button (`shared/ui/return-home-button.ts`) can
  * gate visibility (`core/telemetry/flight-state-logic.ts#canCommandReturnHome`) from data this
@@ -131,10 +131,10 @@ export interface FleetMarker {
   readonly armed?: boolean;
   readonly failsafe?: boolean;
   readonly gpsFixType?: number;
-  /** docs/DRONE-INFRA-PLAN.md I-e Stage 1 — see this interface's own doc comment above. */
+  /** docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 — see this interface's own doc comment above. */
   readonly firmware?: string;
   /**
-   * docs/FC-INTEGRATIONS-PLAN.md F-e — the same raw `TelemetrySample.extra` map `flightMode`/etc.
+   * docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — the same raw `TelemetrySample.extra` map `flightMode`/etc.
    * above are decoded from, passed through verbatim so `features/command/asset-panel.ts`'s Status
    * tab can feed it straight into `core/telemetry/flight-state-logic.ts#deriveDiagnostics` without a
    * second `TelemetryStore` poller — same reuse rationale as every other marker-level field here.
@@ -243,7 +243,7 @@ export function fingerprintMarkers(markers: readonly FleetMarker[]): string {
 export type AutoFitEvent = 'userInteraction' | 'recenterClicked' | 'assetFocused';
 
 /**
- * The auto-fit reducer (docs/CYCLES-PLAN.md §6): "auto-fit bounds on load and when the marker set
+ * The auto-fit reducer (docs/main/CYCLES-PLAN.md §6): "auto-fit bounds on load and when the marker set
  * changes, but any manual pan/zoom disables auto-fit until the user re-enables it via a recenter
  * control." Idempotent either way — interacting while already off, or recentering while already
  * on, is a no-op — so the map component can call this from every move/zoom event without first

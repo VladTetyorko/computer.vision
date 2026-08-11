@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * docs/DRONE-INFRA-PLAN.md I-b: real loopback UDP exercise of {@link MavlinkHeartbeatScanner},
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-b: real loopback UDP exercise of {@link MavlinkHeartbeatScanner},
  * both paths (hub-borrow and self-bind), plus the bind-conflict/time-boxing guarantees {@link
  * com.drones.vision.domain.port.out.DeviceDiscoveryPort}'s contract requires. No hardware, no
  * docker.

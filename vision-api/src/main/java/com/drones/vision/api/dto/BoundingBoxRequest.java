@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.BoundingBox;
 
 /**
  * Wire representation of a corrected/drawn {@link BoundingBox}, embedded in {@link
- * AnnotationRequest} (docs/CV-TRAINING-PLAN.md §3's frozen wire contract) — the request-side
+ * AnnotationRequest} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire contract) — the request-side
  * mirror of {@link BoundingBoxResponse}.
  *
  * @param x      left edge, normalized [0,1] against frame width

@@ -3,7 +3,7 @@ import { preflightSummary, type PreflightItem } from '../../core/telemetry/fligh
 import { Icon } from '../../shared/ui/icon';
 
 /**
- * The Fly cockpit's pre-flight checklist card (docs/FC-INTEGRATIONS-PLAN.md F-d) — a compact,
+ * The Fly cockpit's pre-flight checklist card (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — a compact,
  * always-5-row rundown of `flight-state-logic.ts#derivePreflight`'s own rows (Video feed,
  * Telemetry link, GPS fix, Battery, Armable), each glyphed `✓`/`✕`/`—` for ok/fail/unknown.
  * Deliberately dumb: the inputs are the only state, computed by `CockpitFacade` from
@@ -24,7 +24,7 @@ import { Icon } from '../../shared/ui/icon';
  * reported them (`^(PreArm|Arm): …` STATUSTEXT strings) — never paraphrased, so a pilot sees the
  * same words their FC ground station would show.
  *
- * **Always dark, in both mount points** (docs/VISUAL-REFRESH-PLAN.md F3/W4): the root element
+ * **Always dark, in both mount points** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the root element
  * carries `.surface-dark` itself rather than relying on an ambient enclave — see
  * `preflight-checklist.html`'s own comment for why (short version: its HUD chrome was already
  * theme-invariant, but its text tokens weren't, which broke standalone on `/operate/preflight`

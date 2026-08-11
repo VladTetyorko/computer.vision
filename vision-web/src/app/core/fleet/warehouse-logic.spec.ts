@@ -132,7 +132,7 @@ describe('buildAssetEdit', () => {
   });
 });
 
-describe('DEVICE_ACTION_LABELS / ASSET_ACTION_LABELS (docs/UX-REWORK-PLAN.md §U-a2 §1 — verb+object)', () => {
+describe('DEVICE_ACTION_LABELS / ASSET_ACTION_LABELS (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1 — verb+object)', () => {
   it('labels every device action verb+object, ellipsis only for the two that open a form first', () => {
     expect(DEVICE_ACTION_LABELS).toEqual({
       rename: 'Rename device…',
@@ -156,7 +156,7 @@ describe('DEVICE_ACTION_LABELS / ASSET_ACTION_LABELS (docs/UX-REWORK-PLAN.md §U
   });
 });
 
-describe('reasonedDeviceActions (docs/UX-REWORK-PLAN.md §U-a2 item 3a — poka-yoke prevention)', () => {
+describe('reasonedDeviceActions (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3a — poka-yoke prevention)', () => {
   it('an unowned ACTIVE device: only activate/restore are blocked, both for lifecycle reasons', () => {
     expect(summarize(reasonedDeviceActions('ACTIVE', false))).toEqual([
       { action: 'rename', available: true },
@@ -235,7 +235,7 @@ describe('reasonedDeviceActions (docs/UX-REWORK-PLAN.md §U-a2 item 3a — poka-
   });
 });
 
-describe('reasonedAssetActions (docs/UX-REWORK-PLAN.md §U-a2 item 3a)', () => {
+describe('reasonedAssetActions (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3a)', () => {
   it('ACTIVE: only activate/restore are blocked', () => {
     expect(summarize(reasonedAssetActions('ACTIVE'))).toEqual([
       { action: 'rename', available: true },
@@ -267,7 +267,7 @@ describe('reasonedAssetActions (docs/UX-REWORK-PLAN.md §U-a2 item 3a)', () => {
   });
 });
 
-describe('operatorAssetActions (docs/UX-REWORK-PLAN.md §U-a2 item 2 — Archive+Restore only)', () => {
+describe('operatorAssetActions (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 2 — Archive+Restore only)', () => {
   it('narrows to exactly archive/restore, dropping rename/activate/deactivate entirely', () => {
     for (const state of ['ACTIVE', 'DEACTIVATED', 'DELETED'] as const) {
       expect(operatorAssetActions(state).map((e) => e.action)).toEqual(['archive', 'restore']);

@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * A request to fine-tune a CV model (docs/CV-TRAINING-PLAN.md §6/§7, Phase 2) — the Java-side shape
+ * A request to fine-tune a CV model (docs/plans/done/CV-TRAINING-PLAN.md §6/§7, Phase 2) — the Java-side shape
  * of {@code cv.proto}'s {@code Training.StartTraining} request message, {@code TrainingJobSpec}.
  *
  * <p>{@code datasetId} is deliberately a plain string, not a typed {@link DatasetId} — it crosses a

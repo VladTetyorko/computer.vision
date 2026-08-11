@@ -10,9 +10,9 @@ import { positionLabel } from './fly-logic';
 import type { Transport } from '../../shared/player/player';
 
 /**
- * The Fly cockpit's bottom OSD strip (docs/MVP3-PLAN.md §C-b, relayout per direct user request):
+ * The Fly cockpit's bottom OSD strip (docs/plans/done/MVP3-PLAN.md §C-b, relayout per direct user request):
  * battery/armed, position, telemetry age/RSSI, altitude/heading/speed/mode/GPS, and wind/weather —
- * grouped into four labeled Power/Nav/Link/Env clusters (docs/UI-REDESIGN-PLAN.md Wave 2), each a
+ * grouped into four labeled Power/Nav/Link/Env clusters (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2), each a
  * `.surface-hud` pill with a `<vision-icon>` per metric, rather than the ~11 same-looking flat chips
  * this bar used to render in one undifferentiated row. **Moved from a top-left overlay stack to a
  * full-width row along the bottom of the cockpit grid** (`fly.css`'s `telemetry` grid area, a real
@@ -39,7 +39,7 @@ import type { Transport } from '../../shared/player/player';
  * value is store-backed anywhere, both are `shared/player/player.ts`'s own measurements piped up through its
  * `latencyChanged`/`transportChanged` outputs so this bar never re-measures independently.
  *
- * **Ground speed (docs/FC-INTEGRATIONS-PLAN.md F-d) closes this component's own previously-documented
+ * **Ground speed (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) closes this component's own previously-documented
  * gap** — this doc comment used to record "no current telemetry sample carries a ground-speed
  * reading" as an honest omission; `TelemetrySample.extra['groundspeedMps']` (the frozen wire
  * contract's own `Telemetry.extra` map, now surfaced) is that reading, decoded from MAVLink
@@ -57,14 +57,14 @@ import type { Transport } from '../../shared/player/player';
  * both coordinates exist on the latest sample. Lives in the Nav cluster, first, per the "key
  * characteristics" callout that asked for it alongside Signal and Battery.
  *
- * **Wind chip (docs/FC-INTEGRATIONS-PLAN.md F-e)** — `extra['windSpeedMps']`/
+ * **Wind chip (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e)** — `extra['windSpeedMps']`/
  * `extra['windDirectionDegrees']`, the same ArduPilot-only `WIND`-message extras
  * `core/telemetry/flight-state-logic.ts#deriveDiagnostics`'s own wind row reads (this chip is a
  * second, compact rendering of the identical data for at-a-glance HUD reading, not a duplicate
  * derivation — no severity tier, F-e defines none for wind). The arrow rotates to
  * `windDirectionDegrees` only when that key is present; the speed alone still renders without it.
  *
- * **Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W)** — `<vision-weather-chip>`, always rendered
+ * **Weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W)** — `<vision-weather-chip>`, always rendered
  * inside the Env group (outside the `hasTelemetry()` branch, since it's a pre-flight/ambient
  * forecast advisory independent of whether telemetry — or a flight at all — exists yet). It injects
  * `WeatherStore` from `FlyPage`'s own `providers` directly (DI resolves through the component tree
@@ -301,10 +301,10 @@ export class FlyOsd {
   readonly latencySeconds = input<number | null>(null);
   /** `shared/player/player.ts`'s own live transport, piped up via its `transportChanged` output. */
   readonly transport = input<Transport>('hls');
-  /** `AssetDetails.attributes['windLimitMps']`, resolved by `FlyPage` (docs/OPS-CORE-PLAN.md §W) — defaults to 10 m/s. */
+  /** `AssetDetails.attributes['windLimitMps']`, resolved by `FlyPage` (docs/plans/done/OPS-CORE-PLAN.md §W) — defaults to 10 m/s. */
   readonly windLimitMps = input<number>(DEFAULT_WIND_LIMIT_MPS);
 
-  /** The Env cluster's own disclosure state (docs/UI-REDESIGN-PLAN.md Wave 2) — defaults open,
+  /** The Env cluster's own disclosure state (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2) — defaults open,
    * mirroring `diagnostics-card.ts`'s own precedent. */
   protected readonly expanded = signal(true);
 
@@ -370,7 +370,7 @@ export class FlyOsd {
 
   protected readonly rssiPercent = computed(() => this.flightState()?.rssiPercent);
 
-  /** `TelemetrySample.extra['windSpeedMps']` (docs/FC-INTEGRATIONS-PLAN.md F-e) — `undefined` renders no chip at all. */
+  /** `TelemetrySample.extra['windSpeedMps']` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — `undefined` renders no chip at all. */
   protected readonly windSpeedLabel = computed(() => {
     const mps = this.store.latest()?.extra?.['windSpeedMps'];
     return mps === undefined ? undefined : `${mps.toFixed(1)}m/s`;

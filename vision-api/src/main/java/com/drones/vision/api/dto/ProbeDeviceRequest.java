@@ -6,7 +6,7 @@ import java.net.URI;
 import java.util.Map;
 
 /**
- * Request body for {@code POST /api/devices/probe} (docs/UX-REWORK-PLAN.md §U-d item 3,
+ * Request body for {@code POST /api/devices/probe} (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3,
  * UX-DESIGN.md §5.1's "test-before-save" wizard step) — the exact same connection shape {@code
  * RegisterDeviceRequest} carries, minus a name and capabilities, since a probe never registers
  * anything.

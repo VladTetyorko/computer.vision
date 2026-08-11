@@ -193,7 +193,7 @@ class DefaultReplayServiceTest {
         assertTrue(timeline.detections().isEmpty());
     }
 
-    // ---- detections (docs/MVP2-PLAN.md §R, R-a2) ----
+    // ---- detections (docs/plans/done/MVP2-PLAN.md §R, R-a2) ----
 
     @Test
     void detectionsAreQueriedByTheUsagesStreamIdWithinTheResolvedWindow() {
@@ -326,7 +326,7 @@ class DefaultReplayServiceTest {
         assertEquals(DefaultReplayService.MAX_POINTS_CEILING, timeline.telemetry().size());
     }
 
-    // ---- recordingFor (docs/OPS-CORE-PLAN.md §R) ----
+    // ---- recordingFor (docs/plans/done/OPS-CORE-PLAN.md §R) ----
 
     @Test
     void recordingForThrowsNoSuchElementExceptionForUnknownUsage() {

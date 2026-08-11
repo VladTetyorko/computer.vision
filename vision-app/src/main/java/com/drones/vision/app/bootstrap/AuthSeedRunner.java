@@ -18,7 +18,7 @@ import java.util.Objects;
 
 /**
  * Seeds a root {@link Group} and three starter users on first boot, so flipping {@code
- * vision.auth.enabled=true} has accounts to log in as (docs/U-AUTH-PLAN.md, wave 3).
+ * vision.auth.enabled=true} has accounts to log in as (docs/plans/done/U-AUTH-PLAN.md, wave 3).
  *
  * <p><strong>These are dev-only seed credentials.</strong> {@code admin}/{@code admin} (ADMIN),
  * {@code manager}/{@code manager} (MANAGER), {@code pilot}/{@code pilot} (PILOT) — matching

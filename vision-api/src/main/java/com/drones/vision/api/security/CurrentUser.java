@@ -18,7 +18,7 @@ import java.util.Objects;
  * plain value. The actual "who" decision lives behind {@link PrincipalResolver}, which {@code
  * vision-app} supplies: a fixed dev principal when {@code vision.auth.enabled=false} (identical to
  * the pre-auth behavior — this class simply delegated to a fixed {@code Ownership} before), or a
- * resolver reading the authenticated session when {@code true} (docs/U-AUTH-PLAN.md, wave 3).
+ * resolver reading the authenticated session when {@code true} (docs/plans/done/U-AUTH-PLAN.md, wave 3).
  *
  * <p>This is still "the single thing to replace": the seam moved into {@link PrincipalResolver}, so
  * every controller keeps calling {@link #userId()}/{@link #ownership()} unchanged.
@@ -72,7 +72,7 @@ public class CurrentUser {
 
     /**
      * What this request may see — the acting user's resolved {@link VisibilityScope}
-     * (docs/U-SCOPE-PLAN.md, U-e slice 2). Controllers pass this to the scoped read/command
+     * (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2). Controllers pass this to the scoped read/command
      * methods; when auth is disabled it is {@link VisibilityScope#unbounded()}, so those methods
      * behave exactly as their unscoped counterparts.
      *
@@ -83,7 +83,7 @@ public class CurrentUser {
     }
 
     /**
-     * Who this request is, as the map's authorization model sees it (docs/MAP-REWORK-PLAN.md §4) —
+     * Who this request is, as the map's authorization model sees it (docs/plans/done/MAP-REWORK-PLAN.md §4) —
      * the argument every {@code /api/map/**} endpoint threads into {@code MapLayerService}/{@code
      * MarkService}/{@code DrawingService}. See {@link PrincipalResolver#viewer()} for why this is
      * <em>not</em> derived from {@link #scope()}.

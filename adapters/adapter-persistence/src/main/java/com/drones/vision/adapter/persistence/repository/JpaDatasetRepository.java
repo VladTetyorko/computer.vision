@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /**
  * {@link DatasetRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/CV-TRAINING-PLAN.md §1, Wave T3.
+ * docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3.
  *
  * <p>{@link #save} is an upsert (merge-by-id), matching {@code InMemoryDatasetRepository}'s
  * ({@code vision-app} devsupport) {@code Map#put} semantics exactly. {@link #delete} is a real

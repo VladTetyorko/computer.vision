@@ -397,7 +397,7 @@ class MavlinkTelemetryDecoderTest {
         assertEquals("RTL", afterHeartbeat.flightState().mode());
     }
 
-    // --- docs/FC-INTEGRATIONS-PLAN.md F-e: WIND / VIBRATION / EKF_STATUS_REPORT / MISSION_CURRENT / RANGEFINDER ---
+    // --- docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e: WIND / VIBRATION / EKF_STATUS_REPORT / MISSION_CURRENT / RANGEFINDER ---
 
     @Test
     void mapsWindIntoExtraViaTheArdupilotmegaDialect() throws IOException {
@@ -425,7 +425,7 @@ class MavlinkTelemetryDecoderTest {
         assertEquals(8.25, sample.extra().get("vibeYMs2"), 1e-6);
         assertEquals(45.0, sample.extra().get("vibeZMs2"), 1e-6);
         assertTrue(sample.extra().keySet().stream().noneMatch(key -> key.toLowerCase().contains("clip")),
-                "clipping counts are deliberately skipped per docs/FC-INTEGRATIONS-PLAN.md F-e");
+                "clipping counts are deliberately skipped per docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e");
     }
 
     @Test

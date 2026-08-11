@@ -10,7 +10,7 @@
 }
 
 /* The `DRONE` select riding `<vision-page-bar>`'s own `[pageBarFilters]` slot
-   (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — mirrors `features/wall/wall.css`'s own `.density` label:
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — mirrors `features/wall/wall.css`'s own `.density` label:
    `.row` (src/styles.css) already supplies the flex row + gap, this just sizes the control itself. */
 .preflight-picker select {
   min-height: 40px;

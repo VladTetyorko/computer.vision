@@ -25,7 +25,7 @@ import java.net.InetSocketAddress;
  * close-to-unblock idiom {@code adapter-mjpeg}'s {@code MjpegVideoSource} uses for its blocked
  * HTTP body read.
  *
- * <h2>Last source address (docs/DRONE-INFRA-PLAN.md I-e Stage 1)</h2>
+ * <h2>Last source address (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1)</h2>
  * {@link #lastSourceAddress()} exposes the sender address of the most recently received datagram.
  * Every TX side in this module ({@code MavlinkFeedTransmitter}, a real telemetry radio/SITL
  * instance) writes exactly one MAVLink message per datagram (see {@code MavlinkUdpOutputStream}'s

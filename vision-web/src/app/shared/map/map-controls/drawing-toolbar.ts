@@ -8,7 +8,7 @@ import type { DrawKind } from '../../../core/api/models';
 
 /**
  * `<vision-drawing-toolbar>` — the line / area / arrow / label modes and the selected drawing's
- * editor (docs/MAP-REWORK-PLAN.md §5.2). Shared by the Fly cockpit's Map drawer and Command's
+ * editor (docs/plans/done/MAP-REWORK-PLAN.md §5.2). Shared by the Fly cockpit's Map drawer and Command's
  * floating map card.
  *
  * **What it drives, and what it doesn't.** Arming a mode writes `DrawingsStore.mode`, which the

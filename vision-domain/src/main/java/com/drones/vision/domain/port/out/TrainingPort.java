@@ -7,7 +7,7 @@ import com.drones.vision.domain.model.TrainingProgress;
 import java.util.function.Consumer;
 
 /**
- * Driven port: run a CV model fine-tune and observe its progress (docs/CV-TRAINING-PLAN.md §6/§7,
+ * Driven port: run a CV model fine-tune and observe its progress (docs/plans/done/CV-TRAINING-PLAN.md §6/§7,
  * Phase 2) — the Java side of {@code cv.proto}'s {@code Training.StartTraining} server-streaming
  * RPC. Optional, GPU-training-host-only in production (never the GB4005 inference box — see the
  * plan's "constraint that shapes everything"); a default/offline implementation may simply refuse.

@@ -2,7 +2,7 @@ package com.drones.vision.application.replay;
 
 /**
  * Tunables for {@link DefaultReplayService}'s telemetry/detection downsampling and fetch bounds —
- * extracted per docs/LAYERING-REFACTOR-PLAN.md &sect;1.3's config-extraction rule. Framework-free;
+ * extracted per docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3's config-extraction rule. Framework-free;
  * {@code vision-app} binds a {@code VisionApplicationProperties} record and maps it onto this
  * record's constructor. Every {@link #defaults()} value is byte-identical to the literal it
  * replaces.
@@ -32,7 +32,7 @@ public record ReplayServiceSettings(int defaultMaxPoints, int maxPointsCeiling, 
         }
     }
 
-    /** Every value byte-identical to the literal it replaces (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
+    /** Every value byte-identical to the literal it replaces (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
     public static ReplayServiceSettings defaults() {
         return new ReplayServiceSettings(500, 2_000, 20_000);
     }

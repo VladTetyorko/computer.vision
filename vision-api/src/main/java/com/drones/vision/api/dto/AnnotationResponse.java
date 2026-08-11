@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.Annotation;
 
 /**
  * Wire representation of one {@link Annotation}, embedded in {@link SampleResponse}
- * (docs/CV-TRAINING-PLAN.md §3's frozen wire contract).
+ * (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire contract).
  *
  * @param label  class label
  * @param source {@code "MODEL"} or {@code "OPERATOR"} — the annotation's {@link

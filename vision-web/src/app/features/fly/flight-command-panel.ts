@@ -10,15 +10,15 @@ import type { FlightCapability } from '../../core/api/models';
 import { commandOutcomeToast, disarmConfirmMessage, modeConfirmMessage } from './flight-command-panel-logic';
 import type { FlightCommandToast } from './flight-command-panel-logic';
 
-/** The panel's mutually-exclusive confirm dialogs (docs/UI-ARCHITECTURE-PLAN.md) — a typed id set so
+/** The panel's mutually-exclusive confirm dialogs (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — a typed id set so
  * the template can't ask about a dialog that doesn't exist. */
 type CommandDialog = 'mode' | 'arm' | 'disarm';
 
 /**
- * The Fly cockpit's Arm/Disarm/Mode panel (docs/DRONE-INFRA-PLAN.md I-e Stage 2 — "UI — Wave C"),
+ * The Fly cockpit's Arm/Disarm/Mode panel (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — "UI — Wave C"),
  * extending Stage 1's `shared/ui/return-home-button.ts` with the two next command classes now that
  * capability-gating (`GET .../flight-capabilities`) is real. Migrated into the shared
- * `vision-side-panel` drawer shell (docs/UI-REDESIGN-PLAN.md Wave 2, D-E): this used to be a single
+ * `vision-side-panel` drawer shell (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-E): this used to be a single
  * `.command-cluster` frosted-pill island always visible in `fly.html`'s `.hud-header`; it now
  * renders as the `flight` tool-rail drawer's body, with `open`/`close` driven by `FlyPage`'s own
  * `PanelState` (`panels`) — same "own HTTP call + toast directly" shape as `ReturnHomeButton`
@@ -69,7 +69,7 @@ export class FlightCommandPanel {
   /** Latest telemetry's `flightState.armed` — gates Disarm's crash-warning copy, nothing else. */
   readonly armed = input<boolean | undefined>(undefined);
   /** Whether the `flight` drawer is open — driven by the host's `PanelState` (`fly.ts`'s `panels`),
-   * not this component's own state (docs/UI-REDESIGN-PLAN.md D-E). Distinct from {@link canCommand}:
+   * not this component's own state (docs/plans/done/UI-REDESIGN-PLAN.md D-E). Distinct from {@link canCommand}:
    * that's the *host* gate (is there anything to show at all), this is purely "is the drawer open
    * right now" — both must hold for the command cluster to actually render (see the template). */
   readonly open = input<boolean>(false);
@@ -84,7 +84,7 @@ export class FlightCommandPanel {
 
   /**
    * The panel's three confirm dialogs (mode / arm / disarm) as **one mutually-exclusive overlay
-   * group** (docs/UI-ARCHITECTURE-PLAN.md) rather than three independent `signal(false)` flags:
+   * group** (docs/plans/done/UI-ARCHITECTURE-PLAN.md) rather than three independent `signal(false)` flags:
    * opening any one closes whichever other was open, so the panel can never show two confirms at
    * once — a consistency guarantee by construction, not by discipline. Transient (no `storageKey`) —
    * a confirm must never survive a reload. `isDialogOpen` is the typed template accessor.
@@ -141,7 +141,7 @@ export class FlightCommandPanel {
   // --- Arm -------------------------------------------------------------------------------------
   /**
    * Gates `<vision-arm-confirm-dialog>` in the template — deliberately rendered as a **sibling** of
-   * `<vision-side-panel>`, never projected inside it (docs/UI-REDESIGN-PLAN.md Wave 2 migration
+   * `<vision-side-panel>`, never projected inside it (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 migration
    * note). `<vision-side-panel>`'s own `<aside>` catches `Esc` and emits `close` (which `fly.ts`
    * wires to `panels.close()`); if the arm/mode/disarm confirm dialogs lived *inside* that `<aside>`
    * as projected content, a stray `Esc` press while one is open would bubble up through it and close

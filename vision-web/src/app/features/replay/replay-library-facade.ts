@@ -5,11 +5,11 @@ import { describeHttpError } from '../../core/api-error';
 import type { UsageSummary } from '../../core/api/models';
 import { filterUsagesByTimeRange, usageAssetOptions, type TimeRangeFilter, type UsageAssetOption } from './replay-library-logic';
 
-/** The server's own page size — the newest N flights fleet-wide, or per-asset once filtered (docs/design/10-replay.md's frozen contract). No pagination beyond it. */
+/** The server's own page size — the newest N flights fleet-wide, or per-asset once filtered (docs/extracts/design/10-replay.md's frozen contract). No pagination beyond it. */
 const USAGE_LIMIT = 50;
 
 /**
- * `ReplayLibraryPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — the `/replay` library's read
+ * `ReplayLibraryPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the `/replay` library's read
  * model: the `GET /api/usages` fetch, the asset-filter dropdown's own options (`VisionApi.
  * listAssets`, loaded independently so an asset with zero flights in the current page is still
  * choosable), the client-side time-range narrowing (`replay-library-logic.ts#filterUsagesByTimeRange`
@@ -17,7 +17,7 @@ const USAGE_LIMIT = 50;
  * (mirrors `AssetsFacade`'s own identical convention — see that class's doc comment for why
  * selection is looked up against the unfiltered list, never the filter-narrowed one).
  *
- * **Honest states, never fabricated (docs/design/10-replay.md, F8's own "no navigation path
+ * **Honest states, never fabricated (docs/extracts/design/10-replay.md, F8's own "no navigation path
  * reaches an error state passed off as a bug" bar).** `loading` is true only until the *first*
  * fetch settles; `errorMessage` is set the moment that fetch rejects — a genuine backend failure,
  * including a plain 404 while a concurrent backend wave hasn't shipped `GET /api/usages` yet — and
@@ -46,7 +46,7 @@ export class ReplayLibraryFacade {
    *  by the client-side time-range filter on top. */
   readonly filteredUsages = computed(() => filterUsagesByTimeRange(this.usages(), this.timeRangeFilter(), Date.now()));
 
-  // --- Two-pane selection (`?sel=<usageId>`, docs/NAV-IA-REDESIGN-PLAN.md §2.4) ------------------
+  // --- Two-pane selection (`?sel=<usageId>`, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4) ------------------
   // `ReplayLibraryPage`'s own constructor `effect()` forwards its route-bound `sel` input straight
   // into this signal — the same split `AssetsPage`/`AssetsFacade` already establish. Looked up
   // against `usages` (every loaded row), not `filteredUsages`, so narrowing the time-range filter

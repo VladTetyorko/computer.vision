@@ -22,7 +22,7 @@ import com.drones.vision.application.pipeline.UsageTracker;
 
 /**
  * Evaluates live telemetry against the enabled {@link GeofenceZone} set and raises {@link
- * EventType#GEOFENCE_BREACH} events on edge transitions (docs/OPS-CORE-PLAN.md §G).
+ * EventType#GEOFENCE_BREACH} events on edge transitions (docs/plans/done/OPS-CORE-PLAN.md §G).
  *
  * <p>Called from {@link UsageTracker#applySample} once per telemetry sample — the same hot path
  * that already persists/live-announces the sample — so {@link #evaluate(AssetId, Telemetry)} must
@@ -40,7 +40,7 @@ import com.drones.vision.application.pipeline.UsageTracker;
  * is left exactly as it was (no synthetic "exit" fires just because a zone was disabled — see
  * Gotchas).
  *
- * <h2>Breach rules (docs/OPS-CORE-PLAN.md §G, frozen)</h2>
+ * <h2>Breach rules (docs/plans/done/OPS-CORE-PLAN.md §G, frozen)</h2>
  * For a positioned sample (see below), each enabled zone independently evaluates:
  * <ul>
  *   <li>{@link ZoneKind#KEEP_OUT}: breach iff the position is inside the zone's polygon, at any

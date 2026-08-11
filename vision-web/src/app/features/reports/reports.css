@@ -1,7 +1,7 @@
 /* Reuses `.page`/`.card`/`.grid12`/`.col-*`/`.chip`/`.mono`/`.empty` from `src/styles.css` — no new
    colors. `.kpi-tiles` mirrors `features/asset-detail/asset-detail.css`'s own grid exactly
    (`vision-stat`'s own responsive contract). The page's own header is `vision-page-bar` now
-   (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — no bespoke `.page-head` styling left to own here. */
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — no bespoke `.page-head` styling left to own here. */
 
 .kpi-tiles {
   display: grid;

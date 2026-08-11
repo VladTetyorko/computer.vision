@@ -2,7 +2,7 @@ import { Injectable, signal } from '@angular/core';
 
 export type ToastKind = 'ok' | 'error' | 'info' | 'notification' | 'warning';
 
-/** An optional follow-up the user can take straight from the toast (docs/CYCLES-PLAN.md §4's "Watch"). */
+/** An optional follow-up the user can take straight from the toast (docs/main/CYCLES-PLAN.md §4's "Watch"). */
 export interface ToastAction {
   readonly label: string;
   readonly onClick: () => void;
@@ -56,7 +56,7 @@ export class ToastService {
   /**
    * A background event surfaced without the user asking for it — today, only the notification
    * bell's own newly-arrived detection events (`shared/ui/notification-bell.ts`). Takes an
-   * `action` (mirrors `ok`'s own — docs/CYCLES-PLAN.md §4's "Watch" precedent) since the whole
+   * `action` (mirrors `ok`'s own — docs/main/CYCLES-PLAN.md §4's "Watch" precedent) since the whole
    * point of one is a one-click way to look at whatever just happened, per the verb dictionary
    * ("Watch live"/"Details"). Visually its own kind (`shared/ui/toast-host.ts`'s `.toast.notification`)
    * rather than reusing `info`'s bare styling — distinct enough to read as "something happened
@@ -67,7 +67,7 @@ export class ToastService {
   }
 
   /**
-   * A command genuinely sent but not confirmed (docs/DRONE-INFRA-PLAN.md I-e Stage 1 — the
+   * A command genuinely sent but not confirmed (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 — the
    * "Bring home" button's `NO_ACK` outcome). No `action` — unlike `ok`/`notify`, there is nothing
    * useful for the operator to click from the toast itself, only the fact worth reading.
    */

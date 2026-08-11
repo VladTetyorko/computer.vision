@@ -3,7 +3,7 @@ import type { ManualControlEngageState } from '../../core/rc/manual-control-clie
 
 /**
  * Pure, component-adjacent logic behind `rc-monitor.ts`'s "Take control" section
- * (docs/RC-CONTROL-PHASE1-PLAN.md R5) — mirrors `flight-command-panel-logic.ts`'s own split (a
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5) — mirrors `flight-command-panel-logic.ts`'s own split (a
  * routed feature's gating/copy rules live beside their one component, promoted to `core/` only if
  * a second consumer ever needs them).
  */
@@ -17,7 +17,7 @@ export interface EngageGateInput {
 }
 
 /**
- * The Take-control button's poka-yoke reason (docs/UX-REWORK-PLAN.md §U-a2 rule 1 — "disabled with
+ * The Take-control button's poka-yoke reason (docs/plans/done/UX-REWORK-PLAN.md §U-a2 rule 1 — "disabled with
  * the reason inline, never enabled-then-error", applied to R5's engage gesture; mirrors
  * `flight-command-panel-logic.ts#canShowCommandPanel`'s own "reuse the same gate the flight panel
  * uses" instruction, extended with the two things unique to RC: the Gamepad API's own support/

@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * for a usage's telemetry trail. Writing to the trail is never exposed — entries are produced by
  * the services that make the changes, never by a caller.
  *
- * <h2>Management gate (docs/U-SCOPE-PLAN.md, U-e slice 2)</h2>
+ * <h2>Management gate (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2)</h2>
  * {@link #list} exposes who-changed-what across the <em>whole fleet</em>, a cross-tenant
  * information leak once real users exist — so it is admission-gated on {@link
  * com.drones.vision.application.scope.VisibilityScope#canManageOrg()}, true for ADMIN

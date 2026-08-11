@@ -7,7 +7,7 @@
     height: 12rem;
 }
 
-/* ---- Header (docs/NAV-IA-REDESIGN-PLAN.md §2.2) ---------------------------------------------- */
+/* ---- Header (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) ---------------------------------------------- */
 /* `.back-link` is gone — the back-to-asset link is now `<vision-page-bar>`'s own `crumb` (replay.ts
    `crumb` computed). `.range-label` is the old page-head subtitle's own real content (the flight's
    time range), now plain text under the bar rather than inside it — see replay.html's own comment. */
@@ -135,7 +135,7 @@
 .fact dd {
     margin: var(--space-2) 0 0;
     font-size: 0.85rem;
-    /* docs/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts (altitude, heading,
+    /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts (altitude, heading,
        battery) with text facts (transport, detections); tabular-nums only (not the mono font) since
        it's inert on the text ones but keeps the numeric ones from jittering as they tick. */
     font-variant-numeric: tabular-nums;
@@ -176,7 +176,7 @@
     flex-wrap: wrap;
 }
 
-/* ---- Recording video + clip export (docs/OPS-CORE-PLAN.md §R, R-c) ------------------------- */
+/* ---- Recording video + clip export (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) ------------------------- */
 
 .recording-video {
     width: 100%;
@@ -193,7 +193,7 @@
     gap: var(--space-8);
 }
 
-/* ---- "Add to dataset" (docs/CV-TRAINING-V2-PLAN.md §8) — a dataset picker sharing the clip-actions row */
+/* ---- "Add to dataset" (docs/plans/done/CV-TRAINING-V2-PLAN.md §8) — a dataset picker sharing the clip-actions row */
 
 .dataset-picker {
     min-width: 12rem;

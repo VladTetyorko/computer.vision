@@ -40,7 +40,7 @@ const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
 };
 
 /**
- * `OnboardingPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — orchestrates `OnboardingStore`/
+ * `OnboardingPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OnboardingStore`/
  * `SettingsStore`/`ToastService`, exactly what the page injected directly before this refactor.
  * `OnboardingStore` already owns the wizard's whole step machine/draft state/HTTP orchestration (this
  * component's own page-provided "component store"); this facade adds only the small set of
@@ -49,7 +49,7 @@ const CONNECT_METHOD_LABELS: Record<ConnectMethod, string> = {
  *
  * `OnboardingStore.flightPlanDialogOpen` stays where it already lives (that store) rather than
  * moving to a `UiStore` group — it's the only dialog this page ever shows, so there is nothing for
- * it to be mutually exclusive *with* (docs/UI-ARCHITECTURE-PLAN.md's own explicit carve-out for
+ * it to be mutually exclusive *with* (docs/plans/done/UI-ARCHITECTURE-PLAN.md's own explicit carve-out for
  * this exact field).
  */
 @Injectable()
@@ -65,7 +65,7 @@ export class OnboardingFacade {
 
   readonly connectMethodLabels = CONNECT_METHOD_LABELS;
 
-  // --- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — the picker's own option lists/labels,
+  // --- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — the picker's own option lists/labels,
   //     same "defined alongside the other display config, not the store" convention
   //     `CONNECT_METHOD_LABELS`/`STEP_LABELS` already follow above.
   readonly firmwareOptions = FIRMWARES;
@@ -120,7 +120,7 @@ export class OnboardingFacade {
     return detailsSummary(details);
   }
 
-  // --- "Listen for drones" results list (docs/DRONE-INFRA-PLAN.md I-b) — thin helpers over
+  // --- "Listen for drones" results list (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — thin helpers over
   //     `drone-scan-logic.ts`'s own pure functions, same pattern as `detailPairs` above.
 
   droneVehicleClaimed(candidate: DiscoveredDevice): boolean {
@@ -137,7 +137,7 @@ export class OnboardingFacade {
     }
   }
 
-  // --- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) -------------------------------------------
+  // --- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) -------------------------------------------
 
   /**
    * The Connect step's "‹ back" row is shared by every method (`onboarding.html`'s
@@ -154,7 +154,7 @@ export class OnboardingFacade {
   }
 
   /**
-   * Copies one config block's body (docs/DRONE-INFRA-PLAN.md I-g) — mirrors
+   * Copies one config block's body (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — mirrors
    * `shared/player/stream-info-panel.ts#copyViewUrl`'s existing `navigator.clipboard` + toast
    * try/catch precedent verbatim rather than inventing a second clipboard affordance.
    */
@@ -167,7 +167,7 @@ export class OnboardingFacade {
     }
   }
 
-  /** Client-side `Blob` → `<a download>` (docs/DRONE-INFRA-PLAN.md I-g) — only blocks with a `filename` offer this. */
+  /** Client-side `Blob` → `<a download>` (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — only blocks with a `filename` offer this. */
   downloadBlock(block: ConfigBlock): void {
     if (!block.filename) {
       return;

@@ -5,10 +5,10 @@ import java.util.stream.Collectors;
 
 /**
  * Case-insensitive request-body enum parsing with an actionable error message — the one copy of the
- * idiom {@code CapabilityParsing#toCapability} (and, before docs/MAP-REWORK-PLAN.md Wave C,
+ * idiom {@code CapabilityParsing#toCapability} (and, before docs/plans/done/MAP-REWORK-PLAN.md Wave C,
  * {@code CreateMarkRequest#toKind}/{@code PatchMarkRequest#toStatus}) each spelled out by hand.
  *
- * <p>Extracted because the map wire contract (docs/MAP-REWORK-PLAN.md §4.2) parses <em>eight</em>
+ * <p>Extracted because the map wire contract (docs/plans/done/MAP-REWORK-PLAN.md §4.2) parses <em>eight</em>
  * distinct enums off request bodies ({@code MarkKind}, {@code Affiliation}, {@code MarkStatus},
  * {@code LayerKind}, {@code AccessLevel}, {@code LayerGrant.SubjectType}, {@code DrawKind},
  * {@code Verification.VerificationState}); eight hand-copied loops would be eight places for the

@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>These bypass {@link MediamtxStreamPublisher} entirely — no recorder, no network — driving
  * everything off synthetic {@link Instant} sequences, so they run fast and deterministically.
  * (Moved out of {@code StreamStateTest} when {@code StreamState}'s cadence-measurement/PTS/drift
- * logic was split into this class, docs/LAYERING-REFACTOR-PLAN.md §5.1.)
+ * logic was split into this class, docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1.)
  */
 class CadenceEstimatorTest {
 

@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Context test for the <em>default</em> {@code vision.tracking.*} configuration
- * (docs/TRACKING-PLAN.md &sect;4.F, docs/TRACKING-ORCHESTRATION.md &sect;4.3): the properties bind in
+ * (docs/plans/done/TRACKING-PLAN.md &sect;4.F, docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.3): the properties bind in
  * a real context, the shipped default <b>agrees with the domain's</b> ({@code
  * TrackingMode.ASSOCIATE}, the value {@code PipelineConfig.defaults()} carries as of wave T8), and
  * {@code GET /api/cv/trackers}' roster bean resolves for its component-scanned controller.
@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * config.wiring.TrackingWiringTest}. There is deliberately <b>no seed bean</b> to autowire here: the
  * seed is not a collaborator of any controller, it rides {@code StreamPipelineSettings} into {@code
  * DefaultStreamService}, which is the one point every start path passes through
- * (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
+ * (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
  *
  * <p>{@code vision.publish.enabled=false} for the same determinism reasons as {@link
  * CvWiringTest}/{@link AssetWiringTest}.

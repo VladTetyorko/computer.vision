@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Wires the CV inference gRPC connection to cv-service — the CV slice of what used to be one
- * 825-line {@code WiringConfiguration} (docs/LAYERING-REFACTOR-PLAN.md wave D). Config extraction
+ * 825-line {@code WiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D). Config extraction
  * (wave F4): {@link #detectionPort} now builds a {@code GrpcCvSettings} from {@link
  * VisionCvProperties} instead of passing just {@code detectWidth}/{@code jpegQuality} — every
  * mapped default is byte-identical to the literal it replaced, and this deletes the {@code
@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 public class CvWiring {
 
     /**
-     * The shared gRPC connection to cv-service (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): one
+     * The shared gRPC connection to cv-service (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): one
      * {@link ManagedChannel} for both {@link #detectionPort}'s {@code GrpcDetectionPort} ({@code
      * Inference/DetectStream}, the per-frame hot path) and {@code TrainingWiringConfiguration}'s
      * {@code modelRegistryPort}/{@code trainingPort} beans ({@code Training/*}, control-plane) — so
@@ -65,7 +65,7 @@ public class CvWiring {
     }
 
     /**
-     * Maps every {@code GrpcCvSettings} field off {@link VisionCvProperties} (docs/LAYERING-REFACTOR-PLAN.md
+     * Maps every {@code GrpcCvSettings} field off {@link VisionCvProperties} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * wave F4) — shared by {@link #cvGrpcChannel}/{@link #detectionPort} here and {@code
      * TrainingWiringConfiguration#datasetUploadPort}.
      */
@@ -79,7 +79,7 @@ public class CvWiring {
 
     /**
      * Selects the {@link DetectionPort} implementation per {@link VisionCvProperties#enabled()}
-     * (docs/MVP1-PLAN.md §C7 bullet 4): {@code true} wires {@code GrpcDetectionPort}
+     * (docs/plans/done/MVP1-PLAN.md §C7 bullet 4): {@code true} wires {@code GrpcDetectionPort}
      * (adapter-cv-grpc) against the shared {@link #cvGrpcChannel}; {@code false} (the default)
      * keeps today's {@link NoopDetectionPort}.
      *
@@ -97,11 +97,11 @@ public class CvWiring {
 
     /**
      * The detection-model roster {@code CvModelsController} (component-scanned from {@code
-     * vision-api}) serves at {@code GET /api/cv/models} (docs/CV-CONTROL-PLAN.md §4's frozen wire
+     * vision-api}) serves at {@code GET /api/cv/models} (docs/plans/done/CV-CONTROL-PLAN.md §4's frozen wire
      * contract) — the Fly cockpit's model picker builds its dropdown from exactly this list.
      *
      * <p>Deliberately a static, in-source constant, not the dormant {@code ModelRegistryPort}
-     * (docs/CV-CONTROL-PLAN.md §D): that port models versioned promote/rollback (a Phase-3
+     * (docs/plans/done/CV-CONTROL-PLAN.md §D): that port models versioned promote/rollback (a Phase-3
      * training-studio concern) and has no implementation — wiring it now for a picker that only
      * needs a display list would be over-building.
      */

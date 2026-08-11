@@ -3,7 +3,7 @@
 
 /* Explicit width, not just `min-width` — the global `input { width: 100% }` rule (src/styles.css)
    would otherwise stretch this to the full page-bar row once it wraps onto its own line
-   (docs/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
 .categories-search {
   width: 16rem;
   min-height: 40px;
@@ -19,7 +19,7 @@ td.actions {
   text-align: right;
 }
 
-/* Numeric columns (docs/VISUAL-REFRESH-PLAN.md F5 rule 2 — "numbers right-aligned in `.mono`"),
+/* Numeric columns (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 2 — "numbers right-aligned in `.mono`"),
    same `th`/`td`-share-the-class idiom as `features/assets/assets.css`'s own `.col-num` — Angular's
    emulated view encapsulation means that class doesn't reach this component's template. Streaming
    stays unaligned: it renders a chip/dot (state), not a bare number, matching the assets dense

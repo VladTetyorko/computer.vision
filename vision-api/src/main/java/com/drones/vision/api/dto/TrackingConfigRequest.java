@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 
 /**
  * The {@code tracking} object accepted by {@code PATCH /api/streams/{streamId}/config} and by both
- * start-stream request bodies (docs/TRACKING-PLAN.md &sect;4.D's frozen wire contract).
+ * start-stream request bodies (docs/plans/done/TRACKING-PLAN.md &sect;4.D's frozen wire contract).
  *
  * <p>Every field is independently optional, and this record maps <b>one-for-one</b> onto the
  * application layer's {@link TrackingConfigPatch}: a JSON field that is absent becomes {@code null},
@@ -66,7 +66,7 @@ public record TrackingConfigRequest(String mode, String engineId, Integer verify
 
     /**
      * {@link #toPatch()} for a stream that does not exist yet: identical, except a {@code lock} is
-     * refused rather than silently ignored (docs/TRACKING-PLAN.md &sect;4.D — the start bodies carry
+     * refused rather than silently ignored (docs/plans/done/TRACKING-PLAN.md &sect;4.D — the start bodies carry
      * "the same shape minus {@code lock}").
      *
      * @return what this start request states about tracking

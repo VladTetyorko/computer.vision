@@ -1,7 +1,7 @@
 import { TILE_CACHE_MAX_BYTES, planEviction, type TileCacheEntryMeta } from './tile-cache-logic';
 
 /**
- * Minimal IndexedDB glue behind the map-tile cache (docs/MVP3-PLAN.md's Build rules). Deliberately
+ * Minimal IndexedDB glue behind the map-tile cache (docs/plans/done/MVP3-PLAN.md's Build rules). Deliberately
  * thin and undocumented-by-spec (this codebase's own standing precedent for imperative browser-API
  * wiring — see `shared/map/live-map.ts`'s Leaflet bootstrap, `shared/player/player.ts`'s WHEP path — none of those have
  * dedicated component specs either; jsdom, this project's test environment, has no IndexedDB

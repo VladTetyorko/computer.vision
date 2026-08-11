@@ -40,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * docs/RC-CONTROL-PHASE1-PLAN.md R3: {@link MavlinkManualControlSender} exercised over real
+ * docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R3: {@link MavlinkManualControlSender} exercised over real
  * loopback UDP against a {@link FakeVehicle} test double, the same style {@link
  * MavlinkFlightCommanderTest} uses for {@link MavlinkFlightCommander} — heartbeats continuously so
  * {@link MavlinkSocketHub} claims it, then continuously drains every {@code RC_CHANNELS_OVERRIDE}

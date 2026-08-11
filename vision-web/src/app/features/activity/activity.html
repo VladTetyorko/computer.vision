@@ -1,5 +1,5 @@
 <div class="page">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / §2.4: `page-head` stays gone. No `Mine | Everyone` scope
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / §2.4: `page-head` stays gone. No `Mine | Everyone` scope
        toggle — the backend has no all-users activity query to back it (see `activity-facade.ts`'s
        own class doc comment for the check and this task's report for the flag), so nothing projects
        into `[pageBarFilters]` this wave. -->
@@ -24,7 +24,7 @@
         message="Your actions — creating an asset, renaming a device, archiving — will show up here."
       />
     } @else {
-      <!-- Day-grouped (docs/design/09-activity.md: "an audit log is read by 'when'") — pure
+      <!-- Day-grouped (docs/extracts/design/09-activity.md: "an audit log is read by 'when'") — pure
            bucketing lives in `core/activity/activity-logic.ts#groupActivityByDay`, unit-tested. -->
       @for (group of facade.dayGroups(); track group.label) {
         <h2 class="activity-day-label">{{ group.label }}</h2>
@@ -44,7 +44,7 @@
                 @if (row.targetLabel) {
                   <span class="muted activity-target">{{ row.targetLabel }}</span>
                 }
-                <!-- No verb chip (docs/design/09-activity.md: "the chip is redundant with the
+                <!-- No verb chip (docs/extracts/design/09-activity.md: "the chip is redundant with the
                      verb" — the summary text below already states it, e.g. "Created asset 11…";
                      the left accent border is a color reinforcement of information already present
                      in visible/announced text, not its sole carrier). -->

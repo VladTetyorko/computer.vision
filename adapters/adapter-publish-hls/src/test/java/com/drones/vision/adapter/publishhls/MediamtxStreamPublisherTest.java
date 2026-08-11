@@ -138,7 +138,7 @@ class MediamtxStreamPublisherTest {
         assertEquals(Optional.empty(), publisher.whepUrl(null));
     }
 
-    // -- playbackUrl (docs/OPS-CORE-PLAN.md §R) ---------------------------------
+    // -- playbackUrl (docs/plans/done/OPS-CORE-PLAN.md §R) ---------------------------------
 
     @Test
     void playbackUrlFormatsGetUrlWithPathStartAndDuration() {
@@ -184,7 +184,7 @@ class MediamtxStreamPublisherTest {
      * {@code playbackViewBase} is genuinely optional (unlike the other three bases) — a publisher
      * constructed without one (explicit {@code null}) must return {@link Optional#empty()} rather
      * than build a URL against a nonexistent base, since not every deployment has
-     * recording/playback configured (docs/OPS-CORE-PLAN.md §R).
+     * recording/playback configured (docs/plans/done/OPS-CORE-PLAN.md §R).
      */
     @Test
     void playbackUrlReturnsEmptyWhenPlaybackBaseUnconfigured() {
@@ -249,7 +249,7 @@ class MediamtxStreamPublisherTest {
      * connections immediately on Linux, so this stays fast without relying on
      * the recorder's own connect-timeout option). Publishing must never throw,
      * frames must simply be dropped, and {@code streamEnded} must still clean
-     * up — see docs/PHASE1-PLAN.md §0.3 and §3.
+     * up — see docs/plans/done/PHASE1-PLAN.md §0.3 and §3.
      */
     @Test
     void publishNeverThrowsWhenMediamtxIsUnreachableAndStreamEndedStillCleansUp() {

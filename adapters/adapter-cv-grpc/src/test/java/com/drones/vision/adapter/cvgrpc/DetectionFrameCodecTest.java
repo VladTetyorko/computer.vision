@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Pure {@link DetectionFrameCodec#decode} mapping-logic tests — no gRPC, no network — covering
- * docs/TRACKING-PLAN.md §4.A/§4.B track-field decoding and docs/TRACKING-ORCHESTRATION.md §5.2's
+ * docs/plans/done/TRACKING-PLAN.md §4.A/§4.B track-field decoding and docs/extracts/TRACKING-ORCHESTRATION.md §5.2's
  * {@link TrackingTelemetry} gap fix. {@link DetectionFrameCodec#encode}'s wire-capture behavior
  * (including {@code TrackingConfig}/{@code TargetLock}) is covered end-to-end in
  * {@link GrpcDetectionPortTest} instead, since "captured server-side on the wire" needs a real gRPC

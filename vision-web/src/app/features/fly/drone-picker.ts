@@ -6,14 +6,14 @@ import { lastSeenLabel, positionLabel, streamStateLabel } from './fly-logic';
 import type { AssetSummary } from '../../core/api/models';
 
 /**
- * `/fly` — the drone chooser (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/design/01-fly.md). Split
- * out of the old combined `FlyPage` (docs/MVP3-PLAN.md §C-b), which switched between this and the
+ * `/fly` — the drone chooser (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/extracts/design/01-fly.md). Split
+ * out of the old combined `FlyPage` (docs/plans/done/MVP3-PLAN.md §C-b), which switched between this and the
  * cockpit *internally*, with no URL change — `fly-redirect-guard.ts` now decides, before this
  * component ever mounts, whether a given `/fly` visit should redirect straight into a cockpit
  * instead (a live remembered drone, or an explicit `?asset=` drill-down); this component only ever
  * renders once that guard has confirmed there is genuinely something to ask.
  *
- * **Layered per docs/UI-ARCHITECTURE-PLAN.md**: injects only `DronePickerFacade`, mirroring every
+ * **Layered per docs/plans/done/UI-ARCHITECTURE-PLAN.md**: injects only `DronePickerFacade`, mirroring every
  * other routed page — see `architecture.spec.ts`'s own `ROUTED_PAGES` list (this page's own entry
  * replaces the old combined `fly/fly`).
  *
@@ -33,7 +33,7 @@ import type { AssetSummary } from '../../core/api/models';
 export class DronePickerPage {
   protected readonly facade = inject(DronePickerFacade);
 
-  // --- Picker card facts (docs/UX-REWORK-PLAN.md §U-a2 §3 — the asset card rebuild) -----------
+  // --- Picker card facts (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3 — the asset card rebuild) -----------
   // Pure, stateless, called from the picker's own `@for` — no facade state needed beyond the loop
   // argument itself, same idiom as `asset-detail.ts`'s own `barLabel`/`detailPairs`, kept on the
   // component rather than the facade for the identical reason `fly.ts` used to.

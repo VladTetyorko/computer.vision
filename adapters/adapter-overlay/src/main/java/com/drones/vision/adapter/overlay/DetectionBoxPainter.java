@@ -16,12 +16,12 @@ import java.util.Locale;
 
 /**
  * Draws one {@link Detection}'s box border and label bar onto a frame, split
- * out of {@link Java2DOverlayRenderer} (docs/LAYERING-REFACTOR-PLAN.md §5.1).
+ * out of {@link Java2DOverlayRenderer} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1).
  * Label→color assignment ({@link Java2DOverlayRenderer#colorForLabel})
  * deliberately stays on the renderer, not here — its palette length is baked
  * into pixel-probe test expectations and must not move (§1.3).
  *
- * <p>Track rendering (docs/TRACKING-PLAN.md §7, wave T5): when {@link
+ * <p>Track rendering (docs/plans/done/TRACKING-PLAN.md §7, wave T5): when {@link
  * Detection#track()} is present, the label bar is prefixed {@code "#<id>
  * "} and the box colors by {@link Java2DOverlayRenderer#colorForTrack}
  * instead of {@link Java2DOverlayRenderer#colorForLabel} — an untracked
@@ -53,7 +53,7 @@ final class DetectionBoxPainter {
      * label, and its label bar is prefixed {@code "#<id>"}; a {@link
      * TrackState#COASTING} track additionally draws a dashed rather than
      * solid border, so an operator can see the system is extrapolating
-     * rather than seeing (docs/TRACKING-PLAN.md §3.2). An untracked
+     * rather than seeing (docs/plans/done/TRACKING-PLAN.md §3.2). An untracked
      * detection is unaffected by any of this.
      */
     void draw(Graphics2D g, int frameWidth, int frameHeight, Detection detection) {
@@ -83,7 +83,7 @@ final class DetectionBoxPainter {
     /**
      * {@code "#<trackId> <label> <confidence>"} when {@link
      * Detection#track()} is present, unchanged {@code "<label>
-     * <confidence>"} otherwise (docs/TRACKING-PLAN.md §7, wave T5).
+     * <confidence>"} otherwise (docs/plans/done/TRACKING-PLAN.md §7, wave T5).
      * Package-private so it can be asserted directly, without going through
      * {@code FontMetrics}-dependent pixel geometry (this module's
      * determinism convention — label bar pixel positions are never
@@ -114,7 +114,7 @@ final class DetectionBoxPainter {
     /**
      * Draws a dashed rectangle for a {@link TrackState#COASTING} track —
      * the tracker is extrapolating the box, not re-confirming it against a
-     * fresh detector pass (docs/TRACKING-PLAN.md §3.2). Unlike {@link
+     * fresh detector pass (docs/plans/done/TRACKING-PLAN.md §3.2). Unlike {@link
      * #drawInsetBorder}'s four filled strips, a dashed line has no
      * fillRect-exact equivalent; it goes through a real {@link Stroke} and
      * {@link Graphics2D#draw(java.awt.Shape)} instead. Per this module's

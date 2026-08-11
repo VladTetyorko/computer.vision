@@ -12,16 +12,16 @@ import java.util.Set;
 
 /**
  * The {@link PrincipalResolver} wired when {@code vision.auth.enabled=false} (the default) — every
- * request is the fixed {@link DevPrincipal}, exactly the pre-auth behavior (docs/U-AUTH-PLAN.md,
+ * request is the fixed {@link DevPrincipal}, exactly the pre-auth behavior (docs/plans/done/U-AUTH-PLAN.md,
  * wave 3). Identical in effect to {@code PrincipalResolver.fixed(DevPrincipal.OWNERSHIP)}; a named
  * class rather than that inline factory only so the wiring reads self-documenting.
  *
  * <p>{@link #scope()} returns {@link VisibilityScope#unbounded()} — the slice-2 guardrail
- * (docs/U-SCOPE-PLAN.md): with auth off, every scoped read/command sees everything, so the
+ * (docs/plans/done/U-SCOPE-PLAN.md): with auth off, every scoped read/command sees everything, so the
  * default-off build behaves exactly as it does today.
  *
  * <p>{@link #viewer()} is the map-side counterpart of that same guardrail
- * (docs/MAP-REWORK-PLAN.md §4): the dev principal is an {@link Role#ADMIN} viewer, which {@link
+ * (docs/plans/done/MAP-REWORK-PLAN.md §4): the dev principal is an {@link Role#ADMIN} viewer, which {@link
  * MapAccessPolicy} grants {@code MANAGE} on every layer — so with auth off the whole common
  * operational picture (every layer, every mark, every drawing, and every {@code map} SSE event) is
  * visible, matching the unscoped behavior the marks stack had before layers existed.

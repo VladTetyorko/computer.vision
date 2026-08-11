@@ -4,7 +4,7 @@ import { isSimulatedAsset, mapSimulatedDevices } from './simulate-logic';
 
 /**
  * `buildSimulationRequest`/`buildSyntheticRegisterRequest`'s own tests moved to
- * `core/fleet/simulation-logic.spec.ts` alongside the functions themselves (docs/UX-REWORK-PLAN.md
+ * `core/fleet/simulation-logic.spec.ts` alongside the functions themselves (docs/plans/done/UX-REWORK-PLAN.md
  * §U-d) — this file keeps only the Warehouse-page-specific display logic.
  */
 

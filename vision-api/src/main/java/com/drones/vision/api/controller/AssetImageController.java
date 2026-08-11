@@ -26,7 +26,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Driving REST adapter for CONTRACT 2's asset image endpoints (docs/UX-REWORK-PLAN.md §U-d item
+ * Driving REST adapter for CONTRACT 2's asset image endpoints (docs/plans/done/UX-REWORK-PLAN.md §U-d item
  * 3): {@code PUT}/{@code GET}/{@code DELETE /api/assets/{id}/image}.
  *
  * <p>Constructor-injected with {@link AssetService}, {@link CurrentUser}, and {@link
@@ -41,7 +41,7 @@ import java.util.Set;
  * carries no asset-existence check either (no referential integrity, matching every other
  * repository port's convention in this codebase) — existence/visibility is enforced here instead.
  *
- * <h2>Visibility scoping (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
+ * <h2>Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
  * Every operation first re-reads the target asset through {@link
  * AssetService#details(VisibilityScope, AssetId)} with {@link CurrentUser#scope()} — the same
  * {@code requireInScope} guard {@link AssetController} uses before its mutations — so an

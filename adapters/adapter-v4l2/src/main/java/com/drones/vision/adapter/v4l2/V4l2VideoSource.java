@@ -23,16 +23,16 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * {@link VideoSourcePort} implementation for local USB/V4L2 cameras
- * (docs/MVP2-PLAN.md X-b), via JavaCV/FFmpeg's {@code v4l2} demuxer.
+ * (docs/plans/done/MVP2-PLAN.md X-b), via JavaCV/FFmpeg's {@code v4l2} demuxer.
  *
  * <p><b>RX only.</b> A local capture device has no wire to transmit
  * <i>to</i> — the same "no TX half" situation as {@code adapter-simulation}'s
  * {@code sim} source and {@code adapter-rtsp}'s {@code file} source (see
- * {@code docs/CYCLES-PLAN.md} §0's RX/TX doctrine). There is no {@code
+ * {@code docs/main/CYCLES-PLAN.md} §0's RX/TX doctrine). There is no {@code
  * V4l2FeedTransmitter}, and none is planned.
  *
  * <p><b>Protocol/URI shape — matches {@code adapter-discovery}'s {@code
- * V4l2Scanner}, not docs/MVP2-PLAN.md X-b's original brief.</b> The brief
+ * V4l2Scanner}, not docs/plans/done/MVP2-PLAN.md X-b's original brief.</b> The brief
  * proposed protocol {@code "usb"} with {@code uri = v4l2:///dev/videoN}; the
  * real {@code V4l2Scanner} (already shipped, verified by reading its source
  * and its test) emits {@link StreamDescriptor#protocol()} {@code "v4l2"} with
@@ -87,7 +87,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@link #PUBLISHER_BUFFER_CAPACITY}/{@link #CLOSE_JOIN_TIMEOUT_MILLIS} as
  * defaults; the two-arg constructor lets a caller (e.g. {@code vision-app},
  * bound from {@code vision.v4l2.*} properties) override either. Only two
- * tunables exist today, so — per {@code docs/LAYERING-REFACTOR-PLAN.md}
+ * tunables exist today, so — per {@code docs/plans/active/LAYERING-REFACTOR-PLAN.md}
  * §1.3 rule 4 — this class takes them as plain constructor parameters
  * rather than a settings record.
  */

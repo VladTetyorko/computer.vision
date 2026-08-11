@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Wire representation of a {@link TrainingSample} (docs/CV-TRAINING-PLAN.md §3's frozen wire
+ * Wire representation of a {@link TrainingSample} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire
  * contract). Annotations are pre-filled from the model's live detections on capture ({@code
  * source="MODEL"}).
  *

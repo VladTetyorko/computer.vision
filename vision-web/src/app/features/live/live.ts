@@ -14,14 +14,14 @@ import { LiveFacade } from './live-facade';
 
 /**
  * The single-device cockpit (`/live/:deviceId`) — video-first with a collapsible rail
- * (docs/CYCLES-PLAN.md §2, §9). Dumb by convention (docs/UI-ARCHITECTURE-PLAN.md): every read-model
+ * (docs/main/CYCLES-PLAN.md §2, §9). Dumb by convention (docs/plans/done/UI-ARCHITECTURE-PLAN.md): every read-model
  * and command lives in `LiveFacade`, which this component injects exclusively. `TelemetryStore`/
  * `DetectionsStore` stay in this component's own `providers` (one poller-set per route activation,
  * unchanged) so the facade and this page's child components (`<vision-telemetry-osd>`,
  * `<vision-detections-strip>`, `<vision-tactical-map>`, `<vision-stream-info>`) keep DI-sharing the
  * exact same store instances as before this refactor.
  *
- * **Header** (docs/NAV-IA-REDESIGN-PLAN.md §2.2): `page-head` is now `<vision-page-bar>`, titled
+ * **Header** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2): `page-head` is now `<vision-page-bar>`, titled
  * with the device's own name (this page has no nav entry/canonical icon of its own — it's a
  * drill-down from Devices/Wall/Command, not a sidebar destination, so `icon` is omitted).
  */

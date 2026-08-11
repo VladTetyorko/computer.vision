@@ -1,7 +1,7 @@
 import type { DetectionEvent } from '../../core/api/models';
 
 /**
- * Pure derivations behind `shared/ui/notification-bell.ts` (docs/UX-REWORK-PLAN.md §U-c's user
+ * Pure derivations behind `shared/ui/notification-bell.ts` (docs/plans/done/UX-REWORK-PLAN.md §U-c's user
  * amendments: "Events become notifications" — the header bell's unread count and its toast-worthy
  * subset of a fresh `EventsStore.events()` read), split out so both rules are unit-testable without
  * a component/effect/timer, mirroring every other consumer of `EventsStore`'s own

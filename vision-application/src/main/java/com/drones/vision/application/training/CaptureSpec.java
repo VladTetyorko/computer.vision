@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.StreamId;
 import java.util.Objects;
 
 /**
- * {@link LabelingService#capture}'s command record (docs/CV-TRAINING-PLAN.md §2/§3) — the wire
+ * {@link LabelingService#capture}'s command record (docs/plans/done/CV-TRAINING-PLAN.md §2/§3) — the wire
  * shape for {@code POST /api/streams/{streamId}/samples}, whose body carries only {@code
  * datasetId} (the stream id itself is a path parameter).
  *

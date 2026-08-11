@@ -6,8 +6,8 @@ import com.drones.vision.domain.model.DatasetUpload;
 import java.util.List;
 
 /**
- * Driven port: ship a YOLO-format dataset (docs/CV-TRAINING-PLAN.md §5) to the training host,
- * replacing any prior upload for the same {@code datasetId} (docs/CV-TRAINING-V2-PLAN.md §3) —
+ * Driven port: ship a YOLO-format dataset (docs/plans/done/CV-TRAINING-PLAN.md §5) to the training host,
+ * replacing any prior upload for the same {@code datasetId} (docs/plans/done/CV-TRAINING-V2-PLAN.md §3) —
  * the replacement for {@code DatasetExportPort}: delivery to cv-service rides a gRPC upload RPC
  * instead of landing a zip on the platform's own disk.
  *
@@ -43,7 +43,7 @@ public interface DatasetUploadPort {
 
     /**
      * One image plus its YOLO label file content, ready to frame under {@code images/}/{@code
-     * labels/} (docs/CV-TRAINING-PLAN.md §5) — the shape {@code DatasetExportPort.ExportEntry} had,
+     * labels/} (docs/plans/done/CV-TRAINING-PLAN.md §5) — the shape {@code DatasetExportPort.ExportEntry} had,
      * carried over verbatim, same three compact-constructor checks.
      *
      * @param imageName     the image's basename, e.g. {@code "<sampleId>.jpg"} — the same stem is

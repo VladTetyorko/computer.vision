@@ -7,7 +7,7 @@ import java.util.stream.Collectors;
 
 /**
  * Request body for {@code POST /api/devices/{id}/state} and {@code POST /api/assets/{id}/state}
- * (docs/CYCLES-PLAN.md §8's pinned contract) — shared by both controllers, since the rule is
+ * (docs/main/CYCLES-PLAN.md §8's pinned contract) — shared by both controllers, since the rule is
  * identical either way.
  *
  * <p>Only {@link LifecycleState#ACTIVE} and {@link LifecycleState#DEACTIVATED} may be requested

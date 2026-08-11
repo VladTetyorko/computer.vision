@@ -21,7 +21,7 @@ import java.util.Set;
 /**
  * The {@link PrincipalResolver} wired when {@code vision.auth.enabled=true} — reads the
  * authenticated {@link VisionUserDetails} from Spring Security's {@link SecurityContextHolder}
- * afresh on every call (docs/U-AUTH-PLAN.md, wave 3), so a singleton {@code CurrentUser} still
+ * afresh on every call (docs/plans/done/U-AUTH-PLAN.md, wave 3), so a singleton {@code CurrentUser} still
  * answers per-request and picks up the session's current principal.
  *
  * <p>Every {@code /api/**} path that reads {@code CurrentUser} is already behind the enabled filter
@@ -29,7 +29,7 @@ import java.util.Set;
  * practice; the {@link IllegalStateException} guard is purely defensive (a controller reachable
  * unauthenticated must never silently act as some default user).
  *
- * <p><strong>Scope (docs/U-SCOPE-PLAN.md, U-e slice 2).</strong> {@link #scope()} delegates to
+ * <p><strong>Scope (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2).</strong> {@link #scope()} delegates to
  * {@link ScopeResolver}, computing the acting user's {@link VisibilityScope} from their memberships,
  * the group tree, and their assignments. It is recomputed per call rather than cached per request —
  * acceptable for now (a controller reads {@code scope()} at most a handful of times per request, and
@@ -38,7 +38,7 @@ import java.util.Set;
  * session principal ({@link VisionUserDetails#user()}), so resolving a scope needs no extra
  * repository hit beyond the group/assignment reads {@code ScopeResolver} itself does.
  *
- * <p><strong>Map viewer (docs/MAP-REWORK-PLAN.md §4).</strong> {@link #viewer()} deliberately does
+ * <p><strong>Map viewer (docs/plans/done/MAP-REWORK-PLAN.md §4).</strong> {@link #viewer()} deliberately does
  * <em>not</em> walk the group tree itself. {@link ScopeResolver} already owns that traversal
  * ({@code DefaultScopeResolver#subtreeOf}, breadth-first with cycle-breaking), and for a MANAGER its
  * result — {@code scope().groups()} — <em>is</em> the expanded subtree. So the viewer's group set is

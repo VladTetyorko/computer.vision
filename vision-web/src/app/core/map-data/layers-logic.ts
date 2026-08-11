@@ -2,7 +2,7 @@ import type { AccessLevel, LayerGrant, LayerKind, MapEventPayload, MapLayer } fr
 import { applyMapEvents, type MapEntitySpec } from './map-event-logic';
 
 /**
- * Pure, Angular-free logic behind `core/map-data/layers-store.ts` (docs/MAP-REWORK-PLAN.md §3/§5.2)
+ * Pure, Angular-free logic behind `core/map-data/layers-store.ts` (docs/plans/done/MAP-REWORK-PLAN.md §3/§5.2)
  * — the access-level ranking every "may I show this control?" decision in the map UI reads, the
  * layer ordering, the SSE fold, and the wholesale-grants editing reducers.
  *

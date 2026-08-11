@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /**
  * {@link GeofenceRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/OPS-CORE-PLAN.md §G.
+ * docs/plans/done/OPS-CORE-PLAN.md §G.
  *
  * <p>{@link #save} is an upsert (merge-by-id), matching {@code InMemoryGeofenceRepository}'s
  * ({@code vision-app} devsupport) {@code Map#put} semantics exactly. {@link #deleteById} is a real

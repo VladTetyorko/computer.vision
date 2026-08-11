@@ -1,4 +1,4 @@
--- docs/U-AUTH-PLAN.md wave 3: identity (users + org-chart groups). Purely additive on top of
+-- docs/plans/done/U-AUTH-PLAN.md wave 3: identity (users + org-chart groups). Purely additive on top of
 -- V1-V7 -- two brand-new tables, nothing else changed.
 --
 -- No cross-entity foreign keys (not groups.parent_id, not any users->groups link), same convention

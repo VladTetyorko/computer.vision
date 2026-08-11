@@ -1,8 +1,8 @@
 /**
- * Protocols this build of Vision can actually register a device against (docs/UX-QUICKWINS-PLAN.md
+ * Protocols this build of Vision can actually register a device against (docs/plans/done/UX-QUICKWINS-PLAN.md
  * QF-2 — the Register-manually form's protocol field, previously free text, is now a `<select>` of
  * exactly this list). Moved here from `features/devices/` when the onboarding wizard
- * (docs/UX-REWORK-PLAN.md §U-d) absorbed the Register/Discover/Simulate connect methods wholesale —
+ * (docs/plans/done/UX-REWORK-PLAN.md §U-d) absorbed the Register/Discover/Simulate connect methods wholesale —
  * the Warehouse page never showed this select at all, it only ever rendered `Device.protocol`
  * verbatim as a chip. Each entry is a **consuming** (RX) protocol — one `VideoSourcePort`/
  * `TelemetrySourcePort#supports()` implementation actually accepts it — verified against each
@@ -11,7 +11,7 @@
  * - `rtsp` — `adapters/adapter-rtsp/.../FfmpegVideoSource#supports` (`PROTOCOL_RTSP = "rtsp"`)
  * - `mjpeg` — `adapters/adapter-mjpeg/.../MjpegVideoSource#supports` (`PROTOCOL = "mjpeg"`, `uri` scheme `http`/`https`)
  * - `srt` — the same `FfmpegVideoSource#supports` as `rtsp`/`file`, extended in
- *   docs/DRONE-INFRA-PLAN.md I-h wave A (`adapters/adapter-rtsp/**`, landed concurrently with this
+ *   docs/plans/active/DRONE-INFRA-PLAN.md I-h wave A (`adapters/adapter-rtsp/**`, landed concurrently with this
  *   task) to accept the `srt` protocol string; **not** independently re-verified against that
  *   adapter's source here — this task's own file scope was `vision-web/**` only, so the plan's own
  *   frozen contract (protocol string `srt`, `uri` scheme `srt:`) is the source of truth for this entry.
@@ -29,7 +29,7 @@
  * `rtsp`/`mjpeg`/mavlink-telemetry *transmission* path (rehearsing the protocol by emitting a feed),
  * never a device this page can register to consume.
  *
- * **List order is grouped by likelihood/relatedness, not alphabetical or add-order** (docs/DRONE-INFRA-PLAN.md
+ * **List order is grouped by likelihood/relatedness, not alphabetical or add-order** (docs/plans/active/DRONE-INFRA-PLAN.md
  * I-h wave B — 8 entries is enough that scanability started to matter): network camera/video streams
  * first (`rtsp`, `mjpeg`, `srt`, `udp` — the ones an operator is most often choosing between), then
  * local sources (`v4l2`, `file`), then the two special-purpose entries (`sim`, `mavlink`) last. Plain

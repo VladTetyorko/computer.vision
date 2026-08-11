@@ -1,7 +1,7 @@
 """The two tracker-engine protocols, and the vocabulary they speak.
 
-`docs/TRACKING-ORCHESTRATION.md` §2.2 (the interface-segregation fix),
-`docs/TRACKING-PLAN.md` §5.A.
+`docs/extracts/TRACKING-ORCHESTRATION.md` §2.2 (the interface-segregation fix),
+`docs/plans/done/TRACKING-PLAN.md` §5.A.
 
 **Two protocols, not one.** The two modes need genuinely different things:
 `ASSOCIATE` hands N boxes to something that assigns ids and never looks at a

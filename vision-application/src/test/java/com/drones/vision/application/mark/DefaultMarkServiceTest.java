@@ -376,7 +376,7 @@ class DefaultMarkServiceTest {
         Mark existing = markRepository.save(mark(team.id(), ownership, MarkStatus.ACTIVE, Verification.unverified()));
         MarkPatch patch = new MarkPatch(Optional.empty(), Optional.empty(), Optional.of("Renamed"), Optional.empty(),
                 Optional.empty(), Optional.empty());
-        // An outsider may not learn the mark exists (docs/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
+        // An outsider may not learn the mark exists (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — 404, not 403.
         Viewer outsider = new Viewer(UserId.random(), Set.of(), Role.PILOT);
 
         assertThrows(NoSuchElementException.class, () -> service.patch(outsider, existing.id(), patch));

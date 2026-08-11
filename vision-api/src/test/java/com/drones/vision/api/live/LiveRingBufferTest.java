@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pure unit tests for {@link LiveRingBuffer} — no Spring, no timing, deterministic
- * (docs/REALTIME-PLAN.md §4).
+ * (docs/plans/done/REALTIME-PLAN.md §4).
  */
 class LiveRingBufferTest {
 

@@ -106,7 +106,7 @@ class DefaultUserServiceTest {
         assertThrows(NoSuchElementException.class, () -> service.setEnabled(UserId.random(), true, ADMIN));
     }
 
-    // --- management gates (docs/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
+    // --- management gates (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
 
     private UserSpec inGroup(String username, GroupId group, Role role) {
         return new UserSpec(username, "Display " + username, username + "@example.com", "s3cret",

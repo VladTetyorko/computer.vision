@@ -12,7 +12,7 @@ import com.drones.vision.domain.model.UserId;
 import java.util.List;
 
 /**
- * {@link MapLayer} ⟷ {@link MapLayerEntity} (docs/MAP-REWORK-PLAN.md §4.4).
+ * {@link MapLayer} ⟷ {@link MapLayerEntity} (docs/plans/done/MAP-REWORK-PLAN.md §4.4).
  *
  * <p>{@code ownership} flattens to owner/group, the same choice {@code AssetMapper}/{@code
  * MarkMapper} make. The grant list converts element-wise through {@link LayerGrantEmbeddable} — the

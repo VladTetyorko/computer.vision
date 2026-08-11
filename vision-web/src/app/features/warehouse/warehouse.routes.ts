@@ -1,7 +1,7 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/warehouse` — **deleted** (docs/UX-SIMPLIFY-REVIEW.md F2). `WarehousePage` used to be a two-tile
+ * `/warehouse` — **deleted** (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2). `WarehousePage` used to be a two-tile
  * launcher whose only job was linking to People (`/manage/roster`) and Assets (`/assets`) — both
  * already reachable directly from the Manage hub, so it was a third door to a concept ("where are my
  * cameras / who flies them") that already had two doors. Assets is now the one home for "what I

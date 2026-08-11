@@ -14,7 +14,7 @@ import java.util.Optional;
 
 /**
  * {@link GroupRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/U-AUTH-PLAN.md, wave 3.
+ * docs/plans/done/U-AUTH-PLAN.md, wave 3.
  *
  * <p>{@link #save} is an upsert (merge-by-id), matching {@code InMemoryGroupRepository}'s ({@code
  * vision-app} devsupport) {@code Map#put}. {@code parentGroupId} maps straight through as a

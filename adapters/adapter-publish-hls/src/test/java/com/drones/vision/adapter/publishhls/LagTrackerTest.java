@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Direct unit tests for {@link LagTracker}'s pure ring-buffer/percentile
- * math (docs/MVP2-PLAN.md V-c) — no {@link MediamtxStreamPublisher}, no
+ * math (docs/plans/done/MVP2-PLAN.md V-c) — no {@link MediamtxStreamPublisher}, no
  * clock, no I/O.
  */
 class LagTrackerTest {
@@ -83,7 +83,7 @@ class LagTrackerTest {
 
     /**
      * Full-window, no-wrap sanity check at a scale closer to real usage
-     * (docs/MVP2-PLAN.md V-c's own {@code LAG_TRACKER_WINDOW_SIZE}=150 is
+     * (docs/plans/done/MVP2-PLAN.md V-c's own {@code LAG_TRACKER_WINDOW_SIZE}=150 is
      * this shape, just smaller here for a readable hand computation):
      * samples 1..100 recorded in order, so sorted[i] == i+1 exactly.
      */

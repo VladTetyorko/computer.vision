@@ -1,7 +1,7 @@
 """`StreamTrackingSession`: composition only. One instance per stream.
 
-`docs/TRACKING-ORCHESTRATION.md` §3.1 (the per-frame hot path this file runs),
-§3.4 (degradation), `docs/TRACKING-PLAN.md` §3.1/§3.2.
+`docs/extracts/TRACKING-ORCHESTRATION.md` §3.1 (the per-frame hot path this file runs),
+§3.4 (degradation), `docs/plans/done/TRACKING-PLAN.md` §3.1/§3.2.
 
     frame
       |- params            ALREADY RESOLVED -- no parsing, no dict build

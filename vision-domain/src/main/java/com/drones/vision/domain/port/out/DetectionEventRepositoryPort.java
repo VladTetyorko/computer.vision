@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Driven port: persist and query debounced {@code DetectionEvent}s (docs/MVP2-PLAN.md §E, E-a).
+ * Driven port: persist and query debounced {@code DetectionEvent}s (docs/plans/done/MVP2-PLAN.md §E, E-a).
  *
  * <p>Unlike {@link DetectionRepositoryPort} (append-only, one immutable row per completed
  * inference), a {@code DetectionEvent} mutates over its own open lifetime — {@code lastSeen}/

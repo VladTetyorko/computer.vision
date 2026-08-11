@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 import java.time.Duration;
 
 /**
- * Per-frame tracking facts (docs/TRACKING-PLAN.md §4.B; docs/TRACKING-ORCHESTRATION.md §5.2) — as
+ * Per-frame tracking facts (docs/plans/done/TRACKING-PLAN.md §4.B; docs/extracts/TRACKING-ORCHESTRATION.md §5.2) — as
  * opposed to {@link TrackRef}'s per-detection facts, this is what happened on the frame as a
  * whole: did a detector pass run, why, how long the tracker took, which engine actually served
  * it, and which track is currently locked.
@@ -13,7 +13,7 @@ import java.time.Duration;
  * {@code "detectorRan"} field would have had no source to map from. One nullable component on
  * {@code DetectionResult}, not five flat ones — {@code null} there means tracking was off for
  * that result, exactly as {@link Detection#track()} being {@code null} means "untracked"
- * (docs/TRACKING-ORCHESTRATION.md §6 rules 1–2).
+ * (docs/extracts/TRACKING-ORCHESTRATION.md §6 rules 1–2).
  *
  * @param detectorRan    whether a full detector pass ran on this frame ({@code false} = this
  *                       frame was tracker-only, duty-cycled)

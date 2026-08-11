@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pure unit coverage for the {@code vision.tracking.*} mapping (docs/TRACKING-PLAN.md &sect;4.F,
- * docs/TRACKING-ORCHESTRATION.md &sect;4.3) — no Spring context: both wiring methods are plain
+ * Pure unit coverage for the {@code vision.tracking.*} mapping (docs/plans/done/TRACKING-PLAN.md &sect;4.F,
+ * docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.3) — no Spring context: both wiring methods are plain
  * mappings from a properties record, and {@link TrackingWiringContextTest} separately proves the
  * beans actually resolve in the real context.
  *
@@ -130,7 +130,7 @@ class TrackingWiringTest {
 
     @Test
     void theStreamStartSeedBindsIntoStreamPipelineSettingsSoEveryStartPathSeesIt() {
-        // The one binding that matters for docs/TRACKING-ORCHESTRATION.md §4.1: the seed reaches
+        // The one binding that matters for docs/extracts/TRACKING-ORCHESTRATION.md §4.1: the seed reaches
         // DefaultStreamService, which every start path -- device, asset, simulation, demo fleet --
         // goes through, instead of only the two REST endpoints that used to be injected with it.
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
@@ -166,6 +166,6 @@ class TrackingWiringTest {
         assertEquals("ncc", roster.get(2).id());
         assertEquals(List.of("FOLLOW"), roster.get(2).modes());
         assertTrue(roster.stream().noneMatch(CvTrackerResponse::needsAssets),
-                "none of the three shipped engines needs model assets (docs/TRACKING-PLAN.md §5.B)");
+                "none of the three shipped engines needs model assets (docs/plans/done/TRACKING-PLAN.md §5.B)");
     }
 }

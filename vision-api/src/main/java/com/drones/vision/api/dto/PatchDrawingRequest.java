@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Request body for {@code PATCH /api/map/drawings/{id}} (docs/MAP-REWORK-PLAN.md §4.2) — a true
+ * Request body for {@code PATCH /api/map/drawings/{id}} (docs/plans/done/MAP-REWORK-PLAN.md §4.2) — a true
  * partial patch: every field is optional and {@code null} means "leave unchanged".
  *
  * <p>{@code points}, when present, is a <strong>wholesale replacement</strong> of the geometry, not

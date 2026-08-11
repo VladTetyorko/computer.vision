@@ -59,14 +59,14 @@ interface OptionRow {
 const SCAN_TIMEOUTS = [2_000, 4_000, 8_000] as const;
 
 /**
- * The MAVLink heartbeat scanner's well-known listen port (docs/DRONE-INFRA-PLAN.md I-g) — used only
+ * The MAVLink heartbeat scanner's well-known listen port (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — used only
  * as `mavlinkPort`'s initial value until `GET /api/system/network` resolves, so the "configure your
  * drone" sub-step never renders with an empty port while the request is in flight. Every real value
  * comes from the network response itself (`SystemNetworkResponse#mavlinkPort`), never assumed.
  */
 const DEFAULT_MAVLINK_PORT = 14_550;
 
-/** Shown under the Simulate mode selector — one sentence per mode, docs/CYCLES-PLAN.md §4's own wording. */
+/** Shown under the Simulate mode selector — one sentence per mode, docs/main/CYCLES-PLAN.md §4's own wording. */
 const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
   direct: 'Plays the file straight through the pipeline — the simplest way to see it work.',
   rtsp: 'Rehearse the real protocol path: the platform transmits your file over RTSP and ingests it back like real hardware.',
@@ -75,7 +75,7 @@ const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
 };
 
 /**
- * The onboarding wizard's own "component store" (docs/UX-REWORK-PLAN.md §U-d) — provided per-route
+ * The onboarding wizard's own "component store" (docs/plans/done/UX-REWORK-PLAN.md §U-d) — provided per-route
  * on `OnboardingPage` (`providers: [OnboardingStore]`, same DI-sharing idiom as
  * `AssetDetailPage`'s `TelemetryStore`/`DetectionsStore`), not `providedIn: 'root'`: wizard state has
  * no reason to survive leaving `/add-source`, and a fresh instance per visit means a second pass
@@ -157,7 +157,7 @@ export class OnboardingStore {
   }
 
   // --- Step 2: Connect (the pre-existing 3-choice register/discover/simulate component, moved
-  //     verbatim from `features/devices/devices.ts` — docs/UX-REWORK-PLAN.md §U-d) -------------
+  //     verbatim from `features/devices/devices.ts` — docs/plans/done/UX-REWORK-PLAN.md §U-d) -------------
 
   readonly connectMethod = signal<ConnectMethod | null>(null);
   readonly registerableProtocols = REGISTERABLE_PROTOCOLS;
@@ -241,7 +241,7 @@ export class OnboardingStore {
     }
   }
 
-  // --- Connect: "Listen for drones" (docs/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only scan,
+  // --- Connect: "Listen for drones" (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only scan,
   //     distinct from the general `discover` method above; see `drone-scan-logic.ts`'s own doc
   //     comment for why this is a separate pure-logic module rather than folded into that one. ------
 
@@ -249,7 +249,7 @@ export class OnboardingStore {
   readonly droneScanResult = signal<ScanResult | null>(null);
 
   /**
-   * No `timeoutMs` is sent — the scanner self-time-boxes (docs/DRONE-INFRA-PLAN.md I-b: "scans take
+   * No `timeoutMs` is sent — the scanner self-time-boxes (docs/plans/active/DRONE-INFRA-PLAN.md I-b: "scans take
    * ~5-10s"), so unlike the general scan above there is no timeout picker to read from. "Allow
    * cancel-by-navigation" (the plan's own wording): leaving `/add-source` destroys this
    * per-route-provided store (see this class's own doc comment), so an in-flight scan's eventual
@@ -273,14 +273,14 @@ export class OnboardingStore {
   /**
    * Fills the register fields from an unclaimed heard vehicle and switches to the register
    * sub-view — the same "candidate → register" pivot `useCandidate` uses, plus
-   * `suggestedCategory` (docs/DRONE-INFRA-PLAN.md I-b — closes this wizard's own previously-documented
+   * `suggestedCategory` (docs/plans/active/DRONE-INFRA-PLAN.md I-b — closes this wizard's own previously-documented
    * gap of never wiring a discovery suggestion into the Profile step's category picker, for this one
    * path). A no-op for an already-claimed vehicle (the UI never offers this action for one, but a
    * defensive check costs nothing — see `isClaimedVehicle`'s own doc comment for why one can exist
    * in the results list at all).
    *
    * **The one shared "Use" handler for both entry points that reach the `listen` method**
-   * (docs/DRONE-INFRA-PLAN.md I-g's own "listen is the scan" wording — the guided `drone` method
+   * (docs/plans/active/DRONE-INFRA-PLAN.md I-g's own "listen is the scan" wording — the guided `drone` method
    * hands off to this exact method/UI verbatim once configured, see `finishDroneConfigAndListen`
    * below): protocol/uri/options come from `buildDroneDeviceSpec` (`drone-config-logic.ts`), pinned
    * to this platform's own authoritative `mavlinkPort` (from `GET /api/system/network`) rather than
@@ -310,7 +310,7 @@ export class OnboardingStore {
     }
   }
 
-  // --- Connect: "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g, wave B) — the guided firmware×link
+  // --- Connect: "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g, wave B) — the guided firmware×link
   //     picker + parameterized copy-paste config, both sub-states of this one Connect step
   //     (deliberately not added to `onboarding-logic.ts#WizardStep`, per the plan's own "minimize new
   //     wizard-state surface" instruction). Once configured, `finishDroneConfigAndListen` hands off to
@@ -378,7 +378,7 @@ export class OnboardingStore {
   }
 
   /**
-   * The hand-off (docs/DRONE-INFRA-PLAN.md I-g step 3, "listen is the scan"): switches straight to
+   * The hand-off (docs/plans/active/DRONE-INFRA-PLAN.md I-g step 3, "listen is the scan"): switches straight to
    * the existing `listen` method and starts its scan, exactly as if the operator had picked that
    * tile directly from the method grid. Everything past this point — the vehicle list, claimed-vehicle
    * dimming, `useDroneVehicle`'s "Use" pivot to `register`, probe, create — is the pre-existing I-b
@@ -518,7 +518,7 @@ export class OnboardingStore {
     }
   }
 
-  /** Register/Discover paths: one `POST /api/assets` call, the device embedded (docs/UX-REWORK-PLAN.md §U-d item 2). */
+  /** Register/Discover paths: one `POST /api/assets` call, the device embedded (docs/plans/done/UX-REWORK-PLAN.md §U-d item 2). */
   private async createViaConnection(): Promise<void> {
     const request = buildCreateAssetRequest(
       { displayName: this.displayName(), registrationNumber: this.registrationNumber(), category: this.category() },
@@ -533,7 +533,7 @@ export class OnboardingStore {
   }
 
   /**
-   * Simulate path (docs/UX-REWORK-PLAN.md §U-d item 1): `synthetic` carries no video/telemetry at
+   * Simulate path (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1): `synthetic` carries no video/telemetry at
    * all — it is, underneath, a fixed `sim`/`sim://demo` connection, so it goes through the exact
    * same `POST /api/assets` call as Register/Discover (closing the same orphaned-device dead end
    * for it too, rather than perpetuating the pre-wizard "Add the simulated source" quick-add's own
@@ -611,7 +611,7 @@ export class OnboardingStore {
     await this.router.navigate(['/assets', assetId]);
   }
 
-  // --- Step navigation (docs/UX-REWORK-PLAN.md §U-d item 1 — stepper, back-navable) -------------
+  // --- Step navigation (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — stepper, back-navable) -------------
 
   readonly canAdvance = computed(() => {
     switch (this.step()) {
@@ -654,7 +654,7 @@ export class OnboardingStore {
 
   /**
    * Fetched once, up front, so the "configure your drone" sub-step's snippets are ready to render
-   * the moment the operator gets there (docs/DRONE-INFRA-PLAN.md I-g) — not fetched lazily on first
+   * the moment the operator gets there (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — not fetched lazily on first
    * pick, which would show a blank/loading config panel on an otherwise-instant step transition.
    * Silent-degrade on failure exactly like `loadCategoryOptions` above: `mavlinkPort` keeps its
    * `DEFAULT_MAVLINK_PORT` fallback and `networkAddresses` stays `[]`, which is the same UI state

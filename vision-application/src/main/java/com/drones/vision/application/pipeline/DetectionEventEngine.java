@@ -22,7 +22,7 @@ import com.drones.vision.application.stream.DefaultStreamService;
 
 /**
  * Debounces raw per-frame {@link DetectionResult}s into {@link DetectionEvent}s, one independent
- * state machine per tracked label (docs/MVP2-PLAN.md §E, E-a): a label reaching {@link
+ * state machine per tracked label (docs/plans/done/MVP2-PLAN.md §E, E-a): a label reaching {@link
  * EventRuleConfig#confidenceThreshold()} across {@link EventRuleConfig#consecutiveToOpen()}
  * consecutive results opens an event; the label then being absent (or below threshold) for {@link
  * EventRuleConfig#absenceToClose()} closes it.

@@ -9,7 +9,7 @@ import com.drones.vision.domain.model.Telemetry;
 
 /**
  * Driven port: announce a live update so a driving adapter can push it to connected viewers
- * (docs/REALTIME-PLAN.md §4 — the server-push data plane replacing steady-state polling).
+ * (docs/plans/done/REALTIME-PLAN.md §4 — the server-push data plane replacing steady-state polling).
  *
  * <p>This is the application layer's <em>only</em> notion of "someone might be watching right
  * now" — it knows nothing about SSE, connections, topics, or resume/replay; those are entirely a
@@ -31,10 +31,10 @@ import com.drones.vision.domain.model.Telemetry;
  *       advanced (a further qualifying observation while already open), or closed — the same
  *       occurrence {@code DetectionEventRepositoryPort#save} already persists, announced at the
  *       exact same seam rather than duplicated bookkeeping.</li>
- *   <li>{@link #publishMapEvent(MapEvent)} — a {@link MapEvent} (docs/MAP-REWORK-PLAN.md §2.3):
+ *   <li>{@link #publishMapEvent(MapEvent)} — a {@link MapEvent} (docs/plans/done/MAP-REWORK-PLAN.md §2.3):
  *       a mark, drawing, or layer was created/updated/cleared/deleted. Supersedes this port's
  *       former {@code publishMarkCreated}/{@code publishMarkUpdated}/{@code publishMarkCleared}
- *       trio (docs/TACTICAL-MARKS-PLAN.md §5) — one method now covers marks, drawings, and layers
+ *       trio (docs/plans/done/TACTICAL-MARKS-PLAN.md §5) — one method now covers marks, drawings, and layers
  *       alike. A driving adapter broadcasts this on a single {@code "map"} SSE topic, filtered per
  *       connection by which layers its viewer may see ({@code MapAccessPolicy}) — the
  *       security-critical rework that scoped delivery requires, unlike every other method on this
@@ -100,11 +100,11 @@ public interface LiveUpdatePublisherPort {
 
     /**
      * Announces a {@link MapEvent} — a mark, drawing, or layer created, updated, cleared, or
-     * deleted (docs/MAP-REWORK-PLAN.md §2.3). Replaces the three mark-specific {@code
+     * deleted (docs/plans/done/MAP-REWORK-PLAN.md §2.3). Replaces the three mark-specific {@code
      * publishMarkCreated}/{@code publishMarkUpdated}/{@code publishMarkCleared} methods this port
-     * had under docs/TACTICAL-MARKS-PLAN.md §5 (one method here now covers marks, drawings, and
+     * had under docs/plans/done/TACTICAL-MARKS-PLAN.md §5 (one method here now covers marks, drawings, and
      * layers alike). Unlike those, this method is <b>not</b> {@code default}-bodied: scoped
-     * per-connection delivery is the point of this rework (docs/MAP-REWORK-PLAN.md §4.3), so a
+     * per-connection delivery is the point of this rework (docs/plans/done/MAP-REWORK-PLAN.md §4.3), so a
      * driving adapter must implement it deliberately rather than silently no-op.
      *
      * @param event the map event that occurred

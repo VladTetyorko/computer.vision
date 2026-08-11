@@ -2,7 +2,7 @@ import type { MeResponse, Role } from '../api/models';
 
 /**
  * Pure decision logic behind `core/auth/auth-store.ts`/`auth-guard.ts` and the login/identity-chip
- * components (docs/U-AUTH-PLAN.md wave 4) — kept framework-free and unit-tested here so those
+ * components (docs/plans/done/U-AUTH-PLAN.md wave 4) — kept framework-free and unit-tested here so those
  * consumers stay dumb: a component/guard only ever reads a signal and calls one of these.
  */
 
@@ -52,7 +52,7 @@ export function initialsFor(displayName: string): string {
  * the one place that decision is written down.
  *
  * `false` whenever `authEnabled` is `false` — **always**, regardless of `status`/`user` — dev
- * parity (docs/U-AUTH-PLAN.md: "the app works with zero auth exactly as today") means the login
+ * parity (docs/plans/done/U-AUTH-PLAN.md: "the app works with zero auth exactly as today") means the login
  * screen must never be reachable at all in that mode, not just usually skipped. Otherwise `true`
  * only once the boot check has actually concluded there is no session (`status === 'anon'` *and*
  * `user === null` — both, not either, so a transitional or inconsistent state never triggers a

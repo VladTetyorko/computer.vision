@@ -18,7 +18,7 @@ import { MAP_LAYERS, droneDivIcon, ensureLeafletStylesheet, importLeaflet, mapLa
 const DEFAULT_ZOOM = 17;
 
 /**
- * The flight-replay cockpit's map (docs/MVP2-PLAN.md §R, R-b) — a breadcrumb trail drawn up to the
+ * The flight-replay cockpit's map (docs/plans/done/MVP2-PLAN.md §R, R-b) — a breadcrumb trail drawn up to the
  * scrub position plus a heading-rotated marker at that position. Purely presentational: driven by
  * `[trail]`/`[markerPosition]`/`[markerHeadingDegrees]` inputs from `ReplayPage`'s own scrub-time
  * derivations (`replay-logic.ts#trailPrefix`/`nearestSample`), not a store — replay has no live

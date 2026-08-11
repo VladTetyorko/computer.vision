@@ -1,8 +1,8 @@
 import type { AuditEntry } from '../api/models';
 
 /**
- * Pure, Angular-free logic behind `/activity`'s day-grouped list (docs/NAV-IA-REDESIGN-PLAN.md §2.4,
- * docs/design/09-activity.md — task 2, "Day-group the rows… the grouping in a pure function under
+ * Pure, Angular-free logic behind `/activity`'s day-grouped list (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4,
+ * docs/extracts/design/09-activity.md — task 2, "Day-group the rows… the grouping in a pure function under
  * `core/` with its own unit tests — it is date logic, not view code"). New file rather than folded
  * into `core/org/org-logic.ts` — that file's own `formatActivity`/`ActivityView` pairing already has
  * exactly one consumer (`ActivityFacade`) and needed no change for this; this is additional
@@ -60,11 +60,11 @@ export function groupActivityByDay(entries: readonly AuditEntry[], nowMs: number
   return groups;
 }
 
-/** The row's left accent border color (docs/design/09-activity.md task 2's own union). */
+/** The row's left accent border color (docs/extracts/design/09-activity.md task 2's own union). */
 export type ActivityAccentTone = 'success' | 'info' | 'warn' | 'danger';
 
 /**
- * `docs/design/09-activity.md`: "the verb becomes the row's colour accent, not a chip — Created
+ * `docs/extracts/design/09-activity.md`: "the verb becomes the row's colour accent, not a chip — Created
  * green / Updated blue / Archived amber / Deleted red." The design doc names four verbs; the actual
  * backend enum (`vision-domain`'s `AuditAction`) has six: `CREATED`/`UPDATED`/`DEACTIVATED`/
  * `ACTIVATED`/`DELETED`/`RESTORED`. Reconciling the two:
@@ -78,7 +78,7 @@ export type ActivityAccentTone = 'success' | 'info' | 'warn' | 'danger';
  *   `DEACTIVATED` (a genuinely distinct, reversible "pull from service" action, rendered "Deactivated")
  *   is the closest fit to what "archived" was very likely gesturing at, so it takes the amber slot.
  * - `ACTIVATED`/`RESTORED` have no named color in the mockup at all. Extended along the two existing
- *   semantic families rather than inventing a fifth tone (docs/UX-REWORK-PLAN.md §U-b item 2's "one
+ *   semantic families rather than inventing a fifth tone (docs/plans/done/UX-REWORK-PLAN.md §U-b item 2's "one
  *   saturated accent" rule read generally: reuse this app's four existing tones, don't add a fifth):
  *   `ACTIVATED` reads as a positive, creation-adjacent state → green, same family as `CREATED`;
  *   `RESTORED` reads as "brought back to how it was" → blue, same family as `UPDATED`.

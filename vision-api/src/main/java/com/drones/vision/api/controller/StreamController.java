@@ -54,15 +54,15 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  *
  * <p>No acting user is threaded through here: a stream is transient plumbing rather than a
  * change to the fleet, so nothing on this path is audited against a principal. Asset-level
- * streaming, which is, lives on {@link AssetController}. {@link #updateConfig} (docs/CV-CONTROL-PLAN.md
+ * streaming, which is, lives on {@link AssetController}. {@link #updateConfig} (docs/plans/done/CV-CONTROL-PLAN.md
  * §3) follows the same stance — a live config tweak is not an audited fleet change either.
  *
- * <p>Also exposes recent detections read-only over {@link DetectionRepositoryPort} (docs/MVP1-PLAN.md
+ * <p>Also exposes recent detections read-only over {@link DetectionRepositoryPort} (docs/plans/done/MVP1-PLAN.md
  * §C8 bullet 3) — the same precedent {@link AssetController} already sets for {@link
  * com.drones.vision.domain.port.out.TelemetryRepositoryPort}: no driving use-case exists for "read
  * a stream's recent detections", so this controller reads the driven port directly instead.
  *
- * <p>{@link #snapshot} (docs/MVP3-PLAN.md C-a) is the one binary (non-JSON) response in this
+ * <p>{@link #snapshot} (docs/plans/done/MVP3-PLAN.md C-a) is the one binary (non-JSON) response in this
  * controller — a JPEG thumbnail of a running stream's latest published frame, cheap enough for a
  * manager dashboard to poll per-visible-tile.
  */
@@ -78,7 +78,7 @@ public class StreamController {
     private final StreamPublisherPort streamPublisherPort;
     private final DetectionRepositoryPort detectionRepositoryPort;
     /**
-     * Constructor-injected (docs/LAYERING-REFACTOR-PLAN.md wave D) — {@code vision-app} now supplies
+     * Constructor-injected (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D) — {@code vision-app} now supplies
      * this as a real bean, mapped from its own Spring {@code VisionApiProperties} record, replacing
      * this field's previous self-constructed {@code VisionApiProperties.defaults()} stopgap.
      */
@@ -106,7 +106,7 @@ public class StreamController {
      * the config: the deployment's tracking seed ({@code vision.tracking.*}) is applied inside {@link
      * StreamService#start(DeviceId, PipelineConfig, com.drones.vision.application.stream.TrackingConfigPatch)},
      * so this endpoint, asset-level start and the simulation service all seed identically
-     * (docs/TRACKING-ORCHESTRATION.md §4.1).
+     * (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
      *
      * @param deviceId the device to stream from
      * @param request  optional overrides; {@code null}/absent means use every default
@@ -153,14 +153,14 @@ public class StreamController {
     }
 
     /**
-     * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md §3's frozen wire
+     * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md §3's frozen wire
      * contract) — a partial patch: only fields present in the body change, everything else is left
      * as-is. Confidence threshold, inference fps, label filter, and detection on/off apply instantly
      * with no video interruption; a present {@code model} that differs from the stream's currently
      * running one briefly re-arms detection instead (video stays untouched either way) — the caller
      * learns this happened via {@link UpdateStreamConfigResponse#modelReArmed()}.
      *
-     * <p>A {@code tracking} object (docs/TRACKING-PLAN.md §4.D) is the third, independent family of
+     * <p>A {@code tracking} object (docs/plans/done/TRACKING-PLAN.md §4.D) is the third, independent family of
      * change, and it is a <b>hot knob like any other</b>: mode, engine, cadences and the target lock
      * all apply live and <b>never re-arm the detector</b>. The caller learns whether it actually
      * changed anything via {@link UpdateStreamConfigResponse#trackingChanged()}. Click-to-follow is
@@ -195,7 +195,7 @@ public class StreamController {
     }
 
     /**
-     * A running stream's track book plus the duty-cycle counters over it (docs/TRACKING-PLAN.md
+     * A running stream's track book plus the duty-cycle counters over it (docs/plans/done/TRACKING-PLAN.md
      * §4.E's frozen wire contract) — what backs the cockpit's track list, its
      * "Following #N — release" chip, and the flow strip that puts "the detector stopped running and
      * the tracker took over" on screen instead of in {@code htop}.
@@ -233,7 +233,7 @@ public class StreamController {
     }
 
     /**
-     * Lists a stream's most recent completed detection results, newest first (docs/MVP1-PLAN.md
+     * Lists a stream's most recent completed detection results, newest first (docs/plans/done/MVP1-PLAN.md
      * §C8 bullet 3) — for the Live page's detections strip.
      *
      * <p>An unknown stream id behaves exactly as {@link DetectionRepositoryPort#query} does (an
@@ -261,11 +261,11 @@ public class StreamController {
     }
 
     /**
-     * A JPEG snapshot of the latest published frame on a running stream (docs/MVP3-PLAN.md C-a) —
+     * A JPEG snapshot of the latest published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) —
      * post-overlay burn-in when it's on, since {@link StreamService#latestFrame} returns exactly
      * the instance the pipeline last handed to {@link StreamPublisherPort#publish}. Downscaled to
      * at most {@value SnapshotJpegEncoder#MAX_SNAPSHOT_WIDTH}px wide (aspect-preserving, see {@link
-     * SnapshotJpegEncoder}) so a manager dashboard polling many thumbnails at once (docs/MVP3-PLAN.md
+     * SnapshotJpegEncoder}) so a manager dashboard polling many thumbnails at once (docs/plans/done/MVP3-PLAN.md
      * Command, ~1/5s per visible tile) stays cheap.
      *
      * <p>Never cached ({@code Cache-Control: no-store}) — every poll wants the actual latest frame,

@@ -21,9 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@link FeedTransmitterPort} implementation that emits a synthetic MAVLink 2 telemetry stream —
  * {@code HEARTBEAT} + {@code SYS_STATUS} (battery) + {@code GPS_RAW_INT} (fixed 3D fix) at
  * 1&nbsp;Hz, and {@code GLOBAL_POSITION_INT} at a steady configurable rate — driven by a looping
- * flight route (docs/MVP2-PLAN.md X-a; docs/FC-INTEGRATIONS-PLAN.md F-a added the armed/mode/GPS/
+ * flight route (docs/plans/done/MVP2-PLAN.md X-a; docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a added the armed/mode/GPS/
  * failsafe reporting). This is the TX (transmit) half of the RX/TX doctrine ({@code
- * docs/CYCLES-PLAN.md} §0): zero-hardware rehearsal for {@link MavlinkTelemetrySource} (or any
+ * docs/main/CYCLES-PLAN.md} §0): zero-hardware rehearsal for {@link MavlinkTelemetrySource} (or any
  * real MAVLink ground station), and the same wire path {@code sim_vehicle.py} SITL would
  * otherwise be needed for.
  *
@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * deliberate semantic deviation from this port's other implementations, documented here and in
  * this module's {@code MODULE.md}.
  *
- * <h2>Flight state: armed, mode, failsafe (docs/FC-INTEGRATIONS-PLAN.md F-a)</h2>
+ * <h2>Flight state: armed, mode, failsafe (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a)</h2>
  * Every {@code HEARTBEAT} reports {@code autopilot} ARDUPILOTMEGA, {@code type} QUADROTOR, and
  * {@code base_mode} armed + custom-mode-enabled, so the RX side always resolves a firmware/mode
  * pair. While the simulated battery (see {@code batteryDrainPerSecond}) stays at/above the new
@@ -63,13 +63,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li>{@code positionRateHz} — {@code GLOBAL_POSITION_INT} send rate, default {@value
  *       #DEFAULT_POSITION_RATE_HZ}; a non-positive or unparseable value falls back to the
  *       default.</li>
- *   <li>{@code failsafeBatteryPercent} (docs/FC-INTEGRATIONS-PLAN.md F-a) — battery percent below
+ *   <li>{@code failsafeBatteryPercent} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a) — battery percent below
  *       which {@code HEARTBEAT} switches to the failsafe {@code custom_mode}/{@code
  *       system_status} described above, default {@value #DEFAULT_FAILSAFE_BATTERY_PERCENT};
  *       missing/unparseable falls back to the default (lenient, like {@code
  *       batteryDrainPerSecond} — unlike {@code speedMps}/{@code positionRateHz}, a non-positive
  *       value is accepted as-is, since {@code 0} is a meaningful "never" setting).</li>
- *   <li>{@code sysid} (docs/DRONE-INFRA-PLAN.md I-a) — the MAVLink system id every message from
+ *   <li>{@code sysid} (docs/plans/active/DRONE-INFRA-PLAN.md I-a) — the MAVLink system id every message from
  *       this feed is sent as, default {@value #DEFAULT_MAV_SYSTEM_ID} (every real firmware's own
  *       out-of-the-box default). Lenient: missing/blank/unparseable/out of the valid 1-255 range
  *       falls back to the default — exists so a test (or a real multi-vehicle rehearsal) can run
@@ -127,7 +127,7 @@ public final class MavlinkFeedTransmitter implements FeedTransmitterPort {
     }
 
     /**
-     * @param settings this module's {@code vision.mavlink.*} tunables (docs/LAYERING-REFACTOR-PLAN.md
+     * @param settings this module's {@code vision.mavlink.*} tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      *                 wave F2) — {@link MavlinkSettings#transmit()} supplies this feed's cadence
      *                 (tick/heartbeat period) and per-option defaults (speed/position-rate/
      *                 failsafe-battery/sysid); {@link MavlinkSettings#closeJoinTimeout()} bounds how

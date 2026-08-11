@@ -40,16 +40,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>This context never calls {@link StreamPublisherPort#publish}, so no
  * connection to mediamtx is ever attempted — {@code MediamtxStreamPublisher}
  * only opens its RTSP push lazily, on the first published frame (see
- * docs/PHASE1-PLAN.md §3) — so this test stays green without mediamtx
+ * docs/plans/done/PHASE1-PLAN.md §3) — so this test stays green without mediamtx
  * running. {@code viewUrl} is a pure function of {@link
  * VisionPublishProperties#viewBase()}, so asserting it needs no running
  * mediamtx either.
  *
- * <p>Extended for docs/CYCLES-PLAN.md §5: {@code mjpeg} is asserted alongside {@code sim}/{@code
+ * <p>Extended for docs/main/CYCLES-PLAN.md §5: {@code mjpeg} is asserted alongside {@code sim}/{@code
  * rtsp} as a third registered {@link VideoSourcePort} protocol ({@code MjpegVideoSource},
  * adapter-mjpeg) — the RX half of the mjpeg TX/RX pair.
  *
- * <p>Extended for docs/MVP2-PLAN.md X-b: {@code v4l2} (adapter-v4l2's {@code V4l2VideoSource})
+ * <p>Extended for docs/plans/done/MVP2-PLAN.md X-b: {@code v4l2} (adapter-v4l2's {@code V4l2VideoSource})
  * is asserted as a fourth registered protocol, using the exact descriptor shape {@code
  * adapter-discovery}'s {@code V4l2Scanner} emits ({@code file:/dev/videoN}), not the plan's
  * originally-proposed {@code "usb"}/{@code v4l2://} shape — see adapter-v4l2/MODULE.md.
@@ -87,11 +87,11 @@ class PublishWiringTest {
         assertTrue(videoSources.stream().anyMatch(source -> source.supports(rtspDescriptor)),
                 "expected a registered VideoSourcePort supporting the rtsp descriptor");
         assertTrue(videoSources.stream().anyMatch(source -> source.supports(mjpegDescriptor)),
-                "expected a registered VideoSourcePort supporting the mjpeg descriptor (docs/CYCLES-PLAN.md §5)");
+                "expected a registered VideoSourcePort supporting the mjpeg descriptor (docs/main/CYCLES-PLAN.md §5)");
     }
 
     /**
-     * docs/MVP2-PLAN.md X-b: the descriptor shape here is deliberately {@code
+     * docs/plans/done/MVP2-PLAN.md X-b: the descriptor shape here is deliberately {@code
      * adapter-discovery}'s real {@code V4l2Scanner} emission ({@code protocol="v4l2"}, {@code
      * uri=file:/dev/videoN}), not the plan's originally-proposed {@code "usb"}/{@code v4l2://}
      * shape — see adapter-v4l2/MODULE.md for the full deviation writeup.
@@ -102,7 +102,7 @@ class PublishWiringTest {
 
         assertTrue(videoSources.stream().anyMatch(source -> source.supports(v4l2Descriptor)),
                 "expected a registered VideoSourcePort supporting the v4l2 descriptor "
-                        + "(docs/MVP2-PLAN.md X-b, matching adapter-discovery's V4l2Scanner emission)");
+                        + "(docs/plans/done/MVP2-PLAN.md X-b, matching adapter-discovery's V4l2Scanner emission)");
     }
 
     @Test
@@ -123,7 +123,7 @@ class PublishWiringTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md §L: unlike {@code viewUrl}, {@code whepUrl} is deliberately mediamtx's own
+     * docs/plans/done/MVP2-PLAN.md §L: unlike {@code viewUrl}, {@code whepUrl} is deliberately mediamtx's own
      * address, not app-relative (see {@code VisionPublishProperties}'s "WHEP has no third base"
      * javadoc section) — the default is the host-mode {@code whep-base} in {@code
      * application.properties} (port 18889, matching {@code docker-compose.yml}'s host mapping).
@@ -141,7 +141,7 @@ class PublishWiringTest {
     }
 
     /**
-     * docs/CV-TRAINING-V2-PLAN.md §7/§I: {@code streamPublisherPort} now takes the 4-arg {@code
+     * docs/plans/done/CV-TRAINING-V2-PLAN.md §7/§I: {@code streamPublisherPort} now takes the 4-arg {@code
      * MediamtxStreamPublisher} constructor with an explicit {@code
      * VisionPublishProperties.Mediamtx#playbackBase()} rather than the 3-arg overload's old guess
      * derived from {@code whepBase}'s host — asserting {@code playbackUrl}'s host:port here proves
@@ -162,7 +162,7 @@ class PublishWiringTest {
     }
 
     /**
-     * docs/CV-TRAINING-V2-PLAN.md §7: the replay-capture frame extractor is wired the same
+     * docs/plans/done/CV-TRAINING-V2-PLAN.md §7: the replay-capture frame extractor is wired the same
      * {@code vision.publish.enabled} on/off split as {@code streamPublisherPort} itself, since a
      * replay frame can only ever come from a recording mediamtx publishing produced.
      */

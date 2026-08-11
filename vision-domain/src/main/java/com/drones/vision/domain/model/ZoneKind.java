@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * What a {@link GeofenceZone}'s polygon means for breach evaluation (docs/OPS-CORE-PLAN.md §G).
+ * What a {@link GeofenceZone}'s polygon means for breach evaluation (docs/plans/done/OPS-CORE-PLAN.md §G).
  *
  * <p>The polygon itself never changes shape between the two kinds — only how {@code
  * GeofenceMonitor} (vision-application) reads it: a {@link #KEEP_OUT} zone is forbidden airspace

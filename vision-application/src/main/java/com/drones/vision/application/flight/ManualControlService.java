@@ -7,7 +7,7 @@ import com.drones.vision.application.scope.VisibilityScope;
 
 /**
  * Guarded relay-session control: engages a streaming, ack-less RC-channel-override relay
- * (docs/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1) for one asset — the stateful,
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1) for one asset — the stateful,
  * watchdog-supervised opposite of {@link FlightCommandService}'s request-then-ack one-shots. There
  * is no {@code *UseCase} type or inbound-port package here, matching every other service in this
  * module.

@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The per-field fold of docs/TRACKING-PLAN.md &sect;4.D, tested without a running stream — the whole
+ * The per-field fold of docs/plans/done/TRACKING-PLAN.md &sect;4.D, tested without a running stream — the whole
  * point of putting it on the patch record rather than inside {@code DefaultStreamService}.
  */
 class TrackingConfigPatchTest {

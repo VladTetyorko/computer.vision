@@ -4,7 +4,7 @@ import { buildEntityRows, commandGridColumns } from './command-logic';
 
 /**
  * The `batteryAttentionSeverity`/`attentionReasons`/`attentionAgeLabel` cases that used to live here
- * moved to `core/fleet/attention-logic.spec.ts` alongside the rules themselves (docs/UI-REDESIGN-PLAN.md
+ * moved to `core/fleet/attention-logic.spec.ts` alongside the rules themselves (docs/plans/done/UI-REDESIGN-PLAN.md
  * Wave 4 — see `command-logic.ts`'s own doc comment for why). What's left below is Command-specific:
  * `buildEntityRows`' own sort/wiring and `commandGridColumns`' layout arithmetic.
  */
@@ -21,7 +21,7 @@ function asset(partial: Partial<AssetAttention> = {}): AssetAttention {
   };
 }
 
-describe('buildEntityRows — geofenceBreachesByAssetId (docs/OPS-CORE-PLAN.md §G-c)', () => {
+describe('buildEntityRows — geofenceBreachesByAssetId (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   it('feeds breaches into each asset\'s own reason, by id, ranking it above every other asset', () => {
     const breaching = asset({ assetId: 'b', displayName: 'Breaching' });
     const critical = asset({ assetId: 'c', displayName: 'Zulu-critical', batteryPercent: 5 });

@@ -22,7 +22,7 @@ import com.drones.vision.api.security.CurrentUser;
 
 /**
  * Driving REST adapter for the one-call, zero-hardware simulation entry point
- * (docs/CYCLES-PLAN.md §0-1): a video file path in, a registered, categorized, optionally
+ * (docs/main/CYCLES-PLAN.md §0-1): a video file path in, a registered, categorized, optionally
  * already-streaming asset out.
  *
  * <p>Constructor-injected with {@link SimulationService}, {@link CurrentUser}, and one driven port
@@ -37,16 +37,16 @@ import com.drones.vision.api.security.CurrentUser;
  * <h2>Status codes</h2>
  * A bad {@code videoPath} (failing {@code SimulationService}'s filesystem checks — missing, not a
  * regular file, unreadable), an unrecognized {@code transport} name, a {@code null}/blank {@code
- * videoPath} combined with a non-{@code direct} {@code transport} (docs/CYCLES-PLAN.md §9, CU-a —
+ * videoPath} combined with a non-{@code direct} {@code transport} (docs/main/CYCLES-PLAN.md §9, CU-a —
  * a synthetic simulation has no in-process renderer output to push over the wire), or
- * (docs/CYCLES-PLAN.md §3, §5) a {@code transport=rtsp}/{@code mjpeg} request no registered {@code
+ * (docs/main/CYCLES-PLAN.md §3, §5) a {@code transport=rtsp}/{@code mjpeg} request no registered {@code
  * FeedTransmitterPort} supports, all surface as {@link IllegalArgumentException} → 400; an
  * unseeded {@code simulated} category surfaces as {@link IllegalStateException} → 409 — all via
  * {@link ApiExceptionHandler}, the same mapping every other controller here relies on. {@link
  * #stop} is idempotent and a malformed {@code assetId} (via {@code AssetId#of}) is the same 400.
  *
  * <p>A {@code null}/blank {@code videoPath} with the default {@code direct} transport is not an
- * error (docs/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations {}} yields a fully synthetic,
+ * error (docs/main/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations {}} yields a fully synthetic,
  * moving simulated drone — no video file required.
  */
 @RestController
@@ -93,7 +93,7 @@ public class SimulationController {
 
     /**
      * Stops a simulated asset's stream and, for a wired-transport ({@code rtsp}/{@code mjpeg})
-     * simulation, its transmitted feed too (docs/CYCLES-PLAN.md §3, §5) — idempotent, mirroring {@code
+     * simulation, its transmitted feed too (docs/main/CYCLES-PLAN.md §3, §5) — idempotent, mirroring {@code
      * AssetController}'s {@code DELETE /api/assets/{id}/stream}: an unknown or already-stopped
      * asset is still a 204, not a 404.
      *

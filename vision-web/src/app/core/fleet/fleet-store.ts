@@ -45,9 +45,9 @@ const LOG_PREFIX = '[fleet]';
  *
  * Every page reads the same two signals, so the Wall, the Devices tab and a Live view
  * cannot disagree — and there is exactly one poller in the app rather than one per page
- * (docs/WEB-PLAN.md, W6).
+ * (docs/plans/done/WEB-PLAN.md, W6).
  *
- * **Projection of `LiveStore`'s `devices` topic** (docs/REALTIME-PLAN.md §4's backend follow-up
+ * **Projection of `LiveStore`'s `devices` topic** (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up
  * batch — the same poll-vs-live pattern `TelemetryStore`/`DetectionsStore` established in R-c,
  * simplified since this topic is app-wide and always-on, not per-asset/opt-in): while `LiveStore`
  * is `'open'`, `devices`/`streams` are set atomically from each `DevicesSnapshotResponse` envelope
@@ -75,17 +75,17 @@ export class FleetStore {
   private readonly reachableSignal = signal<boolean | null>(null);
 
   /**
-   * The detection-model picker's roster (docs/CV-CONTROL-PLAN.md §4) — fetched once, here, rather
+   * The detection-model picker's roster (docs/plans/done/CV-CONTROL-PLAN.md §4) — fetched once, here, rather
    * than per-page: every consumer (`features/fly/cv-control-panel.ts`, `features/live/live.ts`,
    * `features/settings/settings.ts`) reads the identical list, same "one source, no page-to-page
    * disagreement" reasoning as `devices`/`streams`. Unlike those two, this is **not** re-polled —
-   * the roster is config-backed at the server (docs/CV-CONTROL-PLAN.md §D: "changes at deploy time,
+   * the roster is config-backed at the server (docs/plans/done/CV-CONTROL-PLAN.md §D: "changes at deploy time,
    * not runtime") — a one-shot fetch at construction is enough for the app's lifetime.
    */
   private readonly modelsSignal = signal<readonly CvModel[]>([]);
 
   /**
-   * The tracker-engine roster (docs/TRACKING-PLAN.md §4.F, wave T7) — fetched once, same "config-
+   * The tracker-engine roster (docs/plans/done/TRACKING-PLAN.md §4.F, wave T7) — fetched once, same "config-
    * backed, changes at deploy time not runtime" posture as {@link models} above, and the identical
    * degrade-on-failure shape: an empty list means either "still loading" or "the request failed" (a
    * pre-tracking server included — this endpoint didn't exist at all when this wave landed), and
@@ -123,14 +123,14 @@ export class FleetStore {
     void this.refresh(); // one-time initial fetch, regardless of live — see class doc.
     void this.loadModels(); // one-time, unrelated to the devices/streams poll — see `models`' own doc comment.
     void this.loadTrackers(); // one-time, same shape as `loadModels()` — see `trackers`' own doc comment.
-    // Poll-while-visible now runs off the app's one shared timer (docs/CYCLES-PLAN.md §9, CU-b
+    // Poll-while-visible now runs off the app's one shared timer (docs/main/CYCLES-PLAN.md §9, CU-b
     // item 3 — `PollScheduler`) rather than this store's own `setInterval`. Started unconditionally
     // here so today's (pre-live, or live-unavailable) behavior is unchanged byte-for-byte; the
     // effect below only ever pauses it (once live opens) or resumes it (once live drops), never
     // double-registers it — see `applyTransport`'s own `stopPollingFn !== null` guard.
     this.stopPollingFn = this.schedulePoll();
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops (docs/REALTIME-PLAN.md
+    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops (docs/plans/done/REALTIME-PLAN.md
     // §4's backend follow-up batch) — mirrors `TelemetryStore`/`DetectionsStore`'s identical
     // reconnect-driven effect, simplified: no per-session `tracking` guard is needed since this
     // store has no track()/reset() session at all, just "poll, unless live is open".
@@ -185,7 +185,7 @@ export class FleetStore {
   /**
    * Returns the `refresh()` promise (not `void`-discarded) so `PollScheduler`'s in-flight guard can
    * skip a tick while the previous poll is still pending, rather than piling another request on top
-   * of a slow/hung backend (docs/MVP2-PLAN.md §S, S-b).
+   * of a slow/hung backend (docs/plans/done/MVP2-PLAN.md §S, S-b).
    */
   private schedulePoll(): () => void {
     return this.scheduler.schedule(POLL_INTERVAL_MS, () => this.refresh({ quiet: true }));
@@ -247,7 +247,7 @@ export class FleetStore {
   }
 
   /** One-shot fetch of the tracker-engine roster — same silent-degrade shape as {@link loadModels}
-   * above, including "the endpoint doesn't exist yet" (docs/TRACKING-PLAN.md wave T6 hadn't shipped
+   * above, including "the endpoint doesn't exist yet" (docs/plans/done/TRACKING-PLAN.md wave T6 hadn't shipped
    * when this wave landed): a 404/network failure just logs and leaves {@link trackers} empty. */
   private async loadTrackers(): Promise<void> {
     try {
@@ -259,11 +259,11 @@ export class FleetStore {
   }
 
   /**
-   * One stream's live track book + duty-cycle stats (docs/TRACKING-PLAN.md §4.E) —
+   * One stream's live track book + duty-cycle stats (docs/plans/done/TRACKING-PLAN.md §4.E) —
    * `cv-control-panel.ts`'s own poll for the flow strip + the "Following #N" lock-confirmation chip.
    * **Deliberately not `run()`-wrapped** (unlike {@link patchStreamConfig} below): this is a
    * background enrichment read on a fast poll cadence, not a user-initiated action — a failure (an
-   * old/absent server most of all, since this endpoint is new in docs/TRACKING-PLAN.md wave T6) must
+   * old/absent server most of all, since this endpoint is new in docs/plans/done/TRACKING-PLAN.md wave T6) must
    * degrade the flow strip/chip to hidden, silently, the same posture `loadModels`/`DetectionsStore`'s
    * own poll already take, never a toast fired every couple of seconds against a backend that simply
    * doesn't have this route yet. Rethrows on failure — the caller's own `catch` decides what "hidden"
@@ -282,7 +282,7 @@ export class FleetStore {
     });
   }
 
-  // --- Warehouse: device lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) ----------------
+  // --- Warehouse: device lifecycle (docs/main/CYCLES-PLAN.md §8's pinned contract) ----------------
   // Thin `run()`-wrapped wrappers, same seam as `register`/`start`/`stop` above and `simulate`
   // below — chosen over a separate page-scoped store because `devicesSignal` already lives here
   // and every mutation below changes what it should read afterward (a renamed/reactivated device
@@ -350,7 +350,7 @@ export class FleetStore {
   }
 
   /**
-   * Live-patches a *running* stream's detection config (docs/CV-CONTROL-PLAN.md §3) —
+   * Live-patches a *running* stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md §3) —
    * `features/fly/cv-control-panel.ts`'s one write path, both for debounced hot-knob edits and a
    * deliberate model change. `run()`-wrapped like every other mutation here, so a failure (an
    * unknown/torn-down stream, an out-of-range value that somehow slipped past the panel's own
@@ -378,7 +378,7 @@ export class FleetStore {
   }
 
   /**
-   * Creates a simulated asset (docs/CYCLES-PLAN.md §4) and refreshes the device/stream lists so
+   * Creates a simulated asset (docs/main/CYCLES-PLAN.md §4) and refreshes the device/stream lists so
    * the new device shows up immediately. Returns `null` on failure (already toasted by `run()`);
    * the caller decides the specific success toast/Watch action since that depends on whether
    * `autoStart` produced a `streamId` — this store only knows how to fail loudly once.
@@ -401,7 +401,7 @@ export class FleetStore {
     return result ?? false;
   }
 
-  // --- Warehouse: asset lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) -----------------
+  // --- Warehouse: asset lifecycle (docs/main/CYCLES-PLAN.md §8's pinned contract) -----------------
   // Same seam as `simulate`/`stopSimulation` above: assets aren't tracked by a `FleetStore`
   // signal (the Devices page fetches them ad hoc, as it already did for the C4 wizard's
   // simulated-asset chips), but every mutation here can change what `devicesSignal` should read
@@ -428,7 +428,7 @@ export class FleetStore {
   }
 
   /**
-   * Soft delete (archive) — the success toast names what survived (docs/CYCLES-PLAN.md §8: an
+   * Soft delete (archive) — the success toast names what survived (docs/main/CYCLES-PLAN.md §8: an
    * archive confirmation must say what's retained, not just that the asset is gone).
    */
   async deleteAsset(id: string): Promise<AssetDeletionResponse | null> {
@@ -470,7 +470,7 @@ export class FleetStore {
 
   /**
    * Unassigns a device from an asset. The ≥1-device invariant's 409 gets its own explanation —
-   * `describeHttpError`'s generic conflict sentence doesn't know *why* (docs/CYCLES-PLAN.md §8).
+   * `describeHttpError`'s generic conflict sentence doesn't know *why* (docs/main/CYCLES-PLAN.md §8).
    */
   async unassignDevice(assetId: string, deviceId: string): Promise<AssetDetails | null> {
     try {

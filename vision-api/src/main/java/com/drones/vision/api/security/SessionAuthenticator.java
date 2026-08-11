@@ -9,7 +9,7 @@ import com.drones.vision.api.controller.AuthController;
 
 /**
  * The seam {@link AuthController} uses to establish and tear down a login session, kept in {@code
- * vision-api} so the controller never references Spring Security (docs/U-AUTH-PLAN.md, wave 3).
+ * vision-api} so the controller never references Spring Security (docs/plans/done/U-AUTH-PLAN.md, wave 3).
  *
  * <p>{@code vision-app} supplies the implementation: when {@code vision.auth.enabled=true} it
  * verifies the credentials (BCrypt, via the application-layer {@code AuthService}) and persists an

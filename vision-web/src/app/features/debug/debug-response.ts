@@ -29,8 +29,8 @@ export function isSuccessStatus(status: number): boolean {
 }
 
 /**
- * The Health panel's chip semantics (docs/NAV-IA-REDESIGN-PLAN.md §2.2's health-probe correctness
- * fix, docs/design/18-debug.md) — a *probe that isn't there* and a *system that is unhealthy* used to
+ * The Health panel's chip semantics (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2's health-probe correctness
+ * fix, docs/extracts/design/18-debug.md) — a *probe that isn't there* and a *system that is unhealthy* used to
  * render identically, a red chip reading the raw HTTP status. Verified independently: this deployment
  * has no `spring-boot-starter-actuator` on the classpath at all (`vision-app/pom.xml`), so
  * `GET /actuator/health` 404s the same way any unmapped path would — the request never even reaches a

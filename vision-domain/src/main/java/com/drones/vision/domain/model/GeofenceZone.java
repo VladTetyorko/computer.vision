@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 import java.util.List;
 
 /**
- * A named geofence boundary (docs/OPS-CORE-PLAN.md §G) — a polygon over {@link GeoPosition}s plus
+ * A named geofence boundary (docs/plans/done/OPS-CORE-PLAN.md §G) — a polygon over {@link GeoPosition}s plus
  * an optional altitude ceiling, evaluated against live telemetry by {@code GeofenceMonitor}
  * (vision-application).
  *
@@ -15,7 +15,7 @@ import java.util.List;
  * <p>{@code maxAltitudeMeters} is an independent ceiling checked only while a position is inside
  * the polygon (a sample outside the polygon has no ceiling to violate); {@code null} means no
  * ceiling. Zones are global — every asset is evaluated against every enabled zone; per-group
- * scoping is a later cycle (docs/OPS-CORE-PLAN.md §G, U-e), not this one.
+ * scoping is a later cycle (docs/plans/done/OPS-CORE-PLAN.md §G, U-e), not this one.
  *
  * @param id                typed zone identity
  * @param name              human-readable name; must not be blank

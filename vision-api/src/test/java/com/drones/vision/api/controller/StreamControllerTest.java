@@ -126,7 +126,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.viewUrl").doesNotExist());
     }
 
-    // ---- docs/MVP2-PLAN.md §L: whepUrl beside viewUrl ----
+    // ---- docs/plans/done/MVP2-PLAN.md §L: whepUrl beside viewUrl ----
 
     @Test
     void startReturns201WithWhepUrlWhenPublisherHasOne() throws Exception {
@@ -225,7 +225,7 @@ class StreamControllerTest {
 
     @Test
     void startMergesOverlayBurnInOverrideOntoDefaults() throws Exception {
-        // docs/MVP2-PLAN.md §V, V-e: overlayBurnIn is per-stream settable exactly like
+        // docs/plans/done/MVP2-PLAN.md §V, V-e: overlayBurnIn is per-stream settable exactly like
         // confidenceThreshold/inferenceFps above.
         StreamId streamId = StreamId.random();
         when(streamService.start(any(), any(), any())).thenReturn(streamId);
@@ -313,7 +313,7 @@ class StreamControllerTest {
         assertEquals(PipelineConfig.defaults().model(), captor.getValue().model());
     }
 
-    // ---- docs/CV-CONTROL-PLAN.md §2: labelFilter/detectionEnabled start overrides ----
+    // ---- docs/plans/done/CV-CONTROL-PLAN.md §2: labelFilter/detectionEnabled start overrides ----
 
     @Test
     void startMergesLabelFilterOverrideOntoDefaults() throws Exception {
@@ -587,7 +587,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$", hasSize(0)));
     }
 
-    // ---- docs/CV-CONTROL-PLAN.md §3: PATCH /api/streams/{streamId}/config ----
+    // ---- docs/plans/done/CV-CONTROL-PLAN.md §3: PATCH /api/streams/{streamId}/config ----
 
     @Test
     void updateConfigReturnsStreamIdAndModelReArmedFalseForHotKnobs() throws Exception {
@@ -697,7 +697,7 @@ class StreamControllerTest {
         assertEquals(PipelineConfigPatch.NOTHING, captor.getValue());
     }
 
-    // ---- docs/MVP3-PLAN.md C-a: GET /api/streams/{streamId}/snapshot ----
+    // ---- docs/plans/done/MVP3-PLAN.md C-a: GET /api/streams/{streamId}/snapshot ----
 
     private static byte[] tinyJpeg(int width, int height) throws IOException {
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
@@ -748,7 +748,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 
-    // ---- docs/TRACKING-PLAN.md §4.D: the `tracking` object on PATCH .../config ----
+    // ---- docs/plans/done/TRACKING-PLAN.md §4.D: the `tracking` object on PATCH .../config ----
 
     @Test
     void updateConfigThreadsTheTrackingObjectThroughToThePatchAndReportsItChanged() throws Exception {
@@ -892,7 +892,7 @@ class StreamControllerTest {
         verify(streamService, never()).trackingStats(any());
     }
 
-    // ---- docs/TRACKING-PLAN.md §4.D: the `tracking` object on POST /api/devices/{id}/stream ----
+    // ---- docs/plans/done/TRACKING-PLAN.md §4.D: the `tracking` object on POST /api/devices/{id}/stream ----
 
     @Test
     void startStatesNothingAboutTrackingWhenTheRequestDoesNot() throws Exception {
@@ -938,7 +938,7 @@ class StreamControllerTest {
         verify(streamService, never()).start(any(), any(), any());
     }
 
-    // ---- docs/TRACKING-PLAN.md §4.E: GET /api/streams/{streamId}/tracks ----
+    // ---- docs/plans/done/TRACKING-PLAN.md §4.E: GET /api/streams/{streamId}/tracks ----
 
     @Test
     void tracksReturnsTheBookedTracksWithLockedTrackIdHoistedAboveStats() throws Exception {
@@ -1017,7 +1017,7 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
     }
 
-    // ---- docs/TRACKING-PLAN.md §4.G: the nested track/tracking objects on the detections wire ----
+    // ---- docs/plans/done/TRACKING-PLAN.md §4.G: the nested track/tracking objects on the detections wire ----
 
     @Test
     void detectionsCarryTheNestedTrackAndTrackingObjectsWhenTrackingIsOn() throws Exception {

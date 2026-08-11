@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Postgres-backed {@link MapLayerRepositoryPort} (docs/MAP-REWORK-PLAN.md §4.4, {@code
+ * Postgres-backed {@link MapLayerRepositoryPort} (docs/plans/done/MAP-REWORK-PLAN.md §4.4, {@code
  * V12__map_layers.sql}) — {@code save} is merge-by-id (upsert), {@code deleteById} a real hard
  * delete, idempotent: the same shape {@code JpaGeofenceRepository}/{@code JpaMarkRepository} already
  * have.

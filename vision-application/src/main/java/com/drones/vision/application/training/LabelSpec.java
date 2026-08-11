@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * {@link LabelingService#label}'s command record (docs/CV-TRAINING-PLAN.md §2/§3) — the wire
+ * {@link LabelingService#label}'s command record (docs/plans/done/CV-TRAINING-PLAN.md §2/§3) — the wire
  * shape for {@code PUT /api/samples/{id}/annotations}: the operator's confirmed/corrected
  * ground-truth annotations plus the review outcome.
  *

@@ -18,8 +18,8 @@ import { Notice } from '../../shared/ui/notice';
 import type { GeoPosition, MapMark } from '../../core/api/models';
 
 /**
- * The Fly cockpit's "Marks" tool-rail drawer (docs/MAP-REWORK-PLAN.md §5.2, reworked from
- * docs/TACTICAL-MARKS-PLAN.md M5) — a non-routed presentational child, so `architecture.spec.ts`'s
+ * The Fly cockpit's "Marks" tool-rail drawer (docs/plans/done/MAP-REWORK-PLAN.md §5.2, reworked from
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — a non-routed presentational child, so `architecture.spec.ts`'s
  * facade rule doesn't apply (its own carve-out: "non-routed presentational child components… may
  * still DI-share a host-provided store"). Injects the two root map-data stores directly rather than
  * going through `CockpitFacade`, since every action here is a thin forward to them — mirroring

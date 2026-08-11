@@ -29,7 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Standalone MockMvc tests for {@link UserAdminController} (docs/U-SCOPE-PLAN.md, U-e slice 2 —
+ * Standalone MockMvc tests for {@link UserAdminController} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 —
  * org-settings user management). Verifies list/create/setEnabled map through to {@link UserService}
  * and that {@code CreateUserRequest} builds a well-formed {@link UserSpec} (memberships + enabled).
  */

@@ -41,7 +41,7 @@ from cv_service.grpc.servicers import (  # cv_pb2_grpc re-exported so tests can 
 LOGGER = logging.getLogger("cv_service.grpc.server")
 
 # HTTP/2 keepalive tuning for a flaky Wi-Fi/VPN link between the laptop
-# (backend, adapter-cv-grpc) and this service -- docs/REMOTE-CV-PLAN.md
+# (backend, adapter-cv-grpc) and this service -- docs/plans/done/REMOTE-CV-PLAN.md
 # "Transport decisions" P1. The client channel
 # (`GrpcDetectionPort.KEEPALIVE_TIME_SECONDS`) pings every 20s, including
 # while idle; a grpc Python server otherwise GOAWAYs ("too_many_pings") a

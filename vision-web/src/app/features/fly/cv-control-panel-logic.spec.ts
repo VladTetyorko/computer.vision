@@ -323,7 +323,7 @@ describe('cv-control-panel-logic', () => {
     });
   });
 
-  // --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
+  // --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
 
   describe('tracking patch builders', () => {
     it('buildTrackingModePatch sends mode alone', () => {

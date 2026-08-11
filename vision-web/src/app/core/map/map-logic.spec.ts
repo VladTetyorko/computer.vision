@@ -165,7 +165,7 @@ describe('buildMarker', () => {
     expect(marker?.batteryPercent).toBe(40);
   });
 
-  describe('flightMode/armed/failsafe/gpsFixType (docs/FC-INTEGRATIONS-PLAN.md F-d)', () => {
+  describe('flightMode/armed/failsafe/gpsFixType (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d)', () => {
     it('sources all four from the latest sample\'s own flightState', () => {
       const telemetry: AssetTelemetrySnapshot = {
         latest: sample({
@@ -204,7 +204,7 @@ describe('buildMarker', () => {
     });
   });
 
-  describe('firmware (docs/DRONE-INFRA-PLAN.md I-e Stage 1 — feeds asset-panel.ts\'s "Bring home" gate)', () => {
+  describe('firmware (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 — feeds asset-panel.ts\'s "Bring home" gate)', () => {
     it('sources it from the latest sample\'s own flightState, same place as flightMode/armed/etc.', () => {
       const telemetry: AssetTelemetrySnapshot = {
         latest: sample({ latitude: 5, longitude: 6, flightState: { firmware: 'ardupilot' } }),
@@ -226,7 +226,7 @@ describe('buildMarker', () => {
     });
   });
 
-  describe('extra (docs/FC-INTEGRATIONS-PLAN.md F-e — feeds asset-panel.ts\'s Status-tab diagnostics)', () => {
+  describe('extra (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — feeds asset-panel.ts\'s Status-tab diagnostics)', () => {
     it('passes the latest sample\'s extra map through verbatim', () => {
       const telemetry: AssetTelemetrySnapshot = { latest: sample({ extra: { windSpeedMps: 4.2 } }), trail: [] };
       const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);

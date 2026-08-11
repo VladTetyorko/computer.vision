@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import java.util.List;
 
 /**
- * Request body of {@code PATCH /api/live/{connectionId}/topics} (docs/REALTIME-PLAN.md §4, item
+ * Request body of {@code PATCH /api/live/{connectionId}/topics} (docs/plans/done/REALTIME-PLAN.md §4, item
  * 2) — adds/removes per-asset {@code telemetry:<assetId>}/{@code detections:<assetId>} topics on
  * an already-open connection, so a viewer's fan-out shrinks/grows as tiles enter/leave the screen
  * without reconnecting.

@@ -9,7 +9,7 @@ import com.drones.vision.api.controller.DeviceProbeController;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 
 /**
- * Response body for {@code POST /api/devices/probe} — CONTRACT 1 (docs/UX-REWORK-PLAN.md §U-d
+ * Response body for {@code POST /api/devices/probe} — CONTRACT 1 (docs/plans/done/UX-REWORK-PLAN.md §U-d
  * item 3): a successful probe never omits {@code ok}, so a caller can tell a 200 apart from a
  * (differently-shaped) error body without inspecting the HTTP status alone.
  *

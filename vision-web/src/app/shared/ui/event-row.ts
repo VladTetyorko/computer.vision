@@ -4,7 +4,7 @@ import type { DetectionEvent } from '../../core/api/models';
 
 /**
  * `vision-event-row` — one detection event, extracted from `shared/ui/events-rail.*`
- * (docs/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3, docs/design/08-alerts.md's refactor list item 1) so the
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3, docs/extracts/design/08-alerts.md's refactor list item 1) so the
  * header bell's dropdown, the Wall rail, and `/monitor/alerts` render the identical row instead of
  * three independent copies drifting apart. Purely presentational — every field is an input, every
  * click is reported via `activated` and left for the host to interpret (select vs. navigate).
@@ -51,7 +51,7 @@ export class EventRow {
   /** Two-pane's own "this is the selected row" highlight (Alerts only — always `false` elsewhere). */
   readonly selected = input(false);
   /**
-   * The row's own explicit verb (docs/UX-REWORK-PLAN.md U-a2 §2.6 — a hover style alone never says
+   * The row's own explicit verb (docs/plans/done/UX-REWORK-PLAN.md U-a2 §2.6 — a hover style alone never says
    * what a click does). Omit (or pass `null`) to render none — dense rows always omit it.
    */
   readonly actionLabel = input<string | null>(null);

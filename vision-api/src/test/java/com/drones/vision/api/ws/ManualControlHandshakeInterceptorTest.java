@@ -25,7 +25,7 @@ import static org.mockito.Mockito.verify;
 
 /**
  * Unit tests for {@link ManualControlHandshakeInterceptor} — the WebSocket counterpart to every
- * REST controller reading {@link CurrentUser} (docs/RC-CONTROL-PHASE1-PLAN.md §4).
+ * REST controller reading {@link CurrentUser} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4).
  */
 class ManualControlHandshakeInterceptorTest {
 

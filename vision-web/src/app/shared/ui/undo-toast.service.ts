@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 
-/** docs/OPS-CORE-PLAN.md §Q2's own pinned default — long enough to notice, short enough to not pile up. */
+/** docs/plans/done/OPS-CORE-PLAN.md §Q2's own pinned default — long enough to notice, short enough to not pile up. */
 export const DEFAULT_UNDO_TIMEOUT_MS = 10_000;
 
 export interface UndoToastOptions {
@@ -10,7 +10,7 @@ export interface UndoToastOptions {
    * Runs once this toast's window closes without `Undo` — on natural timeout, an explicit dismiss
    * (`×` / Escape), or because a newer `showUndo()` replaced it before its own timer elapsed. Most
    * callers have nothing to do here: the mutation this toast is offering to reverse already
-   * happened *before* `showUndo` was ever called (docs/UX-REWORK-PLAN.md §U-a2's "undo over
+   * happened *before* `showUndo` was ever called (docs/plans/done/UX-REWORK-PLAN.md §U-a2's "undo over
    * confirm" — act first, offer a way back), so "commit" is usually a no-op. This exists for the
    * rare caller that wants to know the window is truly, finally closed, and for this service's own
    * replace-semantics to have something observable to test.
@@ -26,7 +26,7 @@ export interface UndoToastState {
 }
 
 /**
- * The one-at-a-time "Undo" toast (docs/OPS-CORE-PLAN.md §Q2) — a *separate* primitive from
+ * The one-at-a-time "Undo" toast (docs/plans/done/OPS-CORE-PLAN.md §Q2) — a *separate* primitive from
  * `core/toast.service.ts`'s `ToastService`, not a mode of it: `ToastService` already supports an
  * optional action button (`ok(text, {label:'Undo', onClick})`, the precedent `features/devices/devices.ts`/
  * `features/asset-detail/asset-detail.ts`'s archive flows used before this landed), but its toasts

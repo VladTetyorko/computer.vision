@@ -1,7 +1,7 @@
 [project]
 name = "cv-service"
 version = "0.1.0"
-description = "Python CV inference & training gRPC service for the Vision platform (see ../ARCHITECTURE.md, ../docs/PHASE0-PLAN.md)."
+description = "Python CV inference & training gRPC service for the Vision platform (see ../ARCHITECTURE.md, ../docs/plans/done/PHASE0-PLAN.md)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,7 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Phase 2: real inference backend (Ultralytics YOLO) + frame decoding, and
-# (docs/TRACKING-PLAN.md wave T1) the tracking engines.
+# (docs/plans/done/TRACKING-PLAN.md wave T1) the tracking engines.
 #
 # `ultralytics` pulls in `torch` transitively; this service targets CPU-only
 # inference, so on x86 install with the PyTorch CPU wheel index to avoid
@@ -24,12 +24,12 @@ dependencies = [
 # default/documented path for the demo target (a laptop, no GPU assumed).
 #
 # THE --extra-index-url LINE IS x86-ONLY. On aarch64 (a Raspberry Pi / any
-# ARM companion computer, docs/TRACKING-PLAN.md §3.3) PyPI's plain `torch`
+# ARM companion computer, docs/plans/done/TRACKING-PLAN.md §3.3) PyPI's plain `torch`
 # wheel already IS the CPU build -- there are no generic-ARM CUDA wheels --
 # so the ARM install line is simply `pip install -e '.[cv]'`. See
 # cv-service/MODULE.md, "Running on ARM64 / a companion computer".
 #
-# INVARIANT P1 (docs/TRACKING-PLAN.md §3.3, §5.J): NOTHING x86-ONLY OR
+# INVARIANT P1 (docs/plans/done/TRACKING-PLAN.md §3.3, §5.J): NOTHING x86-ONLY OR
 # CUDA-ONLY MAY EVER ENTER THIS EXTRA. It is what makes the same cv-service
 # package deployable to a laptop, to the GB4005 LAN box, and onboard an
 # airframe. It is free to hold and expensive to recover: one CUDA-gated
@@ -48,7 +48,7 @@ dependencies = [
 # runtime shared-library needs at the OS level instead (see Dockerfile:
 # libgl1/libglib2.0-0).
 #
-# `opencv-python` is pinned to a MAJOR RANGE (docs/TRACKING-PLAN.md R3):
+# `opencv-python` is pinned to a MAJOR RANGE (docs/plans/done/TRACKING-PLAN.md R3):
 # before T1 this floated transitively from ultralytics and happened to land
 # on 5.0.x. That is not a detail we can float on -- OpenCV 5 REMOVED
 # `TrackerKCF`/`TrackerCSRT`/`TrackerMOSSE` and dropped `cv2.legacy`
@@ -60,7 +60,7 @@ dependencies = [
 # `lap` is pinned because it is a HIDDEN RUNTIME dependency of ultralytics'
 # `BYTETracker.update` -> `matching.linear_assignment`, which ultralytics'
 # AutoUpdate resolves by running `pip install lap` FROM THE NETWORK,
-# MID-PROCESS, inside a live stream (docs/TRACKING-PLAN.md R2, observed).
+# MID-PROCESS, inside a live stream (docs/plans/done/TRACKING-PLAN.md R2, observed).
 # On the offline GB4005 box, in a running container, or on a companion
 # computer in flight, that is not an annoyance -- it is a guaranteed
 # in-flight failure with no fallback. Pinning it makes the dependency

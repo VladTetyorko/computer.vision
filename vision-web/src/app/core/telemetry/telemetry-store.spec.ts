@@ -13,7 +13,7 @@ function flush(): Promise<void> {
 }
 
 /**
- * A minimal `LiveStore` test double (docs/REALTIME-PLAN.md §4, Phase R-c) — real Angular `signal`s
+ * A minimal `LiveStore` test double (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — real Angular `signal`s
  * so `TelemetryStore`'s own `computed`/`effect` react to it exactly as they would to the real
  * class, without needing a real `EventSource` (jsdom has none — see `live-store.ts`'s own doc
  * comment). Defaults to `'closed'` — the same state the *real* `LiveStore` reports under jsdom —
@@ -156,7 +156,7 @@ describe('TelemetryStore', () => {
     expect(store.samples()).toEqual([]);
   });
 
-  // --- assetId O(1) path (docs/REALTIME-PLAN.md Phase R-a item 3) -----------------------------
+  // --- assetId O(1) path (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3) -----------------------------
 
   it('given an assetId, resolves the open usage with one getAsset() call — no listAssets() at all', async () => {
     const asset: AssetDetails = {
@@ -204,7 +204,7 @@ describe('TelemetryStore', () => {
   });
 
   it('re-entering track() with the same (deviceId, assetId) is a no-op — no second getAsset() call at all', async () => {
-    // Defense in depth (docs/REALTIME-PLAN.md §4 Phase R-c follow-up): a caller-side guard
+    // Defense in depth (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c follow-up): a caller-side guard
     // (`trackingIdChanged`, `AssetDetailPage`/`FlyPage`) is the primary fix for the re-entry churn
     // bug, but this store's own `track()` no-ops on an unchanged `(deviceId, assetId)` pair too, so
     // an unguarded call site (or a caller-side guard bug) can't reopen the same tight loop.
@@ -235,7 +235,7 @@ describe('TelemetryStore', () => {
   it('N successive track() calls with the same id — even with no caller-side guard at all — subscribe live exactly once and never untrack', async () => {
     // Simulates the exact churn class this test suite exists to guard against: an effect reading a
     // fresh `AssetDetails` object every poll tick, re-entering `track()` with unchanged primitives
-    // each time (docs/REALTIME-PLAN.md §4 Phase R-c follow-up — the `AssetDetailPage` bug, not just
+    // each time (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c follow-up — the `AssetDetailPage` bug, not just
     // R-a's slower-paced original). Without the `lastTrackKey` guard, each of these calls would tear
     // down and rebuild the live subscription — the `untrack`/`track` log-spam loop this fix closes.
     const asset: AssetDetails = {
@@ -300,7 +300,7 @@ describe('TelemetryStore', () => {
     expect(store.samples()).toEqual([]);
   });
 
-  // --- LiveStore projection (docs/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
+  // --- LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
 
   function assetWithOpenUsage(assetId: string, deviceId: string, usageId: string): AssetDetails {
     return {

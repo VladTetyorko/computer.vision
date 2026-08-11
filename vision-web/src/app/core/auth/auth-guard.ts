@@ -4,7 +4,7 @@ import { AuthStore } from './auth-store';
 import { needsLogin } from './auth-logic';
 
 /**
- * Gates every real page behind a session once auth is enabled (docs/U-AUTH-PLAN.md wave 4) —
+ * Gates every real page behind a session once auth is enabled (docs/plans/done/U-AUTH-PLAN.md wave 4) —
  * applied to `app.routes.ts`'s grouping wrapper around every feature route array, deliberately
  * excluding `/login` itself (see that file's own comment for the wrapper).
  *

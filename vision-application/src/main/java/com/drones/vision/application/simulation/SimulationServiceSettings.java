@@ -4,7 +4,7 @@ import java.util.Objects;
 
 /**
  * Tunables for {@link DefaultSimulationService}'s MAVLink-transport fallback defaults — extracted
- * per docs/LAYERING-REFACTOR-PLAN.md &sect;1.3's config-extraction rule. Framework-free; {@code
+ * per docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3's config-extraction rule. Framework-free; {@code
  * vision-app} binds a {@code VisionApplicationProperties} record and maps it onto this record's
  * constructor. Every {@link #defaults()} value is byte-identical to the literal it replaces.
  *
@@ -26,7 +26,7 @@ public record SimulationServiceSettings(String mavlinkLoopbackHost, double fallb
         }
     }
 
-    /** Every value byte-identical to the literal it replaces (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
+    /** Every value byte-identical to the literal it replaces (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
     public static SimulationServiceSettings defaults() {
         return new SimulationServiceSettings("127.0.0.1", 50.45, 30.52);
     }

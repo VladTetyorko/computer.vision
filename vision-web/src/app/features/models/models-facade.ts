@@ -12,10 +12,10 @@ import { canPromoteModel, resolvePromoteVersion, sortModelsForDisplay } from './
 const LOG_PREFIX = '[models]';
 
 /**
- * `ModelsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/manage/training/models`, the last step
+ * `ModelsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/manage/training/models`, the last step
  * of the CV-TRAINING-PLAN loop this plan builds toward (dataset export → train offline → rsync the
  * produced `.pt` into cv-service's model directory → **this page lists it and promotes it live**,
- * docs/CV-TRAINING-PLAN.md Phase 2 T10). Injects `VisionApi` directly rather than growing a shared
+ * docs/plans/done/CV-TRAINING-PLAN.md Phase 2 T10). Injects `VisionApi` directly rather than growing a shared
  * store — the registry list is page-local, single-consumer state, the same
  * `DatasetDetailFacade`/`CategoriesFacade` shape ("a routed page's facade may talk to a service
  * directly, not only a store").

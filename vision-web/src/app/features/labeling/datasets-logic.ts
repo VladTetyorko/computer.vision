@@ -1,5 +1,5 @@
 /**
- * Pure logic behind `DatasetsPage` (`/manage/training`, docs/CV-TRAINING-PLAN.md Wave T5) — the
+ * Pure logic behind `DatasetsPage` (`/manage/training`, docs/plans/done/CV-TRAINING-PLAN.md Wave T5) — the
  * dataset list + "New dataset" form. Split out per this app's own convention of keeping component
  * logic thin and unit-testing the framework-free parts directly.
  */
@@ -9,7 +9,7 @@
  * non-blank list `CreateDatasetRequest#classes` expects. Splits on comma **or** newline (an
  * operator pasting a multi-line list from elsewhere shouldn't have to reformat it first), trims
  * each entry, drops blanks, and keeps only the first occurrence of a repeated name — order matters
- * (it becomes the YOLO class index, docs/CV-TRAINING-PLAN.md §5), so this never re-sorts.
+ * (it becomes the YOLO class index, docs/plans/done/CV-TRAINING-PLAN.md §5), so this never re-sorts.
  */
 export function parseClassesInput(text: string): readonly string[] {
   const seen = new Set<string>();

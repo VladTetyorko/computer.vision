@@ -1,5 +1,5 @@
 <div class="page">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 (Wave 2, committed) / §2.4 (this wave): `page-head` stays
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 (Wave 2, committed) / §2.4 (this wave): `page-head` stays
        gone. The `By asset | By pilot` pivot and the fleet-level gap indicator join search in the
        bar's own `[pageBarFilters]` slot — the same projection idiom every other Wave 2/3 page uses,
        not a change to the bar component itself. -->
@@ -38,7 +38,7 @@
           </button>
         </div>
 
-        <!-- docs/design/13-roster.md: "a gap indicator — makes the page answer a real management
+        <!-- docs/extracts/design/13-roster.md: "a gap indicator — makes the page answer a real management
              question at a glance." Signal only when non-zero (`@if` on a plain number is falsy at
              0, so this already skips a "0 assets" confirmation — the same noise the CLOSED-chip
              fix elsewhere in this wave exists to remove). -->
@@ -90,7 +90,7 @@
                   >
                     <span class="roster-name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
                     <span class="roster-category muted truncate">{{ row.asset.categoryName }}</span>
-                    <!-- Pilot coverage is this row's own state (docs/VISUAL-REFRESH-PLAN.md F5 — at
+                    <!-- Pilot coverage is this row's own state (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — at
                          most one chip per row): a dot + the assigned names as plain text, not a chip
                          per pilot. -->
                     <span class="roster-pilots">

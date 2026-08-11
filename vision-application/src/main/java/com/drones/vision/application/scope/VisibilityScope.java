@@ -10,7 +10,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * What a request may see: the resolved boundary of one user's visibility (docs/U-SCOPE-PLAN.md,
+ * What a request may see: the resolved boundary of one user's visibility (docs/plans/done/U-SCOPE-PLAN.md,
  * U-e slice 2, feature 1). Computed once per request from the acting user by {@link ScopeResolver}
  * and threaded into the user-facing read paths, which filter by {@link #includes(Asset)}.
  *
@@ -114,7 +114,7 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
      * and see the management lists at all). Derives management authority directly from the scope's
      * kind, which maps 1:1 to role in this codebase: {@link Kind#UNBOUNDED} is ADMIN and
      * {@link Kind#GROUPS} is MANAGER — both may manage; {@link Kind#ASSIGNED_ASSETS} (a PILOT, or a
-     * user with no membership at all) may not (docs/U-SCOPE-PLAN.md, U-e slice 2 — deferred
+     * user with no membership at all) may not (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 — deferred
      * slice-2 cleanup).
      *
      * @return {@code true} iff {@link #kind()} is {@link Kind#UNBOUNDED} or {@link Kind#GROUPS}

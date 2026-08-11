@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * Describes a local media source to transmit over a real wire protocol (see
  * {@code com.drones.vision.domain.port.out.FeedTransmitterPort} and
- * {@code docs/CYCLES-PLAN.md} §0 for why this exists: simulation
+ * {@code docs/main/CYCLES-PLAN.md} §0 for why this exists: simulation
  * infrastructure, not egress).
  *
  * <p>{@code protocol} is a lower-case key (e.g. {@code "rtsp"}) used by

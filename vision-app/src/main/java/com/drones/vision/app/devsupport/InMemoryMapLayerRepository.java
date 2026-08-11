@@ -10,7 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory {@link MapLayerRepositoryPort} (docs/MAP-REWORK-PLAN.md §2.3) — the default-config
+ * In-memory {@link MapLayerRepositoryPort} (docs/plans/done/MAP-REWORK-PLAN.md §2.3) — the default-config
  * fallback for {@code JpaMapLayerRepository}, selected when {@code vision.persistence.enabled} is
  * {@code false}.
  *

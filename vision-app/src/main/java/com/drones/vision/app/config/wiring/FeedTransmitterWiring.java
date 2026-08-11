@@ -17,9 +17,9 @@ import org.springframework.context.annotation.Configuration;
 import java.util.List;
 
 /**
- * Wires every {@link FeedTransmitterPort} TX simulator (docs/CYCLES-PLAN.md §3/§5, docs/MVP2-PLAN.md
+ * Wires every {@link FeedTransmitterPort} TX simulator (docs/main/CYCLES-PLAN.md §3/§5, docs/plans/done/MVP2-PLAN.md
  * X-a) — the TX slice of what used to be one 825-line {@code WiringConfiguration}
- * (docs/LAYERING-REFACTOR-PLAN.md wave D). Config extraction (waves F1/F2): {@link
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D). Config extraction (waves F1/F2): {@link
  * #rtspFeedTransmitter}/{@link #mjpegFeedTransmitter}/{@link #mavlinkFeedTransmitter} each now
  * build their adapter's plain settings record from a {@code vision.<protocol>.*} properties
  * record — every mapped default is byte-identical to the literal it replaced.
@@ -30,7 +30,7 @@ import java.util.List;
 public class FeedTransmitterWiring {
 
     /**
-     * TX (transmit) half of docs/CYCLES-PLAN.md §3's RX/TX doctrine: pushes a {@code
+     * TX (transmit) half of docs/main/CYCLES-PLAN.md §3's RX/TX doctrine: pushes a {@code
      * transport=rtsp} simulation's video file to the same mediamtx sidecar {@code
      * PublishWiring#streamPublisherPort} pushes viewer egress to.
      */
@@ -42,7 +42,7 @@ public class FeedTransmitterWiring {
     }
 
     /**
-     * TX half of the mjpeg TX/RX pair (docs/CYCLES-PLAN.md §5): serves a {@code transport=mjpeg}
+     * TX half of the mjpeg TX/RX pair (docs/main/CYCLES-PLAN.md §5): serves a {@code transport=mjpeg}
      * simulation's video file as an HTTP {@code multipart/x-mixed-replace} stream on its own
      * ephemeral port. {@code destroyMethod = "close"} so Spring shuts its shared {@code
      * HttpServer}/dispatch pool down on context close.
@@ -53,7 +53,7 @@ public class FeedTransmitterWiring {
     }
 
     /**
-     * TX half of the MAVLink TX/RX pair (docs/MVP2-PLAN.md X-a): emits a synthetic MAVLink 2
+     * TX half of the MAVLink TX/RX pair (docs/plans/done/MVP2-PLAN.md X-a): emits a synthetic MAVLink 2
      * telemetry stream (HEARTBEAT/SYS_STATUS/GLOBAL_POSITION_INT) driven by a flight route, for
      * zero-hardware rehearsal of {@code TelemetryWiring#mavlinkTelemetrySource} (or any real
      * MAVLink ground station).
@@ -66,7 +66,7 @@ public class FeedTransmitterWiring {
 
     /**
      * Selects the {@link FeedTransmitterPort} adapter for a simulation's {@code transport}
-     * (docs/CYCLES-PLAN.md §5) — the TX-side mirror of {@code VideoSourceWiring#videoSourceRegistry}.
+     * (docs/main/CYCLES-PLAN.md §5) — the TX-side mirror of {@code VideoSourceWiring#videoSourceRegistry}.
      */
     @Bean
     public FeedTransmitterRegistry feedTransmitterRegistry(List<FeedTransmitterPort> feedTransmitters) {

@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** The BCrypt {@link PasswordHasherPort} (docs/U-AUTH-PLAN.md, wave 3): hash/verify round trip. */
+/** The BCrypt {@link PasswordHasherPort} (docs/plans/done/U-AUTH-PLAN.md, wave 3): hash/verify round trip. */
 class BcryptPasswordHasherTest {
 
     private final PasswordHasherPort hasher = new BcryptPasswordHasher();

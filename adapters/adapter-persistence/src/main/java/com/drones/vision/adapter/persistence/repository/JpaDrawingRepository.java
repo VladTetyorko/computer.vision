@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Postgres-backed {@link DrawingRepositoryPort} (docs/MAP-REWORK-PLAN.md §4.4, {@code
+ * Postgres-backed {@link DrawingRepositoryPort} (docs/plans/done/MAP-REWORK-PLAN.md §4.4, {@code
  * V12__map_layers.sql}) — {@code save} is merge-by-id (upsert), {@code deleteById} a real hard
  * delete, idempotent: the same shape {@code JpaMarkRepository} has, for the same reason (a drawing
  * has real identity and mutates in place as its geometry is edited).

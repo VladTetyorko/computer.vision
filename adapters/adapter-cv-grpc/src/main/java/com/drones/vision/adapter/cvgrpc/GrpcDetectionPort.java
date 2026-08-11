@@ -63,7 +63,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
     /**
      * Builds a {@link ManagedChannel} to {@code host:port} per {@code settings} (plaintext-or-not,
      * HTTP/2 keepalive tuning — the CV service is reached over a private/internal network:
-     * docker-compose, or a Wi-Fi/VPN link to a remote GPU box, see {@code docs/REMOTE-CV-PLAN.md} —
+     * docker-compose, or a Wi-Fi/VPN link to a remote GPU box, see {@code docs/plans/done/REMOTE-CV-PLAN.md} —
      * so {@link GrpcCvSettings#plaintext()} defaults to {@code true}) and delegates to the canonical
      * constructor.
      */

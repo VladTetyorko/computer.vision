@@ -37,7 +37,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * {@link #start} requires {@link VisibilityScope#canManageOrg()}, mirroring {@code
  * DefaultModelRegistryService#promote}'s manager/admin gate exactly.
  *
- * <h2>Synchronous dataset pre-check (docs/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
+ * <h2>Synchronous dataset pre-check (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
  * After the scope gate, {@link #start} runs one cheap, bounded {@link
  * LabelingService#samples(DatasetId, com.drones.vision.domain.model.SampleStatus, int, UserId,
  * VisibilityScope) LabelingService#samples} read (limit {@code 1}, filtered to {@code LABELED})
@@ -61,7 +61,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * unrelated one); only the locally-generated id is ever exposed through this service's surface, so
  * a caller never needs to know the wire id exists at all.
  *
- * <h2>Off-thread run: upload, then train (docs/CV-TRAINING-V2-PLAN.md §4)</h2>
+ * <h2>Off-thread run: upload, then train (docs/plans/done/CV-TRAINING-V2-PLAN.md §4)</h2>
  * The task submitted to {@code executor} ({@link #runJob}) first calls {@link
  * LabelingService#uploadForTraining} — composing every {@code LABELED} sample into the frozen §5
  * YOLO content and shipping it to the training host — noting the phase in the job's {@code message}
@@ -142,7 +142,7 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     }
 
     /**
-     * Same as the 3-argument constructor, plus an explicit retention cap (docs/LAYERING-REFACTOR-PLAN.md
+     * Same as the 3-argument constructor, plus an explicit retention cap (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction, {@code vision.application.training.max-finished-jobs}) instead
      * of {@link #MAX_FINISHED_JOBS}.
      */

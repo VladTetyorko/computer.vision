@@ -14,7 +14,7 @@ import java.util.function.Function;
  * one-constructor-argument wrapper around {@link EntityManagerFactory} plus its own entity/domain
  * mapping (delegated to {@code com.drones.vision.adapter.persistence.mapper}).
  *
- * <p>Public rather than package-private (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C): every
+ * <p>Public rather than package-private (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C): every
  * {@code Jpa*Repository} composing this class now lives in the sibling {@code repository}
  * package, so cross-package visibility is required — the alternative (leaving it package-private
  * and the repositories in the same flat package) is exactly the shape this refactor replaces.

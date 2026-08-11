@@ -6,7 +6,7 @@ control port (never touches the udpclient link entrypoint.sh points at the
 vision platform), arms it, takes off in GUIDED mode, then switches to
 CIRCLE so it flies a small default circuit near its home location -- the
 fleet-in-a-box requirement of "flying a small default circuit near a
-configurable home location" (docs/DRONE-INFRA-PLAN.md I-c).
+configurable home location" (docs/plans/active/DRONE-INFRA-PLAN.md I-c).
 
 Failure here is non-fatal by design (see entrypoint.sh's `|| echo ...`)
 -- worst case the vehicle sits armed or disarmed on the ground, but SITL

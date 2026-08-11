@@ -55,7 +55,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link MapLayersController} (docs/MAP-REWORK-PLAN.md §4.1's frozen wire
+ * MockMvc tests for {@link MapLayersController} (docs/plans/done/MAP-REWORK-PLAN.md §4.1's frozen wire
  * contract), in the style of {@code GeofenceControllerTest}: a standalone {@code MockMvc} over
  * mocked services, with {@link ApiExceptionHandler} attached so error mapping runs exactly as it
  * does in production.

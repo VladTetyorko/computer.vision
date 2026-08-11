@@ -15,9 +15,9 @@ import java.util.Set;
  * settings (max in-flight inferences, telemetry overlay) come from the
  * defaults untouched — Phase 1 only exposed the two settings a dev-console
  * user is likely to want to tweak (KISS); {@code overlayBurnIn}
- * (docs/MVP2-PLAN.md §V, V-e), {@code model} (the frontend's detection-model
+ * (docs/plans/done/MVP2-PLAN.md §V, V-e), {@code model} (the frontend's detection-model
  * picker), and {@code labelFilter}/{@code detectionEnabled}
- * (docs/CV-CONTROL-PLAN.md §2) were added the same way, per-stream,
+ * (docs/plans/done/CV-CONTROL-PLAN.md §2) were added the same way, per-stream,
  * mirroring this pattern rather than a global toggle.
  *
  * @param confidenceThreshold overrides {@link PipelineConfig#confidenceThreshold()} if present
@@ -34,7 +34,7 @@ import java.util.Set;
  *                             is itself a real value with the same "all labels" meaning
  * @param detectionEnabled    overrides {@link PipelineConfig#detectionEnabled()} if present; absent keeps
  *                             the default ({@code true})
- * @param tracking            overrides the deployment's tracking seed if present (docs/TRACKING-PLAN.md
+ * @param tracking            overrides the deployment's tracking seed if present (docs/plans/done/TRACKING-PLAN.md
  *                             §4.D) — the same object shape {@code PATCH .../config} accepts
  *                             <b>minus {@code lock}</b>, which names a track that cannot exist before
  *                             the stream has produced one and is therefore a 400 here; absent keeps
@@ -48,7 +48,7 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
     public static final StartStreamRequest EMPTY = new StartStreamRequest(null, null, null, null, null, null, null);
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
      * a convenience constructor defaulting it to {@code null} ("use the seed as-is").
      *
      * @param confidenceThreshold overrides the default confidence threshold if present
@@ -70,7 +70,7 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
      * of the fold, not the answer. What this request states about tracking travels separately as
      * {@link #trackingPatch()}, and the application layer composes the three layers (request &gt;
      * deployment seed &gt; this default) when the stream starts, so that every start path seeds
-     * identically (docs/TRACKING-ORCHESTRATION.md §4.1).
+     * identically (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
      *
      * @return the effective pipeline configuration for the new stream
      */
@@ -90,7 +90,7 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
     }
 
     /**
-     * What this request states about tracking, per field (docs/TRACKING-PLAN.md §4.D) — an absent
+     * What this request states about tracking, per field (docs/plans/done/TRACKING-PLAN.md §4.D) — an absent
      * {@code tracking} object states nothing.
      *
      * @return the tracking patch to fold onto the deployment seed; never {@code null}

@@ -4,7 +4,7 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * Plain, framework-free settings for this module's mediamtx publish path (docs/LAYERING-REFACTOR-PLAN.md
+ * Plain, framework-free settings for this module's mediamtx publish path (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * &sect;1.3/&sect;2.2, wave F3) — the single source for every {@code vision.publish.encoder.*}/{@code
  * .resilience.*}/{@code .cadence.*} tunable {@link MediamtxStreamPublisher}, {@link
  * H264RecorderFactory}, {@link PublishBackoff}, and {@link CadenceEstimator} need. No Spring
@@ -15,7 +15,7 @@ import java.util.Objects;
  * breaking the hexagon).
  *
  * <p>{@code vision.publish.replay.window}/{@code .read-timeout} are deliberately <b>not</b> fields
- * here — {@link MediamtxReplayFrameExtractor} has only two tunables of its own (docs/LAYERING-REFACTOR-PLAN.md
+ * here — {@link MediamtxReplayFrameExtractor} has only two tunables of its own (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * &sect;1.3 rule 4: modules with &le;2 tunables skip the settings record), so it takes them as plain
  * constructor parameters instead.
  *

@@ -3,14 +3,14 @@ import type { GeoPosition, LiveEvent, ZoneKind } from '../api/models';
 /**
  * Pure, Angular-free logic behind `core/geofence/geofence-store.ts` and the zones UI
  * (`features/command/**`, `shared/map/fleet-map/**`, `shared/map/live-map/**`;
- * docs/OPS-CORE-PLAN.md §G-c) — vertex validation, the map-layer style per `ZoneKind`, the
+ * docs/plans/done/OPS-CORE-PLAN.md §G-c) — vertex validation, the map-layer style per `ZoneKind`, the
  * KEEP_IN save-time "assets outside this zone" advisory, and deriving currently-open geofence
  * breaches from the generic `LiveEvent` feed (`core/live/live-store.ts#liveEvents`) — split out so
  * every rule is unit-testable without HTTP/Leaflet/a component, mirroring every other feature's
  * own `*-logic.ts` split (`core/map/map-logic.ts`, `core/events/events-logic.ts`, …).
  */
 
-// --- Vertex validation (docs/OPS-CORE-PLAN.md §G's frozen wire contract: polygon must have ≥3) --
+// --- Vertex validation (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract: polygon must have ≥3) --
 
 /** A polygon needs at least this many vertices to enclose any area at all (mirrors the domain's own `GeofenceZone`). */
 export const MIN_ZONE_VERTICES = 3;
@@ -67,7 +67,7 @@ export function polygonContains(polygon: readonly ZoneVertex[], point: ZoneVerte
 }
 
 /**
- * The KEEP_IN draw dialog's save-time advisory (docs/OPS-CORE-PLAN.md §G-c: "N assets currently
+ * The KEEP_IN draw dialog's save-time advisory (docs/plans/done/OPS-CORE-PLAN.md §G-c: "N assets currently
  * outside this zone") — how many of `positions` (every asset with a currently-known position, from
  * `core/map/map-logic.ts#FleetMarker.position`) fall outside `polygon`. Advisory, not blocking: the
  * dialog still lets the operator save regardless (a KEEP_IN zone drawn before any asset is deployed
@@ -81,7 +81,7 @@ export function assetsOutsideZoneCount(polygon: readonly ZoneVertex[], positions
   return positions.filter((position) => !polygonContains(polygon, position)).length;
 }
 
-// --- Map-layer style (docs/OPS-CORE-PLAN.md §G-c: "KEEP_OUT red ~12% fill + dashed border; KEEP_IN
+// --- Map-layer style (docs/plans/done/OPS-CORE-PLAN.md §G-c: "KEEP_OUT red ~12% fill + dashed border; KEEP_IN
 // accent dashed border no fill") -----------------------------------------------------------------
 
 /** Matches `src/styles.css`'s `--danger` token — see that file's own doc comment for the hue rationale. */
@@ -101,7 +101,7 @@ export interface ZoneLayerStyle {
 }
 
 /**
- * The zone→Leaflet-layer style mapping (docs/OPS-CORE-PLAN.md §G-c's frozen visual spec):
+ * The zone→Leaflet-layer style mapping (docs/plans/done/OPS-CORE-PLAN.md §G-c's frozen visual spec):
  * `KEEP_OUT` — red ~12% fill, dashed border; `KEEP_IN` — accent dashed border, no fill. A disabled
  * zone (`enabled === false`) renders dimmed (halved opacity) rather than a third color — "this zone
  * exists but isn't currently enforced", not a new visual language.
@@ -119,7 +119,7 @@ export function zoneKindLabel(kind: ZoneKind): string {
   return kind === 'KEEP_OUT' ? 'KEEP-OUT' : 'KEEP-IN';
 }
 
-// --- Breach derivation from the generic `LiveEvent` feed (docs/OPS-CORE-PLAN.md §G's frozen
+// --- Breach derivation from the generic `LiveEvent` feed (docs/plans/done/OPS-CORE-PLAN.md §G's frozen
 // contract: "breach events ride the existing `event` SSE topic … EventType GEOFENCE_BREACH") -----
 
 export type BreachDirection = 'enter' | 'exit';
@@ -158,7 +158,7 @@ export function parseGeofenceBreach(event: LiveEvent): GeofenceBreach | undefine
 }
 
 /**
- * Every currently-open breach, derived from `LiveStore.liveEvents()` (docs/OPS-CORE-PLAN.md §G:
+ * Every currently-open breach, derived from `LiveStore.liveEvents()` (docs/plans/done/OPS-CORE-PLAN.md §G:
  * "an 'enter' opens the concern for that asset+zone, matching 'exit' clears it"). `events` is
  * assumed **newest-first** (`LiveStore.liveEvents`'s own contract — it prepends on arrival), which
  * is what makes a single forward scan correct without needing to reverse first: the *first* time a
@@ -201,7 +201,7 @@ export function groupBreachesByAsset(breaches: readonly GeofenceBreach[]): Reado
 }
 
 /**
- * The attention rail's own "why" sentence for a set of active breaches on one asset (docs/OPS-CORE-PLAN.md
+ * The attention rail's own "why" sentence for a set of active breaches on one asset (docs/plans/done/OPS-CORE-PLAN.md
  * §G-c: `geofence-breach`, the new top-rank reason) — one clause per zone, e.g. "KEEP-OUT breach —
  * North perimeter; KEEP-IN breach — Charging pad.".
  */
@@ -211,7 +211,7 @@ export function geofenceBreachReasonText(breaches: readonly GeofenceBreach[]): s
 
 /**
  * The notification bell's own toast text for a single, freshly-arrived breach `enter` event
- * (docs/OPS-CORE-PLAN.md §G-c: "message like 'KEEP-OUT breach — <zoneName>'") — `undefined` for an
+ * (docs/plans/done/OPS-CORE-PLAN.md §G-c: "message like 'KEEP-OUT breach — <zoneName>'") — `undefined` for an
  * `exit` (clearing a breach is relief, not a new alert worth a toast) or anything that doesn't
  * parse as a breach at all.
  */

@@ -7,7 +7,7 @@ import java.util.List;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * A user's own activity feed (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 7) — the read side behind
+ * A user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 7) — the read side behind
  * {@code GET /api/me/activity} (vision-api, a later wave). One interface, one implementation
  * ({@link DefaultActivityService}).
  *

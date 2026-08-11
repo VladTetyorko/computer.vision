@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Full TX→wire→RX round trip over real loopback UDP sockets — no hardware, no docker: {@link
  * MavlinkFeedTransmitter} flies a two-waypoint loop and {@link MavlinkTelemetrySource} ingests it
  * back, proving a moving position (and draining battery) actually arrives end to end. A third
- * test (docs/FC-INTEGRATIONS-PLAN.md F-e) proves a real ardupilotmega-dialect-only {@code WIND}
+ * test (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) proves a real ardupilotmega-dialect-only {@code WIND}
  * datagram, sent raw alongside the transmitter's own traffic, survives the real UDP path into a
  * {@link Telemetry} sample — confirming {@link MavlinkTelemetryDecoder}'s dialect-selection
  * mechanism note against the real socket/thread path, not just the golden-bytes unit tests. A
@@ -110,7 +110,7 @@ class MavlinkRoundTripIntegrationTest {
             List<Telemetry> withBattery = collected.stream().filter(t -> t.batteryPercent() != null).toList();
             assertTrue(!withBattery.isEmpty(), "expected at least one battery-reporting sample (SYS_STATUS)");
 
-            // docs/FC-INTEGRATIONS-PLAN.md F-a: the nominal (non-failsafe) heartbeat reports armed + Loiter.
+            // docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a: the nominal (non-failsafe) heartbeat reports armed + Loiter.
             List<Telemetry> withFlightState = collected.stream().filter(t -> t.flightState() != null).toList();
             assertTrue(!withFlightState.isEmpty(), "expected at least one flight-state-bearing sample (HEARTBEAT)");
             assertTrue(withFlightState.stream().anyMatch(t -> Boolean.TRUE.equals(t.flightState().armed())

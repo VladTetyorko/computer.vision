@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 /**
  * The great-circle initial bearing and haversine distance from one {@link GeoPosition} to another,
  * as computed by {@link GeoProjection#bearingDistance(GeoPosition, GeoPosition)}
- * (docs/TACTICAL-MARKS-PLAN.md §1) — e.g. "how far and in what direction is this mark from the
+ * (docs/plans/done/TACTICAL-MARKS-PLAN.md §1) — e.g. "how far and in what direction is this mark from the
  * drone / from home".
  *
  * @param bearingDegrees initial bearing, degrees, range [0,360), clockwise from true north

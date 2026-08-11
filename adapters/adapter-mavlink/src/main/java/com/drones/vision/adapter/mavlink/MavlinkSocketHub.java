@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * One shared {@link DatagramSocket} + one dedicated read thread per distinct bind address
  * ({@code host:port}), reference-counted across every {@link MavlinkTelemetrySource#open}
- * call that targets it (docs/DRONE-INFRA-PLAN.md I-a) — the fleet-gateway core that lets N
+ * call that targets it (docs/plans/active/DRONE-INFRA-PLAN.md I-a) — the fleet-gateway core that lets N
  * aircraft coexist on the one well-known GCS port (14550) every telemetry radio pushes to by
  * default, instead of the pre-I-a world of one socket per device.
  *
@@ -54,7 +54,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       (see {@link VehicleClaimRegistry#resolve}) — no threads beyond the one read loop.</li>
  *   <li><b>Unclaimed</b> — a sysid heard on this socket that no registration (pinned or unpinned)
  *       currently wants is recorded in a small bounded registry (see {@link
- *       #unclaimedVehicles()}) instead of silently dropped, for docs/DRONE-INFRA-PLAN.md I-b's
+ *       #unclaimedVehicles()}) instead of silently dropped, for docs/plans/active/DRONE-INFRA-PLAN.md I-b's
  *       future plug-and-fly discovery to consume.</li>
  * </ul>
  * Each claim or re-election creates a <b>fresh</b> {@link MavlinkTelemetryDecoder} for the
@@ -62,7 +62,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * belong to one physical vehicle, and reusing one across a re-election would leak the old
  * vehicle's stale values into the new one's first samples.
  *
- * <h2>Command TX seam (docs/DRONE-INFRA-PLAN.md I-e Stage 1)</h2>
+ * <h2>Command TX seam (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1)</h2>
  * This hub is receive-only by construction (one read thread, no outbound traffic of its own), but
  * it is the only place that knows a claimed vehicle's <b>last-seen UDP source address</b> — the
  * one piece of information a command sender needs that {@link MavlinkTelemetryDecoder}/{@link
@@ -85,7 +85,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * dedicated read thread. All mutable claim/registration state lives in {@link
  * VehicleClaimRegistry}, guarded by its own monitor; all pending-ack state lives in {@link
  * CommandAckRegistry}, guarded by a separate monitor — the two never need to be atomic with each
- * other (docs/LAYERING-REFACTOR-PLAN.md E2 split this hub's original single lock into those two
+ * other (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2 split this hub's original single lock into those two
  * collaborators' own locks for exactly that reason). This class's own fields are limited to the
  * socket/thread handles {@link #unregister} must reach from a caller thread to shut down (also
  * read by {@link #socket()} for command TX, for the same reason).
@@ -110,7 +110,7 @@ final class MavlinkSocketHub {
      *                 window), {@link MavlinkSettings#maxUnclaimedVehicles()} (bounded unclaimed
      *                 registry cap), and {@link MavlinkSettings#closeJoinTimeout()} (how long
      *                 {@link #shutdown()} awaits the read thread) — passed as one object rather
-     *                 than three primitives (docs/LAYERING-REFACTOR-PLAN.md §1.3 rule 3), safe
+     *                 than three primitives (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 rule 3), safe
      *                 since {@link MavlinkSettings} already lives in this same package.
      */
     MavlinkSocketHub(String bindHost, int port, MavlinkSettings settings) {
@@ -156,13 +156,13 @@ final class MavlinkSocketHub {
         return empty;
     }
 
-    /** Vehicles heard on this socket that no registration currently claims (docs/DRONE-INFRA-PLAN.md I-b). */
+    /** Vehicles heard on this socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     List<UnclaimedVehicle> unclaimedVehicles() {
         return claimRegistry.unclaimedVehicles();
     }
 
     /**
-     * Vehicles currently claimed by an open device on this socket (docs/DRONE-INFRA-PLAN.md I-b):
+     * Vehicles currently claimed by an open device on this socket (docs/plans/active/DRONE-INFRA-PLAN.md I-b):
      * lets a discovery scan label an already-registered vehicle instead of inviting a duplicate
      * asset. {@code firmware}/{@code mavType} are {@code null} until a {@code HEARTBEAT} from the
      * claiming vehicle has actually arrived (the same "unknown until observed" honesty {@link
@@ -174,7 +174,7 @@ final class MavlinkSocketHub {
 
     /**
      * The current shared socket, so a command sender can push a reply through the same socket
-     * this hub reads from instead of opening a second one (docs/DRONE-INFRA-PLAN.md I-e Stage 1).
+     * this hub reads from instead of opening a second one (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1).
      * {@code null} before the read thread has bound, or once this hub has shut down.
      */
     DatagramSocket socket() {
@@ -184,7 +184,7 @@ final class MavlinkSocketHub {
     /**
      * The command-TX coordinates for {@code deviceId}'s current claim on this hub — its sysid,
      * last-known firmware/mavType (from the most recent {@code HEARTBEAT}, possibly {@code null}
-     * if none has arrived yet), and last-seen UDP source address (docs/DRONE-INFRA-PLAN.md I-e
+     * if none has arrived yet), and last-seen UDP source address (docs/plans/active/DRONE-INFRA-PLAN.md I-e
      * Stage 1) — or {@code null} if {@code deviceId} holds no claim on this hub right now (never
      * opened here, pinned to a sysid never yet heard, or an unpinned claim re-elected away).
      */
@@ -195,7 +195,7 @@ final class MavlinkSocketHub {
     /**
      * Registers interest in the next {@code COMMAND_ACK} carrying {@code commandId} (a raw
      * {@code MAV_CMD_*} value) from {@code sysid} — the narrow read-loop seam described in this
-     * class's own javadoc (docs/DRONE-INFRA-PLAN.md I-e Stage 1). The returned future completes on
+     * class's own javadoc (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1). The returned future completes on
      * this hub's read thread the instant a matching ack is routed; it is never completed at all if
      * none ever arrives, so the caller must apply its own timeout (e.g. {@code
      * future.get(timeout, unit)}) and always pair this with {@link #cancelAckWait} in a {@code
@@ -298,16 +298,16 @@ final class MavlinkSocketHub {
         }
     }
 
-    /** A sysid heard on the hub's socket that no registration currently claims (docs/DRONE-INFRA-PLAN.md I-b). */
+    /** A sysid heard on the hub's socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     record UnclaimedVehicle(int sysid, String firmware, Integer mavType, Instant lastHeard) {
     }
 
-    /** A sysid on this hub's socket currently claimed by an open device (docs/DRONE-INFRA-PLAN.md I-b). */
+    /** A sysid on this hub's socket currently claimed by an open device (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     record ClaimedVehicle(int sysid, DeviceId deviceId, String firmware, Integer mavType, Instant lastHeard) {
     }
 
     /**
-     * A currently-claimed vehicle's command-TX coordinates (docs/DRONE-INFRA-PLAN.md I-e Stage 1):
+     * A currently-claimed vehicle's command-TX coordinates (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1):
      * which sysid, its firmware/mavType (for RTL mode-number resolution — {@code null} until a
      * {@code HEARTBEAT} has actually arrived, same "unknown until observed" honesty as {@link
      * UnclaimedVehicle}/{@link ClaimedVehicle}), and where to send a reply ({@code null} only in

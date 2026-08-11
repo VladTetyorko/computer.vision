@@ -4,7 +4,7 @@
    sizing class working together. This component only owns what's visually *inside* the card.
 
    Row-level styling (state chip, label, time, source, confidence) moved to `shared/ui/event-row.css`
-   with the row markup itself (docs/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3) — this file keeps only the
+   with the row markup itself (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3) — this file keeps only the
    card chrome, filters, and list layout around those rows. */
 :host {
   display: block;

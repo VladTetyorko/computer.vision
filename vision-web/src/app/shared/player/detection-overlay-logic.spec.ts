@@ -172,7 +172,7 @@ describe('distinctModelKeys', () => {
   });
 });
 
-// --- Track-aware rendering (docs/TRACKING-PLAN.md §4/§10, wave T7) ------------------------------
+// --- Track-aware rendering (docs/plans/done/TRACKING-PLAN.md §4/§10, wave T7) ------------------------------
 
 function fullDetection(partial: Partial<Detection> = {}): Detection {
   return {

@@ -6,10 +6,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 /**
  * Response body element for one detected object, embedded in {@link DetectionResultResponse}.
  *
- * <p>{@code @JsonInclude(NON_NULL)} covers exactly one field, {@code track} (docs/TRACKING-PLAN.md
+ * <p>{@code @JsonInclude(NON_NULL)} covers exactly one field, {@code track} (docs/plans/done/TRACKING-PLAN.md
  * &sect;4.G) — every other field is always present. <b>An untracked detection's payload is therefore
  * byte-identical to the pre-tracking wire</b>, which is the whole reason the track facts are one
- * nested object instead of five flat fields (docs/TRACKING-ORCHESTRATION.md &sect;6 rule 1).
+ * nested object instead of five flat fields (docs/extracts/TRACKING-ORCHESTRATION.md &sect;6 rule 1).
  *
  * @param label      the detected class label
  * @param confidence [0,1]
@@ -24,7 +24,7 @@ public record DetectionResponse(String label, double confidence, BoundingBoxResp
                                  String modelVersion, DetectionTrackResponse track) {
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code track}, kept as a
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code track}, kept as a
      * convenience constructor defaulting it to {@code null} ("untracked") — the same N-1-arg idiom
      * the domain's own {@code Detection}/{@code DetectionResult} use, so every pre-existing call
      * site compiles unchanged.

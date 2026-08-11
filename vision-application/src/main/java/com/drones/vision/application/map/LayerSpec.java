@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.MapLayer;
 
 /**
  * Everything needed to create a {@link LayerKind#TEAM} or {@link LayerKind#PERSONAL} {@link
- * MapLayer} (docs/MAP-REWORK-PLAN.md §3) — the single {@link LayerKind#COP} layer is never created
+ * MapLayer} (docs/plans/done/MAP-REWORK-PLAN.md §3) — the single {@link LayerKind#COP} layer is never created
  * through this record; see {@link MapLayerService#copLayerId()}.
  *
  * <p>Duplicates {@link MapLayer}'s own name-blank/length invariants so a malformed request fails

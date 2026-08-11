@@ -18,7 +18,7 @@ import java.util.UUID;
  * are non-nullable primitives on the domain side, so only the altitude column is independently
  * nullable once a position exists.
  *
- * <p>{@code streamId} (docs/MVP2-PLAN.md §R, R-a2, {@code V4__usage_stream_id.sql}) is a nullable
+ * <p>{@code streamId} (docs/plans/done/MVP2-PLAN.md §R, R-a2, {@code V4__usage_stream_id.sql}) is a nullable
  * UUID column — additive on top of V1-V3, so every pre-existing row simply reads back {@code
  * null} (a legacy usage, honestly carrying no stream link — see {@link
  * com.drones.vision.domain.model.AssetUsage}'s javadoc).

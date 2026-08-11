@@ -4,7 +4,7 @@ import { AuthStore } from '../auth/auth-store';
 import { canManageOrg } from './org-logic';
 
 /**
- * Role-gates the org-settings route (docs/U-SCOPE-PLAN.md, U-e slice 2) — only ADMIN/MANAGER may
+ * Role-gates the org-settings route (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — only ADMIN/MANAGER may
  * reach `/org`; a PILOT is redirected to `/fly`. Sits **alongside** `core/auth/auth-guard.ts` (the
  * org route is still inside that guard's children wrapper, so a signed-out user hits `/login`
  * first): this guard only adds the role check on top.

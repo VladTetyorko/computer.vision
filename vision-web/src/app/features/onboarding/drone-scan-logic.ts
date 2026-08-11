@@ -2,7 +2,7 @@ import type { DiscoveredDevice, ScanRequest } from '../../core/api/models';
 
 /**
  * Pure logic behind the onboarding wizard's Connect step "Listen for drones" path
- * (docs/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only discovery scan, distinct from the
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only discovery scan, distinct from the
  * existing protocol-agnostic "Discover on network" method (ONVIF/mDNS/V4L2). Split out per this
  * app's own convention (`onboarding-logic.ts`'s doc comment): Angular-free, unit-tested without
  * HTTP, the router, or a component.
@@ -12,14 +12,14 @@ import type { DiscoveredDevice, ScanRequest } from '../../core/api/models';
  * how to prefill the register form from one) lives here.
  */
 
-/** The `DeviceDiscoveryPort#method()` key `MavlinkHeartbeatScanner` reports (docs/DRONE-INFRA-PLAN.md I-b). */
+/** The `DeviceDiscoveryPort#method()` key `MavlinkHeartbeatScanner` reports (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
 export const MAVLINK_DISCOVERY_METHOD = 'mavlink';
 
 /**
  * Builds `POST /api/discovery/scan`'s body restricted to the MAVLink heartbeat scanner alone
  * (`ScanRequest#methods`, already supported by the existing discovery contract — no backend/DTO
  * change needed for this path). `timeoutMs` is optional and omitted when not given: the scanner
- * self-time-boxes (docs/DRONE-INFRA-PLAN.md I-b — "scans take ~5-10s"), so the wizard doesn't need
+ * self-time-boxes (docs/plans/active/DRONE-INFRA-PLAN.md I-b — "scans take ~5-10s"), so the wizard doesn't need
  * its own timeout picker the way the general "Discover on network" method does.
  */
 export function buildMavlinkScanRequest(timeoutMs?: number): ScanRequest {
@@ -30,7 +30,7 @@ export function buildMavlinkScanRequest(timeoutMs?: number): ScanRequest {
 }
 
 /**
- * A vehicle already claimed by an existing device (docs/DRONE-INFRA-PLAN.md I-b's poka-yoke: "a
+ * A vehicle already claimed by an existing device (docs/plans/active/DRONE-INFRA-PLAN.md I-b's poka-yoke: "a
  * discovered vehicle already claimed by an existing device is labeled as such" — no accidental
  * duplicate assets). `MavlinkHeartbeatScanner` reports this via `details['claimed'] = "true"`
  * (`DiscoveredDevice.details` is a plain string map — no dedicated wire field for it).
@@ -52,11 +52,11 @@ export interface VehicleDetailChip {
 }
 
 /**
- * The results list's own detail chips (docs/DRONE-INFRA-PLAN.md I-b: "details chips (firmware,
+ * The results list's own detail chips (docs/plans/active/DRONE-INFRA-PLAN.md I-b: "details chips (firmware,
  * sysid)") — deliberately a fixed, narrow pair (never more than 2, each independently omitted when
  * its own key is absent) rather than a generic dump of every `details` entry the way the general
  * "Discover on network" table used to (now {@link detailsSummary} below, one plain-text cell —
- * docs/VISUAL-REFRESH-PLAN.md F5 rule 4 caps every row at one chip, and a card here already spends
+ * docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 caps every row at one chip, and a card here already spends
  * its one chip budget on nothing since this list's whole point is a simpler, drone-specific glance).
  */
 export function vehicleDetailChips(candidate: DiscoveredDevice): readonly VehicleDetailChip[] {
@@ -74,7 +74,7 @@ export function vehicleDetailChips(candidate: DiscoveredDevice): readonly Vehicl
 
 /**
  * A single, comma-joined "key: value" summary of a candidate's raw `details` map — the general
- * "Discover on network" table's own Details column (docs/VISUAL-REFRESH-PLAN.md F5 rule 4: "at most
+ * "Discover on network" table's own Details column (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4: "at most
  * one chip per row… classification is muted text, not a chip"). That column used to render one chip
  * per detail key, unbounded — exactly the pattern F5 bans — collapsed here to plain text the same
  * way `features/devices/devices.html`'s own Capabilities column already merges N capabilities into
@@ -96,7 +96,7 @@ export interface DronePrefill {
 }
 
 /**
- * Builds the register-form prefill for an unclaimed vehicle (docs/DRONE-INFRA-PLAN.md I-b:
+ * Builds the register-form prefill for an unclaimed vehicle (docs/plans/active/DRONE-INFRA-PLAN.md I-b:
  * "prefills the wizard's connect form from suggestedStream (protocol mavlink, uri, sysid option)
  * and suggestedCategory"). `protocol` falls back to `"mavlink"` (this scan only ever finds MAVLink
  * vehicles) when the candidate somehow carries none — mirrors `useCandidate`'s own

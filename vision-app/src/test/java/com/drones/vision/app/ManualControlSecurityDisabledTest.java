@@ -13,7 +13,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * docs/RC-CONTROL-PHASE1-PLAN.md §4: with {@code vision.auth.enabled} unset (its default {@code
+ * docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4: with {@code vision.auth.enabled} unset (its default {@code
  * false}), {@code /ws/manual-control} rides the same permit-all chain as everything else — the WS
  * handshake reaches {@code ManualControlWebSocketHandler}'s own handler mapping unauthenticated,
  * exactly like {@link AuthDisabledSecurityTest} proves for {@code /api/**}.

@@ -9,7 +9,7 @@ this platform in the field. Neither directory touches the Java/Python/Angular bu
 standalone (`sitl/` needs only docker, `edge/` is configuration to copy onto real hardware).
 
 Full context, sequencing, and the phases these implement (I-c and I-d) live in
-[`docs/DRONE-INFRA-PLAN.md`](../docs/DRONE-INFRA-PLAN.md) — read that first for how this fits
+[`docs/plans/active/DRONE-INFRA-PLAN.md`](../docs/plans/active/DRONE-INFRA-PLAN.md) — read that first for how this fits
 alongside the multi-vehicle gateway (I-a), plug-and-fly provisioning (I-b), and guarded command
 TX (I-e). Each subdirectory has its own README with prerequisites, quick-start, and what was
 verified vs. researched.

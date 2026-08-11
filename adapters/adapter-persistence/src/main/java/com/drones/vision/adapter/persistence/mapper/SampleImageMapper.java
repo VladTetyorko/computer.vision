@@ -8,7 +8,7 @@ import java.time.Instant;
 
 /**
  * {@link SampleImage} &harr; {@link SampleImageEntity} mapping, extracted from {@code
- * JpaSampleImageStore} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaSampleImageStore} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class SampleImageMapper {
 

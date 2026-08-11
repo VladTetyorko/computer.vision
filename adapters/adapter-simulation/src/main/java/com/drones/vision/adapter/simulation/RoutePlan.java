@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Parses a configurable flight route (docs/CYCLES-PLAN.md §7, CT-a) from {@link
+ * Parses a configurable flight route (docs/main/CYCLES-PLAN.md §7, CT-a) from {@link
  * SimulatedTelemetrySource}'s {@code route}/{@code routeMode} device options and computes a
  * position/heading/altitude at any distance traveled along it.
  *
@@ -17,7 +17,7 @@ import java.util.List;
  * checkpoints → end). Distance and bearing between waypoints use a local equirectangular
  * approximation — the same technique {@code SimulatedTelemetrySource}'s circular track already
  * uses — adequate because flight-plan segments are short enough that this never visibly diverges
- * from a true great-circle calculation (KISS, per docs/CYCLES-PLAN.md §7).
+ * from a true great-circle calculation (KISS, per docs/main/CYCLES-PLAN.md §7).
  *
  * <p><b>Lenient parsing:</b> {@link #parse} never throws. A missing/malformed route (fewer than 2
  * points, an unparseable number, a wrongly-shaped point) returns {@code null}, signaling the

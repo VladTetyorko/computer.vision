@@ -10,7 +10,7 @@ import com.drones.vision.application.map.LayerResolver;
 
 /**
  * Everything needed to create a {@code MANUAL} {@link com.drones.vision.domain.model.Mark} (a map
- * click) — docs/MAP-REWORK-PLAN.md §3, superseding docs/TACTICAL-MARKS-PLAN.md §2's shape.
+ * click) — docs/plans/done/MAP-REWORK-PLAN.md §3, superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape.
  *
  * <p>A top-level record rather than a type nested in {@link MarkService}, so callers can name their
  * input without importing the service, and so the wire DTO in {@code …api.dto} maps to one plain

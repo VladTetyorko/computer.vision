@@ -9,7 +9,7 @@ import java.net.URI;
 
 /**
  * {@link Device} &harr; {@link DeviceEntity} mapping, extracted from {@code JpaDeviceRepository}
- * (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class DeviceMapper {
 

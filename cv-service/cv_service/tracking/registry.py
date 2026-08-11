@@ -1,6 +1,6 @@
 """`TrackerRegistry`: two rosters of engine **factories**, probed at startup.
 
-`docs/TRACKING-PLAN.md` §5.A, `docs/TRACKING-ORCHESTRATION.md` §2.1.
+`docs/plans/done/TRACKING-PLAN.md` §5.A, `docs/extracts/TRACKING-ORCHESTRATION.md` §2.1.
 Deliberately shaped like `cv_service/inference/registry.py`'s `ModelRegistry`
 -- lazy construction, unknown ids logged once and served the default, the
 roster logged once at INFO so an operator can see what is routable without

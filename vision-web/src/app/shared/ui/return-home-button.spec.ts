@@ -6,7 +6,7 @@ import { ToastService } from '../../core/toast.service';
 import type { ReturnHomeResponse } from '../../core/api/models';
 
 /**
- * `ReturnHomeButton`'s confirm (docs/UI-STATE-PLAN.md §2.4) — `VisionApi`/`ToastService` are both
+ * `ReturnHomeButton`'s confirm (docs/plans/done/UI-STATE-PLAN.md §2.4) — `VisionApi`/`ToastService` are both
  * faked (no HTTP), mirroring `shared/ui/notification-bell.spec.ts`'s own "fake every transitive
  * dependency purely so the tree can mount" approach. `returnHomeToastFor`'s own outcome-mapping is
  * already covered by `return-home-button-logic.spec.ts`; this file only exercises the confirm's own
@@ -40,7 +40,7 @@ function dialogCard(fixture: { nativeElement: HTMLElement }): HTMLElement | null
   return fixture.nativeElement.querySelector('.dialog');
 }
 
-describe('ReturnHomeButton — confirm lifecycle (docs/UI-STATE-PLAN.md §2.4)', () => {
+describe('ReturnHomeButton — confirm lifecycle (docs/plans/done/UI-STATE-PLAN.md §2.4)', () => {
   it('opens the confirm on click, closes on Escape without sending the command', () => {
     const fixture = render();
     triggerBtn(fixture).click();

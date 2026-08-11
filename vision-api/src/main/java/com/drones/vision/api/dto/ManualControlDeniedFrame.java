@@ -4,7 +4,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 /**
  * Server&rarr;client {@code /ws/manual-control} frame refusing an {@code engage} request, or
- * flagging a malformed inbound frame (docs/RC-CONTROL-PHASE1-PLAN.md §4).
+ * flagging a malformed inbound frame (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4).
  *
  * @param type   always {@code "denied"}
  * @param code   one of the frozen codes {@code OUT_OF_SCOPE}/{@code NOT_COMMANDABLE}/{@code

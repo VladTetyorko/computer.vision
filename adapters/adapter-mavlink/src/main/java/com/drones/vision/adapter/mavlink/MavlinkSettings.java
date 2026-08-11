@@ -5,7 +5,7 @@ import java.util.Objects;
 
 /**
  * Framework-free, compact-constructor-validated tunables for this module
- * (docs/LAYERING-REFACTOR-PLAN.md §1.3's config-extraction rule, §2.2's {@code vision.mavlink}/
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3's config-extraction rule, §2.2's {@code vision.mavlink}/
  * {@code vision.rc} rows) — every value this module's classes today bake in as a {@code private
  * static final} constant (bind host, silence window, timeouts, transmit cadence/defaults, scanner
  * poll/timeout budgets), plus the four {@code vision.rc} values {@link MavlinkManualControlSender}
@@ -19,9 +19,9 @@ import java.util.Objects;
  * MavlinkSocketHub}/{@link MavlinkTelemetrySource}/{@link MavlinkFeedTransmitter}/{@link
  * MavlinkHeartbeatScanner}'s constructors is a later wave (F2) — only {@link
  * MavlinkManualControlSender} consumes {@link Rc} today, since deleting its env-var reads was this
- * wave's one hard requirement (docs/LAYERING-REFACTOR-PLAN.md §2.2's {@code vision.rc} row).
+ * wave's one hard requirement (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2's {@code vision.rc} row).
  *
- * <p><b>Public, not package-private (docs/LAYERING-REFACTOR-PLAN.md wave F2):</b> {@code vision-app}
+ * <p><b>Public, not package-private (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F2):</b> {@code vision-app}
  * (a different module/package) must be able to construct one of these — mapped from {@code
  * VisionMavlinkProperties}/{@code VisionRcProperties} — and name {@link Scan}/{@link Transmit}/
  * {@link Rc} to pass to this module's constructors, which a package-private outer record would make
@@ -124,7 +124,7 @@ public record MavlinkSettings(
 
     /**
      * {@link MavlinkManualControlSender}'s {@code RC_CHANNELS_OVERRIDE} cadence
-     * (docs/RC-CONTROL-PHASE1-PLAN.md §3) — replaces the {@code VISION_RC_OVERRIDE_HZ}/{@code
+     * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §3) — replaces the {@code VISION_RC_OVERRIDE_HZ}/{@code
      * VISION_RC_RELEASE_FRAMES} environment variables it used to read directly.
      */
     public record Rc(int overrideHz, int minOverrideHz, int maxOverrideHz, int releaseFrames) {

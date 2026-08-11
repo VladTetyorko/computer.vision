@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 import java.util.UUID;
 
 /**
- * One explicit access grant on a {@link MapLayer} (docs/MAP-REWORK-PLAN.md §2.1) — "give this user
+ * One explicit access grant on a {@link MapLayer} (docs/plans/done/MAP-REWORK-PLAN.md §2.1) — "give this user
  * or group this level of access", DELTA's "give N participants access to a layer" idea.
  *
  * <p>{@code subjectId} is deliberately a plain {@link UUID} rather than a typed {@code UserId}/

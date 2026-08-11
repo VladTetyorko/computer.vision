@@ -1,5 +1,5 @@
 <div class="page">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/06-devices.md: `page-head` and its own
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/06-devices.md: `page-head` and its own
        toolbar row are gone — search and the archived toggle project into `[pageBarFilters]`;
        `+ Add source`/`Refresh` into `[pageBarActions]`. Both subtitle sentences are deleted (see
        this file's own class doc comment for why). The `List | Grid` toggle that used to sit here is
@@ -37,7 +37,7 @@
     </button>
   </vision-page-bar>
 
-  <!-- ---- Devices: table + detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)
+  <!-- ---- Devices: table + detail panel (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md)
        `vision-two-pane` docks the detail beside the table ≥1200px and overlays it below that — see
        that component's own doc comment. Selection lives in `?sel=<deviceId>` via the facade. -->
   <vision-two-pane
@@ -58,7 +58,7 @@
           />
         }
       } @else {
-        <!-- Contained horizontal scroll (docs/NAV-IA-REDESIGN-PLAN.md §2.4's own "responsive by
+        <!-- Contained horizontal scroll (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4's own "responsive by
              default" bar) — `table { min-width }` below keeps every column, especially Name, from
              being squeezed illegible by the browser's auto table layout once the two-pane detail
              opens or the viewport narrows; this wrapper scrolls instead of the page. -->
@@ -76,7 +76,7 @@
           </thead>
           <tbody>
             @for (row of facade.warehouseRows(); track row.device.id) {
-              <!-- Wave 3 (docs/design/06-devices.md): the row is clickable + keyboard-operable
+              <!-- Wave 3 (docs/extracts/design/06-devices.md): the row is clickable + keyboard-operable
                    (F6 — selecting opens the detail panel, never navigates), same
                    tabindex/role="button"/Enter·Space idiom `features/assets/assets.html`'s own dense
                    list uses. The primary-action button and the kebab cell both stop propagation so
@@ -97,7 +97,7 @@
                   <div class="name">{{ row.device.name }}</div>
                 </td>
                 <td class="source">
-                  <!-- Protocol is classification, not state (docs/VISUAL-REFRESH-PLAN.md F5 rule 4
+                  <!-- Protocol is classification, not state (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4
                        — "category/protocol become muted plain text, not chips"). -->
                   <span class="muted">{{ row.device.protocol }}</span>
                   <span class="mono muted truncate" [title]="row.device.uri">{{ row.device.uri }}</span>
@@ -268,7 +268,7 @@
       }
     </section>
 
-    <!-- ---- Detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy: title row [`vision-two-pane`'s own
+    <!-- ---- Detail panel (docs/plans/done/VISUAL-REFRESH-PLAN.md F6 anatomy: title row [`vision-two-pane`'s own
          head] → status chip row → key-value fact grid → actions row — this panel has no further h3
          sections, there's nothing else on a device worth a subsection). What the row truncates — the
          full source URI, the device UUID (both with a copy button), the owning asset — plus the full
@@ -399,11 +399,11 @@
     }
   </vision-two-pane>
 
-  <!-- ---- Promote to asset (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix; renamed to
-       its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3; switched to the deviceIds contract per
-       docs/REALTIME-PLAN.md §4's backend follow-up batch — no more duplicate-device workaround). -->
+  <!-- ---- Promote to asset (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix; renamed to
+       its outcome per docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3; switched to the deviceIds contract per
+       docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch — no more duplicate-device workaround). -->
   <!-- Reached from any row's kebab or detail panel whose owner is unassigned — surgery for an
-       already-existing orphaned device (docs/UX-REWORK-PLAN.md §U-d); a brand-new source goes through
+       already-existing orphaned device (docs/plans/done/UX-REWORK-PLAN.md §U-d); a brand-new source goes through
        the onboarding wizard instead, which never produces an orphan in the first place. -->
   @if (createAssetFor(); as createDevice) {
     <section class="card create-asset-panel">

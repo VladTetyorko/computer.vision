@@ -3,7 +3,7 @@ package com.drones.vision.adapter.overlay;
 /**
  * Tunable layout/encode values for {@link Java2DOverlayRenderer} and its
  * collaborators, extracted from {@code private static final} literals per
- * {@code docs/LAYERING-REFACTOR-PLAN.md} §1.3/§2.2 (property prefix
+ * {@code docs/plans/active/LAYERING-REFACTOR-PLAN.md} §1.3/§2.2 (property prefix
  * {@code vision.overlay}). Framework-free — {@code vision-app} maps its own
  * {@code VisionOverlayProperties} (a later wave) onto this record and passes
  * it as one constructor argument, matching §1.3 rule 3.
@@ -71,7 +71,7 @@ public record OverlaySettings(
      * record existed — {@code jpeg-quality=0.8}, {@code min-stroke-width=2},
      * {@code stroke-divisor=200}, {@code min-font-size=12}, {@code
      * font-divisor=45}, {@code osd-background-alpha=160}, {@code
-     * osd-margin=4} (docs/LAYERING-REFACTOR-PLAN.md §2.2).
+     * osd-margin=4} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2).
      */
     public static OverlaySettings defaults() {
         return new OverlaySettings(0.8f, 2, 200, 12, 45, 160, 4);

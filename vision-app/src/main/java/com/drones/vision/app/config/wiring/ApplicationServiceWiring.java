@@ -45,14 +45,14 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Wires the {@code vision-application} service layer — the largest slice of what used to be one
- * 825-line {@code WiringConfiguration} (docs/LAYERING-REFACTOR-PLAN.md wave D): every {@code
+ * 825-line {@code WiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D): every {@code
  * DefaultXService}, the event/audit/live-update decorator chains, and the two {@code
  * ApplicationRunner}s. This is the only place in the codebase allowed to know about both the
  * application layer and concrete adapters/devsupport fallbacks for these ports — enforced by
  * {@code ArchitectureTest}.
  *
  * <p>Ports that don't yet have a real adapter are wired to in-process dev-support fallbacks so the
- * platform runs end to end from Phase 0 onward. The server-push data plane (docs/REALTIME-PLAN.md
+ * platform runs end to end from Phase 0 onward. The server-push data plane (docs/plans/done/REALTIME-PLAN.md
  * §4): {@link #liveUpdatePublisherPort} selects between the real {@code LiveUpdateRegistry}
  * (vision-api) and {@code NoopLiveUpdatePublisher} per {@link VisionLiveProperties#enabled()}
  * (default {@code true}), threaded unconditionally into {@link #usageTracker}/{@link
@@ -92,7 +92,7 @@ public class ApplicationServiceWiring {
 
     /**
      * Selects the {@link LiveUpdatePublisherPort} implementation per {@link
-     * VisionLiveProperties#enabled()} (docs/REALTIME-PLAN.md §4, item 4): {@code true} (the
+     * VisionLiveProperties#enabled()} (docs/plans/done/REALTIME-PLAN.md §4, item 4): {@code true} (the
      * default) wires the real {@code LiveUpdateRegistry} (vision-api, component-scanned); {@code
      * false} wires {@link NoopLiveUpdatePublisher}.
      */
@@ -106,7 +106,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The stateful, watchdog-supervised RC-relay session service (docs/RC-CONTROL-PHASE1-PLAN.md
+     * The stateful, watchdog-supervised RC-relay session service (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md
      * §2, R2) behind {@code ManualControlWebSocketHandler} (vision-api, component-scanned). {@code
      * manualControlPort} resolves to {@code TelemetryWiring#mavlinkManualControlSender}, the one
      * {@link ManualControlPort} bean in this context today.
@@ -154,7 +154,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Debounced detection events (docs/MVP2-PLAN.md §E, E-a). In-memory, unconditionally. When
+     * Debounced detection events (docs/plans/done/MVP2-PLAN.md §E, E-a). In-memory, unconditionally. When
      * {@link VisionLiveProperties#enabled()} is {@code true}, wrapped in {@link
      * LiveUpdateDetectionEventRepository}, which announces every {@code save} as a live update.
      */
@@ -170,7 +170,7 @@ public class ApplicationServiceWiring {
 
     /**
      * Evaluates live telemetry against the enabled {@code GeofenceZone} set and raises {@code
-     * GEOFENCE_BREACH} events on edge transitions (docs/OPS-CORE-PLAN.md §G) — threaded into
+     * GEOFENCE_BREACH} events on edge transitions (docs/plans/done/OPS-CORE-PLAN.md §G) — threaded into
      * {@link #usageTracker} below as a nullable-by-convention but always-real collaborator.
      */
     @Bean
@@ -181,7 +181,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * CRUD/list over geofence zones (docs/OPS-CORE-PLAN.md §G) behind {@code GeofenceController}
+     * CRUD/list over geofence zones (docs/plans/done/OPS-CORE-PLAN.md §G) behind {@code GeofenceController}
      * (vision-api, component-scanned) — a one-line assembly, mirroring {@link #replayService}'s
      * shape.
      */
@@ -209,7 +209,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The map's authorization model (docs/MAP-REWORK-PLAN.md §3) — pure, stateless, no ports, so one
+     * The map's authorization model (docs/plans/done/MAP-REWORK-PLAN.md §3) — pure, stateless, no ports, so one
      * shared singleton serves every map service and {@code CurrentUser#viewer()}'s consumers alike.
      */
     @Bean
@@ -219,7 +219,7 @@ public class ApplicationServiceWiring {
 
     /**
      * The shared layer-lookup/default-layer collaborator every map service composes
-     * (docs/MAP-REWORK-PLAN.md §3) — deliberately one bean rather than three instances, because its
+     * (docs/plans/done/MAP-REWORK-PLAN.md §3) — deliberately one bean rather than three instances, because its
      * {@code copLayerId()}/{@code defaultLayerFor()} are {@code synchronized} find-or-create methods
      * whose idempotence depends on a single instance guarding a single repository.
      */
@@ -230,7 +230,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Layer CRUD + grants (docs/MAP-REWORK-PLAN.md §3) behind {@code MapLayersController}
+     * Layer CRUD + grants (docs/plans/done/MAP-REWORK-PLAN.md §3) behind {@code MapLayersController}
      * (vision-api, component-scanned). Takes the mark/drawing repositories directly — not their
      * services — because the only thing it does with them is cascade a layer deletion, for which the
      * services' own viewer-gated methods would be both wrong (the cascade is already authorized) and
@@ -246,9 +246,9 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The tactical marks half of the common operational picture (docs/MAP-REWORK-PLAN.md §3) behind
+     * The tactical marks half of the common operational picture (docs/plans/done/MAP-REWORK-PLAN.md §3) behind
      * {@code MapMarksController} (vision-api, component-scanned) — reworked in place from the
-     * docs/TACTICAL-MARKS-PLAN.md M4 bean this replaces, which took no policy and no layer resolver.
+     * docs/plans/done/TACTICAL-MARKS-PLAN.md M4 bean this replaces, which took no policy and no layer resolver.
      * {@code usageTracker} still backs the cockpit "geolocate" action ({@code
      * UsageTracker#latestTelemetry}); {@code liveUpdatePublisherPort} is always a real bean, so every
      * mutation is announced on the {@code map} SSE topic unconditionally.
@@ -262,7 +262,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Lines/polygons/arrows/text on the map (docs/MAP-REWORK-PLAN.md §3) behind {@code
+     * Lines/polygons/arrows/text on the map (docs/plans/done/MAP-REWORK-PLAN.md §3) behind {@code
      * MapDrawingsController} (vision-api, component-scanned) — a one-line assembly, mirroring
      * {@link #markService}'s shape minus the telemetry collaborator a drawing has no use for.
      */
@@ -276,7 +276,7 @@ public class ApplicationServiceWiring {
 
     /**
      * Ensures the single COP layer exists before the first request can ask for it
-     * (docs/MAP-REWORK-PLAN.md §3's "ensured at startup").
+     * (docs/plans/done/MAP-REWORK-PLAN.md §3's "ensured at startup").
      *
      * <p>{@code copLayerId()} is a synchronized find-or-create and therefore already idempotent, so
      * this runner is not a correctness requirement — it is a timing one. Without it, the first
@@ -323,7 +323,7 @@ public class ApplicationServiceWiring {
      * where the conversion happens, once.
      *
      * <p>The tracking window pair comes from {@code vision.tracking.*} rather than {@code
-     * vision.application.*} (docs/TRACKING-ORCHESTRATION.md &sect;4.3): {@code stats-window-seconds}
+     * vision.application.*} (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.3): {@code stats-window-seconds}
      * is how far back {@code TrackingStatsWindow}'s duty-cycle counters reach — the number {@code GET
      * /api/streams/{id}/tracks} reports as {@code stats.windowSeconds} — and {@code
      * track-retention-seconds} is how long {@code TrackBook} keeps a track that stopped arriving.
@@ -336,7 +336,7 @@ public class ApplicationServiceWiring {
      * {@link TrackingWiring#streamStartTrackingSeed}. They seed <b>new</b> streams only, applied at
      * {@code DefaultStreamService#start} — the one point every start path passes through, so the
      * device, asset, simulation and demo-fleet paths cannot disagree about them
-     * (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
+     * (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
      */
     static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties,
                                                           VisionTrackingProperties tracking) {
@@ -376,7 +376,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Guarded flight command TX (docs/DRONE-INFRA-PLAN.md I-e, Stage 1 — "bring it home"): the
+     * Guarded flight command TX (docs/plans/active/DRONE-INFRA-PLAN.md I-e, Stage 1 — "bring it home"): the
      * service behind {@code FlightCommandController} (vision-api, component-scanned). {@code
      * flightCommandPort} resolves to {@code TelemetryWiring#mavlinkFlightCommander}, the one
      * {@link FlightCommandPort} bean in this context today.
@@ -389,8 +389,8 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Flight replay (docs/MVP2-PLAN.md §R, R-a/R-a2) plus its recording/clip-export read
-     * (docs/OPS-CORE-PLAN.md §R, R-b): the read side behind {@code UsageTimelineController}
+     * Flight replay (docs/plans/done/MVP2-PLAN.md §R, R-a/R-a2) plus its recording/clip-export read
+     * (docs/plans/done/OPS-CORE-PLAN.md §R, R-b): the read side behind {@code UsageTimelineController}
      * (vision-api, component-scanned).
      */
     @Bean
@@ -406,7 +406,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The fleet-wide "replay library" list (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8): the read side
+     * The fleet-wide "replay library" list (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8): the read side
      * behind {@code UsageTimelineController}'s {@code GET /api/usages} (vision-api,
      * component-scanned) — a sibling read to {@link #replayService}'s per-usage detail, kept as its
      * own bean/service since it needs a different collaborator ({@link AssetRepositoryPort}, to
@@ -420,7 +420,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The manager dashboard's single aggregated read (docs/MVP3-PLAN.md C-a): the read side behind
+     * The manager dashboard's single aggregated read (docs/plans/done/MVP3-PLAN.md C-a): the read side behind
      * {@code FleetController} (vision-api, component-scanned).
      */
     @Bean
@@ -434,7 +434,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * One asset's flight-utilization stats (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A): the read
+     * One asset's flight-utilization stats (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A): the read
      * side behind {@code AssetStatsController}'s {@code GET /api/assets/{id}/stats} (vision-api,
      * component-scanned).
      */
@@ -447,7 +447,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Test-before-save connection probe (docs/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
+     * Test-before-save connection probe (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
      * the read side behind {@code DeviceProbeController} (vision-api, component-scanned). Reuses
      * {@code videoSourceRegistry} (the exact same adapter-selection {@link StreamService} itself
      * streams through, from {@code VideoSourceWiring}) plus the {@code List<TelemetrySourcePort>}
@@ -460,7 +460,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * The one-call, zero-hardware simulation entry point (docs/CYCLES-PLAN.md §1b, §3, §5): turns
+     * The one-call, zero-hardware simulation entry point (docs/main/CYCLES-PLAN.md §1b, §3, §5): turns
      * a video file path into a registered {@code simulated}-category asset via {@link
      * #assetService}, reusing every rule it already enforces. {@code feedTransmitterRegistry}
      * (from {@code FeedTransmitterWiring}) backs {@code transport=rtsp}/{@code mjpeg} simulations.

@@ -83,4 +83,4 @@ UART.
   serial protocol/baud settings, mavesp8266 AP defaults.
 - [mavesp8266 — GitHub](https://github.com/ArduPilot/mavesp8266) — ArduPilot-maintained
   ESP8266 bridge firmware.
-- `docs/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing).
+- `docs/plans/active/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing).

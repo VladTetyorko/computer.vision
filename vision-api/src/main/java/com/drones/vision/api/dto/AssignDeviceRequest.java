@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.DeviceId;
 
 /**
- * Request body for {@code POST /api/assets/{id}/devices} (docs/CYCLES-PLAN.md §8's pinned
+ * Request body for {@code POST /api/assets/{id}/devices} (docs/main/CYCLES-PLAN.md §8's pinned
  * contract) — assigns an existing, unowned device to an asset.
  *
  * @param deviceId the device to assign, as a canonical UUID string

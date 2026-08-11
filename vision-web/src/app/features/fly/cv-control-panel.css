@@ -24,7 +24,7 @@
   margin-bottom: 0;
 }
 
-/* Prominence for the open-vocab model's own primary control (docs/CV-CONTROL-PLAN.md §E) — a soft
+/* Prominence for the open-vocab model's own primary control (docs/plans/done/CV-CONTROL-PLAN.md §E) — a soft
    accent card-within-the-drawer, reusing the existing `--accent`/`--accent-soft` tokens rather than
    inventing a new color for "this is the important one right now". */
 .cv-section.emphasized {
@@ -193,10 +193,10 @@
   margin-bottom: var(--space-8);
 }
 
-/* ---- Tracking (docs/TRACKING-PLAN.md, wave T7) --------------------------------------------------- */
+/* ---- Tracking (docs/plans/done/TRACKING-PLAN.md, wave T7) --------------------------------------------------- */
 
 /* The "Following #N — release" chip row — `.chip.accent` is the shared confirmed/selected chip
-   style everywhere else in the app (docs/STYLE-TOKENS-PLAN.md); this only owns the row layout. */
+   style everywhere else in the app (docs/plans/done/STYLE-TOKENS-PLAN.md); this only owns the row layout. */
 .tracking-lock-row {
     display: flex;
     align-items: center;
@@ -204,7 +204,7 @@
     margin-top: var(--space-8);
 }
 
-/* The flow strip (docs/TRACKING-ORCHESTRATION.md §7) — telemetry-shaped text, so `.mono` +
+/* The flow strip (docs/extracts/TRACKING-ORCHESTRATION.md §7) — telemetry-shaped text, so `.mono` +
    tabular-nums like every other ticking number in this app (frontend-style skill §8); a hairline
    card rather than plain text so it reads as one instrument reading, not a stray caption. */
 .tracking-flow-strip {

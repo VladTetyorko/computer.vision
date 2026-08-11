@@ -8,7 +8,7 @@ import type { ApiErrorBody } from './api/models';
  * so those are surfaced verbatim — the domain knows better than the UI why a URI was
  * rejected. This layer adds what the backend cannot know: that the server is unreachable,
  * that a stream is already running, that credentials were refused. "Request failed" is
- * never an acceptable output (docs/UX-DESIGN.md §7.1).
+ * never an acceptable output (docs/main/UX-DESIGN.md §7.1).
  */
 export function describeHttpError(error: unknown): string {
   if (!(error instanceof HttpErrorResponse)) {

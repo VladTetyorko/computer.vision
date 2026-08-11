@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * Review state of a {@link TrainingSample} (docs/CV-TRAINING-PLAN.md §1).
+ * Review state of a {@link TrainingSample} (docs/plans/done/CV-TRAINING-PLAN.md §1).
  */
 public enum SampleStatus {
 

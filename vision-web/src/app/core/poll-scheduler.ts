@@ -35,7 +35,7 @@ export interface ScheduleOptions {
    * caller is unaffected.
    *
    * **The one documented user** is `core/events/events-store.ts`'s global detection-events poll
-   * (docs/MVP2-PLAN.md §E, E-b): its whole reason to exist is noticing a newly-opened event *while
+   * (docs/plans/done/MVP2-PLAN.md §E, E-b): its whole reason to exist is noticing a newly-opened event *while
    * the tab is in the background*, so it can fire a browser `Notification` — a task that pauses
    * the instant the tab backgrounds could never detect anything to notify about, since by
    * definition it would only ever observe new data while already visible. Every other poller in
@@ -47,7 +47,7 @@ export interface ScheduleOptions {
 
 /**
  * One timer authority for every "poll while the tab is visible" consumer in the app
- * (docs/CYCLES-PLAN.md §9, CU-b item 3).
+ * (docs/main/CYCLES-PLAN.md §9, CU-b item 3).
  *
  * Before this, `FleetStore`, `TelemetryStore`, `FleetMapStore` (both its asset poll and its
  * per-streaming-asset telemetry trackers, one `setInterval` each) and `DetectionsStore` each ran
@@ -80,7 +80,7 @@ export class PollScheduler {
    * function — call it on `DestroyRef.onDestroy`/`reset()`/tracker teardown, exactly where a
    * `clearInterval(handle)` used to go.
    *
-   * **In-flight guard (docs/MVP2-PLAN.md §S, S-b).** If `callback` returns a `Promise`, this task
+   * **In-flight guard (docs/plans/done/MVP2-PLAN.md §S, S-b).** If `callback` returns a `Promise`, this task
    * is skipped on every due tick until that promise settles — a slow/hung backend then degrades
    * one task to stale data instead of firing an unbounded, ever-growing pile of overlapping HTTP
    * requests against it (every poller in this app calls a `VisionApi` method that returns a

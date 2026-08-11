@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.List;
 
 /**
- * Wire representation of a {@link FlightState} (docs/FC-INTEGRATIONS-PLAN.md F-b) — the
+ * Wire representation of a {@link FlightState} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — the
  * flight-controller-reported facts embedded in {@link TelemetrySampleResponse#flightState()},
  * mirrors the frozen wire contract field-for-field: {@code firmware, mode, armed, failsafe,
  * gpsFixType, satellites, hdop, rssiPercent, armingBlockers}. The frontend was already built

@@ -5,8 +5,8 @@ import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { DetectionSettingsFacade } from './detection-settings-facade';
 
 /**
- * `/settings/detection` — **Detection defaults** (docs/NAV-IA-REDESIGN-PLAN.md §2.5,
- * docs/design/11-settings.md, Wave 4's F7 split). Reached from exactly one door — the sidebar's
+ * `/settings/detection` — **Detection defaults** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5,
+ * docs/extracts/design/11-settings.md, Wave 4's F7 split). Reached from exactly one door — the sidebar's
  * Operate group (`features/hubs/nav-entries.ts`'s "Detection defaults" entry, already repointed here
  * ahead of this task) — the avatar menu never linked here and still doesn't, so this URL has exactly
  * one name too, same as `/settings`'s own half of the split.
@@ -27,7 +27,7 @@ import { DetectionSettingsFacade } from './detection-settings-facade';
  * `DetectionSettingsFacade`'s own doc comment for why its copy says "applies immediately" rather than
  * implying an unsaved/pending value.
  *
- * Dumb by convention (docs/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation/derivation lives in
+ * Dumb by convention (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation/derivation lives in
  * `DetectionSettingsFacade`, which this component injects exclusively.
  */
 @Component({

@@ -6,7 +6,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Response body for {@code GET /api/usages/{usageId}/timeline} (docs/MVP2-PLAN.md §R, R-a): a
+ * Response body for {@code GET /api/usages/{usageId}/timeline} (docs/plans/done/MVP2-PLAN.md §R, R-a): a
  * merged, time-ordered replay window over one usage.
  *
  * <p>No field here is ever absent — {@code from}/{@code to} are always resolved (defaulted

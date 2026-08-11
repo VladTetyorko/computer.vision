@@ -37,15 +37,15 @@ import java.util.stream.Collectors;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for capture/labeling (docs/CV-TRAINING-PLAN.md §3's frozen wire contract,
- * as delta'd by docs/CV-TRAINING-V2-PLAN.md §5) — the operator-in-the-loop half of the CV
+ * Driving REST adapter for capture/labeling (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire contract,
+ * as delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md §5) — the operator-in-the-loop half of the CV
  * model-improvement loop, over {@link LabelingService}.
  *
  * <p>Gated by {@code vision.training.enabled} (default {@code false}), same as {@link
  * DatasetController} — see that class's own javadoc.
  *
  * <p>The manual export/download routes this controller used to carry
- * (docs/CV-TRAINING-PLAN.md §3) are gone (docs/CV-TRAINING-V2-PLAN.md §A): dataset delivery to the
+ * (docs/plans/done/CV-TRAINING-PLAN.md §3) are gone (docs/plans/done/CV-TRAINING-V2-PLAN.md §A): dataset delivery to the
  * training host is now an implicit part of {@code POST /api/datasets/{id}/train} ({@link
  * TrainingJobController}), over a gRPC upload — see {@link LabelingService#uploadForTraining}. This
  * controller's constructor dropped its {@code DatasetService}/{@code DatasetExportPort}
@@ -94,7 +94,7 @@ public class LabelingController {
     /**
      * Captures a training sample from a finished usage's recorded replay at a specific instant —
      * the replay counterpart to {@link #capture}'s live "Add to dataset" gesture
-     * (docs/CV-TRAINING-V2-PLAN.md §4/§5), invoked from the Replay page rather than a stream picker.
+     * (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§5), invoked from the Replay page rather than a stream picker.
      *
      * @param usageId the finished usage to pull a recorded frame from, as a canonical UUID string
      * @param request the target dataset and the replay offset (seconds past the usage's own {@code

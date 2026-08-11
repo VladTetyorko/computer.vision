@@ -7,7 +7,7 @@ import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.MarkKind;
 
 /**
- * Request body for {@code POST /api/map/marks} (docs/MAP-REWORK-PLAN.md §4.2's frozen wire
+ * Request body for {@code POST /api/map/marks} (docs/plans/done/MAP-REWORK-PLAN.md §4.2's frozen wire
  * contract) — a manual mark, dropped by a map click.
  *
  * <p>{@code kind}/{@code affiliation} are matched case-insensitively against their enum names via

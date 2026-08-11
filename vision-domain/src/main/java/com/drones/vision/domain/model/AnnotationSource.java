@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 /**
  * Provenance of one {@link Annotation} — how its box/label came to be, not a behavior. Recorded so
  * the labeling loop can later tell where the operator agreed with the model versus where they had
- * to correct it (docs/CV-TRAINING-PLAN.md §E) — that correction is the improvement signal.
+ * to correct it (docs/plans/done/CV-TRAINING-PLAN.md §E) — that correction is the improvement signal.
  */
 public enum AnnotationSource {
 

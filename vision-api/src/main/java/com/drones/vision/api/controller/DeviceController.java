@@ -101,7 +101,7 @@ public class DeviceController {
     }
 
     /**
-     * Moves a device between {@code ACTIVE} and {@code DEACTIVATED} (docs/CYCLES-PLAN.md §8's
+     * Moves a device between {@code ACTIVE} and {@code DEACTIVATED} (docs/main/CYCLES-PLAN.md §8's
      * pinned contract).
      *
      * <p>Idempotent. {@code DEACTIVATED} on an already-{@code DELETED} device restores it —

@@ -25,28 +25,28 @@ import { MarksPanel } from './marks-panel';
 import { CockpitFacade } from './cockpit-facade';
 import { nextCollapseAction, type ToolRailPanelId } from './fly-logic';
 
-/** `UiStore`'s own storage key for this page's tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) —
+/** `UiStore`'s own storage key for this page's tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) —
  * one key for all seven drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`; the former
  * detection-`layers` drawer was folded into `cv` per direct user request — see `fly-logic.ts`'s own
- * `ToolRailPanelId` doc comment; the new `map` drawer, docs/MAP-REWORK-PLAN.md §5.2, is the map's
+ * `ToolRailPanelId` doc comment; the new `map` drawer, docs/plans/done/MAP-REWORK-PLAN.md §5.2, is the map's
  * layers + drawing tools and is unrelated to that old one). Unchanged key — `UiStore` round-trips
  * the same `localStorage` shape, so an already-open drawer survives across a reload. */
 const ACTIVE_PANEL_KEY = 'vision.fly.activePanel';
 
-/** This page's one mutually-exclusive **confirm-dialog** group (docs/UI-ARCHITECTURE-PLAN.md) —
+/** This page's one mutually-exclusive **confirm-dialog** group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) —
  * today just the Stop-stream confirm. Typed as a union (not a bare string), mirroring
  * `flight-command-panel.ts#CommandDialog`/`command.ts#CommandOverlay`'s identical precedent, even
  * with one member today. */
 type CockpitDialog = 'stop';
 
 /**
- * `/fly/:assetId` — the operator cockpit, addressable on its own now (docs/NAV-IA-REDESIGN-PLAN.md
- * §2.5 F12, docs/MVP3-PLAN.md §C-b's "one job, one page" persona: *flies ONE drone at a time;
+ * `/fly/:assetId` — the operator cockpit, addressable on its own now (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
+ * §2.5 F12, docs/plans/done/MVP3-PLAN.md §C-b's "one job, one page" persona: *flies ONE drone at a time;
  * everything else is noise*). Split out of the old combined `FlyPage`, which switched between this
  * and `DronePickerPage` internally with no URL change — see `drone-picker.ts`'s own doc comment for
  * the picker's half, and `cockpit-facade.ts`'s for exactly what moved/changed in the split.
  *
- * **Layered per docs/UI-ARCHITECTURE-PLAN.md (wave W1)**: every store/service injection, derived
+ * **Layered per docs/plans/done/UI-ARCHITECTURE-PLAN.md (wave W1)**: every store/service injection, derived
  * read-model, and HTTP-backed command lives in {@link CockpitFacade} (provided below, alongside
  * `TelemetryStore`/`DetectionsStore`/`WeatherStore` — one poller-set per route activation). This
  * component is left holding only:
@@ -68,7 +68,7 @@ type CockpitDialog = 'stop';
  * Every HTTP call, toast, silent-degrade path, poll cadence, and keyboard shortcut is unchanged from
  * the pre-split page — see {@link CockpitFacade}'s own doc comment for the full "what moved/changed" account.
  *
- * **`.surface-dark` enclave root** (docs/VISUAL-REFRESH-PLAN.md F3/W4): `cockpit.html`'s `.cockpit`
+ * **`.surface-dark` enclave root** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): `cockpit.html`'s `.cockpit`
  * div (every branch — loaded, empty, loading) carries `.surface-dark` — this whole route is the
  * video surface, with no separate light chrome around it (`fullBleed: true`, no page-bar), so the
  * enclave is the page's own root. See `cockpit.html`'s own comment at that class for the reasoning.
@@ -100,7 +100,7 @@ type CockpitDialog = 'stop';
   styleUrl: './cockpit.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `LivePage`/`AssetDetailPage`.
-  // `WeatherStore` (docs/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
+  // `WeatherStore` (docs/plans/done/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
   // comment for why it can't be a shared root singleton. `CockpitFacade` shares this same injector
   // so its own `inject(TelemetryStore)`/`inject(DetectionsStore)`/`inject(WeatherStore)` resolve to
   // these exact instances (see `CockpitFacade`'s own doc comment).
@@ -111,7 +111,7 @@ export class CockpitPage {
    * `:assetId` to match this exactly, mirroring `LivePage#deviceId`). */
   readonly assetId = input.required<string>();
 
-  /** `?watch=1` — hides Start/Stop (docs/MVP3-PLAN.md §C-b, C-c's own drill-down target). */
+  /** `?watch=1` — hides Start/Stop (docs/plans/done/MVP3-PLAN.md §C-b, C-c's own drill-down target). */
   readonly watch = input<string | undefined>(undefined);
 
   protected readonly facade = inject(CockpitFacade);
@@ -121,7 +121,7 @@ export class CockpitPage {
   // --- Overlay state — host-owned, see this class's own doc comment above ------------------------
 
   /**
-   * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/UI-REDESIGN-PLAN.md
+   * The right-edge icon tool-rail's one-open-at-a-time drawer manager (docs/plans/done/UI-REDESIGN-PLAN.md
    * Wave 2, D-D/F3). Frozen rail ids (`ToolRailPanelId`): `flight`, `rc`, `cv`, `detections`,
    * `marks`, `help`.
    */
@@ -134,7 +134,7 @@ export class CockpitPage {
   }
 
   constructor() {
-    // Route-driven asset selection (docs/NAV-IA-REDESIGN-PLAN.md F12) — reruns whenever `assetId()`
+    // Route-driven asset selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12) — reruns whenever `assetId()`
     // itself changes, including the very first activation; `CockpitFacade#selectAsset` no-ops if the
     // id is unchanged (mirrors `LivePage`'s identical `effect(() => this.facade.setDeviceId(...))`).
     effect(() => this.facade.selectAsset(this.assetId()));
@@ -143,7 +143,7 @@ export class CockpitPage {
     // `effect(() => this.facade.setDeviceId(...))`.
     effect(() => this.facade.setWatch(this.watch()));
 
-    // Tactical marks (docs/TACTICAL-MARKS-PLAN.md M5) — a captured map click always produces a
+    // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — a captured map click always produces a
     // `MarksStore.draft()` regardless of whether the `marks` drawer happens to be open at that
     // moment (the map inset and the drawer are independent siblings — see `MarksStore`'s own class
     // doc comment). Auto-reopening the drawer here is what keeps a draft from silently landing
@@ -162,7 +162,7 @@ export class CockpitPage {
     });
   }
 
-  // --- Stop, with a confirm step (docs/UX-REWORK-PLAN.md §U-a2 §2 poka-yoke rule 2) -------------
+  // --- Stop, with a confirm step (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 poka-yoke rule 2) -------------
   // The facade owns the actual command (`CockpitFacade#stop`); this page only owns the confirm gate.
 
   protected requestStop(): void {
@@ -178,12 +178,12 @@ export class CockpitPage {
     this.dialog.close('stop');
   }
 
-  // --- Keyboard shortcuts (docs/MVP3-PLAN.md §C-b) ------------------------------------------
+  // --- Keyboard shortcuts (docs/plans/done/MVP3-PLAN.md §C-b) ------------------------------------------
   // Mirrors `LivePage`'s own `M`-only listener (page-scoped `document` `keydown`, ignored while a
   // form field has focus or a modifier is held, added/removed with the route), extended to the
   // cockpit's fuller shortcut set. Kept on this component (not the facade) purely because
   // fullscreen needs `stageHost`, a `viewChild` only a component can declare. No `showPicker()`
-  // guard needed any more (docs/NAV-IA-REDESIGN-PLAN.md F12) — this page *is* the cockpit now, the
+  // guard needed any more (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12) — this page *is* the cockpit now, the
   // picker is a different route entirely and was never reachable from here.
 
   private handleKeydown(event: KeyboardEvent): void {
@@ -221,7 +221,7 @@ export class CockpitPage {
     event.preventDefault();
   }
 
-  /** Closest-thing-open-first (docs/UI-REDESIGN-PLAN.md D-D): any open tool-rail drawer, then the
+  /** Closest-thing-open-first (docs/plans/done/UI-REDESIGN-PLAN.md D-D): any open tool-rail drawer, then the
    * Stop-stream confirm, then the map inset; see `fly-logic.ts#nextCollapseAction`'s own doc comment
    * for the cascade order this delegates to. */
   protected collapseOverlays(): void {
@@ -243,7 +243,7 @@ export class CockpitPage {
     }
   }
 
-  // --- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) --------------------------------------
+  // --- Tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) --------------------------------------
   // Thin wrappers around `this.panels` typed to the frozen `ToolRailPanelId` set (`fly-logic.ts`) so
   // `cockpit.html`'s rail buttons/drawers can't typo an id past the compiler — `UiStore` itself stays
   // a generic `string` id (see that class's own doc comment).

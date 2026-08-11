@@ -41,7 +41,7 @@ import com.drones.vision.application.pipeline.FeedTransmitterRegistry;
  *
  * <p>Builds one {@link AssetSpec} with two devices — a video device (either {@code "file"}-protocol,
  * played back in-process; {@code "sim"}-protocol, the synthetic renderer, when {@link
- * SimulationSpec#videoPath()} is {@code null} (docs/CYCLES-PLAN.md §9, CU-a); or — for a wired
+ * SimulationSpec#videoPath()} is {@code null} (docs/main/CYCLES-PLAN.md §9, CU-a); or — for a wired
  * {@link SimulationTransport} ({@link SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG})
  * — pointing at a feed pushed out by whichever {@link FeedTransmitterPort} {@link #feedTransmitters}
  * selects for that transport) and a telemetry device — {@code "sim"}-protocol by default, or {@code
@@ -95,18 +95,18 @@ public final class DefaultSimulationService implements SimulationService {
     /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the RTSP transport. */
     private static final String FEED_PROTOCOL_RTSP = "rtsp";
 
-    /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the MJPEG transport (docs/CYCLES-PLAN.md §5). */
+    /** {@code FeedSpec}/{@code StreamDescriptor} protocol key for the MJPEG transport (docs/main/CYCLES-PLAN.md §5). */
     private static final String FEED_PROTOCOL_MJPEG = "mjpeg";
 
     /**
      * {@code StreamDescriptor} protocol key for the synthetic renderer — used both for the
-     * telemetry device (always) and, since docs/CYCLES-PLAN.md §9 (CU-a), the video device of a
+     * telemetry device (always) and, since docs/main/CYCLES-PLAN.md §9 (CU-a), the video device of a
      * spec with no {@link SimulationSpec#videoPath()}.
      */
     private static final String SIM_PROTOCOL = "sim";
 
     /**
-     * Display name a fully synthetic simulation (docs/CYCLES-PLAN.md §9, CU-a — {@link
+     * Display name a fully synthetic simulation (docs/main/CYCLES-PLAN.md §9, CU-a — {@link
      * SimulationSpec#videoPath()} {@code null}) falls back to when {@link
      * SimulationSpec#displayName()} is absent/blank, mirroring how a video-path spec falls back to
      * the file's own name.
@@ -193,7 +193,7 @@ public final class DefaultSimulationService implements SimulationService {
     /**
      * Tracks which transmitter/{@link FeedId} pair (if any) backs each MAVLink-transport asset's
      * telemetry feed — kept separate from {@link #feedByAsset} since video and telemetry transports
-     * are orthogonal (docs/DRONE-INFRA-PLAN.md's natural follow-up): an asset can have a tracked
+     * are orthogonal (docs/plans/active/DRONE-INFRA-PLAN.md's natural follow-up): an asset can have a tracked
      * video feed, a tracked telemetry feed, both, or neither, independently. Never consulted by
      * {@link #resumeAll} — see the class javadoc's "A MAVLink telemetry feed is never a candidate"
      * paragraph.
@@ -215,7 +215,7 @@ public final class DefaultSimulationService implements SimulationService {
 
     /**
      * Same as the 4-argument constructor, plus explicit MAVLink-transport fallback settings
-     * (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code
+     * (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction, {@code
      * vision.application.simulation.*}) instead of {@link SimulationServiceSettings#defaults()}.
      */
     public DefaultSimulationService(AssetService assetService, CategoryRepositoryPort categoryRepository,
@@ -497,7 +497,7 @@ public final class DefaultSimulationService implements SimulationService {
 
     /**
      * Derives a display name from the file name (extension stripped) when none was supplied, or —
-     * for a fully synthetic spec (docs/CYCLES-PLAN.md §9, CU-a — {@code videoPath == null}) —
+     * for a fully synthetic spec (docs/main/CYCLES-PLAN.md §9, CU-a — {@code videoPath == null}) —
      * {@link #SYNTHETIC_DISPLAY_NAME}, since there is no file name to derive one from.
      */
     private static String resolveDisplayName(String requested, Path videoPath) {
@@ -518,7 +518,7 @@ public final class DefaultSimulationService implements SimulationService {
     }
 
     /**
-     * Builds a {@code "sim"}-protocol video device (docs/CYCLES-PLAN.md §9, CU-a) for a spec with no
+     * Builds a {@code "sim"}-protocol video device (docs/main/CYCLES-PLAN.md §9, CU-a) for a spec with no
      * {@link SimulationSpec#videoPath()} — the same synthetic renderer {@link #telemetryDevice}
      * already points a telemetry device at ({@code SimulatedVideoSource}, adapter-simulation), so a
      * caller with zero hardware and no video file still gets a watchable, moving asset. Unlike
@@ -689,7 +689,7 @@ public final class DefaultSimulationService implements SimulationService {
     private static final String TELEMETRY_OPTION_ROUTE_MODE = "routeMode";
 
     /**
-     * Builds the telemetry device's options: a {@link SimulationSpec#plan()} (docs/CYCLES-PLAN.md
+     * Builds the telemetry device's options: a {@link SimulationSpec#plan()} (docs/main/CYCLES-PLAN.md
      * §7, CT-a) wins over the bare {@link SimulationSpec#latitude()}/{@link
      * SimulationSpec#longitude()} home-point fields whenever it carries a route — in that case the
      * route's first waypoint doubles as the {@code lat}/{@code lon} start position (so even a

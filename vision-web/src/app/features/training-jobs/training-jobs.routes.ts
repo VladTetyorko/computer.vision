@@ -1,8 +1,8 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/manage/training/jobs/:jobId` (docs/CV-TRAINING-PLAN.md Phase 2's last web wave) — own lazy
- * chunk, split per vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
+ * `/manage/training/jobs/:jobId` (docs/plans/done/CV-TRAINING-PLAN.md Phase 2's last web wave) — own lazy
+ * chunk, split per vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
  * `authGuard`-wrapped children group. **No ordering constraint against `LABELING_ROUTES`/
  * `MODELS_ROUTES`, unlike `MODELS_ROUTES`'s own note** — this path has 4 segments
  * (`manage`/`training`/`jobs`/`:jobId`), while every `LABELING_ROUTES` entry has either 3

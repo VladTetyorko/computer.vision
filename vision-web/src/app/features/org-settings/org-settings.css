@@ -1,7 +1,7 @@
 /* Reuses this app's management-page tokens wholesale (`.page`/`.card`/`.btn`/`.chip`/`.segmented`/
    `.empty`/`.label` from `src/styles.css`) — this stylesheet only owns the two form grids and the
    two list/tree layouts, all built to wrap rather than overflow on a narrow viewport. No new
-   colors (docs/UX-REWORK-PLAN.md §U-b item 2 — one accent, `--ok`/`--danger` for status only). */
+   colors (docs/plans/done/UX-REWORK-PLAN.md §U-b item 2 — one accent, `--ok`/`--danger` for status only). */
 :host {
   display: block;
 }
@@ -101,7 +101,7 @@
   font-size: 0.78rem;
 }
 
-/* One truncated text line, not a chip row (docs/VISUAL-REFRESH-PLAN.md F5 rule 4 — see
+/* One truncated text line, not a chip row (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — see
    `org-settings.html`'s own comment above its usage). */
 .org-row-groups {
   display: block;

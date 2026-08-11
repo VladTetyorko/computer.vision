@@ -3,7 +3,7 @@ package com.drones.vision.application.scope;
 import com.drones.vision.domain.model.User;
 
 /**
- * Resolves a {@link User}'s {@link VisibilityScope} (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1).
+ * Resolves a {@link User}'s {@link VisibilityScope} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1).
  * One interface, one implementation ({@link DefaultScopeResolver}), mirroring every other service
  * in this package.
  *

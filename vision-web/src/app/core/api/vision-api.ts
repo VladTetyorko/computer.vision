@@ -92,7 +92,7 @@ export class VisionApi {
 
   /**
    * `includeDeleted` defaults to `false` (today's behavior, unchanged) and is only added to the
-   * query string when `true` — the warehouse page's "show archived" toggle (docs/CYCLES-PLAN.md
+   * query string when `true` — the warehouse page's "show archived" toggle (docs/main/CYCLES-PLAN.md
    * §8's pinned contract).
    */
   listDevices(includeDeleted = false): Promise<Device[]> {
@@ -105,7 +105,7 @@ export class VisionApi {
     return firstValueFrom(this.http.post<Device>('/api/devices', request));
   }
 
-  // --- Devices — warehouse lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) --------------
+  // --- Devices — warehouse lifecycle (docs/main/CYCLES-PLAN.md §8's pinned contract) --------------
   // CW-a builds the server side of these in parallel with this UI; every call here degrades to
   // one `FleetStore.run()` toast (via its thin wrappers) if it 404s before CW-a ships.
 
@@ -147,7 +147,7 @@ export class VisionApi {
   }
 
   /**
-   * Recent detection results for a stream, newest first (docs/MVP1-PLAN.md §C8 bullet 3) — backs
+   * Recent detection results for a stream, newest first (docs/plans/done/MVP1-PLAN.md §C8 bullet 3) — backs
    * the Live page's chip strip + CV status dot. An unknown/never-detected stream returns an empty
    * array rather than 404ing, mirroring `usageTelemetry`'s precedent.
    */
@@ -159,7 +159,7 @@ export class VisionApi {
     );
   }
 
-  // --- Live per-stream CV control (docs/CV-CONTROL-PLAN.md §3-4's frozen contract) -----------
+  // --- Live per-stream CV control (docs/plans/done/CV-CONTROL-PLAN.md §3-4's frozen contract) -----------
   // `features/fly/cv-control-panel.ts` is the one UI caller (via `FleetStore`'s thin wrappers,
   // mirroring every other mutation in this class); no page talks to either URL directly.
 
@@ -190,7 +190,7 @@ export class VisionApi {
     return firstValueFrom(this.http.get<CvModelsResponse>('/api/cv/models'));
   }
 
-  // --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -------------
+  // --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -------------
   // `features/fly/cv-control-panel.ts` is the one UI caller of both (via `FleetStore`'s own thin
   // wrappers — see that class's doc comments for why neither is `run()`-wrapped). **Neither
   // endpoint had shipped server-side when this wave landed** — both simply reject until docs/
@@ -207,7 +207,7 @@ export class VisionApi {
   }
 
   /**
-   * One stream's live track book + duty-cycle stats (docs/TRACKING-PLAN.md §4.E) — feeds the Fly
+   * One stream's live track book + duty-cycle stats (docs/plans/done/TRACKING-PLAN.md §4.E) — feeds the Fly
    * cockpit's flow strip and its "Following #N" lock-confirmation chip (see
    * `StreamTracksResponse`'s own doc comment). Never errors server-side once T6 ships (an
    * unknown/stopped stream returns an empty track list) — see `FleetStore.getStreamTracks`'s own
@@ -226,7 +226,7 @@ export class VisionApi {
     return firstValueFrom(this.http.post<ScanResult>('/api/discovery/scan', request));
   }
 
-  // --- Device probe (docs/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) ---------
+  // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) ---------
   // "Test before save" (UX-DESIGN §5.1): connects to a candidate connection and decodes one frame
   // without registering anything. A probe that can't produce a frame is a 422 with a specific
   // message (`describeHttpError` already surfaces it) — the wizard never lets Register/Discover
@@ -237,7 +237,7 @@ export class VisionApi {
   }
 
   // --- Assets ----------------------------------------------------------------
-  // Backs the live telemetry OSD/map (docs/CYCLES-PLAN.md §2): a device's asset — and
+  // Backs the live telemetry OSD/map (docs/main/CYCLES-PLAN.md §2): a device's asset — and
   // that asset's open usage — is looked up on demand, not polled by a fleet-wide store.
 
   /** `includeDeleted` defaults to `false` (today's behavior, unchanged) — see `listDevices`. */
@@ -255,7 +255,7 @@ export class VisionApi {
   }
 
   /**
-   * The defined category reference list (`CategoryController`, docs/UI-REDESIGN-PLAN.md Wave 4) —
+   * The defined category reference list (`CategoryController`, docs/plans/done/UI-REDESIGN-PLAN.md Wave 4) —
    * every category the asset-creation UI's picker can offer, **including one with zero assets
    * currently in it** (unlike deriving categories from whatever's loaded, `core/fleet/category-logic.ts#deriveCategoryOptions`'s
    * pre-existing fallback approach). Never errors server-side; an empty install still returns the
@@ -267,7 +267,7 @@ export class VisionApi {
   }
 
   /**
-   * The manager page's KPI tile row (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
+   * The manager page's KPI tile row (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3) — lifetime
    * flight-utilization aggregates, distinct from {@link getAsset}'s `recentUsages` (a capped
    * recent list). 404 for an unknown asset, same as {@link getAsset}; the caller degrades its own
    * KPI row to "—" rather than blocking the page on failure (this page's existing enrichment-read
@@ -278,7 +278,7 @@ export class VisionApi {
   }
 
   /**
-   * Creates a new asset together with its device(s) in one call (docs/UX-QUICKWINS-PLAN.md QF-2 —
+   * Creates a new asset together with its device(s) in one call (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2 —
    * the Devices page's "Create asset from this device" quick action, the first UI call site for an
    * endpoint that already existed server-side). Returns the full detail view (201), same shape as
    * {@link getAsset}.
@@ -296,7 +296,7 @@ export class VisionApi {
   }
 
   /**
-   * The flight-replay window for one usage (docs/MVP2-PLAN.md §R, R-a/R-b — `UsageTimelineController`,
+   * The flight-replay window for one usage (docs/plans/done/MVP2-PLAN.md §R, R-a/R-b — `UsageTimelineController`,
    * windowed + downsampled, unlike `usageTelemetry` above). `fromMs`/`toMs`/`maxPoints` are each
    * only added to the query string when given — omitting all three (`features/replay/replay.ts`'s
    * only call site) lets the server default the window to the usage's own bounds and thin to its
@@ -324,7 +324,7 @@ export class VisionApi {
   }
 
   /**
-   * The fleet-wide flight list behind the replay library (docs/design/10-replay.md's frozen wire
+   * The fleet-wide flight list behind the replay library (docs/extracts/design/10-replay.md's frozen wire
    * contract, Wave 4) — `GET /api/usages`, newest first. `limit`/`assetId` are each only added to
    * the query string when given, the same convention as every other optional filter in this
    * class. `features/replay/replay-library-facade.ts` re-fetches with `assetId` set whenever the
@@ -343,7 +343,7 @@ export class VisionApi {
     return firstValueFrom(this.http.get<UsageSummary[]>('/api/usages', { params }));
   }
 
-  // --- Assets — warehouse lifecycle (docs/CYCLES-PLAN.md §8's pinned contract) ---------------
+  // --- Assets — warehouse lifecycle (docs/main/CYCLES-PLAN.md §8's pinned contract) ---------------
 
   updateAsset(id: string, edit: AssetEdit): Promise<AssetDetails> {
     return firstValueFrom(this.http.patch<AssetDetails>(`/api/assets/${encodeURIComponent(id)}`, edit));
@@ -379,14 +379,14 @@ export class VisionApi {
     );
   }
 
-  // --- Asset image (docs/UX-REWORK-PLAN.md §U-d) ----------------------------------------------
+  // --- Asset image (docs/plans/done/UX-REWORK-PLAN.md §U-d) ----------------------------------------------
   // A small binary sidecar on an asset, not a field in `AssetDetails`/`AssetSummary` itself — only
   // `hasImage` lives on those DTOs (see that field's own doc comment in `models.ts`). Upload is
   // always a client-downscaled JPEG (`features/onboarding/image-downscale.ts`), always ≤2MB per the
   // pinned contract — this class does no downscaling itself, it only moves already-prepared bytes.
 
   /**
-   * The path for an asset's photo (docs/UX-REWORK-PLAN.md §U-d) — not promise-returning, like
+   * The path for an asset's photo (docs/plans/done/UX-REWORK-PLAN.md §U-d) — not promise-returning, like
    * `snapshotUrl` above: meant to be bound straight to an `<img src>`, which fetches it itself and
    * degrades gracefully to its own `error` handler on a 404 (an asset with `hasImage` false/absent,
    * or one whose photo was never uploaded on a pre-§U-d backend).
@@ -410,7 +410,7 @@ export class VisionApi {
   }
 
   // --- Simulation ------------------------------------------------------------
-  // Backs the "Simulate a source" wizard (docs/CYCLES-PLAN.md §4): a video file path in, a
+  // Backs the "Simulate a source" wizard (docs/main/CYCLES-PLAN.md §4): a video file path in, a
   // registered, categorized, optionally already-streaming asset out.
 
   startSimulation(request: StartSimulationRequest): Promise<SimulationResponse> {
@@ -424,7 +424,7 @@ export class VisionApi {
     );
   }
 
-  // --- Detection events (docs/MVP2-PLAN.md §E, E-a/E-b) ----------------------------------------
+  // --- Detection events (docs/plans/done/MVP2-PLAN.md §E, E-a/E-b) ----------------------------------------
   // `EventController`'s polling contract: newest-first by `lastSeen`, `sinceMs` a nullable cursor
   // (see `core/events/events-store.ts` for how the poll loop advances it).
 
@@ -453,7 +453,7 @@ export class VisionApi {
     );
   }
 
-  // --- Fleet summary + stream snapshots (docs/MVP3-PLAN.md C-a/C-c) --------------------------
+  // --- Fleet summary + stream snapshots (docs/plans/done/MVP3-PLAN.md C-a/C-c) --------------------------
   // The Command dashboard's one aggregated poll: per-category counts + a capped per-asset
   // attention list, server-joined so the browser never assembles this from several endpoints.
 
@@ -473,12 +473,12 @@ export class VisionApi {
   }
 
   /**
-   * The path for a running stream's latest-frame JPEG thumbnail (docs/MVP3-PLAN.md C-a/C-c) — not
+   * The path for a running stream's latest-frame JPEG thumbnail (docs/plans/done/MVP3-PLAN.md C-a/C-c) — not
    * promise-returning like every other method here: meant to be bound straight to an `<img src>`,
    * which fetches it itself via the browser's own image loading, cache-busted with a query param on
    * each poll — there is nothing this class could usefully `await` on the caller's behalf.
    *
-   * **Currently unused** (docs/UX-REWORK-PLAN.md §U-c): its one consumer,
+   * **Currently unused** (docs/plans/done/UX-REWORK-PLAN.md §U-c): its one consumer,
    * `features/command/live-strip-tile.ts` (the Command dashboard's live-strip snapshot tiles), was
    * deleted when that section was removed from Command per the plan's own user-amendments
    * blockquote ("live strip: removed"). Left in place rather than deleted — a small, self-contained,
@@ -492,7 +492,7 @@ export class VisionApi {
     return `/api/streams/${encodeURIComponent(streamId)}/snapshot`;
   }
 
-  // --- Live updates (docs/REALTIME-PLAN.md §4, Phase R-c) ------------------------------------
+  // --- Live updates (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ------------------------------------
   // `GET /api/live` itself is not here — `core/live/live-store.ts` opens it as a raw `EventSource`
   // (not `HttpClient`, which cannot stream SSE), so this class's own "the only place the frontend
   // knows REST URLs" rule bends for exactly that one endpoint (see that file's own doc comment).
@@ -508,7 +508,7 @@ export class VisionApi {
     );
   }
 
-  // --- Geofencing (docs/OPS-CORE-PLAN.md §G's frozen wire contract) ---------------------------
+  // --- Geofencing (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract) ---------------------------
 
   /** Every known zone, server-sorted by name. */
   listGeofences(): Promise<GeofenceZone[]> {
@@ -532,7 +532,7 @@ export class VisionApi {
     return firstValueFrom(this.http.delete<void>(`/api/geofences/${encodeURIComponent(id)}`));
   }
 
-  // --- The map COP: layers, marks, drawings (docs/MAP-REWORK-PLAN.md §4.1's frozen contract) ---
+  // --- The map COP: layers, marks, drawings (docs/plans/done/MAP-REWORK-PLAN.md §4.1's frozen contract) ---
   // One base path, `/api/map`, replacing the whole `/api/marks` surface. Every list is already
   // scoped server-side (§3) — an out-of-scope id 404s rather than 403s, deliberately, so existence
   // is never revealed; a forbidden action on an object the caller *can* see is the only 403.
@@ -617,7 +617,7 @@ export class VisionApi {
     return firstValueFrom(this.http.delete<void>(`/api/map/drawings/${encodeURIComponent(id)}`));
   }
 
-  // --- Recording + clip export (docs/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------
+  // --- Recording + clip export (docs/plans/done/OPS-CORE-PLAN.md §R's frozen wire contract) ---------------
 
   /**
    * The recording/clip-export URL for one usage's flight window, if one is available. Always a
@@ -630,7 +630,7 @@ export class VisionApi {
     );
   }
 
-  // --- Guarded command TX (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
+  // --- Guarded command TX (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -------------
   // The RX-only doctrine's one deliberate exception, staged and guarded: a single command, sent
   // only after the caller's own mandatory confirm dialog (`shared/ui/return-home-button.ts`).
 
@@ -649,11 +649,11 @@ export class VisionApi {
     );
   }
 
-  // --- Guarded command TX — arm/disarm/mode select (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+  // --- Guarded command TX — arm/disarm/mode select (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
   // contract, extends Stage 1 above) -------------------------------------------------------------
 
   /**
-   * The vehicle's own capability matrix (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) —
+   * The vehicle's own capability matrix (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) —
    * drives what `features/fly/flight-command-panel.ts` renders for this asset: `commandable=false`
    * for a Betaflight/never-heard vehicle hides the whole panel, the identical refusal cases Stage
    * 1's `returnHome` already surfaces as a `409`, just told ahead of time here as data instead of
@@ -711,7 +711,7 @@ export class VisionApi {
     );
   }
 
-  // --- Guided drone onboarding (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -----------
+  // --- Guided drone onboarding (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract) -----------
 
   /**
    * This platform's own reachable LAN address(es) + the MAVLink heartbeat scanner's listen port —
@@ -725,7 +725,7 @@ export class VisionApi {
     return firstValueFrom(this.http.get<SystemNetworkResponse>('/api/system/network'));
   }
 
-  // --- Auth (docs/U-AUTH-PLAN.md wave 3's frozen contract) --------------------------------------
+  // --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract) --------------------------------------
   // Same-origin session cookie, not a bearer token — no `withCredentials` needed on any of the
   // three calls below (or anywhere else in this class): this app is always served same-origin with
   // vision-api, either the built SPA served off vision-app's own classpath in production, or
@@ -763,7 +763,7 @@ export class VisionApi {
     return firstValueFrom(this.http.post<void>('/api/auth/logout', {}));
   }
 
-  // --- Org settings: users, groups (docs/U-SCOPE-PLAN.md, U-e slice 2's frozen contract) --------
+  // --- Org settings: users, groups (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2's frozen contract) --------
   // ADMIN/MANAGER-only surfaces server-side; the UI additionally role-gates the route + nav link so
   // a pilot never reaches them (`core/org/org-guard.ts`). `core/org/org-store.ts` is the only caller.
 
@@ -791,7 +791,7 @@ export class VisionApi {
     return firstValueFrom(this.http.post<GroupSummary>('/api/groups', request));
   }
 
-  // --- Pilot assignment (docs/U-SCOPE-PLAN.md feature 2) ----------------------------------------
+  // --- Pilot assignment (docs/plans/done/U-SCOPE-PLAN.md feature 2) ----------------------------------------
   // `PUT`/`DELETE` are idempotent and answer `204`; a `403` means the asset is outside the acting
   // manager's scope, a `404` an unknown asset. `features/asset-detail/pilots-card.ts` handles both.
 
@@ -827,7 +827,7 @@ export class VisionApi {
   }
 
   /**
-   * The acting user's own recent activity, newest first (`GET /api/me/activity`, docs/U-SCOPE-PLAN.md
+   * The acting user's own recent activity, newest first (`GET /api/me/activity`, docs/plans/done/U-SCOPE-PLAN.md
    * feature 7). `limit` is only added to the query string when given (the backend defaults to 50,
    * caps at 500, floors at 1) — `features/activity/activity.ts` is the only caller.
    */
@@ -837,7 +837,7 @@ export class VisionApi {
     );
   }
 
-  // --- CV training / dataset improvement loop (docs/CV-TRAINING-PLAN.md §3-4's frozen wire
+  // --- CV training / dataset improvement loop (docs/plans/done/CV-TRAINING-PLAN.md §3-4's frozen wire
   // contract, Wave T5) — capture a live frame + its detections into a dataset, correct the boxes,
   // export a YOLO dataset. Every method below is gated server-side by `vision.training.enabled`
   // (default `false`) and 404s as a whole when it's off — `core/training/training-store.ts` is the
@@ -867,7 +867,7 @@ export class VisionApi {
   /**
    * Captures the stream's current **raw**, full-resolution frame + its latest detections into a
    * new `PENDING` sample (annotations pre-filled `source: 'MODEL'`) — the operator-tap "Add to
-   * dataset" gesture (docs/CV-TRAINING-PLAN.md §B). `404` when the dataset is unknown or the stream
+   * dataset" gesture (docs/plans/done/CV-TRAINING-PLAN.md §B). `404` when the dataset is unknown or the stream
    * has no frame published yet; `403` dataset/source asset outside scope.
    */
   captureSample(streamId: string, datasetId: string): Promise<TrainingSample> {
@@ -893,7 +893,7 @@ export class VisionApi {
   }
 
   /**
-   * The path for a sample's captured frame (docs/CV-TRAINING-PLAN.md §3/§D — the raw, pre-overlay,
+   * The path for a sample's captured frame (docs/plans/done/CV-TRAINING-PLAN.md §3/§D — the raw, pre-overlay,
    * full-resolution JPEG, not the dashboard's downscaled `snapshotUrl`) — not promise-returning, like
    * `assetImageUrl`/`snapshotUrl` above: meant to be bound straight to an `<img src>`, which fetches
    * it itself and degrades to its own `error` handler on a `404` (unknown sample or no image stored).
@@ -927,7 +927,7 @@ export class VisionApi {
     );
   }
 
-  // --- CV model registry (docs/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) — the dynamic registry
+  // --- CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) — the dynamic registry
   // behind `features/models/**`'s "list + promote" page. Gated by the same `vision.training.enabled`
   // flag as the dataset/labeling methods above; `ModelsFacade.refresh()` treats a 404 on
   // `registryModels()` the same way `TrainingStore.refresh()` treats one on `listDatasets()` — the
@@ -951,7 +951,7 @@ export class VisionApi {
     );
   }
 
-  // --- CV training-job flow (docs/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) — starting a
+  // --- CV training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) — starting a
   // fine-tune run against a dataset and polling its progress. Gated by the same
   // `vision.training.enabled` flag as every method above; `features/training-jobs/**` is the one
   // consumer.

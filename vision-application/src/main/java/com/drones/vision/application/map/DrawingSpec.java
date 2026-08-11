@@ -8,7 +8,7 @@ import com.drones.vision.domain.model.LayerId;
 import java.util.List;
 
 /**
- * Everything needed to create a {@link Drawing} (docs/MAP-REWORK-PLAN.md §3/§4.2).
+ * Everything needed to create a {@link Drawing} (docs/plans/done/MAP-REWORK-PLAN.md §3/§4.2).
  *
  * <p>Duplicates {@link Drawing}'s own per-{@link DrawKind} point-count invariant and its
  * TEXT-requires-a-label rule so a malformed request fails fast with a spec-specific message before

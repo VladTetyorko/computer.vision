@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * itself {@code file}.
  *
  * <p>This is the TX (transmit) half of the RX/TX doctrine in {@code
- * docs/CYCLES-PLAN.md} §0/§5: <b>simulation infrastructure, not egress</b> —
+ * docs/main/CYCLES-PLAN.md} §0/§5: <b>simulation infrastructure, not egress</b> —
  * unrelated to {@code StreamPublisherPort} (viewer-facing HLS egress).
  *
  * <h2>Recognized {@link FeedSpec#options()}</h2>

@@ -53,7 +53,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link MapMarksController} (docs/MAP-REWORK-PLAN.md §4.1/§4.2's frozen wire
+ * MockMvc tests for {@link MapMarksController} (docs/plans/done/MAP-REWORK-PLAN.md §4.1/§4.2's frozen wire
  * contract) — the replacement for the deleted {@code MarksControllerTest}, extended with the
  * verify/promote endpoints and the affiliation/layer/verification fields the rework adds.
  */

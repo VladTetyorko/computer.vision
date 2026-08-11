@@ -17,7 +17,7 @@ import type { IconName } from '../../ui/icon-registry';
 
 /**
  * Pure, Angular-free and Leaflet-free logic behind `shared/map/tactical-map/tactical-map.ts`
- * (docs/MAP-REWORK-PLAN.md §5.1) — the one map component that replaced `FleetMap` + `LiveMap`.
+ * (docs/plans/done/MAP-REWORK-PLAN.md §5.1) — the one map component that replaced `FleetMap` + `LiveMap`.
  * Everything the map decides *before* it touches a Leaflet object lives here: the display model,
  * affiliation/kind symbology class resolution, layer-visibility filtering (incl. its own
  * `localStorage` shape), legend counts, the drawing-vertex reducers, and the follow-mode marker
@@ -28,7 +28,7 @@ import type { IconName } from '../../ui/icon-registry';
  * `fleet-map.ts` and `live-map.ts`) and the zone tooltip label they each rebuilt inline.
  */
 
-// --- Display model (docs/MAP-REWORK-PLAN.md §2/§5.2) --------------------------------------------
+// --- Display model (docs/plans/done/MAP-REWORK-PLAN.md §2/§5.2) --------------------------------------------
 //
 // The **enums are the wire enums** — re-exported from `core/api/models.ts`, which this repo's own
 // convention makes the single place a wire shape is declared. The three *interfaces* below stay
@@ -86,10 +86,10 @@ export interface LayerView {
 /** §5.1's name for the detection-event overlay input — `DetectionEvent` as `selectEventMarkers` already yields it. */
 export type EventMarker = DetectionEvent;
 
-/** What a map click means right now (docs/MAP-REWORK-PLAN.md §5.1/§5.2). */
+/** What a map click means right now (docs/plans/done/MAP-REWORK-PLAN.md §5.1/§5.2). */
 export type InteractionMode = 'view' | 'mark' | 'draw-line' | 'draw-polygon' | 'draw-arrow' | 'draw-text';
 
-// --- Symbology (docs/MAP-REWORK-PLAN.md §5.1) --------------------------------------------------
+// --- Symbology (docs/plans/done/MAP-REWORK-PLAN.md §5.1) --------------------------------------------------
 //
 // Affiliation resolves to a *class*, never to a colour literal: the frame shape and colour both
 // live in `tactical-map.css` against this app's own semantic tokens (`--color-info`/`--color-danger`/
@@ -177,7 +177,7 @@ export function copLayerIds(layers: readonly LayerView[]): ReadonlySet<string> {
 
 // --- Client-side layer visibility (the eye toggles) --------------------------------------------
 //
-// Orthogonal to server-side visibility (docs/MAP-REWORK-PLAN.md §3 — what the viewer is *allowed*
+// Orthogonal to server-side visibility (docs/plans/done/MAP-REWORK-PLAN.md §3 — what the viewer is *allowed*
 // to see is resolved before the data ever reaches this component). These toggles only declutter the
 // operator's own screen, so they persist per browser, not per account.
 
@@ -310,7 +310,7 @@ export function builtinRows(
 
 // --- Legend counts ------------------------------------------------------------------------------
 
-/** The legend's asset-state row (docs/VISUAL-REFRESH-PLAN.md F7's original three counts, plus attention). */
+/** The legend's asset-state row (docs/plans/done/VISUAL-REFRESH-PLAN.md F7's original three counts, plus attention). */
 export interface AssetLegendCounts {
   readonly streaming: number;
   readonly offline: number;
@@ -364,7 +364,7 @@ export function markKindCounts(marks: readonly TacticalMark[]): Record<TacticalM
   return counts;
 }
 
-// --- Drawing drafts (docs/MAP-REWORK-PLAN.md §5.1 "drawing-vertex reducers") ---------------------
+// --- Drawing drafts (docs/plans/done/MAP-REWORK-PLAN.md §5.1 "drawing-vertex reducers") ---------------------
 
 /** A drawing being built by successive map clicks — also the `(drawingCompleted)` payload. */
 export interface DrawingDraft {
@@ -489,7 +489,7 @@ export interface FollowMarkerSpec {
 }
 
 /**
- * The single `FleetMarker` a follow-mode host passes as `[assets]` (docs/MAP-REWORK-PLAN.md §5.1:
+ * The single `FleetMarker` a follow-mode host passes as `[assets]` (docs/plans/done/MAP-REWORK-PLAN.md §5.1:
  * "0..n; 1 in follow mode"), built from the telemetry the old `LiveMap` used to read out of an
  * injected `TelemetryStore` itself. `undefined` — i.e. an empty `[assets]`, nothing plotted — when
  * there is no position at all, matching `LiveMap`'s own empty-trail branch.

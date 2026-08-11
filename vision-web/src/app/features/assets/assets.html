@@ -1,5 +1,5 @@
 <div class="page">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/04-assets.md: `page-head` + the boxed
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/04-assets.md: `page-head` + the boxed
        `.asset-toolbar` filter card are both gone — every filter/search control below now projects
        into the bar's `[pageBarFilters]` slot, the two actions into `[pageBarActions]`. The subtitle
        (and its `/devices` link, F7) is deleted outright rather than kept as a `hint`: "Assets" needs
@@ -16,7 +16,7 @@
       (ngModelChange)="facade.searchQuery.set($event)"
     />
 
-    <!-- ---- List/card view toggle (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md) —
+    <!-- ---- List/card view toggle (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md) —
          dense list is the default (F5); the card grid is an opt-in for the photo-first case, kept
          behind this toggle and persisted per user (`core/panel-state.ts`, not a bespoke scheme). -->
     <div class="segmented" pageBarFilters role="group" aria-label="View">
@@ -108,7 +108,7 @@
     </button>
   </vision-page-bar>
 
-  <!-- ---- Assets: list/card + detail panel (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md)
+  <!-- ---- Assets: list/card + detail panel (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md)
        `vision-two-pane` docks the detail beside the list ≥1200px and overlays it below that — see that
        component's own doc comment. Selection lives in `?sel=<assetId>` via the facade, never a bare
        component signal, so refresh/Back/sharing all keep working (F6). -->
@@ -139,7 +139,7 @@
           </vision-empty>
         }
       } @else if (viewMode() === 'list') {
-        <!-- ---- Dense list (default, docs/design/04-assets.md's own row spec, F5 column order —
+        <!-- ---- Dense list (default, docs/extracts/design/04-assets.md's own row spec, F5 column order —
              name · category · state · devices · kebab), ~36px rows — ~20 fit a 1080p screen without
              scrolling (the page's own acceptance bar). A real `<table>`, not a
              CSS-grid list: it's the same shape `features/devices/devices.html`'s table already
@@ -183,7 +183,7 @@
                 </td>
                 <td class="muted truncate">{{ row.asset.categoryName }}</td>
                 <td>
-                  <!-- Merged Lifecycle+Streaming (docs/VISUAL-REFRESH-PLAN.md F5 — one chip per row
+                  <!-- Merged Lifecycle+Streaming (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — one chip per row
                        max): archived/deactivated/live each get a colored chip; the ordinary
                        "active, not currently streaming" case is a dot + plain text instead of a
                        fourth chip. -->
@@ -229,7 +229,7 @@
         </table>
         </div>
       } @else {
-        <!-- ---- Cards (opt-in, docs/design/04-assets.md): the photo-first view — auto-fills so a
+        <!-- ---- Cards (opt-in, docs/extracts/design/04-assets.md): the photo-first view — auto-fills so a
              wide viewport gets more columns rather than one lonely card in a 1400px column (F4). -->
         <div class="asset-card-grid">
           @for (row of facade.assetRows(); track row.asset.assetId) {
@@ -295,7 +295,7 @@
       }
     </section>
 
-    <!-- ---- Detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy: title row [`vision-two-pane`'s own
+    <!-- ---- Detail panel (docs/plans/done/VISUAL-REFRESH-PLAN.md F6 anatomy: title row [`vision-two-pane`'s own
          head] → status chip row → key-value fact grid → h3 sections → actions row). Replaces the old
          per-row "Open" for triage — facts, the device list, and the full action set, including
          "Open full ›" for the deep work this panel has no room for. -->

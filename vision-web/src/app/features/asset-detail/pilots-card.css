@@ -1,5 +1,5 @@
 /* Reuses `.card`/`.btn`/`.empty` from `src/styles.css`. Mounted inside `AssetDetailPage`'s "Pilots"
-   `vision-side-panel` drawer (docs/UI-REDESIGN-PLAN.md Wave 3) — the drawer body already provides
+   `vision-side-panel` drawer (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3) — the drawer body already provides
    the card-like chrome/padding, so this component renders as a plain block, not a second nested
    card; before Wave 3 it was a `.detail-grid` grid child instead (`:host{display:contents}` plus a
    local `.card{grid-column:1/-1}` override so it could span the old two-column grid — both gone now

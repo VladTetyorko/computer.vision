@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * {@link FfmpegSettings#defaults()} must reproduce, byte-for-byte, every literal this record
- * replaced (docs/LAYERING-REFACTOR-PLAN.md §1.3's "behavior guardrail": a structural move, not a
+ * replaced (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3's "behavior guardrail": a structural move, not a
  * retune) — pinned here against the exact values the pre-split {@code FfmpegVideoSource}/{@code
  * RtspFeedTransmitter} constants held. Compact-constructor validation is also asserted directly,
  * matching this codebase's convention for every other validated domain/settings record.

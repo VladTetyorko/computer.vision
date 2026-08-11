@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * How a {@link Mark} came to exist (docs/TACTICAL-MARKS-PLAN.md §1).
+ * How a {@link Mark} came to exist (docs/plans/done/TACTICAL-MARKS-PLAN.md §1).
  */
 public enum MarkSource {
 

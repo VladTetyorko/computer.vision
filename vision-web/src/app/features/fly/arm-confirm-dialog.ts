@@ -4,7 +4,7 @@ import { armFinalConfirmLabel, armWarningMessage } from './flight-command-panel-
 export type ArmConfirmStage = 'warn' | 'final';
 
 /**
- * The Arm command's own confirm modal (docs/DRONE-INFRA-PLAN.md I-e Stage 2 — "arming spins
+ * The Arm command's own confirm modal (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — "arming spins
  * propellers, it is the highest-danger action in the app… materially higher-friction than RTL's").
  * A **separate component from `shared/ui/confirm-dialog.ts`**, not a variant/input flag on it — Arm
  * is the one action in this app that needs to feel categorically more dangerous than everything
@@ -19,7 +19,7 @@ export type ArmConfirmStage = 'warn' | 'final';
  *    reachable from both stages. A misclick/reflexive double-click on open lands on "Continue", not
  *    "Arm" — the dangerous button never occupies the position the plain confirm's own single button
  *    would.
- * 2. **Reserves the app's full, undiluted `--live` red** (docs/DRONE-INFRA-PLAN.md I-e Stage 2's own
+ * 2. **Reserves the app's full, undiluted `--live` red** (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's own
  *    styling instruction) — the same hue `features/fly/failsafe-banner.ts`'s genuine-failsafe strip
  *    uses, and nothing else in this app's button chrome does; every other danger-adjacent control
  *    (`btn.danger` — Stop stream, Bring home, Mode/Disarm's own `<vision-confirm-dialog>`) stays the

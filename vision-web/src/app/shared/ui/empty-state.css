@@ -8,7 +8,7 @@
    that is already full-width centres nothing. The icon's own `<svg>` then sat at the container's
    left edge while the heading and message were text-centred, so every empty state in the app
    rendered as two disconnected fragments ~850px apart, reading as broken markup rather than one
-   message (docs/design/16-training.md's "icon renders far left while the text is centered").
+   message (docs/extracts/design/16-training.md's "icon renders far left while the text is centered").
    Centring the *inner* svg via flex is independent of how wide the host happens to be. */
 .empty-icon {
   display: flex;

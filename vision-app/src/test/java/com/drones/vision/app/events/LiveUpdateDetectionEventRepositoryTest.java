@@ -18,7 +18,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * Pure unit test for {@link LiveUpdateDetectionEventRepository} (docs/REALTIME-PLAN.md §4,
+ * Pure unit test for {@link LiveUpdateDetectionEventRepository} (docs/plans/done/REALTIME-PLAN.md §4,
  * extended for the {@code detection-events} live topic) — no Spring context, mirroring {@link
  * LiveUpdateAuditTrailTest}'s own shape.
  */

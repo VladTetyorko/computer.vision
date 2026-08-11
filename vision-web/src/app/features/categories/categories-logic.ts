@@ -1,7 +1,7 @@
 import type { Category, CategoryCounts } from '../../core/api/models';
 
 /**
- * Pure, Angular-free logic behind `CategoriesPage` (`/manage/categories`, docs/UI-REDESIGN-PLAN.md
+ * Pure, Angular-free logic behind `CategoriesPage` (`/manage/categories`, docs/plans/done/UI-REDESIGN-PLAN.md
  * Wave 4 — **SPLIT**: the grouped/counted view below is functional, reusing `CategoryController`
  * (`GET /api/categories`, `VisionApi.listCategories`) joined against `FleetController`'s per-category
  * counts (`GET /api/fleet/summary`'s own `categories: CategoryCounts[]`); category create/edit is not

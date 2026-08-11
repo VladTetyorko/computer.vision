@@ -7,7 +7,7 @@ import java.time.Instant;
 
 /**
  * Response body element for {@code GET /api/events}/{@code GET /api/streams/{streamId}/events}
- * (docs/MVP2-PLAN.md §E, E-a) — one debounced detection event.
+ * (docs/plans/done/MVP2-PLAN.md §E, E-a) — one debounced detection event.
  *
  * @param id             the event's id, as a canonical UUID string
  * @param streamId       the stream this event was observed on, as a canonical UUID string

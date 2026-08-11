@@ -15,8 +15,8 @@ import com.drones.vision.application.scope.AccessDeniedException;
 /**
  * The shared operational picture: geolocated tactical {@link Mark}s, created two ways (a map click,
  * or a cockpit "geolocate" projected from a drone's pose), annotated, verified, promoted and
- * cleared/deleted (docs/MAP-REWORK-PLAN.md §3, reworked in place — superseding
- * docs/TACTICAL-MARKS-PLAN.md §2's shape and its own "list() takes no scope" divergence, see below).
+ * cleared/deleted (docs/plans/done/MAP-REWORK-PLAN.md §3, reworked in place — superseding
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape and its own "list() takes no scope" divergence, see below).
  *
  * <p>One interface, one implementation ({@link DefaultMarkService}). Visibility and every gate here
  * now resolve from a {@link Viewer} — identity plus group memberships — through {@link
@@ -24,7 +24,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
  * no longer separate method parameters (superseded, see below).
  *
  * <h2>Visibility: layer-scoped, not deployment-wide any more</h2>
- * docs/TACTICAL-MARKS-PLAN.md's shipped {@code list()} took <b>no scope at all</b> — a deliberate
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md's shipped {@code list()} took <b>no scope at all</b> — a deliberate
  * workaround for a trap in {@code VisibilityScope}: a PILOT's {@code ASSIGNED_ASSETS} scope carries
  * no group information, so group-filtering hid every mark from the primary FPV-operator persona,
  * including their own. This rework fixes that properly instead of routing around it: every mark now
@@ -33,7 +33,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
  * membership directly, never from {@code VisibilityScope} (see {@link MapAccessPolicy}'s own javadoc
  * for exactly why). A PILOT reaches the COP layer (everyone can view it) and their own team's layer
  * (group membership grants {@code CONTRIBUTE}) without the old trap resurfacing. This supersedes
- * docs/TACTICAL-MARKS-PLAN.md §2's "deployment-wide, no scope parameter at all" design note in full.
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md §2's "deployment-wide, no scope parameter at all" design note in full.
  *
  * <h2>Authorization</h2>
  * Creating/geolocating a mark requires {@link MapAccessPolicy#canContribute} on the resolved layer

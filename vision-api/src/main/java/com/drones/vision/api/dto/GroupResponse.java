@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.Group;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
- * An org-chart group on the wire (docs/U-SCOPE-PLAN.md, U-e slice 2) — the element type of {@code
+ * An org-chart group on the wire (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — the element type of {@code
  * GET /api/groups} and the body of {@code POST /api/groups}.
  *
  * @param id            the group id, as a canonical UUID string

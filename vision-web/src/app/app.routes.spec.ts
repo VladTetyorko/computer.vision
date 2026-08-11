@@ -28,7 +28,7 @@ function findRouteByPath(list: Routes, target: string, prefix = ''): Route | und
 }
 
 /**
- * The Wave 1 "no dead link" regression test (docs/UI-REDESIGN-PLAN.md Wave 1's own Verify bullet:
+ * The Wave 1 "no dead link" regression test (docs/plans/done/UI-REDESIGN-PLAN.md Wave 1's own Verify bullet:
  * "a route-resolution vitest asserting every URL in the F4 table resolves (existing + hubs)").
  * Walks the **real** `routes` array `app.routes.ts` exports (via `route-audit-logic.ts`'s pure
  * flattener — see that file's own doc comment) and checks every URL either table below actually
@@ -46,7 +46,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it("/operate, /monitor, /manage no longer have their own page — each redirects to its mode's primaryRoute (docs/design/19-hubs.md, docs/NAV-IA-REDESIGN-PLAN.md F1/F10)", () => {
+  it("/operate, /monitor, /manage no longer have their own page — each redirects to its mode's primaryRoute (docs/extracts/design/19-hubs.md, docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1/F10)", () => {
     expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual(['/fly', '/command', '/assets']);
     for (const mode of NAV_MODES) {
       const hubPath = `/${mode.id}`;
@@ -86,7 +86,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it('/monitor/replay resolves to the ComingSoon scaffold, not ReplayPage (docs/NAV-IA-REDESIGN-PLAN.md F8 — it no longer redirects through the bare /replay route)', async () => {
+  it('/monitor/replay resolves to the ComingSoon scaffold, not ReplayPage (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F8 — it no longer redirects through the bare /replay route)', async () => {
     const route = findRouteByPath(routes, 'monitor/replay');
     expect(route?.loadComponent, '/monitor/replay').toBeDefined();
     const component = (await route!.loadComponent!()) as { name: string };
@@ -99,7 +99,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     expect(routeExists(flat, '/assets/probe-1')).toBe(true);
   });
 
-  it('/warehouse redirects to /assets (docs/UX-SIMPLIFY-REVIEW.md F2 — Warehouse deleted, not just unrouted); /devices still resolves to the raw device page, off the primary nav but not removed', () => {
+  it('/warehouse redirects to /assets (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2 — Warehouse deleted, not just unrouted); /devices still resolves to the raw device page, off the primary nav but not removed', () => {
     expect(routeExists(flat, '/warehouse')).toBe(true);
     expect(flattenRoutes(routes).find((route) => route.path === '/warehouse')?.kind).toBe('redirect');
     expect(routeExists(flat, '/devices')).toBe(true);
@@ -112,7 +112,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     }
   });
 
-  it('every Wave 4 functional/split page resolves at its pinned path (docs/UI-REDESIGN-PLAN.md Wave 4)', () => {
+  it('every Wave 4 functional/split page resolves at its pinned path (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4)', () => {
     const wave4Pages = ['/operate/preflight', '/monitor/alerts', '/manage/categories', '/manage/reports', '/manage/roster'];
     for (const path of wave4Pages) {
       expect(routeExists(flat, path), path).toBe(true);

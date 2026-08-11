@@ -11,7 +11,7 @@ import com.drones.vision.api.support.LocalNetworkAddresses;
 
 /**
  * Driving REST adapter for host-environment introspection the guided drone-onboarding wizard
- * needs (docs/DRONE-INFRA-PLAN.md I-g).
+ * needs (docs/plans/active/DRONE-INFRA-PLAN.md I-g).
  *
  * <p><b>Why this lives in vision-api, not vision-application</b>: {@code GET
  * /api/system/network} answers "what network interfaces does the machine this JVM happens to be
@@ -65,7 +65,7 @@ public class SystemNetworkController {
      * Reports this host's site-local IPv4 addresses plus the MAVLink heartbeat port, so the
      * onboarding wizard can pre-fill copy-paste FC/companion-computer configuration with this
      * app's own reachable address and port instead of asking the operator to type them in
-     * (docs/DRONE-INFRA-PLAN.md I-g's frozen wire contract).
+     * (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract).
      *
      * <p>{@code mavlinkPort} is always the exact value {@code MavlinkHeartbeatScanner} (wired in
      * {@code vision-app}'s {@code DiscoveryWiringConfiguration}) listens on — both this

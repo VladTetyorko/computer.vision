@@ -27,11 +27,11 @@ import com.drones.vision.application.scope.VisibilityScope;
  *
  * <h2>Scope gate</h2>
  * {@link #create}/{@link #delete} require {@link VisibilityScope#canManageOrg()} — any
- * manager/admin, not further restricted to the dataset's own owning group (docs/CV-TRAINING-PLAN.md
+ * manager/admin, not further restricted to the dataset's own owning group (docs/plans/done/CV-TRAINING-PLAN.md
  * Open Questions §4: "create/delete = canManageOrg"). {@link #get} 403s (not the usual hiding 404)
  * when the dataset exists but is outside a {@link VisibilityScope.Kind#GROUPS} scope's visible
  * subtree, per this feature's own frozen contract. Every denial here — create, delete, and get
- * alike — is audited ({@code DENIED:out of scope}), per docs/CV-TRAINING-PLAN.md §2's own "Scope
+ * alike — is audited ({@code DENIED:out of scope}), per docs/plans/done/CV-TRAINING-PLAN.md §2's own "Scope
  * gate" paragraph ("dataset ops ... + audit DENIED"), reusing {@code
  * DefaultFlightCommandService}'s "audit every attempt, success or refusal" idiom. {@link #list}
  * never throws (it silently filters), so it has nothing to audit.

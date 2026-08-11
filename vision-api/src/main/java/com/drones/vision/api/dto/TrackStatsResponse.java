@@ -8,13 +8,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * The {@code "stats"} object of {@code GET /api/streams/{streamId}/tracks} (docs/TRACKING-PLAN.md
+ * The {@code "stats"} object of {@code GET /api/streams/{streamId}/tracks} (docs/plans/done/TRACKING-PLAN.md
  * &sect;4.E) — the duty cycle made visible: how often the detector actually ran against how often
  * the tracker did, what that cost, and what the book currently holds.
  *
  * <p>Computed Java-side by {@code TrackingStatsWindow} (vision-application) from responses that
  * already arrive — no new wire field and no read-model concern inside cv-service (invariant P3,
- * docs/TRACKING-ORCHESTRATION.md &sect;5.4). It is what backs the Fly cockpit's flow strip, so the
+ * docs/extracts/TRACKING-ORCHESTRATION.md &sect;5.4). It is what backs the Fly cockpit's flow strip, so the
  * plan's core claim is read off a screen instead of {@code htop} on a remote inference box.
  *
  * <p>No {@code @JsonInclude(NON_NULL)}, and that is load-bearing: <b>this object is either wholly
@@ -28,7 +28,7 @@ import java.util.Map;
  *
  * @param mode               the stream's currently configured tracking mode
  * @param engineId           the engine <b>actually serving</b> this stream, which is not necessarily
- *                           the one requested (docs/TRACKING-PLAN.md R11); {@code ""} when none has
+ *                           the one requested (docs/plans/done/TRACKING-PLAN.md R11); {@code ""} when none has
  *                           reported yet
  * @param windowSeconds      how far back the counters reach ({@code vision.tracking.stats-window-seconds})
  * @param detectorPasses     frames in the window that spent a full detector pass

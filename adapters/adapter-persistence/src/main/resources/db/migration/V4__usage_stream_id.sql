@@ -1,4 +1,4 @@
--- docs/MVP2-PLAN.md P-b's replay follow-up, R-a2: AssetUsage (vision-domain) gained a nullable
+-- docs/plans/done/MVP2-PLAN.md P-b's replay follow-up, R-a2: AssetUsage (vision-domain) gained a nullable
 -- streamId, recorded once at usage-open time (UsageTracker, vision-application) so a finished
 -- flight's replay timeline can join its detections (DetectionRepositoryPort, keyed by stream_id)
 -- back to the usage they belong to, instead of every usage's detections[] being unconditionally

@@ -4,14 +4,14 @@ import type { BoxesMode } from '../../shared/player/player';
 
 /**
  * Re-exported from `core/telemetry/telemetry-logic.ts`, which is now its canonical home
- * (docs/REALTIME-PLAN.md §4 Phase R-c follow-up — see that function's own doc comment for why:
+ * (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c follow-up — see that function's own doc comment for why:
  * `features/asset-detail/asset-detail.ts` needed the identical guard). Kept here too so this page's
  * own existing `trackingIdChanged` import site keeps working verbatim.
  */
 export { trackingIdChanged } from '../../core/telemetry/telemetry-logic';
 
 /**
- * Pure, Angular-free logic behind `FlyPage` (docs/MVP3-PLAN.md §C-b) — split out so picker
+ * Pure, Angular-free logic behind `FlyPage` (docs/plans/done/MVP3-PLAN.md §C-b) — split out so picker
  * ordering, remembered/requested-asset resolution, the "Replay last flight" link, watch-mode
  * parsing, and the keyboard boxes-cycle are unit-testable without HTTP, the router, or `document`,
  * mirroring every other page's own `*-logic.ts` split (`core/map/map-logic.ts`,
@@ -34,8 +34,8 @@ export function sortAssetsForPicker(assets: readonly AssetSummary[]): readonly A
 }
 
 /**
- * The one auto-redirect `/fly` performs on its own (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12,
- * docs/design/01-fly.md — "skip the picker when it has nothing to ask"): the operator's remembered
+ * The one auto-redirect `/fly` performs on its own (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12,
+ * docs/extracts/design/01-fly.md — "skip the picker when it has nothing to ask"): the operator's remembered
  * drone (`SettingsStore.flyAssetId`) only counts as "nothing to ask" while it is still actually
  * **streaming** — merely still existing (the pre-split `resolveActiveAssetId`'s own bar, back when
  * one component quietly switched between picker/cockpit with no URL change at all) is not enough. A
@@ -70,7 +70,7 @@ export function latestFinishedUsage(usages: readonly AssetUsage[]): AssetUsage |
 }
 
 /**
- * `?watch=1` exactly (docs/MVP3-PLAN.md §C-b — "Watch mode `?watch=1`: hides Start/Stop"). Only
+ * `?watch=1` exactly (docs/plans/done/MVP3-PLAN.md §C-b — "Watch mode `?watch=1`: hides Start/Stop"). Only
  * this literal value counts, not any other truthy-looking string — a deliberate, narrow contract
  * for a query param a future cycle (C-c) constructs itself, not one a person is expected to type.
  */
@@ -89,7 +89,7 @@ export function cycleBoxesMode(current: BoxesMode): BoxesMode {
 /** How many rows the events ticker overlay shows at once — glanceable, not a full feed (see the Wall rail for that). */
 export const TICKER_MAX_EVENTS = 4;
 
-// --- Tool-rail / drawer wiring (docs/UI-REDESIGN-PLAN.md Wave 2, D-D) ---------------------------
+// --- Tool-rail / drawer wiring (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) ---------------------------
 // The right-edge icon tool-rail replaces the split `mapVisible`/`detectionsStripOpen`/`cvPanelOpen`/
 // `shortcutsOpen` open-flags with a single per-page `PanelState` (`core/panel-state.ts`). The ids
 // below are the frozen set (D-D) — typed here (not just inline string literals in `fly.html`/
@@ -97,10 +97,10 @@ export const TICKER_MAX_EVENTS = 4;
 // compile error, not a silently-dead button; `PanelState` itself stays a generic `string` id (it has
 // no reason to know this page's specific ids) per its own doc comment.
 
-/** The tool-rail's frozen ids (docs/UI-REDESIGN-PLAN.md D-D; `rc` added by docs/RC-CONTROL-PLAN.md
- * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/TACTICAL-MARKS-PLAN.md M5
+/** The tool-rail's frozen ids (docs/plans/done/UI-REDESIGN-PLAN.md D-D; `rc` added by docs/plans/active/RC-CONTROL-PLAN.md
+ * Phase 0 — the read-only RC transmitter monitor; `marks` added by docs/plans/done/TACTICAL-MARKS-PLAN.md M5
  * — the shared tactical-marks operational picture). This union's own declaration order is no longer
- * the rail's visual order: docs/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
+ * the rail's visual order: docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 groups the rail by job — Control (flight,
  * rc), Vision (cv, detections), Situational (marks), Help (pinned last, separated) — see fly.html's
  * own comment above `.grid-rail` for the full grouping. Every id/gate/behavior below is unchanged;
  * only where each button sits in the rail moved. **`layers` was removed** (per direct user request)
@@ -109,7 +109,7 @@ export const TICKER_MAX_EVENTS = 4;
 export type ToolRailPanelId = 'flight' | 'rc' | 'cv' | 'detections' | 'marks' | 'map' | 'help';
 
 /**
- * `Esc`'s own "closest thing open, first" priority (docs/UI-REDESIGN-PLAN.md D-D: "Esc calls
+ * `Esc`'s own "closest thing open, first" priority (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "Esc calls
  * `panels.close()`") — extracted from `fly.ts#collapseOverlays()` so the cascade order itself (any
  * open tool-rail drawer, then the Stop-stream confirm, then the map inset) is unit-testable without
  * a real `PanelState`/DOM. Mirrors the pre-Wave-2 cascade's own order (shortcuts/CV/detections were
@@ -138,7 +138,7 @@ export function nextCollapseAction(state: {
 
 /**
  * Whether `candidateAssetId` is the header switcher `<option>` that should carry the native
- * `selected` property (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2 — "switcher shows wrong selected
+ * `selected` property (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2 — "switcher shows wrong selected
  * drone when the active asset isn't first in option order"). Extracted so the fix is unit-testable
  * without a real `<select>`/`<option>` DOM.
  *
@@ -162,7 +162,7 @@ export function isSwitcherOptionSelected(candidateAssetId: string, activeAssetId
   return candidateAssetId === activeAssetId;
 }
 
-// --- Picker asset card (docs/UX-REWORK-PLAN.md §U-a2 §3 — "the info-less asset card on Fly ...
+// --- Picker asset card (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3 — "the info-less asset card on Fly ...
 // becomes an asset card") ------------------------------------------------------------------------
 //
 // The picker card used to show only a `displayName` and, while streaming, a bare "Streaming" chip
@@ -210,7 +210,7 @@ export function positionLabel(position: GeoPosition | undefined): string | undef
   return `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`;
 }
 
-// --- Header switcher / "All drones" merge (docs/UX-REWORK-PLAN.md §U-a bullet 4 — "Merge 'All
+// --- Header switcher / "All drones" merge (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4 — "Merge 'All
 // drones' + drone <select> into one switcher control") -------------------------------------------
 
 /**

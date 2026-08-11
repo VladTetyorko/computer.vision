@@ -1,8 +1,8 @@
 package com.drones.vision.application.stream;
 
 /**
- * Result of {@link StreamService#updateConfig} (docs/CV-CONTROL-PLAN.md &sect;5,
- * docs/TRACKING-PLAN.md &sect;4.D).
+ * Result of {@link StreamService#updateConfig} (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,
+ * docs/plans/done/TRACKING-PLAN.md &sect;4.D).
  *
  * @param modelReArmed    {@code true} only when the patch carried a {@code modelId} (see {@link
  *                        PipelineConfigPatch#modelId()}) that differed from the stream's running
@@ -24,7 +24,7 @@ package com.drones.vision.application.stream;
 public record UpdateOutcome(boolean modelReArmed, boolean trackingChanged) {
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T3 added {@code trackingChanged},
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T3 added {@code trackingChanged},
      * kept as a convenience constructor defaulting it to {@code false}, so pre-existing call sites
      * (vision-api's controller tests stub this type) compile unchanged. Same "N-1-arg convenience
      * ctor" idiom used throughout the domain.

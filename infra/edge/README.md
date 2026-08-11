@@ -7,13 +7,13 @@ platform already listens on: **MAVLink 2 over UDP, pushed to `udp://<platform-ho
 `adapters/adapter-mavlink/MODULE.md`, "udp://host:port means listen, not connect"). Register the
 resulting feed the same way regardless of which recipe produced it: `POST /api/devices` with
 `protocol: "mavlink"`, `uri: "udp://0.0.0.0:14550"`, `capabilities: ["TELEMETRY"]` (or use the
-onboarding wizard's discovery flow once `docs/DRONE-INFRA-PLAN.md` I-b lands).
+onboarding wizard's discovery flow once `docs/plans/active/DRONE-INFRA-PLAN.md` I-b lands).
 
 **Today's limit**: one device listening on a given `udp://host:port` locks onto the first
 MAVLink system id it hears and silently ignores any other sysid arriving on that same port
 (`MavlinkTelemetryDecoder`, see its MODULE.md Gotchas). Two aircraft on the same link today
 means registering two devices on two different ports (`--serial0 udpclient:host:14550` /
-`...:14551`, etc.) — the multi-vehicle single-port gateway (`docs/DRONE-INFRA-PLAN.md` I-a) is
+`...:14551`, etc.) — the multi-vehicle single-port gateway (`docs/plans/active/DRONE-INFRA-PLAN.md` I-a) is
 the fix in flight; this kit doesn't need to wait for it, one aircraft per port works today.
 
 ## Decision table

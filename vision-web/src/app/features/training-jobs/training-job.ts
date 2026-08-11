@@ -8,7 +8,7 @@ import { failureMessage, formatMetric, hasReportedProgress, jobStateLabel, produ
 
 /**
  * `/manage/training/jobs/:jobId` — the live progress view for one CV fine-tune run
- * (docs/CV-TRAINING-PLAN.md Phase 2's last web wave). Reached by starting a run from
+ * (docs/plans/done/CV-TRAINING-PLAN.md Phase 2's last web wave). Reached by starting a run from
  * `DatasetDetailPage`'s own "Train a model" card (an immediate navigation here, so the operator
  * lands straight on the run they just started) or from that same page's "Training jobs" list for a
  * job started earlier.

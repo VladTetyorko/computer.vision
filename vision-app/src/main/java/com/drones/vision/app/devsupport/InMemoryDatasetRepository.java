@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory {@link DatasetRepositoryPort}: dev fallback with no durability across restarts
- * (docs/CV-TRAINING-PLAN.md §1, Wave T3).
+ * (docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3).
  *
  * <p>Replaced by {@code adapter-persistence}'s {@code JpaDatasetRepository} when {@code
  * vision.persistence.enabled=true}.

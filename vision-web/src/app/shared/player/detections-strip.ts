@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { DetectionsStore } from '../../core/detections/detections-store';
 
 /**
- * The compact detections strip (docs/MVP1-PLAN.md §C8 bullet 4): the last ~8 distinct labels seen
+ * The compact detections strip (docs/plans/done/MVP1-PLAN.md §C8 bullet 4): the last ~8 distinct labels seen
  * with their confidence, plus a subtle "CV" status dot.
  *
  * Purely presentational: injects the same `DetectionsStore` instance from its host page's DI (the
@@ -12,7 +12,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
  * Boxes themselves are never drawn here — they are burned into the frame server-side
  * (`Java2DOverlayRenderer`); this strip only lists what is currently being seen.
  *
- * Moved here from `pages/live/` (docs/MVP3-PLAN.md §C-b) when the Fly cockpit needed the identical
+ * Moved here from `pages/live/` (docs/plans/done/MVP3-PLAN.md §C-b) when the Fly cockpit needed the identical
  * strip — this codebase has no precedent for one page importing another page's module (see
  * `core/fleet/device-logic.ts`'s doc comment for the original precedent this follows, most recently
  * repeated by `shared/map/live-map.ts`'s own move). `features/live/live.ts` now imports it from here; nothing

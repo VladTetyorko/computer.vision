@@ -9,7 +9,7 @@ export interface DebugHistoryEntry {
   readonly body?: string;
 }
 
-/** "last ~20 requests" per docs/WEB-PLAN.md W5. */
+/** "last ~20 requests" per docs/plans/done/WEB-PLAN.md W5. */
 export const DEBUG_HISTORY_LIMIT = 20;
 
 /** Newest first, capped — this is a recency log for re-filling the form, not an archive. */

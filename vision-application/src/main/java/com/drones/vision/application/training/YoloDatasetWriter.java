@@ -11,10 +11,10 @@ import java.util.Locale;
 
 /**
  * Pure, in-memory composition of one {@link TrainingSample}'s YOLO upload entry plus a dataset's
- * {@code data.yaml} content (docs/CV-TRAINING-PLAN.md §5) — no I/O, fully unit-testable; {@link
+ * {@code data.yaml} content (docs/plans/done/CV-TRAINING-PLAN.md §5) — no I/O, fully unit-testable; {@link
  * DatasetUploadPort} only frames/transports the bytes this class produces.
  *
- * <h2>Box conversion (frozen, docs/CV-TRAINING-PLAN.md §5)</h2>
+ * <h2>Box conversion (frozen, docs/plans/done/CV-TRAINING-PLAN.md §5)</h2>
  * The platform's {@link BoundingBox} is top-left-origin, normalized {@code [0,1]}
  * {@code (x, y, width, height)}; YOLO label lines are center-based: {@code cx = x + width/2},
  * {@code cy = y + height/2}, {@code w = width}, {@code h = height}, all still normalized
@@ -52,9 +52,9 @@ final class YoloDatasetWriter {
 
     /**
      * Builds the {@code data.yaml} content for a dataset's ordered class vocabulary — moved
-     * verbatim from the deleted {@code FilesystemDatasetExport} (docs/CV-TRAINING-V2-PLAN.md §4):
+     * verbatim from the deleted {@code FilesystemDatasetExport} (docs/plans/done/CV-TRAINING-V2-PLAN.md §4):
      * {@code names: [a, b]}, {@code nc: 2}, {@code train}/{@code val} both {@code images}
-     * (docs/CV-TRAINING-PLAN.md §5).
+     * (docs/plans/done/CV-TRAINING-PLAN.md §5).
      *
      * @param classes the dataset's ordered YOLO class vocabulary; may be empty
      * @return the {@code data.yaml} file content to ship alongside the images/labels
@@ -69,7 +69,7 @@ final class YoloDatasetWriter {
     /**
      * Builds the YOLO label file text for one sample's annotations — one {@code <class_index> <cx>
      * <cy> <w> <h>} line per annotation, or empty text for a sample with zero annotations (a valid
-     * YOLO "negative"/background image, docs/CV-TRAINING-PLAN.md §5).
+     * YOLO "negative"/background image, docs/plans/done/CV-TRAINING-PLAN.md §5).
      */
     private static String labelText(List<Annotation> annotations, List<String> classes) {
         StringBuilder text = new StringBuilder();

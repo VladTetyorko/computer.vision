@@ -18,7 +18,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code marks} — mirrors {@link com.drones.vision.domain.model.Mark} field-for-field
- * (docs/TACTICAL-MARKS-PLAN.md §3, reworked by docs/MAP-REWORK-PLAN.md §4.4 / {@code
+ * (docs/plans/done/TACTICAL-MARKS-PLAN.md §3, reworked by docs/plans/done/MAP-REWORK-PLAN.md §4.4 / {@code
  * V12__map_layers.sql}); {@code MarkMapper} owns the mapping in both directions.
  *
  * <p><strong>The V12 rework adds five columns.</strong> {@code layer_id} (which layer the mark lives

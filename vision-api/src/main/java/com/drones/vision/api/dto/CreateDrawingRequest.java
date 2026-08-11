@@ -8,7 +8,7 @@ import com.drones.vision.domain.model.GeoPosition;
 import java.util.List;
 
 /**
- * Request body for {@code POST /api/map/drawings} (docs/MAP-REWORK-PLAN.md §4.2).
+ * Request body for {@code POST /api/map/drawings} (docs/plans/done/MAP-REWORK-PLAN.md §4.2).
  *
  * <p>Point-count rules per {@code kind} ({@code LINE}/{@code ARROW} ≥ 2, {@code POLYGON} ≥ 3,
  * {@code TEXT} exactly 1 with a non-blank label) are left to {@link DrawingSpec}'s own compact

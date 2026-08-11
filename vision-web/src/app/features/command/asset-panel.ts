@@ -9,7 +9,7 @@ import type { FleetMarker } from '../../core/map/map-logic';
 export type AssetPanelTab = 'status' | 'telemetry' | 'video';
 
 /**
- * The right-docked asset detail panel (docs/UX-REWORK-PLAN.md §U-c bullet 1) — the one genuinely
+ * The right-docked asset detail panel (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 1) — the one genuinely
  * new component this rework adds. Everything it *shows* is reused: `<vision-player>` (the shared
  * video surface, unmodified, same as every other live-video consumer in this app) for the Video
  * tab, and the `dl.facts`/`.fact` telemetry-facts grid idiom already established independently by
@@ -26,7 +26,7 @@ export type AssetPanelTab = 'status' | 'telemetry' | 'video';
  * `FleetMapStore.resolveWatchDevice` call on selection plus the always-on root `FleetStore`. This
  * component issues no HTTP itself and holds no store — only the active-tab signal.
  *
- * Tabs, not stacked sections (the plan allowed either) — a `.segmented` control (docs/UX-REWORK-PLAN.md
+ * Tabs, not stacked sections (the plan allowed either) — a `.segmented` control (docs/plans/done/UX-REWORK-PLAN.md
  * §U-b item 5's own "mutually-exclusive mode buttons" primitive, reused verbatim) keeps the ~380px
  * panel from needing to scroll past three stacked cards' worth of content for a quick glance.
  */
@@ -56,7 +56,7 @@ export class AssetPanel {
   protected readonly ageLabel = computed(() => attentionAgeLabel(this.asset()));
   protected readonly batterySeverity = computed(() => batteryAttentionSeverity(this.marker()?.batteryPercent));
 
-  // --- Mode / Armed / GPS (docs/FC-INTEGRATIONS-PLAN.md F-d) — prefer the live marker (fresher,
+  // --- Mode / Armed / GPS (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — prefer the live marker (fresher,
   // sourced from the latest telemetry sample's own `flightState`) and fall back to the
   // fleet-summary-level `AssetAttention` fields (still honest, just possibly a poll cycle behind);
   // GPS has no fleet-summary-level fallback at all (see `AssetAttention`'s own doc comment) — a
@@ -67,13 +67,13 @@ export class AssetPanel {
   protected readonly gpsLabel = computed(() => gpsFixLabel(this.gpsFixType()));
   protected readonly gpsSeverityTier = computed(() => gpsSeverity(this.gpsFixType()));
 
-  /** docs/FC-INTEGRATIONS-PLAN.md F-e — reuses the same pure derivation `features/fly/diagnostics-card.ts`
+  /** docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — reuses the same pure derivation `features/fly/diagnostics-card.ts`
    * feeds from `TelemetryStore`; here fed from the marker's own `extra` (see that field's own doc
    * comment on `FleetMarker` for why this panel needs no second telemetry poller). */
   protected readonly diagnostics = computed(() => deriveDiagnostics(this.marker()?.extra));
 
   /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates the panel-actions row's `<vision-return-home-button>`
+   * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 — gates the panel-actions row's `<vision-return-home-button>`
    * (`asset-panel.html`). Fed from `marker()` alone (`firmware`/`sampleAgeSeconds`), the same
    * "no second `TelemetryStore` poller" reuse this panel's Mode/Armed/GPS/diagnostics facts already
    * establish above — `AssetAttention` carries no firmware field at all, only the live marker does.

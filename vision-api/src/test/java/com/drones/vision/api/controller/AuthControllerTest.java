@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Standalone MockMvc tests for {@link AuthController}'s two modes (docs/U-AUTH-PLAN.md, wave 3),
+ * Standalone MockMvc tests for {@link AuthController}'s two modes (docs/plans/done/U-AUTH-PLAN.md, wave 3),
  * with the {@link SessionAuthenticator}/{@link AuthService}/{@link GroupService} seams mocked — no
  * Spring Security, no live context, mirroring every other controller test in this module.
  */

@@ -39,7 +39,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
  * freshest sample via {@link UsageTracker#latestTelemetry}, honestly validates it (latitude,
  * longitude and heading present; altitude present and positive), and only then builds the drone's
  * {@link GeoPosition} and calls {@link GeoProjection#project} — {@code GeoProjection} itself accepts
- * no nullable telemetry (docs/TACTICAL-MARKS-PLAN.md's M1 handoff note), so this null-checking is
+ * no nullable telemetry (docs/plans/done/TACTICAL-MARKS-PLAN.md's M1 handoff note), so this null-checking is
  * this class's job, not the pure geo-math's.
  *
  * <h2>Threading</h2>
@@ -239,7 +239,7 @@ public final class DefaultMarkService implements MarkService {
 
     /**
      * A mark on a layer the viewer may not {@link MapAccessPolicy#canView view} must be
-     * indistinguishable from a mark that does not exist (docs/MAP-REWORK-PLAN.md §4.1: out-of-scope
+     * indistinguishable from a mark that does not exist (docs/plans/done/MAP-REWORK-PLAN.md §4.1: out-of-scope
      * → 404, never 403 — a 403 would reveal the id is real). Checked before any per-action gate.
      */
     private void requireVisible(Viewer v, Mark mark, MapLayer layer) {

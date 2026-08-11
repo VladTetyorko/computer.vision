@@ -1,9 +1,9 @@
--- docs/MAP-REWORK-PLAN.md §4.4: the map as a Common Operational Picture -- named layers with
+-- docs/plans/done/MAP-REWORK-PLAN.md §4.4: the map as a Common Operational Picture -- named layers with
 -- grantable access, drawings on those layers, and the mark columns that turn a flat, deployment-wide
 -- mark list into a scoped, affiliation-aware, verifiable one.
 --
 -- Migration number: the plan's own sketch says "V11__map_layers.sql", which was stale by the time
--- this wave ran -- V11 was already taken by V11__training_datasets.sql (docs/CV-TRAINING-PLAN.md
+-- this wave ran -- V11 was already taken by V11__training_datasets.sql (docs/plans/done/CV-TRAINING-PLAN.md
 -- Wave T3). V12 is the next free number, confirmed by listing this directory first.
 --
 -- Foreign keys, deliberately partial (a documented deviation from the plan's parenthetical "FK
@@ -83,7 +83,7 @@ ALTER TABLE marks ADD COLUMN verified_at        TIMESTAMPTZ;
 
 -- Backfill, in the order the columns' NOT NULL constraints below require.
 --
--- Affiliation is derived from the OLD kind, per docs/MAP-REWORK-PLAN.md §2.2's frozen mapping table
+-- Affiliation is derived from the OLD kind, per docs/plans/done/MAP-REWORK-PLAN.md §2.2's frozen mapping table
 -- (TARGET->HOSTILE, HAZARD->UNKNOWN, POI->NEUTRAL, FRIENDLY->FRIENDLY), so this UPDATE must run
 -- BEFORE the kind rename below -- once FRIENDLY has become UNIT the information is gone. The ELSE
 -- branch is defensive only: no other value can exist, since the old MarkKind had exactly these four.

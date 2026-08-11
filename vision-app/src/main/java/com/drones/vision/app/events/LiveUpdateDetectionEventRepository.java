@@ -11,7 +11,7 @@ import java.util.Objects;
 
 /**
  * {@link DetectionEventRepositoryPort} decorator that additionally announces a live {@code
- * detection-events} update (docs/REALTIME-PLAN.md §4, extended for the events UI) for every
+ * detection-events} update (docs/plans/done/REALTIME-PLAN.md §4, extended for the events UI) for every
  * upserted event.
  *
  * <p>{@code DetectionEventEngine} (vision-application) already calls {@link #save} at exactly the

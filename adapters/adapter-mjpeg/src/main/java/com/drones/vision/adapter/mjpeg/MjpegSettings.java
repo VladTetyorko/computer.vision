@@ -6,7 +6,7 @@ import java.util.OptionalInt;
 
 /**
  * Framework-free tunables for this module, one field per {@code vision.mjpeg.*} property key in
- * {@code docs/LAYERING-REFACTOR-PLAN.md} §2.2. This record is plain (no Spring) per that plan's
+ * {@code docs/plans/active/LAYERING-REFACTOR-PLAN.md} §2.2. This record is plain (no Spring) per that plan's
  * §1.3 binding rule: a later wave adds {@code VisionMjpegProperties} in {@code vision-app} and
  * binds it onto this record — this module never imports that type.
  *

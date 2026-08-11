@@ -64,7 +64,7 @@ class FfmpegVideoSourceTest {
         assertFalse(source.supports(null));
     }
 
-    /** docs/DRONE-INFRA-PLAN.md I-h: srt/udp accepted only with a matching-scheme URI, unknown protocols rejected. */
+    /** docs/plans/active/DRONE-INFRA-PLAN.md I-h: srt/udp accepted only with a matching-scheme URI, unknown protocols rejected. */
     @Test
     void supportsSrtAndUdpOnlyWithAMatchingSchemeUri() {
         FfmpegVideoSource source = new FfmpegVideoSource();
@@ -389,8 +389,8 @@ class FfmpegVideoSourceTest {
         }
     }
 
-    // -- docs/MVP2-PLAN.md V-c / docs/DRONE-INFRA-PLAN.md I-h: RTSP/SRT/UDP option-seam unit
-    // tests moved to FfmpegGrabberOptionsTest (docs/LAYERING-REFACTOR-PLAN.md §5.1 -- that
+    // -- docs/plans/done/MVP2-PLAN.md V-c / docs/plans/active/DRONE-INFRA-PLAN.md I-h: RTSP/SRT/UDP option-seam unit
+    // tests moved to FfmpegGrabberOptionsTest (docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1 -- that
     // option/default config surface was promoted out of this class into FfmpegGrabberOptions).
     // What remains here is real-loopback/end-to-end coverage of FfmpegVideoSource's own
     // open()/openAny() behavior (below), not the option-seam unit tests.

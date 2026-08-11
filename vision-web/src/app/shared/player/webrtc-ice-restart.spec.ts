@@ -185,7 +185,7 @@ describe('candidatesFromFragment', () => {
   });
 });
 
-describe('isPatchFallbackStatus (docs/REALTIME-PLAN.md Phase R-b item 1 — "last resort" rule)', () => {
+describe('isPatchFallbackStatus (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1 — "last resort" rule)', () => {
   it('is false (success, apply the restart) for 200 — an ICE restart was applied', () => {
     expect(isPatchFallbackStatus(200)).toBe(false);
   });

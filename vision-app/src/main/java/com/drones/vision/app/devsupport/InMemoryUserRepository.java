@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory {@link UserRepositoryPort}: dev fallback with no durability across restarts
- * (docs/U-AUTH-PLAN.md, wave 3).
+ * (docs/plans/done/U-AUTH-PLAN.md, wave 3).
  *
  * <p>Replaced by {@code adapter-persistence}'s {@code JpaUserRepository} when {@code
  * vision.persistence.enabled=true}. {@link #findByUsername} lower-cases its lookup key ({@code

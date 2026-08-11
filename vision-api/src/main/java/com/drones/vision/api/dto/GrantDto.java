@@ -7,7 +7,7 @@ import com.drones.vision.domain.model.LayerGrant;
 import java.util.UUID;
 
 /**
- * One entry of a layer's access list (docs/MAP-REWORK-PLAN.md §4.2), both directions: read back on
+ * One entry of a layer's access list (docs/plans/done/MAP-REWORK-PLAN.md §4.2), both directions: read back on
  * {@link LayerResponse#grants()} (only when the caller manages the layer) and sent in wholesale on
  * {@code PUT /api/map/layers/{id}/grants}.
  *

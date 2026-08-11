@@ -3,7 +3,7 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { batterySeverity } from '../../core/telemetry/telemetry-logic';
 
 /**
- * The live telemetry HUD strip for `/live/:deviceId` (docs/CYCLES-PLAN.md §2, UX-DESIGN §5.2).
+ * The live telemetry HUD strip for `/live/:deviceId` (docs/main/CYCLES-PLAN.md §2, UX-DESIGN §5.2).
  *
  * Purely presentational: every value is a `computed` over the `TelemetryStore` injected from
  * `LivePage`'s DI (that component lists `TelemetryStore` in its own `providers`, so this child
@@ -87,7 +87,7 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
     }
 
     .value {
-      /* docs/UX-REWORK-PLAN.md §U-b item 3 — every numeric readout on this HUD (altitude, heading,
+      /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — every numeric readout on this HUD (altitude, heading,
          battery, sample age), not just the "Position" line, which already carried its own explicit
          ".mono" class in the template alongside this one. */
       font-family: var(--mono);
@@ -114,7 +114,7 @@ import { batterySeverity } from '../../core/telemetry/telemetry-logic';
       /* Bespoke 25% black wash for the dial face — much lighter than either --scrim (55%) or
          --scrim-strong (70%), and not a video/map compositing overlay, so neither canonical
          scrim step reproduces this look without visibly darkening the dial
-         (docs/STYLE-TOKENS-PLAN.md §Geometry note's "bespoke opacity... genuinely needed"
+         (docs/plans/done/STYLE-TOKENS-PLAN.md §Geometry note's "bespoke opacity... genuinely needed"
          exception). Left literal; flagged. */
       background: rgb(0 0 0 / 25%);
       flex: none;

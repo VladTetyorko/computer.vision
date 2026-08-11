@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * Which of the two tracking loops (docs/TRACKING-PLAN.md §1) produced a particular {@link
+ * Which of the two tracking loops (docs/plans/done/TRACKING-PLAN.md §1) produced a particular {@link
  * Detection} on a particular frame.
  *
  * <p>{@code DETECTOR} — a full detector pass ran on this frame and produced this box. {@code

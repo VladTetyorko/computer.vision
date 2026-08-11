@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 import java.util.UUID;
 
 /**
- * Typed identity for a {@link Dataset} (docs/CV-TRAINING-PLAN.md §1).
+ * Typed identity for a {@link Dataset} (docs/plans/done/CV-TRAINING-PLAN.md §1).
  *
  * <p>Modeled as a value record wrapping {@link UUID} rather than a bare {@code String} so dataset
  * identities cannot be mixed up with asset, stream, or other typed identifiers at compile time —

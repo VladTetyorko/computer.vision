@@ -3,7 +3,7 @@ import type { SimulateMode } from '../../core/fleet/simulation-logic';
 import { withRegistrationNumber } from '../../core/fleet/asset-attributes';
 
 /**
- * Pure logic behind the onboarding wizard (docs/UX-REWORK-PLAN.md §U-d): step-state transitions,
+ * Pure logic behind the onboarding wizard (docs/plans/done/UX-REWORK-PLAN.md §U-d): step-state transitions,
  * poka-yoke advance gating, and request builders. Split out so it is unit-testable without HTTP,
  * the router, or a canvas — mirrors every other `*-logic.ts` module in this app
  * (`features/devices/devices-page-logic.ts`, `core/telemetry/telemetry-logic.ts`).
@@ -19,20 +19,20 @@ export type WizardStep = 'profile' | 'connect' | 'test' | 'create';
 export const WIZARD_STEPS: readonly WizardStep[] = ['profile', 'connect', 'test', 'create'];
 
 /**
- * The Connect step's entry points (docs/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
+ * The Connect step's entry points (docs/plans/done/UX-REWORK-PLAN.md §U-d — "the existing 3-choice connect
  * component (port / resource / simulate) stays"). `discover` is never the method a probe or a
  * create request is built against — picking "Use" on a scan candidate switches the method to
  * `register` with the candidate's fields prefilled, exactly like the pre-wizard Devices page did
  * (`useCandidate`, moved here verbatim in behavior).
  *
- * `listen` (docs/DRONE-INFRA-PLAN.md I-b — "Listen for drones") is a fourth tile, alongside the
+ * `listen` (docs/plans/active/DRONE-INFRA-PLAN.md I-b — "Listen for drones") is a fourth tile, alongside the
  * original three, for a MAVLink-heartbeat-only scan (`drone-scan-logic.ts`): it behaves exactly
  * like `discover` in every gate below — never itself advanceable — since picking an unclaimed
  * vehicle flips the method to `register` with the connect form prefilled
  * (`OnboardingStore#useDroneVehicle`), the same "candidate → register" pivot `discover` already
  * uses.
  *
- * `drone` (docs/DRONE-INFRA-PLAN.md I-g, wave B — "Add a real drone") is a fifth tile: a guided
+ * `drone` (docs/plans/active/DRONE-INFRA-PLAN.md I-g, wave B — "Add a real drone") is a fifth tile: a guided
  * firmware×link picker plus parameterized copy-paste config snippets
  * (`drone-config-logic.ts#linkCompatibility`/`configSnippets`), entirely **sub-states of this one
  * Connect step** (`OnboardingStore#droneSubStep`, `'picker' | 'config'`, deliberately not part of
@@ -47,7 +47,7 @@ export type ConnectMethod = 'register' | 'discover' | 'simulate' | 'listen' | 'd
 
 /**
  * The next step for the wizard's own forward-only "Next"/submit action. `simulate` skips `test`
- * entirely (docs/UX-REWORK-PLAN.md §U-d item 1's own wording: "simulate path may skip step 3, it
+ * entirely (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1's own wording: "simulate path may skip step 3, it
  * always produces frames" — there is no separate device to probe ahead of starting it; starting the
  * simulation *is* the proof it works). Calling this on `'create'` is a caller bug — there is no step
  * after it — so it is left undefined behavior (returns `'create'`, a harmless no-op) rather than
@@ -78,7 +78,7 @@ export function prevStep(current: WizardStep, method: ConnectMethod | null): Wiz
   }
 }
 
-// --- Poka-yoke: advance gating (docs/UX-REWORK-PLAN.md §U-a2 rule 1 — prevention over confirmation) -
+// --- Poka-yoke: advance gating (docs/plans/done/UX-REWORK-PLAN.md §U-a2 rule 1 — prevention over confirmation) -
 
 /** Profile step: a name and a category are the only two facts every asset must have. */
 export function canAdvanceFromProfile(displayName: string, category: string): boolean {
@@ -121,7 +121,7 @@ export function canAdvanceFromConnect(draft: ConnectDraft): boolean {
 }
 
 /**
- * Test step (docs/UX-REWORK-PLAN.md §U-d item 1, poka-yoke): "cannot advance to save while the last
+ * Test step (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1, poka-yoke): "cannot advance to save while the last
  * probe failed" — for `register`/`discover` paths only. `simulate` never reaches this step at all
  * (see {@link nextStep}), so it trivially always may advance; kept as a real branch (not assumed
  * true by the caller) so a future caller that *does* invoke this for `simulate` gets the right
@@ -159,7 +159,7 @@ export interface ProfileDraft {
 }
 
 /**
- * Builds `POST /api/assets`'s body for the `register`/`discover` Connect paths (docs/UX-REWORK-PLAN.md
+ * Builds `POST /api/assets`'s body for the `register`/`discover` Connect paths (docs/plans/done/UX-REWORK-PLAN.md
  * §U-d item 2 — "closes the orphaned-device dead end": one call creates the asset *and* registers
  * its device, via `CreateAssetRequest#devices`, rather than registering a device first and hoping
  * something files it under an asset later). The device is given the asset's own display name — this
@@ -189,7 +189,7 @@ export function buildCreateAssetRequest(
 
 /**
  * Builds the `PATCH /api/assets/{id}` body applied *after* the Simulate Connect path's
- * `POST /api/simulations` call (docs/UX-REWORK-PLAN.md §U-d item 1 — "Simulate path routes through
+ * `POST /api/simulations` call (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — "Simulate path routes through
  * POST /api/simulations as today then applies name/photo/attributes via PATCH+PUT"). Deliberately
  * carries no `category` — `DefaultSimulationService` always creates the asset under the fixed
  * `simulated` category regardless of what the Profile step's category picker shows, so sending one

@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The {@link TrainingSampleRepositoryPort} contract against the in-memory reference
- * implementation (docs/CV-TRAINING-PLAN.md §1, Wave T3) — the same contract {@code
+ * implementation (docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3) — the same contract {@code
  * JpaTrainingSampleRepository} is judged against in {@code adapter-persistence}'s Postgres tests.
  */
 class InMemoryTrainingSampleRepositoryTest {

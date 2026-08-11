@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 import java.time.Instant;
 
 /**
- * The verification state of a {@link Mark} (docs/MAP-REWORK-PLAN.md §2.1) — DELTA's
+ * The verification state of a {@link Mark} (docs/plans/done/MAP-REWORK-PLAN.md §2.1) — DELTA's
  * verify&rarr;confirm&rarr;share-wider flow: anyone in scope contributes an unverified mark on a
  * team layer, a manager reviews it, and a {@code CONFIRMED} mark is a candidate for promotion to
  * the shared COP layer.

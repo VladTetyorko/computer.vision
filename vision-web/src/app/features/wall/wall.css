@@ -1,6 +1,6 @@
 /* `.page` (styles.css) is padding-only — no height, no background of its own — so with few tiles
    its box only grows to content height, leaving `<main>`'s own light-theme background exposed
-   below/beside it (confirmed live, docs/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05: a 2-stream
+   below/beside it (confirmed live, docs/plans/done/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05: a 2-stream
    Wall showed a white gap under the grid). `min-height: 100dvh`, not `100%` — `<vision-wall>`'s own
    host has no explicit `display: block`, and a percentage height needs a definite-size ancestor to
    resolve at all (the exact bug `app.css`'s own `<main>` doc comment already names for `.sidebar`);
@@ -29,8 +29,8 @@
     gap: var(--space-16);
 }
 
-/* ---- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1) — sizing/positioning only; the rail's own
-   internal look lives in shared/ui/events-rail.css now (docs/MVP3-PLAN.md §C-c) ---------------------- */
+/* ---- Events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1) — sizing/positioning only; the rail's own
+   internal look lives in shared/ui/events-rail.css now (docs/plans/done/MVP3-PLAN.md §C-c) ---------------------- */
 
 .events-rail {
     width: 300px;
@@ -64,7 +64,7 @@
     font-family: var(--mono);
     /* Bespoke 25% black wash for an inline code chip — much lighter than either `--scrim` (55%) or
        `--scrim-strong` (70%), and not a video/map compositing overlay, so neither canonical scrim
-       step reproduces this look without visibly darkening the chip (docs/STYLE-TOKENS-PLAN.md
+       step reproduces this look without visibly darkening the chip (docs/plans/done/STYLE-TOKENS-PLAN.md
        §Geometry note's "bespoke opacity... genuinely needed" exception). Left literal; flagged. */
     background: rgb(0 0 0 / 25%);
     padding: var(--space-2) var(--space-4);

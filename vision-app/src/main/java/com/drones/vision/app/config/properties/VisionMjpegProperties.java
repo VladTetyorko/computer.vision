@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import java.time.Duration;
 
 /**
- * Configuration for {@code adapter-mjpeg}'s RX/TX ({@code vision.mjpeg.*}), docs/LAYERING-REFACTOR-PLAN.md
+ * Configuration for {@code adapter-mjpeg}'s RX/TX ({@code vision.mjpeg.*}), docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * &sect;2.2, wave F1.
  *
  * <p>Mapped by {@code wiring.VideoSourceWiring}/{@code wiring.FeedTransmitterWiring} onto {@code

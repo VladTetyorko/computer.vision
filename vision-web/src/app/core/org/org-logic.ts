@@ -3,7 +3,7 @@ import { roleLabel } from '../auth/auth-logic';
 import { relativeTimeLabel } from '../events/events-logic';
 
 /**
- * Pure decision logic behind the org-settings surface (docs/U-SCOPE-PLAN.md, U-e slice 2) — the
+ * Pure decision logic behind the org-settings surface (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — the
  * role gate, the group-tree shape, the role picker, and the activity-row view model. Kept
  * framework-free and unit-tested here so `core/org/org-store.ts`, `core/org/org-guard.ts`,
  * `features/org-settings/**`, and `features/activity/**` stay dumb: each only reads a signal and
@@ -12,7 +12,7 @@ import { relativeTimeLabel } from '../events/events-logic';
 
 /**
  * May this role reach the org-settings surface (users/groups CRUD, pilot assignment)? ADMIN and
- * MANAGER only — a PILOT flies aircraft, they don't manage the org (docs/U-SCOPE-PLAN.md's own
+ * MANAGER only — a PILOT flies aircraft, they don't manage the org (docs/plans/done/U-SCOPE-PLAN.md's own
  * "a pilot flies their aircraft, not their org's inventory").
  *
  * Takes `topRole` as it actually arrives — possibly `undefined`/`null` (a user with no membership

@@ -1,7 +1,7 @@
 package com.drones.vision.application.simulation;
 
 /**
- * One checkpoint on a {@link TelemetryPlan}'s route (docs/CYCLES-PLAN.md §7, CT-a).
+ * One checkpoint on a {@link TelemetryPlan}'s route (docs/main/CYCLES-PLAN.md §7, CT-a).
  *
  * <p>Deliberately a distinct type from {@code GeoPosition} (vision-domain), even though the shape
  * matches, since the two model different things: {@code GeoPosition} is a derived "where is it

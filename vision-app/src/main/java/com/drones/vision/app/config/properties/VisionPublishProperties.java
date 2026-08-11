@@ -11,7 +11,7 @@ import java.time.Duration;
  * {@code wiring.PublishWiring} wires published frames to a <a
  * href="https://github.com/bluenviron/mediamtx">mediamtx</a> sidecar for
  * HLS viewing, where that sidecar is reachable, and the app-facing URL base
- * viewers are actually given. Extended by docs/LAYERING-REFACTOR-PLAN.md
+ * viewers are actually given. Extended by docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * §2.2 (wave F3) with {@code adapter-publish-hls}'s encoder/resilience/cadence
  * tunables and {@code MediamtxReplayFrameExtractor}'s window/read-timeout.
  *
@@ -41,7 +41,7 @@ import java.time.Duration;
  * wiring.PublishWiring} passes as {@code MediamtxStreamPublisher}'s {@code
  * hlsViewBase} constructor argument instead of {@link Mediamtx#hlsBase()}.
  *
- * <h2>WHEP has no third base (docs/MVP2-PLAN.md §L)</h2>
+ * <h2>WHEP has no third base (docs/plans/done/MVP2-PLAN.md §L)</h2>
  * {@link Mediamtx#whepBase()} does <b>not</b> get the same internal/viewer-facing split as HLS: a
  * WHEP session is a POST/SDP exchange plus ICE, not a byte stream {@code HlsProxyController}-style
  * reverse proxying can forward transparently, so {@code MediamtxStreamPublisher#whepUrl} is built
@@ -110,7 +110,7 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
      * @param hlsBase      internal address where mediamtx serves HLS, used only as the upstream
      *                     {@code HlsProxyController} forwards to — viewers never see it directly;
      *                     e.g. {@code http://localhost:8888}; default {@value Mediamtx#DEFAULT_HLS_BASE}
-     * @param whepBase     mediamtx's WebRTC/WHEP egress base (docs/MVP2-PLAN.md §L), e.g. {@code
+     * @param whepBase     mediamtx's WebRTC/WHEP egress base (docs/plans/done/MVP2-PLAN.md §L), e.g. {@code
      *                     http://localhost:8889}; default {@value Mediamtx#DEFAULT_WHEP_BASE}.
      *                     <b>Unlike {@code hlsBase}</b>, this is not an internal-only address behind a
      *                     proxy: {@code wiring.PublishWiring} hands it straight to
@@ -118,8 +118,8 @@ public record VisionPublishProperties(@DefaultValue("true") boolean enabled,
      *                     that URL goes to the browser verbatim — so
      *                     this must already be an address the *viewer's* browser can reach, not just
      *                     this app's own JVM.
-     * @param playbackBase base HTTP URL of mediamtx's playback server (docs/OPS-CORE-PLAN.md §R,
-     *                     docs/CV-TRAINING-V2-PLAN.md §7), e.g. {@code http://localhost:19996};
+     * @param playbackBase base HTTP URL of mediamtx's playback server (docs/plans/done/OPS-CORE-PLAN.md §R,
+     *                     docs/plans/done/CV-TRAINING-V2-PLAN.md §7), e.g. {@code http://localhost:19996};
      *                     default {@value Mediamtx#DEFAULT_PLAYBACK_BASE}
      */
     public record Mediamtx(@DefaultValue(Mediamtx.DEFAULT_RTSP_BASE) URI rtspBase,

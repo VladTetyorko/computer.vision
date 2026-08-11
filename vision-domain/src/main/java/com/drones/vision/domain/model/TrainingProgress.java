@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * One message in a training job's progress stream (docs/CV-TRAINING-PLAN.md §6/§7, Phase 2) — the
+ * One message in a training job's progress stream (docs/plans/done/CV-TRAINING-PLAN.md §6/§7, Phase 2) — the
  * Java-side shape of {@code cv.proto}'s {@code Training.StartTraining} response message,
  * {@code TrainingProgress}.
  *

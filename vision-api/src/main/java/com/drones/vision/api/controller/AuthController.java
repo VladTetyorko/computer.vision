@@ -26,7 +26,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.SessionAuthenticator;
 
 /**
- * Driving REST adapter for session auth (docs/U-AUTH-PLAN.md, wave 3's frozen wire contract):
+ * Driving REST adapter for session auth (docs/plans/done/U-AUTH-PLAN.md, wave 3's frozen wire contract):
  * {@code POST /api/auth/login}, {@code POST /api/auth/logout}, {@code GET /api/auth/me}.
  *
  * <p><strong>No Spring Security here.</strong> Reading the current identity goes through {@link

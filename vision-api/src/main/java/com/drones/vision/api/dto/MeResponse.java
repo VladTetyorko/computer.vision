@@ -10,7 +10,7 @@ import java.util.function.Function;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Response body for {@code GET /api/auth/me}, {@code POST /api/auth/login} (docs/U-AUTH-PLAN.md,
+ * Response body for {@code GET /api/auth/me}, {@code POST /api/auth/login} (docs/plans/done/U-AUTH-PLAN.md,
  * wave 3's frozen wire contract) — the current identity as the SPA needs it.
  *
  * <p>{@code authEnabled} tells the SPA whether login is real at all: {@code false} means the

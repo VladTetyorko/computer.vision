@@ -1,7 +1,7 @@
 import type { DetectionResult } from '../api/models';
 
 /**
- * Pure derivations behind `DetectionsStore` (docs/MVP1-PLAN.md §C8 bullet 4), split out so the
+ * Pure derivations behind `DetectionsStore` (docs/plans/done/MVP1-PLAN.md §C8 bullet 4), split out so the
  * chip/status logic can be unit-tested without touching HTTP or timers — mirrors
  * `core/telemetry/telemetry-logic.ts`'s split of pure derivation from the injectable that drives it.
  */

@@ -1,5 +1,5 @@
 @if (facade.asset(); as a) {
-  <!-- ---- Cockpit grid (docs/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user
+  <!-- ---- Cockpit grid (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user
        request — see cockpit.css's own grid comment for the full reasoning) ------------------------
        Named CSS-grid areas (cockpit.css): `banner` is a real grid row that reflows the rest of the
        grid while showing (no manual shift math), `main` is the full-width video hero, `rail` is the
@@ -8,7 +8,7 @@
        cockpit instead of sharing width with a stacked instrument column. The map inset and whichever
        tool-rail drawer is open both overlay `main` itself (absolute within `.grid-main`, never
        within `.cockpit`) — see cockpit.css's own comment on `.grid-main`. -->
-  <!-- `.surface-dark` (docs/VISUAL-REFRESH-PLAN.md F3/W4): the cockpit is a full-bleed video
+  <!-- `.surface-dark` (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the cockpit is a full-bleed video
        surface end to end — there is no separate light-themed chrome around it on this route
        (`fly.routes.ts`'s `fullBleed: true` means no page-bar wraps it either) — so the enclave
        boundary is this component's own root, matching every other overlay/drawer mounted inside
@@ -43,8 +43,8 @@
       </div>
 
       <!-- ---- Main header overlay: exit, drone switcher, "Bring home" -------------------------
-           A real CSS grid, not a flex row relying on wrap-if-it-overflows (docs/NAV-IA-REDESIGN-PLAN.md
-           F11, docs/design/01-fly.md — "give the overlay a real safe area rather than nudging
+           A real CSS grid, not a flex row relying on wrap-if-it-overflows (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
+           F11, docs/extracts/design/01-fly.md — "give the overlay a real safe area rather than nudging
            positions"): `.header-actions` is its own right-anchored cluster in a `minmax(0, auto)`
            column, so the switcher+"Bring home" pair can wrap onto a second line inside the safe area
            if it ever has to, but can never push past `--overlay-pad` and clip behind/off the edge —
@@ -70,7 +70,7 @@
             </select>
           </label>
 
-          <!-- ---- "Bring home" (docs/DRONE-INFRA-PLAN.md I-e Stage 1) — not a tool-rail drawer, a
+          <!-- ---- "Bring home" (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1) — not a tool-rail drawer, a
                deliberate one-shot command shown right in the header, same as before. `<vision-return-
                home-button>` hides itself entirely unless `canBringHome()`. No optimistic UI here: a
                successful send only shows a toast — the aircraft's actual mode change arrives later
@@ -86,7 +86,7 @@
         </div>
       </div>
 
-      <!-- ---- Map inset (M) — a separate persisted toggle, not a drawer (docs/UI-REDESIGN-PLAN.md
+      <!-- ---- Map inset (M) — a separate persisted toggle, not a drawer (docs/plans/done/UI-REDESIGN-PLAN.md
            D-D: "glanceable, not a modal drawer"); overlays `main`, hidden entirely below `--bp-md`
            (900px, cockpit.css) regardless of this toggle's own state. -->
       @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
@@ -130,7 +130,7 @@
         </div>
       }
 
-      <!-- ---- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
+      <!-- ---- Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
            in watch mode, and once the FC itself confirms armed. Collapsible per direct user request:
            open before the stream starts, collapsed to its summary head once it's running (the video
            stage owns that space then), re-openable by clicking the head — the state itself is
@@ -146,7 +146,7 @@
         </div>
       }
 
-      <!-- ---- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
+      <!-- ---- Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
            vibration/EKF/rangefinder/mission progress); hidden entirely with no diagnostic keys. -->
       @if (facade.diagnosticsRows().length > 0) {
         <div class="main-diagnostics">
@@ -154,7 +154,7 @@
         </div>
       }
 
-      <!-- ---- Tool-rail drawers (docs/UI-REDESIGN-PLAN.md Wave 2, D-D/D-E) ----------------------
+      <!-- ---- Tool-rail drawers (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D/D-E) ----------------------
            One open at a time via `panels`; each overlays `main` (its own `<vision-side-panel>` is
            `position: fixed`, so where it mounts in the DOM doesn't matter for layout — mounting it
            here just keeps it beside the rest of `main`'s own overlays). -->
@@ -188,8 +188,8 @@
         />
       }
 
-      <!-- Controller (RC transmitter monitor + Take control) — docs/RC-CONTROL-PLAN.md Phase 0
-           (the read-only monitor, always available) + docs/RC-CONTROL-PHASE1-PLAN.md R5 (the SITL
+      <!-- Controller (RC transmitter monitor + Take control) — docs/plans/active/RC-CONTROL-PLAN.md Phase 0
+           (the read-only monitor, always available) + docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5 (the SITL
            relay engage/release below it, gated on the same `canShowCommands()` the flight panel
            uses). Mounted only while open so its Gamepad rAF poll loop — and any live relay session,
            via `ManualControlClient`'s own `DestroyRef` teardown — only run then. -->
@@ -203,14 +203,14 @@
       }
 
       <!-- Detections strip — previously an always-visible bottom-right toggle+strip, now the
-           `detections` drawer (docs/UI-REDESIGN-PLAN.md Wave 2 item 5); same `live()` gate as before. -->
+           `detections` drawer (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 item 5); same `live()` gate as before. -->
       @if (facade.live() && isPanelOpen('detections')) {
         <vision-side-panel title="Detections" icon="eye" (close)="panels.close()">
           <vision-detections-strip />
         </vision-side-panel>
       }
 
-      <!-- Map — layers + drawing (docs/MAP-REWORK-PLAN.md §5.2). One drawer for both rather than
+      <!-- Map — layers + drawing (docs/plans/done/MAP-REWORK-PLAN.md §5.2). One drawer for both rather than
            two rail buttons: the cockpit's own map is a 220px inset, so a toolbar floating over it
            (Command's shape) would eat the picture it is meant to annotate. See
            `<vision-layer-manager>`'s doc comment for why the grants editor is a sibling panel rather
@@ -226,7 +226,7 @@
         </vision-side-panel>
       }
 
-      <!-- Marks — the shared tactical-marks operational picture (docs/TACTICAL-MARKS-PLAN.md M5).
+      <!-- Marks — the shared tactical-marks operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M5).
            Always available (no `canShowCommands()`/`watchMode()` gate — annotating the shared
            picture is not a flight command, any in-scope viewer may create/annotate). -->
       <vision-marks-panel
@@ -251,7 +251,7 @@
             <dt>?</dt>
             <dd>This help</dd>
           </dl>
-          <!-- Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): every icon-only control in the
+          <!-- Quick-access pass (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1): every icon-only control in the
                cockpit gets a title tooltip *and* a line here, so a new operator can find out what
                every glyph-only button does from one place, not by hovering each in turn. -->
           <h3 class="shortcuts-subhead">Cockpit controls</h3>
@@ -265,15 +265,15 @@
       }
     </div>
 
-    <!-- ---- Bottom OSD strip (docs/UI-REDESIGN-PLAN.md Wave 2 — Power/Nav/Link/Env clusters,
+    <!-- ---- Bottom OSD strip (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 — Power/Nav/Link/Env clusters,
          relaid out as a bottom row per direct user request; see cockpit.css's own grid comment). ---- -->
     <div class="grid-telemetry">
       <vision-fly-osd [latencySeconds]="facade.latencySeconds()" [transport]="facade.transport()" [windLimitMps]="facade.windLimitMps()" />
     </div>
 
 
-    <!-- ---- Tool-rail (docs/UI-REDESIGN-PLAN.md Wave 2, D-D; grouped by job per
-         docs/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit";
+    <!-- ---- Tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D; grouped by job per
+         docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 — "7 glyph-only drawers is past the glance-and-know limit";
          `layers` folded into `cv` per direct user request — the detection-boxes rendering mode is
          now a control inside the `cv` (Detection) drawer, not its own drawer/button, so the rail is
          down to 6) — frozen ids (fly-logic.ts's own `ToolRailPanelId`): flight · rc · cv ·
@@ -282,7 +282,7 @@
          safety-of-flight screen); a thin `--hairline` divider between `.rail-group`s stands in for a
          text label, which does not read clean at this rail's ~2.25rem button width (F4: "if it
          crowds, use just the divider"). Every button already carries its own `title`/`aria-label`
-         via `vision-icon-button`'s required `label` input (docs/UX-QUICKWINS-PLAN.md QF-1 — see that
+         via `vision-icon-button`'s required `label` input (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1 — see that
          component's own doc comment). Groups, top to bottom:
            Control      — flight, rc (what an operator commands the aircraft with)
            Vision       — cv, detections (what the aircraft sees / how it's rendered, including the
@@ -381,7 +381,7 @@
             Stop stream
           </button>
         } @else {
-          <!-- Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2): disabled with the reason inline,
+          <!-- Poka-yoke rule 1 (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2): disabled with the reason inline,
                never enabled-then-error — a drone with no camera device has nothing to stream. -->
           <div class="start-control">
             <button type="button" class="btn big" (click)="facade.start()" [disabled]="facade.busy() || !facade.primaryDevice()">
@@ -398,7 +398,7 @@
     @if (isDialogOpen('stop')) {
       <div class="hud-confirm">
         <div class="card inline-confirm-card">
-          <!-- Poka-yoke rule 2 (docs/UX-REWORK-PLAN.md §U-a2 §2): high-consequence, mid-flight —
+          <!-- Poka-yoke rule 2 (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2): high-consequence, mid-flight —
                keeps its confirm, but states the consequence, not just the question. -->
           <p>Stop {{ a.displayName }}'s stream? It ends the stream for all viewers, not just you.</p>
           <div class="row">
@@ -412,7 +412,7 @@
     }
   </div>
 } @else if (facade.loadError()) {
-  <!-- Honest empty state (docs/NAV-IA-REDESIGN-PLAN.md F12 — "a :assetId that does not exist must
+  <!-- Honest empty state (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12 — "a :assetId that does not exist must
        degrade to an honest empty state, never a crash or a blank screen"): a bad bookmark or a
        since-deleted asset renders this instead of silently bouncing the operator to a different URL
        — mirrors `LivePage`'s own "Unknown device" empty state exactly (`live.html`). -->

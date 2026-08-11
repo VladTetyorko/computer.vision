@@ -16,7 +16,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for group management (docs/U-SCOPE-PLAN.md, U-e slice 2) — list groups and
+ * Driving REST adapter for group management (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — list groups and
  * create one (optionally under a parent), the org-chart half of the org-settings surface.
  *
  * <p>Constructor-injected with {@link GroupService} and {@link CurrentUser}: both operations pass

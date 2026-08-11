@@ -22,7 +22,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for the CV training-job flow (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2) —
+ * Driving REST adapter for the CV training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2) —
  * starting a fine-tune run against a dataset and polling its progress, over {@link
  * TrainingJobService}. The last backend piece of the training loop: {@link DatasetController}/
  * {@link LabelingController} build the dataset, {@link ModelRegistryController} promotes the
@@ -34,8 +34,8 @@ import com.drones.vision.api.security.CurrentUser;
  *
  * <p>{@link #start} nests under {@code /api/datasets/{id}/train} (the dataset being trained on),
  * while {@link #job}/{@link #jobs} live under {@code /api/training/jobs} — a job outlives, and is
- * never re-scoped by, the dataset it started from, exactly the split docs/CV-TRAINING-PLAN.md §8
- * pins. {@link #start} parses {@code id} into a {@link DatasetId} at the edge (docs/CV-TRAINING-V2-PLAN.md
+ * never re-scoped by, the dataset it started from, exactly the split docs/plans/done/CV-TRAINING-PLAN.md §8
+ * pins. {@link #start} parses {@code id} into a {@link DatasetId} at the edge (docs/plans/done/CV-TRAINING-V2-PLAN.md
  * §5) — a malformed id is a synchronous {@code 400}, not a job that fails later — then threads its
  * canonical string form into the started {@link TrainingJobSpec}, whose {@code datasetId} field
  * itself stays a plain string all the way to the gRPC boundary ({@link
@@ -48,8 +48,8 @@ import com.drones.vision.api.security.CurrentUser;
  * dataset) → 404; {@link IllegalArgumentException} (a malformed dataset id; a malformed spec — blank
  * {@code baseModel} or non-positive {@code epochs}, {@link TrainingJobSpec}'s own
  * compact-constructor checks; or a dataset with no {@code LABELED} samples to train on,
- * docs/CV-TRAINING-V2-PLAN.md §4's synchronous pre-check) → 400. A training run that fails
- * mid-flight (including a rejected dataset upload, docs/CV-TRAINING-V2-PLAN.md §4) is <b>never</b>
+ * docs/plans/done/CV-TRAINING-V2-PLAN.md §4's synchronous pre-check) → 400. A training run that fails
+ * mid-flight (including a rejected dataset upload, docs/plans/done/CV-TRAINING-V2-PLAN.md §4) is <b>never</b>
  * a thrown exception — it is a polled {@link com.drones.vision.domain.model.JobState#FAILED} {@link
  * TrainingJobResponse#state()}, so {@link #job}/{@link #jobs} never special-case it.
  */
@@ -68,7 +68,7 @@ public class TrainingJobController {
     /**
      * Starts a fine-tune job against a dataset — uploading it to the training host over gRPC and
      * kicking off the run, all in {@link TrainingJobService#start}'s off-thread work
-     * (docs/CV-TRAINING-V2-PLAN.md §4).
+     * (docs/plans/done/CV-TRAINING-V2-PLAN.md §4).
      *
      * @param id      the dataset id to train on, as a canonical UUID string, parsed at this edge
      *                (400 on a malformed id) before its canonical string form is threaded into the

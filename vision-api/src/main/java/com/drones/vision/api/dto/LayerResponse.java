@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * A map layer as the caller sees it (docs/MAP-REWORK-PLAN.md §4.2) — the layer itself, the caller's
+ * A map layer as the caller sees it (docs/plans/done/MAP-REWORK-PLAN.md §4.2) — the layer itself, the caller's
  * own effective access level, and how much is on it.
  *
  * <p><strong>{@code grants} is {@code null} unless {@code myAccess == MANAGE}</strong> (and always
@@ -52,7 +52,7 @@ public record LayerResponse(String layerId, String name, String kind, String own
     }
 
     /**
-     * The SSE form (docs/MAP-REWORK-PLAN.md §4.3): a layer carried inside a {@code map} event.
+     * The SSE form (docs/plans/done/MAP-REWORK-PLAN.md §4.3): a layer carried inside a {@code map} event.
      *
      * <p>Two fields are deliberately not what a REST read would carry, because the broadcast side
      * has neither piece of information available per recipient:

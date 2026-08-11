@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Lists finished (and still-open) {@link com.drones.vision.domain.model.AssetUsage}s as
  * display-ready rows — the read side behind {@code GET /api/usages}, the "replay library"
- * (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/design/10-replay.md). {@link ReplayService}
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md). {@link ReplayService}
  * (sibling package) is the detail view over <em>one</em> usage's telemetry/detection timeline; this
  * is the cross-fleet list a caller picks a usage from before opening that detail view — a genuinely
  * different collaborator set ({@link AssetRepositoryPort} to resolve a display name and enforce

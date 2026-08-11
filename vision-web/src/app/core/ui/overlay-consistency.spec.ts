@@ -2,12 +2,12 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * Overlay-consistency guard (docs/UI-STATE-PLAN.md §2.3, §3) — a pure source-scanning test, the same
+ * Overlay-consistency guard (docs/plans/done/UI-STATE-PLAN.md §2.3, §3) — a pure source-scanning test, the same
  * technique `core/ui/architecture.spec.ts` already established (`import.meta.glob(..., '?raw')`, no
  * `TestBed`, plain string analysis; this suite runs in the Angular unit-test builder's browser-like
  * bundle, where the Node `fs`/`path` APIs are unavailable).
  *
- * **What it enforces.** docs/UI-STATE-PLAN.md §2.3's own dividing line between an allowed `<details>`
+ * **What it enforces.** docs/plans/done/UI-STATE-PLAN.md §2.3's own dividing line between an allowed `<details>`
  * and a forbidden one is behavioral, not syntactic — *"can something else need to close this?"*:
  *   - **Inline disclosure that pushes content** (the sidebar's `Advanced`/`Upcoming`, `/debug`'s raw
  *     JSON, a detection card's `Advanced` section) — native `<details>` is fine, its state is genuinely
@@ -28,7 +28,7 @@ import { describe, expect, it } from 'vitest';
  *
  * **Scope: the always-mounted shell only.** Only files actually reachable from `app.html`'s permanent
  * render tree are scanned — the root shell itself, the sidebar (+ the identity chip / notification
- * bell it composes), the toast host, and the undo toast (docs/UI-STATE-PLAN.md §2.2 D5: *"the shell is
+ * bell it composes), the toast host, and the undo toast (docs/plans/done/UI-STATE-PLAN.md §2.2 D5: *"the shell is
  * always mounted, so nothing cleans up"* — page-scoped overlays are destroyed with their host page and
  * self-heal on navigation for free, which is exactly what makes them out of D4's blast radius). This is
  * deliberately **not** every `<details>` under `shared/ui/**` — `kebab-menu.ts`'s per-row overflow menu
@@ -51,7 +51,7 @@ import { describe, expect, it } from 'vitest';
  *     `[open]="a() > b()"`) would confuse the simple `[^>]*` tag-boundary regex below — none of the
  *     files this guard currently reads do that.
  *
- * **The union-type half of docs/UI-STATE-PLAN.md §3** ("any new `GlobalOverlayId` must be registered in
+ * **The union-type half of docs/plans/done/UI-STATE-PLAN.md §3** ("any new `GlobalOverlayId` must be registered in
  * the store's own union type") needs no test here — the plan's own text is explicit that this is
  * already compiler-enforced (a string literal not in the union fails `tsc`), which is the entire point
  * of a union over a free string; a Vitest spec re-checking what `tsc` already guarantees would be
@@ -98,7 +98,7 @@ function unboundDetailsTags(source: string): readonly string[] {
   return tags.filter((tag) => !/\[open\]\s*=/.test(tag));
 }
 
-describe('overlay-consistency guard (always-mounted shell, docs/UI-STATE-PLAN.md §2.3/§3)', () => {
+describe('overlay-consistency guard (always-mounted shell, docs/plans/done/UI-STATE-PLAN.md §2.3/§3)', () => {
   it('resolves exactly the shell files this guard is scoped to (a stale path scans nothing, silently)', () => {
     expect(Object.keys(HTML_SOURCES).length).toBe(5);
     expect(Object.keys(TS_SOURCES).length).toBe(3);
@@ -111,7 +111,7 @@ describe('overlay-consistency guard (always-mounted shell, docs/UI-STATE-PLAN.md
     expect(
       offenders,
       `${path} has a <details> with no [open] binding — the always-mounted shell can't leave an ` +
-        `overlay's state in the DOM where nothing can coordinate or close it (docs/UI-STATE-PLAN.md ` +
+        `overlay's state in the DOM where nothing can coordinate or close it (docs/plans/done/UI-STATE-PLAN.md ` +
         `§2.3/D4): ${offenders.join(', ')}`,
     ).toEqual([]);
   });

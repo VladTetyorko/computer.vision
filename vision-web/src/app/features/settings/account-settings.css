@@ -1,6 +1,6 @@
 /* `.page--form` (styles.css) centers this page at 880px — see `detection-settings.css`'s own header
    comment for the sibling page this file used to be combined with
-   (docs/NAV-IA-REDESIGN-PLAN.md §2.5, docs/design/11-settings.md, Wave 4). */
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5, docs/extracts/design/11-settings.md, Wave 4). */
 
 .blast-line {
     margin: 0 0 var(--space-16);

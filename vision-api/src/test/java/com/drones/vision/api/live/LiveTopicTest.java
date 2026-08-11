@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Pure unit tests for {@link LiveTopic} parsing (docs/REALTIME-PLAN.md §4, item 2) — no Spring.
+ * Pure unit tests for {@link LiveTopic} parsing (docs/plans/done/REALTIME-PLAN.md §4, item 2) — no Spring.
  */
 class LiveTopicTest {
 

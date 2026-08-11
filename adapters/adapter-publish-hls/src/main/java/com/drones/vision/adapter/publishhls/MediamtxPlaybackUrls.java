@@ -5,13 +5,13 @@ import java.time.Instant;
 
 /**
  * Builds mediamtx's playback-server {@code /get} query URL — the one place that knows the exact
- * query-string shape mediamtx's playback HTTP server (docs/OPS-CORE-PLAN.md §R) expects: {@code
+ * query-string shape mediamtx's playback HTTP server (docs/plans/done/OPS-CORE-PLAN.md §R) expects: {@code
  * {playbackBase}/get?path=<name>&start=<RFC3339>&duration=<seconds>}.
  *
  * <p>Shared by {@link MediamtxStreamPublisher#playbackUrl} (an arbitrary, caller-supplied clip
  * window, surfaced to a viewer) and {@link MediamtxReplayFrameExtractor} (a fixed one-second window
  * used purely to make mediamtx seek to the wanted instant before this process decodes a single
- * frame from it, docs/CV-TRAINING-V2-PLAN.md §6) — extracted here so mediamtx's query shape is
+ * frame from it, docs/plans/done/CV-TRAINING-V2-PLAN.md §6) — extracted here so mediamtx's query shape is
  * expressed in exactly one place instead of twice.
  *
  * <p>Package-private, stateless, pure string formatting — no I/O, no validation beyond what {@link

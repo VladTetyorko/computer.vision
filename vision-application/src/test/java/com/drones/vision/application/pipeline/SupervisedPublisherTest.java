@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Unit tests for {@link SupervisedPublisher}, docs/MVP2-PLAN.md §S, S-a. Uses a hand-rolled fake
+ * Unit tests for {@link SupervisedPublisher}, docs/plans/done/MVP2-PLAN.md §S, S-a. Uses a hand-rolled fake
  * {@link ScheduledExecutorService} ({@link RecordingScheduler}) that records every scheduling
  * request without a real timer, so backoff-doubling/capping and stop-cancels-the-pending-retry are
  * both deterministic and instantaneous — no real sleeping anywhere in this suite.

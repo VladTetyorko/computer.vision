@@ -6,14 +6,14 @@ import type {
 
 /**
  * Pure request-builders for every zero-hardware entry point `POST /api/simulations`/
- * `POST /api/devices` back (docs/CYCLES-PLAN.md §4, §9; docs/UX-REWORK-PLAN.md §U-d).
+ * `POST /api/devices` back (docs/main/CYCLES-PLAN.md §4, §9; docs/plans/done/UX-REWORK-PLAN.md §U-d).
  *
  * `buildTestDroneRequest`/`TestDroneForm` (the "moving test drone, no file" mode) split out of
- * `features/devices/simulate-logic.ts` into `core/fleet/` (vision-web/docs/UI-STRUCTURE-PLAN.md §3,
+ * `features/devices/simulate-logic.ts` into `core/fleet/` (vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §3,
  * B1) once `features/map/map.ts` needed the same builder its own Devices-page-local
  * `simulate-logic.ts` module used to hold exclusively. `buildSimulationRequest`/
  * `buildSyntheticRegisterRequest`/`SimulateMode`/`FileSimulateForm` (the `direct`/`rtsp`/`synthetic`
- * modes) joined them here for the identical reason (docs/UX-REWORK-PLAN.md §U-d): the onboarding
+ * modes) joined them here for the identical reason (docs/plans/done/UX-REWORK-PLAN.md §U-d): the onboarding
  * wizard's Connect step needs every mode, not just `testDrone`, and `features/devices/devices.ts`
  * (Warehouse)'s own one-click "Add the simulated source" empty-state button still needs
  * `buildSyntheticRegisterRequest` — this codebase has no precedent for one feature importing
@@ -26,7 +26,7 @@ import type {
 
 /**
  * The four zero-hardware entry points the onboarding wizard's Connect step (Simulate method)
- * offers. `testDrone` (docs/CYCLES-PLAN.md §9, CU-b item 7) is CU-a's fully synthetic simulation —
+ * offers. `testDrone` (docs/main/CYCLES-PLAN.md §9, CU-b item 7) is CU-a's fully synthetic simulation —
  * no video file, a VIDEO+TELEMETRY device moving along a circular home-point track — distinct from
  * `synthetic`, which registers a plain VIDEO-only `sim`-protocol device with no telemetry at all
  * (the pre-existing quick-add). `direct`/`rtsp` play a real file through the pipeline.
@@ -37,7 +37,7 @@ export type SimulateMode = 'direct' | 'rtsp' | 'synthetic' | 'testDrone';
  * Form state for the file-based modes (`direct`/`rtsp`). `synthetic` never reaches this shape —
  * it carries no file path or home position at all, see `buildSyntheticRegisterRequest`.
  *
- * `telemetry` (docs/CYCLES-PLAN.md §7, CT-b) is the already-serialized wire shape from
+ * `telemetry` (docs/main/CYCLES-PLAN.md §7, CT-b) is the already-serialized wire shape from
  * `shared/map/flight-plan-logic.ts#buildTelemetryRequest` — the flight-plan dialog builds it, this
  * module only threads it through to the request, exactly like it already does for
  * `latitude`/`longitude`.
@@ -82,7 +82,7 @@ const SYNTHETIC_DEFAULT_NAME = 'sim-demo';
 /**
  * The `synthetic` mode registers the same classic `sim`-protocol VIDEO device the Warehouse page's
  * "Add the simulated source" quick-add has always used — this *is* that path, reused, so every
- * zero-hardware entry point builds its request from one place (docs/CYCLES-PLAN.md §4). No file, no
+ * zero-hardware entry point builds its request from one place (docs/main/CYCLES-PLAN.md §4). No file, no
  * home position: a blank/whitespace-only name falls back to the quick-add's own default.
  */
 export function buildSyntheticRegisterRequest(name: string): RegisterDeviceRequest {
@@ -98,7 +98,7 @@ export function buildSyntheticRegisterRequest(name: string): RegisterDeviceReque
  * Form state for the `testDrone` mode: a home point (optional — the backend defaults it when
  * absent) and whether to start streaming immediately. No `videoPath` —
  * `StartSimulationRequest.videoPath` is optional precisely so this mode can omit it entirely
- * (CU-a, vision-api). `telemetry` (docs/CYCLES-PLAN.md §7, CT-b) is the flight-plan dialog's
+ * (CU-a, vision-api). `telemetry` (docs/main/CYCLES-PLAN.md §7, CT-b) is the flight-plan dialog's
  * serialized route, same convention as `FileSimulateForm#telemetry` in `simulate-logic.ts`.
  */
 export interface TestDroneForm {
@@ -111,7 +111,7 @@ export interface TestDroneForm {
 
 /**
  * Builds the `POST /api/simulations` body for the `testDrone` mode — the one-click "moving test
- * drone, no file" entry point (docs/CYCLES-PLAN.md §9, CU-a/CU-b): `videoPath` is omitted
+ * drone, no file" entry point (docs/main/CYCLES-PLAN.md §9, CU-a/CU-b): `videoPath` is omitted
  * entirely (not even blank), which is what tells the backend to register a fully synthetic
  * VIDEO+TELEMETRY device instead of a `file`-backed one. Name/position follow the same
  * trim-and-omit-when-blank convention as {@link buildSimulationRequest} above.

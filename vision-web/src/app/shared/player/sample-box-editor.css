@@ -129,7 +129,7 @@
   background: var(--panel-hover);
 }
 
-/* Selected per docs/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
+/* Selected per docs/plans/done/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
    selected row/card in the app uses (e.g. `features/assets/assets.css`'s `.asset-card.selected`). */
 .box-row.selected {
   background: var(--color-info-soft);

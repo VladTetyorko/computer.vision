@@ -239,7 +239,7 @@ class YoloDetector:
         call; without this, that cost lands on the first real frame instead,
         which risks tripping adapter-cv-grpc's 2s response timeout and
         forcing an outage-backoff teardown right at stream start (see
-        docs/CYCLES-PLAN.md CP-a). Runs for injected `model=` doubles too --
+        docs/main/CYCLES-PLAN.md CP-a). Runs for injected `model=` doubles too --
         tests assert on this construction-time call. A failure here is
         treated the same as a load failure: `ModelUnavailableError`, which
         the caller degrades to the echo path instead of crashing. This is

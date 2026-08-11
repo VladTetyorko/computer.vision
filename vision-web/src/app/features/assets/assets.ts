@@ -11,16 +11,16 @@ import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { AssetsFacade } from './assets-facade';
 import { describeAssetState, parseAssetViewMode, type AssetListRow, type AssetStateDescriptor, type AssetViewMode } from './assets-logic';
 
-/** `localStorage` key for the `▤ ▦` view toggle (docs/design/04-assets.md) — one page's own key,
+/** `localStorage` key for the `▤ ▦` view toggle (docs/extracts/design/04-assets.md) — one page's own key,
  *  same `vision.<page>.<field>` shape as `vision.command.railOpen`/`vision.fly.mapVisible`. */
 const VIEW_MODE_KEY = 'vision.assets.viewMode';
 
 /**
  * The Assets page (`/assets`) — asset-first list: search by name, filter by category/lifecycle/
  * streaming, one row per asset with a two-pane detail panel for triage. Split out of the old combined
- * Devices page (docs/CYCLES-PLAN.md §11's "asset-first list") once inventory got its own dedicated
+ * Devices page (docs/main/CYCLES-PLAN.md §11's "asset-first list") once inventory got its own dedicated
  * pages for Assets and Devices. **Assets is the one home for "what I own/fly"**
- * (docs/UX-SIMPLIFY-REVIEW.md F2) — Warehouse, a two-tile launcher that briefly sat between this page
+ * (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2) — Warehouse, a two-tile launcher that briefly sat between this page
  * and `features/devices/**`, was deleted outright (`/warehouse` now redirects here); see
  * `features/hubs/nav-entries.ts`'s own class doc comment for the full before/after and
  * `features/devices/devices.ts`'s own class doc comment for what stayed behind.
@@ -28,14 +28,14 @@ const VIEW_MODE_KEY = 'vision.assets.viewMode';
  * `operatorAssetActions`'s own doc comment for why only Archive/Restore reach this surface) is
  * unchanged from the page this was split out of, byte-for-byte in behavior.
  *
- * **Layered per docs/UI-ARCHITECTURE-PLAN.md**: every store/service injection, search/filter
+ * **Layered per docs/plans/done/UI-ARCHITECTURE-PLAN.md**: every store/service injection, search/filter
  * read-model, and HTTP-backed command lives in {@link AssetsFacade}. This component is left holding
  * only the route-bound `category`/`sel` inputs (only a component can receive one), the two
  * constructor `effect()`s that forward them into the facade, the `viewMode` toggle (pure
  * template-branch state, doesn't feed any facade computed), and a couple of pure, stateless
  * label/action-list helpers with no injected dependency of their own.
  *
- * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/04-assets.md):
+ * **`page-head` → `vision-page-bar`** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/04-assets.md):
  * the old subtitle — two lines ending in a prose link to `/devices` — is deleted outright rather than
  * moved to a `hint`, both because "Assets" needs no explanation and because that link was a second
  * door to a page the sidebar already lists under `⌄ Advanced` (F7). The search/category/status/
@@ -43,7 +43,7 @@ const VIEW_MODE_KEY = 'vision.assets.viewMode';
  * now project into the bar's `[pageBarFilters]` slot; `+ Add source`/`Refresh` project into
  * `[pageBarActions]`.
  *
- * **Wave 3 — two-pane (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/04-assets.md)**: a dense list
+ * **Wave 3 — two-pane (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/04-assets.md)**: a dense list
  * is now the default view (F5 — a card spent 260×120 on what a row shows in 32px); the card grid
  * stays as an opt-in `▤ ▦` view, both reading `facade.assetRows()` — one projection, two renderings,
  * per the design doc's own "don't duplicate the row/card mapping" instruction. Clicking a row/card no
@@ -62,13 +62,13 @@ const VIEW_MODE_KEY = 'vision.assets.viewMode';
 })
 export class AssetsPage {
   /**
-   * `?category=<slug>` — pre-filters the grid to one category (docs/UX-QUICKWINS-PLAN.md QF-2/QF-3):
+   * `?category=<slug>` — pre-filters the grid to one category (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2/QF-3):
    * the drill-down target for the Command dashboard's readiness tiles.
    */
   readonly category = input<string | undefined>(undefined);
 
   /**
-   * `?sel=<assetId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4) — bound the same way `category` above is
+   * `?sel=<assetId>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4) — bound the same way `category` above is
    * (`withComponentInputBinding()`, `app.config.ts`): only a component can receive a route input, so
    * the constructor `effect()` below is what forwards it into the facade, mirroring `category`'s own
    * forwarding exactly.
@@ -82,7 +82,7 @@ export class AssetsPage {
   protected readonly pluralize = pluralize;
 
   /**
-   * The `▤ ▦` list/card view toggle (docs/design/04-assets.md) — pure template-branch view state,
+   * The `▤ ▦` list/card view toggle (docs/extracts/design/04-assets.md) — pure template-branch view state,
    * same "host-owned, not the facade's" reasoning `features/devices/devices.ts`'s own (now-removed)
    * `viewMode` doc comment gave: both views read the identical `facade.assetRows()`, so this signal
    * decides nothing any computed in the facade needs to know about. Seeded from `localStorage`
@@ -130,7 +130,7 @@ export class AssetsPage {
   }
 
   /**
-   * The dense list/card grid/detail panel's one merged state indicator (docs/VISUAL-REFRESH-PLAN.md
+   * The dense list/card grid/detail panel's one merged state indicator (docs/plans/done/VISUAL-REFRESH-PLAN.md
    * F5 — "at most one chip per row"): replaces the old separate Lifecycle + Streaming chips. See
    * `assets-logic.ts#describeAssetState`'s own doc comment for the priority order.
    */
@@ -138,7 +138,7 @@ export class AssetsPage {
     return describeAssetState(row);
   }
 
-  /** The card's per-row kebab menu — just Archive/Restore, reasoned (docs/UX-REWORK-PLAN.md §U-a2 item 2). */
+  /** The card's per-row kebab menu — just Archive/Restore, reasoned (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 2). */
   protected assetActionsFor(row: AssetListRow): readonly ActionAvailability<'archive' | 'restore'>[] {
     return operatorAssetActions(row.lifecycle);
   }

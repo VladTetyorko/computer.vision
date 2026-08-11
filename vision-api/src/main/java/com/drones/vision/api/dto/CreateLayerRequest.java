@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.GroupId;
 import com.drones.vision.domain.model.LayerKind;
 
 /**
- * Body of {@code POST /api/map/layers} (docs/MAP-REWORK-PLAN.md §4.2).
+ * Body of {@code POST /api/map/layers} (docs/plans/done/MAP-REWORK-PLAN.md §4.2).
  *
  * @param name    the layer's name, non-blank, at most {@code MapLayer.MAX_NAME_LENGTH}
  * @param kind    {@code "TEAM"} or {@code "PERSONAL"}; {@code "COP"} is rejected — the single COP

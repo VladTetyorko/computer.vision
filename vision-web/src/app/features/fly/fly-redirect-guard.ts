@@ -5,7 +5,7 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { rememberedStreamingAssetId } from './fly-logic';
 
 /**
- * Gates the bare `/fly` route (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/design/01-fly.md —
+ * Gates the bare `/fly` route (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/extracts/design/01-fly.md —
  * "skip the picker when it has nothing to ask") — decides, **before `DronePickerPage` ever mounts**,
  * whether this visit should redirect straight into a cockpit instead of showing the picker at all.
  * Two independent reasons to redirect, checked in this order:
@@ -21,13 +21,13 @@ import { rememberedStreamingAssetId } from './fly-logic';
  * Neither branch fetches `getAsset`/validates the id beyond `rememberedStreamingAssetId`'s own
  * fleet-presence check — an `/fly/:assetId` that turns out to be stale (deleted between this guard's
  * `listAssets()` and the cockpit's own `getAsset()`) is `CockpitPage`'s own honest-empty-state job
- * (docs/NAV-IA-REDESIGN-PLAN.md F12's own "must degrade to an honest empty state" requirement), not
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12's own "must degrade to an honest empty state" requirement), not
  * this guard's — duplicating that check here would only double the round trip for the same answer.
  *
  * **Redirects by navigating and returning `false`, never by returning a `UrlTree`** (unlike
  * `auth-guard.ts`/`org-guard.ts`, both wiring-only redirects that happen to need no particular
  * history behavior). This route's own redirect needs an unambiguous **replacing** navigation
- * (docs/UX-DESIGN.md §2 T1's "Back must not loop" concern, restated for F12): landing here already
+ * (docs/main/UX-DESIGN.md §2 T1's "Back must not loop" concern, restated for F12): landing here already
  * consumed one history entry — the link that brought the operator to `/fly?asset=…`, or whatever
  * preceded a bare `/fly` visit with a live remembered drone. Pushing `/fly/:assetId` *on top* of
  * that (however a guard-returned `UrlTree`'s own history behavior resolves — not pinned down here)
@@ -49,7 +49,7 @@ import { rememberedStreamingAssetId } from './fly-logic';
  * cockpit is exactly what sets `flyAssetId`, so the overwhelmingly common case is "the drone I
  * just came from is still streaming" — re-running this guard on Back would redirect straight back
  * into the very cockpit Back is trying to leave, silently swallowing the Back press
- * (docs/design/01-fly.md's own "the cockpit needs a way back to it" promise, broken one navigation
+ * (docs/extracts/design/01-fly.md's own "the cockpit needs a way back to it" promise, broken one navigation
  * later). `Router.getCurrentNavigation()?.trigger` is `'popstate'` for both Back and Forward and
  * only those (never a `routerLink` click, a `router.navigate` call, or a typed URL - all
  * `'imperative'`) - checked first, before either branch, so Back/Forward always renders whatever

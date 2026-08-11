@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.function.LongSupplier;
 
 /**
- * A per-field, partial statement about a stream's {@link TrackingConfig} (docs/TRACKING-PLAN.md
+ * A per-field, partial statement about a stream's {@link TrackingConfig} (docs/plans/done/TRACKING-PLAN.md
  * &sect;4.D): every component is nullable and {@code null} means <b>leave this knob unchanged</b> —
  * the same null-means-unchanged idiom {@link PipelineConfigPatch} uses for the rest of the pipeline
  * config, applied one level down.
@@ -24,7 +24,7 @@ import java.util.function.LongSupplier;
  *
  * <h2>The two folds, and the layering they express</h2>
  * {@link #foldOnto} is used at both ends of a stream's life, which is what makes the configuration
- * precedence of docs/TRACKING-ORCHESTRATION.md &sect;4.1 — <b>per-stream request &gt; deployment env
+ * precedence of docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1 — <b>per-stream request &gt; deployment env
  * &gt; code default</b> — literal in code rather than prose:
  *
  * <ul>

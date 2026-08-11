@@ -97,7 +97,7 @@ describe('PageBar', () => {
     expect(render().nativeElement.querySelector('.page-bar-hint-trigger')).toBeNull();
   });
 
-  // docs/UI-STATE-PLAN.md §2.4 — before this, the hint popover only closed by clicking its own
+  // docs/plans/done/UI-STATE-PLAN.md §2.4 — before this, the hint popover only closed by clicking its own
   // trigger a second time; an operator hitting Escape (or clicking anywhere else) expects it gone.
   it('closes the hint on Escape, from anywhere in the document', () => {
     const fixture = render((host) => host.hint.set('Only affects your account.'));
@@ -152,7 +152,7 @@ describe('PageBar', () => {
     expect(el.querySelector('.page-bar-actions button')).not.toBeNull();
   });
 
-  // The asset photo (docs/UX-REWORK-PLAN.md §U-d item 3) lives here; the endpoint 404s for an asset
+  // The asset photo (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) lives here; the endpoint 404s for an asset
   // with no uploaded photo, so a failed load must hide the element rather than leave a torn icon.
   it('renders the avatar when given a src, and hides it once that src fails to load', () => {
     const fixture = render((host) => host.avatarSrc.set('/api/assets/abc/image'));

@@ -1,8 +1,8 @@
 package com.drones.vision.domain.model;
 
 /**
- * Why a detector pass was spent on a frame (docs/TRACKING-PLAN.md §3.1, §4.A;
- * docs/TRACKING-ORCHESTRATION.md §5.1) — {@link TrackingTelemetry#detectorRan()} says
+ * Why a detector pass was spent on a frame (docs/plans/done/TRACKING-PLAN.md §3.1, §4.A;
+ * docs/extracts/TRACKING-ORCHESTRATION.md §5.1) — {@link TrackingTelemetry#detectorRan()} says
  * <em>whether</em> a pass ran; this says <em>why</em>, one value per trigger in the duty-cycle
  * table.
  *

@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Configuration for the server-push data plane ({@code vision.live.*}, docs/REALTIME-PLAN.md §4,
+ * Configuration for the server-push data plane ({@code vision.live.*}, docs/plans/done/REALTIME-PLAN.md §4,
  * item 4).
  *
  * <p>Selected by {@code wiring.ApplicationServiceWiring#liveUpdatePublisherPort}: {@link #enabled()}

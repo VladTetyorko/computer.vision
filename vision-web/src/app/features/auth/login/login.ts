@@ -4,7 +4,7 @@ import { Notice } from '../../../shared/ui/notice';
 import { LoginFacade } from './login-facade';
 
 /**
- * The login screen (docs/U-AUTH-PLAN.md wave 4) — the one destination `core/auth/auth-guard.ts`
+ * The login screen (docs/plans/done/U-AUTH-PLAN.md wave 4) — the one destination `core/auth/auth-guard.ts`
  * sends an anonymous user to whenever auth is enabled. Never reachable at all in dev-parity mode
  * (`authEnabled === false`); see `core/auth/auth-logic.ts#needsLogin`.
  *
@@ -17,7 +17,7 @@ import { LoginFacade } from './login-facade';
  *
  * Dumb by this codebase's own convention: every real decision — busy state, what the inline error
  * says, what "success" means — lives in `AuthStore.login()`, orchestrated by `LoginFacade`
- * (docs/UI-ARCHITECTURE-PLAN.md) — this component owns only the route-bound `returnUrl` input and
+ * (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — this component owns only the route-bound `returnUrl` input and
  * renders the facade's signals/commands.
  */
 @Component({

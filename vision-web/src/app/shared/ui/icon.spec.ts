@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Icon } from './icon';
 import { ICONS, type IconName } from './icon-registry';
 
-// The frozen F2 name set (docs/UI-REDESIGN-PLAN.md) — every glyph any wave needs at launch. This
+// The frozen F2 name set (docs/plans/done/UI-REDESIGN-PLAN.md) — every glyph any wave needs at launch. This
 // list must stay a subset of `Object.keys(ICONS)` forever (additive-only); it is not required to be
 // an exact match if a later wave adds a name, so the assertion below only checks "at least these".
 const FROZEN_NAMES: readonly IconName[] = [
@@ -14,9 +14,9 @@ const FROZEN_NAMES: readonly IconName[] = [
   'ruler', 'power',
   'alert', 'replay', 'history', 'wrench', 'chip', 'firmware', 'report', 'category', 'warehouse',
   'source', 'pilot', 'map',
-  // docs/RC-CONTROL-PLAN.md Phase 0 — the RC transmitter monitor's tool-rail glyph.
+  // docs/plans/active/RC-CONTROL-PLAN.md Phase 0 — the RC transmitter monitor's tool-rail glyph.
   'gamepad',
-  // docs/TACTICAL-MARKS-PLAN.md M5 — TARGET's crosshair and FRIENDLY's flag.
+  // docs/plans/done/TACTICAL-MARKS-PLAN.md M5 — TARGET's crosshair and FRIENDLY's flag.
   'target', 'flag',
 ];
 

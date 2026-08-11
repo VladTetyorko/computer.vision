@@ -1,7 +1,7 @@
 import type { AssetDetails, CreateAssetRequest, Device, LifecycleState } from '../../core/api/models';
 
 /**
- * Pure logic behind the Devices page's raw-devices table/grid (docs/CYCLES-PLAN.md §8, §11; the
+ * Pure logic behind the Devices page's raw-devices table/grid (docs/main/CYCLES-PLAN.md §8, §11; the
  * asset-first list this file used to also back moved wholesale to `features/assets/assets-logic.ts`
  * once Assets and Devices became separate pages — see that file's own doc comment). Split out so it
  * is unit-testable without HTTP or the router — mirrors `features/devices/simulate-logic.ts` and
@@ -9,7 +9,7 @@ import type { AssetDetails, CreateAssetRequest, Device, LifecycleState } from '.
  *
  * The generic lifecycle-action-menu state machine and edit-request builders
  * (`availableDeviceActions`/`buildDeviceRenameEdit`/`RESTORE_TARGET_STATE`) moved to
- * `core/fleet/warehouse-logic.ts` in docs/CYCLES-PLAN.md §11 (CD-b) — the asset detail page needs
+ * `core/fleet/warehouse-logic.ts` in docs/main/CYCLES-PLAN.md §11 (CD-b) — the asset detail page needs
  * them too, and this codebase has no precedent for one page importing another page's module (see
  * `core/fleet/device-logic.ts`'s doc comment). Re-exported here so every import site this page
  * already had keeps working verbatim; the asset-level exports (`ASSET_ACTION_LABELS`/
@@ -29,21 +29,21 @@ export {
 
 /**
  * The "existing categories + backend seed list" category picker moved to
- * `core/fleet/category-logic.ts` (docs/UX-REWORK-PLAN.md §U-d) once the onboarding wizard's Profile
+ * `core/fleet/category-logic.ts` (docs/plans/done/UX-REWORK-PLAN.md §U-d) once the onboarding wizard's Profile
  * step needed the identical picker — same cross-feature-module rule as the re-export block above.
  * Re-exported here so this page's own pre-existing import site keeps working verbatim.
  */
 export { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/category-logic';
 
 /**
- * The pinned REST contract (docs/CYCLES-PLAN.md §8) is coded against verbatim even though CW-a
+ * The pinned REST contract (docs/main/CYCLES-PLAN.md §8) is coded against verbatim even though CW-a
  * (the backend half) is not live while this lands: every mutation this logic feeds goes through
  * `FleetStore`'s `run()` funnel, so a 404 today degrades to one toast, never a crash.
  */
 
 /**
  * Enough about a device's owning asset to render an "owned by" column, an unassign action, and
- * (docs/UX-REWORK-PLAN.md §U-a2 item 3a) whether unassigning it would leave that asset with none —
+ * (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3a) whether unassigning it would leave that asset with none —
  * `deviceCount` is what lets `reasonedDeviceActions`'s `ownerDeviceCount` parameter disable
  * Unassign *before* the click instead of only after the backend's own 409.
  */
@@ -86,7 +86,7 @@ export interface WarehouseRow {
 
 /**
  * Devices + who owns them + who's currently streaming, combined into one row per device — the
- * Advanced/raw-devices table's view model (docs/CYCLES-PLAN.md §11 demoted this from the page's
+ * Advanced/raw-devices table's view model (docs/main/CYCLES-PLAN.md §11 demoted this from the page's
  * primary surface to a collapsed "Advanced" area; the row shape itself is unchanged from CW-b).
  */
 export function buildWarehouseRows(
@@ -136,7 +136,7 @@ export function searchWarehouseRowsByQuery(
 }
 
 /**
- * docs/VISUAL-REFRESH-PLAN.md F5's "at most one chip per row" — collapses a row's lifecycle +
+ * docs/plans/done/VISUAL-REFRESH-PLAN.md F5's "at most one chip per row" — collapses a row's lifecycle +
  * streaming facts into the one state a glance actually needs, priority archived > deactivated >
  * live > the default "stopped" (an active device with no running stream — rendered as a dot +
  * plain text everywhere it's used rather than a fourth chip color, so the merely-normal case
@@ -169,8 +169,8 @@ export function describeDeviceState(row: Pick<WarehouseRow, 'lifecycle' | 'archi
 }
 
 /**
- * Resolves the two-pane detail panel's row from `?sel=<deviceId>` (docs/NAV-IA-REDESIGN-PLAN.md §2.4,
- * docs/design/06-devices.md) — looked up against **every** loaded row, not the search-narrowed
+ * Resolves the two-pane detail panel's row from `?sel=<deviceId>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4,
+ * docs/extracts/design/06-devices.md) — looked up against **every** loaded row, not the search-narrowed
  * `warehouseRows()`, so typing into the search box never silently evicts an already-open selection.
  * Returns `undefined` for a missing/blank id and equally for one matching no currently-loaded row (a
  * device archived by someone else since the link was shared) — the caller (`DevicesFacade#selectedRow`)
@@ -184,11 +184,11 @@ export function findWarehouseRowById(rows: readonly WarehouseRow[], id: string |
 }
 
 /**
- * Builds the `POST /api/assets` body for "Promote to asset…" (docs/UX-QUICKWINS-PLAN.md QF-2's
- * orphaned-device quick fix, renamed to its outcome per docs/UX-REWORK-PLAN.md §U-a2 §3): assigns
+ * Builds the `POST /api/assets` body for "Promote to asset…" (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2's
+ * orphaned-device quick fix, renamed to its outcome per docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3): assigns
  * `device` — the existing, already-registered device, by id — to the new asset via `deviceIds`.
  *
- * **No new `Device` row, no archive step** (docs/REALTIME-PLAN.md §4's backend follow-up batch,
+ * **No new `Device` row, no archive step** (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch,
  * `CreateAssetRequest#deviceIds`): this used to be impossible — `CreateAssetRequest` had no
  * "existing device id" field, so `devices.ts#confirmCreateAsset` registered a brand-new device
  * wrapping `device`'s own connection details, then archived `device` itself, so the orphan didn't

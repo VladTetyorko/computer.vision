@@ -1,4 +1,4 @@
-/* ---- Cockpit grid (docs/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user request:
+/* ---- Cockpit grid (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user request:
    "player = full-screen centered hero, key telemetry moves to a bottom row") -------------------- */
 /* Named CSS-grid areas replace the old ten `position: absolute` `.hud-*` regions and their
    duplicated `.banner-active` offset set — the failsafe banner is a real grid row (content reflows
@@ -41,12 +41,12 @@
     'controls  rail';
   grid-template-columns: 1fr auto;
   grid-template-rows: auto 1fr auto auto auto;
-  /* The one edge-inset every `.main-*` overlay below shares (docs/NAV-IA-REDESIGN-PLAN.md F11,
-     docs/design/01-fly.md — "a grid overlay ... with an --overlay-pad"): named so "the safe margin
+  /* The one edge-inset every `.main-*` overlay below shares (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F11,
+     docs/extracts/design/01-fly.md — "a grid overlay ... with an --overlay-pad"): named so "the safe margin
      from the video's own edge" reads as one rule, not half a dozen independent `var(--space-16)`
      literals that could silently drift apart one at a time. */
   --overlay-pad: var(--space-16);
-  /* No more global header to subtract (docs/NAV-IA-REDESIGN-PLAN.md §2.1) — `100dvh`, a viewport
+  /* No more global header to subtract (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1) — `100dvh`, a viewport
      unit, not `height: 100%`: this page's own root sits directly inside `app.css`'s plain-block
      `<main>` (`height: 100dvh; overflow-y: auto`), and a percentage height here would need that
      entire parent chain to carry a *definite* size for `height: 100%` to resolve at all — confirmed
@@ -81,7 +81,7 @@
   height: 12rem;
 }
 
-/* Honest empty state (docs/NAV-IA-REDESIGN-PLAN.md F12 — a bad/stale `:assetId` bookmark) —
+/* Honest empty state (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12 — a bad/stale `:assetId` bookmark) —
    `vision-empty` centered the same way the loading skeleton is, on the same `--black` cockpit
    backdrop so a dead link never flashes the app's ordinary light/dark page background mid-cockpit. */
 .cockpit-empty {
@@ -130,9 +130,9 @@
   padding: var(--space-16);
 }
 
-/* The tool-rail column (docs/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·
+/* The tool-rail column (docs/plans/done/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·
    marks · help, each a `vision-icon-button` toggling `panels` (cockpit.ts). Grouped by job
-   (docs/UX-SIMPLIFY-REVIEW.md F4 — see cockpit.html's own comment above `.grid-rail` for the full
+   (docs/conclusions/UX-SIMPLIFY-REVIEW.md F4 — see cockpit.html's own comment above `.grid-rail` for the full
    grouping rationale); this rule now spaces `.rail-group`s apart, each group handling its own
    tighter inner gap. */
 .grid-rail {
@@ -257,7 +257,7 @@
 
 /* ---- Main header overlay: exit, drone switcher, "Bring home" ------------------------------ */
 /* A real 3-column safe-area grid, not a flex row relying on wrap-if-it-overflows
-   (docs/NAV-IA-REDESIGN-PLAN.md F11, docs/design/01-fly.md — "Bring home is clipped at the right
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F11, docs/extracts/design/01-fly.md — "Bring home is clipped at the right
    edge behind/past the DRONE selector ... fix by giving the overlay a real safe area rather than
    nudging positions"). Three columns: the exit link (`auto`, left), pure slack (`minmax(0, 1fr)`,
    absorbs whatever width is left over), and `.header-actions` (`minmax(0, auto)`, right) — the
@@ -314,7 +314,7 @@
   background: var(--hud-bg-strong);
 }
 
-/* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): a labeled cockpit control, not a bare native
+/* Quick-access pass (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1): a labeled cockpit control, not a bare native
    `<select>` — the "DRONE" label is always visible (fleet/military ethos: words, not just a control
    floating unexplained in the header), styled as the same frosted-pill chrome every other HUD
    control here already uses (`.icon-btn`'s own background/border/blur), just wrapping a `<label>`
@@ -441,7 +441,7 @@
   text-overflow: ellipsis;
 }
 
-/* Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) — left column, elevated above
+/* Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — left column, elevated above
    `.main-secondary`'s own tile strip (also left-anchored, but shorter) — an approximate, not
    computed, offset (this cockpit's own long-standing convention: see `.main-diagnostics`'s twin). */
 .main-preflight {
@@ -451,7 +451,7 @@
   z-index: 3;
 }
 
-/* Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e) — right column; no neighbor to clear on this side
+/* Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — right column; no neighbor to clear on this side
    now that the old bottom-right detections toggle moved into its own tool-rail drawer. */
 .main-diagnostics {
   position: absolute;
@@ -462,7 +462,7 @@
 
 /* ---- Controls row (Start/Stop, Replay) ----------------------------------------------------- */
 
-/* Poka-yoke rule 1 (docs/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own inline
+/* Poka-yoke rule 1 (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own inline
    reason sits directly under it, not off in the video-stage notice, so the "why" is right where
    the eye already is. */
 .start-control {
@@ -502,7 +502,7 @@
 .hud-confirm .card {
   max-width: 24rem;
   width: 90%;
-  /* The one place `.card` gets a shadow (docs/UX-REWORK-PLAN.md §U-b item 1): this renders over a
+  /* The one place `.card` gets a shadow (docs/plans/done/UX-REWORK-PLAN.md §U-b item 1): this renders over a
      full-screen scrim, a genuine floating overlay, not a page panel. */
   box-shadow: var(--shadow);
 }
@@ -531,7 +531,7 @@ dl {
   font-size: 0.85rem;
 }
 
-/* Quick-access pass (docs/UX-QUICKWINS-PLAN.md QF-1): the second `<dl>` — mouse-only, icon-only
+/* Quick-access pass (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1): the second `<dl>` — mouse-only, icon-only
    cockpit controls — gets its own small heading rather than blending into the keyboard list above. */
 .shortcuts-subhead {
   margin: var(--space-16) 0 0;
@@ -557,7 +557,7 @@ dd {
   }
 }
 
-/* ---- Map drawer (docs/MAP-REWORK-PLAN.md §5.2) ------------------------------------------------
+/* ---- Map drawer (docs/plans/done/MAP-REWORK-PLAN.md §5.2) ------------------------------------------------
    One rail drawer carries both map tools — the drawing toolbar and the layer manager — separated by
    the same hairline every other stacked section in this app uses rather than a second panel shell.
    See `cockpit.html`'s own comment at that drawer for why they share one button. */

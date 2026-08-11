@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** {@link InMemoryGroupRepository}: store/list + upsert (docs/U-AUTH-PLAN.md, wave 3). */
+/** {@link InMemoryGroupRepository}: store/list + upsert (docs/plans/done/U-AUTH-PLAN.md, wave 3). */
 class InMemoryGroupRepositoryTest {
 
     private final GroupRepositoryPort repository = new InMemoryGroupRepository();

@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Response body element for a domain {@link Event} (docs/REALTIME-PLAN.md §4) — the {@code
+ * Response body element for a domain {@link Event} (docs/plans/done/REALTIME-PLAN.md §4) — the {@code
  * "event"} envelope payload on {@code GET /api/live}. There is no REST endpoint of its own for
  * this shape (see vision-api's own Gotchas for why {@code EventPublisherPort} has no read side to
  * back one) — this DTO exists purely so the live-update feed can carry it.

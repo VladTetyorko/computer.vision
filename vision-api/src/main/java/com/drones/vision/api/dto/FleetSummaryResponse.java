@@ -5,7 +5,7 @@ import com.drones.vision.application.fleet.FleetSummary;
 import java.util.List;
 
 /**
- * Body of {@code GET /api/fleet/summary} (docs/MVP3-PLAN.md C-a) — the manager dashboard's one
+ * Body of {@code GET /api/fleet/summary} (docs/plans/done/MVP3-PLAN.md C-a) — the manager dashboard's one
  * aggregated poll: per-category counts plus a capped, per-asset attention list. Every field is
  * always present (no {@code @JsonInclude(NON_NULL)} needed).
  *

@@ -20,7 +20,7 @@ import org.springframework.web.servlet.resource.PathResourceResolver;
  * "asset not found".
  *
  * <p>{@code classpath:/static/} stays registered so the legacy Phase-1 console remains reachable
- * at {@code /legacy/} until the Debug tab supersedes it (docs/WEB-PLAN.md, W5).
+ * at {@code /legacy/} until the Debug tab supersedes it (docs/plans/done/WEB-PLAN.md, W5).
  */
 @Configuration
 public class SpaResourceConfiguration implements WebMvcConfigurer {

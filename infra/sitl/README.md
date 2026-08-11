@@ -4,7 +4,7 @@
 MAVLink sysid, each pushing MAVLink 2 UDP to the host and flying a small default circuit
 (GUIDED takeoff → CIRCLE mode) near a configurable home location — full PreArm/EKF/failsafe
 realism the platform's own synthetic simulators (`adapter-simulation`) can't produce.
-`docs/DRONE-INFRA-PLAN.md` I-c.
+`docs/plans/active/DRONE-INFRA-PLAN.md` I-c.
 
 ## Prerequisites
 
@@ -42,7 +42,7 @@ silently drops every other sysid arriving on the same port
 (`adapters/adapter-mavlink/MODULE.md`, "Multiple systems on one port: first system id seen
 wins, no re-election"). `./up.sh 5` genuinely produces 5 distinct sysids on the wire (verified
 below) — but *today*, registering one device against `udp://0.0.0.0:14550` only ever shows you
-sysid 1. The multi-vehicle single-port gateway (`docs/DRONE-INFRA-PLAN.md` I-a, "MAVLink fleet
+sysid 1. The multi-vehicle single-port gateway (`docs/plans/active/DRONE-INFRA-PLAN.md` I-a, "MAVLink fleet
 gateway") is what makes one port genuinely serve N vehicles as N assets; until it lands, either
 run one device per sysid by pointing each SITL instance at its own port
 (`MAVLINK_TARGET_PORT=14550`, `14551`, ... — set per-instance by exporting a different value
@@ -146,6 +146,6 @@ own footprint does.
 - [ArduPilot — Tools/autotest/default_params/copter.parm](https://github.com/ArduPilot/ardupilot/blob/master/Tools/autotest/default_params/copter.parm) —
   source of the FRAME_CLASS/FRAME_TYPE/INS_ACC*/COMPASS_OFS* defaults baked into
   `entrypoint.sh`.
-- `docs/DRONE-INFRA-PLAN.md` I-c (this phase's spec) and I-a (the multi-vehicle gateway this
+- `docs/plans/active/DRONE-INFRA-PLAN.md` I-c (this phase's spec) and I-a (the multi-vehicle gateway this
   fleet is designed to hand off to).
 - `adapters/adapter-mavlink/MODULE.md` — the platform-side ingest model this fleet targets.

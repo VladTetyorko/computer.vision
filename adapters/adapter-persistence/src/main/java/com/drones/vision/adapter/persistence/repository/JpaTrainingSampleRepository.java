@@ -17,7 +17,7 @@ import java.util.Optional;
 
 /**
  * {@link TrainingSampleRepositoryPort} backed by Postgres via plain JPA (see {@link
- * JpaOperations}) — docs/CV-TRAINING-PLAN.md §1, Wave T3.
+ * JpaOperations}) — docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3.
  *
  * <p>{@link #save} is an upsert (merge-by-id), matching {@code InMemoryTrainingSampleRepository}'s
  * ({@code vision-app} devsupport) {@code Map#put} semantics exactly — a sample mutates over its

@@ -12,8 +12,8 @@ import io.dronefleet.mavlink.common.Vibration;
  * (common), {@code WIND}/{@code EKF_STATUS_REPORT}/{@code RANGEFINDER} (ardupilotmega), {@code
  * VIBRATION}/{@code MISSION_CURRENT} (common) — none of which have a home in {@link
  * com.drones.vision.domain.model.Telemetry}'s named fields or {@link
- * com.drones.vision.domain.model.FlightState} (docs/FC-INTEGRATIONS-PLAN.md F-e;
- * docs/LAYERING-REFACTOR-PLAN.md E2 split out of {@code MavlinkTelemetryDecoder}'s original
+ * com.drones.vision.domain.model.FlightState} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e;
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md E2 split out of {@code MavlinkTelemetryDecoder}'s original
  * 35-field flat state). See {@code MavlinkTelemetryDecoder}'s own javadoc for the full
  * unit-conversion table (none of these fields need one — last-message-wins, no sentinel).
  *

@@ -17,7 +17,7 @@ function stubApi(streamDetections: ReturnType<typeof vi.fn> = vi.fn().mockResolv
 }
 
 /**
- * A minimal `LiveStore` test double (docs/REALTIME-PLAN.md §4, Phase R-c) — mirrors
+ * A minimal `LiveStore` test double (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — mirrors
  * `telemetry-store.spec.ts`'s own stub exactly (see that file's doc comment for the full
  * reasoning); defaults to `'closed'`, matching the real class under jsdom, so every pre-existing
  * test above keeps exercising the poll-only path unmodified.
@@ -167,7 +167,7 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  // --- LiveStore projection (docs/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
+  // --- LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
 
   function detectionResult(streamId: string, frameSequence: number): DetectionResult {
     return { streamId, frameSequence, capturedAt: new Date().toISOString(), inferenceMillis: 5, detections: [] };
@@ -277,7 +277,7 @@ describe('DetectionsStore', () => {
   });
 
   it('N successive track() calls with the same (streamId, assetId) — even with no caller-side guard — subscribe live exactly once and never untrack', () => {
-    // Mirrors `TelemetryStore`'s identical churn-simulation test (docs/REALTIME-PLAN.md §4 Phase
+    // Mirrors `TelemetryStore`'s identical churn-simulation test (docs/plans/done/REALTIME-PLAN.md §4 Phase
     // R-c follow-up) — this store's own `track()` has no `await` at all, so an unguarded caller
     // re-entering with the same id risked an even *tighter* same-tick re-notify loop.
     const api = stubApi();

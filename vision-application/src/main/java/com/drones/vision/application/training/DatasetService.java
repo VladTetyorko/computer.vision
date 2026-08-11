@@ -13,10 +13,10 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * CRUD over {@link Dataset}s (docs/CV-TRAINING-PLAN.md §2) — one interface, one implementation
+ * CRUD over {@link Dataset}s (docs/plans/done/CV-TRAINING-PLAN.md §2) — one interface, one implementation
  * ({@link DefaultDatasetService}), the labeling/capture side lives in {@link LabelingService}.
  *
- * <h2>Scope (docs/CV-TRAINING-PLAN.md Open Questions §4)</h2>
+ * <h2>Scope (docs/plans/done/CV-TRAINING-PLAN.md Open Questions §4)</h2>
  * Create/delete are management actions, gated on {@link VisibilityScope#canManageOrg()} — any
  * manager/admin, not only one whose subtree contains the dataset (mirrors {@code
  * DefaultMarkService}'s own "any manager may manage" precedent, not {@code AssetService}'s

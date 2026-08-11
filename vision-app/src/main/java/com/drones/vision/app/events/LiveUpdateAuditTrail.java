@@ -11,7 +11,7 @@ import java.util.Objects;
 
 /**
  * {@link AuditTrailPort} decorator that additionally announces a live "fleet changed" update
- * (docs/REALTIME-PLAN.md §4) for every recorded entry.
+ * (docs/plans/done/REALTIME-PLAN.md §4) for every recorded entry.
  *
  * <p>Every asset/device mutation ({@code create}/{@code update}/{@code setState}/{@code delete}/
  * {@code assignDevice}/{@code unassignDevice} — see {@code DefaultAssetService}/{@code

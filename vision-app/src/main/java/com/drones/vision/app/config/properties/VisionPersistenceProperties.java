@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Configuration for the JPA/Postgres fleet persistence adapter ({@code vision.persistence.*}),
- * per docs/MVP2-PLAN.md P-a.
+ * per docs/plans/done/MVP2-PLAN.md P-a.
  *
  * <p>Selected by {@code wiring.PersistenceWiring}: {@link #enabled()} {@code false} (the
  * default, today's behavior) keeps every repository port wired to its devsupport in-memory

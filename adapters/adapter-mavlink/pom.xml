@@ -11,7 +11,7 @@
 
     <artifactId>adapter-mavlink</artifactId>
     <name>adapter-mavlink</name>
-    <description>MAVLink 2 UDP telemetry ingest (RX) and flight-plan transmit simulator (TX) adapter — docs/MVP2-PLAN.md X-a.</description>
+    <description>MAVLink 2 UDP telemetry ingest (RX) and flight-plan transmit simulator (TX) adapter — docs/plans/done/MVP2-PLAN.md X-a.</description>
 
     <dependencies>
         <dependency>

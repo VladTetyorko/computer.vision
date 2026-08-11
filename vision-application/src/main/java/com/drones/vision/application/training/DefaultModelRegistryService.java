@@ -22,7 +22,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  *
  * <h2>Scope gate</h2>
  * {@link #promote} requires {@link VisibilityScope#canManageOrg()} — any manager/admin, mirroring
- * {@code DefaultDatasetService#create}'s gate exactly (docs/CV-TRAINING-PLAN.md §7/§8: promotion is
+ * {@code DefaultDatasetService#create}'s gate exactly (docs/plans/done/CV-TRAINING-PLAN.md §7/§8: promotion is
  * the one privileged control-plane action the registry exposes). {@link #models()} is unscoped and
  * never throws, matching {@code CvModelsController}'s existing "any authenticated caller may read
  * the roster" precedent.

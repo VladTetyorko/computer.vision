@@ -5,13 +5,13 @@ import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Deployment defaults for the tracking engine ({@code vision.tracking.*}), docs/TRACKING-PLAN.md
- * &sect;4 / docs/TRACKING-ORCHESTRATION.md &sect;4.1 and &sect;4.3's knob inventory. Mirrors {@link
+ * Deployment defaults for the tracking engine ({@code vision.tracking.*}), docs/plans/done/TRACKING-PLAN.md
+ * &sect;4 / docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1 and &sect;4.3's knob inventory. Mirrors {@link
  * VisionCvProperties}'s record-plus-{@code @DefaultValue} idiom.
  *
  * <h2>What "deployment default" means here, precisely</h2>
  * Configuration is a layer, and precedence runs strictly <b>per-stream request &gt; deployment env
- * &gt; code default</b> (docs/TRACKING-ORCHESTRATION.md &sect;4.1). This record is the middle layer,
+ * &gt; code default</b> (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1). This record is the middle layer,
  * and it has two disjoint jobs:
  *
  * <ul>
@@ -32,10 +32,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * <p>{@code vision-domain} keeps pure literals and knows nothing about any of this — {@code
  * TrackingConfig.off()}/{@code .defaults()} stay constants in a framework-free module, which is
- * exactly why the deployment layer lives here (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
+ * exactly why the deployment layer lives here (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
  *
  * <p><b>{@link #defaultMode()} is {@code ASSOCIATE}</b> — the same value {@code
- * PipelineConfig.defaults()} carries as of docs/TRACKING-PLAN.md wave T8, so a deployment that sets
+ * PipelineConfig.defaults()} carries as of docs/plans/done/TRACKING-PLAN.md wave T8, so a deployment that sets
  * nothing starts every stream tracking, and every detection it produces carries a stable {@code
  * trackId}. <b>This default has to move with the domain's, not lag it.</b> The seed is
  * unconditional — {@link
@@ -53,7 +53,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param defaultMode           tracking mode new streams start in — {@code OFF}/{@code ASSOCIATE}/{@code
  *                              FOLLOW}, matched case-insensitively; default {@value #DEFAULT_MODE}
  * @param followFps             the Java-side sampler's target rate while {@code FOLLOW} is active
- *                              (docs/TRACKING-PLAN.md &sect;5.D — cv-service has no such knob, it
+ *                              (docs/plans/done/TRACKING-PLAN.md &sect;5.D — cv-service has no such knob, it
  *                              must never care how often it is fed); must be positive; default
  *                              {@value #DEFAULT_FOLLOW_FPS}
  * @param verifyEveryMillis     {@code FOLLOW} detector re-verify cadence new streams start with;

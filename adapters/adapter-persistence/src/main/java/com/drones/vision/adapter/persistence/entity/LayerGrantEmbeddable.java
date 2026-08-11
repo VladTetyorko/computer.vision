@@ -12,7 +12,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * One row of the {@code map_layer_grants} element-collection table (docs/MAP-REWORK-PLAN.md §4.4).
+ * One row of the {@code map_layer_grants} element-collection table (docs/plans/done/MAP-REWORK-PLAN.md §4.4).
  *
  * <p><strong>Why an adapter-local class instead of reusing the domain {@link LayerGrant}
  * record.</strong> Every other collection in this module stores its domain record tree directly (as

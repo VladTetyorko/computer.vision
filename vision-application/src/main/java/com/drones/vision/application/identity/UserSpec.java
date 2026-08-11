@@ -8,7 +8,7 @@ import com.drones.vision.application.asset.AssetSpec;
 import com.drones.vision.application.geofence.GeofenceZoneSpec;
 
 /**
- * Everything needed to create a {@link User} (docs/U-AUTH-PLAN.md, wave 2) — a top-level record
+ * Everything needed to create a {@link User} (docs/plans/done/U-AUTH-PLAN.md, wave 2) — a top-level record
  * rather than a type nested in {@link UserService}, so callers can name their input without
  * importing the service, same reasoning as {@link GeofenceZoneSpec}/{@link AssetSpec}.
  *

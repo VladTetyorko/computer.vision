@@ -6,7 +6,7 @@ import { UiStore } from './ui-store';
 
 /**
  * Every overlay the app **shell** owns, as opposed to a page's own `UiStore` group
- * (docs/UI-STATE-PLAN.md §2.1's "page overlays" tier, e.g. `fly`'s tool-rail or `asset-detail`'s
+ * (docs/plans/done/UI-STATE-PLAN.md §2.1's "page overlays" tier, e.g. `fly`'s tool-rail or `asset-detail`'s
  * editors). A union, not a free string, so a typo (`'idenity-menu'`) fails to compile instead of
  * silently never matching anything — §3's guardrail is that "any new `GlobalOverlayId` must be
  * registered in the store's union type", which the compiler already enforces by construction.
@@ -24,7 +24,7 @@ interface OverlayHost {
 }
 
 /**
- * `GlobalOverlayStore` — the missing piece docs/UI-STATE-PLAN.md §2.2 names. Reproduced live (§1):
+ * `GlobalOverlayStore` — the missing piece docs/plans/done/UI-STATE-PLAN.md §2.2 names. Reproduced live (§1):
  * open the notification bell, then the identity menu — both stay open; select an asset — both are
  * still open over the side panel; navigate `/assets` → `/devices` — both are **still open** on the
  * new page. Root cause (§1 D4/D5): `identity-chip`/`notification-bell` used to be native `<details>`

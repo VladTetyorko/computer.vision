@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory {@link MarkRepositoryPort}: dev fallback with no durability across restarts
- * (docs/TACTICAL-MARKS-PLAN.md §3).
+ * (docs/plans/done/TACTICAL-MARKS-PLAN.md §3).
  *
  * <p>Replaced by {@code adapter-persistence}'s {@code JpaMarkRepository} when {@code
  * vision.persistence.enabled=true}.

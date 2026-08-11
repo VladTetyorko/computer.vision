@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * {@link FFmpegFrameRecorder} only assigns fields — no network I/O happens until {@code start()},
  * which none of these tests ever call — so this needs neither a live mediamtx nor even a reachable
  * socket. (Moved out of {@code MediamtxStreamPublisherTest} when {@code configureRecorder} and its
- * constants were split into this class, docs/LAYERING-REFACTOR-PLAN.md §5.1.)
+ * constants were split into this class, docs/plans/active/LAYERING-REFACTOR-PLAN.md §5.1.)
  */
 class H264RecorderFactoryTest {
 
@@ -28,7 +28,7 @@ class H264RecorderFactoryTest {
         H264RecorderFactory.configureRecorder(recorder, 30.0);
 
         assertEquals(30.0, recorder.getFrameRate());
-        // GOP_SECONDS(1, docs/MVP2-PLAN.md V-a: was 2) * measured fps -- a 1s
+        // GOP_SECONDS(1, docs/plans/done/MVP2-PLAN.md V-a: was 2) * measured fps -- a 1s
         // keyframe interval matches mediamtx's own 1s hlsSegmentDuration, so
         // an HLS segment is never coarser than 1s regardless of the source's
         // measured cadence.
@@ -54,7 +54,7 @@ class H264RecorderFactoryTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md V-a latency audit: {@code tune=zerolatency} (which
+     * docs/plans/done/MVP2-PLAN.md V-a latency audit: {@code tune=zerolatency} (which
      * x264 itself expands to {@code --bframes 0 --no-mbtree --sync-lookahead
      * 0 --rc-lookahead 0 --force-cfr}, verified against x264's own source —
      * see {@code H264RecorderFactory.configureRecorder}'s javadoc) is
@@ -78,7 +78,7 @@ class H264RecorderFactoryTest {
 
     /**
      * The keyframe interval an HLS segment is cut on can never be shorter
-     * than the GOP itself (docs/MVP2-PLAN.md V-a) — this asserts the actual
+     * than the GOP itself (docs/plans/done/MVP2-PLAN.md V-a) — this asserts the actual
      * wall-clock duration a GOP spans at a slow, real-world-plausible source
      * cadence is close to 1s (mediamtx's own configured {@code
      * hlsSegmentDuration}, see docker-compose.yml), not the old 2s.

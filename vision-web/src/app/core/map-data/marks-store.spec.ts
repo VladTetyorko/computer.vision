@@ -12,7 +12,7 @@ import type { MapEventPayload, MapLayer, MapMark } from '../api/models';
 
 /**
  * Store-level coverage carried over from the deleted `core/marks/marks-store.spec.ts` and extended
- * for v2 (docs/MAP-REWORK-PLAN.md §5.2): the initial GET + `map`-topic fold, the palette's
+ * for v2 (docs/plans/done/MAP-REWORK-PLAN.md §5.2): the initial GET + `map`-topic fold, the palette's
  * arm→click→confirm flow, verify/promote, and the error paths that must leave the list untouched.
  * The pure reducers themselves live in `mark-logic.spec.ts`; this file exercises the wiring only.
  */

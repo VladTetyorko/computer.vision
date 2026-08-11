@@ -3,8 +3,8 @@ package com.drones.vision.domain.model;
 import java.time.Instant;
 
 /**
- * A geolocated tactical mark on the shared operational picture (docs/MAP-REWORK-PLAN.md §2.2,
- * superseding docs/TACTICAL-MARKS-PLAN.md §1) — structurally, a point version of a {@link
+ * A geolocated tactical mark on the shared operational picture (docs/plans/done/MAP-REWORK-PLAN.md §2.2,
+ * superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §1) — structurally, a point version of a {@link
  * GeofenceZone}: one {@link GeoPosition} plus a tactical {@link #kind()}, a short {@link
  * #label()}, an optional {@link #note()}, owned by the creator's group ({@link #ownership()}),
  * with a lifecycle {@link #status()} and a {@link #source()} describing how it was created.
@@ -83,7 +83,7 @@ public record Mark(MarkId id, LayerId layerId, GeoPosition position, MarkKind ki
     /**
      * The user who created this mark, derived from {@link #ownership()}.
      *
-     * <p>Used both for display and to decide "creator can edit" (docs/MAP-REWORK-PLAN.md §3) —
+     * <p>Used both for display and to decide "creator can edit" (docs/plans/done/MAP-REWORK-PLAN.md §3) —
      * kept as a derived accessor rather than a separate component so identity never drifts from
      * ownership.
      *

@@ -3,7 +3,7 @@ import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { ICONS, type IconName } from './icon-registry';
 
 /**
- * `<vision-icon>` — the inline-SVG icon primitive (docs/UI-REDESIGN-PLAN.md Frozen contract F2).
+ * `<vision-icon>` — the inline-SVG icon primitive (docs/plans/done/UI-REDESIGN-PLAN.md Frozen contract F2).
  * Purely decorative: `host: aria-hidden="true"` on every instance, always — the labeled control
  * around it (a `vision-icon-button`'s required `label`, a `vision-nav-tile`'s own visible name text,
  * a page heading) owns the accessible name, per F2's own render note. Never use this component where

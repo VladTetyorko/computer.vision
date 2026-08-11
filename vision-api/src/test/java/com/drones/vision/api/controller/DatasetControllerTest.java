@@ -40,7 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link DatasetController} (docs/CV-TRAINING-PLAN.md §3's frozen wire
+ * MockMvc tests for {@link DatasetController} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire
  * contract), mirroring {@link MarksControllerTest}/{@link GeofenceControllerTest}'s style: a
  * standalone {@code MockMvc} over mocked {@link DatasetService}/{@link
  * TrainingSampleRepositoryPort} collaborators, with {@link ApiExceptionHandler} attached so error

@@ -41,11 +41,11 @@ cv-service/cv_service/gen/
 ### Environment ###
 .env
 
-### Demo (docs/MVP1-PLAN.md §C9) ###
+### Demo (docs/plans/done/MVP1-PLAN.md §C9) ###
 # Default bind-mount source for docker-compose.yml's vision-app service
 # (DEMO_CLIPS_DIR) -- local video clips, never committed.
 /clips/
 
-### CV training exports (docs/CV-TRAINING-PLAN.md, Wave T4) ###
+### CV training exports (docs/plans/done/CV-TRAINING-PLAN.md, Wave T4) ###
 # Default vision.training.export-dir -- generated YOLO dataset export zips, never committed.
 /data/

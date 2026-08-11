@@ -43,7 +43,7 @@ import com.drones.vision.application.stream.StreamService;
  *
  * <h2>Bounds</h2>
  * <ul>
- *   <li>{@link #MAX_ASSETS_IN_SUMMARY} caps the per-asset list (docs/MVP3-PLAN.md C-a's own done
+ *   <li>{@link #MAX_ASSETS_IN_SUMMARY} caps the per-asset list (docs/plans/done/MVP3-PLAN.md C-a's own done
  *       criterion: "capped/paged for 100+"); {@link FleetSummary#totalAssets()} always reports the
  *       true count, so a caller can detect truncation. Category counts are never capped — they are
  *       computed over every in-scope asset regardless of the per-asset list's cap, since a
@@ -59,7 +59,7 @@ import com.drones.vision.application.stream.StreamService;
 public final class DefaultFleetSummaryService implements FleetSummaryService {
 
     /**
-     * Hard cap on {@link FleetSummary#assets()}'s size (docs/MVP3-PLAN.md C-a). Generously past the
+     * Hard cap on {@link FleetSummary#assets()}'s size (docs/plans/done/MVP3-PLAN.md C-a). Generously past the
      * "3-100 pilots" scale this cycle targets; a caller compares {@code assets().size()} against
      * {@link FleetSummary#totalAssets()} to detect truncation. True pagination (an offset/cursor
      * parameter) is deferred — nothing downstream has asked for more than a single generous cap
@@ -94,7 +94,7 @@ public final class DefaultFleetSummaryService implements FleetSummaryService {
     }
 
     /**
-     * Same as the 4-argument constructor, plus explicit caps (docs/LAYERING-REFACTOR-PLAN.md
+     * Same as the 4-argument constructor, plus explicit caps (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction, {@code vision.application.fleet.*}) instead of {@link
      * #MAX_ASSETS_IN_SUMMARY}/{@link #OPEN_EVENTS_SCAN_LIMIT}.
      */

@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * A full set of {@link ControlBinding}s: which gamepad axis/button drives which RC channel
- * (docs/RC-CONTROL-PHASE1-PLAN.md §1/§5).
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5).
  *
  * @param bindings the control bindings that make up this map; defensively copied
  */
@@ -19,7 +19,7 @@ public record ChannelMap(List<ControlBinding> bindings) {
     }
 
     /**
-     * The frozen v1 default map (docs/RC-CONTROL-PHASE1-PLAN.md §5): gamepad axes 0..3 (roll/
+     * The frozen v1 default map (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §5): gamepad axes 0..3 (roll/
      * pitch/throttle/yaw) onto RC channels 1..4 — centered at 1500µs, {@code [1000,2000]} full
      * travel, no deadband, not reversed; gamepad buttons 0..3 (aux 1..4, e.g. the flight-mode
      * switch) onto RC channels 5..8 — {@code [1000,2000]}, not reversed. Channels 9..18 are not

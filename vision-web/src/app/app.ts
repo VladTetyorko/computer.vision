@@ -12,7 +12,7 @@ import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
 
 /**
- * The app shell (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md) — a persistent left
+ * The app shell (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1, docs/extracts/design/00-shell.md) — a persistent left
  * sidebar (`shared/ui/app-sidebar/**`) plus a `<main>` that scrolls independently, replacing the old
  * sticky `.app-header` (three mode dropdowns) and, with it, the three `/operate`/`/monitor`/`/manage`
  * hub pages the dropdowns used to duplicate. See `AppSidebar`'s own class doc for the specific F1/
@@ -32,12 +32,12 @@ import { UndoToast } from './shared/ui/undo-toast';
  * with the full ADMIN-scoped set, same as a real ADMIN session. Nothing here reads `authEnabled`
  * directly.
  *
- * **Theme bootstrap** (docs/VISUAL-REFRESH-PLAN.md F3): eagerly injecting `ThemeStore` (see the
+ * **Theme bootstrap** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3): eagerly injecting `ThemeStore` (see the
  * field below) applies the user's persisted light/dark choice as `data-theme` on `<html>` the moment
  * this component constructs — before `auth.user()` gates the sidebar, so it applies regardless of
  * auth state, unlike everything else in this class.
  *
- * **Full-bleed auto-collapse** (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11): `/fly`, `/wall`,
+ * **Full-bleed auto-collapse** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11): `/fly`, `/wall`,
  * `/command` each carry `data: { fullBleed: true }` (a concurrent task's own route change, read
  * here, never written). `routeTreeHasFullBleed` walks the *activated-route tree*, not just the
  * top-level route, because the flag can sit on any segment a lazy-loaded feature's own
@@ -63,7 +63,7 @@ export class App {
   private readonly fleet = inject(FleetStore);
   private readonly sidebar = inject(SidebarStore);
   // Injected for its constructor side effect only (applies the persisted `data-theme` attribute to
-  // `<html>`, docs/VISUAL-REFRESH-PLAN.md F3) — never read again after that, same "eager singleton
+  // `<html>`, docs/plans/done/VISUAL-REFRESH-PLAN.md F3) — never read again after that, same "eager singleton
   // mounted once by the shell" shape as `sidebar`/`fleet` above. `index.html`'s own inline bootstrap
   // script already applies the same attribute before Angular loads (see its comment) so there is no
   // flash of the wrong theme; this makes it official once the app itself is live and reapplies it if
@@ -74,7 +74,7 @@ export class App {
   protected readonly offline = computed(() => this.fleet.reachable() === false);
 
   constructor() {
-    // Warms the Leaflet chunk on idle (docs/CYCLES-PLAN.md §9, CU-b item 2) — after render so it
+    // Warms the Leaflet chunk on idle (docs/main/CYCLES-PLAN.md §9, CU-b item 2) — after render so it
     // never competes with first paint or the initial fleet fetch. `inject()` is called here, in
     // the constructor's own injection context, and the resolved instance captured in a const —
     // NOT inside the `afterNextRender` callback itself, which runs *after* render completes and is
@@ -82,7 +82,7 @@ export class App {
     const leafletWarmup = inject(LeafletWarmup);
     afterNextRender(() => leafletWarmup.schedule());
 
-    // Full-bleed auto-collapse (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11). This class owns the
+    // Full-bleed auto-collapse (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11). This class owns the
     // single router read and pushes it into `SidebarStore`, which layers it under any manual toggle
     // (see that store's own precedence doc) — the sidebar component itself stays router-agnostic.
     // Seeded eagerly as well as on every `NavigationEnd`, so a first load straight into `/fly` never
@@ -96,7 +96,7 @@ export class App {
       )
       .subscribe((fullBleed) => this.sidebar.enterRoute(fullBleed));
 
-    // `[` toggles the sidebar (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 4) — a global `document`
+    // `[` toggles the sidebar (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 4) — a global `document`
     // keydown listener, the same page-scoped-listener idiom `features/fly/fly.ts`/
     // `features/live/live.ts` already use for their own keyboard shortcuts, ignored while focus is
     // in a form field or a contenteditable region so typing a literal `[` never fights the shell.

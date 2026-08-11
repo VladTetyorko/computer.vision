@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Request body for {@code PATCH /api/streams/{streamId}/config} (docs/CV-CONTROL-PLAN.md §3's frozen
+ * Request body for {@code PATCH /api/streams/{streamId}/config} (docs/plans/done/CV-CONTROL-PLAN.md §3's frozen
  * wire contract) — a live, partial update to a running stream's detection config.
  *
  * <p>Every field is optional; only present fields change, absent fields are left as-is. This is a
@@ -26,7 +26,7 @@ import java.util.Set;
  *                            explicit empty array is a real value meaning "keep all labels"
  * @param detectionEnabled    replacement detection on/off flag, or absent to keep the current one
  * @param model               replacement model checkpoint id, or absent to keep the current one
- * @param tracking            replacement tracking configuration (docs/TRACKING-PLAN.md §4.D), or
+ * @param tracking            replacement tracking configuration (docs/plans/done/TRACKING-PLAN.md §4.D), or
  *                            absent to leave tracking entirely alone. <b>A tracking change never
  *                            re-arms the detector</b> — mode, engine, cadences and the target lock
  *                            are all hot knobs, exactly like confidence and fps; only {@code model}
@@ -40,7 +40,7 @@ public record UpdateStreamConfigRequest(Double confidenceThreshold, Integer infe
             new UpdateStreamConfigRequest(null, null, null, null, null, null);
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
      * a convenience constructor defaulting it to {@code null} ("leave tracking alone") — the same
      * N-1-arg idiom the application's own {@code PipelineConfigPatch} uses.
      *
@@ -56,7 +56,7 @@ public record UpdateStreamConfigRequest(Double confidenceThreshold, Integer infe
     }
 
     /**
-     * Maps this request to the application-level patch (docs/TRACKING-PLAN.md §4.D), field for
+     * Maps this request to the application-level patch (docs/plans/done/TRACKING-PLAN.md §4.D), field for
      * field: an absent JSON field is a {@code null} the application layer reads as "leave this knob
      * unchanged", and an absent {@code tracking} object leaves tracking entirely alone.
      *

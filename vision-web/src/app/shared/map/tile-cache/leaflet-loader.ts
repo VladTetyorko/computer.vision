@@ -7,10 +7,10 @@ import { tileCacheKey } from './tile-cache-logic';
 
 /**
  * Leaflet bootstrap bits shared by every map in this app (`shared/map/tactical-map/`, the one map
- * component since docs/MAP-REWORK-PLAN.md §5.1; plus `features/replay/replay-map.ts`,
+ * component since docs/plans/done/MAP-REWORK-PLAN.md §5.1; plus `features/replay/replay-map.ts`,
  * `shared/map/fleet-plan-dialog/`, `features/command/geofence-zone-dialog.ts`): the dynamic import,
  * the runtime stylesheet injection, and the switchable base-layer tile factory
- * (docs/CYCLES-PLAN.md §9, CU-b item 6 — `MAP_LAYERS`/`mapLayerTileLayer`). Pulled out of
+ * (docs/main/CYCLES-PLAN.md §9, CU-b item 6 — `MAP_LAYERS`/`mapLayerTileLayer`). Pulled out of
  * the original single-asset map when the `/map` tab needed the identical setup — intra-app DRY (unlike the
  * cross-adapter rule in the Java side of this repo, nothing here stops two Angular pages sharing
  * a plain module).
@@ -27,7 +27,7 @@ const LEAFLET_STYLESHEET_ID = 'vision-leaflet-css';
 const LEAFLET_STYLESHEET_HREF = '/leaflet/leaflet.css';
 
 /**
- * One definition per switchable base layer (docs/CYCLES-PLAN.md §9, CU-b item 6): **Standard**
+ * One definition per switchable base layer (docs/main/CYCLES-PLAN.md §9, CU-b item 6): **Standard**
  * (plain OSM raster), **Night** (CARTO Dark Matter — real dark tiles, replacing the CSS `invert()`
  * filter every map used to apply unconditionally), **Relief** (OpenTopoMap, contour shading), and
  * **Satellite** (Esri World Imagery). Each carries its own attribution text, shown by Leaflet's
@@ -89,9 +89,9 @@ export function mapLayerDef(id: MapLayerId): MapLayerDef {
   return MAP_LAYERS.find((layer) => layer.id === id) ?? MAP_LAYERS[0];
 }
 
-// --- Theme-aware default layer (docs/VISUAL-REFRESH-PLAN.md F7, Wave 3) ------------------------
+// --- Theme-aware default layer (docs/plans/done/VISUAL-REFRESH-PLAN.md F7, Wave 3) ------------------------
 //
-// `SettingsStore.mapLayer` (docs/CYCLES-PLAN.md §9) is a single persisted signal shared by every
+// `SettingsStore.mapLayer` (docs/main/CYCLES-PLAN.md §9) is a single persisted signal shared by every
 // map — it always holds a concrete `MapLayerId` (its own hardcoded `DEFAULT_MAP_LAYER = 'night'`
 // until something changes it), so a consumer reading it alone cannot tell "the operator has never
 // touched the layer picker" apart from "the operator explicitly chose Night". That distinction is
@@ -125,7 +125,7 @@ export function markMapLayerExplicit(): void {
 /**
  * The layer id a map should actually render: `chosen` (`SettingsStore.mapLayer()`) once the
  * operator has made an explicit pick, otherwise the theme's own default — "an explicit user pick
- * always wins" (docs/VISUAL-REFRESH-PLAN.md F7). Pure and unit-tested (`leaflet-loader.spec.ts`);
+ * always wins" (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). Pure and unit-tested (`leaflet-loader.spec.ts`);
  * `TacticalMap` wraps it in a `computed()` reading `ThemeStore.theme()` +
  * `SettingsStore.mapLayer()`, so both re-render the instant either changes.
  */
@@ -163,14 +163,14 @@ export function ensureLeafletStylesheet(): void {
 }
 
 /**
- * Builds the tile layer for `layerId` (docs/CYCLES-PLAN.md §9, CU-b item 6) — offline-safe (a
+ * Builds the tile layer for `layerId` (docs/main/CYCLES-PLAN.md §9, CU-b item 6) — offline-safe (a
  * tile fetch failure just leaves the host's own dark background showing through; `onStatus`
  * reports which, so the host can show a small "tiles unavailable" badge, as `tactical-map.ts` already
  * does). Callers create a fresh instance per layer switch — swapping which `TileLayer` is
  * `addTo(map)` is how `TacticalMap` changes the active base layer, and Leaflet's own
  * attribution control follows whichever instance is currently added.
  *
- * **IndexedDB tile cache** (docs/MVP3-PLAN.md's Build rules): every tile this layer requests goes
+ * **IndexedDB tile cache** (docs/plans/done/MVP3-PLAN.md's Build rules): every tile this layer requests goes
  * through `resolveTileSrc` below instead of a bare `img.src = url` — cache hit serves a stored
  * blob, cache miss fetches, renders, and stores it for next time. Landing here (rather than in
  * each host component) is what makes it shared infra: `TacticalMap`, `ReplayMap`, and

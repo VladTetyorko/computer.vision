@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 
 /**
  * Wire representation of one corrected/confirmed {@link Annotation}, embedded in {@link
- * LabelAnnotationsRequest} (docs/CV-TRAINING-PLAN.md §3's frozen wire contract, body of {@code PUT
+ * LabelAnnotationsRequest} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire contract, body of {@code PUT
  * /api/samples/{id}/annotations}).
  *
  * @param label  class label

@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 
 /**
  * Answers "may this viewer see events about this layer?" for the {@code map} SSE topic
- * (docs/MAP-REWORK-PLAN.md §4.3's security-critical rework), cheaply enough to ask once per event
+ * (docs/plans/done/MAP-REWORK-PLAN.md §4.3's security-critical rework), cheaply enough to ask once per event
  * per connection.
  *
  * <h2>Why a cache at all</h2>
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * set is cached per {@link Viewer} (a record, so a sound map key) for {@value #TTL_MILLIS}ms.
  *
  * <h2>Staleness bound, and why it is safe</h2>
- * docs/MAP-REWORK-PLAN.md §4.3 fixes the acceptance bar at <em>"stale-grant visibility beyond 30s is
+ * docs/plans/done/MAP-REWORK-PLAN.md §4.3 fixes the acceptance bar at <em>"stale-grant visibility beyond 30s is
  * a bug"</em> and leaves the mechanism to the implementer. This class chooses a plain TTL over
  * event-driven invalidation, for two reasons:
  * <ul>

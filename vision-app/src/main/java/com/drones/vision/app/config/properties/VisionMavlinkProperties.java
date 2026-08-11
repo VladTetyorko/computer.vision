@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import java.time.Duration;
 
 /**
- * Configuration for {@code adapter-mavlink}'s RX/TX ({@code vision.mavlink.*}), docs/LAYERING-REFACTOR-PLAN.md
+ * Configuration for {@code adapter-mavlink}'s RX/TX ({@code vision.mavlink.*}), docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * &sect;2.2, wave F2.
  *
  * <p>Mapped by {@code wiring.TelemetryWiring}/{@code wiring.FeedTransmitterWiring} onto {@code

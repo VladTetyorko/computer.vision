@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory {@link GeofenceRepositoryPort}: dev fallback with no durability across restarts
- * (docs/OPS-CORE-PLAN.md §G).
+ * (docs/plans/done/OPS-CORE-PLAN.md §G).
  *
  * <p>Replaced by {@code adapter-persistence}'s {@code JpaGeofenceRepository} when {@code
  * vision.persistence.enabled=true}.

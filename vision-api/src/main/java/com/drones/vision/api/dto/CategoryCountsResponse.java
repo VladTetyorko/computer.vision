@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.application.category.CategoryCounts;
 
 /**
- * One row of {@code GET /api/fleet/summary}'s {@code categories} array (docs/MVP3-PLAN.md C-a) —
+ * One row of {@code GET /api/fleet/summary}'s {@code categories} array (docs/plans/done/MVP3-PLAN.md C-a) —
  * per-category asset counts, lifecycle state crossed with whether the asset is currently streaming.
  * Every field is always present (no {@code @JsonInclude(NON_NULL)} needed: nothing here is
  * nullable).

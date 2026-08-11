@@ -4,7 +4,7 @@ import java.time.Instant;
 
 /**
  * A detection tracked across frames under a stable track id — the application layer's track-book
- * entry (docs/TRACKING-PLAN.md §4.B): {@code trackId} is the book's key, {@code detection} its
+ * entry (docs/plans/done/TRACKING-PLAN.md §4.B): {@code trackId} is the book's key, {@code detection} its
  * latest observation (whose {@link Detection#track()} carries the lifecycle state, source, and
  * velocity), {@code firstSeen}/{@code lastSeen} the track's lifetime. Populated and maintained by
  * {@code TrackBook} (vision-application), which books what arrived and associates nothing itself

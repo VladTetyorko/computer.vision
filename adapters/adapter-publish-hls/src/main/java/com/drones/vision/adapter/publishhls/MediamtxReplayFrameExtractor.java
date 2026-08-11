@@ -18,7 +18,7 @@ import java.util.Optional;
 
 /**
  * {@link ReplayFrameExtractionPort} that pulls one decoded frame out of a stream's mediamtx
- * recording at a specific instant (docs/CV-TRAINING-V2-PLAN.md §6) — the replay-capture
+ * recording at a specific instant (docs/plans/done/CV-TRAINING-V2-PLAN.md §6) — the replay-capture
  * counterpart to live capture's {@code StreamService#latestRawFrame}.
  *
  * <h2>Seek is delegated to mediamtx, not to ffmpeg</h2>
@@ -85,7 +85,7 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
 
     /**
      * @param window      length of the clip window requested from mediamtx per {@link #frameAt}
-     *                    call — {@code vision.publish.replay.window} (docs/LAYERING-REFACTOR-PLAN.md
+     *                    call — {@code vision.publish.replay.window} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      *                    wave F3), replacing this class's own {@link #WINDOW_DURATION_SECONDS} constant
      * @param readTimeout bounds the grabber's connect+read I/O — {@code vision.publish.replay.read-timeout},
      *                    replacing this class's own {@link #READ_TIMEOUT_MICROS} constant

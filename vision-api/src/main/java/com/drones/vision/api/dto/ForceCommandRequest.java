@@ -2,7 +2,7 @@ package com.drones.vision.api.dto;
 
 /**
  * Request body for {@code POST /api/assets/{id}/arm} and {@code POST /api/assets/{id}/disarm}
- * (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen wire contract) — both carry the one optional
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen wire contract) — both carry the one optional
  * {@code force} flag, so one shared shape backs both endpoints.
  *
  * <p>The whole body is optional ({@code POST .../arm} with no body is valid); {@code force} defaults

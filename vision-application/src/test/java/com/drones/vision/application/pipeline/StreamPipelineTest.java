@@ -305,7 +305,7 @@ class StreamPipelineTest {
 
     @Test
     void latestRawFrameStaysTheRawFrameEvenWhenOverlayBurnInPublishesADifferentRenderedFrame() {
-        // docs/CV-TRAINING-PLAN.md §2/§D: latestRawFrame() must expose the pre-overlay frame, never
+        // docs/plans/done/CV-TRAINING-PLAN.md §2/§D: latestRawFrame() must expose the pre-overlay frame, never
         // the (possibly burned-in) instance latestFrame()/streamPublisherPort see -- this is the one
         // thing that actually distinguishes the two seams, so it is the load-bearing assertion here.
         VideoFrame f0 = frame(0);
@@ -463,7 +463,7 @@ class StreamPipelineTest {
 
     @Test
     void feedsEveryCompletedResultToTheEventEngineWhenConfigured() {
-        // docs/MVP2-PLAN.md §E, E-a: DetectionEventEngine needs empty results too (that is exactly
+        // docs/plans/done/MVP2-PLAN.md §E, E-a: DetectionEventEngine needs empty results too (that is exactly
         // what "absent" looks like for its debounce rule), so both must reach accept(), not just
         // the non-empty one that detectionRepositoryPort/eventPublisher care about above.
         VideoFrame f0 = frame(0);
@@ -495,7 +495,7 @@ class StreamPipelineTest {
 
     @Test
     void announcesEveryCompletedResultAsALiveUpdateWhenConfiguredWithAnOwningAsset() {
-        // docs/REALTIME-PLAN.md §4: empty results matter here too -- "nothing detected now" is
+        // docs/plans/done/REALTIME-PLAN.md §4: empty results matter here too -- "nothing detected now" is
         // itself useful live information, mirroring the eventEngine precedent above exactly.
         VideoFrame f0 = frame(0);
         VideoFrame f1 = frame(1);
@@ -542,7 +542,7 @@ class StreamPipelineTest {
 
     @Test
     void detectionFailureDoesNotClosePipelineAndVideoKeepsFlowing() {
-        // Resilience policy (docs/MVP1-PLAN.md §C7): a failing/absent CV
+        // Resilience policy (docs/plans/done/MVP1-PLAN.md §C7): a failing/absent CV
         // service must never kill or degrade the video path. One
         // PIPELINE_ERROR event still marks the outage, but frames keep
         // publishing and the subscription is never cancelled.
@@ -833,7 +833,7 @@ class StreamPipelineTest {
 
     @Test
     void latestFrameReflectsTheRenderedFrameWhenOverlayBurnInProducesOne() {
-        // docs/MVP3-PLAN.md C-a: latestFrame() must expose the exact instance streamPublisherPort
+        // docs/plans/done/MVP3-PLAN.md C-a: latestFrame() must expose the exact instance streamPublisherPort
         // was handed, so a snapshot request sees the same post-overlay picture a viewer does.
         VideoFrame f0 = frame(0);
         VideoFrame f1 = frame(1);
@@ -851,7 +851,7 @@ class StreamPipelineTest {
 
     @Test
     void overlayNeverInvokedAndFramesPublishRawWhenOverlayBurnInIsDisabled() {
-        // docs/MVP2-PLAN.md §V, V-e: an OverlayPort is configured and detections are non-empty --
+        // docs/plans/done/MVP2-PLAN.md §V, V-e: an OverlayPort is configured and detections are non-empty --
         // exactly the condition overlayRendersOntoFrame...() above proves triggers rendering -- but
         // PipelineConfig#overlayBurnIn() is false, so the renderer must never even be called and
         // every frame publishes as the raw, unmodified instance the source produced.
@@ -895,7 +895,7 @@ class StreamPipelineTest {
 
     @Test
     void overlayReceivesRawSingleResultDetectionsUnchangedWhenOnlyOneResultHasCompleted() {
-        // docs/CYCLES-PLAN.md §12 CP-c: with only one completed result (no "previous" yet), the
+        // docs/main/CYCLES-PLAN.md §12 CP-c: with only one completed result (no "previous" yet), the
         // DetectionExtrapolator passes it through as-is -- overlay behavior is unchanged from
         // before the extrapolator existed.
         VideoFrame f0 = frame(0);
@@ -916,7 +916,7 @@ class StreamPipelineTest {
 
     @Test
     void overlayExtrapolatesTheMatchedBoxBetweenTwoCompletedResultsInsteadOfFreezingAtTheLatestRawPosition() {
-        // docs/CYCLES-PLAN.md §12 CP-c: once a second result completes, the overlay for a
+        // docs/main/CYCLES-PLAN.md §12 CP-c: once a second result completes, the overlay for a
         // subsequently-published frame shows a box moved along the measured velocity toward that
         // frame's own capture time, not L's raw (now-stale) box position.
         Instant t0 = Instant.parse("2024-01-01T00:00:00Z");
@@ -951,7 +951,7 @@ class StreamPipelineTest {
 
     @Test
     void overlayFreezesExtrapolationAtTheCapForAFrameFarPastTheLatestResult() {
-        // docs/CYCLES-PLAN.md §12 CP-c: a frame published long after L (e.g. a stalled/outaged
+        // docs/main/CYCLES-PLAN.md §12 CP-c: a frame published long after L (e.g. a stalled/outaged
         // detector) must not run the box off screen -- extrapolation freezes at
         // DetectionExtrapolator.MAX_EXTRAPOLATION_MILLIS past L's capture time.
         Instant t0 = Instant.parse("2024-01-01T00:00:00Z");
@@ -983,7 +983,7 @@ class StreamPipelineTest {
         assertEquals(0.46, forF2.detections().get(0).box().x(), 1e-9);
     }
 
-    // --- docs/CV-CONTROL-PLAN.md Wave C: live config update, skip-detect, label-filter enforcement ---
+    // --- docs/plans/done/CV-CONTROL-PLAN.md Wave C: live config update, skip-detect, label-filter enforcement ---
 
     private DetectionResult resultWithLabels(long sequence, String... labels) {
         List<Detection> detections = new ArrayList<>();
@@ -1167,7 +1167,7 @@ class StreamPipelineTest {
                 "the very next sampled frame must already carry the new model");
     }
 
-    // --- docs/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
+    // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
 
     private static PipelineConfig trackingConfig(int inferenceFps, TrackingConfig tracking) {
         return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, 5, true, Set.of(),

@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 
 /**
- * Response body for {@code GET /api/assets/{assetId}/stats} (docs/ASSET-MANAGER-PAGE-PLAN.md,
+ * Response body for {@code GET /api/assets/{assetId}/stats} (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md,
  * Wave A's frozen wire contract) — the manager page's KPI tile row.
  *
  * <p>Mirrors {@link AssetStats} field-for-field. {@code firstFlownAt}/{@code lastFlownAt}/{@code

@@ -11,9 +11,9 @@ import { PilotAssignmentsPanel } from './pilot-assignments-panel';
 import { RosterFacade } from './roster-facade';
 
 /**
- * `/manage/roster` — the fleet-wide pilot roster (docs/UI-REDESIGN-PLAN.md Wave 4's original
- * accordion build; reworked into a two-pane matrix by docs/NAV-IA-REDESIGN-PLAN.md Wave 3, §2.4,
- * docs/design/13-roster.md).
+ * `/manage/roster` — the fleet-wide pilot roster (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4's original
+ * accordion build; reworked into a two-pane matrix by docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 3, §2.4,
+ * docs/extracts/design/13-roster.md).
  *
  * Route-guarded (`core/org/org-guard.ts`, the same guard `/org` uses) — only ADMIN/MANAGER reach
  * this page; a PILOT following the Manage sidebar's entry is redirected to `/fly` before this
@@ -21,7 +21,7 @@ import { RosterFacade } from './roster-facade';
  *
  * **The accordion is gone.** Assignments render inline in the row — `RosterFacade.rows`/`pilotRows`
  * already carry the pilot names/asset names each row needs, so the disclosure that used to hide them
- * behind a click (docs/design/13-roster.md's own named problem: "40 assets is 40 clicks to read")
+ * behind a click (docs/extracts/design/13-roster.md's own named problem: "40 assets is 40 clicks to read")
  * had nothing left to earn its place. A `By asset | By pilot` pivot (`?by=`) reads the identical
  * source data either direction — "By pilot" is what answers "what does Pilot A fly", which the
  * accordion could not answer without expanding every row. Both pivots wrap in `vision-two-pane`
@@ -30,7 +30,7 @@ import { RosterFacade } from './roster-facade';
  * `By pilot` — see `RosterFacade`'s own class doc comment for why there are still only two REST call
  * sites behind both.
  *
- * **`page-head` → `vision-page-bar`** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, Wave 2, committed) — the
+ * **`page-head` → `vision-page-bar`** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, Wave 2, committed) — the
  * subtitle carries real instruction, so it stays a `hint`; the count chip and search live in the bar
  * as before, joined this wave by the pivot toggle (`[pageBarFilters]`) and a fleet-level gap
  * indicator next to it.
@@ -47,7 +47,7 @@ export class RosterPage {
   protected readonly facade = inject(RosterFacade);
 
   /**
-   * The "By pilot" pivot's own row state text (docs/VISUAL-REFRESH-PLAN.md F5 — dot + plain text,
+   * The "By pilot" pivot's own row state text (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — dot + plain text,
    * not a chip per assigned asset) — mirrors the "By asset" pivot's `row.pilotNames.join(', ')`,
    * which needs no helper since `RosterRow#pilotNames` is already `readonly string[]`;
    * `RosterPilotRow#assignments` carries the display name one level deeper.

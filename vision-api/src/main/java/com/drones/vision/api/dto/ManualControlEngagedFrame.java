@@ -5,7 +5,7 @@ import com.drones.vision.api.ws.ManualControlWebSocketHandler;
 
 /**
  * Server&rarr;client {@code /ws/manual-control} frame confirming an {@code engage} request
- * succeeded (docs/RC-CONTROL-PHASE1-PLAN.md §4).
+ * succeeded (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4).
  *
  * @param type       always {@code "engaged"}
  * @param assetId    the engaged asset, as a canonical UUID string

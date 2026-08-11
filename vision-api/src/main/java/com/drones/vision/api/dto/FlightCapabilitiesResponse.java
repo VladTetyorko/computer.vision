@@ -5,7 +5,7 @@ import com.drones.vision.domain.model.FlightCapability;
 import java.util.List;
 
 /**
- * Response body for {@code GET /api/assets/{id}/flight-capabilities} (docs/DRONE-INFRA-PLAN.md I-e
+ * Response body for {@code GET /api/assets/{id}/flight-capabilities} (docs/plans/active/DRONE-INFRA-PLAN.md I-e
  * Stage 2's frozen wire contract) — mirrors domain {@link FlightCapability} field-for-field so a
  * driving adapter can decide which flight-command controls to show. No {@code @JsonInclude} — every
  * field is always present ({@code selectableModes} is an empty list, never absent, when mode select

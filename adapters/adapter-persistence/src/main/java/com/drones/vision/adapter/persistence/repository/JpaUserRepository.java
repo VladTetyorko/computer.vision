@@ -16,7 +16,7 @@ import java.util.Optional;
 
 /**
  * {@link UserRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/U-AUTH-PLAN.md, wave 3.
+ * docs/plans/done/U-AUTH-PLAN.md, wave 3.
  *
  * <p>{@link #save} is an upsert (merge-by-id), matching {@code InMemoryUserRepository}'s ({@code
  * vision-app} devsupport) {@code Map#put}. {@link #findByUsername} lower-cases its lookup key

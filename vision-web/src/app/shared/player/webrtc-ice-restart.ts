@@ -1,5 +1,5 @@
 /**
- * Pure SDP-fragment logic behind WHEP's PATCH-based ICE restart (docs/REALTIME-PLAN.md Phase R-b
+ * Pure SDP-fragment logic behind WHEP's PATCH-based ICE restart (docs/plans/done/REALTIME-PLAN.md Phase R-b
  * item 1) — split out from `player-recovery.ts` the same way `live-edge-logic.ts` was: a sibling
  * module, aware of the state machine that drives it without growing inside it (see that file's own
  * doc comment for the precedent this follows). No `RTCPeerConnection`/browser API is touched here
@@ -191,7 +191,7 @@ export function candidatesFromFragment(fragment: string): readonly FragmentCandi
 
 /**
  * Whether a WHEP PATCH response status means "give up on the ICE restart, fall back to full
- * teardown+re-POST" (docs/REALTIME-PLAN.md Phase R-b item 1's own "last resort" rule) — **200**
+ * teardown+re-POST" (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1's own "last resort" rule) — **200**
  * (restart applied, mediamtx's own answer fragment follows) and **204** (acknowledged, no restart
  * — defensive; this module never actually sends a non-restart PATCH, see the module doc comment,
  * but a `204` is still a success shape, not a fallback trigger, per `http_server.go#onWHIPPatch`) are

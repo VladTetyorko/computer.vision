@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Standalone MockMvc tests for {@link ActivityController} (docs/U-SCOPE-PLAN.md, U-e slice 2,
+ * Standalone MockMvc tests for {@link ActivityController} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2,
  * feature 7): the acting user's own audit entries, with the {@code limit} default/cap/floor logic.
  */
 class ActivityControllerTest {

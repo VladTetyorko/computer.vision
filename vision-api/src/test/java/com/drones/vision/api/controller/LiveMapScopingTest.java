@@ -57,7 +57,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 
 /**
- * The security-critical half of docs/MAP-REWORK-PLAN.md §4.3, end to end over real SSE frames: two
+ * The security-critical half of docs/plans/done/MAP-REWORK-PLAN.md §4.3, end to end over real SSE frames: two
  * open {@code /api/live} connections belonging to <em>different</em> viewers must receive different
  * {@code map} events, decided server-side from each connection's own viewer.
  *

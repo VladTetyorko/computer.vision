@@ -210,7 +210,7 @@ describe('telemetryAgeSeverity', () => {
   });
 });
 
-describe('trackingIdChanged (docs/REALTIME-PLAN.md Phase R-a item 2; moved here Phase R-c follow-up)', () => {
+describe('trackingIdChanged (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2; moved here Phase R-c follow-up)', () => {
   it('is false when the same id is derived again — the re-entry guard\'s whole point', () => {
     expect(trackingIdChanged('dev-1', 'dev-1')).toBe(false);
   });

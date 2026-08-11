@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code groups} — mirrors {@link com.drones.vision.domain.model.Group} field-for-field
- * (docs/U-AUTH-PLAN.md, wave 3); {@link com.drones.vision.adapter.persistence.JpaGroupRepository}
+ * (docs/plans/done/U-AUTH-PLAN.md, wave 3); {@link com.drones.vision.adapter.persistence.JpaGroupRepository}
  * owns the mapping in both directions.
  *
  * <p>{@code parentId} is a nullable {@code UUID} (null = root group). No FK to itself or any other

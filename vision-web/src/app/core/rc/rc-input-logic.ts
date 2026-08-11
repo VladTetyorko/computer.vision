@@ -1,5 +1,5 @@
 /**
- * Pure helpers behind the RC transmitter monitor (docs/RC-CONTROL-PLAN.md Phase 0). Frame-free and
+ * Pure helpers behind the RC transmitter monitor (docs/plans/active/RC-CONTROL-PLAN.md Phase 0). Frame-free and
  * dependency-free so it unit-tests without a browser or `TestBed` — the `RcInputService` (the
  * `navigator.getGamepads()` plumbing) is the only browser-touching part.
  *

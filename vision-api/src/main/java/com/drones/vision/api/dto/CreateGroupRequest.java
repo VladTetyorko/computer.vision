@@ -4,7 +4,7 @@ import com.drones.vision.application.identity.GroupSpec;
 import com.drones.vision.domain.model.GroupId;
 
 /**
- * Request body for {@code POST /api/groups} (docs/U-SCOPE-PLAN.md, U-e slice 2) — create a group,
+ * Request body for {@code POST /api/groups} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — create a group,
  * optionally under a parent. Converts to {@link GroupSpec} via {@link #toSpec()}.
  *
  * <p>Blank-name validation is left to {@link GroupSpec}'s own compact constructor (surfacing as

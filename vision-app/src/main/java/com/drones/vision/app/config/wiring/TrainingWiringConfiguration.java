@@ -18,12 +18,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the CV model-improvement training loop (docs/CV-TRAINING-PLAN.md §3, Wave T4, as delta'd by
- * docs/CV-TRAINING-V2-PLAN.md §7) — {@link DatasetService}/{@link LabelingService} plus their
+ * Wires the CV model-improvement training loop (docs/plans/done/CV-TRAINING-PLAN.md §3, Wave T4, as delta'd by
+ * docs/plans/done/CV-TRAINING-V2-PLAN.md §7) — {@link DatasetService}/{@link LabelingService} plus their
  * gRPC-backed {@link DatasetUploadPort} (the replacement for the deleted filesystem export step) —
  * behind {@link VisionTrainingProperties#enabled()} (default {@code false}).
  *
- * <p>Also wires the model registry control plane (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9):
+ * <p>Also wires the model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9):
  * {@link #modelRegistryPort}/{@link #modelRegistryService} behind {@code ModelRegistryController}
  * (vision-api, component-scanned), gated by the same {@link VisionTrainingProperties#enabled()}
  * property. {@link #modelRegistryPort} consumes {@code CvWiring}'s shared {@link
@@ -33,12 +33,12 @@ import org.springframework.context.annotation.Configuration;
  * its port arguments as plain, unconditional parameters.
  *
  * <p>{@code
- * ModelRegistryPort}'s history: dormant since docs/CV-CONTROL-PLAN.md §D noted "not the dormant
+ * ModelRegistryPort}'s history: dormant since docs/plans/done/CV-CONTROL-PLAN.md §D noted "not the dormant
  * {@code ModelRegistryPort}" for the detection-model roster ({@code CvModelsController}'s static
  * config-backed picker) — this task is the port's first real wiring.
  *
- * <p><strong>Training-job flow (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2, last backend wave; upload
- * folded in by docs/CV-TRAINING-V2-PLAN.md §4)</strong>: {@link #trainingPort}/{@link
+ * <p><strong>Training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2, last backend wave; upload
+ * folded in by docs/plans/done/CV-TRAINING-V2-PLAN.md §4)</strong>: {@link #trainingPort}/{@link
  * #trainingJobService} behind {@code TrainingJobController} (vision-api, component-scanned) —
  * {@code POST /api/datasets/{id}/train} and {@code GET /api/training/jobs}[/{jobId}]. {@link
  * #trainingPort} shares {@link #modelRegistryPort}'s exact same {@link ManagedChannel} bean (see
@@ -63,7 +63,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * <p>{@link DatasetRepositoryPort}/{@link TrainingSampleRepositoryPort}/{@link
  * SampleImageStorePort} are already unconditionally wired in {@link PersistenceWiringConfiguration}
- * (docs/CV-TRAINING-PLAN.md Wave T3) — real JPA or in-memory devsupport, selected independently by
+ * (docs/plans/done/CV-TRAINING-PLAN.md Wave T3) — real JPA or in-memory devsupport, selected independently by
  * {@code vision.persistence.enabled} — so the beans below just consume them as already-resolved
  * collaborators, same as {@code ApplicationServiceWiring#markService} consumes {@code
  * markRepositoryPort}. {@link #replaySources} does the same for {@link AssetUsageRepositoryPort}/
@@ -80,10 +80,10 @@ public class TrainingWiringConfiguration {
 
     /**
      * Ships a composed YOLO dataset to cv-service over the shared gRPC channel
-     * (docs/CV-TRAINING-V2-PLAN.md §3/§6) — the replacement for the deleted {@code
+     * (docs/plans/done/CV-TRAINING-V2-PLAN.md §3/§6) — the replacement for the deleted {@code
      * FilesystemDatasetExport} bean; the same channel {@link #modelRegistryPort}/{@link
      * #trainingPort} already reuse. {@code settings} maps {@link VisionCvProperties#upload()} (plus
-     * every other {@code GrpcCvSettings} field) onto {@code GrpcCvSettings} (docs/LAYERING-REFACTOR-PLAN.md
+     * every other {@code GrpcCvSettings} field) onto {@code GrpcCvSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * wave F4) — the same mapping {@code CvWiring#detectionPort} performs, duplicated here since
      * this bean lives in a separate {@code @Configuration} class with no shared private helper.
      */
@@ -126,7 +126,7 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * Dataset CRUD (docs/CV-TRAINING-PLAN.md §2) behind {@code DatasetController} (vision-api,
+     * Dataset CRUD (docs/plans/done/CV-TRAINING-PLAN.md §2) behind {@code DatasetController} (vision-api,
      * component-scanned) — a one-line assembly, mirroring {@code
      * ApplicationServiceWiring#geofenceService}'s shape.
      */
@@ -137,7 +137,7 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * Capture/label/upload (docs/CV-TRAINING-PLAN.md §2, as delta'd by docs/CV-TRAINING-V2-PLAN.md
+     * Capture/label/upload (docs/plans/done/CV-TRAINING-PLAN.md §2, as delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md
      * §4) behind {@code LabelingController} (vision-api, component-scanned). {@code
      * streamService}/{@code assetRepositoryPort} resolve a live capture's source stream/asset;
      * {@code replaySources} resolves a replay capture's usage/detections/frame (see {@code
@@ -156,13 +156,13 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * The CV model registry's gRPC client (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) —
+     * The CV model registry's gRPC client (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) —
      * {@code Training/ListModels}/{@code Training/PromoteModel} over {@code CvWiring#cvGrpcChannel},
      * the exact same channel {@code GrpcDetectionPort} uses for {@code
      * Inference/DetectStream} when {@code vision.cv.enabled=true} too (see that bean's own javadoc,
      * "Shutdown ownership", for why this class never closes it). Behind {@code
      * ModelRegistryController} (vision-api, component-scanned). {@code cvProperties.registry().callTimeout()}
-     * (docs/LAYERING-REFACTOR-PLAN.md wave F4, {@code vision.cv.registry.call-timeout}) replaces
+     * (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F4, {@code vision.cv.registry.call-timeout}) replaces
      * {@code GrpcModelRegistryPort.CALL_TIMEOUT_SECONDS} as the actual per-call deadline.
      */
     @Bean
@@ -172,7 +172,7 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * Model list/promote (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) behind {@code
+     * Model list/promote (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) behind {@code
      * ModelRegistryController} (vision-api, component-scanned) — a one-line assembly, mirroring
      * {@link #datasetService}'s shape.
      */
@@ -184,7 +184,7 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * The training-run gRPC client (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 — the last backend
+     * The training-run gRPC client (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 — the last backend
      * wave) — {@code Training/StartTraining} over {@link WiringConfiguration#cvGrpcChannel}, the
      * <em>same</em> shared channel {@link #modelRegistryPort} and {@code GrpcDetectionPort}
      * already use (see {@link GrpcModelRegistryPort}'s own javadoc, "Channel reuse"). Taking the
@@ -202,8 +202,8 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * Starts fine-tune jobs and holds their pollable state (docs/CV-TRAINING-PLAN.md §7/§8, Phase
-     * 2, upload-then-train folded in by docs/CV-TRAINING-V2-PLAN.md §4) behind {@code
+     * Starts fine-tune jobs and holds their pollable state (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase
+     * 2, upload-then-train folded in by docs/plans/done/CV-TRAINING-V2-PLAN.md §4) behind {@code
      * TrainingJobController} (vision-api, component-scanned). {@code labelingService} backs both
      * {@code start}'s synchronous "does this dataset have LABELED samples" pre-check and {@code
      * runJob}'s upload phase — see {@code DefaultTrainingJobService}'s own javadoc.

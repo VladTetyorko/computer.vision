@@ -8,8 +8,8 @@ import java.time.Duration;
 
 /**
  * Configuration for the gRPC connection to the Python CV service ({@code vision.cv.*}),
- * per docs/MVP1-PLAN.md §C7 bullet 4 and docs/REMOTE-CV-PLAN.md P1 item 5, extended by
- * docs/LAYERING-REFACTOR-PLAN.md §2.2 (wave F4) with every remaining {@code
+ * per docs/plans/done/MVP1-PLAN.md §C7 bullet 4 and docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, extended by
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2 (wave F4) with every remaining {@code
  * com.drones.vision.adapter.cvgrpc.GrpcCvSettings}/{@code GrpcModelRegistryPort} tunable.
  *
  * <p>Selected by {@code wiring.CvWiring#detectionPort}: {@link #enabled()} {@code false}
@@ -87,8 +87,8 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
-     * Convenience constructor covering just the four original {@code vision.cv.*} fields (docs/MVP1-PLAN.md
-     * §C7/docs/REMOTE-CV-PLAN.md P1 item 5, predating wave F4's extension) — every field wave F4 added
+     * Convenience constructor covering just the four original {@code vision.cv.*} fields (docs/plans/done/MVP1-PLAN.md
+     * §C7/docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, predating wave F4's extension) — every field wave F4 added
      * defaults to {@code GrpcCvSettings}'s own literal, so behavior constructing an instance this way
      * is unchanged.
      */

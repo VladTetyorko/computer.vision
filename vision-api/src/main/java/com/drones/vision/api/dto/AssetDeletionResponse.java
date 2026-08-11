@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.application.asset.AssetDeletion;
 
 /**
- * Response body for {@code DELETE /api/assets/{id}} (docs/CYCLES-PLAN.md §8's pinned contract).
+ * Response body for {@code DELETE /api/assets/{id}} (docs/main/CYCLES-PLAN.md §8's pinned contract).
  *
  * <p>Returned instead of an empty {@code 204} so the caller can tell the user both what the
  * deletion reached — "removed my-drone and its 2 sources" — and, just as importantly, what it

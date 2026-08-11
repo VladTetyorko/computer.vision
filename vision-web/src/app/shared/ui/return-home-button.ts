@@ -6,7 +6,7 @@ import { ConfirmDialog } from './confirm-dialog';
 import { returnHomeToastFor } from './return-home-button-logic';
 
 /**
- * "Bring home" (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) — a single command,
+ * "Bring home" (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) — a single command,
  * `MAV_CMD_DO_SET_MODE → RTL`, reused verbatim by both call sites the plan names (Fly's cockpit HUD
  * and Command's `AssetPanel`), the same "second consumer → a shared component" precedent
  * `shared/ui/weather-chip.ts`/`shared/player/detections-strip.ts` already established.
@@ -40,7 +40,7 @@ import { returnHomeToastFor } from './return-home-button-logic';
  * this is a single one-shot request, not a saga with retries/reducible transitions the way
  * `shared/player/player-recovery.ts`'s reconnect logic is.
  *
- * **`Escape` and an outside click both cancel** (docs/UI-STATE-PLAN.md §2.4) — added *here*, on this
+ * **`Escape` and an outside click both cancel** (docs/plans/done/UI-STATE-PLAN.md §2.4) — added *here*, on this
  * component, not on `ConfirmDialog` itself. `ConfirmDialog`'s own doc comment is deliberate about
  * carrying **no** Escape/backdrop-dismiss of its own ("every dismissal is an explicit button click …
  * never an accidental key press/misclick either way") — a rule this component still honors for its

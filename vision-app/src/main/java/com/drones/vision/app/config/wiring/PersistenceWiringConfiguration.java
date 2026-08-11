@@ -13,8 +13,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Wires the fleet-side repository ports (docs/MVP2-PLAN.md P-a: categories, devices, assets) and
- * the history repository ports (docs/MVP2-PLAN.md P-b: asset usages, telemetry, detections) to
+ * Wires the fleet-side repository ports (docs/plans/done/MVP2-PLAN.md P-a: categories, devices, assets) and
+ * the history repository ports (docs/plans/done/MVP2-PLAN.md P-b: asset usages, telemetry, detections) to
  * either {@code adapter-persistence}'s Postgres-backed JPA implementations or their devsupport
  * in-memory fallbacks, selected by {@link VisionPersistenceProperties#enabled()} (default
  * {@code false} — unchanged in-memory behavior for every existing test and IDE run).
@@ -102,7 +102,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryDetectionRepository();
     }
 
-    /** docs/UX-REWORK-PLAN.md §U-d item 3 — the asset image store, same toggle idiom as the six above. */
+    /** docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — the asset image store, same toggle idiom as the six above. */
     @Bean
     public AssetImageRepositoryPort assetImageRepositoryPort(VisionPersistenceProperties properties,
                                                                 ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -112,7 +112,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryAssetImageRepository();
     }
 
-    /** docs/OPS-CORE-PLAN.md §G — geofence zones, same toggle idiom as the seven above. */
+    /** docs/plans/done/OPS-CORE-PLAN.md §G — geofence zones, same toggle idiom as the seven above. */
     @Bean
     public GeofenceRepositoryPort geofenceRepositoryPort(VisionPersistenceProperties properties,
                                                            ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -122,7 +122,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryGeofenceRepository();
     }
 
-    /** docs/U-AUTH-PLAN.md wave 3 — users (identity aggregate), same toggle idiom as the eight above. */
+    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — users (identity aggregate), same toggle idiom as the eight above. */
     @Bean
     public UserRepositoryPort userRepositoryPort(VisionPersistenceProperties properties,
                                                   ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -132,7 +132,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryUserRepository();
     }
 
-    /** docs/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes), same toggle idiom as the nine above. */
+    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes), same toggle idiom as the nine above. */
     @Bean
     public GroupRepositoryPort groupRepositoryPort(VisionPersistenceProperties properties,
                                                     ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -142,7 +142,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryGroupRepository();
     }
 
-    /** docs/U-SCOPE-PLAN.md slice 2 — pilot→asset assignments, same toggle idiom as the ten above. */
+    /** docs/plans/done/U-SCOPE-PLAN.md slice 2 — pilot→asset assignments, same toggle idiom as the ten above. */
     @Bean
     public AssignmentRepositoryPort assignmentRepositoryPort(VisionPersistenceProperties properties,
                                                              ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -152,7 +152,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryAssignmentRepository();
     }
 
-    /** docs/TACTICAL-MARKS-PLAN.md §3 — tactical marks, same toggle idiom as the eleven above. */
+    /** docs/plans/done/TACTICAL-MARKS-PLAN.md §3 — tactical marks, same toggle idiom as the eleven above. */
     @Bean
     public MarkRepositoryPort markRepositoryPort(VisionPersistenceProperties properties,
                                                   ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -162,7 +162,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryMarkRepository();
     }
 
-    /** docs/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets, same toggle idiom as the twelve above. */
+    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training datasets, same toggle idiom as the twelve above. */
     @Bean
     public DatasetRepositoryPort datasetRepositoryPort(VisionPersistenceProperties properties,
                                                         ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -172,7 +172,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryDatasetRepository();
     }
 
-    /** docs/CV-TRAINING-PLAN.md §1, Wave T3 — training samples, same toggle idiom as the thirteen above. */
+    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — training samples, same toggle idiom as the thirteen above. */
     @Bean
     public TrainingSampleRepositoryPort trainingSampleRepositoryPort(VisionPersistenceProperties properties,
                                                                      ObjectProvider<EntityManagerFactory> entityManagerFactory) {
@@ -183,7 +183,7 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
-     * docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the training-sample image store, same toggle idiom
+     * docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — the training-sample image store, same toggle idiom
      * as the fourteen above.
      */
     @Bean
@@ -196,7 +196,7 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
-     * docs/MAP-REWORK-PLAN.md §2.3/§4.4 — map layers (with their grant list), same toggle idiom as
+     * docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map layers (with their grant list), same toggle idiom as
      * the fifteen above.
      *
      * <p>The two persistence modes seed the COP layer differently but converge: {@code
@@ -213,7 +213,7 @@ public class PersistenceWiringConfiguration {
         return new InMemoryMapLayerRepository();
     }
 
-    /** docs/MAP-REWORK-PLAN.md §2.3/§4.4 — map drawings, same toggle idiom as the sixteen above. */
+    /** docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map drawings, same toggle idiom as the sixteen above. */
     @Bean
     public DrawingRepositoryPort drawingRepositoryPort(VisionPersistenceProperties properties,
                                                         ObjectProvider<EntityManagerFactory> entityManagerFactory) {

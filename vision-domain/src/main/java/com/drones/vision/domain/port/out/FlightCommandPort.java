@@ -5,10 +5,10 @@ import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.FlightCapability;
 
 /**
- * Driven port: send a flight command to the aircraft behind a device (docs/DRONE-INFRA-PLAN.md
- * I-e — guarded command TX). The RX-only doctrine ({@code docs/CYCLES-PLAN.md} §0) ends only
+ * Driven port: send a flight command to the aircraft behind a device (docs/plans/active/DRONE-INFRA-PLAN.md
+ * I-e — guarded command TX). The RX-only doctrine ({@code docs/main/CYCLES-PLAN.md} §0) ends only
  * here, deliberately, and only this far. Stage 1 opened it for a single command, return-to-home;
- * Stage 2 (docs/DRONE-INFRA-PLAN.md I-e Stage 2) adds the two next capability-gated command
+ * Stage 2 (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2) adds the two next capability-gated command
  * classes — arbitrary mode select and arm/disarm — plus a {@link #capabilities(Device)} snapshot
  * a UI drives itself from. There is still intentionally no fully generic command surface (arbitrary
  * MAVLink opcodes, mission/fence upload) — those are later, separately-gated stages of the same

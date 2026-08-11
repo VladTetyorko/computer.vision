@@ -3,7 +3,7 @@ import type { AssetAttention } from '../api/models';
 import { attentionAgeLabel, attentionReasons, batteryAttentionSeverity } from './attention-logic';
 
 /**
- * Moved from `features/command/command-logic.spec.ts` (docs/UI-REDESIGN-PLAN.md Wave 4) alongside
+ * Moved from `features/command/command-logic.spec.ts` (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4) alongside
  * the rules themselves — see `attention-logic.ts`'s own doc comment. `features/command/command-logic.spec.ts`
  * keeps its own `buildEntityRows`/`commandGridColumns` cases (Command-specific), importing these
  * same functions via `command-logic.ts`'s re-export.
@@ -94,7 +94,7 @@ describe('attentionReasons', () => {
     expect(reasons.map((r) => r.kind)).toEqual(['battery-critical', 'telemetry-stale', 'open-events']);
   });
 
-  describe('failsafe (docs/FC-INTEGRATIONS-PLAN.md F-d)', () => {
+  describe('failsafe (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d)', () => {
     it('flags failsafe only for an explicit true, never fabricated from absent/false data', () => {
       expect(attentionReasons(asset({ failsafe: undefined }))).toEqual([]);
       expect(attentionReasons(asset({ failsafe: false }))).toEqual([]);
@@ -113,7 +113,7 @@ describe('attentionReasons', () => {
     });
   });
 
-  describe('gps-degraded (docs/FC-INTEGRATIONS-PLAN.md F-d)', () => {
+  describe('gps-degraded (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d)', () => {
     it('never fires with no gpsFixType given at all', () => {
       expect(attentionReasons(asset(), undefined)).toEqual([]);
     });
@@ -141,7 +141,7 @@ describe('attentionReasons', () => {
   });
 });
 
-describe('geofence-breach (docs/OPS-CORE-PLAN.md §G-c)', () => {
+describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   it('never fires with no breaches given at all', () => {
     expect(attentionReasons(asset())).toEqual([]);
     expect(attentionReasons(asset(), undefined, [])).toEqual([]);

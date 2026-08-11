@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * docs/DRONE-INFRA-PLAN.md I-e Stage 1: {@link MavlinkFlightCommander} exercised over real
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: {@link MavlinkFlightCommander} exercised over real
  * loopback UDP against a {@link FakeVehicle} test double that speaks just enough MAVLink to stand
  * in for a real ArduPilot/Betaflight aircraft — heartbeats first (so {@link MavlinkSocketHub}
  * claims and labels it, exactly like a real vehicle), then either decodes and answers the

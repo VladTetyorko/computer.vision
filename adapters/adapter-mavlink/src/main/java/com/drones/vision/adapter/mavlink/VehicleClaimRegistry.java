@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * One {@link MavlinkSocketHub}'s vehicle-claim bookkeeping (docs/LAYERING-REFACTOR-PLAN.md E2 split
+ * One {@link MavlinkSocketHub}'s vehicle-claim bookkeeping (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2 split
  * out of what used to be {@code MavlinkSocketHub} itself): which {@link VehicleRegistration}s exist,
  * which sysid each currently claims, and the bounded registry of sysids nobody claims. See {@link
  * MavlinkSocketHub}'s own javadoc for the full claim/re-election/unclaimed-registry semantics this
@@ -42,7 +42,7 @@ final class VehicleClaimRegistry {
     private final LinkedHashMap<Integer, MavlinkSocketHub.UnclaimedVehicle> unclaimed = new LinkedHashMap<>();
 
     /**
-     * @param maxUnclaimedVehicles bound on {@link #unclaimed}'s size (docs/LAYERING-REFACTOR-PLAN.md
+     * @param maxUnclaimedVehicles bound on {@link #unclaimed}'s size (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      *                             §2.2's {@code vision.mavlink.max-unclaimed-vehicles} — was this
      *                             class's own {@code MAX_UNCLAIMED_VEHICLES} constant, now sourced
      *                             from {@link MavlinkSettings#maxUnclaimedVehicles()})
@@ -72,14 +72,14 @@ final class VehicleClaimRegistry {
         }
     }
 
-    /** Vehicles heard on this hub's socket that no registration currently claims (docs/DRONE-INFRA-PLAN.md I-b). */
+    /** Vehicles heard on this hub's socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     List<MavlinkSocketHub.UnclaimedVehicle> unclaimedVehicles() {
         synchronized (lock) {
             return List.copyOf(unclaimed.values());
         }
     }
 
-    /** Vehicles currently claimed by an open device on this hub's socket (docs/DRONE-INFRA-PLAN.md I-b). */
+    /** Vehicles currently claimed by an open device on this hub's socket (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     List<MavlinkSocketHub.ClaimedVehicle> claimedVehicles() {
         synchronized (lock) {
             List<MavlinkSocketHub.ClaimedVehicle> result = new ArrayList<>(registrations.size());
@@ -141,7 +141,7 @@ final class VehicleClaimRegistry {
 
     /**
      * Must be called while holding {@link #lock}. Refreshes a claimed registration's firmware/
-     * mavType label from a {@code HEARTBEAT} (docs/DRONE-INFRA-PLAN.md I-b) -- a no-op for every
+     * mavType label from a {@code HEARTBEAT} (docs/plans/active/DRONE-INFRA-PLAN.md I-b) -- a no-op for every
      * other message type.
      */
     private static void captureHeartbeatInfo(VehicleRegistration r, MavlinkMessage<?> message) {

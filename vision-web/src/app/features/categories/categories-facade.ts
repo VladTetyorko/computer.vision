@@ -5,7 +5,7 @@ import type { Category, CategoryCounts } from '../../core/api/models';
 import { buildCategoryRows, searchCategoryRows, type CategoryRow } from './categories-logic';
 
 /**
- * `CategoriesPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — loads the defined category list
+ * `CategoriesPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — loads the defined category list
  * (`VisionApi.listCategories`) and the fleet-summary counts (`VisionApi.fleetSummary`) once, in
  * parallel, and joins them ({@link buildCategoryRows}). No role gate — reachable by any signed-in
  * user, same openness as `/assets` (browsing/filtering categories is not a management action; only

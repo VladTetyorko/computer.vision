@@ -35,7 +35,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Layer CRUD and grant management (docs/MAP-REWORK-PLAN.md §4.1's frozen wire contract) — the
+ * Layer CRUD and grant management (docs/plans/done/MAP-REWORK-PLAN.md §4.1's frozen wire contract) — the
  * access-controlled surfaces marks and drawings live on.
  *
  * <h2>Who is acting</h2>

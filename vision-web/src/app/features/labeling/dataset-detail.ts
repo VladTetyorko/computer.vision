@@ -9,8 +9,8 @@ import type { SampleStatus, TrainingSample } from '../../core/api/models';
 
 /**
  * `/manage/training/:datasetId` — one dataset's sample grid, capture flow, and train action
- * (docs/CV-TRAINING-PLAN.md Wave T5; the manual export step was deleted in
- * docs/CV-TRAINING-V2-PLAN.md §8 — "Train a model" now uploads the dataset itself). The capture
+ * (docs/plans/done/CV-TRAINING-PLAN.md Wave T5; the manual export step was deleted in
+ * docs/plans/done/CV-TRAINING-V2-PLAN.md §8 — "Train a model" now uploads the dataset itself). The capture
  * control here is the operator's "Add to dataset" gesture: pick a currently-live stream, grab its
  * current frame + detections as a `PENDING` sample.
  *

@@ -8,8 +8,8 @@ import java.util.concurrent.SubmissionPublisher;
 
 /**
  * One device's interest in a {@link MavlinkSocketHub}'s socket: a possible sysid pin, and the
- * resolved claim/decoder state (docs/DRONE-INFRA-PLAN.md I-a). Promoted to a top-level type
- * (docs/LAYERING-REFACTOR-PLAN.md E2) so both {@link MavlinkSocketHub} (socket/thread lifecycle,
+ * resolved claim/decoder state (docs/plans/active/DRONE-INFRA-PLAN.md I-a). Promoted to a top-level type
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2) so both {@link MavlinkSocketHub} (socket/thread lifecycle,
  * dispatch) and {@link VehicleClaimRegistry} (claim bookkeeping) can share it without one nesting
  * inside the other.
  *
@@ -34,9 +34,9 @@ final class VehicleRegistration {
     Integer claimedSysid;
     long lastHeardMillis;
     MavlinkTelemetryDecoder decoder;
-    String firmware; // docs/DRONE-INFRA-PLAN.md I-b -- from the most recent HEARTBEAT, null until one arrives
+    String firmware; // docs/plans/active/DRONE-INFRA-PLAN.md I-b -- from the most recent HEARTBEAT, null until one arrives
     Integer mavType; // ditto
-    InetSocketAddress lastSourceAddress; // docs/DRONE-INFRA-PLAN.md I-e Stage 1 -- null until this claim has actually been heard from
+    InetSocketAddress lastSourceAddress; // docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 -- null until this claim has actually been heard from
 
     VehicleRegistration(DeviceId deviceId, Integer pinnedSysid, SubmissionPublisher<Telemetry> publisher) {
         this.deviceId = deviceId;

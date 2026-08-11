@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 
 /**
  * In-memory {@link TrainingSampleRepositoryPort}: dev fallback with no durability across
- * restarts (docs/CV-TRAINING-PLAN.md §1, Wave T3).
+ * restarts (docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3).
  *
  * <p>{@link #findByDataset} orders newest-captured-first before bounding to {@code limit} — the
  * same concrete, deterministic order {@code JpaTrainingSampleRepository} (adapter-persistence)

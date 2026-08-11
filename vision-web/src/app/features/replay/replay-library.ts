@@ -9,13 +9,13 @@ import { ReplayLibraryFacade } from './replay-library-facade';
 import { formatUsageDuration } from './replay-library-logic';
 
 /**
- * `/replay` — the replay library (docs/design/10-replay.md, Wave 4, closing F8: "Scrub any
+ * `/replay` — the replay library (docs/extracts/design/10-replay.md, Wave 4, closing F8: "Scrub any
  * finished flight, frame by frame" used to land on `ReplayPage`'s own bare "Replay unavailable —
  * No usage specified." empty state, a nav entry advertising a feature that had never existed).
  * This is now the routed component for the flat `replay` path (`replay.routes.ts`) — `ReplayPage`
  * keeps its own separate, unmodified route (`assets/:assetId/replay/:usageId`).
  *
- * **The deep link keeps behaving exactly as today (docs/OPS-CORE-PLAN.md §Q1) — by literally
+ * **The deep link keeps behaving exactly as today (docs/plans/done/OPS-CORE-PLAN.md §Q1) — by literally
  * reusing the same component, not reimplementing its logic.** `/replay?asset=…&usage=…&t=…` (the
  * event → replay deep link's own shipped target — `shared/ui/notification-bell.ts`,
  * `features/wall/wall-facade.ts`, `features/alerts/alerts-facade.ts`, all grep-verified live call
@@ -54,14 +54,14 @@ import { formatUsageDuration } from './replay-library-logic';
   providers: [ReplayLibraryFacade],
 })
 export class ReplayLibraryPage {
-  /** The event → replay deep link's own query params (docs/OPS-CORE-PLAN.md §Q1) — the same three
+  /** The event → replay deep link's own query params (docs/plans/done/OPS-CORE-PLAN.md §Q1) — the same three
    *  aliases `ReplayPage` itself declares; see this class's own doc comment for why they're
    *  forwarded straight through rather than re-derived. */
   readonly assetIdParam = input<string | undefined>(undefined, { alias: 'asset' });
   readonly usageIdParam = input<string | undefined>(undefined, { alias: 'usage' });
   readonly deepLinkOffsetParam = input<string | undefined>(undefined, { alias: 't' });
 
-  /** `?sel=<usageId>` — the library's own two-pane selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4),
+  /** `?sel=<usageId>` — the library's own two-pane selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4),
    *  bound the same way `AssetsPage`'s own `sel` input is (see that component's doc comment): only
    *  a component can receive a route input, so this constructor's `effect()` is what forwards it
    *  into the facade. */

@@ -1,7 +1,7 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/map` — folded into Command (docs/UX-REWORK-PLAN.md §U-c: "`/map` … folds into Command
+ * `/map` — folded into Command (docs/plans/done/UX-REWORK-PLAN.md §U-c: "`/map` … folds into Command
  * (redirect)"). `MapPage`/`map.html`/`map.css` are deleted, not just unrouted — every job that page
  * did (the fleet map, the "every asset" rail, the docked live preview, the empty-state "Add a test
  * drone") now lives in `features/command/**`, per the plan's own "components fold in" instruction.

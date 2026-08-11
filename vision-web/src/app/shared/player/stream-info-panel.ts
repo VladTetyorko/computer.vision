@@ -17,7 +17,7 @@ import type { Transport } from './player';
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * A stream's user-meaningful summary (docs/MVP2-PLAN.md §U-info) — replaces the old plumbing-first
+ * A stream's user-meaningful summary (docs/plans/done/MVP2-PLAN.md §U-info) — replaces the old plumbing-first
  * "Source" card (bare URI, device id, stream id, raw `startedAt`) with: a protocol chip + human
  * source description, a live-ticking session duration, CV status (on/off + last-detection age),
  * the player's own measured latency, and a copyable view URL. Every raw identifier is still
@@ -118,7 +118,7 @@ const CLOCK_TICK_MS = 1_000;
     .fact dd {
       margin: var(--space-2) 0 0;
       font-size: 0.85rem;
-      /* docs/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts ("Streaming for",
+      /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — this grid mixes numeric readouts ("Streaming for",
          "Latency") with text facts ("Transport", the "Detections" chip); tabular-nums only (not
          the mono font), inert on the text ones but keeps the numeric ones from jittering. */
       font-variant-numeric: tabular-nums;
@@ -155,7 +155,7 @@ export class StreamInfoPanel {
   readonly deviceId = input.required<string>();
   /** `shared/player/player.ts`'s own measured seconds-behind-live, piped up via its `latencyChanged` output. */
   readonly latencySeconds = input<number | null>(null);
-  /** `shared/player/player.ts`'s own live transport, piped up via its `transportChanged` output (docs/MVP2-PLAN.md §L / §U3). */
+  /** `shared/player/player.ts`'s own live transport, piped up via its `transportChanged` output (docs/plans/done/MVP2-PLAN.md §L / §U3). */
   readonly transport = input<Transport>('hls');
 
   private readonly fleet = inject(FleetStore);
@@ -182,7 +182,7 @@ export class StreamInfoPanel {
   protected readonly detectionsOn = computed(() => this.detections.status() === 'on');
 
   /**
-   * Status legibility pass (docs/UX-QUICKWINS-PLAN.md QF-3): the dot alone used to be the only
+   * Status legibility pass (docs/plans/done/UX-QUICKWINS-PLAN.md QF-3): the dot alone used to be the only
    * carrier of on/off — a word now always renders beside it, in the same chip idiom
    * `shared/ui/events-rail.ts`'s OPEN/CLOSED chip uses, self-describing even read out of context.
    */

@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Client&rarr;server {@code /ws/manual-control} frame streaming one gamepad sample
- * (docs/RC-CONTROL-PHASE1-PLAN.md §4) — sent at whatever rate the browser's Gamepad API poll
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — sent at whatever rate the browser's Gamepad API poll
  * delivers (~20-30Hz), decoupled from the adapter's fixed wire cadence by {@code
  * ManualControlSession#onChannels}'s latest-wins forwarding.
  *

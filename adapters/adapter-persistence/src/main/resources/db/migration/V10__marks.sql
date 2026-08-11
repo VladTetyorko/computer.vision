@@ -1,4 +1,4 @@
--- docs/TACTICAL-MARKS-PLAN.md §3: geolocated tactical marks (the shared operational picture) --
+-- docs/plans/done/TACTICAL-MARKS-PLAN.md §3: geolocated tactical marks (the shared operational picture) --
 -- structurally a point version of geofence_zones (V7), with ownership/lifecycle columns instead
 -- of the zone's jsonb polygon.
 --

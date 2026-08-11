@@ -15,7 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The prime directive of docs/U-AUTH-PLAN.md wave 3, proven: with {@code vision.auth.enabled}
+ * The prime directive of docs/plans/done/U-AUTH-PLAN.md wave 3, proven: with {@code vision.auth.enabled}
  * unset (its default {@code false}), the Spring Security filter chain permits everything, so a
  * secured-looking {@code /api/**} path succeeds with no authentication and {@code /api/auth/me}
  * reports the dev admin with {@code authEnabled=false} — the exact pre-auth behavior.

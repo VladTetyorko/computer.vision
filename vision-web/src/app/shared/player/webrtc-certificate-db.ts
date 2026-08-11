@@ -1,5 +1,5 @@
 /**
- * Minimal IndexedDB glue behind the stable WHEP DTLS certificate (docs/REALTIME-PLAN.md Phase R-b
+ * Minimal IndexedDB glue behind the stable WHEP DTLS certificate (docs/plans/done/REALTIME-PLAN.md Phase R-b
  * item 3). Deliberately thin and undocumented-by-spec (this codebase's own standing precedent for
  * imperative browser-API wiring — see `shared/map/tile-cache-db.ts`'s identical doc comment; jsdom, this
  * project's test environment, has no IndexedDB *or* `RTCPeerConnection.generateCertificate`

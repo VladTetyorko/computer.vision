@@ -14,8 +14,8 @@ import { NotificationBell } from '../notification-bell';
 
 /**
  * `<vision-app-sidebar>` — the persistent left sidebar that replaces the old top header's three mode
- * dropdowns **and** the three hub launcher pages (docs/NAV-IA-REDESIGN-PLAN.md F1/F2/F3/F10,
- * docs/design/00-shell.md). `NAV_MODES` (`features/hubs/nav-entries.ts`) used to feed two parallel
+ * dropdowns **and** the three hub launcher pages (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F1/F2/F3/F10,
+ * docs/extracts/design/00-shell.md). `NAV_MODES` (`features/hubs/nav-entries.ts`) used to feed two parallel
  * renderers; it now feeds exactly one — this component — which is what closes the specific gaps the
  * walkthrough behind NAV-IA-REDESIGN-PLAN found:
  *
@@ -33,7 +33,7 @@ import { NotificationBell } from '../notification-bell';
  *   filtered exactly once, in `modes()` below. The old split — `ManageHub` honoured it, the header
  *   dropdown didn't — cannot recur because there is only one place left that reads `NAV_MODES`.
  *
- * **Group headers are labels, never links** (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 1) — this
+ * **Group headers are labels, never links** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 1) — this
  * component renders no `/operate`/`/monitor`/`/manage` destination at all; those paths still resolve
  * (a concurrent task's own `app.routes.ts` redirect to each mode's `primaryRoute`), they are just no
  * longer reachable *from here*, which is the specific mechanism that makes the hub pages removable
@@ -66,7 +66,7 @@ import { NotificationBell } from '../notification-bell';
  * DOM to adapt it to a new host" technique `features/fly/fly.css`'s `.stage-video vision-player
  * .frame` override already uses) — neither child component's own file is touched.
  *
- * **Interest-point simplification (docs/VISUAL-REFRESH-PLAN.md Wave 1)** — the sidebar's own ranking
+ * **Interest-point simplification (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1)** — the sidebar's own ranking
  * ("where am I" then "one-click switch" then "quiet ambient status") drove three trims: group labels
  * drop their `mode.icon` glyph entirely (it competed with each row's own icon two rows down; the
  * uppercase/tracked/muted label text already reads as a label without one); the Upcoming disclosure's
@@ -77,7 +77,7 @@ import { NotificationBell } from '../notification-bell';
  * only its resting background moved from `--panel-raised` to `--color-info-soft` in `app-sidebar.css`,
  * per F4's own "left bar + soft tint" pairing.
  *
- * **Theme toggle** (docs/VISUAL-REFRESH-PLAN.md F3/Wave 1) — a plain icon `<button>` in the foot's
+ * **Theme toggle** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1) — a plain icon `<button>` in the foot's
  * status row, sized/styled like `notification-bell.ts`'s own trigger (same box, same one-off inline
  * `<svg>` idiom — `shared/ui/icon-registry.ts` is out of this task's file scope, so this follows the
  * pre-existing "a bespoke inline svg is fine for a one-off glyph" precedent that file itself names,
@@ -93,14 +93,14 @@ import { NotificationBell } from '../notification-bell';
  * then auto-collapses the sidebar via `SidebarStore.enterRoute()`. A theme click must never double as
  * a navigation.
  *
- * **Responsive** (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md): ≥1024px docked
+ * **Responsive** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1, docs/extracts/design/00-shell.md): ≥1024px docked
  * (expanded or user-collapsed rail, pure CSS, no JS breakpoint tracking); 640–1024px forced to the
  * rail regardless of `collapsed` (`app-sidebar.css`'s own media query); below 640px the sidebar
  * becomes an off-canvas sheet (`mobileOpen`) behind a hamburger button rendered alongside it, since
- * Wave 1a has no page bar yet for a hamburger to live in (`docs/NAV-IA-REDESIGN-PLAN.md` §3 puts the
+ * Wave 1a has no page bar yet for a hamburger to live in (`docs/plans/done/NAV-IA-REDESIGN-PLAN.md` §3 puts the
  * page bar in Wave 2) — this component owns its own trigger rather than waiting for one.
  *
- * **The mobile sheet joins `GlobalOverlayStore`** (docs/UI-STATE-PLAN.md §1/§2.2) as `'sidebar-mobile'`
+ * **The mobile sheet joins `GlobalOverlayStore`** (docs/plans/done/UI-STATE-PLAN.md §1/§2.2) as `'sidebar-mobile'`
  * — it used to be a plain local `signal(false)`, invisible to the identity menu/notification bell it
  * shares this always-mounted shell with, so opening one could leave a *second* thing open behind it
  * (§1 D1/D3, generalized past just the two `<details>`-turned-overlays the plan's own reproduction
@@ -112,7 +112,7 @@ import { NotificationBell } from '../notification-bell';
  * except this one is swapped out for the scrim while the sheet is open (`app-sidebar.html`'s own
  * `@if`/`@else`), so `GlobalOverlayStore.register`'s own doc comment on re-registration covers exactly
  * this component. The local `(keydown.escape)="closeMobile()"` binding this `<aside>` root used to
- * carry is removed — the store's one document-level listener (docs/UI-STATE-PLAN.md §2.2 rule 3: "one
+ * carry is removed — the store's one document-level listener (docs/plans/done/UI-STATE-PLAN.md §2.2 rule 3: "one
  * listener pair … not one per component") now covers it, and covers strictly more (any focus anywhere
  * on the page, not just inside `.sidebar`).
  */
@@ -126,7 +126,7 @@ import { NotificationBell } from '../notification-bell';
 export class AppSidebar {
   protected readonly sidebar = inject(SidebarStore);
   protected readonly fleet = inject(FleetStore);
-  /** Backs the foot's theme-toggle button (docs/VISUAL-REFRESH-PLAN.md Wave 1) — a shared shell
+  /** Backs the foot's theme-toggle button (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1) — a shared shell
    *  component, not a routed feature page, so `core/ui/architecture.spec.ts`'s "routed page injects
    *  only its facade" guard doesn't scan this file at all (it globs `features/**` only); the
    *  `Settings › Appearance` control (`features/settings/account-settings.ts`) IS a routed page and
@@ -163,7 +163,7 @@ export class AppSidebar {
   /** The <640px off-canvas sheet's own open state — `GlobalOverlayStore`-backed (see class doc), so
    *  it shares exclusivity/Escape/outside-click/close-on-navigation with the identity menu and
    *  notification bell. Still transient, never persisted — same reasoning as before this moved:
-   *  docs/design/00-shell.md's responsive table only persists the docked/rail choice, not "was the
+   *  docs/extracts/design/00-shell.md's responsive table only persists the docked/rail choice, not "was the
    *  phone sheet open". */
   protected readonly mobileOpen = computed(() => this.overlays.isOpen('sidebar-mobile'));
 

@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * Response body for {@code GET/POST /api/geofences}, {@code PUT /api/geofences/{id}}
- * (docs/OPS-CORE-PLAN.md §G's frozen wire contract).
+ * (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract).
  *
  * <p>{@code maxAltitudeMeters} is omitted entirely (rather than serialized {@code null}) when the
  * zone has no altitude ceiling — same convention as every other optional numeric field in this

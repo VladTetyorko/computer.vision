@@ -3,7 +3,7 @@ package com.drones.vision.application.asset;
 import java.time.Instant;
 
 /**
- * One asset's aggregated flight-utilization stats (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A) — the
+ * One asset's aggregated flight-utilization stats (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A) — the
  * read model behind the manager page's KPI tile row: {@code AssetStatsService}'s output, mapped
  * essentially field-for-field onto {@code vision-api}'s {@code AssetStatsResponse}.
  *

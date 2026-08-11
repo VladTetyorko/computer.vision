@@ -46,7 +46,7 @@ import {
 const DEFAULT_ZOOM = 14;
 
 /**
- * The flight-plan map editor (docs/CYCLES-PLAN.md §7, CT-b) — a modal dialog, not embedded inline
+ * The flight-plan map editor (docs/main/CYCLES-PLAN.md §7, CT-b) — a modal dialog, not embedded inline
  * in either host's form, so it can be reused verbatim by two unrelated pages: the Devices page's
  * Add-source Simulate step (file/testDrone modes) and the Map tab's "Add a test drone" empty-state
  * action. Living in `shared/map/` rather than either `features/devices/` or `features/map/` follows
@@ -89,7 +89,7 @@ export class FlightPlanDialog {
   protected readonly settings = inject(SettingsStore);
   protected readonly theme = inject(ThemeStore);
 
-  /** The layer actually rendered (docs/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
+  /** The layer actually rendered (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
    * field's own doc comment for the full "explicit pick always wins" contract. */
   protected readonly activeLayerId = computed<MapLayerId>(() =>
     effectiveMapLayerId(this.theme.theme(), this.settings.mapLayer(), isMapLayerExplicit()),
@@ -125,7 +125,7 @@ export class FlightPlanDialog {
     afterNextRender(() => void this.initMap());
 
     effect(() => this.drawWaypoints(this.waypoints()));
-    // `activeLayerId()` tracks both `settings.mapLayer()` and `theme.theme()` (docs/VISUAL-REFRESH-PLAN.md F7).
+    // `activeLayerId()` tracks both `settings.mapLayer()` and `theme.theme()` (docs/plans/done/VISUAL-REFRESH-PLAN.md F7).
     effect(() => this.applyLayer());
 
     inject(DestroyRef).onDestroy(() => this.teardown());
@@ -210,7 +210,7 @@ export class FlightPlanDialog {
   }
 
   /** A layer-picker click — an explicit pick always wins over the theme default from here on
-   * (docs/VISUAL-REFRESH-PLAN.md F7); see `FleetMap#setLayer`'s identical doc comment. */
+   * (docs/plans/done/VISUAL-REFRESH-PLAN.md F7); see `FleetMap#setLayer`'s identical doc comment. */
   protected setLayer(id: MapLayerId): void {
     markMapLayerExplicit();
     this.settings.mapLayer.set(id);

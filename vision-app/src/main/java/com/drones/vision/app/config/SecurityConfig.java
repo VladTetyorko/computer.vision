@@ -12,14 +12,14 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.context.SecurityContextRepository;
 
 /**
- * Spring Security wiring (docs/U-AUTH-PLAN.md, wave 3), gated entirely by {@code
+ * Spring Security wiring (docs/plans/done/U-AUTH-PLAN.md, wave 3), gated entirely by {@code
  * vision.auth.enabled}. Exactly one {@link SecurityFilterChain} bean is ever active, so Spring
  * Boot's own default (HTTP Basic + a generated password) never applies.
  *
  * <h2>Disabled (default) — {@link #permitAllFilterChain}</h2>
  * Permit-all, CSRF off: <strong>nothing is secured</strong>, so every existing test, every
  * full-context MockMvc smoke test, and the running SPA behave exactly as before auth existed
- * (docs/U-AUTH-PLAN.md's prime directive). CSRF is disabled here too — not just in the secured
+ * (docs/plans/done/U-AUTH-PLAN.md's prime directive). CSRF is disabled here too — not just in the secured
  * chain — because the real running app <em>does</em> route through this filter, and a default-on
  * CSRF filter would 403 the SPA's own {@code POST /api/*} calls that worked fine pre-auth.
  *
@@ -31,7 +31,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * SecuritySessionAuthenticator} saves the context into on login, so a subsequent request resolves
  * the same identity.
  *
- * <p>{@code /ws/**} (docs/RC-CONTROL-PHASE1-PLAN.md §4, R4) is matched alongside {@code /api/**}:
+ * <p>{@code /ws/**} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4, R4) is matched alongside {@code /api/**}:
  * the {@code /ws/manual-control} WebSocket upgrade rides the same session cookie and must be
  * authenticated before the handshake completes, so {@code ManualControlHandshakeInterceptor}
  * (vision-api) never has to reject an identity-less connection itself when this chain is active —

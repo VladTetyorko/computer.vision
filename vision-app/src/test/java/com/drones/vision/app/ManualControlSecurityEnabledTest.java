@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * docs/RC-CONTROL-PHASE1-PLAN.md §4: with {@code vision.auth.enabled=true}, the secured chain's
+ * docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4: with {@code vision.auth.enabled=true}, the secured chain's
  * {@code authenticated()} rule now also covers {@code /ws/**} (added alongside {@code /api/**} —
  * see {@code SecurityConfig#securedFilterChain}), so an unauthenticated handshake attempt at {@code
  * /ws/manual-control} is rejected with {@code 401} before it ever reaches {@code

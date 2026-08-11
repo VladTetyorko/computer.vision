@@ -16,8 +16,8 @@ import java.util.regex.Pattern;
 /**
  * {@link MavlinkTelemetryDecoder}'s accumulated flight-controller-state fields — {@code HEARTBEAT},
  * {@code GPS_RAW_INT}, {@code RC_CHANNELS}/{@code RC_CHANNELS_RAW}, {@code STATUSTEXT} — the subset
- * that materializes into {@link FlightState} (docs/FC-INTEGRATIONS-PLAN.md F-a;
- * docs/LAYERING-REFACTOR-PLAN.md E2 split out of {@code MavlinkTelemetryDecoder}'s original 35-field
+ * that materializes into {@link FlightState} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a;
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md E2 split out of {@code MavlinkTelemetryDecoder}'s original 35-field
  * flat state). See {@code MavlinkTelemetryDecoder}'s own javadoc for the full unit-conversion table.
  *
  * <p>Package-private mutable struct, not a record — see {@link PositionAndPowerState}'s javadoc for

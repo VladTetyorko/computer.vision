@@ -84,7 +84,7 @@ public interface StreamPublisherPort {
     /**
      * Where a viewer can watch the published stream over WebRTC (a <a
      * href="https://www.rfc-editor.org/rfc/rfc9484">WHEP</a> endpoint URL),
-     * sub-second latency vs. {@link #viewUrl}'s HLS (docs/MVP2-PLAN.md §L).
+     * sub-second latency vs. {@link #viewUrl}'s HLS (docs/plans/done/MVP2-PLAN.md §L).
      *
      * <p>Unlike {@link #viewUrl}, a WHEP URL is never proxied through the
      * app: consuming it means POSTing an SDP offer and then exchanging ICE
@@ -105,7 +105,7 @@ public interface StreamPublisherPort {
     /**
      * Where a recorded clip covering {@code [start, start + duration)} of this stream can be
      * played back or downloaded, if this publisher has durable recording configured
-     * (docs/OPS-CORE-PLAN.md §R — recording is delegated to the media server, not this
+     * (docs/plans/done/OPS-CORE-PLAN.md §R — recording is delegated to the media server, not this
      * application).
      *
      * <p>Unlike {@link #viewUrl}, and for the exact same reason {@link #whepUrl} is never proxied:

@@ -1,7 +1,7 @@
 import type { TrainingJobResponse, TrainingJobState } from '../../core/api/models';
 
 /**
- * Pure logic behind `TrainingJobPage` (`/manage/training/jobs/:jobId`, docs/CV-TRAINING-PLAN.md
+ * Pure logic behind `TrainingJobPage` (`/manage/training/jobs/:jobId`, docs/plans/done/CV-TRAINING-PLAN.md
  * Phase 2's last web wave) — the live progress view for one fine-tune run: how far along it is,
  * whether it's still worth polling, and how its raw numbers read as plain language. Split out per
  * this app's own convention of keeping component/facade logic thin and unit-testing the
@@ -77,7 +77,7 @@ export function failureMessage(job: Pick<TrainingJobResponse, 'state' | 'message
 }
 
 /** A fixed 3-decimal reading for `loss`/`map50`, rendered in the mono/telemetry register
- *  (docs/CV-TRAINING-PLAN.md Phase 2's own task brief: "loss/map50 (mono/telemetry style)") —
+ *  (docs/plans/done/CV-TRAINING-PLAN.md Phase 2's own task brief: "loss/map50 (mono/telemetry style)") —
  *  callers gate this behind {@link hasReportedProgress} so a real `0.000` is never confused with
  *  "not reported yet". */
 export function formatMetric(value: number): string {

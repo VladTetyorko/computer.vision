@@ -56,7 +56,7 @@
    from this component's own template — see `live-map.css`'s identical note.
 
    Map overlay chrome is a `--panel-raised` + `--border` + `--shadow` card, never a `--hud-*`/
-   `--scrim*` frosted-dark pill (docs/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
+   `--scrim*` frosted-dark pill (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
    inside `.surface-dark`). This component sits outside the `.recording-card` section that carries
    `.surface-dark` on the replay page (W4's boundary — the clip player is video, this map is a
    themed review tool), so it stays themed like any other map. The arrow's drop-shadow below uses

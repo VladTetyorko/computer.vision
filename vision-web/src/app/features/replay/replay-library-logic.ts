@@ -3,7 +3,7 @@ import { formatDuration } from '../../core/stream-info-logic';
 
 /**
  * Pure, unit-tested logic behind the replay library (`/replay` with no deep-link params —
- * docs/design/10-replay.md's Wave 4 "real" design, closing F8). Mirrors this codebase's own
+ * docs/extracts/design/10-replay.md's Wave 4 "real" design, closing F8). Mirrors this codebase's own
  * "extract testable logic into a pure `*-logic.ts`, keep the facade/component thin" precedent
  * (e.g. `core/activity/activity-logic.ts`'s day-bucketing behind `/activity`).
  */

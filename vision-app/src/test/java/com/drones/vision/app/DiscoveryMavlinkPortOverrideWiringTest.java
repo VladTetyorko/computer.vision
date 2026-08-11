@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Context test for a <em>non-default</em> {@code vision.discovery.mavlink-port}
- * (docs/DRONE-INFRA-PLAN.md I-g wave A) — a cross-consistency proof {@link
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-g wave A) — a cross-consistency proof {@link
  * DiscoveryWiringTest}'s default-value test can't fully make on its own: a bean equal to
  * {@code 14550} could still, in principle, be a coincidental hardcoded literal rather than one
  * genuinely read from the property. Overriding to a value ({@value #OVERRIDDEN_PORT}) nothing in

@@ -2,7 +2,7 @@ package com.drones.vision.domain.model;
 
 /**
  * One physical joystick/gamepad control (an axis or a button) mapped to one RC channel, with a
- * linear calibration (docs/RC-CONTROL-PHASE1-PLAN.md §1). Full per-axis calibration UI is
+ * linear calibration (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1). Full per-axis calibration UI is
  * deferred; this record models what a linear default needs today.
  *
  * <p>{@link #toMicros(double)} applies, in order: clamp the raw input to its source's natural

@@ -12,18 +12,18 @@ const POLL_INTERVAL_MS = 2_000;
 /** How often the CV status dot's recency check ticks, independent of the poll cadence. */
 const CLOCK_TICK_MS = 1_000;
 
-/** Matches `StreamController#detections`'s own default limit (docs/MVP1-PLAN.md §C8) — also the cap on the live-accumulated list below. */
+/** Matches `StreamController#detections`'s own default limit (docs/plans/done/MVP1-PLAN.md §C8) — also the cap on the live-accumulated list below. */
 const DETECTIONS_LIMIT = 50;
 
 /**
  * Tracks one stream's recent detections for the Live page's chip strip + CV status dot
- * (docs/MVP1-PLAN.md §C8 bullet 4): polls `GET /api/streams/{streamId}/detections` every 2s while
- * visible, or — when `assetId` is given and {@link LiveStore} is open (docs/REALTIME-PLAN.md §4,
+ * (docs/plans/done/MVP1-PLAN.md §C8 bullet 4): polls `GET /api/streams/{streamId}/detections` every 2s while
+ * visible, or — when `assetId` is given and {@link LiveStore} is open (docs/plans/done/REALTIME-PLAN.md §4,
  * Phase R-c) — subscribes to that asset's live `detections:<assetId>` topic instead.
  *
  * **`track(streamId, assetId?)`** (`assetId` new in R-c, mirroring `TelemetryStore.track`'s own
  * R-a-established `assetId?` split): the live `detections` topic is asset-scoped, not stream-scoped
- * (docs/REALTIME-PLAN.md §4, item 2 — there is no way to subscribe to "this stream's detections"
+ * (docs/plans/done/REALTIME-PLAN.md §4, item 2 — there is no way to subscribe to "this stream's detections"
  * over SSE, only "this asset's"), so a caller with no asset id in scope (`LivePage`/`WallTile` — a
  * bare `deviceId`/`streamId`, no asset context) always polls by `streamId`, regardless of whether
  * `LiveStore` is otherwise connected — exactly as before this cycle. `FlyPage`/`AssetDetailPage`
@@ -31,7 +31,7 @@ const DETECTIONS_LIMIT = 50;
  *
  * **Latest-frame-only, accumulated client-side**: `LiveStore.detectionsFor` only ever holds the
  * single most recent result (the coalescing registry's own "detections keep only the latest per
- * asset", docs/REALTIME-PLAN.md §4, item 3 — there is no backlog to replay). This store still
+ * asset", docs/plans/done/REALTIME-PLAN.md §4, item 3 — there is no backlog to replay). This store still
  * presents the same shape the poll fallback always has — a short recent-history list, newest first
  * — by prepending every newly-arrived live result onto a running `liveResultsSignal` itself
  * (capped at `DETECTIONS_LIMIT`, same as the poll's own `limit` query param), rather than
@@ -208,7 +208,7 @@ export class DetectionsStore {
     const generation = this.generation;
     void this.pollOnce(streamId, generation);
     // Returns the poll's own promise so `PollScheduler`'s in-flight guard applies — see
-    // `FleetStore`'s identical comment (docs/MVP2-PLAN.md §S, S-b).
+    // `FleetStore`'s identical comment (docs/plans/done/MVP2-PLAN.md §S, S-b).
     this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(streamId, generation));
   }
 

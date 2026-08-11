@@ -13,8 +13,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Wires the tracking engine's deployment layer (docs/TRACKING-PLAN.md &sect;4.F,
- * docs/TRACKING-ORCHESTRATION.md &sect;4.1/&sect;4.3) — the engine roster bean {@code vision-api}
+ * Wires the tracking engine's deployment layer (docs/plans/done/TRACKING-PLAN.md &sect;4.F,
+ * docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1/&sect;4.3) — the engine roster bean {@code vision-api}
  * needs, plus the mapping of {@code vision.tracking.*} onto the stream-start seed. Its own
  * {@code @Configuration} class rather than more methods on {@link CvWiring}, for the same
  * split-by-concern reason {@code PersistenceWiringConfiguration}/{@code
@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
  * exposes only one bean — a deployment default belongs where the streams are started, not at the
  * REST edge.
  *
- * <p>There is no {@code vision.tracking.enabled} flag, deliberately (docs/TRACKING-PLAN.md
+ * <p>There is no {@code vision.tracking.enabled} flag, deliberately (docs/plans/done/TRACKING-PLAN.md
  * &sect;5.G): {@code vision.cv.enabled} already kills CV wholesale, and {@code TrackingMode.OFF} is
  * a per-stream off-switch that is strictly better than a JVM-wide one.
  */
@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
 public class TrackingWiring {
 
     /**
-     * The tracking seed new streams are started on (docs/TRACKING-ORCHESTRATION.md &sect;4.1) — what
+     * The tracking seed new streams are started on (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1) — what
      * a start request's own {@code tracking} object folds onto, and what a start request that says
      * nothing gets outright.
      *
@@ -49,7 +49,7 @@ public class TrackingWiring {
      * the wire's {@code <=0} sentinels resolve to inside cv-service — one number, one owner, rather
      * than this method restating a default it does not own. {@code engineId} is left {@code null} for
      * the same reason: the engine is cv-service's registry's choice, the only component that knows
-     * which engines actually constructed on this box (docs/TRACKING-PLAN.md R11).
+     * which engines actually constructed on this box (docs/plans/done/TRACKING-PLAN.md R11).
      *
      * <p><b>Not a bean, and not injected into a controller.</b> The seed is folded by {@code
      * DefaultStreamService#start} — the one point every start path (device, asset, simulation, demo
@@ -74,16 +74,16 @@ public class TrackingWiring {
 
     /**
      * The tracker-engine roster {@code CvTrackersController} (component-scanned from {@code
-     * vision-api}) serves at {@code GET /api/cv/trackers} (docs/TRACKING-PLAN.md &sect;4.F's frozen
+     * vision-api}) serves at {@code GET /api/cv/trackers} (docs/plans/done/TRACKING-PLAN.md &sect;4.F's frozen
      * wire contract) — the Tracking section's engine picker.
      *
      * <p>Deliberately a static, in-source constant, exactly like {@code CvWiring#cvModelRoster}: the
-     * roster changes at deploy time, not runtime (docs/CV-CONTROL-PLAN.md &sect;D's frozen decision,
+     * roster changes at deploy time, not runtime (docs/plans/done/CV-CONTROL-PLAN.md &sect;D's frozen decision,
      * mirrored here). The three entries are the engines cv-service actually ships
-     * (docs/TRACKING-PLAN.md &sect;5.B), with their <b>measured</b> per-frame costs — {@code
+     * (docs/plans/done/TRACKING-PLAN.md &sect;5.B), with their <b>measured</b> per-frame costs — {@code
      * bytetrack} associates (Mode A), {@code lk}/{@code ncc} follow (Mode B), which is why {@code
      * modes} is a list and not a single value: cv-service has two engine protocols, and the picker
-     * must never offer an associator for a follow (docs/TRACKING-ORCHESTRATION.md &sect;2.2).
+     * must never offer an associator for a follow (docs/extracts/TRACKING-ORCHESTRATION.md &sect;2.2).
      *
      * <p>A roster entry is a claim about what this deployment ships, not a promise that the engine
      * constructed on this box; {@code tracker_engine_id} on every response is the ground truth the

@@ -4,7 +4,7 @@ import { DEFAULT_WIND_LIMIT_MPS, windAdvisory } from '../../core/weather/weather
 import { formatDuration } from '../../core/stream-info-logic';
 
 /**
- * The weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) — reused by Command's header and Fly's OSD,
+ * The weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W) — reused by Command's header and Fly's OSD,
  * the same "second consumer → a shared, dumb, DI-sharing component" precedent `TelemetryOsd`/
  * `shared/player/detections-strip.ts` already established: this component takes **no data inputs**
  * beyond the optional wind limit — it injects whichever `WeatherStore` instance its host page
@@ -13,13 +13,13 @@ import { formatDuration } from '../../core/stream-info-logic';
  * `store.reading()` is `undefined` — "offline/failed → chip hidden entirely, never a stale fake".
  *
  * **Not the same chip as `features/fly/fly-osd.ts`'s existing "Wind" chip** — that one is the
- * drone's own onboard MAVLink `WIND` reading (docs/FC-INTEGRATIONS-PLAN.md F-e,
+ * drone's own onboard MAVLink `WIND` reading (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e,
  * `TelemetrySample.extra['windSpeedMps']`), a live *in-flight* instrument value with no severity
  * tier. This chip is a pre-flight/ambient **forecast** advisory from Open-Meteo, independent of
  * whether anything is even flying yet — the two intentionally coexist without colliding: this one
  * always reads "GO"/"CAUTION"/"NO-GO", the telemetry one never does.
  *
- * Advisory only, never blocking anything (docs/OPS-CORE-PLAN.md §W) — the `title` tooltip always
+ * Advisory only, never blocking anything (docs/plans/done/OPS-CORE-PLAN.md §W) — the `title` tooltip always
  * names the data source and the reading's own age, so a manager/pilot can judge for themselves how
  * much to trust a chip that hasn't refreshed in a while, rather than the chip silently going stale
  * with no indication.

@@ -8,7 +8,7 @@ import java.time.Instant;
 
 /**
  * {@link AssetImage} &harr; {@link AssetImageEntity} mapping, extracted from {@code
- * JpaAssetImageRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaAssetImageRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class AssetImageMapper {
 

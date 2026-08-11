@@ -29,7 +29,7 @@ import {
 } from './mark-logic';
 
 /**
- * Safety-net only (docs/MAP-REWORK-PLAN.md §4.3: the live channel is the primary path) — the `map`
+ * Safety-net only (docs/plans/done/MAP-REWORK-PLAN.md §4.3: the live channel is the primary path) — the `map`
  * topic is always-on and this store folds every mark delta in as it arrives, so this poll only
  * reconciles a connection that was briefly down/degraded, mirroring `GeofenceStore`'s own 30s
  * cadence for the identical reason.
@@ -38,7 +38,7 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
 
 /**
  * `MarksStore` — the app's one shared source of truth for the marks half of the Common Operational
- * Picture (docs/MAP-REWORK-PLAN.md §5.2). **Moved here from `core/marks/` and reworked to v2**: the
+ * Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2). **Moved here from `core/marks/` and reworked to v2**: the
  * old store's `pendingKind` two-step is now a full {@link MarkPalette} (kind × affiliation × layer),
  * the old `marks` SSE topic is the scoped `map` topic, and verification/promotion are new.
  * `providedIn: 'root'` and started at boot, exactly as before: marks back the Fly cockpit's map
@@ -92,7 +92,7 @@ export class MarksStore {
   readonly selectedMarkId = this.selectedMarkIdSignal.asReadonly();
   readonly selected = computed(() => this.marksSignal().find((mark) => mark.markId === this.selectedMarkIdSignal()));
 
-  // --- The palette (docs/MAP-REWORK-PLAN.md §5.2) ------------------------------------------------
+  // --- The palette (docs/plans/done/MAP-REWORK-PLAN.md §5.2) ------------------------------------------------
   private readonly paletteSignal = signal<MarkPalette>(DEFAULT_MARK_PALETTE);
   /** What the next mark will be: kind × affiliation × layer. Always present — arming is a separate flag. */
   readonly palette = this.paletteSignal.asReadonly();

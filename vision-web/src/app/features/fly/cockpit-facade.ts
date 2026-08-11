@@ -38,9 +38,9 @@ import type { AssetDetails, AssetSummary, DetectionEvent, FlightCapability } fro
 /** Asset characteristics/usages + the header switcher's own asset list are re-read at this cadence. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
-/** Panel-state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — the map inset toggle predates
- * `PanelState`/`UiStore` and stays exactly as it was (docs/UI-REDESIGN-PLAN.md D-D: the map inset is
- * a glanceable, separately-persisted toggle, not a tool-rail drawer, and per docs/UI-ARCHITECTURE-PLAN.md
+/** Panel-state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — the map inset toggle predates
+ * `PanelState`/`UiStore` and stays exactly as it was (docs/plans/done/UI-REDESIGN-PLAN.md D-D: the map inset is
+ * a glanceable, separately-persisted toggle, not a tool-rail drawer, and per docs/plans/done/UI-ARCHITECTURE-PLAN.md
  * a non-mutually-exclusive toggle like this one lives in the feature facade, not `UiStore`). See
  * `core/panel-state.ts`'s own doc comment for why this isn't routed through `SettingsStore`. */
 const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
@@ -53,10 +53,10 @@ const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
 const LOG_PREFIX = '[cockpit]';
 
 /**
- * `CockpitPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/fly/:assetId`, the operator cockpit
- * (docs/MVP3-PLAN.md §C-b, the "one job, one page" persona: *flies ONE drone at a time; everything
+ * `CockpitPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/fly/:assetId`, the operator cockpit
+ * (docs/plans/done/MVP3-PLAN.md §C-b, the "one job, one page" persona: *flies ONE drone at a time; everything
  * else is noise*). Split out of the old combined `FlyFacade` when the cockpit gained its own
- * addressable route (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12) — `drone-picker-facade.ts` is the
+ * addressable route (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12) — `drone-picker-facade.ts` is the
  * picker's own half; **almost everything below is that same class, unchanged**, just no longer
  * sharing a component with the picker. See that file's own doc comment for what stayed picker-side.
  *
@@ -65,7 +65,7 @@ const LOG_PREFIX = '[cockpit]';
  *     called from `CockpitPage`'s constructor `effect()`) instead of the picker's internal
  *     resolve-once-then-flip-a-signal dance — there is no more "no asset selected" state for this
  *     page to represent; every mount of this component already has a concrete id to load.
- *   - **`loadError`** is new — the honest empty state docs/NAV-IA-REDESIGN-PLAN.md F12 requires for
+ *   - **`loadError`** is new — the honest empty state docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12 requires for
  *     a `:assetId` that doesn't resolve (a bad bookmark, a since-deleted asset): `CockpitPage`'s own
  *     template renders `<vision-empty>` instead of the cockpit while this is `true`, rather than the
  *     old behavior of silently kicking the operator back to the picker (impossible now anyway — the
@@ -92,7 +92,7 @@ const LOG_PREFIX = '[cockpit]';
  * FC-derived `preflightItems`/`diagnosticsRows`/`canBringHome`/`canShowCommands`, the weather chip's
  * `windLimitMps`, the ticker, Start/Stop, the telemetry/detections re-entry guards — is byte-for-byte
  * what `FlyFacade` already had: same HTTP calls, same toasts, same silent-degrade paths, same poll
- * cadence, same O(N)-amplification guards (docs/REALTIME-PLAN.md Phase R-a item 2), just relocated.
+ * cadence, same O(N)-amplification guards (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2), just relocated.
  */
 @Injectable()
 export class CockpitFacade {
@@ -106,7 +106,7 @@ export class CockpitFacade {
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
   /**
-   * The three halves of the Common Operational Picture (docs/MAP-REWORK-PLAN.md §5.2) — exposed as
+   * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
    * `<vision-tactical-map>`'s `[marks]`/`[layers]`/`[drawings]`/`[selectedMarkId]`/`(markSelected)`/
    * `(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and
@@ -132,7 +132,7 @@ export class CockpitFacade {
   readonly switcherAssets = signal<readonly AssetSummary[] | undefined>(undefined);
   readonly orderedSwitcherAssets = computed(() => sortAssetsForPicker(this.switcherAssets() ?? []));
 
-  /** The header switcher's own sentinel `<option>` value (docs/UX-REWORK-PLAN.md §U-a bullet 4). */
+  /** The header switcher's own sentinel `<option>` value (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4). */
   readonly ALL_DRONES_OPTION = ALL_DRONES_OPTION_VALUE;
 
   readonly activeAssetId = signal<string | undefined>(undefined);
@@ -140,7 +140,7 @@ export class CockpitFacade {
   /** See this class's own doc comment — the honest-empty-state signal `:assetId` degrading needs. */
   readonly loadError = signal(false);
 
-  // --- Telemetry/detections re-entry guards (docs/REALTIME-PLAN.md Phase R-a item 2) ---------
+  // --- Telemetry/detections re-entry guards (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2) ---------
   // The last deviceId/streamId the corresponding constructor effect actually acted on — compared
   // by value (mirrors `core/map/map-store.ts#reconcileTrackers`), not by the enclosing `asset()`/
   // `stream()` object's own identity, which changes every ~5s poll tick regardless.
@@ -160,7 +160,7 @@ export class CockpitFacade {
   });
   /**
    * Secondary video-device tiles (`cockpit.html`'s `@for (device of secondaryDevices(); track
-   * device.id)`). **Verified against docs/REALTIME-PLAN.md Phase R-a item 4**: this computed
+   * device.id)`). **Verified against docs/plans/done/REALTIME-PLAN.md Phase R-a item 4**: this computed
    * returns a brand-new array (and, on every ~5s `refreshPoll`, brand-new `Device` objects too)
    * regardless of whether anything actually changed, but `@for`'s own `track device.id` already
    * keeps the same `<vision-player>` component instance alive across that — Angular reuses/moves
@@ -182,7 +182,7 @@ export class CockpitFacade {
   });
   readonly live = computed(() => this.stream() !== undefined);
 
-  // --- Deliberately-stopped state (docs/MVP2-PLAN.md §S, S-b) — identical pair/rule to
+  // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) — identical pair/rule to
   // `LivePage`/`AssetDetailPage`; reset whenever the primary device changes since that's
   // effectively a fresh device to watch.
   private readonly explicitlyStopped = signal(false);
@@ -196,7 +196,7 @@ export class CockpitFacade {
   readonly telemetryDevicesList = computed(() => telemetryDevices(this.asset()?.devices ?? []));
   readonly hasTelemetryDevice = computed(() => this.telemetryDevicesList().length > 0);
 
-  // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md
+  // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md
   // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
   // already reads, no second telemetry source.
   readonly failsafeBanner = computed(() => flightBanner(this.telemetry.latest()));
@@ -234,12 +234,12 @@ export class CockpitFacade {
    */
   readonly preflightCollapsed = linkedSignal(() => this.live());
 
-  /** docs/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
+  /** docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
    * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */
   readonly diagnosticsRows = computed(() => deriveDiagnostics(this.telemetry.latest()?.extra));
 
   /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 1 — gates `<vision-return-home-button>` (`cockpit.html`'s
+   * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 — gates `<vision-return-home-button>` (`cockpit.html`'s
    * `.hud-header`). Same "re-derive whenever the tracked sample changes, not a continuously-ticking
    * clock" convention as `preflightItems` above: `telemetry.latest()` itself already re-emits
    * roughly every poll/live-update tick while the vehicle is transmitting, so this tracks freshness
@@ -251,7 +251,7 @@ export class CockpitFacade {
   });
 
   /**
-   * docs/DRONE-INFRA-PLAN.md I-e Stage 2 — the vehicle's own capability matrix, fetched once per
+   * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — the vehicle's own capability matrix, fetched once per
    * asset selection and re-fetched the first time this vehicle's firmware becomes known (see the
    * capabilities-tracking effect below for why). `undefined` while in flight or on any failure —
    * `<vision-flight-command-panel>` renders nothing at all in that case, the plan's own "degrade to
@@ -267,7 +267,7 @@ export class CockpitFacade {
     return canShowCommandPanel(this.capabilities(), sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
   });
 
-  // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) --------------------------------------
+  // --- Weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W) --------------------------------------
   /** The live telemetry fix when one exists, else the asset's own last-known position — "best position we have right now". */
   private readonly weatherPosition = computed(() => {
     const latest = this.telemetry.latest();
@@ -280,17 +280,17 @@ export class CockpitFacade {
   readonly windLimitMps = computed(() => parseWindLimitMps(this.asset()?.attributes));
 
   /**
-   * The selected mark's "from drone" bearing/distance readout (docs/TACTICAL-MARKS-PLAN.md §3)
+   * The selected mark's "from drone" bearing/distance readout (docs/plans/done/TACTICAL-MARKS-PLAN.md §3)
    * reuses `weatherPosition` verbatim rather than re-deriving "best position we have right now" a
    * second time — same live-fix-else-last-known fallback, same honest degrade to `undefined` (the
    * readout shows "—") when neither exists. No "from home" counterpart: surveyed, no home/launch
-   * position is modeled anywhere in this app's telemetry/asset data (docs/TACTICAL-MARKS-PLAN.md
+   * position is modeled anywhere in this app's telemetry/asset data (docs/plans/done/TACTICAL-MARKS-PLAN.md
    * Open Q3's own documented default — "show from-drone always; from-home only when a home position
    * exists" — so `<vision-marks-panel>` renders drone-only and says so, never a fabricated distance).
    */
   readonly dronePosition = this.weatherPosition;
 
-  // --- Map inset (docs/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
+  // --- Map inset (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
   // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own
   // `TelemetryStore` through DI. The new component is dumb — every overlay is an input — so the
   // cockpit's single followed drone is built here from the exact same trail/latest signals, via the
@@ -321,7 +321,7 @@ export class CockpitFacade {
    * own `boxesMode` input default matches for the same reason). */
   readonly boxesMode = signal<BoxesMode>('burned');
 
-  /** Persisted, non-mutually-exclusive toggle (docs/UI-ARCHITECTURE-PLAN.md) — see this class's own
+  /** Persisted, non-mutually-exclusive toggle (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — see this class's own
    * doc comment above `MAP_VISIBLE_KEY`. */
   readonly mapVisible = signal(readPersistedFlag(MAP_VISIBLE_KEY, true));
 
@@ -329,7 +329,7 @@ export class CockpitFacade {
 
   readonly latestFinishedUsageEntry = computed(() => latestFinishedUsage(this.asset()?.recentUsages ?? []));
 
-  // --- Events ticker overlay (docs/MVP3-PLAN.md §C-b: "this stream's events via events-store,
+  // --- Events ticker overlay (docs/plans/done/MVP3-PLAN.md §C-b: "this stream's events via events-store,
   // newest, auto-fading") — filters the shared global feed by this asset's id, same derivation
   // `AssetDetailPage`'s own offline-branch already uses (`filterEvents(events.events(), {assetId})`);
   // "auto-fading" is a pure CSS animation per row (`cockpit.css`), not a JS timer.
@@ -342,13 +342,13 @@ export class CockpitFacade {
   });
 
   constructor() {
-    // Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7) — persists whenever the map toggle
+    // Panel state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — persists whenever the map toggle
     // actually changes (the `M` shortcut, or `CockpitPage#collapseOverlays`'s `Esc` handling); the
     // initial `signal()` value above already restored whatever was last saved.
     effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
 
     // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherStore.track`
-    // itself no-ops instantly unless the 10-minute cache is actually stale (docs/OPS-CORE-PLAN.md §W).
+    // itself no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
 
     // Latches once `live()` is ever observed true for the current primary device — see `stopped`'s
@@ -359,7 +359,7 @@ export class CockpitFacade {
       }
     });
 
-    // Logs exactly what `<vision-player>` is being fed (docs/MVP3-PLAN.md follow-up: makes an
+    // Logs exactly what `<vision-player>` is being fed (docs/plans/done/MVP3-PLAN.md follow-up: makes an
     // "empty box, no error" report diagnosable from the console alone) — every time the primary
     // device's stream entry changes, not just once, since the whole point is to catch a stream
     // that flips between present/absent as `FleetStore`'s own poll lands.
@@ -384,12 +384,12 @@ export class CockpitFacade {
     // `AssetDetailPage`'s identical effect) — start tracking as soon as the asset has *any*
     // TELEMETRY-capable device, regardless of which VIDEO device is currently primary.
     //
-    // **Guarded on the derived deviceId primitive** (docs/REALTIME-PLAN.md Phase R-a item 2):
+    // **Guarded on the derived deviceId primitive** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2):
     // `this.asset()` is a fresh `AssetDetails` object every ~5s poll tick (`refreshPoll`) even when
     // nothing about the tracked device actually changed, so this effect re-runs on that cadence
     // regardless. Without this guard, re-entering `telemetry.track()` with the *same* deviceId every
     // ~5s re-ran `findOpenUsageId` from scratch each time — the diagnosed O(N) burst (`GET
-    // /api/assets` + `GET /api/assets/{id}` per fleet asset, docs/REALTIME-PLAN.md §0). Mirrors
+    // /api/assets` + `GET /api/assets/{id}` per fleet asset, docs/plans/done/REALTIME-PLAN.md §0). Mirrors
     // `core/map/map-store.ts#reconcileTrackers`' own reconcile-by-id idiom: compare the id *value*, not
     // object identity, and no-op the store call when it hasn't changed.
     effect(() => {
@@ -400,7 +400,7 @@ export class CockpitFacade {
       }
       this.lastTelemetryDeviceId = deviceId;
       if (deviceId) {
-        // Already has the owning asset id (docs/REALTIME-PLAN.md Phase R-a item 3) — skips
+        // Already has the owning asset id (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3) — skips
         // `TelemetryStore`'s own O(N) fleet-listing fallback.
         this.telemetry.track(deviceId, this.activeAssetId());
       } else {
@@ -411,7 +411,7 @@ export class CockpitFacade {
     // Detections only make sense while the primary device's stream is actually running.
     // Guarded on the derived streamId primitive for the identical reason as telemetry above — a
     // stream object re-arriving unchanged every ~5s poll tick must not re-enter `track()` (which
-    // clears results immediately, a visible flicker, docs/REALTIME-PLAN.md §0).
+    // clears results immediately, a visible flicker, docs/plans/done/REALTIME-PLAN.md §0).
     effect(() => {
       const streamId = this.stream()?.streamId;
       if (!trackingIdChanged(streamId, this.lastDetectionsStreamId)) {
@@ -419,7 +419,7 @@ export class CockpitFacade {
       }
       this.lastDetectionsStreamId = streamId;
       if (streamId) {
-        // Already has the owning asset id (docs/REALTIME-PLAN.md §4, Phase R-c) — lets
+        // Already has the owning asset id (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — lets
         // `DetectionsStore` subscribe to live `detections:<assetId>` instead of only polling.
         this.detections.track(streamId, this.activeAssetId());
       } else {
@@ -427,7 +427,7 @@ export class CockpitFacade {
       }
     });
 
-    // docs/DRONE-INFRA-PLAN.md I-e Stage 2 — flight-command panel capabilities. Fetched once per
+    // docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — flight-command panel capabilities. Fetched once per
     // asset selection, and again the first time this vehicle's own firmware becomes known (an
     // unheard vehicle reports `commandable=false` until its first heartbeat arrives, per the plan's
     // own capability matrix — a fresh fetch once firmware resolves is what flips a just-connected
@@ -438,7 +438,7 @@ export class CockpitFacade {
     // object most poll ticks (signals compare with `Object.is`), so without the firmware half of the
     // key this effect would re-fetch every ~poll tick with an unchanged firmware value — the exact
     // O(N)-re-entry class of bug `trackingIdChanged`'s other call sites in this file already guard
-    // against (docs/REALTIME-PLAN.md Phase R-a item 2).
+    // against (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2).
     effect(() => {
       const assetId = this.activeAssetId();
       const firmware = this.telemetry.latest()?.flightState?.firmware;
@@ -454,7 +454,7 @@ export class CockpitFacade {
       }
     });
 
-    // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — one more of the handful of
+    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — one more of the handful of
     // pages that keeps the shared global events poll alive while mounted.
     this.events.activate();
 
@@ -512,7 +512,7 @@ export class CockpitFacade {
       this.asset.set(details);
     } catch (error) {
       if (this.asset() === undefined) {
-        // The very first load for this pick failed — a genuine dead end (docs/NAV-IA-REDESIGN-PLAN.md
+        // The very first load for this pick failed — a genuine dead end (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
         // F12's own "must degrade to an honest empty state" requirement), not a background hiccup on
         // top of an already-working cockpit (that case silently keeps the stale data instead, below).
         console.warn(`${LOG_PREFIX} could not load asset ${assetId}`, { error });
@@ -542,24 +542,24 @@ export class CockpitFacade {
   /**
    * `cockpit.html`'s header switcher binds this per-`<option>` (`[selected]`) rather than `[value]`
    * on the `<select>` itself — see `fly-logic.ts#isSwitcherOptionSelected`'s doc comment for the
-   * `<select>`/`@for` ordering race this sidesteps (docs/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2).
+   * `<select>`/`@for` ordering race this sidesteps (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1, BROKEN #2).
    */
   switcherOptionSelected(candidateAssetId: string): boolean {
     return candidateAssetId === this.activeAssetId();
   }
 
   /**
-   * The header switcher's single `(change)` handler (docs/UX-REWORK-PLAN.md §U-a bullet 4: fold
+   * The header switcher's single `(change)` handler (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4: fold
    * the old standalone "All drones" button into this one control) — the sentinel option navigates
    * to the picker (`/fly`), any other value is a real asset id and navigates straight to its own
-   * cockpit route. A real route change either way (docs/NAV-IA-REDESIGN-PLAN.md F12) — unlike the
+   * cockpit route. A real route change either way (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12) — unlike the
    * pre-split page's internal signal flip, both picks are now addressable/Back-able on their own.
    *
    * **"All drones…" also forgets the remembered drone** — not just navigate. Without this,
    * `fly-redirect-guard.ts` would immediately bounce a plain `/fly` right back into *this exact*
    * cockpit whenever the current drone is still streaming (its own "skip the picker when it has
    * nothing to ask" job, working as designed) — making the picker practically unreachable from
-   * here for as long as the drone keeps flying, breaking docs/design/01-fly.md's own explicit
+   * here for as long as the drone keeps flying, breaking docs/extracts/design/01-fly.md's own explicit
    * promise that "the cockpit needs a way back to it". Choosing "All drones…" is itself an explicit
    * signal that this visit is *not* "nothing to ask" — clearing `flyAssetId` is what makes the
    * guard agree. Picking a drone again (from the picker, or this same switcher) re-establishes the
@@ -597,12 +597,12 @@ export class CockpitFacade {
   }
 
   /**
-   * Click-to-follow (docs/TRACKING-PLAN.md §4.D, wave T7) — `<vision-player>`'s own
+   * Click-to-follow (docs/plans/done/TRACKING-PLAN.md §4.D, wave T7) — `<vision-player>`'s own
    * `(trackFollowed)`, the operator clicking a tracked box in the video. A single PATCH, always
    * `mode:'FOLLOW'` + the lock together (`cv-control-panel-logic.ts#buildFollowLockPatch`'s own doc
    * comment); no toast, no optimistic UI update here — the "Following #N" chip's own confirmation
    * comes from `cv-control-panel.ts`'s independent tracks poll, never from this call's return value
-   * (docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule — a lock is a request until the wire says
+   * (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule — a lock is a request until the wire says
    * otherwise). A no-op with nothing running has no stream to patch.
    */
   followTrack(trackId: number): void {
@@ -652,7 +652,7 @@ export class CockpitFacade {
     return `${capitalizeLabel(event.label)} · ${formatConfidence(event.peakConfidence)}`;
   }
 
-  // --- Map inset / boxes-mode toggles (docs/UI-ARCHITECTURE-PLAN.md — persisted, non-exclusive,
+  // --- Map inset / boxes-mode toggles (docs/plans/done/UI-ARCHITECTURE-PLAN.md — persisted, non-exclusive,
   // so plain facade commands rather than `UiStore`) -------------------------------------------
 
   toggleMapVisible(): void {
@@ -672,7 +672,7 @@ export class CockpitFacade {
     this.watchSignal.set(watch);
   }
 
-  // --- Drawings (docs/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------
+  // --- Drawings (docs/plans/done/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------
 
   /** `<vision-tactical-map>`'s `(drawingCompleted)` — the map only ever emits a shape that already passes `Drawing`'s own minimum-point rule, so this is a straight `POST`. */
   async completeDrawing(draft: DrawingDraft): Promise<void> {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { NAV_MODES, navModeById } from './nav-entries';
 
 describe('NAV_MODES', () => {
-  it('has exactly the three frozen modes, in order, each with its own primaryRoute (docs/design/19-hubs.md — where the retired /operate|/monitor|/manage hub paths now redirect)', () => {
+  it('has exactly the three frozen modes, in order, each with its own primaryRoute (docs/extracts/design/19-hubs.md — where the retired /operate|/monitor|/manage hub paths now redirect)', () => {
     expect(NAV_MODES.map((mode) => mode.id)).toEqual(['operate', 'monitor', 'manage']);
     expect(NAV_MODES.map((mode) => mode.primaryRoute)).toEqual(['/fly', '/command', '/assets']);
   });
@@ -44,7 +44,7 @@ describe('NAV_MODES', () => {
   });
 
   /**
-   * docs/UX-SIMPLIFY-REVIEW.md F1's own standing regression guard: before this task `/command` was
+   * docs/conclusions/UX-SIMPLIFY-REVIEW.md F1's own standing regression guard: before this task `/command` was
    * linked 3×, `/wall` 2×, `/fly` 2× across Operate/Monitor — this asserts every destination now has
    * exactly one canonical `NavEntry`, app-wide, forever (not just for the three routes the finding
    * happened to name).

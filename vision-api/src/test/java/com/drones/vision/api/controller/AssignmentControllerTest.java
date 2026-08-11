@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Standalone MockMvc tests for {@link AssignmentController} (docs/U-SCOPE-PLAN.md, U-e slice 2,
+ * Standalone MockMvc tests for {@link AssignmentController} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2,
  * feature 2), seams mocked, with {@link ApiExceptionHandler} registered so the {@code 403}/{@code
  * 404} mappings are exercised. {@link CurrentUser} is built from a plain {@link Ownership}, so its
  * {@code scope()} is unbounded — the assertions here focus on wiring/status, not scope filtering

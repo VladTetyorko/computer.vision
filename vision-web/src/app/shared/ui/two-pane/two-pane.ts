@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input, output } from '@angular/core
 import { IconButton } from '../icon-button';
 
 /**
- * `vision-two-pane` — the list-plus-detail shell behind Wave 3 of docs/NAV-IA-REDESIGN-PLAN.md
+ * `vision-two-pane` — the list-plus-detail shell behind Wave 3 of docs/plans/done/NAV-IA-REDESIGN-PLAN.md
  * (§2.4), generalizing the split `features/command/**` already proves works (asset list beside the
  * live map) so `/assets`, `/devices`, `/monitor/alerts`, `/activity` and `/manage/roster` stop
  * answering "tell me about this row" by navigating away from the list (F6).

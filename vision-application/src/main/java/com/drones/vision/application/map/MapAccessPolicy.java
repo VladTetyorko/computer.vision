@@ -12,7 +12,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Resolves effective access to a {@link MapLayer} for one viewer (docs/MAP-REWORK-PLAN.md §3) —
+ * Resolves effective access to a {@link MapLayer} for one viewer (docs/plans/done/MAP-REWORK-PLAN.md §3) —
  * the map's authorization model. Pure: no ports, no mutable state, safe to share as a singleton.
  *
  * <h2>Why identity, not {@code VisibilityScope}</h2>
@@ -26,12 +26,12 @@ import java.util.Set;
  * every {@link LayerKind#TEAM} layer (and therefore every mark/drawing on one) structurally
  * unreachable for a PILOT — including their own team's layer — exactly the bug the original
  * {@code DefaultMarkService#list()} shipped with and was later revised away from (see this module's
- * MODULE.md, "Design history worth keeping", and docs/MAP-REWORK-PLAN.md §1's own "Known trap"
+ * MODULE.md, "Design history worth keeping", and docs/plans/done/MAP-REWORK-PLAN.md §1's own "Known trap"
  * note). A map viewer's visibility is a property of which groups they actually belong to, not of
  * which asset-management tier their role falls into, so this policy takes plain group membership
  * (plus role, for the COP/organization-wide rules) as its input instead.
  *
- * <h2>Rule table (docs/MAP-REWORK-PLAN.md §3, frozen)</h2>
+ * <h2>Rule table (docs/plans/done/MAP-REWORK-PLAN.md §3, frozen)</h2>
  * Effective access to a layer is the <b>max</b> (by {@link AccessLevel}'s own least&rarr;most
  * permissive ordinal ordering) across every rule that applies:
  * <ol>

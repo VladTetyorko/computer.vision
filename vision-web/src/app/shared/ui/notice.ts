@@ -3,7 +3,7 @@ import { Icon } from './icon';
 import type { IconName } from './icon-registry';
 
 /**
- * `vision-notice` — the shared attention-banner (docs/STYLE-TOKENS-PLAN.md §Shared primitives),
+ * `vision-notice` — the shared attention-banner (docs/plans/done/STYLE-TOKENS-PLAN.md §Shared primitives),
  * replacing the ~13 hand-written amber/red "light text on a matching dark line" banners that were
  * copy-pasted across `app.css`, `wall.css`, `command.css`, `fly.css`, `live.css`, `onboarding.css`,
  * `toast-host.ts`, `player.ts` and others.

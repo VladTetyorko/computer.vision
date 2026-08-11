@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.AssetId;
 
 /**
- * One asset a pilot is assigned to, on the wire (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2) —
+ * One asset a pilot is assigned to, on the wire (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2) —
  * the element type of {@code GET /api/me/assignments}.
  *
  * <p>Deliberately just the id: the pilot's Fly picker / fleet list already fetches the full asset

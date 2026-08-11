@@ -7,11 +7,11 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link Dataset}s (docs/CV-TRAINING-PLAN.md §1).
+ * Driven port: persist and retrieve {@link Dataset}s (docs/plans/done/CV-TRAINING-PLAN.md §1).
  *
  * <p>A dataset carries {@code ownership}, but this port has no ownership- or group-aware query:
  * {@link #findAll()} always returns every dataset, and group-scoped visibility over that snapshot
- * is the application layer's job (docs/CV-TRAINING-PLAN.md §2), the same "no scope filtering baked
+ * is the application layer's job (docs/plans/done/CV-TRAINING-PLAN.md §2), the same "no scope filtering baked
  * into the repository" convention every other port in this module follows (see {@link
  * MarkRepositoryPort}).
  *

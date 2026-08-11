@@ -1,6 +1,6 @@
 """Tracking configuration: the one place a wire sentinel becomes a number.
 
-`docs/TRACKING-ORCHESTRATION.md` §2.1 (charter), §4.1-§4.3 (the layering and
+`docs/extracts/TRACKING-ORCHESTRATION.md` §2.1 (charter), §4.1-§4.3 (the layering and
 the resolve-once rule).
 
 Configuration is a **layer**, not a field on the thing being configured, and

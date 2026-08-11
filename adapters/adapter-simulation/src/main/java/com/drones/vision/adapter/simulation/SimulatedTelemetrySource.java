@@ -24,7 +24,7 @@ import java.util.concurrent.Flow;
  * circular GPS track with battery drain in-process, so usage history, start
  * position, and a telemetry trail are demoable with zero hardware (per the
  * asset model plan's demo goal) — or, given a configurable flight plan
- * (docs/CYCLES-PLAN.md §7, CT-a), flies a piecewise-linear route with
+ * (docs/main/CYCLES-PLAN.md §7, CT-a), flies a piecewise-linear route with
  * checkpoints instead.
  *
  * <p>Supports devices that both expose {@link Capability#TELEMETRY} and use
@@ -71,7 +71,7 @@ import java.util.concurrent.Flow;
  * <p>Plain class with no framework dependency — instantiated directly by
  * {@code vision-app}'s wiring configuration.
  *
- * <p>Every sample also carries a synthetic {@link FlightState} (docs/FC-INTEGRATIONS-PLAN.md F-c),
+ * <p>Every sample also carries a synthetic {@link FlightState} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-c),
  * computed by {@link SyntheticFlightState} — see that class for the startup ramp / nominal cruise /
  * battery-driven RTL-Land details and its own deterministic-per-device-id guarantee.
  */

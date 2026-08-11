@@ -56,7 +56,7 @@ const STREAM_EVENTS_POLL_INTERVAL_MS = 5_000;
 const STREAM_EVENTS_LIMIT = 50;
 
 /**
- * `AssetDetailPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection,
+ * `AssetDetailPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection,
  * derived read-model, and command for the asset manager page, so the page component itself only
  * injects this class (+ its own local `editors`/`panels`/`subView` overlay/view state — see
  * `asset-detail.ts`'s own doc comment for why those stay on the component rather than here).
@@ -109,7 +109,7 @@ export class AssetDetailFacade {
   /** Read-only: whether *someone* is currently streaming this asset. Piloting is the cockpit's job. */
   readonly live = computed(() => this.stream() !== undefined);
 
-  // --- Events (docs/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
+  // --- Events (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
 
   private readonly streamEventsSignal = signal<readonly DetectionEvent[]>([]);
 
@@ -135,7 +135,7 @@ export class AssetDetailFacade {
   readonly freshestAgeSeconds = computed(() => ageSeconds(this.freshestOverall()?.at, this.nowSignal()));
   readonly freshestStale = computed(() => isStale(this.freshestAgeSeconds()));
 
-  // --- Position card map (docs/MAP-REWORK-PLAN.md §5.1 Wave D) -----------------------------------
+  // --- Position card map (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D) -----------------------------------
   // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own
   // `TelemetryStore` through DI; the new component is dumb, so the followed marker is built here from
   // the same telemetry. This page also finally passes zones + marks (the plan's own bug fix — the old
@@ -143,7 +143,7 @@ export class AssetDetailFacade {
 
   readonly geofence = inject(GeofenceStore);
   readonly marks = inject(MarksStore);
-  /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/MAP-REWORK-PLAN.md §5.2). */
+  /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
   readonly layers = inject(LayersStore);
   readonly drawings = inject(DrawingsStore);
 
@@ -169,18 +169,18 @@ export class AssetDetailFacade {
   readonly archived = computed(() => this.lifecycle() === 'DELETED');
 
   /**
-   * The header's one lifecycle button (docs/UX-REWORK-PLAN.md §U-a2 item 2). Exactly one of the pair
+   * The header's one lifecycle button (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 2). Exactly one of the pair
    * `operatorAssetActions` returns is ever `available` — see that function's own doc comment.
    */
   readonly assetLifecycleAction = computed(() => operatorAssetActions(this.lifecycle()).find((entry) => entry.available));
 
-  // --- KPI tile row + "Recent flights" chart (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4) -
+  // --- KPI tile row + "Recent flights" chart (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B items 3–4) -
 
   readonly stats = signal<AssetStats | undefined>(undefined);
   readonly kpiTiles = computed<readonly KpiTile[]>(() => buildKpiTiles(this.stats(), this.nowSignal()));
   readonly flightBars = computed<readonly FlightBar[]>(() => buildFlightBars(this.asset()?.recentUsages ?? [], this.nowSignal()));
 
-  // --- Registration/tail number + attributes (docs/UX-REWORK-PLAN.md §U-d item 3) ---------------
+  // --- Registration/tail number + attributes (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) ---------------
 
   readonly registrationNumber = computed(() => registrationNumberOf(this.asset()?.attributes ?? {}));
 
@@ -203,7 +203,7 @@ export class AssetDetailFacade {
   }
 
   /** The last deviceId the telemetry-tracking effect below actually acted on — see that effect's own
-   *  doc comment (docs/REALTIME-PLAN.md Phase R-a item 2, R-c follow-up incident). */
+   *  doc comment (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2, R-c follow-up incident). */
   private lastTelemetryDeviceId: string | undefined = undefined;
 
   constructor() {
@@ -211,7 +211,7 @@ export class AssetDetailFacade {
     // own doc comment) — passing `assetId` lets it resolve the open usage with one `getAsset()`
     // instead of listing the whole fleet.
     //
-    // **Guarded on the derived deviceId primitive** (docs/REALTIME-PLAN.md Phase R-a item 2, R-c
+    // **Guarded on the derived deviceId primitive** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2, R-c
     // follow-up): re-entering `track()` with an unchanged id every ~5s poll tick used to be a
     // self-sustaining 50-90/sec loop (`TelemetryStore.track()`'s own teardown wrote back into a
     // signal this effect was still the active reactive consumer of) — `trackingIdChanged` is what
@@ -241,12 +241,12 @@ export class AssetDetailFacade {
       }
     });
 
-    // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — one of exactly three pages that
+    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — one of exactly three pages that
     // keeps the shared global events poll alive.
     this.events.activate();
 
     // Every poll registration below returns its own promise so `PollScheduler`'s in-flight guard can
-    // skip a tick while the previous one is still pending (docs/MVP2-PLAN.md §S, S-b).
+    // skip a tick while the previous one is still pending (docs/plans/done/MVP2-PLAN.md §S, S-b).
     const scheduler = inject(PollScheduler);
     const stopAssetPoll = scheduler.schedule(ASSET_POLL_INTERVAL_MS, () => this.refresh());
     const stopClock = scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
@@ -292,7 +292,7 @@ export class AssetDetailFacade {
   }
 
   /**
-   * The KPI row's own fetch (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3), independent of
+   * The KPI row's own fetch (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave B item 3), independent of
    * `fetchAsset` by design: a `/stats` failure/404 must never flip `notFound` or block the rest of the
    * page — it only ever affects `stats` (rendered as an all-`'—'` row by `kpiTiles` when `undefined`),
    * and on failure leaves it at whatever it already was rather than resetting it.
@@ -396,9 +396,9 @@ export class AssetDetailFacade {
   }
 
   /**
-   * The header's one destructive lifecycle action (docs/UX-REWORK-PLAN.md §U-a2 item 2's
+   * The header's one destructive lifecycle action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 2's
    * Archive/Restore pair). **Callers must confirm first** — `asset-detail.ts#requestArchiveAsset`
-   * gates this behind `<vision-confirm-dialog>` (docs/design/05-asset-detail.md's own acceptance
+   * gates this behind `<vision-confirm-dialog>` (docs/extracts/design/05-asset-detail.md's own acceptance
    * criterion), a departure from this method's original "Undo over confirm, fires immediately"
    * design (item 3b) now that Archive lives behind a kebab rather than a plain header button — the
    * Undo toast below stays too, so a mistaken confirm is still one click from reversed. Bypasses
@@ -445,7 +445,7 @@ export class AssetDetailFacade {
     }
   }
 
-  // --- Hardware section (docs/CYCLES-PLAN.md §11 item 2; docs/UX-REWORK-PLAN.md §U-a item 7, §U-a2) -
+  // --- Hardware section (docs/main/CYCLES-PLAN.md §11 item 2; docs/plans/done/UX-REWORK-PLAN.md §U-a item 7, §U-a2) -
 
   /** Archive executes immediately, no confirm dialog — same bypass-`FleetStore` reasoning as
    *  `archiveAssetNow` above. Undo reuses the explicit Restore path (`setDeviceLifecycle`). */
@@ -462,7 +462,7 @@ export class AssetDetailFacade {
     }
   }
 
-  /** Deactivate also offers an Undo toast (docs/OPS-CORE-PLAN.md §Q2) — same bypass-`FleetStore`
+  /** Deactivate also offers an Undo toast (docs/plans/done/OPS-CORE-PLAN.md §Q2) — same bypass-`FleetStore`
    *  reasoning as `archiveDeviceNow`. */
   async deactivateDeviceNow(device: Device): Promise<void> {
     this.busyDeviceId.set(device.id);
@@ -557,7 +557,7 @@ export class AssetDetailFacade {
     return samples && samples.length > 0 ? samples[samples.length - 1] : undefined;
   }
 
-  // --- Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3 — GET image URL as img src, graceful 404) -
+  // --- Asset photo (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — GET image URL as img src, graceful 404) -
   // Pure URL construction (no HTTP call itself — the browser's own `<img src>` fetch is what
   // actually hits the network); exposed so the page doesn't need its own `VisionApi` injection just
   // for this one string-builder. The 404-degrade that used to live in the page as an

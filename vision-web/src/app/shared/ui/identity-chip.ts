@@ -6,7 +6,7 @@ import { canManageOrg } from '../../core/org/org-logic';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 
 /**
- * The header identity chip (docs/U-AUTH-PLAN.md wave 4) — displayName + a role badge + a logout
+ * The header identity chip (docs/plans/done/U-AUTH-PLAN.md wave 4) — displayName + a role badge + a logout
  * affordance, mounted once in `app.html` next to the notification bell/status chips. The first
  * piece of this app's broader responsive pass (the plan's own framing: "build it responsive from
  * the start so it sets the pattern") — see `identity-chip.css` for the collapse rule.
@@ -18,14 +18,14 @@ import { GlobalOverlayStore } from '../../core/ui/overlay-store';
  * `AuthStore` directly (root-provided, one instance app-wide) rather than taking inputs — there is
  * exactly one session in this app, nothing for a host page to parameterize.
  *
- * **Account settings** (docs/UI-REDESIGN-PLAN.md Wave 1, F4's "(shell) → `/settings` via profile
+ * **Account settings** (docs/plans/done/UI-REDESIGN-PLAN.md Wave 1, F4's "(shell) → `/settings` via profile
  * menu") sits in the menu right alongside **My activity** — no role gate, same as My activity,
  * since every signed-in user (pilot included) owns their own detection/notification defaults. This
  * is the same `/settings` route the Operate hub's own "Flight & detection settings" tile links to
  * (`features/hubs/nav-entries.ts`) — one destination, reachable from two places, not a duplicate
  * page.
  *
- * **Shown even with auth disabled** (dev parity, docs/U-AUTH-PLAN.md's own explicit call: "show the
+ * **Shown even with auth disabled** (dev parity, docs/plans/done/U-AUTH-PLAN.md's own explicit call: "show the
  * dev admin's name too, so the surface is consistent") — the one thing suppressed in that mode is
  * the **Log out** action itself (`@if (auth.authEnabled())`), since logging out of a session that
  * was never real has nothing to do.
@@ -38,7 +38,7 @@ import { GlobalOverlayStore } from '../../core/ui/overlay-store';
  * name, role, and (when relevant) Log out, so opening it on a narrow viewport surfaces exactly the
  * information the trigger hid, never a reduced feature set.
  *
- * **Signal-backed open state, not `<details>`** (docs/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): this
+ * **Signal-backed open state, not `<details>`** (docs/plans/done/UI-STATE-PLAN.md §1 D4/D5, §2.3, §2.2): this
  * used to be a native `<details>`, whose `open` state lived in the DOM where nothing could see or
  * reset it — and since this component is mounted once in the always-on shell (`app-sidebar.html`'s
  * foot) and never destroyed on navigation, "the page component is destroyed on route change" (this
@@ -71,7 +71,7 @@ export class IdentityChip {
   protected readonly roleLabel = topRoleLabel;
 
   /**
-   * Whether to show the **Organization** link (docs/U-SCOPE-PLAN.md, U-e slice 2) — ADMIN/MANAGER
+   * Whether to show the **Organization** link (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — ADMIN/MANAGER
    * only, the same gate `core/org/org-guard.ts` enforces on the route itself, so a pilot never sees
    * the door, not just a bounced click. **My activity** below it has no such gate (every user reads
    * their own).

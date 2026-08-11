@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Firmware/vehicle-aware flight-mode name lookup (docs/FC-INTEGRATIONS-PLAN.md F-a). MAVLink's
+ * Firmware/vehicle-aware flight-mode name lookup (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a). MAVLink's
  * {@code HEARTBEAT.custom_mode} is a firmware-specific integer with no meaning shared across
  * autopilots, so turning it into a human-readable name requires knowing both which firmware
  * ({@code HEARTBEAT.autopilot}) and, for ArduPilot, which vehicle family ({@code HEARTBEAT.type})
@@ -115,7 +115,7 @@ final class FlightModes {
 
     /**
      * Reverse of {@link #name}: the numeric {@code custom_mode} for a named mode within the table
-     * selected by {@code autopilot}/{@code mavType} (docs/DRONE-INFRA-PLAN.md I-e Stage 1 —
+     * selected by {@code autopilot}/{@code mavType} (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 —
      * {@code MavlinkFlightCommander}'s return-to-home mode resolution). {@code null} when the
      * firmware/vehicle combination has no table at all, or the table has no entry with exactly
      * this name — never a guessed/fabricated mode number.
@@ -147,7 +147,7 @@ final class FlightModes {
 
     /**
      * The distinct mode names a caller may pass to {@code MavlinkFlightCommander.setMode} for the
-     * vehicle-family table selected by {@code autopilot}/{@code mavType} (docs/DRONE-INFRA-PLAN.md
+     * vehicle-family table selected by {@code autopilot}/{@code mavType} (docs/plans/active/DRONE-INFRA-PLAN.md
      * I-e Stage 2 — the {@code selectableModes} half of a {@code FlightCapability} snapshot).
      *
      * <p>Deliberately <b>ArduPilot-only</b>: only an ArduPilot copter/plane/rover table yields a

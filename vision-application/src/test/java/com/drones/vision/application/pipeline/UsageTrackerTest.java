@@ -79,14 +79,14 @@ class UsageTrackerTest {
                 liveUpdatePublisherPort);
     }
 
-    /** docs/OPS-CORE-PLAN.md §G: same as {@link #tracker}, plus a {@link GeofenceMonitor} collaborator. */
+    /** docs/plans/done/OPS-CORE-PLAN.md §G: same as {@link #tracker}, plus a {@link GeofenceMonitor} collaborator. */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
                 null, geofenceMonitor);
     }
 
     /**
-     * docs/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
+     * docs/plans/done/MVP2-PLAN.md §S, S-a: same as {@link #tracker}, but with a tiny (20ms) source reopen
      * backoff instead of production's real 1s-30s one, via the package-private test-seam
      * constructor -- so supervision tests complete quickly and deterministically.
      */
@@ -204,7 +204,7 @@ class UsageTrackerTest {
         verify(telemetryRepository).save(usageAfterSecond.id(), sample2);
 
         tracker.onStreamStopped(telemetryDevice.id());
-        // docs/MVP2-PLAN.md §S, S-a: the actual close() call now runs on a background thread (same
+        // docs/plans/done/MVP2-PLAN.md §S, S-a: the actual close() call now runs on a background thread (same
         // fix as DefaultStreamService's own stop() -- see that class's javadoc), so this must be
         // awaited rather than checked synchronously right after onStreamStopped returns.
         assertTrue(source.closeLatch.await(1, TimeUnit.SECONDS), "telemetry must be unsubscribed/closed on usage close");
@@ -213,7 +213,7 @@ class UsageTrackerTest {
 
     @Test
     void announcesEveryAppendedSampleAsALiveUpdateWhenConfigured() {
-        // docs/REALTIME-PLAN.md §4: applySample is the single write path for a telemetry sample --
+        // docs/plans/done/REALTIME-PLAN.md §4: applySample is the single write path for a telemetry sample --
         // the live-update announcement rides along with the persist/summary-fold, attributed to the
         // owning asset (not the device the sample physically came from).
         Device telemetryDevice = telemetryDevice("tel-1");
@@ -233,7 +233,7 @@ class UsageTrackerTest {
 
     @Test
     void appliedSampleInvokesTheConfiguredGeofenceMonitor() {
-        // docs/OPS-CORE-PLAN.md §G: applySample is the single write path for a telemetry sample --
+        // docs/plans/done/OPS-CORE-PLAN.md §G: applySample is the single write path for a telemetry sample --
         // the geofence evaluation rides along with the persist/live-update steps, attributed to the
         // owning asset.
         Device telemetryDevice = telemetryDevice("tel-1");
@@ -267,7 +267,7 @@ class UsageTrackerTest {
 
     @Test
     void telemetrySourceFailureTriggersASupervisedReopenAndTheUsageStaysOpenThroughout() throws InterruptedException {
-        // docs/MVP2-PLAN.md §S, S-a: a telemetry source error/completion must never end telemetry
+        // docs/plans/done/MVP2-PLAN.md §S, S-a: a telemetry source error/completion must never end telemetry
         // for the usage -- it is retried (proven here by a second open() call), and the same usage
         // (never closed/reopened) keeps accumulating samples once the new subscription is flowing.
         Device telemetryDevice = telemetryDevice("tel-1");
@@ -465,7 +465,7 @@ class UsageTrackerTest {
 
     @Test
     void latestTelemetryStaysAnsweredAfterTheUsageCloses() {
-        // docs/MVP3-PLAN.md C-a: unlike latestPosition (scoped to the currently open usage),
+        // docs/plans/done/MVP3-PLAN.md C-a: unlike latestPosition (scoped to the currently open usage),
         // latestTelemetry is deliberately still answered once streaming stops -- staleness is most
         // useful exactly once an asset has gone quiet.
         Device telemetryDevice = telemetryDevice("tel-1");
@@ -512,9 +512,9 @@ class UsageTrackerTest {
         private final Map<DeviceId, ScriptedPublisher> publishers = new ConcurrentHashMap<>();
         final List<DeviceId> openedDevices = new CopyOnWriteArrayList<>();
         final List<DeviceId> closedDevices = new CopyOnWriteArrayList<>();
-        /** Counts down on every {@link #close}; docs/MVP2-PLAN.md §S, S-a moved the real close() call onto a background thread, so tests await this instead of checking synchronously. */
+        /** Counts down on every {@link #close}; docs/plans/done/MVP2-PLAN.md §S, S-a moved the real close() call onto a background thread, so tests await this instead of checking synchronously. */
         final CountDownLatch closeLatch = new CountDownLatch(1);
-        /** Test hook invoked at the end of every {@link #open}, e.g. to count/signal a supervised reopen (docs/MVP2-PLAN.md §S, S-a). */
+        /** Test hook invoked at the end of every {@link #open}, e.g. to count/signal a supervised reopen (docs/plans/done/MVP2-PLAN.md §S, S-a). */
         volatile Runnable onOpen;
 
         ScriptedTelemetrySource(java.util.function.Predicate<Device> supportsPredicate) {
@@ -552,7 +552,7 @@ class UsageTrackerTest {
             }
         }
 
-        /** The publisher returned by the most recent {@link #open} call for {@code deviceId} (docs/MVP2-PLAN.md §S, S-a: lets a test fail the *current* open, whichever attempt it is). */
+        /** The publisher returned by the most recent {@link #open} call for {@code deviceId} (docs/plans/done/MVP2-PLAN.md §S, S-a: lets a test fail the *current* open, whichever attempt it is). */
         ScriptedPublisher currentPublisher(DeviceId deviceId) {
             return publishers.get(deviceId);
         }
@@ -591,7 +591,7 @@ class UsageTrackerTest {
             }
         }
 
-        /** docs/MVP2-PLAN.md §S, S-a: simulates this open's telemetry source failing/disconnecting. */
+        /** docs/plans/done/MVP2-PLAN.md §S, S-a: simulates this open's telemetry source failing/disconnecting. */
         void error(Throwable t) {
             Flow.Subscriber<? super Telemetry> s = subscriber;
             if (s != null) {

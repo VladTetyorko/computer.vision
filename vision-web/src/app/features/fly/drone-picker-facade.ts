@@ -10,9 +10,9 @@ import type { AssetSummary } from '../../core/api/models';
 const ASSET_POLL_INTERVAL_MS = 5_000;
 
 /**
- * `DronePickerPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/fly`, the drone chooser
- * (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/design/01-fly.md). Split out of the old combined
- * `FlyFacade` (docs/MVP3-PLAN.md §C-b) when the cockpit gained its own addressable route
+ * `DronePickerPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/fly`, the drone chooser
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12, docs/extracts/design/01-fly.md). Split out of the old combined
+ * `FlyFacade` (docs/plans/done/MVP3-PLAN.md §C-b) when the cockpit gained its own addressable route
  * (`/fly/:assetId`) — see `cockpit-facade.ts`'s own doc comment for the cockpit's half.
  *
  * **Deliberately thin**: every "does this visit need the picker at all" decision now happens one

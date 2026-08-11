@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 
 /**
- * `vision-kebab-menu` — the shared per-row overflow (⋯) menu (docs/STYLE-TOKENS-PLAN.md §Shared
+ * `vision-kebab-menu` — the shared per-row overflow (⋯) menu (docs/plans/done/STYLE-TOKENS-PLAN.md §Shared
  * primitives), wrapping the native `<details>/<summary>` disclosure idiom documented in
  * src/styles.css (the `.kebab*` primitives) that was hand-assembled at ~30 call sites.
  *

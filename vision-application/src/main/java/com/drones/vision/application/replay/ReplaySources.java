@@ -11,7 +11,7 @@ import com.drones.vision.application.training.TrainingStores;
 
 /**
  * The three replay-sourced collaborators {@link DefaultLabelingService#captureFromReplay} needs,
- * bundled into one constructor parameter (docs/CV-TRAINING-V2-PLAN.md §4) — the same
+ * bundled into one constructor parameter (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) — the same
  * java-clean-code SKILL.md §3 reasoning {@link TrainingStores}'s own javadoc gives: each is a
  * genuine, independently-substitutable port (a real usage/detection repository and, once
  * implemented, a real {@link ReplayFrameExtractionPort} adapter all exist or are on their way), so

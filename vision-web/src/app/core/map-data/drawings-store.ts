@@ -19,7 +19,7 @@ import {
 const DRAWINGS_POLL_INTERVAL_MS = 30_000;
 
 /**
- * `DrawingsStore` — lines, areas, arrows and text labels on map layers (docs/MAP-REWORK-PLAN.md
+ * `DrawingsStore` — lines, areas, arrows and text labels on map layers (docs/plans/done/MAP-REWORK-PLAN.md
  * §2.1/§5.2), `providedIn: 'root'` alongside `LayersStore`/`MarksStore` for the identical reason:
  * every map host renders the same drawings and none should poll for them separately.
  *

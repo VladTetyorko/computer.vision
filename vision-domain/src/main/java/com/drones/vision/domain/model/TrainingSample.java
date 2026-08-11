@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * A captured frame plus its (evolving) annotations (docs/CV-TRAINING-PLAN.md §1) — one row of a
+ * A captured frame plus its (evolving) annotations (docs/plans/done/CV-TRAINING-PLAN.md §1) — one row of a
  * {@link Dataset}.
  *
  * <p>Image bytes are <b>not</b> carried here — they are stored separately, keyed by {@link #id()},

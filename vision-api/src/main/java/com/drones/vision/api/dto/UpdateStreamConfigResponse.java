@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
 /**
- * Response body for {@code PATCH /api/streams/{streamId}/config} (docs/CV-CONTROL-PLAN.md §3's
- * frozen wire contract, extended by docs/TRACKING-PLAN.md §4.D).
+ * Response body for {@code PATCH /api/streams/{streamId}/config} (docs/plans/done/CV-CONTROL-PLAN.md §3's
+ * frozen wire contract, extended by docs/plans/done/TRACKING-PLAN.md §4.D).
  *
  * @param streamId     the updated stream's id, canonical UUID string
  * @param modelReArmed {@code true} only when the patch's {@code model} field was present and
@@ -20,7 +20,7 @@ package com.drones.vision.api.dto;
 public record UpdateStreamConfigResponse(String streamId, boolean modelReArmed, boolean trackingChanged) {
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code trackingChanged},
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code trackingChanged},
      * kept as a convenience constructor defaulting it to {@code false} — the same N-1-arg idiom used
      * throughout this codebase.
      *

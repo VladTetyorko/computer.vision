@@ -7,7 +7,7 @@ import type { PilotAssetAssignment } from '../../core/roster/roster-pivot-logic'
 
 /**
  * `vision-pilot-assignments-panel` — `/manage/roster`'s "By pilot" detail pane
- * (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/13-roster.md — task 3: "the detail pane does the
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/13-roster.md — task 3: "the detail pane does the
  * assign/unassign editing"). The pilot-scoped twin of `features/asset-detail/pilots-card.ts`'s
  * asset-scoped editor: same job (assign/unassign against `AssignmentController`), same "one
  * assignment service, two entry points" the task brief asks for — transposed to list *this pilot's*

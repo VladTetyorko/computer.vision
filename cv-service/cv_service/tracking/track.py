@@ -1,6 +1,6 @@
 """The track lifecycle machine: identity and age, no pixels and no policy.
 
-`docs/TRACKING-PLAN.md` §3.2, `docs/TRACKING-ORCHESTRATION.md` §2.1.
+`docs/plans/done/TRACKING-PLAN.md` §3.2, `docs/extracts/TRACKING-ORCHESTRATION.md` §2.1.
 
     TENTATIVE -> CONFIRMED -> COASTING -> LOST -> (expired, id retired)
 

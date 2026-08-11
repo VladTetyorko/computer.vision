@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pins {@link MjpegSettings#defaults()} to the exact literals this module hardcoded before this
- * record existed ({@code docs/LAYERING-REFACTOR-PLAN.md} §1.3's "byte-identical default"
+ * record existed ({@code docs/plans/active/LAYERING-REFACTOR-PLAN.md} §1.3's "byte-identical default"
  * guardrail) and exercises the compact-constructor validation.
  */
 class MjpegSettingsTest {

@@ -1,4 +1,4 @@
-/* `<vision-tactical-map>` (docs/MAP-REWORK-PLAN.md §5.1) — the merged stylesheet of the deleted
+/* `<vision-tactical-map>` (docs/plans/done/MAP-REWORK-PLAN.md §5.1) — the merged stylesheet of the deleted
    `fleet-map.css` + `live-map.css`, plus the new legend / data-layer chrome and the affiliation
    symbology.
 
@@ -305,7 +305,7 @@
   color: var(--text-muted);
 }
 
-/* ---- Asset markers: one glyph, state by colour only (docs/VISUAL-REFRESH-PLAN.md F7) --------- */
+/* ---- Asset markers: one glyph, state by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) --------- */
 
 :host ::ng-deep .asset-marker .drone-arrow {
   width: 0;
@@ -353,7 +353,7 @@
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
-/* ---- Mark symbology (docs/MAP-REWORK-PLAN.md §5.1) -------------------------------------------
+/* ---- Mark symbology (docs/plans/done/MAP-REWORK-PLAN.md §5.1) -------------------------------------------
    APP-6-inspired, but expressed in this app's own tokens rather than the plan's four hex values:
    `--color-info` blue = friendly, `--color-danger` red = hostile, `--color-success` green =
    neutral, `--color-warn` amber = unknown. Same four hues the plan named, theme-aware in both
@@ -420,7 +420,7 @@
   transform: rotate(45deg);
 }
 
-/* Verification (docs/MAP-REWORK-PLAN.md §5.1): unverified reads as provisional — dashed frame,
+/* Verification (docs/plans/done/MAP-REWORK-PLAN.md §5.1): unverified reads as provisional — dashed frame,
    reduced opacity — and a confirmed mark on the common-picture layer gets a quiet outer ring. */
 :host ::ng-deep .mark-symbol.unverified .sym-frame {
   border-style: dashed;

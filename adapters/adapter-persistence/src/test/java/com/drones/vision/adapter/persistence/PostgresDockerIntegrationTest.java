@@ -428,7 +428,7 @@ class PostgresDockerIntegrationTest {
 
             Optional<AssetUsage> found = repository.findById(usage.id());
             assertTrue(found.isPresent());
-            assertNull(found.get().streamId(), "docs/MVP2-PLAN.md R-a2's V4 column is additive/nullable");
+            assertNull(found.get().streamId(), "docs/plans/done/MVP2-PLAN.md R-a2's V4 column is additive/nullable");
         }
 
         @Test
@@ -597,7 +597,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/FC-INTEGRATIONS-PLAN.md F-b: {@code flight_state} round-trips a full {@link
+         * docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b: {@code flight_state} round-trips a full {@link
          * FlightState} — including its own nullable sub-fields and a non-empty {@code
          * armingBlockers} — through the jsonb column via the same {@code @JdbcTypeCode(SqlTypes.JSON)}
          * idiom {@code DetectionResultEntity#detections} already uses for a plain record tree.
@@ -719,7 +719,7 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * docs/TRACKING-PLAN.md &sect;4.C: <b>the regression this whole "no migration" decision rests
+         * docs/plans/done/TRACKING-PLAN.md &sect;4.C: <b>the regression this whole "no migration" decision rests
          * on.</b> A {@code detection_results} row written <b>before</b> the tracking wave — its
          * {@code detections} jsonb carrying no {@code track} key at all — must still deserialize,
          * with {@link Detection#track()} reading {@code null}.
@@ -769,14 +769,14 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * The other half of docs/TRACKING-PLAN.md &sect;4.C: a tracked detection rides along in the
+         * The other half of docs/plans/done/TRACKING-PLAN.md &sect;4.C: a tracked detection rides along in the
          * existing jsonb blob with <b>no schema change at all</b> — {@link TrackRef} is a plain
          * record inside the {@code List<Detection>} Jackson already serializes.
          *
          * <p>Also pins the deliberate omission: {@code DetectionResult#tracking()} (the <i>per-frame</i>
          * telemetry, as opposed to this <i>per-detection</i> track reference) has no column and is
          * <b>not</b> persisted, so it reads back {@code null}. That is a documented drop, not the
-         * silent kind docs/TRACKING-ORCHESTRATION.md &sect;6 rule 6 warns about: the duty-cycle
+         * silent kind docs/extracts/TRACKING-ORCHESTRATION.md &sect;6 rule 6 warns about: the duty-cycle
          * counters it feeds are a live read model ({@code TrackingStatsWindow}), and a durable
          * trajectory/telemetry table is deferred to S2, which is the first thing that would query it.
          */
@@ -804,7 +804,7 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/UX-REWORK-PLAN.md §U-d item 3: the asset image store. */
+    /** docs/plans/done/UX-REWORK-PLAN.md §U-d item 3: the asset image store. */
     @Nested
     class AssetImageRepositoryTests {
 
@@ -858,7 +858,7 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/OPS-CORE-PLAN.md §G — every {@link GeofenceRepositoryPort} method, upsert semantics. */
+    /** docs/plans/done/OPS-CORE-PLAN.md §G — every {@link GeofenceRepositoryPort} method, upsert semantics. */
     @Nested
     class GeofenceRepositoryTests {
 
@@ -941,7 +941,7 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/U-AUTH-PLAN.md wave 3 — users, incl. jsonb memberships + case-insensitive findByUsername. */
+    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — users, incl. jsonb memberships + case-insensitive findByUsername. */
     @Nested
     class UserRepositoryTests {
 
@@ -1008,7 +1008,7 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes). */
+    /** docs/plans/done/U-AUTH-PLAN.md wave 3 — groups (org-chart nodes). */
     @Nested
     class GroupRepositoryTests {
 
@@ -1112,7 +1112,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/TACTICAL-MARKS-PLAN.md §3, reworked by docs/MAP-REWORK-PLAN.md §4.4 — every {@link
+     * docs/plans/done/TACTICAL-MARKS-PLAN.md §3, reworked by docs/plans/done/MAP-REWORK-PLAN.md §4.4 — every {@link
      * MarkRepositoryPort} method, upsert semantics, plus the five columns V12 adds (layer,
      * affiliation, and the flattened {@link Verification} triple).
      */
@@ -1236,7 +1236,7 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/CV-TRAINING-PLAN.md §1, Wave T3 — every {@link DatasetRepositoryPort} method, upsert semantics. */
+    /** docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — every {@link DatasetRepositoryPort} method, upsert semantics. */
     @Nested
     class DatasetRepositoryTests {
 
@@ -1320,7 +1320,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/CV-TRAINING-PLAN.md §1, Wave T3 — every {@link TrainingSampleRepositoryPort} method
+     * docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — every {@link TrainingSampleRepositoryPort} method
      * incl. the dataset/status filter {@code idx_training_samples_dataset_status} serves.
      */
     @Nested
@@ -1438,7 +1438,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/CV-TRAINING-PLAN.md §1/§C, Wave T3 — every {@link SampleImageStorePort} method, the
+     * docs/plans/done/CV-TRAINING-PLAN.md §1/§C, Wave T3 — every {@link SampleImageStorePort} method, the
      * {@code AssetImageRepositoryPort} shape reused for training-sample frames.
      */
     @Nested
@@ -1490,7 +1490,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md P-b's retention guard, in test form: uses the small-cap constructor
+     * docs/plans/done/MVP2-PLAN.md P-b's retention guard, in test form: uses the small-cap constructor
      * overload (rather than the production {@value JpaTelemetryRepository#DEFAULT_RETENTION_LIMIT_PER_USAGE}
      * default) so the pruning path exercises without inserting six figures of rows.
      */
@@ -1529,7 +1529,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md P-b's done criterion in test form: a finished flight's telemetry and
+     * docs/plans/done/MVP2-PLAN.md P-b's done criterion in test form: a finished flight's telemetry and
      * detections are queryable after a restart — same "write through one {@link
      * EntityManagerFactory}, read through a brand-new one against the same still-running
      * container" technique as {@link #assetSurvivesAFreshEntityManagerFactoryAgainstTheSameDatabase}.
@@ -1572,7 +1572,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md P-a's done criterion in test form: register an asset through one
+     * docs/plans/done/MVP2-PLAN.md P-a's done criterion in test form: register an asset through one
      * application "run" ({@code entityManagerFactory}, opened in {@link #migrateAndOpen}), then
      * open a brand-new {@link EntityManagerFactory} against the same still-running container (no
      * re-migration needed — Flyway's own history table makes {@link PersistenceUnit#start} a
@@ -1601,7 +1601,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/MVP2-PLAN.md R-a2: {@code V4__usage_stream_id.sql} must apply cleanly on top of the
+     * docs/plans/done/MVP2-PLAN.md R-a2: {@code V4__usage_stream_id.sql} must apply cleanly on top of the
      * V1-V3 schema {@link #migrateAndOpen} already migrated for every other test in this class,
      * adding {@code asset_usages.stream_id} as a nullable column (additive, no backfill — see the
      * migration's own comment) rather than requiring a fresh database. Checked against {@code
@@ -1626,7 +1626,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/FC-INTEGRATIONS-PLAN.md F-b: {@code V6__telemetry_flight_state.sql} must apply cleanly
+     * docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b: {@code V6__telemetry_flight_state.sql} must apply cleanly
      * on top of the V1-V5 schema {@link #migrateAndOpen} already migrated for every other test in
      * this class, adding {@code telemetry_samples.flight_state} as a nullable jsonb column
      * (additive, no backfill) rather than requiring a fresh database — same shape/rationale as
@@ -1649,7 +1649,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/OPS-CORE-PLAN.md §G: {@code V7__geofence_zones.sql} must apply cleanly on top of the
+     * docs/plans/done/OPS-CORE-PLAN.md §G: {@code V7__geofence_zones.sql} must apply cleanly on top of the
      * V1-V6 schema {@link #migrateAndOpen} already migrated for every other test in this class,
      * creating the new {@code geofence_zones} table (a brand-new table, nothing else changed) —
      * same "prove the schema itself, not just a round-trip" reasoning as {@link
@@ -1678,7 +1678,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/U-AUTH-PLAN.md wave 3 — proves {@code V8__users_groups.sql} applied on top of V1-V7:
+     * docs/plans/done/U-AUTH-PLAN.md wave 3 — proves {@code V8__users_groups.sql} applied on top of V1-V7:
      * {@code users.memberships} is a required {@code jsonb} column and {@code groups.parent_id} is a
      * nullable {@code uuid} (root groups have none), same shape of check as the V7 test above.
      */
@@ -1705,7 +1705,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/U-SCOPE-PLAN.md slice 2 — same schema-shape proof as the V4/V6/V7/V8 tests: the
+     * docs/plans/done/U-SCOPE-PLAN.md slice 2 — same schema-shape proof as the V4/V6/V7/V8 tests: the
      * brand-new {@code pilot_assignments} table exists on top of V1-V8 with a composite
      * ({@code pilot_user_id}, {@code asset_id}) primary key (both required {@code uuid} columns).
      */
@@ -1741,7 +1741,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/TACTICAL-MARKS-PLAN.md §3 — same schema-shape proof as the V4/V6/V7/V8/V9 tests: the
+     * docs/plans/done/TACTICAL-MARKS-PLAN.md §3 — same schema-shape proof as the V4/V6/V7/V8/V9 tests: the
      * brand-new {@code marks} table exists on top of V1-V9, with {@code altitude_meters} and
      * {@code note} staying nullable (ground point unknown / no note given) while {@code latitude}
      * is required.
@@ -1775,7 +1775,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/CV-TRAINING-PLAN.md §1, Wave T3 — same schema-shape proof as the V4/V6/V7/V8/V9/V10
+     * docs/plans/done/CV-TRAINING-PLAN.md §1, Wave T3 — same schema-shape proof as the V4/V6/V7/V8/V9/V10
      * tests: the three brand-new training-pipeline tables exist on top of V1-V10, with {@code
      * target_category}/{@code asset_id} staying nullable (no target category / stream not yet
      * resolved to an asset) while {@code stream_id} and {@code sample_images.data} stay required.
@@ -1814,7 +1814,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/MAP-REWORK-PLAN.md §2.3/§4.4 — every {@link MapLayerRepositoryPort} method, plus the
+     * docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — every {@link MapLayerRepositoryPort} method, plus the
      * element-collection grant list's own wholesale-replacement semantics.
      */
     @Nested
@@ -1934,7 +1934,7 @@ class PostgresDockerIntegrationTest {
         }
     }
 
-    /** docs/MAP-REWORK-PLAN.md §2.3/§4.4 — every {@link DrawingRepositoryPort} method. */
+    /** docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — every {@link DrawingRepositoryPort} method. */
     @Nested
     class DrawingRepositoryTests {
 
@@ -2029,7 +2029,7 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
-     * docs/MAP-REWORK-PLAN.md §4.4 — same shape as the V7-V11 schema tests, for the three new map
+     * docs/plans/done/MAP-REWORK-PLAN.md §4.4 — same shape as the V7-V11 schema tests, for the three new map
      * tables and the five columns V12 grafts onto {@code marks}. Also asserts the in-migration COP
      * layer row exists with the system ownership {@code LayerResolver} stamps, since that row is
      * what pre-existing marks were backfilled onto.

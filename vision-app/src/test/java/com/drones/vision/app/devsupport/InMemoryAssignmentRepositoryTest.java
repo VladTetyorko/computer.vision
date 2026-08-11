@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The pilot&rarr;asset assignment port contract against the in-memory reference implementation
- * (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2) — the same contract {@code JpaAssignmentRepository}
+ * (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2) — the same contract {@code JpaAssignmentRepository}
  * is judged against in {@code adapter-persistence}'s Postgres tests.
  */
 class InMemoryAssignmentRepositoryTest {

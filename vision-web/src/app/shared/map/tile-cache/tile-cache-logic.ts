@@ -1,5 +1,5 @@
 /**
- * Pure logic behind the map-tile cache (docs/MVP3-PLAN.md's Build rules — "map tiles are cached
+ * Pure logic behind the map-tile cache (docs/plans/done/MVP3-PLAN.md's Build rules — "map tiles are cached
  * after first load", with the IndexedDB-over-service-worker constraint spelled out there: a
  * service worker requires a secure context, and LAN viewers use plain `http://<ip>:8080`, so
  * ngsw/SW-based caching would silently not work for exactly the field-ops users who need it most).
@@ -8,7 +8,7 @@
  */
 
 /**
- * One cache key per layer+zoom/x/y (docs/MVP3-PLAN.md: "per-layer keying incl. zoom") — the same
+ * One cache key per layer+zoom/x/y (docs/plans/done/MVP3-PLAN.md: "per-layer keying incl. zoom") — the same
  * `{z}/{x}/{y}` a tile is fetched at is what the layer's `MapLayerId` (`core/settings/settings-store.ts`)
  * distinguishes: two layers can tile the same `z/x/y` slot with completely different imagery
  * (Standard vs. Satellite over the same coordinates), so the layer must be part of the key, not

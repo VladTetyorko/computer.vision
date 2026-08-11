@@ -19,7 +19,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for user management (docs/U-SCOPE-PLAN.md, U-e slice 2) — the org-settings
+ * Driving REST adapter for user management (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — the org-settings
  * surface wave 3's UI needs: list users, create/invite a user, enable/disable one.
  *
  * <p>Constructor-injected with {@link UserService} and {@link CurrentUser}: every operation passes

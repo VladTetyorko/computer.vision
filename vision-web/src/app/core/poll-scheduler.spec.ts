@@ -112,7 +112,7 @@ describe('PollScheduler', () => {
     expect(unpaused).toHaveBeenCalledTimes(3);
   });
 
-  // --- In-flight guard (docs/MVP2-PLAN.md §S, S-b) ---------------------------------------------
+  // --- In-flight guard (docs/plans/done/MVP2-PLAN.md §S, S-b) ---------------------------------------------
   // Without this, a hung/slow backend turns "N pollers × M elapsed ticks" into an unbounded pile
   // of overlapping HTTP requests — every real poller in this app already returns its own promise
   // from `callback` (see e.g. `FleetStore`'s registration), so this guard applies to all of them.

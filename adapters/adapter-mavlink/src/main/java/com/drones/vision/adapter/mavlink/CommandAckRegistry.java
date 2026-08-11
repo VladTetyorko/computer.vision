@@ -7,8 +7,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * One {@link MavlinkSocketHub}'s pending {@code COMMAND_ACK} waiters (docs/DRONE-INFRA-PLAN.md I-e
- * Stage 1, split out of {@code MavlinkSocketHub} itself per docs/LAYERING-REFACTOR-PLAN.md E2) —
+ * One {@link MavlinkSocketHub}'s pending {@code COMMAND_ACK} waiters (docs/plans/active/DRONE-INFRA-PLAN.md I-e
+ * Stage 1, split out of {@code MavlinkSocketHub} itself per docs/plans/active/LAYERING-REFACTOR-PLAN.md E2) —
  * the narrow seam a command sender ({@code MavlinkFlightCommander}, {@code
  * MavlinkManualControlSender}) uses to await the matching reply on the hub's own read thread
  * instead of opening a second socket reader.

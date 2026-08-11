@@ -1,6 +1,6 @@
 """`bytetrack` -- the ASSOCIATE engine, over ultralytics' `BYTETracker`.
 
-`docs/TRACKING-PLAN.md` §5.B (the measured roster) and §5.C (library, not
+`docs/plans/done/TRACKING-PLAN.md` §5.B (the measured roster) and §5.C (library, not
 reimplementation). IoU + Kalman motion association in two stages
 (high-confidence first, then low), ~0.75 ms for 10 detections on this box.
 

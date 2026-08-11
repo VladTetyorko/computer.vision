@@ -20,13 +20,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * {@link ModelRegistryPort} over the generated {@code Training/ListModels} and
  * {@code Training/PromoteModel} gRPC RPCs — the Java client half of the
- * ingest/promote seam {@code docs/CV-TRAINING-PLAN.md} Phase 2 §7 fills (see
+ * ingest/promote seam {@code docs/plans/done/CV-TRAINING-PLAN.md} Phase 2 §7 fills (see
  * {@code proto/vision/v1/cv.proto}'s {@code Training} service).
  *
  * <h2>Channel reuse</h2>
  * This class deliberately takes a pre-built {@link ManagedChannel} rather than
  * building its own from a host/port, and never shuts it down. The intent (per
- * {@code docs/CV-TRAINING-PLAN.md} Phase 2 §7) is that the caller — {@code
+ * {@code docs/plans/done/CV-TRAINING-PLAN.md} Phase 2 §7) is that the caller — {@code
  * vision-app}'s wiring — hands it the <em>same</em> channel instance {@link
  * GrpcDetectionPort} already uses for {@code Inference/DetectStream}, so the
  * platform holds exactly one connection to cv-service, not two independently
@@ -68,7 +68,7 @@ import java.util.concurrent.TimeUnit;
  * as the current default — rather than by widening {@code ModelRef} (being the
  * active default is a registry fact, not a property of a reference used
  * throughout detection/pipeline config). {@code ModelInfo.metrics} has no home
- * on this port and is dropped; {@code docs/CV-TRAINING-PLAN.md} §8's planned
+ * on this port and is dropped; {@code docs/plans/done/CV-TRAINING-PLAN.md} §8's planned
  * {@code GET /api/cv/registry/models} REST surface can carry it via a
  * wire-level passthrough if a later wave needs it.
  *
@@ -107,7 +107,7 @@ public final class GrpcModelRegistryPort implements ModelRegistryPort {
 
     /**
      * @param callTimeout per-call deadline for both RPCs — {@code vision.cv.registry.call-timeout}
-     *                    (docs/LAYERING-REFACTOR-PLAN.md wave F4), replacing this class's own {@link
+     *                    (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F4), replacing this class's own {@link
      *                    #CALL_TIMEOUT_SECONDS} constant as the actual value used.
      */
     public GrpcModelRegistryPort(ManagedChannel channel, Duration callTimeout) {

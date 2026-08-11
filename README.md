@@ -2,7 +2,7 @@
 
 A modular platform that ingests video/telemetry from heterogeneous devices (DIY drones, FPV drones, IP cameras, ESP32-CAM, robots), runs computer vision on the frames, overlays CV judgements + telemetry on the video, and re-streams / records / alerts. The Java core (hexagonal, ports & adapters) never knows which protocol a frame came from or how inference is implemented; a Python service handles CV via gRPC.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design and [docs/PHASE0-PLAN.md](docs/PHASE0-PLAN.md) for the current implementation plan.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system design and [docs/plans/done/PHASE0-PLAN.md](docs/plans/done/PHASE0-PLAN.md) for the current implementation plan.
 
 ## Build
 
@@ -32,7 +32,7 @@ End-to-end vertical slice: register a device (the built-in `sim` source, or a re
    ```
    ./mvnw spring-boot:run -pl vision-app
    ```
-   By default (`vision.publish.enabled=true`) it publishes to mediamtx at `rtsp://localhost:8554` (push) / `http://localhost:8888` (HLS view) — see `vision-app/src/main/resources/application.properties`. Without mediamtx running, the publisher just drops frames and retries with backoff (see `docs/PHASE1-PLAN.md` §0.3) rather than failing the app; set `vision.publish.enabled=false` to use the no-op publisher instead.
+   By default (`vision.publish.enabled=true`) it publishes to mediamtx at `rtsp://localhost:8554` (push) / `http://localhost:8888` (HLS view) — see `vision-app/src/main/resources/application.properties`. Without mediamtx running, the publisher just drops frames and retries with backoff (see `docs/plans/done/PHASE1-PLAN.md` §0.3) rather than failing the app; set `vision.publish.enabled=false` to use the no-op publisher instead.
 3. **Open the dev console**: [http://localhost:8080](http://localhost:8080).
 4. **Register a `sim` device** in the form (protocol `sim`, e.g. uri `sim://demo` — no camera needed), then **start** its stream.
 5. **Watch**: the console opens the returned `viewUrl` (`http://localhost:8888/<streamId>/index.m3u8`) in its built-in `hls.js` player. Expect **~5–10 s of latency** before video appears — mediamtx's default HLS muxer buffers a few segments (segment duration × segment count) before the playlist is servable, and `hls.js`/native HLS add their own start-up buffering on top; this is inherent to HLS, not a bug.
@@ -41,7 +41,7 @@ To point at a real IP camera/drone instead, register a device with protocol `rts
 
 ## Demo (MVP1 — "the friends demo")
 
-The full multi-source + live-YOLO + map demo (docs/MVP1-PLAN.md), in three commands:
+The full multi-source + live-YOLO + map demo (docs/plans/done/MVP1-PLAN.md), in three commands:
 
 ```
 ./mvnw -B package
@@ -64,7 +64,7 @@ Street/people footage works best — the default model (YOLO11n) only draws boxe
 
 - **~5-10s of HLS start-up buffering** per stream (see Quickstart above) — inherent to HLS, not a bug.
 - **CPU inference latency**: sampling runs at 5fps (`inferenceFps` default) and each sampled frame's `predict()` call costs roughly 0.5-1s on a typical laptop CPU (see cv-service/MODULE.md) — boxes visibly update a couple of times a second, not every frame; that's expected.
-- **Kill `cv-service` mid-demo** to see the resilience story: `docker compose stop cv-service` (or start the whole stack with it absent from the outset via `docker compose up -d --scale cv-service=0`) — video and telemetry keep running on every source, detection boxes just stop appearing (`StreamPipeline`'s outage policy logs one `PIPELINE_ERROR` per outage, not per frame — docs/MVP1-PLAN.md §C7 bullet 3). `docker compose start cv-service` brings boxes back within a few retries (exponential backoff, capped ~10s).
+- **Kill `cv-service` mid-demo** to see the resilience story: `docker compose stop cv-service` (or start the whole stack with it absent from the outset via `docker compose up -d --scale cv-service=0`) — video and telemetry keep running on every source, detection boxes just stop appearing (`StreamPipeline`'s outage policy logs one `PIPELINE_ERROR` per outage, not per frame — docs/plans/done/MVP1-PLAN.md §C7 bullet 3). `docker compose start cv-service` brings boxes back within a few retries (exponential backoff, capped ~10s).
 
 ### Tear down
 
@@ -84,7 +84,7 @@ Stops every source `scripts/demo.sh` started. The underlying assets/devices stay
 
 ### Test coverage note
 
-A full docker-compose E2E test (real postgres+mediamtx+cv-service containers) would need the heavy `cv-service` image (torch/ultralytics layers) built in CI/dev — out of scope wherever disk is tight (docs/MVP1-PLAN.md §C9 bullet 4). Instead:
+A full docker-compose E2E test (real postgres+mediamtx+cv-service containers) would need the heavy `cv-service` image (torch/ultralytics layers) built in CI/dev — out of scope wherever disk is tight (docs/plans/done/MVP1-PLAN.md §C9 bullet 4). Instead:
 
 - `docker compose config` validates the compose file's syntax/interpolation without building anything.
 - `scripts/demo.sh` proves the REST-level orchestration (create, idempotent skip, teardown) end to end against a live instance.
@@ -92,4 +92,4 @@ A full docker-compose E2E test (real postgres+mediamtx+cv-service containers) wo
 
 ## Status
 
-Phase 1 (first light: one source, end to end) is implemented — RTSP ingest, HLS egress via mediamtx, and the REST control plane described above. See `docs/PHASE1-PLAN.md` for the task breakdown and `ARCHITECTURE.md` for the full roadmap.
+Phase 1 (first light: one source, end to end) is implemented — RTSP ingest, HLS egress via mediamtx, and the REST control plane described above. See `docs/plans/done/PHASE1-PLAN.md` for the task breakdown and `ARCHITECTURE.md` for the full roadmap.

@@ -147,7 +147,7 @@ describe('SettingsStore', () => {
     expect(reloaded.flyAssetId()).toBeNull();
   });
 
-  // ---- Detection model (docs/CV-CONTROL-PLAN.md Wave E, extending docs/CV-MODELS-PLAN.md item 4) --
+  // ---- Detection model (docs/plans/done/CV-CONTROL-PLAN.md Wave E, extending docs/plans/done/CV-MODELS-PLAN.md item 4) --
 
   it('defaults every built-in profile to the general model, all classes, detection on', () => {
     for (const profile of BUILT_IN_PROFILES) {
@@ -230,7 +230,7 @@ describe('SettingsStore', () => {
     expect(reloaded.effective().model).toBe('orion12l.pt');
   });
 
-  it('accepts a persisted draft model id even one the current roster no longer recognizes (docs/CV-CONTROL-PLAN.md Wave E — model is no longer a closed set)', () => {
+  it('accepts a persisted draft model id even one the current roster no longer recognizes (docs/plans/done/CV-CONTROL-PLAN.md Wave E — model is no longer a closed set)', () => {
     localStorage.setItem(
       'vision.settings.v1',
       JSON.stringify({ draft: { confidenceThreshold: 0.6, inferenceFps: 8, model: 'a-future-model.pt' } }),

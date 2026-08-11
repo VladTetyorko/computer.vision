@@ -7,12 +7,12 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Response body element for {@code GET /api/streams/{streamId}/detections} (docs/MVP1-PLAN.md
+ * Response body element for {@code GET /api/streams/{streamId}/detections} (docs/plans/done/MVP1-PLAN.md
  * §C8 bullet 3) — one completed inference result. Also the {@code detections} SSE topic's payload
- * (docs/REALTIME-PLAN.md §4), so both surfaces gained the tracking object at once.
+ * (docs/plans/done/REALTIME-PLAN.md §4), so both surfaces gained the tracking object at once.
  *
  * <p>{@code @JsonInclude(NON_NULL)} covers exactly one field, {@code tracking}
- * (docs/TRACKING-PLAN.md §4.G) — every other field is always present, and a result from a stream
+ * (docs/plans/done/TRACKING-PLAN.md §4.G) — every other field is always present, and a result from a stream
  * with tracking off serializes byte-identically to the pre-tracking wire.
  *
  * @param streamId        the stream this result belongs to, as a canonical UUID string
@@ -30,7 +30,7 @@ public record DetectionResultResponse(String streamId, long frameSequence, Insta
                                        List<DetectionResponse> detections, FrameTrackingResponse tracking) {
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
      * a convenience constructor defaulting it to {@code null} ("tracking was off"), so every
      * pre-existing call site compiles unchanged.
      *

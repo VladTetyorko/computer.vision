@@ -3,10 +3,10 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.TrackRef;
 
 /**
- * The nested {@code "track"} object on {@link DetectionResponse} (docs/TRACKING-PLAN.md &sect;4.G) —
+ * The nested {@code "track"} object on {@link DetectionResponse} (docs/plans/done/TRACKING-PLAN.md &sect;4.G) —
  * one detection's track identity for this frame.
  *
- * <p><b>Nested, not five flat fields on the parent</b> (docs/TRACKING-ORCHESTRATION.md &sect;6 rule
+ * <p><b>Nested, not five flat fields on the parent</b> (docs/extracts/TRACKING-ORCHESTRATION.md &sect;6 rule
  * 1): an untracked detection omits one key instead of five, so its payload stays byte-identical to
  * the pre-tracking wire, and a client gets a single null check ({@code d.track?.id}) gating all
  * track rendering rather than five optional fields that can disagree.

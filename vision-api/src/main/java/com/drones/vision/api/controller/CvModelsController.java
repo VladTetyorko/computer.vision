@@ -10,13 +10,13 @@ import java.util.Objects;
 import com.drones.vision.api.proxy.HlsProxyController;
 
 /**
- * Driving REST adapter for the detection-model roster (docs/CV-CONTROL-PLAN.md §4's frozen wire
+ * Driving REST adapter for the detection-model roster (docs/plans/done/CV-CONTROL-PLAN.md §4's frozen wire
  * contract) — the picker the Fly cockpit's CV control panel builds its model dropdown from.
  *
  * <p>Constructor-injected with the roster itself, a plain {@code List<CvModelResponse>} bean rather
  * than a use-case port — the same "raw collaborator, not a domain port" exception {@link
  * HlsProxyController} already documents for {@code hlsProxyUpstreamBase}. This is deliberate
- * (docs/CV-CONTROL-PLAN.md §D): the roster is a static, config-backed list wired in {@code
+ * (docs/plans/done/CV-CONTROL-PLAN.md §D): the roster is a static, config-backed list wired in {@code
  * vision-app} next to its other {@code vision.cv.*} wiring, <strong>not</strong> the dormant {@code
  * ModelRegistryPort} (which models versioned promote/rollback, a Phase-3 training-studio concern
  * with no implementation) and not a new {@code cv-service} roster RPC. A future real source, if one

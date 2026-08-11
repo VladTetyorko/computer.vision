@@ -44,7 +44,7 @@ class ArchitectureTest {
         // (`BufferedImage` is `java..` and allowed) — not a framework or adapter dependency, so the
         // boundary this rule actually protects (no Spring/adapter/external coupling in the use-case
         // layer) is fully preserved. Consumed by `TrainingFrameEncoder` to encode a full-resolution
-        // JPEG of a captured training frame (docs/CV-TRAINING-PLAN.md §D); allowing the layer to hold
+        // JPEG of a captured training frame (docs/plans/done/CV-TRAINING-PLAN.md §D); allowing the layer to hold
         // a BufferedImage but not write one was an inconsistent line, not a principled one.
         ArchRule rule = noClasses().that().resideInAPackage("..application..")
                 .should().dependOnClassesThat()
@@ -73,7 +73,7 @@ class ArchitectureTest {
         rule.check(classes);
     }
 
-    // --- docs/LAYERING-REFACTOR-PLAN.md §7 wave H: package-shape rules ---
+    // --- docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 wave H: package-shape rules ---
     //
     // Note on the plan's fourth proposed rule ("no adapter package may depend on another
     // adapter package"): it is not repeated here because `adaptersDoNotDependOnEachOther`

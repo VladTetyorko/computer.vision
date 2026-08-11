@@ -5,11 +5,11 @@ import com.drones.vision.application.asset.AssetAttention;
 import com.drones.vision.application.category.CategoryCounts;
 
 /**
- * The read model behind {@code GET /api/fleet/summary} (docs/MVP3-PLAN.md C-a): everything the
+ * The read model behind {@code GET /api/fleet/summary} (docs/plans/done/MVP3-PLAN.md C-a): everything the
  * manager dashboard needs to answer "who needs attention right now" in one response — per-category
  * counts plus a bounded, per-asset attention row for each asset in scope.
  *
- * @param categories  per-category counts (docs/MVP3-PLAN.md C-a's "lifecycle &times; streaming
+ * @param categories  per-category counts (docs/plans/done/MVP3-PLAN.md C-a's "lifecycle &times; streaming
  *                    state"), one row per category actually present among the assets this summary
  *                    covers; defensively copied
  * @param assets      per-asset attention facts, capped at {@link

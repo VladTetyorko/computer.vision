@@ -3,15 +3,15 @@ package com.drones.vision.application.simulation;
 import com.drones.vision.application.asset.AssetEdit;
 import com.drones.vision.application.device.DeviceEdit;
 /**
- * Everything needed to turn a video file — or, since docs/CYCLES-PLAN.md §9 (CU-a), nothing at all
- * — into a watchable, telemetry-emitting simulated drone in one call (docs/CYCLES-PLAN.md §1b): the
+ * Everything needed to turn a video file — or, since docs/main/CYCLES-PLAN.md §9 (CU-a), nothing at all
+ * — into a watchable, telemetry-emitting simulated drone in one call (docs/main/CYCLES-PLAN.md §1b): the
  * zero-hardware entry point.
  *
  * @param displayName human-readable name; {@code null}/blank derives one from {@code videoPath}'s
  *                     file name (extension stripped) when a path is given, or a generic synthetic
- *                     name (docs/CYCLES-PLAN.md §9) when it is not
+ *                     name (docs/main/CYCLES-PLAN.md §9) when it is not
  * @param videoPath   absolute path to a local video file, or {@code null} for a fully synthetic
- *                     simulation (docs/CYCLES-PLAN.md §9, CU-a) — a {@code "sim"}-protocol video
+ *                     simulation (docs/main/CYCLES-PLAN.md §9, CU-a) — a {@code "sim"}-protocol video
  *                     device (the same synthetic renderer the telemetry device already uses)
  *                     instead of a {@code "file"}-protocol one; must not be blank (blank is not the
  *                     same as absent) and, when non-{@code null}, is only further validated
@@ -30,9 +30,9 @@ import com.drones.vision.application.device.DeviceEdit;
  *                     (in-process playback, the only transport a {@code null} {@link #videoPath()}
  *                     may use) or {@link SimulationTransport#RTSP}/{@link SimulationTransport#MJPEG}
  *                     (pushed over the wire via {@code FeedTransmitterPort} and ingested back,
- *                     docs/CYCLES-PLAN.md §3, §5, both requiring a non-{@code null} {@link
+ *                     docs/main/CYCLES-PLAN.md §3, §5, both requiring a non-{@code null} {@link
  *                     #videoPath()}); must not be {@code null}
- * @param plan               an optional configurable flight plan (docs/CYCLES-PLAN.md §7, CT-a) for
+ * @param plan               an optional configurable flight plan (docs/main/CYCLES-PLAN.md §7, CT-a) for
  *                           the synthetic telemetry track — {@code null} keeps today's circular
  *                           home-point track ({@link #latitude()}/{@link #longitude()}); when
  *                           given, it wins over those bare fields

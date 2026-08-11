@@ -4,8 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Configuration for the RC manual-control relay ({@code vision.rc.*}), docs/RC-CONTROL-PHASE1-PLAN.md
- * §2/§4, extended by docs/LAYERING-REFACTOR-PLAN.md §2.2 (wave F2) with the cadence values that used
+ * Configuration for the RC manual-control relay ({@code vision.rc.*}), docs/plans/done/RC-CONTROL-PHASE1-PLAN.md
+ * §2/§4, extended by docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2 (wave F2) with the cadence values that used
  * to be the {@code VISION_RC_OVERRIDE_HZ}/{@code VISION_RC_RELEASE_FRAMES} environment variables —
  * the one place in the repo that bypassed Spring config entirely, now closed.
  *

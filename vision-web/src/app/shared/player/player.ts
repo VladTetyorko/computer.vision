@@ -73,7 +73,7 @@ export type { PlayerPhase, Transport } from './player-recovery';
 export type { BoxesMode } from './detection-overlay-logic';
 
 /**
- * Console prefix for this component's diagnostic logging (docs/MVP3-PLAN.md follow-up: the "Fly
+ * Console prefix for this component's diagnostic logging (docs/plans/done/MVP3-PLAN.md follow-up: the "Fly
  * shows an empty box, no error" investigation). This codebase has no logging service/convention
  * (grep-verified before adding this) — plain `console.*` with a stable prefix, mirroring the one
  * `[fly]` uses in `features/fly/fly.ts`. Kept deliberately terse: one line per state transition, not a
@@ -108,7 +108,7 @@ const WHEP_NO_TRACK_TIMEOUT_MS = 6_000;
 const ICE_GATHERING_TIMEOUT_MS = 3_000;
 
 /**
- * hls.js live-edge tuning (docs/MVP2-PLAN.md §V — V-a shrinks segment/part duration server-side,
+ * hls.js live-edge tuning (docs/plans/done/MVP2-PLAN.md §V — V-a shrinks segment/part duration server-side,
  * V-b is this file's own half). Every value below is a *live* setting; VOD robustness (deep
  * back-buffers for scrubbing, generous stall tolerance) is deliberately out of scope — this player
  * only ever shows a live glass-to-glass feed, never something a viewer seeks around in.
@@ -171,18 +171,18 @@ interface DrawnBox {
 
 /**
  * Self-recovering video player, WebRTC(WHEP)-first with an automatic HLS fallback
- * (docs/MVP2-PLAN.md §L / §U3), with an honest status line (docs/CYCLES-PLAN.md §11, CD-b item 5)
+ * (docs/plans/done/MVP2-PLAN.md §L / §U3), with an honest status line (docs/main/CYCLES-PLAN.md §11, CD-b item 5)
  * — shared as-is by `wall-tile.ts`, `live.html`, `features/asset-detail/asset-detail.html`, and
  * `shared/map/live-dock.ts`, so every one of those surfaces gets everything below for free.
  *
- * Three deliberate choices, all from docs/UX-DESIGN.md §2 T1 plus CD-b's own resilience ask:
+ * Three deliberate choices, all from docs/main/UX-DESIGN.md §2 T1 plus CD-b's own resilience ask:
  *
  *  - `hls.js` is imported dynamically, so its ~90 KB lands in its own chunk and never
  *    touches the initial bundle of a user who only visits Devices. WHEP needs no such import —
  *    `RTCPeerConnection`/`fetch` are browser built-ins — and this component itself only ever
  *    reaches a lazy route chunk (never `providedIn: 'root'`), so the WHEP code adds nothing eager.
  *  - The distance behind the live edge is measured and displayed continuously, in a small,
- *    always-on chrome badge (docs/UX-QUICKWINS-PLAN.md QF-4): `"HLS ~6s"` / `"WebRTC 0.4s"` / `"—"`
+ *    always-on chrome badge (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4): `"HLS ~6s"` / `"WebRTC 0.4s"` / `"—"`
  *    while unmeasured — a user told "≈6 s behind live" understands the trade, while a user shown a
  *    spinner concludes the app is broken. WHEP's own badge figure is a `getStats()`-derived estimate
  *    (half the measured round-trip time plus jitter, `player-recovery.ts#estimateWhepLatencySeconds`
@@ -200,18 +200,18 @@ interface DrawnBox {
  * "Waiting for the first segment" is a first-class state rather than an error, because it
  * is the normal condition for the first few seconds of every new stream.
  *
- * **WHEP-first, HLS-fallback** (docs/MVP2-PLAN.md §L / §U3): when the optional `whepUrl` input is
+ * **WHEP-first, HLS-fallback** (docs/plans/done/MVP2-PLAN.md §L / §U3): when the optional `whepUrl` input is
  * set, the player POSTs an SDP offer straight to it (mediamtx's own absolute origin URL — never
  * proxied, never app-relative, see `core/api/models.ts#ActiveStream.whepUrl`'s doc comment),
  * applies the SDP answer, and waits for a track. Any failure before a track ever arrives (a POST
  * error, or no track within `WHEP_NO_TRACK_TIMEOUT_MS`) falls back to the exact same HLS attach path
- * `src` has always used — this fallback is **load-bearing**, not a rare edge case: docs/MVP2-PLAN.md
+ * `src` has always used — this fallback is **load-bearing**, not a rare edge case: docs/plans/done/MVP2-PLAN.md
  * §L's own documented caveat is that a dockerized mediamtx advertises `127.0.0.1` ICE candidates, so
  * *every* LAN viewer's WHEP attempt is expected to fail and land here silently. Once a transport has
  * ever reached `playing`, a later failure no longer means "re-decide transport from scratch" the way
  * a pre-play one does — see below for what it means instead.
  *
- * **Connect once, ICE-restart first** (docs/REALTIME-PLAN.md Phase R-b item 1) — once WHEP has ever
+ * **Connect once, ICE-restart first** (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) — once WHEP has ever
  * reached `playing`, `connectionState==='disconnected'` starts a 5s grace timer
  * (`player-recovery.ts#ICE_RESTART_GRACE_MS`) rather than tearing anything down; `'failed'` (or the
  * grace timer expiring without self-healing) triggers `restartIce()` + a fresh offer, sent as a WHEP
@@ -247,14 +247,14 @@ interface DrawnBox {
  * attached, and `transportChanged` emits it too, for a host that wants to echo it (e.g.
  * `shared/player/stream-info-panel.ts`'s "Transport" fact).
  *
- * **Detection overlay** (docs/CYCLES-PLAN.md §11 item 6): an optional `detections`/`boxesMode`
+ * **Detection overlay** (docs/main/CYCLES-PLAN.md §11 item 6): an optional `detections`/`boxesMode`
  * input pair draws a canvas overlay of the freshest detection batch matched against this player's
  * own measured live-edge latency (`shared/player/detection-overlay-logic.ts#selectDetectionResult`) — crisp
  * at any video bitrate, and hoverable (label + confidence), unlike the server's burned-in boxes
  * (which stay; this is additive, see that module's doc comment on `'burned'`/`'off'`). Callers
  * that never pass `detections` simply never see the canvas draw anything.
  *
- * **Always a dark video surface, wherever it's mounted** (docs/VISUAL-REFRESH-PLAN.md F3/W4): the
+ * **Always a dark video surface, wherever it's mounted** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the
  * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
  * this component is reused far outside the three pages that own their own enclave root (`Fly`
  * cockpit, `Wall`) — `features/live`, `features/command/asset-panel`, and any future host all mount
@@ -277,14 +277,14 @@ export class Player {
   /** HLS playlist URL, or `null` when nothing is streaming — also the WHEP fallback target. */
   readonly src = input<string | null>(null);
 
-  /** Mediamtx's own absolute WHEP origin URL (docs/MVP2-PLAN.md §L), or `null`/absent for HLS-only. */
+  /** Mediamtx's own absolute WHEP origin URL (docs/plans/done/MVP2-PLAN.md §L), or `null`/absent for HLS-only. */
   readonly whepUrl = input<string | null>(null);
 
   /** Wall tiles set this when scrolled out of view so off-screen video stops decoding. */
   readonly suspended = input(false);
 
   /**
-   * The host page knows this stream was deliberately stopped (docs/MVP2-PLAN.md §S, S-b) — its own
+   * The host page knows this stream was deliberately stopped (docs/plans/done/MVP2-PLAN.md §S, S-b) — its own
    * Stop action, or (a host reading it off `FleetStore`/an equivalent store) the streams list no
    * longer naming this device. Renders a calm "Stream stopped" state and — the actual fix for the
    * diagnosed freeze — makes the reattach effect below a no-op regardless of `src`/`whepUrl`, so a
@@ -315,7 +315,7 @@ export class Player {
   readonly transportChanged = output<Transport>();
 
   /**
-   * Click-to-follow (docs/TRACKING-PLAN.md §4.D, wave T7) — emits a track id when the operator
+   * Click-to-follow (docs/plans/done/TRACKING-PLAN.md §4.D, wave T7) — emits a track id when the operator
    * clicks a **tracked** box in the overlay (an untracked box has no id to lock onto, and is
    * deliberately a no-op click — the point/box lock forms the wire contract also allows are out of
    * this wave's scope). The host (`CockpitFacade#followTrack`) is the one that actually PATCHes
@@ -323,7 +323,7 @@ export class Player {
    * itself, same "dumb component, host owns the write" rule as `latencyChanged`/`transportChanged`
    * above. No optimistic UI here either: nothing in this component claims the lock took until a host
    * that reads it back (`cv-control-panel.ts`'s own tracks poll) says so — see that class's own doc
-   * comment for docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule.
+   * comment for docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule.
    */
   readonly trackFollowed = output<number>();
 
@@ -336,7 +336,7 @@ export class Player {
   protected readonly message = signal<string | null>(null);
 
   /**
-   * Cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) — `player-recovery.ts#PacingState`'s
+   * Cross-cycle reconnect pacing (docs/plans/done/MVP2-PLAN.md §S, S-c) — `player-recovery.ts#PacingState`'s
    * own doc comment has the full rules; this signal is the one piece of state that survives a
    * WHEP→HLS fallback and every subsequent cycle restart, driving the *actual* delay/WHEP-retry
    * decisions below. `transportState` above is untouched and still drives `phase`/the chip.
@@ -385,7 +385,7 @@ export class Player {
     return next;
   }
 
-  /** The `WhepIceState` analog of `dispatchRecovery`/`dispatchPacing` above (docs/REALTIME-PLAN.md Phase R-b item 1) — same reasoning, same log shape. Not a signal: nothing in the template reads it, it's pure internal watchdog/connectionstatechange bookkeeping, same as `lastFrameAt`/`mediaErrorRecoveryCount`. */
+  /** The `WhepIceState` analog of `dispatchRecovery`/`dispatchPacing` above (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) — same reasoning, same log shape. Not a signal: nothing in the template reads it, it's pure internal watchdog/connectionstatechange bookkeeping, same as `lastFrameAt`/`mediaErrorRecoveryCount`. */
   private dispatchWhepIce(event: WhepIceEvent): WhepIceState {
     const prev = this.whepIceState;
     const next = reduceWhepIce(prev, event);
@@ -397,7 +397,7 @@ export class Player {
   }
 
   /**
-   * The "reconnecting" state line's cause + action (docs/UX-QUICKWINS-PLAN.md QF-4 item 2 —
+   * The "reconnecting" state line's cause + action (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4 item 2 —
    * "Feed unreachable — retrying in Ns (attempt k)") — projects the existing recovery/pacing state
    * into words rather than inventing a new one: `cyclePacingDelayMs` (`player-recovery.ts`) is the
    * *exact* delay `scheduleReconnect`/`scheduleColdStartRetry`/`handleWhepFailure` already computed
@@ -421,7 +421,7 @@ export class Player {
   private readonly behindLive = signal<number | null>(null);
 
   /**
-   * The latency badge's WebRTC figure (docs/UX-QUICKWINS-PLAN.md QF-4) — `null` until the first
+   * The latency badge's WebRTC figure (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4) — `null` until the first
    * `getStats()` tick that reports a round-trip time (`estimateWhepLatencySeconds`,
    * `player-recovery.ts`), refreshed on the same `WATCHDOG_TICK_MS` cadence as the stall watchdog's
    * own poll (`refreshWhepStatsProgress`). Purely a display concern — never read by the overlay sync
@@ -443,7 +443,7 @@ export class Player {
 
   protected readonly hoveredDetection = signal<Detection | null>(null);
   /** The hover tooltip's own text — `formatDetectionLabel` so the tooltip and the canvas-drawn box
-   * label always agree on whether a box is carrying a track id (docs/TRACKING-PLAN.md §10). */
+   * label always agree on whether a box is carrying a track id (docs/plans/done/TRACKING-PLAN.md §10). */
   protected readonly hoveredLabel = computed(() => {
     const hovered = this.hoveredDetection();
     return hovered ? formatDetectionLabel(hovered) : '';
@@ -472,7 +472,7 @@ export class Player {
       : undefined,
   );
 
-  /** docs/OPS-CORE-PLAN.md §Q3b: every distinct model key in the batch currently on screen. */
+  /** docs/plans/done/OPS-CORE-PLAN.md §Q3b: every distinct model key in the batch currently on screen. */
   protected readonly overlayModelKeys = computed(() => distinctModelKeys(this.overlayResult()?.detections ?? []));
   /** The legend chip only earns its place once ≥2 models actually mix in the same frame. */
   protected readonly showModelLegend = computed(() => this.overlayModelKeys().length >= 2);
@@ -497,7 +497,7 @@ export class Player {
   /**
    * The `src`/`whepUrl`/`suspended`/`stopped` tuple (`player-recovery.ts#attachKey`) the reattach
    * effect last actually acted on — see its own doc comment. Also what keeps a secondary tile's
-   * `<vision-player>` from tearing down on every poll re-render (docs/REALTIME-PLAN.md Phase R-a
+   * `<vision-player>` from tearing down on every poll re-render (docs/plans/done/REALTIME-PLAN.md Phase R-a
    * item 4) — see `attachKey`'s own doc comment for why this holds regardless of tile
    * reorder/resize.
    */
@@ -505,14 +505,14 @@ export class Player {
   /** `document.hidden` as of the latency timer's last tick — see `startLatencySampling`'s doc. */
   private wasDocumentHidden = false;
 
-  // --- WHEP (docs/MVP2-PLAN.md §L / §U3) ---------------------------------------------------------
+  // --- WHEP (docs/plans/done/MVP2-PLAN.md §L / §U3) ---------------------------------------------------------
   private peerConnection: RTCPeerConnection | null = null;
   private whepAbort: AbortController | null = null;
   private whepWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private whepNoTrackTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Whether `ontrack` has already fired for the current attach — reset `false` at the top of every
-   * `beginWhepAttach`. **The actual fix for a live-soak-confirmed race** (docs/REALTIME-PLAN.md
+   * `beginWhepAttach`. **The actual fix for a live-soak-confirmed race** (docs/plans/done/REALTIME-PLAN.md
    * Phase R-b follow-up): on a fast/loopback connection, `pc.ontrack` can fire *before*
    * `scheduleWhepNoTrackTimeout`'s own call site runs (it fires as part of applying the remote
    * description, ahead of the `await`-continuation that used to call that method afterward) — a
@@ -527,12 +527,12 @@ export class Player {
   private whepTrackArrived = false;
   private lastFrameAt = 0;
   private currentWhepUrl: string | null = null;
-  /** Previous tick's `getStats()` snapshot (docs/REALTIME-PLAN.md Phase R-a item 1) — `null` until the first tick that finds one. */
+  /** Previous tick's `getStats()` snapshot (docs/plans/done/REALTIME-PLAN.md Phase R-a item 1) — `null` until the first tick that finds one. */
   private whepStatsSnapshot: WhepStatsSnapshot | null = null;
   /** Last logged advance/stall state, so the watchdog logs only on a *transition* — see `refreshWhepStatsProgress`. */
   private whepStatsAdvancing: boolean | null = null;
 
-  // --- WHEP session lifecycle + ICE-restart-first recovery (docs/REALTIME-PLAN.md Phase R-b) -----
+  // --- WHEP session lifecycle + ICE-restart-first recovery (docs/plans/done/REALTIME-PLAN.md Phase R-b) -----
   private readonly certificateService = inject(WebrtcCertificateService);
   /** The WHEP POST's `Location` header, resolved to an absolute URL (item 2) — `null` until captured, and again once genuinely torn down. The PATCH/DELETE target for everything below. */
   private whepSessionUrl: string | null = null;
@@ -595,7 +595,7 @@ export class Player {
     });
 
     // `pagehide` — not `beforeunload`/`unload` — is the reliable signal a real tab close/navigation
-    // is happening (docs/REALTIME-PLAN.md Phase R-b item 2): `DestroyRef.onDestroy` below still
+    // is happening (docs/plans/done/REALTIME-PLAN.md Phase R-b item 2): `DestroyRef.onDestroy` below still
     // covers a normal Angular route-leave/component-removal teardown, but a genuine browser tab
     // close doesn't reliably run Angular's own destroy hooks in time. `sendWhepSessionDelete` itself
     // nulls out `whepSessionUrl` once fired, so if `teardown()` *also* runs (ordinary route leave)
@@ -627,7 +627,7 @@ export class Player {
 
   /**
    * Cancels whatever reconnect backoff is currently pending, if any — called at the top of every
-   * place that's about to set a new one (docs/MVP2-PLAN.md §S, S-b bug fix). Before this, each of
+   * place that's about to set a new one (docs/plans/done/MVP2-PLAN.md §S, S-b bug fix). Before this, each of
    * `scheduleReconnect`/`handleWhepFailure`'s retry branch assigned `this.reconnectTimer` directly,
    * silently **orphaning** whatever the field previously held: a second failure signal arriving
    * before the first backoff wait elapsed (hls.js can emit more than one fatal `ERROR` for the same
@@ -704,7 +704,7 @@ export class Player {
   }
 
   /**
-   * Starts the next reconnect cycle (docs/MVP2-PLAN.md §S, S-c): tries WHEP again if this saga's
+   * Starts the next reconnect cycle (docs/plans/done/MVP2-PLAN.md §S, S-c): tries WHEP again if this saga's
    * damping cooldown allows it (`shouldAttemptWhep`), otherwise goes straight to HLS — the fresh-
    * `RecoveryState`/chip-phase reset here exactly mirrors `reattach()`'s own "fresh attach" branch
    * above, just without resetting `pacingState` (a new *cycle*, not a new *saga*). Every scheduled
@@ -781,10 +781,10 @@ export class Player {
       this.mediaErrorRecoveryCount = 0; // real progress — the recovery cap starts fresh
       const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
       this.dispatchRecovery('firstSegment');
-      this.dispatchPacing('playing', Date.now()); // docs/MVP2-PLAN.md §S, S-c
+      this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
       if (wasReconnecting) {
         console.info(`${LOG_PREFIX} HLS recovered — fragment buffered again`);
-        this.maybeSnapToLive('recovered'); // see docs/MVP2-PLAN.md §V, V-b — a fresh reattach earns a live-edge snap.
+        this.maybeSnapToLive('recovered'); // see docs/plans/done/MVP2-PLAN.md §V, V-b — a fresh reattach earns a live-edge snap.
       }
     });
     hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -854,7 +854,7 @@ export class Player {
   }
 
   /**
-   * A never-yet-live stream's cold-start poll (docs/MVP2-PLAN.md §S, S-c rule 1): gentle and fixed
+   * A never-yet-live stream's cold-start poll (docs/plans/done/MVP2-PLAN.md §S, S-c rule 1): gentle and fixed
    * while this saga has never failed anything (`cycleAttempt === 0` — "a never-yet-live stream
    * politely waiting is allowed its gentle poll"), but the moment this saga has already failed a
    * transport (a WHEP fallback, or an earlier HLS attempt this same saga), a further playlist miss
@@ -918,7 +918,7 @@ export class Player {
   }
 
   /**
-   * Dispatches a pacing `'healthTick'` (docs/MVP2-PLAN.md §S, S-c rule 3) whenever `phase ===
+   * Dispatches a pacing `'healthTick'` (docs/plans/done/MVP2-PLAN.md §S, S-c rule 3) whenever `phase ===
    * 'playing'` — a no-op otherwise. Called from both the HLS/native watchdog (`startWatchdog`) and
    * the WHEP one (`startWhepWatchdog`), which already tick every `WATCHDOG_TICK_MS` for their own
    * stall check regardless of transport, so this reuses that existing cadence rather than starting
@@ -941,9 +941,9 @@ export class Player {
         this.lastProgressAt = Date.now();
         const wasReconnecting = this.transportState().recovery.phase === 'reconnecting';
         this.dispatchRecovery('firstSegment');
-        this.dispatchPacing('playing', Date.now()); // docs/MVP2-PLAN.md §S, S-c
+        this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
         if (wasReconnecting) {
-          this.maybeSnapToLive('recovered'); // see docs/MVP2-PLAN.md §V, V-b — mirrors the hls.js FRAG_BUFFERED handler above.
+          this.maybeSnapToLive('recovered'); // see docs/plans/done/MVP2-PLAN.md §V, V-b — mirrors the hls.js FRAG_BUFFERED handler above.
         }
       },
       { signal: abortSignal },
@@ -974,7 +974,7 @@ export class Player {
 
   /**
    * Samples `behindLive` once a second and derives the live-edge behavior that rides on that same
-   * cadence (docs/MVP2-PLAN.md §V, V-b) — a tab-visibility restore, detected by diffing
+   * cadence (docs/plans/done/MVP2-PLAN.md §V, V-b) — a tab-visibility restore, detected by diffing
    * `document.hidden` against what it was on the *previous* tick (there is no dedicated
    * `visibilitychange` listener — this app already has the precedent of checking `document.hidden`
    * from an existing per-second heartbeat rather than a separate event, see `core/poll-scheduler.ts`;
@@ -1045,7 +1045,7 @@ export class Player {
     this.overlayTimer = setInterval(() => this.redrawOverlay(), OVERLAY_REDRAW_MS);
   }
 
-  // --- WHEP attach (docs/MVP2-PLAN.md §L / §U3) --------------------------------------------------
+  // --- WHEP attach (docs/plans/done/MVP2-PLAN.md §L / §U3) --------------------------------------------------
 
   /**
    * POSTs an SDP offer straight to `whepUrl` (never proxied — see class doc), applies the answer,
@@ -1088,7 +1088,7 @@ export class Player {
     this.whepAbort = controller;
 
     try {
-      // Stable DTLS fingerprint (docs/REALTIME-PLAN.md Phase R-b item 3) — every PC this player
+      // Stable DTLS fingerprint (docs/plans/done/REALTIME-PLAN.md Phase R-b item 3) — every PC this player
       // creates shares the one browser-persisted certificate; see `WebrtcCertificateService`'s own
       // class doc for why (server-side viewer correlation across tiles/reconnects) and its graceful
       // degrade (an empty array here just means "let the browser generate its own ephemeral one",
@@ -1122,14 +1122,14 @@ export class Player {
         this.behindLive.set(0); // WHEP is effectively live — see class doc.
         this.clearWhepNoTrackTimer();
         this.dispatchRecovery('firstSegment');
-        this.dispatchPacing('playing', Date.now()); // docs/MVP2-PLAN.md §S, S-c
+        this.dispatchPacing('playing', Date.now()); // docs/plans/done/MVP2-PLAN.md §S, S-c
         if (this.overlayTimer === null) {
           this.startOverlayLoop(); // ontrack can fire more than once on renegotiation
         }
       };
 
       // `connectionState` (not `iceConnectionState`) drives ICE-restart-first recovery
-      // (docs/REALTIME-PLAN.md Phase R-b item 1) — the WebRTC-recommended aggregated signal for
+      // (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) — the WebRTC-recommended aggregated signal for
       // "is media actually still flowing", replacing this handler's pre-R-b immediate-teardown
       // behavior entirely (an ICE restart needs the grace/restart decision made *before* anything
       // tears down, which the old handler never allowed for).
@@ -1141,7 +1141,7 @@ export class Player {
       // Non-trickle: gather (bounded) before POSTing, so the offer's SDP carries usable candidates.
       // An ICE *restart* (see `attemptIceRestart`) reuses this exact same gather-then-send shape —
       // "one negotiate step, reused for both the first offer and every later restart" is this file's
-      // own reading of "adopt the perfect-negotiation pattern" (docs/REALTIME-PLAN.md Phase R-b item
+      // own reading of "adopt the perfect-negotiation pattern" (docs/plans/done/REALTIME-PLAN.md Phase R-b item
       // 1): WHEP's browser-always-offers shape has no offer/answer glare to resolve (mediamtx never
       // sends an unsolicited offer of its own), so the one thing worth sharing is this negotiation
       // shape itself, not the full polite/impolite conflict-resolution protocol.
@@ -1164,7 +1164,7 @@ export class Player {
         throw new Error(`WHEP offer rejected: HTTP ${response.status}`);
       }
 
-      // Honor the session resource (docs/REALTIME-PLAN.md Phase R-b item 2): capture `Location` so
+      // Honor the session resource (docs/plans/done/REALTIME-PLAN.md Phase R-b item 2): capture `Location` so
       // a later ICE restart (PATCH) or genuine teardown (DELETE) has a target. Absent entirely
       // degrades gracefully to "no restart/DELETE available for this session" rather than throwing —
       // a still-playable WHEP attach with no `Location` header is a mediamtx-compatibility gap worth
@@ -1181,7 +1181,7 @@ export class Player {
       if (generation !== this.generation) {
         return;
       }
-      // Armed *before* `setRemoteDescription` is awaited, not after (docs/REALTIME-PLAN.md Phase
+      // Armed *before* `setRemoteDescription` is awaited, not after (docs/plans/done/REALTIME-PLAN.md Phase
       // R-b follow-up — a live soak test's own finding): `ontrack` can fire as part of applying the
       // remote description, ahead of this method's own `await` continuation, so arming any later
       // than this narrows — but does not by itself close — the race `whepTrackArrived`/
@@ -1248,7 +1248,7 @@ export class Player {
     }
   }
 
-  // --- ICE-restart-first recovery (docs/REALTIME-PLAN.md Phase R-b item 1) -----------------------
+  // --- ICE-restart-first recovery (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) -----------------------
 
   /**
    * `connectionState` handler: `'connected'` clears any grace timer and reports a self-heal;
@@ -1433,7 +1433,7 @@ export class Player {
   }
 
   /**
-   * Fire-and-forget `DELETE` to the WHEP session resource (docs/REALTIME-PLAN.md Phase R-b item 2)
+   * Fire-and-forget `DELETE` to the WHEP session resource (docs/plans/done/REALTIME-PLAN.md Phase R-b item 2)
    * — genuine teardown only; never called from the ICE-restart path above, which keeps the same
    * session alive on purpose. `keepalive: true` lets this outlive a `pagehide` navigation (browsers
    * permit a bounded amount of in-flight keepalive request data across a page unload) — chosen over
@@ -1451,7 +1451,7 @@ export class Player {
   /**
    * No frame progress for `STALL_WATCHDOG_MS` — the WHEP equivalent of `startWatchdog`'s HLS check.
    * Real progress is measured via `getStats()` each tick (`refreshWhepStatsProgress`,
-   * docs/REALTIME-PLAN.md Phase R-a item 1) rather than assumed from the one-shot `ontrack` handler
+   * docs/plans/done/REALTIME-PLAN.md Phase R-a item 1) rather than assumed from the one-shot `ontrack` handler
    * — see that method's own doc comment for why the old assumption tripped this watchdog on
    * perfectly healthy streams.
    */
@@ -1475,7 +1475,7 @@ export class Player {
     }
     if (isStalled(this.lastFrameAt, Date.now())) {
       // Keep the real-stall watchdog from R-a as the trigger for recovery, but recovery now means
-      // ICE-restart-first (docs/REALTIME-PLAN.md Phase R-b item 1) — the same rule
+      // ICE-restart-first (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) — the same rule
       // `onWhepConnectionStateChange` uses: a transport that has already played retries via
       // in-place ICE restart before ever tearing anything down; a pre-play stall (rare — the
       // no-track timeout usually catches that first) still falls straight to `handleWhepFailure`.
@@ -1493,7 +1493,7 @@ export class Player {
   }
 
   /**
-   * Refreshes `lastFrameAt` from real decode/receive progress (docs/REALTIME-PLAN.md §0 + Phase
+   * Refreshes `lastFrameAt` from real decode/receive progress (docs/plans/done/REALTIME-PLAN.md §0 + Phase
    * R-a item 1): before this, `lastFrameAt` was only ever set at attach and in the one-shot
    * `ontrack` handler, so a perfectly healthy stream tripped `STALL_WATCHDOG_MS` ~8-10s after
    * connecting regardless — `ontrack` fires once per renegotiation, never once per frame.
@@ -1509,7 +1509,7 @@ export class Player {
    * per-tick logging here would be exactly the console spam this file's own `LOG_PREFIX` doc
    * comment says to avoid.
    *
-   * **Also refreshes `whepLatencySeconds`** (docs/UX-QUICKWINS-PLAN.md QF-4's latency badge) from
+   * **Also refreshes `whepLatencySeconds`** (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4's latency badge) from
    * the exact same report — `extractWhepStatsSnapshot` now also reads jitter/round-trip time
    * alongside the decode counters, so this is one `getStats()` call serving both concerns, not a
    * second poller.
@@ -1557,7 +1557,7 @@ export class Player {
    * `reattach`/`beginNextCycle`'s own `'whepAttempted'` dispatch — and falling through to try HLS is
    * *within* the current cycle, not a new one); the played-before retry branch below does, since a
    * previously-proven WHEP connection dying and needing reconnection is genuinely a new cycle
-   * (docs/MVP2-PLAN.md §S, S-c).
+   * (docs/plans/done/MVP2-PLAN.md §S, S-c).
    */
   private handleWhepFailure(
     generation: number,
@@ -1615,7 +1615,7 @@ export class Player {
   /**
    * Tears down the current WHEP attempt/session — called at the top of every fresh
    * `beginWhepAttach` (a brand new session is about to replace whatever this one was) and from full
-   * `teardown()`. **Always `DELETE`s the session resource if one exists** (docs/REALTIME-PLAN.md
+   * `teardown()`. **Always `DELETE`s the session resource if one exists** (docs/plans/done/REALTIME-PLAN.md
    * Phase R-b item 2): every call site of this method represents genuinely letting go of
    * `whepSessionUrl` — the *only* code path that keeps a session alive across a connectivity blip is
    * `attemptIceRestart`, which deliberately never calls this method at all. That includes this
@@ -1668,7 +1668,7 @@ export class Player {
     return Math.max(0, seekable.end(seekable.length - 1) - video.currentTime);
   }
 
-  // --- Detection overlay (docs/CYCLES-PLAN.md §11 item 6) -------------------------------------
+  // --- Detection overlay (docs/main/CYCLES-PLAN.md §11 item 6) -------------------------------------
 
   private redrawOverlay(): void {
     const canvasRef = this.overlayCanvas();
@@ -1708,7 +1708,7 @@ export class Player {
 
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
     // Trails first, so every box (drawn next) sits visually on top of its own tail rather than
-    // under it — docs/TRACKING-PLAN.md §10 touchable outcome #3.
+    // under it — docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3.
     this.drawTrails(ctx, content, results);
     const drawn: DrawnBox[] = [];
     for (const detection of result.detections) {
@@ -1746,7 +1746,7 @@ export class Player {
   }
 
   /**
-   * Box color is per-**track** once a detection carries one (docs/TRACKING-PLAN.md §10 — `trackHue`,
+   * Box color is per-**track** once a detection carries one (docs/plans/done/TRACKING-PLAN.md §10 — `trackHue`,
    * `detection-overlay-logic.ts`), so one object keeps one color across every frame even as its
    * label flips (a composite-mode member handoff mid-track); **per-model** otherwise (docs/OPS-CORE-
    * PLAN.md §Q3b, `modelHue`/`detectionModelKey`) — a single-model, untracked stream's boxes stay
@@ -1754,7 +1754,7 @@ export class Player {
    * for every box alike — hover means "this box", not "this model" or "this track". A `COASTING`
    * track (tracker-predicted, not detector-reconfirmed on the most recent pass) draws **dashed** —
    * the honest-UI doctrine made pixel-level: the system is visibly saying "I am extrapolating, not
-   * seeing" (docs/TRACKING-ORCHESTRATION.md §3.3's same doctrine, applied to a box instead of a lock).
+   * seeing" (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's same doctrine, applied to a box instead of a lock).
    */
   private drawBox(ctx: CanvasRenderingContext2D, rect: DrawnBox, detection: Detection): void {
     const hovered = this.hoveredDetection() === detection;
@@ -1780,7 +1780,7 @@ export class Player {
   }
 
   /**
-   * Fading per-track trails (docs/TRACKING-PLAN.md §10 touchable outcome #3) — `trackTrails` is a
+   * Fading per-track trails (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #3) — `trackTrails` is a
    * pure recomputation from `results` on every redraw tick (`detection-overlay-logic.ts`'s own doc
    * comment on why that's enough to "clear on stream change" with no extra bookkeeping here). A
    * track with fewer than two points in the window has nothing to connect yet and draws nothing —
@@ -1844,7 +1844,7 @@ export class Player {
   }
 
   /**
-   * Click-to-follow's hit-test (docs/TRACKING-PLAN.md §4.D) — reuses the exact same
+   * Click-to-follow's hit-test (docs/plans/done/TRACKING-PLAN.md §4.D) — reuses the exact same
    * {@link drawnBoxes} hit-test {@link onOverlayMouseMove} already does; a click that lands on a
    * **tracked** box emits its id via {@link trackFollowed}. A click on an untracked box, or on empty
    * canvas, is a no-op — there is no id to lock onto (the wire's point/box lock forms are out of

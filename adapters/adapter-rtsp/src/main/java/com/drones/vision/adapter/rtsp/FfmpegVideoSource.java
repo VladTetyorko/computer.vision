@@ -23,12 +23,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   <li>{@code file} — a local video file played back as a simulated live source (drone simulation
  *       with zero hardware): looped on request and paced to its own native frame rate rather than
  *       decoded flat out.</li>
- *   <li>{@code srt} — SRT (Secure Reliable Transport), docs/DRONE-INFRA-PLAN.md I-h: the de-facto
+ *   <li>{@code srt} — SRT (Secure Reliable Transport), docs/plans/active/DRONE-INFRA-PLAN.md I-h: the de-facto
  *       low-latency transport for drone video over lossy cellular/long-range links (DJI
  *       transmission, Herelink, cheap SRT encoders, OBS). Either dials out ({@code mode=caller}, the
  *       app connects to the encoder) or binds/listens ({@code mode=listener}, the natural choice for
  *       {@code srt://0.0.0.0:port} — the encoder dials in).</li>
- *   <li>{@code udp} — raw UDP/MPEG-TS, docs/DRONE-INFRA-PLAN.md I-h: the classic ground-station/
+ *   <li>{@code udp} — raw UDP/MPEG-TS, docs/plans/active/DRONE-INFRA-PLAN.md I-h: the classic ground-station/
  *       encoder output ({@code ffmpeg … -f mpegts udp://…}, analog-to-digital boxes). Always
  *       binds/listens — UDP is connectionless, so opening a {@code udp://host:port} URL for reading
  *       means "receive datagrams sent to this host:port", not "connect to a remote peer".</li>

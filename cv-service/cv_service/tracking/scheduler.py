@@ -1,7 +1,7 @@
 """The duty-cycle scheduler: pure policy, nothing else.
 
-`docs/TRACKING-PLAN.md` §3.1 (the table this file implements),
-`docs/TRACKING-ORCHESTRATION.md` §2.1, §3.1.
+`docs/plans/done/TRACKING-PLAN.md` §3.1 (the table this file implements),
+`docs/extracts/TRACKING-ORCHESTRATION.md` §2.1, §3.1.
 
     | Mode      | Detector pass when                                        |
     |-----------|-----------------------------------------------------------|

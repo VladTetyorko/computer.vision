@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import java.util.List;
 
 /**
- * Response body for {@code GET /api/training/jobs} (docs/CV-TRAINING-PLAN.md §8's frozen wire
+ * Response body for {@code GET /api/training/jobs} (docs/plans/done/CV-TRAINING-PLAN.md §8's frozen wire
  * contract) — every tracked job, mirroring {@link RegisteredModelsResponse}'s wrapped-list shape.
  *
  * @param jobs every job {@link com.drones.vision.application.training.TrainingJobService#jobs()} still

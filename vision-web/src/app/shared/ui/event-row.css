@@ -34,7 +34,7 @@
   border-color: var(--color-live);
 }
 
-/* Two-pane's own selection state (Alerts only) — docs/VISUAL-REFRESH-PLAN.md F4: the app-wide 2px
+/* Two-pane's own selection state (Alerts only) — docs/plans/done/VISUAL-REFRESH-PLAN.md F4: the app-wide 2px
    `--color-info` left bar + `--color-info-soft` background tint, the same pairing
    `app-sidebar.css#.nav-row.active`/the assets and devices tables/`features/roster` all use. Was a
    left-bar-only change (no tint, `--panel-raised` on both rest and selected — indistinguishable at a
@@ -64,7 +64,7 @@
   font-weight: 600;
 }
 
-/* ---- Dense (docs/design/08-alerts.md): one line, ~32px tall ------------------------------------ */
+/* ---- Dense (docs/extracts/design/08-alerts.md): one line, ~32px tall ------------------------------------ */
 
 .event-row.dense {
   display: flex;

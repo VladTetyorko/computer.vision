@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * <p>{@code streamId}/{@code viewUrl}/{@code whepUrl} are omitted from the JSON entirely (rather
  * than serialized as {@code null}) when the simulation was not auto-started, or — for {@code
  * viewUrl}/{@code whepUrl} individually — when the active {@code StreamPublisherPort} has no
- * matching viewing endpoint for the stream, mirroring {@link StartStreamResponse} (docs/MVP2-PLAN.md
+ * matching viewing endpoint for the stream, mirroring {@link StartStreamResponse} (docs/plans/done/MVP2-PLAN.md
  * §L). {@code whepUrl}, when present, is the media server's own origin URL, not app-relative like
  * {@code viewUrl} can be — see {@code whepUrl}'s port-level javadoc for why.
  *

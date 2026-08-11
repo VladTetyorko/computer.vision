@@ -3,7 +3,7 @@ package com.drones.vision.domain.port.out;
 import com.drones.vision.domain.model.User;
 
 /**
- * Driven port: hash and verify raw passwords (docs/U-AUTH-PLAN.md, wave 2).
+ * Driven port: hash and verify raw passwords (docs/plans/done/U-AUTH-PLAN.md, wave 2).
  *
  * <p>The domain and application layers never see the hashing algorithm — BCrypt in production,
  * supplied by {@code vision-app} (wave 3) — they only see this seam. {@link #hash(String)}'s

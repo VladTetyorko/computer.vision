@@ -13,7 +13,7 @@ import java.util.Objects;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 
 /**
- * Driving REST adapter for CONTRACT 1's test-before-save connection probe (docs/UX-REWORK-PLAN.md
+ * Driving REST adapter for CONTRACT 1's test-before-save connection probe (docs/plans/done/UX-REWORK-PLAN.md
  * §U-d item 3, UX-DESIGN.md §5.1): {@code POST /api/devices/probe} tries a connection and returns
  * what it found, without ever registering a device or asset.
  *
@@ -37,7 +37,7 @@ public class DeviceProbeController {
 
     private final ProbeService probeService;
     /**
-     * Constructor-injected (docs/LAYERING-REFACTOR-PLAN.md wave D) — {@code vision-app} now supplies
+     * Constructor-injected (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D) — {@code vision-app} now supplies
      * this as a real bean, mapped from its own Spring {@code VisionApiProperties} record; the same
      * instance {@link StreamController#snapshot} uses.
      */

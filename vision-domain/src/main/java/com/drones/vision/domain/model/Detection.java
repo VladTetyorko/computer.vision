@@ -3,10 +3,10 @@ package com.drones.vision.domain.model;
 /**
  * A single object detection produced by a model on one frame.
  *
- * <p>{@code track} (docs/TRACKING-PLAN.md §4.B) is {@code null} when tracking is off for this
+ * <p>{@code track} (docs/plans/done/TRACKING-PLAN.md §4.B) is {@code null} when tracking is off for this
  * stream, or when this particular detection has not (yet) been associated with a track —
  * "untracked" has exactly one spelling at this layer, a null reference, never a sentinel {@link
- * TrackRef} with {@code trackId == 0} (docs/TRACKING-ORCHESTRATION.md §6 rule 2).
+ * TrackRef} with {@code trackId == 0} (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 2).
  *
  * @param label      class label (e.g. {@code "person"}); must not be blank
  * @param confidence detection confidence, range [0,1]
@@ -35,7 +35,7 @@ public record Detection(String label, double confidence, BoundingBox box, ModelR
      * Convenience constructor for an untracked detection (tracking off for the stream, or not yet
      * associated) — defaults {@link #track()} to {@code null}, the same "N-1-arg convenience ctor"
      * idiom used elsewhere ({@code Telemetry}'s 8-arg ctor, {@code AssetUsage}'s 7-arg ctor). This
-     * was the canonical constructor before docs/TRACKING-PLAN.md §4.B added {@link #track()};
+     * was the canonical constructor before docs/plans/done/TRACKING-PLAN.md §4.B added {@link #track()};
      * every pre-existing 4-arg call site compiles unchanged.
      */
     public Detection(String label, double confidence, BoundingBox box, ModelRef model) {

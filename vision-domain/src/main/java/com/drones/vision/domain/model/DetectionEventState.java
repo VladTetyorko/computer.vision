@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * Lifecycle state of a {@link DetectionEvent} (docs/MVP2-PLAN.md §E, E-a).
+ * Lifecycle state of a {@link DetectionEvent} (docs/plans/done/MVP2-PLAN.md §E, E-a).
  *
  * <p>Pure marker set, no behavior — mirrors {@link Capability}/{@link EventType}/{@link
  * PixelFormat}'s convention.

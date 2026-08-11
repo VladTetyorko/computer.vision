@@ -8,8 +8,8 @@ import com.drones.vision.application.map.LayerResolver;
 
 /**
  * Everything needed to create a {@code DETECTION} {@link com.drones.vision.domain.model.Mark} from
- * an asset's current pose (the cockpit "geolocate" action) — docs/MAP-REWORK-PLAN.md §3/§4.2,
- * superseding docs/TACTICAL-MARKS-PLAN.md §2's shape.
+ * an asset's current pose (the cockpit "geolocate" action) — docs/plans/done/MAP-REWORK-PLAN.md §3/§4.2,
+ * superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape.
  *
  * <p>{@link MarkService#geolocate} resolves {@code assetId}'s freshest telemetry itself (via {@code
  * UsageTracker#latestTelemetry}) and projects a ground point via {@code

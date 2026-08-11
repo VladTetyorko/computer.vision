@@ -1,5 +1,5 @@
 /**
- * Pure state machine behind `shared/player/player.ts`'s self-recovery (docs/CYCLES-PLAN.md §11, CD-b item 5).
+ * Pure state machine behind `shared/player/player.ts`'s self-recovery (docs/main/CYCLES-PLAN.md §11, CD-b item 5).
  *
  * Split out of the component so the recovery logic — which phase follows which event, and how
  * long to wait before the next reconnect attempt — is unit-testable without hls.js, timers, or a
@@ -16,7 +16,7 @@
  * `error` is now reserved for a genuinely unrecoverable condition — this browser cannot play HLS
  * at all — not for a transient network hiccup.
  *
- * **`stopped`** (docs/MVP2-PLAN.md §S, S-b) — a *deliberately* stopped stream, distinct from both
+ * **`stopped`** (docs/plans/done/MVP2-PLAN.md §S, S-b) — a *deliberately* stopped stream, distinct from both
  * `idle` (nothing has ever been asked to play) and `reconnecting`/`error` (a still-wanted stream
  * that is struggling or unplayable). Reached only via the new `'stopped'` event, which a host page
  * dispatches once it knows — from its own explicit Stop action, or from the streams list no longer
@@ -51,7 +51,7 @@ export type RecoveryEvent =
   /** This browser can play neither native HLS nor hls.js — nothing to retry. */
   | 'unsupported'
   /**
-   * The stream was deliberately stopped (docs/MVP2-PLAN.md §S, S-b) — either this page's own Stop
+   * The stream was deliberately stopped (docs/plans/done/MVP2-PLAN.md §S, S-b) — either this page's own Stop
    * action, or the streams list no longer naming this device. Always wins, from any phase.
    */
   | 'stopped';
@@ -61,11 +61,11 @@ export type RecoveryEvent =
  *
  * The one branch worth reading closely is `playlistNotReady`: before the stream has ever played
  * (`connecting`/`waiting`), a missing playlist is the ordinary, expected shape of a fresh stream —
- * it stays a gentle `waiting` (docs/CYCLES-PLAN.md §11 item 5: "no error flash on fresh streams").
+ * it stays a gentle `waiting` (docs/main/CYCLES-PLAN.md §11 item 5: "no error flash on fresh streams").
  * Once the stream has played before, or is already mid-recovery, the *same* event means the
  * backend actually went away (e.g. a restart) — it becomes a real `reconnecting` attempt instead.
  *
- * **`stopped` is absorbing** (docs/MVP2-PLAN.md §S, S-b): once `phase === 'stopped'`, every event
+ * **`stopped` is absorbing** (docs/plans/done/MVP2-PLAN.md §S, S-b): once `phase === 'stopped'`, every event
  * except `'attachStarted'`/`'reset'` (a *fresh* attach — a new `src`/`whepUrl` the caller actually
  * wants attached again) is a no-op, returning the exact same `state`. This is the fix for the
  * diagnosed stop-freeze mechanism: without it, a stray recovery signal arriving after a deliberate
@@ -116,7 +116,7 @@ const RECONNECT_MAX_DELAY_MS = 30_000;
 /**
  * Capped exponential backoff for the `reconnecting` phase: attempt 1 → 1s, 2 → 2s, 3 → 4s, …,
  * capped at 30s and held there indefinitely — the player never gives up on its own while `src` is
- * still set (docs/CYCLES-PLAN.md §11 item 5: "indefinitely while the page is open"), including
+ * still set (docs/main/CYCLES-PLAN.md §11 item 5: "indefinitely while the page is open"), including
  * across a backend restart that takes longer than any single attempt window.
  */
 export function reconnectDelayMs(attempt: number): number {
@@ -133,7 +133,7 @@ export function isStalled(
   return nowMs - lastProgressAtMs >= thresholdMs;
 }
 
-// --- Transport (docs/MVP2-PLAN.md §L / §U3: WHEP-first playback, HLS fallback) -----------------
+// --- Transport (docs/plans/done/MVP2-PLAN.md §L / §U3: WHEP-first playback, HLS fallback) -----------------
 //
 // `RecoveryState`/`reduceRecovery` above are untouched — every existing caller/spec keeps working
 // exactly as before. What follows *wraps* them with one additional rule specific to a
@@ -163,7 +163,7 @@ export function initialTransportState(hasWhepUrl: boolean): TransportRecoverySta
  * — POST/ICE error; `stalled` — no track within a timeout, or a later stall watchdog miss;
  * `unsupported` — this browser has no `RTCPeerConnection`) **before it has ever reached `playing`**
  * falls over to `hls` permanently for this attach lifetime, restarting `hls`'s own recovery from a
- * clean `connecting` state (docs/MVP2-PLAN.md §L's documented caveat: a dockerized mediamtx
+ * clean `connecting` state (docs/plans/done/MVP2-PLAN.md §L's documented caveat: a dockerized mediamtx
  * advertises `127.0.0.1` ICE candidates, so a LAN viewer's WHEP attempt is *expected* to fail every
  * time — retrying it would just add latency before the same, inevitable fallback). A `webrtc`
  * transport that fails **after** having reached `playing` at least once instead retries `webrtc`
@@ -174,7 +174,7 @@ export function initialTransportState(hasWhepUrl: boolean): TransportRecoverySta
  * whether active from the start or reached via fallback, behaves exactly as `reduceRecovery` always
  * has — this function changes nothing about HLS's own recovery once it's the active transport.
  *
- * `'stopped'` (docs/MVP2-PLAN.md §S, S-b) is not a "failure" this function's fallback rule cares
+ * `'stopped'` (docs/plans/done/MVP2-PLAN.md §S, S-b) is not a "failure" this function's fallback rule cares
  * about — it always routes straight to `reduceRecovery`, landing on the absorbing `stopped` phase
  * regardless of `transport`/`neverPlayedYet`; `transport` itself is left as whatever it was (moot —
  * the next real attach picks a fresh one via `initialTransportState`, it never reads this field).
@@ -193,7 +193,7 @@ export function reduceTransportRecovery(
   return { transport: state.transport, recovery: reduceRecovery(state.recovery, event) };
 }
 
-// --- Cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) ------------------------------------
+// --- Cross-cycle reconnect pacing (docs/plans/done/MVP2-PLAN.md §S, S-c) ------------------------------------
 //
 // `RecoveryState`/`reduceRecovery` and `TransportRecoveryState`/`reduceTransportRecovery` above are
 // UNCHANGED by this cycle — every existing caller/spec (including their own `attempt` field, reset
@@ -239,7 +239,7 @@ export function reduceTransportRecovery(
 //     the very next failure resumes escalating from wherever `cycleAttempt` already was.
 
 /**
- * Cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) — see the block comment above for the
+ * Cross-cycle reconnect pacing (docs/plans/done/MVP2-PLAN.md §S, S-c) — see the block comment above for the
  * three rules this backs.
  */
 export interface PacingState {
@@ -338,7 +338,7 @@ export function shouldAttemptWhep(state: PacingState, hasWhepUrl: boolean, nowMs
   );
 }
 
-// --- WHEP real stall detection via getStats() (docs/REALTIME-PLAN.md §0 + Phase R-a item 1) -----
+// --- WHEP real stall detection via getStats() (docs/plans/done/REALTIME-PLAN.md §0 + Phase R-a item 1) -----
 //
 // Before this, `shared/player/player.ts`'s `lastFrameAt` was only ever set once at attach and once more in the
 // one-shot `ontrack` handler — nothing observed *ongoing* frame delivery, so `STALL_WATCHDOG_MS`
@@ -356,7 +356,7 @@ export function shouldAttemptWhep(state: PacingState, hasWhepUrl: boolean, nowMs
 
 /**
  * The two monotonic WHEP inbound-video counters this cycle's stall check watches, plus the two
- * connection-quality figures the latency badge (docs/UX-QUICKWINS-PLAN.md QF-4) reads from the
+ * connection-quality figures the latency badge (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4) reads from the
  * *same* `getStats()` pass — extending this extraction rather than adding a second poller/call.
  */
 export interface WhepStatsSnapshot {
@@ -383,7 +383,7 @@ export interface WhepInboundRtpStatLike {
 
 /**
  * The active ICE candidate-pair entry in the same `getStats()` report — the source of round-trip
- * time for the latency badge (docs/UX-QUICKWINS-PLAN.md QF-4): STUN connectivity checks measure RTT
+ * time for the latency badge (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4): STUN connectivity checks measure RTT
  * regardless of media direction, so this is available even for this player's `recvonly`-only
  * transceiver, unlike a sender-side `remote-inbound-rtp` report (mediamtx's WHEP output has no
  * reason to produce one of those for a receive-only viewer).
@@ -431,7 +431,7 @@ export function extractWhepStatsSnapshot(
 }
 
 /**
- * A player-chrome latency estimate for a WHEP transport (docs/UX-QUICKWINS-PLAN.md QF-4's latency
+ * A player-chrome latency estimate for a WHEP transport (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4's latency
  * badge) — WHEP has no live-edge distance to measure the way HLS does (`shared/player/player.ts`'s
  * own `behindLive` stays pinned to `0` for the overlay-sync matcher; see that class's own doc
  * comment), so this is the honest number to show instead: half the measured round-trip time (the
@@ -473,7 +473,7 @@ export function didWhepStatsAdvance(
   );
 }
 
-// --- Reattach identity key (docs/REALTIME-PLAN.md Phase R-a item 4) -----------------------------
+// --- Reattach identity key (docs/plans/done/REALTIME-PLAN.md Phase R-a item 4) -----------------------------
 //
 // `shared/player/player.ts`'s constructor effect only actually reattaches when this key changes from the
 // previous run — the e7cdc46 fix for the hard-freeze bug (see that commit / this file's own
@@ -495,7 +495,7 @@ export function attachKey(
   return `${src} ${whepUrl} ${suspended} ${stopped}`;
 }
 
-// --- WHEP ICE-restart-first recovery (docs/REALTIME-PLAN.md Phase R-b item 1) -------------------
+// --- WHEP ICE-restart-first recovery (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) -------------------
 //
 // A further, independent pure state machine, sibling to `PacingState` above — same reasoning: kept
 // separate rather than bolted onto `RecoveryState`/`TransportRecoveryState` as ad-hoc flags. The
@@ -578,13 +578,13 @@ export function reduceWhepIce(state: WhepIceState, event: WhepIceEvent): WhepIce
 
 /**
  * Grace period between `connectionState==='disconnected'` and attempting an ICE restart
- * (docs/REALTIME-PLAN.md Phase R-b item 1) — long enough to absorb a brief network blip (a Wi-Fi
+ * (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) — long enough to absorb a brief network blip (a Wi-Fi
  * roam, a momentary NAT rebind) without ever tearing anything down for it, short enough that a
  * genuine loss still recovers well within the operator's own attention span.
  */
 export const ICE_RESTART_GRACE_MS = 5_000;
 
-// --- WHEP no-track timeout race (docs/REALTIME-PLAN.md Phase R-b follow-up) ----------------------
+// --- WHEP no-track timeout race (docs/plans/done/REALTIME-PLAN.md Phase R-b follow-up) ----------------------
 //
 // A live soak test caught a 100%-reproducible false-teardown bug: `shared/player/player.ts`'s
 // `scheduleWhepNoTrackTimeout` used to run only after `await pc.setRemoteDescription(...)`

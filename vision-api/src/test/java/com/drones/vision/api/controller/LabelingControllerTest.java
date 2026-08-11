@@ -50,8 +50,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * MockMvc tests for {@link LabelingController} (docs/CV-TRAINING-PLAN.md §3's frozen wire
- * contract, as delta'd by docs/CV-TRAINING-V2-PLAN.md §5), mirroring {@link
+ * MockMvc tests for {@link LabelingController} (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire
+ * contract, as delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md §5), mirroring {@link
  * DatasetControllerTest}/{@link MarksControllerTest}'s style: a standalone {@code MockMvc} over a
  * mocked {@link LabelingService} collaborator, with {@link ApiExceptionHandler} attached so error
  * mapping is exercised exactly as it runs in production.
@@ -419,7 +419,7 @@ class LabelingControllerTest {
                 .andExpect(jsonPath("$.error").value("NOT_FOUND"));
     }
 
-    // ---- Removed export routes now 404 (docs/CV-TRAINING-V2-PLAN.md §A: deleted, not hidden) ----
+    // ---- Removed export routes now 404 (docs/plans/done/CV-TRAINING-V2-PLAN.md §A: deleted, not hidden) ----
 
     @Test
     void exportRouteNoLongerExists() throws Exception {

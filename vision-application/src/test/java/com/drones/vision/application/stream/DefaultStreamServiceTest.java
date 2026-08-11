@@ -154,7 +154,7 @@ class DefaultStreamServiceTest {
 
         service.stop(streamId);
 
-        // docs/MVP2-PLAN.md §S, S-a: pipeline/source teardown now runs off the calling thread (see
+        // docs/plans/done/MVP2-PLAN.md §S, S-a: pipeline/source teardown now runs off the calling thread (see
         // DefaultStreamService.teardownAsync) so stop() itself returns promptly even when an
         // adapter's close() blocks for a long time -- verify with a bounded timeout rather than a
         // synchronous check.
@@ -169,7 +169,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void stopReturnsPromptlyEvenWhenSourceTeardownBlocksForAWhile() throws InterruptedException {
-        // docs/MVP2-PLAN.md §S, S-a: the actual reported bug -- stop() used to run
+        // docs/plans/done/MVP2-PLAN.md §S, S-a: the actual reported bug -- stop() used to run
         // VideoSourcePort#close synchronously, and some adapters' close() (e.g. adapter-rtsp's
         // FfmpegVideoSource joining its native grab thread, up to 20s) blocked the calling thread
         // for that long, freezing the /live app via the browser's own per-origin connection limit.
@@ -198,7 +198,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void sourceFailureTriggersASupervisedReopenInsteadOfEndingTheStream() {
-        // docs/MVP2-PLAN.md §S, S-a: a source error/completion alone must never end a stream -- it
+        // docs/plans/done/MVP2-PLAN.md §S, S-a: a source error/completion alone must never end a stream -- it
         // is retried (here: a real reopen, proven by a second open() call) instead.
         ErroringThenSilentPublisher publisher = new ErroringThenSilentPublisher();
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
@@ -217,7 +217,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void explicitStopDuringBackoffCancelsThePendingRetryAndNoFurtherOpenEverHappens() {
-        // docs/MVP2-PLAN.md §S, S-a: explicit stop during backoff must cancel the pending retry
+        // docs/plans/done/MVP2-PLAN.md §S, S-a: explicit stop during backoff must cancel the pending retry
         // immediately -- a tiny backoff window (20ms) plus a generous wait afterwards proves no
         // further open() call ever arrives, without waiting out the real 1s-30s production backoff.
         StreamService fastRetryService = new DefaultStreamService(deviceRepository, videoSourceRegistry,
@@ -419,7 +419,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void resolvesTheOwningAssetOnceAtStartAndThreadsItWithLiveUpdatePublisherIntoThePipeline() {
-        // docs/REALTIME-PLAN.md §4: DefaultStreamService is where assetId gets resolved (via
+        // docs/plans/done/REALTIME-PLAN.md §4: DefaultStreamService is where assetId gets resolved (via
         // usageTracker.resolveAsset), once, and handed to StreamPipeline alongside
         // liveUpdatePublisherPort -- StreamPipelineTest itself proves the emission logic once both
         // are present, this proves the wiring seam that gets them there.
@@ -548,7 +548,7 @@ class DefaultStreamServiceTest {
 
     @Test
     void startWithADetectionEventRepositoryPortConfiguredDoesNotThrow() {
-        // docs/MVP2-PLAN.md §E, E-a: the nine-argument constructor threads a fresh, per-stream
+        // docs/plans/done/MVP2-PLAN.md §E, E-a: the nine-argument constructor threads a fresh, per-stream
         // DetectionEventEngine into every StreamPipeline it starts. Full rule-engine behavior is
         // covered by DetectionEventEngineTest/StreamPipelineTest; this is the wiring seam,
         // mirroring usageTrackerIsNeverTouchedWhenNoneIsConfigured's "must not NPE" style for the
@@ -572,7 +572,7 @@ class DefaultStreamServiceTest {
         assertDoesNotThrow(() -> service.stop(streamId));
     }
 
-    // --- docs/CV-CONTROL-PLAN.md Wave C: StreamService.updateConfig ---
+    // --- docs/plans/done/CV-CONTROL-PLAN.md Wave C: StreamService.updateConfig ---
 
     /**
      * A {@link Flow.Publisher} whose frames are pushed explicitly by the test via {@link #push},
@@ -710,7 +710,7 @@ class DefaultStreamServiceTest {
         assertTrue(merged.detectionEnabled());
     }
 
-    // --- docs/TRACKING-PLAN.md §4.D, wave T3: the tracking fold and server-allocated lockSeq ---
+    // --- docs/plans/done/TRACKING-PLAN.md §4.D, wave T3: the tracking fold and server-allocated lockSeq ---
 
     private static TrackingConfig tracking(TrackingMode mode, TargetLock lock) {
         return new TrackingConfig(mode, "lk", 2000, 15, 30, 30, 3, lock);
@@ -930,7 +930,7 @@ class DefaultStreamServiceTest {
         assertEquals(1L, applied.lock().lockSeq(), "the release takes the stream's next sequence number");
     }
 
-    // --- docs/TRACKING-ORCHESTRATION.md §4.1: the deployment seed is applied here, for every start path ---
+    // --- docs/extracts/TRACKING-ORCHESTRATION.md §4.1: the deployment seed is applied here, for every start path ---
 
     @Test
     void aStartThatStatesNothingAboutTrackingTakesTheDeploymentSeed() {

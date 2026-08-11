@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * Lifecycle state of a {@link Dataset} (docs/CV-TRAINING-PLAN.md §1).
+ * Lifecycle state of a {@link Dataset} (docs/plans/done/CV-TRAINING-PLAN.md §1).
  */
 public enum DatasetStatus {
 

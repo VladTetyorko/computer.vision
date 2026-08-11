@@ -11,7 +11,7 @@ import type {
 import type { PipelineSettings } from '../../core/settings/settings-store';
 
 /**
- * Pure, Angular-free logic behind `cv-control-panel.ts` (docs/CV-CONTROL-PLAN.md Wave E) — the Fly
+ * Pure, Angular-free logic behind `cv-control-panel.ts` (docs/plans/done/CV-CONTROL-PLAN.md Wave E) — the Fly
  * cockpit's live CV control panel: model-roster lookups, class-filter chip edits, PATCH-body
  * construction for the two families of change (hot knobs vs. a model swap), and the honest
  * re-arm/perf hint copy. Split out so every rule is unit-testable without Angular/HTTP/timers,
@@ -33,7 +33,7 @@ export function findModel(models: readonly CvModel[], modelId: string): CvModel 
 }
 
 /**
- * The class filter to seed when the operator switches to `model` (docs/CV-CONTROL-PLAN.md Wave E,
+ * The class filter to seed when the operator switches to `model` (docs/plans/done/CV-CONTROL-PLAN.md Wave E,
  * amended after cv-service Wave A's real-vocabulary measurement): an **open-vocabulary** model
  * always seeds `[]` ("show every class"), regardless of what the roster's own `defaultLabelFilter`
  * says — prompt-free YOLOE's real vocabulary (~4585 classes) emits many synonym/scene labels for
@@ -41,7 +41,7 @@ export function findModel(models: readonly CvModel[], modelId: string): CvModel 
  * landmark, all for what a person would call "a building"), so a fixed preset filter would silently
  * *drop* most real detections rather than usefully narrow them — it would look broken. A
  * **closed-set** model's own `defaultLabelFilter` is honored as-is: it's small, enumerable, and
- * already accurate for that model (docs/CV-CONTROL-PLAN.md §4 item 4). `undefined` (roster hasn't
+ * already accurate for that model (docs/plans/done/CV-CONTROL-PLAN.md §4 item 4). `undefined` (roster hasn't
  * resolved this id yet) seeds `[]` too — never guess a restrictive filter for a model with no known
  * facts.
  */
@@ -52,7 +52,7 @@ export function seedLabelFilterForModel(model: CvModel | undefined): readonly st
   return model.defaultLabelFilter;
 }
 
-// --- Class-filter chip candidates (docs/CV-CONTROL-PLAN.md Wave E, coordinator amendment) -----
+// --- Class-filter chip candidates (docs/plans/done/CV-CONTROL-PLAN.md Wave E, coordinator amendment) -----
 // "Prune from what the model is really seeing, not a guessed a-priori list": the chip checklist is
 // built from labels actually observed in the live detection stream, unioned with whatever is
 // already in the filter (so a chosen-but-not-currently-visible label never disappears).
@@ -173,7 +173,7 @@ export function sortSelectedFirst(
   return [...selected, ...unselected];
 }
 
-// --- Opt-in convenience preset (docs/CV-CONTROL-PLAN.md Wave E, coordinator amendment) --------
+// --- Opt-in convenience preset (docs/plans/done/CV-CONTROL-PLAN.md Wave E, coordinator amendment) --------
 
 /**
  * A convenience one-click chip-fill — **never an enforced/silent default** (see
@@ -216,7 +216,7 @@ export function applyPreset(
   return [...new Set([...current, ...preset])];
 }
 
-// --- PATCH body construction (docs/CV-CONTROL-PLAN.md §2-3's frozen contract) -----------------
+// --- PATCH body construction (docs/plans/done/CV-CONTROL-PLAN.md §2-3's frozen contract) -----------------
 
 /**
  * The hot-knob patch body — confidence/fps/labelFilter/detectionEnabled, **never** `model` (a model
@@ -239,10 +239,10 @@ export function buildModelChangePatch(modelId: string): UpdateStreamConfigReques
   return { model: modelId };
 }
 
-// --- Honest hint copy (docs/CV-CONTROL-PLAN.md §E/§F) ------------------------------------------
+// --- Honest hint copy (docs/plans/done/CV-CONTROL-PLAN.md §E/§F) ------------------------------------------
 
 /** Shown briefly after a model-change PATCH whose response says `modelReArmed` — never claims the
- * video was interrupted, because it wasn't (docs/CV-CONTROL-PLAN.md §A: only the detection branch
+ * video was interrupted, because it wasn't (docs/plans/done/CV-CONTROL-PLAN.md §A: only the detection branch
  * briefly re-opens its session). `null` when the server says nothing needed re-arming (the model
  * didn't actually change, or the response is from a hot-knob-only patch). */
 export function reArmHint(response: PatchStreamConfigResponse): string | null {
@@ -250,7 +250,7 @@ export function reArmHint(response: PatchStreamConfigResponse): string | null {
 }
 
 /**
- * The one-line perf-budget hint shown near the fps/model controls (docs/CV-CONTROL-PLAN.md §F) —
+ * The one-line perf-budget hint shown near the fps/model controls (docs/plans/done/CV-CONTROL-PLAN.md §F) —
  * always present, worded more urgently once the open-vocabulary model is actually selected
  * (materially slower on a laptop CPU: open-set lookup + segmentation). Class filtering never
  * appears in this hint: per §E, the model still infers every class every frame regardless of the
@@ -263,20 +263,20 @@ export function perfHint(openVocabSelected: boolean): string {
     : "Inference rate and detection on/off are the CPU-budget controls — the class filter only trims what's shown, not what the model computes.";
 }
 
-// --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
+// --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
 // The Tracking section's own patch builders, roster filter, and flow-strip formatter — pure so the
-// mode-gating, the follow-lock honesty rule, and the flow-strip math (docs/TRACKING-ORCHESTRATION.md
+// mode-gating, the follow-lock honesty rule, and the flow-strip math (docs/extracts/TRACKING-ORCHESTRATION.md
 // §7) are all testable without Angular/HTTP/timers, mirroring every other builder in this file.
 // **The backend for this contract had not shipped when this wave landed** — every function here is
-// coded against docs/TRACKING-PLAN.md §4 with nothing live to exercise it against.
+// coded against docs/plans/done/TRACKING-PLAN.md §4 with nothing live to exercise it against.
 
-/** `TrackingConfigRequest.verifyEveryMillis`'s server-side default (docs/TRACKING-PLAN.md §4.A) —
+/** `TrackingConfigRequest.verifyEveryMillis`'s server-side default (docs/plans/done/TRACKING-PLAN.md §4.A) —
  *  seeds the verify-cadence slider before any confirmed value has ever come back from the wire (the
  *  `stats` object carries no such figure — see `TrackStats`'s own doc comment — so, unlike
  *  mode/engine, this slider has no ground-truth readback in this app). */
 export const DEFAULT_VERIFY_EVERY_MILLIS = 2_000;
 
-/** `TrackingConfigRequest.followFps`'s server-side default (docs/TRACKING-ORCHESTRATION.md §4.3,
+/** `TrackingConfigRequest.followFps`'s server-side default (docs/extracts/TRACKING-ORCHESTRATION.md §4.3,
  *  decision D12) — same "no readback" caveat as {@link DEFAULT_VERIFY_EVERY_MILLIS} above. */
 export const DEFAULT_FOLLOW_FPS = 15;
 
@@ -292,26 +292,26 @@ export function buildTrackingEnginePatch(engineId: string): UpdateStreamConfigRe
 }
 
 /** The verify-cadence slider's own patch body (`FOLLOW`-only knob, milliseconds between detector
- *  re-verify passes — docs/TRACKING-PLAN.md §3.1). */
+ *  re-verify passes — docs/plans/done/TRACKING-PLAN.md §3.1). */
 export function buildVerifyCadencePatch(verifyEveryMillis: number): UpdateStreamConfigRequest {
   return { tracking: { verifyEveryMillis } };
 }
 
 /** The follow-fps slider's own patch body (`FOLLOW`-only knob — the Java-side sampler rate feeding
- *  the tracker, docs/TRACKING-ORCHESTRATION.md §4.3: "`followFps` has no Python knob on purpose"). */
+ *  the tracker, docs/extracts/TRACKING-ORCHESTRATION.md §4.3: "`followFps` has no Python knob on purpose"). */
 export function buildFollowFpsPatch(followFps: number): UpdateStreamConfigRequest {
   return { tracking: { followFps } };
 }
 
 /**
- * Click-to-follow's own patch body (docs/TRACKING-PLAN.md §4.D) — always sets `mode: 'FOLLOW'`
+ * Click-to-follow's own patch body (docs/plans/done/TRACKING-PLAN.md §4.D) — always sets `mode: 'FOLLOW'`
  * alongside the lock in the same call, matching the plan's own worked example
  * (`{tracking:{mode:"FOLLOW", lock:{trackId}}}`) so clicking a box while `ASSOCIATE`/`OFF` is active
  * both switches the mode and locks in one PATCH, not two.
  *
  * **This patch alone never shows the "Following #N" chip.** The chip renders only once a later poll
  * of `GET .../tracks` echoes back this same `trackId` as `lockedTrackId` —
- * docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule: "the UI reflects confirmed state from the
+ * docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule: "the UI reflects confirmed state from the
  * wire, never local intent." A lock cv-service couldn't honor (the target already `LOST`) simply
  * never shows a chip, rather than a lying one.
  */
@@ -320,14 +320,14 @@ export function buildFollowLockPatch(trackId: number): UpdateStreamConfigRequest
 }
 
 /** The "release" chip's own patch body — drops the current lock, falling back to the mode's own
- *  policy (docs/TRACKING-PLAN.md §4.A's `TargetLock#release`). Leaves `mode` untouched. */
+ *  policy (docs/plans/done/TRACKING-PLAN.md §4.A's `TargetLock#release`). Leaves `mode` untouched. */
 export function buildReleaseLockPatch(): UpdateStreamConfigRequest {
   return { tracking: { lock: { release: true } } };
 }
 
 /**
  * The engine picker's own candidate list — every roster entry whose `modes` includes `mode`
- * (docs/TRACKING-PLAN.md §4.F: `bytetrack` advertises `["ASSOCIATE"]`, `lk`/`ncc` advertise
+ * (docs/plans/done/TRACKING-PLAN.md §4.F: `bytetrack` advertises `["ASSOCIATE"]`, `lk`/`ncc` advertise
  * `["FOLLOW"]`). `OFF` has no engine to pick, by construction — always `[]`, so the caller never has
  * to special-case "there is no tracker running" separately from "the roster is empty".
  */
@@ -360,7 +360,7 @@ function formatDutyRatio(dutyRatio: number): string {
 }
 
 /**
- * The flow strip's own text (docs/TRACKING-PLAN.md §10 touchable outcome #2, docs/TRACKING-
+ * The flow strip's own text (docs/plans/done/TRACKING-PLAN.md §10 touchable outcome #2, docs/TRACKING-
  * ORCHESTRATION.md §7's "visible flow" tier) — e.g. `"DETECT 0.5/s ▸ TRACK 15/s · 1 in 29 · lk 0.4 ms
  * · cadence"`. Turns the plan's own core claim ("the detector stopped running and the tracker took
  * over") into something read off the screen instead of `htop` on a remote inference box.
@@ -368,7 +368,7 @@ function formatDutyRatio(dutyRatio: number): string {
  * **Callers must check `stats` for presence before calling this** — there is no "no stats" case
  * represented here at all; an absent `stats` means the strip doesn't render, full stop (`TrackStats`'s
  * own doc comment). `engineId` and `lastDetectorReason` are shown exactly as the wire reports them —
- * the engine **actually serving**, per R11 (docs/TRACKING-PLAN.md §9), not whatever the operator last
+ * the engine **actually serving**, per R11 (docs/plans/done/TRACKING-PLAN.md §9), not whatever the operator last
  * requested in the picker.
  */
 export function formatFlowStrip(stats: TrackStats): string {
@@ -382,7 +382,7 @@ export function formatFlowStrip(stats: TrackStats): string {
 }
 
 /** `"CADENCE"` → `"cadence"` — every `DetectorReason` member reads as a plain lowercase word once
- *  formatted, per docs/TRACKING-PLAN.md §4.A's own naming (`ALWAYS`/`CADENCE`/`TRACKER_FAILED`/
+ *  formatted, per docs/plans/done/TRACKING-PLAN.md §4.A's own naming (`ALWAYS`/`CADENCE`/`TRACKER_FAILED`/
  *  `NO_LOCK`/`BOX_INVALID`/`COASTED_OUT`); the one multi-word member gets a space, not an underscore. */
 function formatDetectorReason(reason: DetectorReason): string {
   return reason.toLowerCase().replace(/_/g, ' ');

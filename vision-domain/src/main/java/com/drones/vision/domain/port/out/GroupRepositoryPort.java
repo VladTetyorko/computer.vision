@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link Group}s (docs/U-AUTH-PLAN.md, wave 1).
+ * Driven port: persist and retrieve {@link Group}s (docs/plans/done/U-AUTH-PLAN.md, wave 1).
  *
  * <p>Slice 1 only stores and lists the group tree ({@code parentGroupId} link); subtree
  * visibility scoping is built on top of this port in a later slice, not part of it.

@@ -1,5 +1,5 @@
 <div class="page">
-  <!-- docs/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/design/01-fly.md — `page-head` is one `<vision-page-bar>`.
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/01-fly.md — `page-head` is one `<vision-page-bar>`.
        The paragraph carried genuine instruction (the remember-and-redirect behavior isn't obvious from
        the title alone — now handled a layer up by `fly-redirect-guard.ts`, but still worth stating),
        so it moves behind the bar's `?` disclosure rather than being dropped outright. Count is `null`
@@ -45,7 +45,7 @@
           </div>
           <p class="muted">{{ a.categoryName }}</p>
 
-          <!-- Asset card rebuild (docs/UX-REWORK-PLAN.md §U-a2 §3 — screenshot evidence: "filename
+          <!-- Asset card rebuild (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3 — screenshot evidence: "filename
                title + Streaming chip, nothing else"). Only facts already in the picker's own
                `listAssets()` response render here — no per-card HTTP call backs this; battery is
                deliberately absent (see `fly-logic.ts`'s own doc comment above `streamStateLabel`). -->
@@ -64,7 +64,7 @@
             }
           </dl>
 
-          <!-- Cards state their action (docs/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — the whole card
+          <!-- Cards state their action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — the whole card
                stays clickable as an accelerator, but this line spells out what pressing it does. -->
           <span class="picker-card-cta">Enter cockpit →</span>
         </a>

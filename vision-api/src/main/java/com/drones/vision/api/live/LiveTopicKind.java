@@ -4,9 +4,9 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * The seven kinds of {@link LiveTopic} (docs/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
+ * The seven kinds of {@link LiveTopic} (docs/plans/done/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
  * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MAP}
- * extends it again for the common operational picture, docs/MAP-REWORK-PLAN.md
+ * extends it again for the common operational picture, docs/plans/done/MAP-REWORK-PLAN.md
  * §4.3) — {@link #wire()}
  * is both the topic-string prefix (e.g. {@code "telemetry:<assetId>"}) and the {@code
  * com.drones.vision.api.dto.LiveEnvelopeResponse#type()} value for envelopes of that kind, since
@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
  * not the underscore a lower-cased enum name would produce.
  */
 enum LiveTopicKind {
-    /** Asset-centric fleet snapshot (docs/REALTIME-PLAN.md §4) — {@code List<AssetSummaryResponse>}. */
+    /** Asset-centric fleet snapshot (docs/plans/done/REALTIME-PLAN.md §4) — {@code List<AssetSummaryResponse>}. */
     FLEET("fleet"),
     /** Generic domain {@code Event}s (device online/offline, stream started/stopped, pipeline errors, ...). */
     EVENT("event"),
@@ -39,7 +39,7 @@ enum LiveTopicKind {
      */
     DETECTION_EVENTS("detection-events"),
     /**
-     * The common operational picture (docs/MAP-REWORK-PLAN.md §4.3) — marks, drawings and layers,
+     * The common operational picture (docs/plans/done/MAP-REWORK-PLAN.md §4.3) — marks, drawings and layers,
      * always-on. <strong>Replaces the {@code marks} topic outright</strong> (removed, not
      * deprecated: the SPA is the only client and migrates in Wave E).
      *

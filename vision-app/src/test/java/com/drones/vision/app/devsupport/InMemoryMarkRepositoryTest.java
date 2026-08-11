@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The {@link MarkRepositoryPort} contract against the in-memory reference implementation
- * (docs/TACTICAL-MARKS-PLAN.md §3, reworked by docs/MAP-REWORK-PLAN.md §2.2) — the same contract
+ * (docs/plans/done/TACTICAL-MARKS-PLAN.md §3, reworked by docs/plans/done/MAP-REWORK-PLAN.md §2.2) — the same contract
  * {@code JpaMarkRepository} is judged against in {@code adapter-persistence}'s Postgres tests, so
  * the two stay behavior-compatible.
  *

@@ -201,7 +201,7 @@ public final class DefaultAssetService implements AssetService {
     /**
      * Maps a state transition to the audit action that describes it — duplicated from {@link
      * com.drones.vision.application.device.DefaultDeviceService}'s own private helper of the same
-     * name/shape rather than shared cross-package, since the two feature packages (docs/LAYERING-REFACTOR-PLAN.md
+     * name/shape rather than shared cross-package, since the two feature packages (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;4.1) never depend on each other's internals; this pair is small, pure, and has no state
      * of its own to drift.
      */
@@ -324,7 +324,7 @@ public final class DefaultAssetService implements AssetService {
         return stopped;
     }
 
-    // --- Device assignment (docs/CYCLES-PLAN.md §8) ---------------------------
+    // --- Device assignment (docs/main/CYCLES-PLAN.md §8) ---------------------------
 
     @Override
     public Asset assignDevice(AssetId id, DeviceId deviceId, UserId actor) {

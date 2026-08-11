@@ -36,7 +36,7 @@ describe('SidebarStore', () => {
     expect(restored.collapsed()).toBe(true);
   });
 
-  // --- Auto-collapse precedence (docs/design/00-shell.md; see the store's own class doc) ----------
+  // --- Auto-collapse precedence (docs/extracts/design/00-shell.md; see the store's own class doc) ----------
   // Regression guard for the shipped bug where `collapsed() || fullBleed()` plus a disabled chevron
   // made the sidebar impossible to expand on /fly, /wall and /command.
 

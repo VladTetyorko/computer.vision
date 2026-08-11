@@ -23,7 +23,7 @@ import java.net.URI;
 /**
  * Wires stream egress (mediamtx publish/replay), detection/OSD overlay burn-in, and the snapshot
  * JPEG encoder — the publish slice of what used to be one 825-line {@code WiringConfiguration}
- * (docs/LAYERING-REFACTOR-PLAN.md wave D). Config extraction (wave F3): {@link #overlayRenderer}
+ * (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D). Config extraction (wave F3): {@link #overlayRenderer}
  * now takes an {@code OverlaySettings} built from {@code vision.overlay.*}; {@link
  * #streamPublisherPort} now also threads {@code vision.publish.encoder.*}/{@code .resilience.*}/
  * {@code .cadence.*} through a {@code PublishSettings}; {@link #replayFrameExtractionPort} threads
@@ -48,7 +48,7 @@ public class PublishWiring {
     /**
      * Burns detection boxes/labels (and, once a telemetry input reaches {@code
      * com.drones.vision.application.pipeline.StreamPipeline}, a telemetry OSD) onto published frames
-     * (docs/MVP1-PLAN.md §C8 bullets 1-2). Threaded into {@code
+     * (docs/plans/done/MVP1-PLAN.md §C8 bullets 1-2). Threaded into {@code
      * ApplicationServiceWiring#streamService} below.
      */
     @Bean
@@ -62,7 +62,7 @@ public class PublishWiring {
      * Selects the {@link StreamPublisherPort} implementation per {@link
      * VisionPublishProperties#enabled()}: the mediamtx-backed publisher (default) pushes RTSP to
      * the mediamtx sidecar; disabling it falls back to the no-op publisher. {@code
-     * PublishSettings} (docs/LAYERING-REFACTOR-PLAN.md wave F3) carries the encoder/resilience/
+     * PublishSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3) carries the encoder/resilience/
      * cadence tunables that used to be {@code H264RecorderFactory}/{@code PublishBackoff}/{@code
      * CadenceEstimator}'s own hardcoded constants.
      */
@@ -92,7 +92,7 @@ public class PublishWiring {
     /**
      * Selects the {@link ReplayFrameExtractionPort} implementation per {@link
      * VisionPublishProperties#enabled()} — the same if/else split {@link #streamPublisherPort}
-     * makes. {@code replay.window}/{@code replay.read-timeout} (docs/LAYERING-REFACTOR-PLAN.md
+     * makes. {@code replay.window}/{@code replay.read-timeout} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * wave F3) replace {@code MediamtxReplayFrameExtractor}'s own hardcoded 1s/15s constants.
      */
     @Bean
@@ -117,8 +117,8 @@ public class PublishWiring {
     }
 
     /**
-     * {@code GET /api/streams/{streamId}/snapshot} (docs/MVP3-PLAN.md C-a) and {@code POST
-     * /api/devices/probe}'s downscale/encode collaborator (docs/LAYERING-REFACTOR-PLAN.md wave D) —
+     * {@code GET /api/streams/{streamId}/snapshot} (docs/plans/done/MVP3-PLAN.md C-a) and {@code POST
+     * /api/devices/probe}'s downscale/encode collaborator (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D) —
      * a real bean, mapped from {@link VisionApiProperties#snapshot()}, replacing {@code
      * StreamController}/{@code DeviceProbeController}'s own {@code
      * VisionApiProperties.defaults()} stopgap construction.

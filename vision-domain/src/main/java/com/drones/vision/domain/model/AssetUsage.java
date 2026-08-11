@@ -14,7 +14,7 @@ import java.time.Instant;
  * position fields, and {@code streamId} are nullable — an open usage has no
  * end time and may not yet have received a telemetry sample.
  *
- * <p>{@code streamId} (docs/MVP2-PLAN.md §R, R-a2) is the {@link StreamId} of
+ * <p>{@code streamId} (docs/plans/done/MVP2-PLAN.md §R, R-a2) is the {@link StreamId} of
  * the video stream whose start opened this usage — recorded once, at open
  * time, by {@code UsageTracker} (vision-application), and never changed
  * afterward for the life of the usage. It exists purely so a finished usage

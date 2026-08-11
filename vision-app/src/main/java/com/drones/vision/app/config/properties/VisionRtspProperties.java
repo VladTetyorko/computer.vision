@@ -7,7 +7,7 @@ import java.time.Duration;
 
 /**
  * Configuration for {@code adapter-rtsp}'s FFmpeg-backed RX/TX ({@code vision.rtsp.*}),
- * docs/LAYERING-REFACTOR-PLAN.md &sect;2.2, wave F1.
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;2.2, wave F1.
  *
  * <p>Mapped by {@code wiring.VideoSourceWiring}/{@code wiring.FeedTransmitterWiring} onto {@code
  * com.drones.vision.adapter.rtsp.FfmpegSettings} — the plain, framework-free settings record {@code

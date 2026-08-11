@@ -1,4 +1,4 @@
--- docs/UX-REWORK-PLAN.md §U-d item 3: one stored image per asset, the onboarding wizard's
+-- docs/plans/done/UX-REWORK-PLAN.md §U-d item 3: one stored image per asset, the onboarding wizard's
 -- "Profile" step photo (CONTRACT 2 -- PUT/GET/DELETE /api/assets/{id}/image).
 --
 -- asset_id is the primary key rather than a synthetic one, since there is at most one image per

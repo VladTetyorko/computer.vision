@@ -8,7 +8,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * Manages the pilot&rarr;asset assignment roster (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2) —
+ * Manages the pilot&rarr;asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2) —
  * the write side behind {@code PUT/DELETE /api/assets/{id}/pilots/{userId}} and the read side behind
  * {@code GET /api/me/assignments} (vision-api, a later wave). One interface, one implementation
  * ({@link DefaultAssignmentService}).

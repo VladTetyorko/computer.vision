@@ -43,7 +43,7 @@ class V4l2VideoSourceTest {
     void rejectsTheOriginallyProposedUsbProtocolString() {
         V4l2VideoSource source = new V4l2VideoSource();
 
-        // docs/MVP2-PLAN.md X-b's original brief proposed protocol "usb" -- deliberately NOT
+        // docs/plans/done/MVP2-PLAN.md X-b's original brief proposed protocol "usb" -- deliberately NOT
         // supported, since discovery never emits it; see class javadoc for the full writeup.
         assertFalse(source.supports(new StreamDescriptor("usb", URI.create("file:/dev/video0"), Map.of())));
     }

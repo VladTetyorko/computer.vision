@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 
 /**
- * Architecture guard (docs/UI-ARCHITECTURE-PLAN.md) — a pure source-scanning test, no `TestBed`,
+ * Architecture guard (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — a pure source-scanning test, no `TestBed`,
  * mirroring the `app.routes.spec.ts` precedent of asserting a structural invariant cheaply. It fails
  * CI the moment a routed feature page drifts off the `Component → Facade → Store → Service` layering,
  * so the consistency the facade/`UiStore` sweep bought can't silently rot back.
@@ -25,7 +25,7 @@ import { describe, expect, it } from 'vitest';
 
 // path segment (under features/) of each routed page component, minus the `.ts`.
 const ROUTED_PAGES = [
-  // `/fly` (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12) split the old combined `fly/fly` into two
+  // `/fly` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12) split the old combined `fly/fly` into two
   // routed pages — the picker (`drone-picker`) and the cockpit (`cockpit`), each addressable on
   // its own now (`/fly` vs `/fly/:assetId`) — each with its own facade below.
   'fly/drone-picker',

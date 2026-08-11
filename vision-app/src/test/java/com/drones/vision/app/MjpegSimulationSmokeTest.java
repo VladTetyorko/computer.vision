@@ -40,7 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * End-to-end smoke test for docs/CYCLES-PLAN.md §5: {@code POST /api/simulations} with {@code
+ * End-to-end smoke test for docs/main/CYCLES-PLAN.md §5: {@code POST /api/simulations} with {@code
  * "transport":"mjpeg"} must flow a real (tiny, synthetic) video file through the mjpeg TX/RX pair
  * — {@code MjpegFeedTransmitter} (TX) serves it as an HTTP {@code multipart/x-mixed-replace}
  * stream on its own ephemeral {@code 127.0.0.1} port, {@code MjpegVideoSource} (RX) ingests it

@@ -12,7 +12,7 @@ import java.util.function.Supplier;
 /**
  * A {@link Flow.Publisher} decorator that keeps re-opening a re-openable source after it ends
  * (error or graceful completion) instead of ever surfacing that termination to the downstream
- * subscriber — the mechanism behind docs/MVP2-PLAN.md &sect;S, S-a: a started stream survives
+ * subscriber — the mechanism behind docs/plans/done/MVP2-PLAN.md &sect;S, S-a: a started stream survives
  * source failures (video or telemetry alike); only an explicit {@link #stop()} ends it.
  *
  * <h2>Design</h2>
@@ -54,7 +54,7 @@ import java.util.function.Supplier;
  */
 public final class SupervisedPublisher<T> implements Flow.Publisher<T> {
 
-    /** Backoff before the first retry after a source ends (1s), per docs/MVP2-PLAN.md §S, S-a. */
+    /** Backoff before the first retry after a source ends (1s), per docs/plans/done/MVP2-PLAN.md §S, S-a. */
     static final long INITIAL_BACKOFF_NANOS = 1_000_000_000L;
 
     /** Cap the exponential backoff doubles up to while retries keep failing (30s). */
@@ -92,7 +92,7 @@ public final class SupervisedPublisher<T> implements Flow.Publisher<T> {
      * Same as the 3-argument constructor, with explicit backoff bounds — public because a caller
      * in a different {@code vision-application} feature package (e.g. {@code stream}'s {@code
      * DefaultStreamService}) supplies its own configured bounds rather than this class's own
-     * defaults (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction).
+     * defaults (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction).
      */
     public SupervisedPublisher(Supplier<Flow.Publisher<T>> opener, Consumer<Throwable> onOutageBegan,
                          ScheduledExecutorService scheduler, long initialBackoffNanos, long maxBackoffNanos) {

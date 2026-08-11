@@ -13,7 +13,7 @@ import java.util.UUID;
  * app-layer wiring ({@link com.drones.vision.app.config.WiringConfiguration}
  * constructs {@code AssetService} with {@link #OWNERSHIP}) and never
  * hard-coded in the domain or application layers, per
- * docs/ASSET-MODEL-PLAN.md §0.3/§4.
+ * docs/plans/done/ASSET-MODEL-PLAN.md §0.3/§4.
  *
  * <p>Replaced by real per-request principals resolved from an identity
  * provider, planned for Phase 6.

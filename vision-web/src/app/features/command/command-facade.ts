@@ -28,7 +28,7 @@ const RAIL_OPEN_KEY = 'vision.command.railOpen';
 const PANEL_OPEN_KEY = 'vision.command.panelOpen';
 
 /**
- * `CommandPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md wave W2) — owns every store/service the page
+ * `CommandPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md wave W2) — owns every store/service the page
  * needs (`FleetStore`, `FleetMapStore`, `GeofenceStore`, `LiveStore`, `WeatherStore`, `VisionApi`,
  * `Router`, `PollScheduler`), the fleet-summary poll, and every read-model/command the template binds
  * to. `CommandPage` itself injects only this facade (plus its own `UiStore` for the Zones overlay —
@@ -46,9 +46,9 @@ const PANEL_OPEN_KEY = 'vision.command.panelOpen';
  * `assetPositions`, `weatherPosition`, `selectedAsset`/`selectedMarker`/`selectedStream`,
  * `panelState`/`gridColumns`, `mapIsEmpty`), every command method (`selectAsset`, `watchAsset`,
  * `openAsset`, `addTestDrone`, …), and the two persisted, non-mutually-exclusive toggles
- * (`railOpen`/the panel's own open/collapsed preference — docs/UX-REWORK-PLAN.md §U-b item 7) under
+ * (`railOpen`/the panel's own open/collapsed preference — docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) under
  * their original `localStorage` keys. None of this is exclusive-overlay state, so none of it belongs
- * on a `UiStore` — see `docs/UI-ARCHITECTURE-PLAN.md`'s own "toggle-style state that is NOT mutually
+ * on a `UiStore` — see `docs/plans/done/UI-ARCHITECTURE-PLAN.md`'s own "toggle-style state that is NOT mutually
  * exclusive … stays a plain boolean … but moves into its feature store/facade" rule.
  */
 @Injectable()
@@ -75,7 +75,7 @@ export class CommandFacade {
   readonly zones = this.geofence.zones;
 
   /**
-   * The three halves of the Common Operational Picture (docs/MAP-REWORK-PLAN.md §5.2) — exposed as
+   * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs, unlike `zones` above): `command.html` wires
    * `<vision-tactical-map>`'s `[marks]`/`[layers]`/`[drawings]`/`[selectedMarkId]`/`(markSelected)`/
    * `(markMoved)`/`(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and the
@@ -96,7 +96,7 @@ export class CommandFacade {
   readonly interactionMode = computed(() => resolveInteractionMode(this.marks.armed(), this.drawings.mode()));
 
   /**
-   * `assetId → gpsFixType`, built from `FleetMapStore` (docs/FC-INTEGRATIONS-PLAN.md F-d) — feeds
+   * `assetId → gpsFixType`, built from `FleetMapStore` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — feeds
    * `command-logic.ts#attentionReasons`' `gps-degraded` reason via `buildEntityRows`'s own optional
    * second argument; an asset with no live marker (not currently plotted) simply has no entry, so that
    * one reason never fires for it — see `gpsDegradedReason`'s own doc comment for why this can't be
@@ -113,7 +113,7 @@ export class CommandFacade {
   });
 
   /**
-   * `assetId → active breaches` (docs/OPS-CORE-PLAN.md §G-c), derived from `LiveStore.liveEvents()`
+   * `assetId → active breaches` (docs/plans/done/OPS-CORE-PLAN.md §G-c), derived from `LiveStore.liveEvents()`
    * — the generic `event` SSE topic GEOFENCE_BREACH rides. Feeds `buildEntityRows`' top-rank
    * `geofence-breach` reason, same "optional map, by assetId" shape as `gpsFixTypeByAssetId` above.
    */
@@ -126,7 +126,7 @@ export class CommandFacade {
   );
 
   /**
-   * Which assets `<vision-tactical-map>` should recolor `--color-danger` (docs/VISUAL-REFRESH-PLAN.md
+   * Which assets `<vision-tactical-map>` should recolor `--color-danger` (docs/plans/done/VISUAL-REFRESH-PLAN.md
    * F7, task 2) — every `entityRows` row with a non-`'ok'` severity, by id. Reuses the rail's own
    * already-computed sort rather than a second attention derivation, so the rail and the map can
    * never disagree about which assets need attention.
@@ -139,7 +139,7 @@ export class CommandFacade {
   readonly assetPositions = computed(() => this.mapStore.markers().map((marker) => marker.position));
 
   /**
-   * `<vision-tactical-map>`'s `[assets]` (docs/MAP-REWORK-PLAN.md §5.1). The map component is dumb
+   * `<vision-tactical-map>`'s `[assets]` (docs/plans/done/MAP-REWORK-PLAN.md §5.1). The map component is dumb
    * now — unlike the deleted `FleetMap`, which injected `FleetMapStore` itself and therefore only
    * worked on a page that provided it — so the store's markers are handed over as an input from
    * here, the one place already holding that store.
@@ -162,21 +162,21 @@ export class CommandFacade {
    */
   readonly eventMarkers = computed(() => selectEventMarkers(this.events.events()));
 
-  // --- Weather go/no-go chip (docs/OPS-CORE-PLAN.md §W) ------------------------------------------
+  // --- Weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W) ------------------------------------------
   // Command's chip centers on the fleet centroid, not any one asset — this page's own fleet-summary
   // poll carries no per-asset `attributes`, so the wind limit here is always the plan's own default
   // rather than a specific asset's `windLimitMps` override (see `WeatherChip`'s own doc comment;
   // Fly's chip, scoped to one selected asset, is the one that reads that attribute).
   readonly weatherPosition = computed(() => fleetCentroid(this.assetPositions()));
 
-  // --- Panel state memory (docs/UX-REWORK-PLAN.md §U-b item 7 / §U-c bullet 5) -------------------
-  // Persisted, but NOT mutually exclusive with anything else (docs/UI-ARCHITECTURE-PLAN.md), so both
+  // --- Panel state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7 / §U-c bullet 5) -------------------
+  // Persisted, but NOT mutually exclusive with anything else (docs/plans/done/UI-ARCHITECTURE-PLAN.md), so both
   // stay plain signals here rather than joining the Zones overlay's `UiStore` group.
   private readonly railOpenSignal = signal(readPersistedFlag(RAIL_OPEN_KEY, true));
   readonly railOpen = this.railOpenSignal.asReadonly();
   private readonly panelOpenPreferenceSignal = signal(readPersistedFlag(PANEL_OPEN_KEY, true));
 
-  // --- Selection (docs/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------------
+  // --- Selection (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 1) -------------------------------------------
   private readonly focusTickSignal = signal(0);
   private readonly selectedAssetIdSignal = signal<string | null>(null);
   readonly selectedAssetId = this.selectedAssetIdSignal.asReadonly();
@@ -225,7 +225,7 @@ export class CommandFacade {
     effect(() => writePersistedFlag(PANEL_OPEN_KEY, this.panelOpenPreferenceSignal()));
 
     // Keeps the weather chip fresh as the fleet centroid moves — `WeatherStore.track` itself
-    // no-ops instantly unless the 10-minute cache is actually stale (docs/OPS-CORE-PLAN.md §W).
+    // no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
   }
 
@@ -295,7 +295,7 @@ export class CommandFacade {
     // Bumped on *every* selection, including re-selecting the asset already selected. The map
     // centres on `focusRequest` changing; keying that off the asset id alone meant clicking the
     // current asset did nothing, so an operator who had panned away could not click it to bring the
-    // camera back — the one gesture they'd naturally reach for (docs/design/02-command.md).
+    // camera back — the one gesture they'd naturally reach for (docs/extracts/design/02-command.md).
     this.focusTickSignal.update((tick) => tick + 1);
     this.selectedAssetIdSignal.set(assetId);
     this.selectedVideoDeviceIdSignal.set(undefined);
@@ -322,7 +322,7 @@ export class CommandFacade {
     this.selectedVideoDeviceIdSignal.set(undefined);
   }
 
-  // --- Navigation (the verb dictionary's two terms — docs/UX-REWORK-PLAN.md §U-a2 item 1) --------
+  // --- Navigation (the verb dictionary's two terms — docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 1) --------
 
   /** `router.navigate(['/fly'], {queryParams: {asset, watch: 1}})` — the pinned Watch-live contract. */
   watchAsset(assetId: string): void {
@@ -352,7 +352,7 @@ export class CommandFacade {
     this.openAsset(assetId);
   }
 
-  // --- Drawings (docs/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------
+  // --- Drawings (docs/plans/done/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------
 
   /**
    * `<vision-tactical-map>`'s `(drawingCompleted)` — the map owns the in-progress vertex list and

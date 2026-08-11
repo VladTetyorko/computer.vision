@@ -10,7 +10,7 @@ import com.drones.vision.application.map.MapAccessPolicy.Viewer;
 import com.drones.vision.application.scope.AccessDeniedException;
 
 /**
- * Layer CRUD and grant management (docs/MAP-REWORK-PLAN.md §3) — the shared, access-controlled
+ * Layer CRUD and grant management (docs/plans/done/MAP-REWORK-PLAN.md §3) — the shared, access-controlled
  * surfaces marks and drawings live on. One interface, one implementation ({@link
  * DefaultMapLayerService}).
  *

@@ -23,13 +23,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Context test for the <em>default</em> {@code vision.training.*} configuration (no override, per
- * {@link VisionTrainingProperties#enabled()}'s default of {@code false} — docs/CV-TRAINING-PLAN.md
- * §3/§G, Wave T4, as delta'd by docs/CV-TRAINING-V2-PLAN.md §7): asserts the context still loads
+ * {@link VisionTrainingProperties#enabled()}'s default of {@code false} — docs/plans/done/CV-TRAINING-PLAN.md
+ * §3/§G, Wave T4, as delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md §7): asserts the context still loads
  * cleanly with every training bean/controller entirely absent — {@code GET/POST /api/datasets}[/{id}],
  * {@code POST /api/streams/{id}/samples}, {@code POST /api/usages/{id}/samples}, {@code GET
  * /api/samples/{id}/image}, {@code PUT /api/samples/{id}/annotations}, and {@code POST
  * /api/datasets/{id}/train} all 404 like any other unmapped route, exactly as before this feature
- * existed — the guardrail docs/CV-TRAINING-PLAN.md §G names explicitly. See {@link
+ * existed — the guardrail docs/plans/done/CV-TRAINING-PLAN.md §G names explicitly. See {@link
  * TrainingEnabledWiringTest} for the opposite (flag-on) counterpart.
  *
  * <p>Looks up every bean via {@link ApplicationContext#getBeansOfType} rather than {@code
@@ -66,7 +66,7 @@ class TrainingDisabledWiringTest {
     }
 
     /**
-     * docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9: with both {@code vision.cv.enabled} and {@code
+     * docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9: with both {@code vision.cv.enabled} and {@code
      * vision.training.enabled} at their default {@code false}, the model registry controller/
      * service/port are all absent too — same "absent entirely" guardrail as the other three tests
      * above, extended to the new beans this task added.
@@ -79,7 +79,7 @@ class TrainingDisabledWiringTest {
     }
 
     /**
-     * docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave: the training-job flow's
+     * docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave: the training-job flow's
      * beans/controller are absent by default too, same "absent entirely" guardrail as {@link
      * #noModelRegistryBeansExistByDefault()} above.
      */

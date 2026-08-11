@@ -29,7 +29,7 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * exactly like a live camera.
  *
  * <p>This is the TX (transmit) half of the RX/TX doctrine in {@code
- * docs/CYCLES-PLAN.md} §0: <b>simulation infrastructure, not egress</b> —
+ * docs/main/CYCLES-PLAN.md} §0: <b>simulation infrastructure, not egress</b> —
  * unrelated to {@code StreamPublisherPort} (viewer-facing HLS egress, see
  * {@code adapter-publish-hls}'s {@code MediamtxStreamPublisher}). Supports
  * {@link FeedSpec#protocol()} {@code "rtsp"} with a {@link FeedSpec#source()}
@@ -60,7 +60,7 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
  * rather than assume instant readiness.
  *
  * <p><b>Real-time pacing:</b> shares {@link RealtimePacer} with {@link
- * FfmpegGrabLoop}'s own {@code file}-scheme pacing (docs/LAYERING-REFACTOR-PLAN.md
+ * FfmpegGrabLoop}'s own {@code file}-scheme pacing (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * §5.1 — the identical timestamp-delta pacing logic was duplicated verbatim
  * between the two before that extraction) so the file is pushed at its own
  * native frame rate rather than as fast as disk I/O allows. Sharing is

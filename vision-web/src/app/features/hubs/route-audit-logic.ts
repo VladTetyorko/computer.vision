@@ -2,7 +2,7 @@ import type { Routes } from '@angular/router';
 
 /**
  * Pure, Angular-free route-table walker — backs `app.routes.spec.ts`'s "every URL in the F4 route
- * table resolves, no dead link" check (docs/UI-REDESIGN-PLAN.md Wave 1's own Verify bullet). Takes
+ * table resolves, no dead link" check (docs/plans/done/UI-REDESIGN-PLAN.md Wave 1's own Verify bullet). Takes
  * the real `Routes` array `app.routes.ts` exports (a plain nested-array-of-objects data structure —
  * only its **shape**, not any Angular runtime behavior, is inspected here) and flattens it into
  * concrete path strings, the same way the Router itself would resolve a URL against nested

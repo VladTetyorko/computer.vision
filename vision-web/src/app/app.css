@@ -1,4 +1,4 @@
-/* App shell (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md) — a persistent left
+/* App shell (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1, docs/extracts/design/00-shell.md) — a persistent left
    sidebar (`<vision-app-sidebar>`, `shared/ui/app-sidebar/**`) plus a `<main>` that scrolls on its
    own, replacing the old sticky `.app-header` (three mode `<details>` dropdowns + a `.status`
    cluster) entirely. See `AppSidebar`'s own class doc for the F1/F2/F3/F10 findings this removes —
@@ -76,7 +76,7 @@ vision-undo-toast {
   font-family: var(--mono);
   /* Bespoke low-opacity black wash for an inline code chip, not a video/map scrim — 25% is
      intentionally lighter than either --scrim step (55%/70%) so the chip stays legible against
-     --color-warn-soft; documented bespoke exception per docs/STYLE-TOKENS-PLAN.md's scrim row. */
+     --color-warn-soft; documented bespoke exception per docs/plans/done/STYLE-TOKENS-PLAN.md's scrim row. */
   background: rgb(0 0 0 / 25%);
   padding: var(--space-2) var(--space-4);
   border-radius: 4px;

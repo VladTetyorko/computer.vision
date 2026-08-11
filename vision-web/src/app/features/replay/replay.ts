@@ -7,17 +7,17 @@ import { ReplayFacade } from './replay-facade';
 import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDensityBucket } from './replay-logic';
 
 /**
- * The flight-replay cockpit (`/assets/:assetId/replay/:usageId`, docs/MVP2-PLAN.md §R, R-b) — the
+ * The flight-replay cockpit (`/assets/:assetId/replay/:usageId`, docs/plans/done/MVP2-PLAN.md §R, R-b) — the
  * asset detail page's usage history "Replay" target for a finished usage. A referee's use case:
  * "verify where the machine was at minute 7."
  *
- * **`/replay?asset=…&usage=…&t=…`** (docs/OPS-CORE-PLAN.md §Q1) is a second, flat route to the same
+ * **`/replay?asset=…&usage=…&t=…`** (docs/plans/done/OPS-CORE-PLAN.md §Q1) is a second, flat route to the same
  * `ReplayPage` — the event → replay deep link's own target. `assetId`/`usageId` (path params) and
  * `assetIdParam`/`usageIdParam`/`deepLinkOffsetParam` (the flat route's query params) are bound from
  * the route by `withComponentInputBinding()` and must stay on this component (an Angular
  * requirement — only a component/directive can declare `input()`); everything else — the cached
  * `timeline`/`asset`/`recording` fetch, every scrub-time derivation, the playback clock, clip export
- * — lives in `ReplayFacade` (docs/UI-ARCHITECTURE-PLAN.md), which this component injects
+ * — lives in `ReplayFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md), which this component injects
  * exclusively via `bind()`.
  *
  * **What's left here, deliberately** (the plan's own "truly-ephemeral, self-contained local view
@@ -29,7 +29,7 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDen
  * whom, and how the feedback loop is broken" writeup (mirrors
  * `shared/map/fleet-map/fleet-map.ts#suppressAutoFitDisable`'s identical idiom).
  *
- * **`.surface-dark` boundary (docs/VISUAL-REFRESH-PLAN.md F3/W4)**: only the Recording card
+ * **`.surface-dark` boundary (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4)**: only the Recording card
  * (`replay.html`'s `.recording-card`, the one section with an actual `<video>`) carries
  * `.surface-dark` — the rest of this page (Position map, Playback scrub bar, Telemetry/Detections
  * facts, the page-bar) stays on the app theme, since this is a themed data/review page with one
@@ -51,7 +51,7 @@ export class ReplayPage {
   readonly assetId = input<string | undefined>(undefined);
   readonly usageId = input<string | undefined>(undefined);
 
-  /** The flat `/replay?asset=…&usage=…&t=…` deep link's own query params (docs/OPS-CORE-PLAN.md §Q1) — see class doc. */
+  /** The flat `/replay?asset=…&usage=…&t=…` deep link's own query params (docs/plans/done/OPS-CORE-PLAN.md §Q1) — see class doc. */
   readonly assetIdParam = input<string | undefined>(undefined, { alias: 'asset' });
   readonly usageIdParam = input<string | undefined>(undefined, { alias: 'usage' });
   readonly deepLinkOffsetParam = input<string | undefined>(undefined, { alias: 't' });
@@ -59,7 +59,7 @@ export class ReplayPage {
   protected readonly facade = inject(ReplayFacade);
 
   /**
-   * `<vision-page-bar>`'s `crumb` (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — replaces the old inline
+   * `<vision-page-bar>`'s `crumb` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — replaces the old inline
    * `← {{ asset displayName }}` back-link. `facade.backLink()` is a route-segment array
    * (`['/assets', id]` or `['/command']`, the deep link's own degraded-path fallback); `crumb.to`
    * is a plain `string`, so this joins it the same way `RouterLink` would resolve it — safe here
@@ -143,7 +143,7 @@ export class ReplayPage {
   }
 
   /** The scrub bar's per-bucket density marker tooltip — `pluralize` fixes the old literal
-   *  `N detection(s)` placeholder (docs/NAV-IA-REDESIGN-PLAN.md §2.2's pluralisation sweep). */
+   *  `N detection(s)` placeholder (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2's pluralisation sweep). */
   protected bucketTitle(bucket: DetectionDensityBucket): string {
     return `${pluralize(bucket.count, 'detection')} near ${this.facade.clockLabel(bucket.atMs)}`;
   }

@@ -54,7 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * End-to-end smoke test for docs/CYCLES-PLAN.md §3: {@code POST /api/simulations} with {@code
+ * End-to-end smoke test for docs/main/CYCLES-PLAN.md §3: {@code POST /api/simulations} with {@code
  * "transport":"rtsp"} must flow a real (tiny, synthetic) video file through the full TX/RX
  * doctrine — {@code RtspFeedTransmitter} (TX) pushes it to a real <a
  * href="https://github.com/bluenviron/mediamtx">mediamtx</a> container, {@code FfmpegVideoSource}
@@ -74,7 +74,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * randomized host RTSP port is fed into {@link VisionPublishProperties.Mediamtx#rtspBase()} via
  * {@link DynamicPropertySource} before the Spring context loads, since {@code
  * WiringConfiguration#rtspFeedTransmitter} reads that same property this app's mediamtx-backed
- * viewer egress would (docs/CYCLES-PLAN.md §3: both TX and viewer egress push to the same
+ * viewer egress would (docs/main/CYCLES-PLAN.md §3: both TX and viewer egress push to the same
  * mediamtx sidecar). {@code vision.publish.enabled=false} keeps viewer egress out of the picture
  * entirely (the recording publisher wins either way), matching {@link FileSimulationSmokeTest}.
  */
@@ -90,7 +90,7 @@ class RtspSimulationDockerE2ETest {
     private static final int FRAME_COUNT = 20;
     private static final double FPS = 20.0; // ~1s of synthetic video
 
-    // Generous throughout, per docs/CYCLES-PLAN.md §3's own instruction: this test proves a real
+    // Generous throughout, per docs/main/CYCLES-PLAN.md §3's own instruction: this test proves a real
     // encoder -> wire -> demuxer -> pipeline round trip through a real container, on top of the
     // native-library-extraction cost FileSimulationSmokeTest already documents paying once.
     private static final long AWAIT_SECONDS = 90;

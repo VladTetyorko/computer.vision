@@ -7,8 +7,8 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * Creates and lists {@link Group}s (docs/U-AUTH-PLAN.md, wave 2; management gates added by
- * docs/U-SCOPE-PLAN.md, U-e slice 2 — deferred slice-2 cleanup).
+ * Creates and lists {@link Group}s (docs/plans/done/U-AUTH-PLAN.md, wave 2; management gates added by
+ * docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 — deferred slice-2 cleanup).
  *
  * <p><strong>Management authority is derived from the acting {@link VisibilityScope}</strong> (kind
  * maps 1:1 to role: unbounded = ADMIN, groups = MANAGER, else PILOT/empty). Both methods take the
@@ -19,7 +19,7 @@ public interface GroupService {
 
     /**
      * Creates a new group, subject to the acting user's management authority
-     * (docs/U-SCOPE-PLAN.md, U-e slice 2).
+     * (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2).
      *
      * <p>{@code !acting.canManageOrg()} → {@link AccessDeniedException}. A <strong>root</strong>
      * group (null {@link GroupSpec#parentGroupId()}) may be created only by an

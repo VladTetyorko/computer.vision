@@ -10,7 +10,7 @@ import com.drones.vision.domain.model.UserId;
 
 /**
  * {@link Dataset} &harr; {@link DatasetEntity} mapping, extracted from {@code
- * JpaDatasetRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaDatasetRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class DatasetMapper {
 

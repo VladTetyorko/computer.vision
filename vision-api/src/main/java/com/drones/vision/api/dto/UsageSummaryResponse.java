@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import java.time.Instant;
 
 /**
- * One row of {@code GET /api/usages} (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/design/
+ * One row of {@code GET /api/usages} (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/
  * 10-replay.md's frozen wire contract) — the "replay library" list.
  *
  * <p>{@code endedAt}/{@code durationSeconds} are omitted from the JSON entirely (rather than

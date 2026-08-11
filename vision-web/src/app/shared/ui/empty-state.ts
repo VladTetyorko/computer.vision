@@ -3,7 +3,7 @@ import { Icon } from './icon';
 import type { IconName } from './icon-registry';
 
 /**
- * `vision-empty` — the shared empty/zero-state block (docs/STYLE-TOKENS-PLAN.md §Shared primitives),
+ * `vision-empty` — the shared empty/zero-state block (docs/plans/done/STYLE-TOKENS-PLAN.md §Shared primitives),
  * replacing the ~15 hand-written `<div class="empty"><h3>…</h3><p>…</p></div>` copies across the
  * feature pages.
  *

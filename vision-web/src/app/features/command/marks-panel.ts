@@ -11,8 +11,8 @@ import { Notice } from '../../shared/ui/notice';
 import type { MapMark } from '../../core/api/models';
 
 /**
- * Command's "Marks" drawer (docs/MAP-REWORK-PLAN.md §5.2, reworked from
- * docs/TACTICAL-MARKS-PLAN.md M5) — the manager's own view onto the Common Operational Picture:
+ * Command's "Marks" drawer (docs/plans/done/MAP-REWORK-PLAN.md §5.2, reworked from
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — the manager's own view onto the Common Operational Picture:
  * create-by-map-click through the shared `<vision-mark-palette>`, an UNVERIFIED filter chip, a
  * per-row Confirm shortcut, and the full `<vision-verify-controls>` strip (Confirm / Reject /
  * **Promote to common picture**) on the selected mark. A non-routed presentational child

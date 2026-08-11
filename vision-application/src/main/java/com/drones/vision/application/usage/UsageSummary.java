@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.UsageId;
 import java.time.Instant;
 
 /**
- * One row of the fleet-wide "replay library" list (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8) — the
+ * One row of the fleet-wide "replay library" list (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8) — the
  * read side behind {@code GET /api/usages}: enough facts to pick a finished (or still-open) flight
  * without opening it.
  *

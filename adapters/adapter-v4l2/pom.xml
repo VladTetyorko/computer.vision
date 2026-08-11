@@ -11,7 +11,7 @@
 
     <artifactId>adapter-v4l2</artifactId>
     <name>adapter-v4l2</name>
-    <description>USB/V4L2 camera ingest (RX only) adapter — docs/MVP2-PLAN.md X-b.</description>
+    <description>USB/V4L2 camera ingest (RX only) adapter — docs/plans/done/MVP2-PLAN.md X-b.</description>
 
     <dependencies>
         <dependency>

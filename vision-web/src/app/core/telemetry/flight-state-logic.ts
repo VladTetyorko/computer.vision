@@ -2,7 +2,7 @@ import type { FlightState, TelemetrySample } from '../api/models';
 import { BATTERY_LOW_PERCENT, STALE_AFTER_SECONDS, ageSeconds, isStale } from './telemetry-logic';
 
 /**
- * Pure, Angular-free flight-controller-state derivations (docs/FC-INTEGRATIONS-PLAN.md F-d) — GPS
+ * Pure, Angular-free flight-controller-state derivations (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — GPS
  * fix labeling/severity, the Fly cockpit's failsafe/RTH/landing banner, and the pre-flight
  * checklist — split out so every rule is unit-testable without HTTP or a component, mirroring
  * `core/telemetry/telemetry-logic.ts`'s own split of pure logic from its injectable store.
@@ -14,7 +14,7 @@ import { BATTERY_LOW_PERCENT, STALE_AFTER_SECONDS, ageSeconds, isStale } from '.
  * the wire-contract level).
  */
 
-// --- GPS fix (docs/FC-INTEGRATIONS-PLAN.md's research section — `GPS_RAW_INT.fix_type`) --------
+// --- GPS fix (docs/plans/done/FC-INTEGRATIONS-PLAN.md's research section — `GPS_RAW_INT.fix_type`) --------
 
 /**
  * `GPS_FIX_TYPE`'s own ordinal → a human label. `undefined` (no reading yet) and any value this
@@ -58,7 +58,7 @@ export function gpsSeverity(fixType: number | undefined): GpsSeverity {
   return fixType === 2 ? 'warn' : 'ok';
 }
 
-// --- Flight banner (docs/FC-INTEGRATIONS-PLAN.md F-d — the Fly cockpit's failsafe/RTH strip) ----
+// --- Flight banner (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d — the Fly cockpit's failsafe/RTH strip) ----
 
 export type FlightBannerKind = 'failsafe' | 'rth' | 'landing';
 
@@ -71,7 +71,7 @@ export interface FlightBanner {
   readonly text: string;
 }
 
-/** ArduPilot/INAV RTL-family mode names (docs/FC-INTEGRATIONS-PLAN.md's copter/plane mode tables). */
+/** ArduPilot/INAV RTL-family mode names (docs/plans/done/FC-INTEGRATIONS-PLAN.md's copter/plane mode tables). */
 const RTH_MODES: ReadonlySet<string> = new Set(['RTL', 'SmartRTL', 'QRTL', 'AutoRTL']);
 
 /** ArduPilot/INAV landing-family mode names. */
@@ -109,7 +109,7 @@ export function flightBanner(sample: TelemetrySample | undefined): FlightBanner 
   return null;
 }
 
-// --- "Bring home" gate (docs/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -----------------
+// --- "Bring home" gate (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's frozen contract) -----------------
 
 /**
  * Whether the "Bring home" button (`shared/ui/return-home-button.ts`, Fly's cockpit HUD + Command's
@@ -141,7 +141,7 @@ export function canCommandReturnHome(firmware: string | undefined, ageSeconds: n
   return firmware === 'ardupilot' && ageSeconds !== undefined && !isStale(ageSeconds);
 }
 
-// --- Pre-flight checklist (docs/FC-INTEGRATIONS-PLAN.md F-d) ------------------------------------
+// --- Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) ------------------------------------
 
 export type PreflightState = 'ok' | 'fail' | 'unknown';
 
@@ -269,7 +269,7 @@ export function preflightSummary(items: readonly PreflightItem[]): PreflightSumm
   return { ok, fail, unknown, state: 'ok', label: 'All clear' };
 }
 
-// --- Diagnostics (docs/FC-INTEGRATIONS-PLAN.md F-e — ArduPilot-only RX extras) ------------------
+// --- Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — ArduPilot-only RX extras) ------------------
 // Everything below rides `TelemetrySample.extra` (the frozen wire-contract keys, decoded
 // server-side only when the source firmware is ArduPilot and actually emits the underlying MAVLink
 // message — `WIND`/`VIBRATION`/`EKF_STATUS_REPORT`/`MISSION_CURRENT`/`RANGEFINDER`). A non-ArduPilot
@@ -280,7 +280,7 @@ export function preflightSummary(items: readonly PreflightItem[]): PreflightSumm
 export type DiagnosticSeverity = 'ok' | 'warn' | 'bad';
 
 /**
- * EKF variance thresholds (docs/FC-INTEGRATIONS-PLAN.md F-e, QGC/ArduPilot convention): `ok` below
+ * EKF variance thresholds (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e, QGC/ArduPilot convention): `ok` below
  * 0.5, `warn` 0.5–1.0 inclusive, `bad` above 1.0.
  */
 export function ekfSeverity(variance: number): DiagnosticSeverity {

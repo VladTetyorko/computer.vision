@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
 
 /**
  * {@link AssignmentRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2.
+ * docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2.
  *
  * <p>{@link #assign} is an idempotent upsert via {@code merge} on the composite ({@code pilot},
  * {@code asset}) key — assigning an already-assigned pair re-persists the same row, never a
@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * no-op). The two directional reads are indexed queries; {@link #isAssigned} is a primary-key
  * lookup.
  *
- * <p>No {@code mapper} class for this repository (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C):
+ * <p>No {@code mapper} class for this repository (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C):
  * unlike every other aggregate in this module, an assignment has no domain record of its own to
  * map to/from — {@link AssignmentEntity} is a bare join row, and every conversion here is a
  * one-line {@code UserId}/{@code AssetId} ↔ {@code UUID} wrap, already inlined at each call site

@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.UserId;
 import java.util.Optional;
 
 /**
- * Authenticates users and re-resolves an already-authenticated principal (docs/U-AUTH-PLAN.md,
+ * Authenticates users and re-resolves an already-authenticated principal (docs/plans/done/U-AUTH-PLAN.md,
  * wave 2).
  *
  * <p>Two read paths exist for two different callers (wave 3): {@link #find(UserId)} is how a

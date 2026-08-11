@@ -7,7 +7,7 @@ import { geofenceBreachReasonText, type GeofenceBreach } from '../geofence/geofe
 /**
  * Pure, Angular-free "does this asset need attention right now" rules — originally
  * `features/command/command-logic.ts`'s own "Attention rules" section, moved here
- * (docs/UI-REDESIGN-PLAN.md Wave 4) when `features/reports/reports-logic.ts` needed the identical
+ * (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4) when `features/reports/reports-logic.ts` needed the identical
  * rules for the Inventory reports page's own attention list. This codebase has no precedent for one
  * page importing another page's module (see `core/fleet/device-logic.ts`'s doc comment for the
  * original precedent this follows, most recently repeated by `core/telemetry/telemetry-logic.ts#trackingIdChanged`) —
@@ -57,14 +57,14 @@ export interface AttentionReason {
  * asset with *any* higher-rank reason always outranks one with only lower-rank reasons, regardless
  * of how many of the latter it has.
  *
- * `geofence-breach` (docs/OPS-CORE-PLAN.md §G-c) is the very top rank, above even `failsafe` — an
+ * `geofence-breach` (docs/plans/done/OPS-CORE-PLAN.md §G-c) is the very top rank, above even `failsafe` — an
  * aircraft that has physically crossed a keep-out/keep-in boundary is an active, external,
  * safety-and-legal-exposure event happening *right now* to something a manager doesn't control the
  * way a failsafe (an onboard, self-correcting response) already is; it outranks every other signal
  * precisely because a breach can co-occur with any of them and still needs to be the first thing a
  * manager's eye lands on.
  *
- * `failsafe` (docs/FC-INTEGRATIONS-PLAN.md F-d) is the next rank, above battery-critical — a flight
+ * `failsafe` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) is the next rank, above battery-critical — a flight
  * controller reporting an active failsafe is otherwise the single most urgent "this drone needs
  * attention right now" signal this app has, worse than a low/critical battery reading alone (a
  * failsafe can itself be *caused* by one, but the failsafe state is the more actionable fact).
@@ -142,7 +142,7 @@ function openEventsReason(openEventCount: number): AttentionReason | undefined {
 }
 
 /**
- * `asset.failsafe` (docs/FC-INTEGRATIONS-PLAN.md F-d, `AssetAttention`'s own field) — `undefined`/
+ * `asset.failsafe` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, `AssetAttention`'s own field) — `undefined`/
  * `false` never trigger a reason, only an explicit `true` (never fabricated from absent
  * flight-controller data). States what the aircraft is doing, not an instruction — same poka-yoke
  * rule `core/telemetry/flight-state-logic.ts#flightBanner` follows for the cockpit's own banner text.
@@ -178,7 +178,7 @@ function gpsDegradedReason(gpsFixType: number | undefined): AttentionReason | un
 }
 
 /**
- * `geofenceBreaches` (docs/OPS-CORE-PLAN.md §G-c, optional) is, like `gpsFixType`, not carried by
+ * `geofenceBreaches` (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional) is, like `gpsFixType`, not carried by
  * `AssetAttention` at all — it's derived from the generic `LiveEvent` feed
  * (`core/geofence/geofence-logic.ts#activeGeofenceBreaches`, sourced from `LiveStore.liveEvents()`),
  * not the fleet-summary DTO. An empty/absent array never fires this reason — "no breach known", not
@@ -195,8 +195,8 @@ function geofenceBreachReason(breaches: readonly GeofenceBreach[] | undefined): 
  * Every reason `asset` triggers, most severe first. An asset with none of these returns an empty
  * array — "all quiet" for that asset.
  *
- * `gpsFixType` (docs/FC-INTEGRATIONS-PLAN.md F-d, optional) and `geofenceBreaches`
- * (docs/OPS-CORE-PLAN.md §G-c, optional) are the two reason inputs not carried by `AssetAttention`
+ * `gpsFixType` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, optional) and `geofenceBreaches`
+ * (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional) are the two reason inputs not carried by `AssetAttention`
  * itself — see `gpsDegradedReason`'s/`geofenceBreachReason`'s own doc comments for where a caller
  * sources each. A caller with neither in hand (e.g. `features/reports/reports-logic.ts`'s read-only
  * dashboard, which has no live map marker or geofence feed to draw from) simply omits both — those

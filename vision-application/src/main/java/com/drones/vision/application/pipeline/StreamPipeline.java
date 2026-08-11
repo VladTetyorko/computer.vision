@@ -57,8 +57,8 @@ import com.drones.vision.application.stream.StreamService;
  *       regardless of whether it is sampled for inference, and regardless of
  *       whether a detection outage (see below) is in progress — the video
  *       path never depends on the CV service being healthy.</li>
- *   <li><b>Overlay burn-in</b> (docs/MVP1-PLAN.md §C8, smoothed per
- *       docs/CYCLES-PLAN.md §12 CP-c; optional per docs/MVP2-PLAN.md §V,
+ *   <li><b>Overlay burn-in</b> (docs/plans/done/MVP1-PLAN.md §C8, smoothed per
+ *       docs/main/CYCLES-PLAN.md §12 CP-c; optional per docs/plans/done/MVP2-PLAN.md §V,
  *       V-e; telemetry OSD input added later): when an {@link OverlayPort}
  *       is configured (constructor argument, nullable — {@code null} keeps
  *       today's raw-publish behavior everywhere) and {@link
@@ -124,18 +124,18 @@ import com.drones.vision.application.stream.StreamService;
  * Event} only when non-empty, so uneventful frames don't spam storage/events.
  *
  * <p>The most recently <b>published</b> frame is likewise kept in a {@code volatile} field ({@link
- * #latestFrame()}, docs/MVP3-PLAN.md C-a) — the same instance {@link StreamPublisherPort#publish}
+ * #latestFrame()}, docs/plans/done/MVP3-PLAN.md C-a) — the same instance {@link StreamPublisherPort#publish}
  * was just handed (post-overlay burn-in when one was drawn), a latest-wins reference swap with no
  * per-frame copy. This is what backs the manager dashboard's per-stream JPEG snapshot endpoint.
  *
- * <p><b>Debounced detection events</b> (docs/MVP2-PLAN.md §E, E-a): every completed result —
+ * <p><b>Debounced detection events</b> (docs/plans/done/MVP2-PLAN.md §E, E-a): every completed result —
  * empty or not — also feeds an optional {@link DetectionEventEngine} ({@code eventEngine},
  * nullable, same convention as {@code overlayPort}), which collapses a tracked label's
  * consecutive-qualifying-results streak into an open/close {@code DetectionEvent} lifecycle. This
  * is a separate concern from {@link #latestDetections()}/overlay burn-in: the engine only ever
  * reads results, it never influences what gets published or returned from this class.
  *
- * <p><b>Tracking</b> (docs/TRACKING-PLAN.md &sect;5.D/&sect;5.E): two further consumers on that same
+ * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): two further consumers on that same
  * fan-out. {@link TrackBook} keeps this stream's tracks by id with their lifetimes ({@link
  * #tracks()}); {@link TrackingStatsWindow} keeps rolling duty-cycle counters over the {@link
  * com.drones.vision.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()}).
@@ -183,7 +183,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * The detection-outage backoff bounds from {@link StreamPipelineSettings#defaults()}, exposed
-     * here purely so same-package tests can assert against them by name (docs/LAYERING-REFACTOR-PLAN.md
+     * here purely so same-package tests can assert against them by name (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction) — this pipeline's own working backoff state ({@link
      * #backoffNanos}) always reads from the {@link StreamPipelineSettings} actually supplied to its
      * constructor, not from these two constants, so a non-default settings object genuinely takes
@@ -200,7 +200,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final Device device;
 
     /**
-     * Live-swappable per docs/CV-CONTROL-PLAN.md &sect;A — every per-frame read below (sampling's
+     * Live-swappable per docs/plans/done/CV-CONTROL-PLAN.md &sect;A — every per-frame read below (sampling's
      * {@code inferenceFps}, {@link #maybeDetect}'s {@code maxInFlightInferences}/{@code
      * detectionEnabled}, {@link #overlayIfNeeded}'s overlay flags, and the {@code config} passed
      * into {@link #detectionPort}{@code .detect}) re-reads this field directly, so a write from
@@ -223,7 +223,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Two more consumers on {@link #onDetectionResult}'s existing fan-out, built here rather than
-     * injected for exactly the reason {@link #extrapolator} is (docs/TRACKING-PLAN.md &sect;5.E,
+     * injected for exactly the reason {@link #extrapolator} is (docs/plans/done/TRACKING-PLAN.md &sect;5.E,
      * TRACKING-ORCHESTRATION.md &sect;2.3): they are this pipeline's own per-stream bookkeeping, not
      * substitutable collaborators, so they cost this class's constructor nothing. They are peers,
      * not one class — see {@link TrackingStatsWindow}'s javadoc for why the counters do not live on
@@ -234,7 +234,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /** @see #trackBook */
     private final TrackingStatsWindow trackingStats;
 
-    // Frame-cadence and detection-outage tuning (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
+    // Frame-cadence and detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
     // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
     // to StreamPipelineSettings#defaults() when the caller doesn't supply one explicitly.
     private final int assumedSourceFps;
@@ -253,7 +253,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile VideoFrame latestFrame;
 
     /**
-     * The most recently arrived frame <b>before</b> {@link #overlayIfNeeded} runs (docs/CV-TRAINING-PLAN.md
+     * The most recently arrived frame <b>before</b> {@link #overlayIfNeeded} runs (docs/plans/done/CV-TRAINING-PLAN.md
      * §2/§D) — a sibling snapshot to {@link #latestFrame}, kept purely additively: written once per
      * {@link #onNext}, alongside {@link #latestFrame}, and read only by {@link #latestRawFrame()}. No
      * other behavior in this class reads or depends on it, so it cannot perturb the publish/detect
@@ -325,7 +325,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Same as the 9-argument constructor, plus a {@link DetectionEventEngine} collaborator
-     * (docs/MVP2-PLAN.md §E, E-a) fed every completed detection result alongside {@link
+     * (docs/plans/done/MVP2-PLAN.md §E, E-a) fed every completed detection result alongside {@link
      * #extrapolator}.
      *
      * @param eventEngine nullable — {@code null} (the other constructors' default) means no
@@ -346,7 +346,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Same as the 10-argument constructor, plus the collaborators needed to announce completed
-     * detection results as live updates (docs/REALTIME-PLAN.md §4).
+     * detection results as live updates (docs/plans/done/REALTIME-PLAN.md §4).
      *
      * @param assetId                 nullable — the owning asset of the device streaming, resolved
      *                                 once by {@link DefaultStreamService} at stream start;
@@ -413,7 +413,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Test/wiring seam: same as the 14-argument constructor, plus an explicit {@link
-     * StreamPipelineSettings} (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) instead
+     * StreamPipelineSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) instead
      * of relying on {@link StreamPipelineSettings#defaults()} — lets a test drive the frame-cadence/
      * detection-backoff/extrapolation tuning deterministically, and lets {@link
      * DefaultStreamService} (wiring) supply a {@code vision-app}-bound configuration instead of this
@@ -481,7 +481,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Live-swaps this pipeline's {@link PipelineConfig} (docs/CV-CONTROL-PLAN.md &sect;5, &sect;A).
+     * Live-swaps this pipeline's {@link PipelineConfig} (docs/plans/done/CV-CONTROL-PLAN.md &sect;5, &sect;A).
      * Hot knobs — confidence threshold, inference fps, label filter, detection on/off — take effect
      * on the very next sampled/published frame with no lock and no stream/usage-session/SSE
      * disruption, since every per-frame read of {@link #config} already re-reads this volatile
@@ -497,7 +497,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * since {@link DetectionPort}'s own contract runs inference "using the model ... in config" on
      * every call.
      *
-     * <p><b>Limitation, honestly documented</b> (docs/CV-CONTROL-PLAN.md &sect;A's own escape
+     * <p><b>Limitation, honestly documented</b> (docs/plans/done/CV-CONTROL-PLAN.md &sect;A's own escape
      * hatch): {@link DetectionPort} (vision-domain) exposes only {@code detect(frame, config)} — no
      * per-stream session lifecycle method a generic caller can invoke, deliberately, per that
      * port's own javadoc ("batching, streaming, and connection reuse are adapter concerns"). This
@@ -543,7 +543,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         frames from the detector, since no inference actually ran.
      *         This is the raw, un-extrapolated result — the REST-facing
      *         surface; overlay burn-in renders {@link #extrapolator}'s
-     *         smoothed boxes instead (docs/CYCLES-PLAN.md §12, CP-c), not
+     *         smoothed boxes instead (docs/main/CYCLES-PLAN.md §12, CP-c), not
      *         this method's output.
      */
     public List<Detection> latestDetections() {
@@ -551,7 +551,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * @return every track currently booked for this stream (docs/TRACKING-PLAN.md &sect;4.E),
+     * @return every track currently booked for this stream (docs/plans/done/TRACKING-PLAN.md &sect;4.E),
      *         ordered by {@code trackId} ascending — an immutable snapshot, the same
      *         read-from-any-thread convention as {@link #latestDetections()}. Empty when tracking is
      *         off, when no tracked detection has arrived yet, or when every track has expired.
@@ -563,7 +563,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * @return this stream's tracking flow over the stats window (docs/TRACKING-PLAN.md &sect;4.E) —
+     * @return this stream's tracking flow over the stats window (docs/plans/done/TRACKING-PLAN.md &sect;4.E) —
      *         detector passes, tracker frames, duty ratio, tracker-latency percentiles, the last
      *         detector reason, the confirmed lock and a state histogram — stamped with the tracking
      *         mode currently configured. {@link TrackingStats#empty} until the first result carrying
@@ -575,7 +575,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * @return the most recently published frame — post-overlay burn-in when one was drawn, exactly
-     *         the instance handed to {@link StreamPublisherPort#publish} (docs/MVP3-PLAN.md C-a) —
+     *         the instance handed to {@link StreamPublisherPort#publish} (docs/plans/done/MVP3-PLAN.md C-a) —
      *         or {@link Optional#empty()} before the first frame has published. A latest-wins
      *         reference swap, same single-{@code volatile}-field convention as {@link
      *         #latestDetections()}: no copy per frame, no buffering, and safe to read from any
@@ -588,7 +588,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * @return the most recently arrived frame exactly as the source produced it — before overlay
-     *         burn-in, at full resolution (docs/CV-TRAINING-PLAN.md §2/§D), or {@link
+     *         burn-in, at full resolution (docs/plans/done/CV-TRAINING-PLAN.md §2/§D), or {@link
      *         Optional#empty()} before the first frame has arrived. Backs training-sample capture,
      *         which wants clean pixels to label, never the (possibly overlay-rendered) frame {@link
      *         #latestFrame()} exposes. Same latest-wins, no-copy, any-thread-safe convention as
@@ -635,7 +635,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * nothing to draw at all yet). Detection is always run against the raw {@code frame}, never the
      * rendered one — overlay is purely a publish-time presentation concern.
      *
-     * <p><b>What {@code overlayBurnIn=false} actually skips</b> (docs/MVP2-PLAN.md §V, V-e): the
+     * <p><b>What {@code overlayBurnIn=false} actually skips</b> (docs/plans/done/MVP2-PLAN.md §V, V-e): the
      * {@link #extrapolator}{@code .at(...)}/{@link #telemetrySampleFor()} lookups below, {@link
      * OverlayPort#render}'s Java2D work (decode/allocate a fresh image, draw boxes/OSD, re-encode),
      * and the extra {@link VideoFrame} instance {@code render} returns — every publish falls
@@ -647,7 +647,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * bookkeeping, not the Java2D/copy cost this flag exists to avoid.
      *
      * <p>The detections passed to the renderer are {@link #extrapolator}'s output at {@code
-     * frame.capturedAt()} (docs/CYCLES-PLAN.md &sect;12, CP-c), not the raw {@link
+     * frame.capturedAt()} (docs/main/CYCLES-PLAN.md &sect;12, CP-c), not the raw {@link
      * #latestDetections}, so burned-in boxes track between completed inferences instead of jumping
      * — same source-timestamp timebase as {@code DetectionResult.capturedAt}, never mixed with wall
      * clock. {@link #latestDetections()} (the REST-facing surface) is unaffected — it always
@@ -747,7 +747,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * The rate this pipeline actually samples frames at (docs/TRACKING-PLAN.md &sect;5.D): {@link
+     * The rate this pipeline actually samples frames at (docs/plans/done/TRACKING-PLAN.md &sect;5.D): {@link
      * PipelineConfig#inferenceFps()} normally, but {@code max(inferenceFps, followFps)} in {@link
      * TrackingMode#FOLLOW} — in {@code FOLLOW} the tracker wants frames faster than the detector
      * does, and raising the sample rate is the whole of that change because {@link
@@ -784,7 +784,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Gated first — before the outage/in-flight logic below — on {@link
-     * PipelineConfig#detectionEnabled()} (docs/CV-CONTROL-PLAN.md &sect;1, &sect;A): {@code false}
+     * PipelineConfig#detectionEnabled()} (docs/plans/done/CV-CONTROL-PLAN.md &sect;1, &sect;A): {@code false}
      * returns immediately, so a disabled stream spends zero CPU on inference <i>and</i> stops
      * probing during an outage too — nothing below this check ever runs. Re-enabling resumes on the
      * next sampled frame, exactly where the (frozen, untouched) outage/backoff state left off.
@@ -913,7 +913,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /**
      * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()} exactly
-     * once, centrally, here (docs/CV-CONTROL-PLAN.md &sect;A, the dormant-field fix) — to every
+     * once, centrally, here (docs/plans/done/CV-CONTROL-PLAN.md &sect;A, the dormant-field fix) — to every
      * downstream consumer: {@link #latestDetections()}, {@link #extrapolator} (and therefore
      * overlay burn-in), {@link #trackBook}, {@link #trackingStats}, {@link #eventEngine}, {@link
      * #liveUpdatePublisherPort}, and persistence/the {@code DETECTION} event. Filtering once here,

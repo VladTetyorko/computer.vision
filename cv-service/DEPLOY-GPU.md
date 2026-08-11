@@ -23,7 +23,7 @@
 
 Runbook for running `cv-service` on a separate CUDA-capable machine while the
 laptop keeps running the Spring Boot backend, the Angular frontend, and
-mediamtx. Background/design: `docs/REMOTE-CV-PLAN.md` — the short version is
+mediamtx. Background/design: `docs/plans/done/REMOTE-CV-PLAN.md` — the short version is
 this is a **config change, not an architecture change**: `DetectStream` is a
 gRPC bidi call the laptop *initiates*, so the only thing that moves is where
 `cv_service.server` runs and what `vision.cv.endpoint` points at.
@@ -72,7 +72,7 @@ scp orion12l.pt gpu-box:~/vision/cv-service/
 
 `orion12l.pt` is a user-provided checkpoint with no network source of truth
 — it only ever moves by direct file transfer (provenance note in
-`docs/CV-MODELS-PLAN.md`: an earlier draft had the Dockerfile *download* it
+`docs/plans/done/CV-MODELS-PLAN.md`: an earlier draft had the Dockerfile *download* it
 from a third-party repo at build time, rejected as an untrusted-code vector;
 this repo never fetches model weights over the network).
 
@@ -149,7 +149,7 @@ WantedBy=multi-user.target
 
 Open only **inbound `50051/tcp`** on the GPU box. The connection direction
 is the laptop dialing out to the GPU box (that's the whole point of the
-gRPC-bidi design in `docs/REMOTE-CV-PLAN.md` — no listener needed on the
+gRPC-bidi design in `docs/plans/done/REMOTE-CV-PLAN.md` — no listener needed on the
 laptop, no new firewall hole there). Either works:
 
 - **Same LAN**: point at the GPU box's LAN IP/hostname.
@@ -213,7 +213,7 @@ concern at typical stream counts.
    selection didn't actually take (re-check step 1's log line and
    `nvidia-smi`, in that order).
 4. **Fallback when the GPU box is unreachable.** This is the scenario
-   `docs/REMOTE-CV-PLAN.md`'s "Fallbacks" section exists for: pull the
+   `docs/plans/done/REMOTE-CV-PLAN.md`'s "Fallbacks" section exists for: pull the
    network cable, stop the `cv-service` process, or block `50051` and watch
    the laptop side. Video, HLS/WebRTC viewing, telemetry, and recording all
    keep working unmodified — `DetectionPort` is a side-branch of
@@ -222,12 +222,12 @@ concern at typical stream counts.
    while the endpoint stays down, so the first probe after the GPU box (or
    the network path to it) comes back succeeds without a backend restart;
    `PIPELINE_ERROR` events fire on outage begin so this is observable, not
-   silent. (The root-pom `grpc-core` version pin — `docs/REMOTE-CV-PLAN.md`
+   silent. (The root-pom `grpc-core` version pin — `docs/plans/done/REMOTE-CV-PLAN.md`
    P0 item 1 — is what makes this recovery reliable rather than
    occasionally wedging the gRPC channel permanently in `CONNECTING` after
    a genuine connect failure; confirm it's in place if reconnection ever
    looks stuck.)
-5. **Keepalive on a half-open link (`docs/REMOTE-CV-PLAN.md` "Transport
+5. **Keepalive on a half-open link (`docs/plans/done/REMOTE-CV-PLAN.md` "Transport
    decisions" P1).** Item 4 above covers a *clean* stop (process killed, port
    blocked) — TCP/gRPC notices that quickly on its own. Keepalive exists for
    the messier case: a link that goes silently dead with no FIN/RST at all

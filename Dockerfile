@@ -1,4 +1,4 @@
-# Minimal runtime image for the vision-app Spring Boot jar (docs/MVP1-PLAN.md
+# Minimal runtime image for the vision-app Spring Boot jar (docs/plans/done/MVP1-PLAN.md
 # §C9). This Dockerfile does NOT run Maven -- it only copies the already-built
 # executable jar, so the image stays small and fast to (re)build. Build the
 # jar first:

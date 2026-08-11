@@ -1,7 +1,7 @@
 /*
  * Vision design tokens + base primitives.
  *
- * Two-theme model (docs/VISUAL-REFRESH-PLAN.md, "daylight chart"): **light is the default theme**,
+ * Two-theme model (docs/plans/done/VISUAL-REFRESH-PLAN.md, "daylight chart"): **light is the default theme**,
  * a cool paper-gray canvas with ink text and one aviation blue — the app's monitoring surfaces are
  * as often a daylit command room as a dark one, and the earlier "dark-first" premise read as
  * generic "AI product" styling rather than an instrument panel. Dark stays fully available as a
@@ -15,13 +15,13 @@
  * video is glare. Components never branch on theme — they reference only the TIER 2 semantic names,
  * which resolve differently depending on which of the two blocks is in effect for their subtree.
  *
- * docs/UX-REWORK-PLAN.md §U-b ("engineered, not generated") pass: flat/bordered panels replace
+ * docs/plans/done/UX-REWORK-PLAN.md §U-b ("engineered, not generated") pass: flat/bordered panels replace
  * rounded-card-with-shadow (§1), the accent/status palette was audited for a single saturated hue
  * (§2), telemetry numerals switched to B612 Mono (§3), and a `.segmented` control primitive was
  * added (§6) — see the doc comments at each token/rule below for the specific before→after and why.
  */
 
-/* B612 Mono (docs/UX-REWORK-PLAN.md §U-b item 3) — designed by Airbus for cockpit/instrument
+/* B612 Mono (docs/plans/done/UX-REWORK-PLAN.md §U-b item 3) — designed by Airbus for cockpit/instrument
    displays, the deliberate "this is a piece of avionics, not a SaaS dashboard" typographic signal
    for telemetry numerals (OSD, latency badge, stat tiles). Installed via `npm install
    @fontsource/b612-mono` (pinned in `package.json`, the version this pair was copied from is
@@ -56,13 +56,13 @@
     color-scheme: light;
 
     /* ======================================================================
-       TIER 1 — PRIMITIVE RAMP (docs/STYLE-TOKENS-PLAN.md §Colour,
-       docs/VISUAL-REFRESH-PLAN.md F1). The ONLY place raw hex is allowed in
+       TIER 1 — PRIMITIVE RAMP (docs/plans/done/STYLE-TOKENS-PLAN.md §Colour,
+       docs/plans/done/VISUAL-REFRESH-PLAN.md F1). The ONLY place raw hex is allowed in
        this app. Named by hue + numeric lightness step. Components must never
        reference these directly — they consume the TIER 2 semantic aliases
        below. Add a new step here (not a hex literal in a component) when a
        genuinely new shade is needed. Both the dark ramp (original) and the
-       light ramp (docs/VISUAL-REFRESH-PLAN.md) live here side by side — the
+       light ramp (docs/plans/done/VISUAL-REFRESH-PLAN.md) live here side by side — the
        dark steps are unchanged and still back the shared dark block further
        down (`:root[data-theme='dark'], .surface-dark`).
        ====================================================================== */
@@ -113,7 +113,7 @@
        ~340° vs 0°, so a temporal "streaming now" state never reads as the "something failed" red). */
     --rose-500: #ff3d78;
 
-    /* Light neutrals — paper canvas → white raised (docs/VISUAL-REFRESH-PLAN.md F1). Contrast-
+    /* Light neutrals — paper canvas → white raised (docs/plans/done/VISUAL-REFRESH-PLAN.md F1). Contrast-
        checked against the pairings TIER 2 below actually uses (computed, not eyeballed):
        ink-900-on-gray-50 14.9:1, ink-900-on-gray-75 13.8:1, gray-500-on-gray-50 5.65:1,
        gray-500-on-gray-75 5.21:1 — all comfortably clear AA's 4.5:1 floor for --text/--text-muted,
@@ -127,7 +127,7 @@
     --gray-450: #8a94a2; /* faint text on light */
     --ink-900: #1c2431; /* body text on light — ink, not black */
 
-    /* Intent hues, darkened/tinted for light backgrounds (docs/VISUAL-REFRESH-PLAN.md F1) — each
+    /* Intent hues, darkened/tinted for light backgrounds (docs/plans/done/VISUAL-REFRESH-PLAN.md F1) — each
        base is saturated enough to read as the accent against `--gray-50`/white, each `-text` step
        checked at ≥4.5:1 against its own `-soft` fill (blue-800/blue-50 6.83:1, green-700/green-50
        6.53:1, amber-700/amber-50 6.03:1, red-700/red-50 6.00:1) — no lightness tuning needed here
@@ -156,20 +156,20 @@
     /* ======================================================================
        TIER 2 — SEMANTIC ALIASES. What every component references. Re-point a
        role at a different ramp step here and the whole app follows. These
-       are the LIGHT theme's values (docs/VISUAL-REFRESH-PLAN.md F2) — the
+       are the LIGHT theme's values (docs/plans/done/VISUAL-REFRESH-PLAN.md F2) — the
        default theme. The dark theme re-declares every one of these names,
        unchanged from their pre-refresh values, in the shared block further
        down (`:root[data-theme='dark'], .surface-dark`).
        ====================================================================== */
 
-    /* Surfaces, back to front — a 3-step elevation staircase (docs/UX-REWORK-PLAN.md §U-b item 1):
+    /* Surfaces, back to front — a 3-step elevation staircase (docs/plans/done/UX-REWORK-PLAN.md §U-b item 1):
        L0 `--bg` is the page canvas; L1 `--panel` is a bordered panel/card sitting on it; L2
        `--panel-raised` is a surface nested *inside* an L1 panel (a form control, a popover/menu, a
        skeleton block) — each step is background-lightness only, no elevation ever comes from a
        shadow. `--panel-hover` is not a fourth elevation step: it is the interaction-feedback tint a
        panel/row tints to on `:hover`, at any elevation, not a place a page ever sits at rest.
        Elevation direction stays "raised = lighter" in light too: canvas gray-75 → panel gray-50 →
-       raised white (docs/VISUAL-REFRESH-PLAN.md F2). */
+       raised white (docs/plans/done/VISUAL-REFRESH-PLAN.md F2). */
     --bg: var(--gray-75);
     --panel: var(--gray-50);
     --panel-raised: var(--white);
@@ -178,8 +178,8 @@
     --border-strong: var(--gray-350);
 
     /* Text — three-tier hierarchy: full-contrast body, a muted secondary tier, and a faint tertiary
-       tier for captions/timestamps/disabled reasons (contrast-audited, docs/UX-REWORK-PLAN.md
-       §U-b item 7; re-audited for light in docs/VISUAL-REFRESH-PLAN.md F2 — see the F1 ramp
+       tier for captions/timestamps/disabled reasons (contrast-audited, docs/plans/done/UX-REWORK-PLAN.md
+       §U-b item 7; re-audited for light in docs/plans/done/VISUAL-REFRESH-PLAN.md F2 — see the F1 ramp
        comment above for the actual ratios). Ink (`--ink-900`), not black — the "non-eye-damaging"
        rule is as much about avoiding `#000` text as it is `#fff` canvases. */
     --text: var(--ink-900);
@@ -216,20 +216,20 @@
     --color-live: var(--rose-600);
 
     /* Geometry — not part of the 8px spacing rule (radius/hairlines are geometry, not gaps). Stay
-       in px. `--radius` at 5px (docs/UX-REWORK-PLAN.md §U-b item 1); pills are a deliberately
+       in px. `--radius` at 5px (docs/plans/done/UX-REWORK-PLAN.md §U-b item 1); pills are a deliberately
        different shape. Theme-invariant — not re-declared in the dark block below. */
     --radius: 5px;
     --radius-sm: 3px;
     --radius-pill: 999px;
 
-    /* Type — 2 families only (docs/STYLE-TOKENS-PLAN.md rule 2). `--font` for UI/display text,
+    /* Type — 2 families only (docs/plans/done/STYLE-TOKENS-PLAN.md rule 2). `--font` for UI/display text,
        `--mono` (B612 Mono, avionics numerals) for telemetry/ids/timestamps. Every `font-family` in
        the app resolves to one of these two — do not add a third. Theme-invariant. */
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --mono: "B612 Mono", ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, monospace;
 
     /* Depth — `--shadow` is reserved for true overlays only (menus, dialogs, toasts). `.card` and
-       every panel/tile in this app carry no box-shadow. Light's shadow (docs/VISUAL-REFRESH-PLAN.md
+       every panel/tile in this app carry no box-shadow. Light's shadow (docs/plans/done/VISUAL-REFRESH-PLAN.md
        F2) is a soft, low-alpha ink wash rather than the dark theme's harsher black one — a dark
        shadow at the dark theme's own 45% alpha reads as a heavy smudge on a pale canvas. The dark
        theme keeps its original value in the shared dark block below. */
@@ -238,7 +238,7 @@
     /* ======================================================================
        SPACING — strict 8px grid, in rem (root = 16px, so 0.5rem = 8px).
        Token name = the pixel value. All gaps/paddings/margins use these; 2px
-       and 4px are the only sub-8 exceptions (docs/STYLE-TOKENS-PLAN.md rule 4).
+       and 4px are the only sub-8 exceptions (docs/plans/done/STYLE-TOKENS-PLAN.md rule 4).
        ====================================================================== */
     --space-2: 0.125rem;  /* 2px  — tight exception (icon nudge, hairline inset) */
     --space-4: 0.25rem;   /* 4px  — tight exception (chip inner, dot gap) */
@@ -250,7 +250,7 @@
     --space-48: 3rem;     /* 48px */
     --space-64: 4rem;     /* 64px */
 
-    /* Field-width tokens (docs/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3, docs/design/07-add-source.md) —
+    /* Field-width tokens (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3, docs/extracts/design/07-add-source.md) —
        every text input/select used to inherit the same bare `width: 100%` below as its parent
        `.field`/`.card`, which is honest inside a form no wider than its own content but absurd once
        `.page--form`'s 880px column (or a fluid page's full width) is that parent: a 6-character tail
@@ -263,15 +263,15 @@
     --field-md: 40ch; /* names, emails, single-line free text */
     --field-lg: 100%; /* URIs, paths, the debug console's own request path — genuinely open-ended */
 
-    /* Sidebar (docs/NAV-IA-REDESIGN-PLAN.md §2.1, docs/design/00-shell.md) — the persistent left
+    /* Sidebar (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1, docs/extracts/design/00-shell.md) — the persistent left
        nav's own two widths (`shared/ui/app-sidebar/**`); `--header-height` (the old sticky top bar's
        height) is deleted, not renamed — there is no header any more, and no other file referenced
        that token (grep-verified before removal). */
     --sidebar-w: 240px;
     --sidebar-w-rail: 56px;
     /* A *new*, distinct breakpoint (1024px) for the sidebar's own docked/rail transition —
-       deliberately NOT named `--bp-md` even though docs/NAV-IA-REDESIGN-PLAN.md's own prose names it
-       that: `--bp-md` already exists below (docs/UI-REDESIGN-PLAN.md Wave 0) at 900px and backs
+       deliberately NOT named `--bp-md` even though docs/plans/done/NAV-IA-REDESIGN-PLAN.md's own prose names it
+       that: `--bp-md` already exists below (docs/plans/done/UI-REDESIGN-PLAN.md Wave 0) at 900px and backs
        ~10 other files' own breakpoints (the asset grid collapse, the cockpit map inset, `command.css`,
        `fly.css`, `live.css`, `replay.css`, `debug.css`, `tile-grid.ts`, …) — redefining its value
        here would silently change what every one of those already means without touching any of them.
@@ -286,7 +286,7 @@
    and the permanent identity of `.surface-dark` full-bleed video enclaves
    (Fly cockpit, Wall, the replay player region). Re-declares every TIER 2
    semantic token from the `:root` block above at its pre-refresh dark value
-   (docs/VISUAL-REFRESH-PLAN.md F3) — nothing here is new colour, only where
+   (docs/plans/done/VISUAL-REFRESH-PLAN.md F3) — nothing here is new colour, only where
    it applies. The selector list is the entire mechanism: the same
    declarations back both the user's chosen dark theme *and* the enclave.
    Custom properties re-resolve correctly wherever a rule *references*
@@ -296,7 +296,7 @@
    `<h1>`, `.page-bar-title`) just carries `<body>`'s light-theme ink straight
    through a `.surface-dark` boundary lower in the tree, invisible against
    the same block's own dark background (confirmed live: Wall's page-bar
-   title, docs/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05). The explicit
+   title, docs/plans/done/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05). The explicit
    `color`/`background` declared directly below exist *only* to restart
    inheritance at this exact boundary for descendants that never set their
    own — components still only ever consume the TIER 2 names, never this
@@ -367,7 +367,7 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* Two deliberate typographic registers (docs/UX-REWORK-PLAN.md §U-b item 3), not one scale reused
+/* Two deliberate typographic registers (docs/plans/done/UX-REWORK-PLAN.md §U-b item 3), not one scale reused
    everywhere: *display* text (these headers, `.brand` in `app.css`) is mixed-case, 600 weight,
    tightened `-0.01em` tracking, read as prose/a title. *Structural/label* text (`.label` below,
    `th`, and now `app.css`'s own `.tab`) is uppercase, loosened `+0.04–0.05em` tracking, read as
@@ -405,7 +405,7 @@ a {
 
 /* ---- Layout primitives -------------------------------------------------- */
 
-/* Fluid (docs/NAV-IA-REDESIGN-PLAN.md §2.3) — the old `max-width: 1400px` centered column dates
+/* Fluid (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.3) — the old `max-width: 1400px` centered column dates
    from when every page sat under a full-width top header with nothing else claiming horizontal
    space; now that a docked sidebar already reserves its own `--sidebar-w`, capping content width a
    second time inside `<main>` left real dead space on wide viewports (F4's own walkthrough numbers:
@@ -429,12 +429,12 @@ a {
     margin: var(--space-4) 0 0;
     color: var(--text-muted);
     font-size: 0.85rem;
-    /* Prose keeps its measure even on a fluid page (docs/NAV-IA-REDESIGN-PLAN.md §2.3) — unchanged
+    /* Prose keeps its measure even on a fluid page (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.3) — unchanged
        from before this task; only `.page` itself lost its own outer cap. */
     max-width: 62ch;
 }
 
-/* Opt-in centered column (docs/NAV-IA-REDESIGN-PLAN.md §2.3) for pages that genuinely want one — a
+/* Opt-in centered column (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.3) for pages that genuinely want one — a
    form, a settings screen — now that `.page` itself is fluid by default. Not consumed by any page
    yet (Wave 1a's own scope is the shell only); a later wave applies it to `/add-source`/`/settings`,
    which also fixes the 1075px-wide "display name" input the plan's own F4 flagged on `/add-source`. */
@@ -443,7 +443,7 @@ a {
     margin-inline: auto;
 }
 
-/* Field-width buckets (docs/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3) — applied directly to an
+/* Field-width buckets (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3) — applied directly to an
    `<input>`/`<select>`, not its wrapping `.field` div, so they override the bare `width: 100%` every
    control gets below without disturbing that div's own layout (label stacking, grid spanning, etc.).
    A plain class selector already outranks the element selector `input, select, textarea { width:
@@ -506,7 +506,7 @@ a {
 .mono {
     font-family: var(--mono);
     font-size: 0.8rem;
-    /* docs/UX-REWORK-PLAN.md §U-b item 3 — every digit takes the same width, so a value that ticks
+    /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — every digit takes the same width, so a value that ticks
        (a duration, a sample age, a device id) doesn't shift its neighbors as it changes. Inert on
        non-digit characters, so this is safe on every existing `.mono` consumer, numeric or not. */
     font-variant-numeric: tabular-nums;
@@ -542,7 +542,7 @@ select,
 textarea {
     width: 100%;
     /* `--panel-raised`, not `--bg` — a control the same shade as the page behind it reads as no
-       control at all (docs/UX-QUICKWINS-PLAN.md QF-3's "nearly invisible" finding: fly switcher,
+       control at all (docs/plans/done/UX-QUICKWINS-PLAN.md QF-3's "nearly invisible" finding: fly switcher,
        scan-timeout select, device-assign picker) — this is what gives every native form control a
        visible surface distinct from the page, consistent with `.btn.secondary`'s own border/surface
        treatment below. */
@@ -658,7 +658,7 @@ input[type="checkbox"] {
 }
 
 /* ---- Segmented controls --------------------------------------------------- */
-/* Mutually-exclusive mode buttons (docs/UX-REWORK-PLAN.md U-b item 5 — the Live/asset-detail
+/* Mutually-exclusive mode buttons (docs/plans/done/UX-REWORK-PLAN.md U-b item 5 — the Live/asset-detail
    "boxes: Overlay/Burned/Off" toggle, the fleet/live map's layer picker) rendered as one joined
    strip with a strong active state, not parallel separate buttons floating next to each other.
    Add this class alongside a group's own layout/`role="group"` wrapper; children stay plain
@@ -675,7 +675,7 @@ input[type="checkbox"] {
 
 /* An inactive segment is otherwise plain `.btn.secondary` (transparent background, bordered) —
    this rule only ever owns the shape (square corners, overlapping border), never a background.
-   docs/VISUAL-REFRESH-PLAN.md W0: an earlier `background-color: var(--text-muted)` painted every
+   docs/plans/done/VISUAL-REFRESH-PLAN.md W0: an earlier `background-color: var(--text-muted)` painted every
    inactive segment a flat muted-gray fill, wrong in both themes (it read as a disabled control, and
    fought the active segment's own `--color-info` fill for attention instead of receding behind
    it) — removed outright rather than re-valued. */
@@ -711,7 +711,7 @@ input[type="checkbox"] {
 }
 
 /* ---- Kebab (⋯) menus ------------------------------------------------------ */
-/* A reusable per-row overflow menu (docs/UX-REWORK-PLAN.md U-a item 7 — this batch's Devices/
+/* A reusable per-row overflow menu (docs/plans/done/UX-REWORK-PLAN.md U-a item 7 — this batch's Devices/
    Asset-detail kebabs are the first consumers): a native `<details>`/`<summary>` disclosure, the
    same idiom the header's own "More" overflow already established (`app.css`'s `.tab-more`/
    `.tab-more-menu`), just a small per-row trigger instead of a nav tab — not a new dropdown
@@ -822,7 +822,7 @@ input[type="checkbox"] {
     color: var(--text-faint);
 }
 
-/* Poka-yoke (docs/UX-REWORK-PLAN.md U-a2 rule 4): "destructive actions look different and live
+/* Poka-yoke (docs/plans/done/UX-REWORK-PLAN.md U-a2 rule 4): "destructive actions look different and live
    apart" — a plain modifier for the one destructive entry among routine ones, wherever it's used:
    a `.kebab-menu` row (paired with that menu's own explicit `.kebab-divider` above it — see the
    Kebab section above for why the separation itself is a rendered element, not CSS inferred from
@@ -849,7 +849,7 @@ button.danger-action {
     background: var(--color-danger-soft);
 }
 
-/* Poka-yoke (docs/UX-REWORK-PLAN.md U-a2 rule 1: prevention over confirmation) — the one-line
+/* Poka-yoke (docs/plans/done/UX-REWORK-PLAN.md U-a2 rule 1: prevention over confirmation) — the one-line
    reason a disabled control can't be used right now ("Stop the stream first"), told inline rather
    than only in a `title` tooltip. Plain class, no component: drop a `<p class="disabled-reason">`
    (or a `<span>`) right after the control it explains. */
@@ -896,7 +896,7 @@ button.danger-action {
 .chip.warn {
     background: var(--color-warn-soft);
     border-color: transparent;
-    /* `-text`, not the bare `--color-warn` this used to read (docs/VISUAL-REFRESH-PLAN.md W0 audit)
+    /* `-text`, not the bare `--color-warn` this used to read (docs/plans/done/VISUAL-REFRESH-PLAN.md W0 audit)
        — `.chip.accent`/`.chip.ok`/`.chip.danger` all already use their own `-text` step for exactly
        this reason: the base intent colour is tuned to read as a fill/border, not as text on its own
        `-soft` tint. In light, `--color-warn` (amber-600) on `--color-warn-soft` (amber-50) measures
@@ -939,7 +939,7 @@ button.danger-action {
 /* ---- Notice banners ----------------------------------------------------- */
 /* The attention-banner pattern (light warm/red text on a matching dark line) that was copy-pasted
    across app.css, wall.css, command.css, fly.css, live.css, onboarding.css, toast-host.ts and
-   player.ts (docs/STYLE-TOKENS-PLAN.md §Shared primitives). Base `.notice` is neutral; add
+   player.ts (docs/plans/done/STYLE-TOKENS-PLAN.md §Shared primitives). Base `.notice` is neutral; add
    `.warn`/`.danger` for the intent. Consumers drop `<div class="notice warn">…</div>` — no
    per-feature color literals. */
 .notice {
@@ -1048,7 +1048,7 @@ tbody tr:last-child td {
   color: var(--text);
 }
 
-/* Leaflet tooltips (docs/TACTICAL-MARKS-PLAN.md M5 — the first non-permanent `bindTooltip` usage in
+/* Leaflet tooltips (docs/plans/done/TACTICAL-MARKS-PLAN.md M5 — the first non-permanent `bindTooltip` usage in
    this app; the existing `.zone-label` rules in each map component's own CSS only ever set
    `permanent: true`) are, like popups above, injected with Leaflet's own white default chrome.
    Themed globally, once, for the identical reason the popup rule above is global rather than
@@ -1065,17 +1065,17 @@ tbody tr:last-child td {
 }
 
 /* ==========================================================================
-   Wave 0 additions (docs/UI-REDESIGN-PLAN.md, Frozen contract F1) — spacing
+   Wave 0 additions (docs/plans/done/UI-REDESIGN-PLAN.md, Frozen contract F1) — spacing
    scale, a tokenized breakpoint reference, the one canonical frosted-pill HUD
    surface, and a 12-column grid. Purely additive: every name below is new;
    nothing above this line changed. Names/values here are frozen exactly as
-   docs/UI-REDESIGN-PLAN.md's own F1 section states them, so later waves
+   docs/plans/done/UI-REDESIGN-PLAN.md's own F1 section states them, so later waves
    (W1-W4) can consume them without drift.
    ========================================================================== */
 
 :root {
   /* Breakpoints — one reconciled set (was: shell 640 / asset 900 / cockpit 760,1280, per
-     docs/UI-REDESIGN-PLAN.md's own "Current state" audit). Documented as custom properties for
+     docs/plans/done/UI-REDESIGN-PLAN.md's own "Current state" audit). Documented as custom properties for
      reference only — @media cannot read var(), so every stylesheet that needs one of these
      hardcodes the matching px value below and cites the token name in its own trailing comment,
      e.g. "@media (max-width: 640px) { ... } " followed by a comment naming --bp-sm. */
@@ -1083,7 +1083,7 @@ tbody tr:last-child td {
   --bp-md: 900px; /* below: asset grid -> 1 col; cockpit map inset hides */
   --bp-lg: 1200px; /* below: hub tile grid drops a column; cockpit tool-rail stays */
 
-  /* Frosted-pill HUD surface — the one canonical recipe (docs/UI-REDESIGN-PLAN.md D-B), replacing
+  /* Frosted-pill HUD surface — the one canonical recipe (docs/plans/done/UI-REDESIGN-PLAN.md D-B), replacing
      the >= 8 copies of `background: rgb(6 9 14 / 62%); backdrop-filter: blur(6px); border: 1px
      solid rgb(255 255 255 / 9%)` scattered across `fly.css`/`cv-control-panel.css`/
      `flight-command-panel.css`/`fly-osd.ts`/`diagnostics-card.ts`/`preflight-checklist.ts` — none
@@ -1100,7 +1100,7 @@ tbody tr:last-child td {
   /* Scrims — black compositing washes over live video/map (gradient legends, label backings,
      dimmers). Alpha-over-black is a compositing value, not a palette colour: prefer these two
      canonical steps; a bespoke `rgb(0 0 0 / N%)` is acceptable only where a unique opacity is
-     genuinely needed (documented exception, docs/STYLE-TOKENS-PLAN.md §Geometry note). */
+     genuinely needed (documented exception, docs/plans/done/STYLE-TOKENS-PLAN.md §Geometry note). */
   --scrim: rgb(0 0 0 / 55%);
   --scrim-strong: rgb(0 0 0 / 70%);
   /* Hairline tint — the faint white 1px edge used on surfaces floating over video/map. */
@@ -1163,8 +1163,8 @@ tbody tr:last-child td {
 }
 
 /* The `main:not(:has(> .cockpit, > .command-shell)) { max-width: 1400px; margin: 0 auto; }` rule
-   that used to live here (docs/UI-REDESIGN-PLAN.md Wave 0) is deleted, not updated
-   (docs/NAV-IA-REDESIGN-PLAN.md §2.1/§2.3) — it dated from when `<main>` was a plain in-flow block,
+   that used to live here (docs/plans/done/UI-REDESIGN-PLAN.md Wave 0) is deleted, not updated
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1/§2.3) — it dated from when `<main>` was a plain in-flow block,
    where `margin: 0 auto` on a `max-width` box is the ordinary way to center a column. `<main>` is
    now a **grid item** of `app.css`'s own `:host { display: grid }` shell; `margin: 0 auto` on a
    grid item suppresses the item's default `stretch` and shrinks it to `max-content` instead of

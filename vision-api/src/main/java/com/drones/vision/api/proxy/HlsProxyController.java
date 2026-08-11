@@ -78,7 +78,7 @@ import java.util.Optional;
  * through verbatim, exactly as {@link #proxy} passes through the upstream's
  * {@code Content-Type}, {@code Cache-Control}, and status on success — this
  * controller adds no caching headers of its own, and forwards (rather than
- * drops) whatever caching header mediamtx itself sent (docs/MVP2-PLAN.md
+ * drops) whatever caching header mediamtx itself sent (docs/plans/done/MVP2-PLAN.md
  * V-a proxy audit), so mediamtx's own {@code no-cache} on live LL-HLS
  * playlists reaches the browser instead of silently vanishing.
  */
@@ -113,7 +113,7 @@ public class HlsProxyController {
             HttpHeaders headers = new HttpHeaders();
             upstreamResponse.headers().firstValue("content-type")
                     .ifPresent(contentType -> headers.add(HttpHeaders.CONTENT_TYPE, contentType));
-            // docs/MVP2-PLAN.md V-a proxy audit: mediamtx marks every LL-HLS live media
+            // docs/plans/done/MVP2-PLAN.md V-a proxy audit: mediamtx marks every LL-HLS live media
             // playlist response "Cache-Control: no-cache" (never cacheable — the whole point
             // of polling/blocking-reloading it) and completed segments/older non-LL playlists
             // "public, max-age=<segment-duration>" (genuinely safe to cache, they're immutable

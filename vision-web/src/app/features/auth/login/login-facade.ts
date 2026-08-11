@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth-store';
 
 /**
- * `LoginPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — thin, mirroring how thin the page already
+ * `LoginPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — thin, mirroring how thin the page already
  * was: owns the two field signals and forwards straight to `AuthStore.login()`, exactly as
  * `LoginPage` did inline before this refactor (byte-for-byte the same busy/error/canSubmit rules —
  * `AuthStore` was already doing every real decision, this only moves *where* the plumbing sits).

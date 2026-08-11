@@ -402,7 +402,7 @@ class AssetControllerTest {
 
     @Test
     void updateAppliesAnAttributesEditIncludingRegistrationNumber() throws Exception {
-        // docs/UX-REWORK-PLAN.md §U-d item 3: confirms attributes patch end-to-end through the
+        // docs/plans/done/UX-REWORK-PLAN.md §U-d item 3: confirms attributes patch end-to-end through the
         // HTTP layer — the frontend sends registrationNumber as a plain attributes key, no
         // special-cased field needed anywhere in this path.
         Device device = videoDevice();
@@ -889,7 +889,7 @@ class AssetControllerTest {
 
     @Test
     void telemetryIncludesFlightStateAndExtraWhenTheSampleCarriesThem() throws Exception {
-        // docs/FC-INTEGRATIONS-PLAN.md F-b: FlightStateResponse mirrors the frozen wire contract
+        // docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b: FlightStateResponse mirrors the frozen wire contract
         // field-for-field, and per-field nullability (only some FlightState fields known here)
         // must survive the DTO mapping honestly rather than fabricating the rest.
         UsageId usageId = UsageId.random();
@@ -932,7 +932,7 @@ class AssetControllerTest {
 
     @Test
     void telemetryDistinguishesSamplesFromDifferentDeviceIds() throws Exception {
-        // docs/CYCLES-PLAN.md §11, CD-a: deviceId is what makes samples from two different
+        // docs/main/CYCLES-PLAN.md §11, CD-a: deviceId is what makes samples from two different
         // telemetry devices on the same usage/asset distinguishable.
         UsageId usageId = UsageId.random();
         DeviceId deviceA = DeviceId.random();

@@ -53,7 +53,7 @@ import com.drones.vision.api.controller.EventController;
 import com.drones.vision.api.controller.StreamController;
 
 /**
- * The {@code /api/live} connection registry (docs/REALTIME-PLAN.md §4) — the one {@link
+ * The {@code /api/live} connection registry (docs/plans/done/REALTIME-PLAN.md §4) — the one {@link
  * LiveUpdatePublisherPort} implementation, a per-process ({@code single-instance deployment},
  * per the plan) hub fanning application-layer announcements out to every subscribed {@code
  * SseEmitter}.
@@ -68,7 +68,7 @@ import com.drones.vision.api.controller.StreamController;
  * GET /api/devices}+{@code GET /api/streams} poll, and {@code detection-events} lets {@code
  * EventsStore} drop its {@code GET /api/events} poll — see each topic's own javadoc ({@link
  * LiveTopicKind#DEVICES}/{@link LiveTopicKind#DETECTION_EVENTS}) for why each is its own topic
- * rather than folded into {@code fleet}/{@code event}. {@code map} (docs/MAP-REWORK-PLAN.md §4.3)
+ * rather than folded into {@code fleet}/{@code event}. {@code map} (docs/plans/done/MAP-REWORK-PLAN.md §4.3)
  * replaces the old {@code marks} topic outright — the whole common operational picture (marks,
  * drawings and layers), carrying its entity and lifecycle action inside the payload rather than as
  * twelve topic kinds, exactly like {@code detection-events} carries OPEN/CLOSED in one topic (see
@@ -77,7 +77,7 @@ import com.drones.vision.api.controller.StreamController;
  * <h2>Scoped delivery — {@code map} only</h2>
  * Every topic above {@code map} broadcasts one envelope to every subscribed connection. {@code map}
  * does not: an event is delivered only to connections whose viewer may see its layer
- * (docs/MAP-REWORK-PLAN.md §4.3, the security-critical half of the rework). The decision is
+ * (docs/plans/done/MAP-REWORK-PLAN.md §4.3, the security-critical half of the rework). The decision is
  * <strong>not</strong> made here — this class never resolves an identity. {@code LiveController}
  * captures the connecting request's viewer and hands {@link #connect} a predicate over an event's
  * {@code layerId} ({@link MapVisibility#deliveryPredicate}); the predicate rides on the {@link
@@ -157,10 +157,10 @@ import com.drones.vision.api.controller.StreamController;
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
 
-    /** How often {@link #flushPending()} drains coalesced telemetry/detections (docs/REALTIME-PLAN.md §4, item 3). */
+    /** How often {@link #flushPending()} drains coalesced telemetry/detections (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
     static final long COALESCE_MILLIS = 150L;
 
-    /** How often {@link #heartbeatAll()} sends a keepalive comment (docs/REALTIME-PLAN.md §4, item 3). */
+    /** How often {@link #heartbeatAll()} sends a keepalive comment (docs/plans/done/REALTIME-PLAN.md §4, item 3). */
     static final long HEARTBEAT_MILLIS = 15_000L;
 
     /** Retained samples per asset's {@code telemetry} topic (FIFO — see {@link LiveRingBuffer}). */
@@ -326,7 +326,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
     }
 
     /**
-     * Adds/removes topics on an already-open connection (docs/REALTIME-PLAN.md §4, item 2) — a
+     * Adds/removes topics on an already-open connection (docs/plans/done/REALTIME-PLAN.md §4, item 2) — a
      * newly-added topic immediately receives its own snapshot burst, exactly like a fresh {@link
      * #connect}, so a tile entering the screen catches up without reconnecting.
      *
@@ -423,7 +423,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
      * {@inheritDoc}
      *
      * <p>Appends one envelope to the shared {@code map} buffer and broadcasts it — but only to the
-     * connections whose viewer may see {@code event.layerId()} (docs/MAP-REWORK-PLAN.md §4.3). The
+     * connections whose viewer may see {@code event.layerId()} (docs/plans/done/MAP-REWORK-PLAN.md §4.3). The
      * buffered envelope itself is unfiltered, so it can be replayed to any later viewer and
      * re-filtered for them; see this class's "Scoped delivery" javadoc section.
      *
@@ -561,7 +561,7 @@ public final class LiveUpdateRegistry implements LiveUpdatePublisherPort {
 
     /**
      * {@code hasImage} is always {@code false} on this live snapshot — deliberately, not an
-     * oversight (docs/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2): this class already sits at the
+     * oversight (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2): this class already sits at the
      * five-constructor-parameter ceiling (see {@code .claude/skills/java-clean-code/SKILL.md} §3),
      * and {@code AssetImageRepositoryPort} carries no per-asset lifecycle event of its own to
      * announce a change through anyway (unlike {@code AuditTrailPort}/{@code EventPublisherPort},

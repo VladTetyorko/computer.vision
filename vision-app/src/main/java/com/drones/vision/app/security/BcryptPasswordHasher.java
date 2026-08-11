@@ -6,7 +6,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import java.util.Objects;
 
 /**
- * The one {@link PasswordHasherPort} implementation (docs/U-AUTH-PLAN.md, wave 3) — BCrypt, via
+ * The one {@link PasswordHasherPort} implementation (docs/plans/done/U-AUTH-PLAN.md, wave 3) — BCrypt, via
  * Spring Security's {@link BCryptPasswordEncoder}.
  *
  * <p><strong>This is the only place in the codebase that references BCrypt.</strong> The

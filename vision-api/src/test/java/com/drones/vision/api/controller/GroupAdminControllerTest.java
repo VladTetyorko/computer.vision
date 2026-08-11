@@ -27,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Standalone MockMvc tests for {@link GroupAdminController} (docs/U-SCOPE-PLAN.md, U-e slice 2 —
+ * Standalone MockMvc tests for {@link GroupAdminController} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 —
  * org-settings group management): list/create map through to {@link GroupService}, and {@code
  * CreateGroupRequest} parses an optional parent id.
  */

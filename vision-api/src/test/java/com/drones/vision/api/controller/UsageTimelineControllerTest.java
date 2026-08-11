@@ -74,7 +74,7 @@ class UsageTimelineControllerTest {
         return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 2);
     }
 
-    // ---- recent (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 -- the replay library list) ----
+    // ---- recent (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 -- the replay library list) ----
 
     @Test
     void recentReturns200WithMappedRowsOnHappyPath() throws Exception {
@@ -302,7 +302,7 @@ class UsageTimelineControllerTest {
         verify(replayService).timeline(eq(usageId), eq(null), eq(null), eq(500));
     }
 
-    // ---- recording (docs/OPS-CORE-PLAN.md §R, R-b) ----
+    // ---- recording (docs/plans/done/OPS-CORE-PLAN.md §R, R-b) ----
 
     @Test
     void recordingReturns200WithAvailableTrueAndTheResolvedRecording() throws Exception {

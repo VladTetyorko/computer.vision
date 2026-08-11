@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * A line/polygon/arrow/text annotation on the wire (docs/MAP-REWORK-PLAN.md §4.2) — the response
+ * A line/polygon/arrow/text annotation on the wire (docs/plans/done/MAP-REWORK-PLAN.md §4.2) — the response
  * body for every {@code /api/map/drawings} endpoint and the {@code drawing} field inside {@link
  * MapEventPayload} on the {@code map} SSE topic.
  *

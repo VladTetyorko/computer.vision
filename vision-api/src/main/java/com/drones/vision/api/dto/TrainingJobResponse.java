@@ -5,7 +5,7 @@ import com.drones.vision.application.training.TrainingJobView;
 import java.time.Instant;
 
 /**
- * Wire representation of a {@link TrainingJobView} (docs/CV-TRAINING-PLAN.md §8's frozen wire
+ * Wire representation of a {@link TrainingJobView} (docs/plans/done/CV-TRAINING-PLAN.md §8's frozen wire
  * contract) — the flattened, pollable state of one CV fine-tune job. Body of {@code POST
  * /api/datasets/{id}/train} and {@code GET /api/training/jobs}[/{jobId}].
  *

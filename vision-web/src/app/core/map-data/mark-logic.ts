@@ -14,7 +14,7 @@ import { applyMapEvents, deletedLayerIds, dropByLayer, type MapEntitySpec } from
 /**
  * Pure, Angular-free logic behind `core/map-data/marks-store.ts` and the marks UI
  * (`shared/map/map-controls/**`, `features/fly/marks-panel.ts`, `features/command/marks-panel.ts`;
- * docs/MAP-REWORK-PLAN.md §5.2). **Moved from `core/marks/mark-logic.ts` and reworked to the v2
+ * docs/plans/done/MAP-REWORK-PLAN.md §5.2). **Moved from `core/marks/mark-logic.ts` and reworked to the v2
  * model** — the old file's colour-by-kind palette (`markColor`/`markStyle`) is gone with it: v2 marks
  * are drawn by `shared/map/tactical-map/tactical-map-logic.ts`'s APP-6-inspired **affiliation**
  * symbology (frame shape + one semantic token), which is the single source of truth for how a mark
@@ -62,7 +62,7 @@ export interface MarkMoved {
   readonly position: GeoPosition;
 }
 
-// --- SSE fold (docs/MAP-REWORK-PLAN.md §4.3) ------------------------------------------------------
+// --- SSE fold (docs/plans/done/MAP-REWORK-PLAN.md §4.3) ------------------------------------------------------
 
 const MARK_SPEC: MapEntitySpec<MapMark> = {
   entity: 'mark',
@@ -80,7 +80,7 @@ export function applyMarkEvents(marks: readonly MapMark[], events: readonly MapE
   return dropByLayer(applyMapEvents(marks, events, MARK_SPEC), deletedLayerIds(events));
 }
 
-// --- The palette: what the next mark will be (docs/MAP-REWORK-PLAN.md §5.2) -----------------------
+// --- The palette: what the next mark will be (docs/plans/done/MAP-REWORK-PLAN.md §5.2) -----------------------
 
 /**
  * The operator's current mark-creation selection — replaces the old store's bare `pendingKind`.
@@ -161,7 +161,7 @@ export function editMarkRequest(palette: MarkPalette, label: string, note?: stri
   return { kind: palette.kind, affiliation: palette.affiliation, label, note };
 }
 
-// --- Verification (docs/MAP-REWORK-PLAN.md §5.2's verify/promote UI) ------------------------------
+// --- Verification (docs/plans/done/MAP-REWORK-PLAN.md §5.2's verify/promote UI) ------------------------------
 
 const VERIFICATION_LABELS: Record<VerificationState, string> = {
   UNVERIFIED: 'Unverified',
@@ -204,7 +204,7 @@ export function countUnverified(marks: readonly MapMark[]): number {
   return marks.reduce((count, mark) => (isUnverified(mark) ? count + 1 : count), 0);
 }
 
-// --- Bearing/distance (docs/TACTICAL-MARKS-PLAN.md §3/§1 — mirrors `domain.model.GeoProjection
+// --- Bearing/distance (docs/plans/done/TACTICAL-MARKS-PLAN.md §3/§1 — mirrors `domain.model.GeoProjection
 // #bearingDistance` byte-for-byte, the same "reimplement the backend's pure math client-side for a
 // live, no-round-trip readout" idiom `geofence-logic.ts#polygonContains` already established for
 // `GeofenceZone#contains`. Moved here verbatim from `core/marks/mark-logic.ts`.) -------------------
@@ -233,7 +233,7 @@ function normalizeDegrees(degrees: number): number {
 
 /**
  * Great-circle initial bearing + haversine distance from `from` to `to` — e.g. "how far and in
- * what direction is this mark from the drone" (docs/TACTICAL-MARKS-PLAN.md §3's selected-mark
+ * what direction is this mark from the drone" (docs/plans/done/TACTICAL-MARKS-PLAN.md §3's selected-mark
  * readout). Byte-for-byte port of `GeoProjection.bearingDistance` (vision-domain) — see that
  * method's own golden-value tests, mirrored in this module's own spec.
  */

@@ -7,7 +7,7 @@ import java.time.Duration;
 
 /**
  * Configuration for {@code vision-api}'s edge-local infrastructure ({@code vision.api.*}),
- * docs/LAYERING-REFACTOR-PLAN.md &sect;2.2, wave D.
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;2.2, wave D.
  *
  * <p><b>Naming note</b>: this Spring {@code @ConfigurationProperties} record shares its simple name
  * with {@code com.drones.vision.api.support.VisionApiProperties} — {@code vision-api}'s own plain,

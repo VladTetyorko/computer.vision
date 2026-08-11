@@ -8,7 +8,7 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
 /**
  * Creates and configures the {@link FFmpegFrameRecorder} {@link MediamtxStreamPublisher} pushes
  * encoded frames through: format/codec/rate-control options, plus the per-stream measured frame
- * rate and its derived GOP size (docs/MVP2-PLAN.md V-a).
+ * rate and its derived GOP size (docs/plans/done/MVP2-PLAN.md V-a).
  *
  * <p>Package-private, stateless. {@link #create} is the only method that touches the network
  * ({@link FFmpegFrameRecorder#start()}); {@link #configureRecorder} deliberately doesn't call it,
@@ -18,7 +18,7 @@ import static org.bytedeco.ffmpeg.global.avutil.AV_PIX_FMT_YUV420P;
 final class H264RecorderFactory {
 
     /**
-     * docs/MVP2-PLAN.md V-a: an HLS segment can never be shorter than the keyframe interval it's
+     * docs/plans/done/MVP2-PLAN.md V-a: an HLS segment can never be shorter than the keyframe interval it's
      * cut on, so this bounds how low mediamtx's own {@code hlsSegmentDuration} (compose {@code
      * MTX_HLSSEGMENTDURATION}, see docker-compose.yml) can usefully go — 1s here matches mediamtx's
      * own 1s default/configured segment duration exactly. Was 2s, which forced ~2s (or coarser,
@@ -43,7 +43,7 @@ final class H264RecorderFactory {
     static final String X264_BUFSIZE_BITS = "12000000";
     /**
      * Disables x264's adaptive scene-cut keyframe insertion (default threshold 40, inherited from
-     * the {@code veryfast} preset if left unset). docs/MVP2-PLAN.md V-a: mediamtx cuts a new HLS
+     * the {@code veryfast} preset if left unset). docs/plans/done/MVP2-PLAN.md V-a: mediamtx cuts a new HLS
      * segment at the first keyframe at-or-after its configured {@code hlsSegmentDuration}, so a
      * closed, strictly periodic GOP (one keyframe every {@link #GOP_SECONDS} exactly, never early)
      * keeps segment boundaries — and therefore segment durations — predictable; scene-cut-triggered
@@ -67,7 +67,7 @@ final class H264RecorderFactory {
 
     /**
      * Same as {@link #create(String, int, int, double)}, but the x264 rate-control/GOP options come
-     * from {@code encoder} (docs/LAYERING-REFACTOR-PLAN.md wave F3) instead of this class's own
+     * from {@code encoder} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3) instead of this class's own
      * {@code static final} constants — {@link MediamtxStreamPublisher} calls this overload with its
      * configured {@link PublishSettings#encoder()}.
      */
@@ -90,7 +90,7 @@ final class H264RecorderFactory {
      * derived GOP size. A package-private test seam: this method deliberately doesn't call {@link
      * FFmpegFrameRecorder#start()} (see class javadoc).
      *
-     * <p><b>Latency audit (docs/MVP2-PLAN.md V-a):</b> {@code tune=zerolatency} (verified against
+     * <p><b>Latency audit (docs/plans/done/MVP2-PLAN.md V-a):</b> {@code tune=zerolatency} (verified against
      * x264's own source) already expands to {@code --bframes 0 --no-mbtree --sync-lookahead 0
      * --rc-lookahead 0 --force-cfr}, i.e. zero B-frames and zero rate-control/frame-type lookahead —
      * there is no reordering delay between a frame being captured and it leaving the encoder. {@link
@@ -109,9 +109,9 @@ final class H264RecorderFactory {
     /**
      * Same as {@link #configureRecorder(FFmpegFrameRecorder, double)}, but {@code crf}/{@code
      * maxrate}/{@code bufsize}/{@code preset}/{@code gopSeconds}/{@code sc_threshold} come from
-     * {@code encoder} (docs/LAYERING-REFACTOR-PLAN.md wave F3) rather than this class's own
+     * {@code encoder} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3) rather than this class's own
      * constants — see that method's own javadoc for everything else (format/codec/tune/pixel format
-     * stay fixed, out of {@link PublishSettings.Encoder}'s scope per docs/LAYERING-REFACTOR-PLAN.md
+     * stay fixed, out of {@link PublishSettings.Encoder}'s scope per docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3's "no behavior change" guardrail: {@code tune=zerolatency} is load-bearing for this
      * class's own documented zero-reordering-delay guarantee, not a deployment knob).
      */

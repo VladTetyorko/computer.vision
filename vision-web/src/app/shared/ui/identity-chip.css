@@ -1,4 +1,4 @@
-/* A plain `<button>` + `@if`-rendered popover (docs/UI-STATE-PLAN.md §2.3/§2.2), not a native
+/* A plain `<button>` + `@if`-rendered popover (docs/plans/done/UI-STATE-PLAN.md §2.3/§2.2), not a native
    `<details>` — its open state must be closable by something other than itself (the notification
    bell opening, a route change, Escape, an outside click; see `identity-chip.ts`'s own class doc and
    `core/ui/overlay-store.ts`), which a `<details>`'s DOM-only `open` attribute structurally can't be. */
@@ -84,7 +84,7 @@
   font-size: 0.75rem;
 }
 
-/* Navigation links inside the menu (docs/U-SCOPE-PLAN.md, U-e slice 2) — My activity, and
+/* Navigation links inside the menu (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — My activity, and
    Organization when the viewer can manage it. Set off from the name/role above and Log out below by
    thin dividers so the menu reads as three bands (identity · links · session action). */
 .identity-links {
@@ -125,7 +125,7 @@
   text-decoration: underline;
 }
 
-/* Collapse to the avatar alone on narrow viewports (docs/U-AUTH-PLAN.md wave 4's own "collapses to
+/* Collapse to the avatar alone on narrow viewports (docs/plans/done/U-AUTH-PLAN.md wave 4's own "collapses to
    an avatar/menu on narrow viewports" ask) — the dropdown itself is untouched by this breakpoint, so
    opening it still surfaces name/role/logout, nothing is lost, only relocated behind one tap. Same
    breakpoint `app.css` already uses for the header's own responsive pass (`.brand-name` hides

@@ -65,7 +65,7 @@ below 333Hz Full for this use case.
 ## Limitations
 
 - **~2.4 kB/s ceiling** — plenty for `HEARTBEAT`/`GPS_RAW_INT`/`SYS_STATUS`/`RC_CHANNELS`
-  (this platform's `FlightState` decode set, see `docs/FC-INTEGRATIONS-PLAN.md`) at a modest
+  (this platform's `FlightState` decode set, see `docs/plans/done/FC-INTEGRATIONS-PLAN.md`) at a modest
   rate, not enough for high-rate attitude streams or bulk log/parameter downloads without
   first bumping the packet rate.
 - **INAV: monitor-only** — no command/config/mission traffic will get through in the direction
@@ -79,6 +79,6 @@ below 333Hz Full for this use case.
 - [ExpressLRS — MAVLink](https://www.expresslrs.org/software/mavlink/) — firmware/backpack
   minimum versions, `SERIALx_PROTOCOL`/`SERIALx_BAUD` values, UDP port, per-firmware support,
   throughput numbers.
-- `docs/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing) and `docs/FC-INTEGRATIONS-PLAN.md`
+- `docs/plans/active/DRONE-INFRA-PLAN.md` I-d (recipe scope/costing) and `docs/plans/done/FC-INTEGRATIONS-PLAN.md`
   (this platform's MAVLink decode set, firmware detection).
 - `adapters/adapter-mavlink/MODULE.md` (this platform's listen-not-connect ingest model).

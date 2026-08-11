@@ -2,7 +2,7 @@ import type { AssetAttention, CategoryCounts, FleetSummary } from '../../core/ap
 import { attentionReasons, type AttentionReason } from '../../core/fleet/attention-logic';
 
 /**
- * Pure, Angular-free logic behind `ReportsPage` (`/manage/reports`, docs/UI-REDESIGN-PLAN.md Wave 4
+ * Pure, Angular-free logic behind `ReportsPage` (`/manage/reports`, docs/plans/done/UI-REDESIGN-PLAN.md Wave 4
  * — **SPLIT**: the read-only stats dashboard below (KPI tiles, a per-category breakdown, an
  * attention list) is functional, reusing `FleetController`'s summary (`GET /api/fleet/summary`,
  * already `VisionApi.fleetSummary`); exportable/generated reports are not built — no export endpoint

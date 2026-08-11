@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * A stored image attached to an {@link Asset} — its user-facing photo (docs/UX-REWORK-PLAN.md
+ * A stored image attached to an {@link Asset} — its user-facing photo (docs/plans/done/UX-REWORK-PLAN.md
  * §U-d item 3, UX-DESIGN.md §5.1's onboarding wizard "Profile" step). One per asset, replacing
  * wholesale on every store — there is no history/versioning.
  *

@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Unit tests for {@link GrpcCvSettings}'s compact-constructor validation and {@link
  * GrpcCvSettings#defaults()}. The detectWidth/jpegQuality boundary-rejection tests and the keepalive
- * constant sanity check moved here from {@code GrpcDetectionPortTest} (docs/LAYERING-REFACTOR-PLAN.md
+ * constant sanity check moved here from {@code GrpcDetectionPortTest} (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * &sect;5.1/E4): this record is now the single place either value is validated, so a
  * {@code GrpcDetectionPort}/{@code GrpcDatasetUploadPort} constructor can no longer be reached with an
  * invalid value in the first place -- there is nothing left for a port-level test to prove about that.
@@ -118,7 +118,7 @@ class GrpcCvSettingsTest {
     }
 
     /**
-     * docs/REMOTE-CV-PLAN.md "Transport decisions" P1: HTTP/2 keepalive on a real-TCP channel must
+     * docs/plans/done/REMOTE-CV-PLAN.md "Transport decisions" P1: HTTP/2 keepalive on a real-TCP channel must
      * ping often enough (and confirm loss fast enough) to catch a half-open connection within
      * seconds, not app-level-timeout later. Actually proving a dropped connection is detected within
      * N seconds needs a real flaky-network harness (out of unit-test reach, and exactly what the task

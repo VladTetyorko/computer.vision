@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.LayerId;
 
 /**
  * The one place the {@code /api/map} request bodies agree on what an <em>optional</em> {@code
- * layerId} means (docs/MAP-REWORK-PLAN.md §4.2): absent or blank is {@code null}, which the
+ * layerId} means (docs/plans/done/MAP-REWORK-PLAN.md §4.2): absent or blank is {@code null}, which the
  * application layer reads as "resolve my default layer" ({@code CreateMarkRequest}/{@code
  * GeolocateMarkRequest}/{@code CreateDrawingRequest}) or "the COP layer" ({@code
  * PromoteMarkRequest}) — while a present-but-malformed value is a {@code 400}, never a silent

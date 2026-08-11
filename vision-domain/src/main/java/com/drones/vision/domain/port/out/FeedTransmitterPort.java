@@ -10,7 +10,7 @@ import com.drones.vision.domain.model.StreamDescriptor;
  * like real hardware.
  *
  * <p>This is the TX (transmit) half of the RX/TX doctrine described in
- * {@code docs/CYCLES-PLAN.md} §0: every protocol adapter that receives from
+ * {@code docs/main/CYCLES-PLAN.md} §0: every protocol adapter that receives from
  * real hardware today can, when it also has a {@code FeedTransmitterPort}
  * implementation, push a user-supplied file (or synthetic feed) out over
  * that same protocol to a real endpoint. This is deliberately <b>simulation

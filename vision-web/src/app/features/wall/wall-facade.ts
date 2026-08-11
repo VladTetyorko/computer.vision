@@ -8,7 +8,7 @@ import { resolveEventTarget, resolveReplayDeepLink } from '../../core/events/eve
 import type { DetectionEvent } from '../../core/api/models';
 
 /**
- * `WallPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsStore`/
+ * `WallPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsStore`/
  * `EventsStore`/`VisionApi`/`Router`, exactly what the page injected directly before this refactor.
  * Every read-model/command below is byte-for-byte what `WallPage` owned before.
  */
@@ -34,13 +34,13 @@ export class WallFacade {
     () => this.fleet.streams().filter((stream) => !stream.viewUrl).length,
   );
 
-  // --- Events rail (docs/MVP2-PLAN.md §E, E-b bullet 1; docs/MVP3-PLAN.md §C-c moved the rail's
+  // --- Events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1; docs/plans/done/MVP3-PLAN.md §C-c moved the rail's
   // own markup/filters/clock into `shared/ui/events-rail.ts` — this page still owns the shared feed's
   // activate/release lifecycle and its own click-to-navigate target resolution, see that
   // component's own doc comment for why the split lands there) ------------------------------
 
   constructor() {
-    // "O(visible) discipline" (docs/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own doc
+    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own doc
     // comment: this is one of exactly three pages that keeps the shared events poll alive.
     this.events.activate();
     inject(DestroyRef).onDestroy(() => this.events.release());
@@ -51,7 +51,7 @@ export class WallFacade {
   }
 
   /**
-   * Navigates to the event's replay deep link (docs/OPS-CORE-PLAN.md §Q1) when a finished covering
+   * Navigates to the event's replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1) when a finished covering
    * usage resolves (a lazy, click-time-only lookup — see `shared/ui/notification-bell.ts`'s own
    * doc comment for the identical idiom), else the event's asset detail page, or its live view when
    * no asset resolved yet.

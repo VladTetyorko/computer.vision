@@ -5,7 +5,7 @@ import { RcDeviceInfo, computeUpdateRateHz, deviceLabel } from './rc-input-logic
 const RATE_WINDOW = 30;
 
 /**
- * `RcInputService` — the browser-facing half of the RC monitor (docs/RC-CONTROL-PLAN.md Phase 0):
+ * `RcInputService` — the browser-facing half of the RC monitor (docs/plans/active/RC-CONTROL-PLAN.md Phase 0):
  * reads a plugged-in transmitter via the **Gamepad API** and exposes its live state as signals. No
  * backend, no MAVLink, no drone — Phase 0 is read-only.
  *

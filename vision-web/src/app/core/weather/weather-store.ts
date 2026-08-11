@@ -6,7 +6,7 @@ import { openMeteoForecastUrl, parseOpenMeteoReading, shouldRefetchWeather, type
 const LOG_PREFIX = '[weather]';
 
 /**
- * `WeatherStore` (docs/OPS-CORE-PLAN.md §W) — Open-Meteo wind/precipitation for the go/no-go chip.
+ * `WeatherStore` (docs/plans/done/OPS-CORE-PLAN.md §W) — Open-Meteo wind/precipitation for the go/no-go chip.
  * **Page-provided, not `providedIn: 'root'`** — mirrors `TelemetryStore`/`DetectionsStore`'s own
  * "different hosts care about different things" precedent: Command's chip is centered on the
  * fleet centroid, Fly's on the currently-flown asset's own position, and those two positions can
@@ -20,14 +20,14 @@ const LOG_PREFIX = '[weather]';
  * is about *this app's* REST surface, and `shared/map/tile-cache/leaflet-loader.ts`'s own tile
  * `fetch()` calls are the standing precedent for reaching a public third-party host directly.
  *
- * **Cache, not a poll** (docs/OPS-CORE-PLAN.md §W: "refresh ≤ every 10 min, cached"): `track()` is
+ * **Cache, not a poll** (docs/plans/done/OPS-CORE-PLAN.md §W: "refresh ≤ every 10 min, cached"): `track()` is
  * called from a host's own `effect()` every time its position signal changes (which, fed by a 5s
  * telemetry/fleet poll, is often — every few seconds) but only ever issues a real request when
  * `shouldRefetchWeather` says the cache is stale or the position moved meaningfully; there is no
  * `PollScheduler` registration here at all, since this store never needs to do anything on its own
  * initiative between calls.
  *
- * **Failure/offline → the chip hides entirely, never a stale fake** (docs/OPS-CORE-PLAN.md §W): a
+ * **Failure/offline → the chip hides entirely, never a stale fake** (docs/plans/done/OPS-CORE-PLAN.md §W): a
  * failed fetch clears `reading` to `undefined` rather than leaving the last-known number on screen
  * with no indication it's gone stale — `shared/ui/weather-chip.ts` renders nothing at all once
  * `reading()` is `undefined`. The *attempt* time still advances on failure (see `track`'s own doc

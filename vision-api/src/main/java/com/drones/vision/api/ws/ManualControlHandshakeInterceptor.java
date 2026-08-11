@@ -15,7 +15,7 @@ import com.drones.vision.api.security.CurrentUser;
 
 /**
  * Resolves the {@code /ws/manual-control} handshake's acting identity before the upgrade completes
- * (docs/RC-CONTROL-PHASE1-PLAN.md §4) — the WebSocket counterpart to every REST controller reading
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — the WebSocket counterpart to every REST controller reading
  * {@link CurrentUser}.
  *
  * <h2>Same seam as every REST call, one layer earlier</h2>

@@ -1,7 +1,7 @@
 package com.drones.vision.domain.model;
 
 /**
- * How much a subject (user or group) may do on a {@link MapLayer} (docs/MAP-REWORK-PLAN.md §2.1).
+ * How much a subject (user or group) may do on a {@link MapLayer} (docs/plans/done/MAP-REWORK-PLAN.md §2.1).
  *
  * <p><strong>Declaration order is meaningful.</strong> Constants are declared least-to-most
  * permissive, so the natural enum ordinal ordering (comparable via {@link Enum#compareTo(Enum)})

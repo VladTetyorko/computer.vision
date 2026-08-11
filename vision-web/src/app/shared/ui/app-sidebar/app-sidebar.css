@@ -184,7 +184,7 @@
   color: var(--text);
 }
 
-/* Active row: 2px accent left bar + `--color-info-soft` tint (docs/VISUAL-REFRESH-PLAN.md F4 — the
+/* Active row: 2px accent left bar + `--color-info-soft` tint (docs/plans/done/VISUAL-REFRESH-PLAN.md F4 — the
    one app-wide selection language; this replaces the pre-refresh bespoke `--panel-raised` fill) —
    `aria-current="page"` is set alongside this in the template so the same state is legible to
    assistive tech, not just visually. */
@@ -223,7 +223,7 @@
 }
 
 /* Upcoming (`badge: 'soon'`) rows still route somewhere real (`ComingSoon`, never a dead link) but
-   read as visibly not-yet-built (docs/NAV-IA-REDESIGN-PLAN.md F9) — dimmed rather than hidden. */
+   read as visibly not-yet-built (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F9) — dimmed rather than hidden. */
 .nav-row.dimmed {
   color: var(--text-faint);
 }
@@ -303,7 +303,7 @@
    cluster out to the same right edge the demo button already occupies, so the foot's two full-width
    rows share one. Measured before this: `padding: 0 var(--space-2)` with no `gap` left the status
    chips and the bell touching at exactly x=158.5 with ~34px of dead space trailing the bell.
-   docs/VISUAL-REFRESH-PLAN.md Wave 1 consolidated the old `.status-compact`/`.status-full` split (a
+   docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1 consolidated the old `.status-compact`/`.status-full` split (a
    rail-only dot vs. an expanded pair of `.chip`s, one of them literally re-stating ONLINE/OFFLINE in
    text) into one markup that renders identically at every width — see `app-sidebar.html`'s own
    comment on this row. */
@@ -396,7 +396,7 @@
 }
 
 /* ============================================================================================
-   Responsive (docs/NAV-IA-REDESIGN-PLAN.md §2.1 / docs/design/00-shell.md's own table):
+   Responsive (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 / docs/extracts/design/00-shell.md's own table):
      >= 1024px (new --sidebar-bp token, see styles.css)  docked, expanded or user-collapsed rail
      641-1024px                                          forced to the rail regardless of `collapsed`
      <= 640px (--bp-sm)                                  hidden behind a hamburger; opens as a sheet
@@ -411,11 +411,11 @@
    own override) means the desktop `collapsed` preference structurally cannot affect the mobile
    sheet at all: below 641px neither of the first two blocks' conditions is ever true, so the
    `.collapsed` class — however it happens to be set — has no visual effect there, and the mobile
-   sheet always opens at full width showing full text, matching docs/design/00-shell.md's own
+   sheet always opens at full width showing full text, matching docs/extracts/design/00-shell.md's own
    "hidden; hamburger opens a full-height sheet" (a sheet, not a rail-shaped sheet).
 
    `--sidebar-bp` is a *new*, distinct token (1024px) rather than reusing the pre-existing `--bp-md`
-   (900px, docs/UI-REDESIGN-PLAN.md Wave 0) — that token already backs ~10 other files' own 900px
+   (900px, docs/plans/done/UI-REDESIGN-PLAN.md Wave 0) — that token already backs ~10 other files' own 900px
    breakpoints (asset grid collapse, the cockpit map inset, `command.css`, `fly.css`, …); redefining
    its value here would silently change what all of those already mean without touching any of
    them. See `styles.css`'s own `--sidebar-bp` doc comment for the full reasoning. */
@@ -503,7 +503,7 @@
   /* Stacked, not inline: as a row the 8px status dot and the 30px bell were centred *as a pair*, so
      neither one landed on the axis (dot centre x=12.3, bell centre x=31.5) while the demo icon and
      the avatar above them sat at 27.5 and 24.5. One per line puts all four on the same axis — the
-     theme-toggle button joins the same stack (docs/VISUAL-REFRESH-PLAN.md Wave 1). */
+     theme-toggle button joins the same stack (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1). */
   .sidebar.collapsed .status-row {
     flex-direction: column;
     gap: var(--space-8);

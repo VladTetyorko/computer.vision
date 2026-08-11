@@ -1,4 +1,4 @@
--- docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2: the pilot->asset assignment roster ("this pilot
+-- docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2: the pilot->asset assignment roster ("this pilot
 -- flies that aircraft"). Purely additive on top of V1-V8 -- one brand-new table, nothing else
 -- changed.
 --

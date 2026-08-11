@@ -201,7 +201,7 @@
 /* Leaflet-owned DOM (the numbered waypoint markers) never gets Angular's `_ngcontent-*`
    attribute — the standard `::ng-deep` workaround, scoped under `:host`, mirrors
    `live-map.css`/`fleet-map.css`. Map overlay chrome is a light card, never a `--scrim*`/
-   `--hairline` frosted-dark ring (docs/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
+   `--hairline` frosted-dark ring (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/F7 — those tokens are only legal
    inside `.surface-dark`, which this dialog never carries): the waypoint dot's own
    `--panel-raised` border already separates it from the basemap without needing one. */
 :host ::ng-deep .waypoint-marker .waypoint-dot {

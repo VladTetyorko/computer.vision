@@ -46,7 +46,7 @@ describe('GlobalOverlayStore', () => {
     expect(store.isOpen('sidebar-mobile')).toBe(false);
   });
 
-  it('is exclusive — opening a second overlay closes the first (docs/UI-STATE-PLAN.md §1 D1)', () => {
+  it('is exclusive — opening a second overlay closes the first (docs/plans/done/UI-STATE-PLAN.md §1 D1)', () => {
     const store = makeStore();
     store.open('notification-bell');
     expect(store.isOpen('notification-bell')).toBe(true);

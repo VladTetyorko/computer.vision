@@ -8,7 +8,7 @@ import java.util.Random;
 
 /**
  * Pure, framework-free synthetic {@link FlightState} generator for one {@code
- * SimulatedTelemetrySource} device runtime (docs/FC-INTEGRATIONS-PLAN.md F-c) — extracted from
+ * SimulatedTelemetrySource} device runtime (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-c) — extracted from
  * {@code SimulatedTelemetrySource.DeviceRuntime}, mirroring the {@link RoutePlan} precedent: a
  * scheduler-free engine that is a plain function of tick index and battery percent, so the whole
  * startup-ramp / nominal-cruise / battery-driven-RTL-Land sequence is unit-testable without a

@@ -2,7 +2,7 @@ package com.drones.vision.domain.model;
 
 /**
  * A live change to the map's data — a {@link Mark}, {@link Drawing}, or {@link MapLayer} created,
- * updated, cleared, or deleted (docs/MAP-REWORK-PLAN.md §2.3) — the payload {@code
+ * updated, cleared, or deleted (docs/plans/done/MAP-REWORK-PLAN.md §2.3) — the payload {@code
  * LiveUpdatePublisherPort#publishMapEvent} carries to a driving adapter.
  *
  * <p>{@link #payload()} is the domain object itself, its concrete type dictated by {@link

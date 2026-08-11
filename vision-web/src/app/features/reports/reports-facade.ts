@@ -6,7 +6,7 @@ import { pluralize } from '../../shared/ui/page-bar/page-bar';
 import { attentionRows, categoryBars, reportKpis } from './reports-logic';
 
 /**
- * `ReportsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — one `VisionApi.fleetSummary()` fetch
+ * `ReportsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — one `VisionApi.fleetSummary()` fetch
  * (`GET /api/fleet/summary`, the same aggregated poll `CommandFacade` already drives, called
  * independently here — a second, unrelated page reading the same endpoint, not a shared store; see
  * `core/events/events-store.ts`'s own doc comment for the "only share a store when continuity across
@@ -28,7 +28,7 @@ export class ReportsFacade {
   readonly bars = computed(() => categoryBars(this.summarySignal()?.categories ?? []));
   readonly attention = computed(() => attentionRows(this.summarySignal()?.assets ?? []));
   /** "N asset(s) flagged" was a literal placeholder string — `pluralize` (`shared/ui/page-bar`) is
-   *  this app's one regular-English pluralisation helper, docs/NAV-IA-REDESIGN-PLAN.md §2.2. */
+   *  this app's one regular-English pluralisation helper, docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2. */
   readonly attentionSubtitle = computed(() => `${pluralize(this.attention().length, 'asset')} flagged`);
 
   constructor() {

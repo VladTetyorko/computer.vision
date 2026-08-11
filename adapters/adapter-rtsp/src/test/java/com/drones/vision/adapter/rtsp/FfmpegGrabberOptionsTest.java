@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Unit-level checks of {@link FfmpegGrabberOptions}'s per-protocol option seams — moved out of
- * {@code FfmpegVideoSourceTest} alongside the production split (docs/LAYERING-REFACTOR-PLAN.md
+ * {@code FfmpegVideoSourceTest} alongside the production split (docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * §5.1). Constructing an {@link FFmpegFrameGrabber} and calling {@code setOption}/{@code
  * setMaxDelay} only assigns fields — no network I/O happens until {@code start()}, which none of
  * these tests call — so this needs neither a live camera nor even a reachable socket, mirroring
@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  */
 class FfmpegGrabberOptionsTest {
 
-    // -- docs/MVP2-PLAN.md V-c: RTSP demuxer latency tuning --------------------
+    // -- docs/plans/done/MVP2-PLAN.md V-c: RTSP demuxer latency tuning --------------------
 
     @Test
     void configureRtspOptionsAppliesDefaultLowLatencyDemuxerTuning() {
@@ -91,10 +91,10 @@ class FfmpegGrabberOptionsTest {
         assertEquals(-1, fileGrabber.getMaxDelay(), "max_delay must stay at FrameGrabber's own unset default");
     }
 
-    // -- docs/DRONE-INFRA-PLAN.md I-h: SRT + UDP/MPEG-TS ingest -----------------
+    // -- docs/plans/active/DRONE-INFRA-PLAN.md I-h: SRT + UDP/MPEG-TS ingest -----------------
 
     /**
-     * Pins the {@code mode} default-inference rule for an any-address host (docs/DRONE-INFRA-PLAN.md
+     * Pins the {@code mode} default-inference rule for an any-address host (docs/plans/active/DRONE-INFRA-PLAN.md
      * I-h: "the natural choice for {@code srt://0.0.0.0:port}" is {@code listener}).
      */
     @Test

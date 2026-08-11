@@ -223,7 +223,7 @@
     transform: scale(0.55) rotate(45deg);
 }
 
-/* "Listen for drones" (docs/DRONE-INFRA-PLAN.md I-b) — concentric rings, echoing a radar/heartbeat
+/* "Listen for drones" (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — concentric rings, echoing a radar/heartbeat
    sweep rather than `.glyph-discover`'s dashed-ring "scanning" mark, so the two read as distinct at
    a glance despite both being scan-based methods. */
 .glyph-listen::after {
@@ -242,7 +242,7 @@
     background: var(--color-info);
 }
 
-/* "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) — a quadcopter-arm cross, distinct from every
+/* "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — a quadcopter-arm cross, distinct from every
    other glyph's circular/ring motif above (this is the one method whose whole point is real
    hardware, not a scan or a synthetic source). No base circle: the `::before`/`::after` bars alone
    read as an "X" of rotor arms. */
@@ -347,7 +347,7 @@ td.actions {
     justify-content: flex-end;
 }
 
-/* "Listen for drones" results (docs/DRONE-INFRA-PLAN.md I-b) — one row per heard vehicle, not the
+/* "Listen for drones" results (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — one row per heard vehicle, not the
    general Discover table above: fewer columns (name + a couple of chips), so a row reads cleanly
    even dimmed for an already-claimed vehicle. */
 .vehicle-list {
@@ -370,7 +370,7 @@ td.actions {
     background: var(--panel-raised);
 }
 
-/* Poka-yoke (docs/DRONE-INFRA-PLAN.md I-b: "no accidental duplicate assets") — dimmed, not hidden,
+/* Poka-yoke (docs/plans/active/DRONE-INFRA-PLAN.md I-b: "no accidental duplicate assets") — dimmed, not hidden,
    so an already-registered vehicle is still visible proof the scan heard it, just not actionable. */
 .vehicle-row.claimed {
     opacity: 0.6;
@@ -405,7 +405,7 @@ td.actions {
     margin-top: 0;
 }
 
-/* ---- "Add a real drone" (docs/DRONE-INFRA-PLAN.md I-g) --------------------------------------- */
+/* ---- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) --------------------------------------- */
 
 .drone-compat {
     display: flex;

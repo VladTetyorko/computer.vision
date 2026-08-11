@@ -8,7 +8,7 @@ import {
 } from './protocols';
 
 describe('REGISTERABLE_PROTOCOLS', () => {
-  it('lists exactly the eight protocols the app actually consumes, grouped network-stream / local / special (docs/DRONE-INFRA-PLAN.md I-h wave B)', () => {
+  it('lists exactly the eight protocols the app actually consumes, grouped network-stream / local / special (docs/plans/active/DRONE-INFRA-PLAN.md I-h wave B)', () => {
     expect(REGISTERABLE_PROTOCOLS.map((option) => option.value)).toEqual([
       'rtsp',
       'mjpeg',
@@ -85,7 +85,7 @@ describe('protocolSelectionFor', () => {
   });
 });
 
-describe('srt / udp (docs/DRONE-INFRA-PLAN.md I-h wave B — low-latency drone video ingest)', () => {
+describe('srt / udp (docs/plans/active/DRONE-INFRA-PLAN.md I-h wave B — low-latency drone video ingest)', () => {
   it('are known protocols', () => {
     expect(isKnownProtocol('srt')).toBe(true);
     expect(isKnownProtocol('udp')).toBe(true);

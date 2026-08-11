@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
 /**
- * Request body for {@code POST /api/assets/{id}/mode} (docs/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
+ * Request body for {@code POST /api/assets/{id}/mode} (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen
  * wire contract) — the flight mode to command the asset's aircraft into.
  *
  * @param mode the target mode name (e.g. {@code "Loiter"}, {@code "RTL"})

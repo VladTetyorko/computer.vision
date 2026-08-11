@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * A telemetry sample from a device: position, attitude, battery state, and (docs/FC-INTEGRATIONS-PLAN.md
+ * A telemetry sample from a device: position, attitude, battery state, and (docs/plans/done/FC-INTEGRATIONS-PLAN.md
  * F-a) flight-controller-reported state.
  *
  * <p>All value fields except {@code deviceId} and {@code at} are nullable —

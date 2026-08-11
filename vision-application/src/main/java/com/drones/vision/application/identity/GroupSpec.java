@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.Group;
 import com.drones.vision.domain.model.GroupId;
 
 /**
- * Everything needed to create a {@link Group} (docs/U-AUTH-PLAN.md, wave 2) — a top-level record
+ * Everything needed to create a {@link Group} (docs/plans/done/U-AUTH-PLAN.md, wave 2) — a top-level record
  * rather than a type nested in {@link GroupService}, same reasoning as {@link UserSpec}.
  *
  * @param name          human-readable name; must not be blank

@@ -7,7 +7,7 @@ import java.util.Objects;
 
 /**
  * One row of {@link ModelRegistryService#models()}: a known {@link ModelRef} plus whether it is
- * the one currently promoted/live (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2).
+ * the one currently promoted/live (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2).
  *
  * <p>Computed by {@link DefaultModelRegistryService} from {@link ModelRegistryPort#models()} and
  * {@link ModelRegistryPort#active()} — never carried by {@link ModelRef} itself, since being "the

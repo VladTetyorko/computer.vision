@@ -3,7 +3,7 @@ package com.drones.vision.domain.model;
 import java.time.Instant;
 
 /**
- * A debounced, human-meaningful occurrence (docs/MVP2-PLAN.md §E, E-a): label X seen at/above a
+ * A debounced, human-meaningful occurrence (docs/plans/done/MVP2-PLAN.md §E, E-a): label X seen at/above a
  * confidence threshold across several consecutive {@link DetectionResult}s on a stream — the CV
  * pipeline's noisy frame-by-frame results collapsed into "something happened", rather than one
  * event per completed inference. Opened and evolved by {@code DetectionEventEngine}

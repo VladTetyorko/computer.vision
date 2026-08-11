@@ -30,7 +30,7 @@ import java.util.UUID;
  * long-running flight — see MODULE.md.)
  *
  * <h2>Retention</h2>
- * docs/MVP2-PLAN.md P-b's retention guard: {@link #save} prunes the usage's oldest samples down to
+ * docs/plans/done/MVP2-PLAN.md P-b's retention guard: {@link #save} prunes the usage's oldest samples down to
  * {@link #retentionLimitPerUsage} whenever the count exceeds it, via one native {@code DELETE ...
  * NOT IN (SELECT ... ORDER BY at DESC LIMIT n)} query per write, in the same transaction as the
  * insert. An explicit {@code flush()} between the {@code persist} and the native delete is required

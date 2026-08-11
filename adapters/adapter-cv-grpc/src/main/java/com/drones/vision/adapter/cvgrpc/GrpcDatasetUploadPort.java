@@ -25,8 +25,8 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * {@link DatasetUploadPort} over the generated {@code Training/UploadDataset} <b>client-streaming</b>
- * gRPC RPC — ships a YOLO-format dataset (docs/CV-TRAINING-PLAN.md &sect;5) straight onto the wire as
- * a streamed zip archive. This is the transport half of docs/CV-TRAINING-V2-PLAN.md &sect;A/&sect;B:
+ * gRPC RPC — ships a YOLO-format dataset (docs/plans/done/CV-TRAINING-PLAN.md &sect;5) straight onto the wire as
+ * a streamed zip archive. This is the transport half of docs/plans/done/CV-TRAINING-V2-PLAN.md &sect;A/&sect;B:
  * dataset delivery to the training host rides the same gRPC connection detection/registry/training
  * already use, instead of a human rsyncing a zip the platform wrote to its own disk.
  *
@@ -54,7 +54,7 @@ import java.util.zip.ZipOutputStream;
  * dataset id and up to {@link GrpcCvSettings#uploadChunkBytes()} bytes of the growing zip — every
  * time that many bytes accumulate, plus one final (possibly smaller) chunk when the zip is closed.
  * The archive's bytes exist only as this one rolling buffer; nothing is ever staged whole in memory
- * or on disk, matching the design decision docs/CV-TRAINING-V2-PLAN.md &sect;D makes explicit
+ * or on disk, matching the design decision docs/plans/done/CV-TRAINING-V2-PLAN.md &sect;D makes explicit
  * (streaming small chunks, not a message-size bump). Zip entries are written in this exact order,
  * matching the byte-for-byte layout the platform's old filesystem-zip export step used:
  * <ol>
@@ -90,7 +90,7 @@ import java.util.zip.ZipOutputStream;
  * Plain class, no Spring. {@link #upload} blocks the calling thread for the whole upload (bounded by
  * the deadline above), matching {@link DatasetUploadPort}'s synchronous contract. No caching or
  * de-duplication is performed here — every call is an independent RPC; re-uploading the same
- * dataset id is the <em>server's</em> own idempotent replace (docs/CV-TRAINING-V2-PLAN.md &sect;2),
+ * dataset id is the <em>server's</em> own idempotent replace (docs/plans/done/CV-TRAINING-V2-PLAN.md &sect;2),
  * not something this client needs to guard against or short-circuit. Safe for concurrent use from
  * multiple threads uploading different datasets (the underlying {@link ManagedChannel} and stub
  * already are); a single {@code upload} call is not meant to be invoked concurrently for the same

@@ -2,7 +2,7 @@ import { deriveTrail } from '../../core/telemetry/telemetry-logic';
 import type { DetectionResult, GeoPosition, TelemetrySample } from '../../core/api/models';
 
 /**
- * Pure logic behind the flight-replay cockpit (docs/MVP2-PLAN.md §R, R-b) — everything the scrub
+ * Pure logic behind the flight-replay cockpit (docs/plans/done/MVP2-PLAN.md §R, R-b) — everything the scrub
  * bar/map/telemetry/detections panels compute from an already-fetched `UsageTimeline` and a scrub
  * position, with no HTTP, timers, or Leaflet involved. Split out so it is unit-testable in
  * isolation, mirroring `core/telemetry/telemetry-logic.ts`/`shared/player/player-recovery.ts`'s own split of pure
@@ -63,7 +63,7 @@ export function nearestSample(samples: readonly TelemetrySample[], atMs: number)
 }
 
 /**
- * The flight trail drawn "up to" the scrub position (docs/MVP2-PLAN.md §R, R-b: "map trail that
+ * The flight trail drawn "up to" the scrub position (docs/plans/done/MVP2-PLAN.md §R, R-b: "map trail that
  * draws up to the scrub position") — every positioned sample with `at <= atMs`, in the same
  * chronological, gap-skipping shape `core/telemetry/telemetry-logic.ts#deriveTrail` already produces for the
  * live map. A sample exactly at `atMs` is included (inclusive prefix).
@@ -121,7 +121,7 @@ export const DEFAULT_DETECTION_BUCKETS = 120;
  * not "where a detection occurred") into `bucketCount` equal-width slots across `[fromMs, toMs]`,
  * returning only the buckets that actually caught something, ascending by time.
  *
- * Backs the scrub bar's density strip (docs/MVP2-PLAN.md §R, R-b: "density/markers along the
+ * Backs the scrub bar's density strip (docs/plans/done/MVP2-PLAN.md §R, R-b: "density/markers along the
  * scrub bar where detections occurred… clicking a marker jumps the scrub there"). Rendering one
  * element per *bucket* rather than one per detection result keeps the strip cheap even for a
  * flight with hundreds of positive frames, and reads as density — a busy stretch of the flight
@@ -157,7 +157,7 @@ export function bucketDetections(
   return [...buckets.values()].sort((a, b) => a.atMs - b.atMs);
 }
 
-/** `capDetectionBuckets`'s own default — docs/OPS-CORE-PLAN.md §Q3a's pinned cap. */
+/** `capDetectionBuckets`'s own default — docs/plans/done/OPS-CORE-PLAN.md §Q3a's pinned cap. */
 export const DETECTION_STRIP_CAP = 200;
 
 /** `capDetectionBuckets`'s result: the (possibly-trimmed) buckets to render, plus the pre-cap total. */
@@ -167,7 +167,7 @@ export interface CappedDetectionBuckets {
 }
 
 /**
- * Caps the scrub bar's density strip at the latest `cap` buckets (docs/OPS-CORE-PLAN.md §Q3a) — a
+ * Caps the scrub bar's density strip at the latest `cap` buckets (docs/plans/done/OPS-CORE-PLAN.md §Q3a) — a
  * pure slice, no virtualization library. `bucketDetections` already keeps the strip cheap by
  * summarizing into a fixed `bucketCount` of slots (well under this cap under today's own
  * `DEFAULT_DETECTION_BUCKETS`), so this rarely trims anything in practice; it exists as the strip's
@@ -190,7 +190,7 @@ export function capDetectionBuckets(
   };
 }
 
-// --- Playback clock (docs/MVP2-PLAN.md §R, R-b: play/pause + 1x/4x/16x speed) -------------------
+// --- Playback clock (docs/plans/done/MVP2-PLAN.md §R, R-b: play/pause + 1x/4x/16x speed) -------------------
 
 /** The three speeds the cockpit's transport control offers. */
 export type PlaybackSpeed = 1 | 4 | 16;
@@ -233,7 +233,7 @@ export function advancePlaybackClock(
   return { atMs: clamped, playing: clamped < toMs };
 }
 
-// --- Recording video pane (docs/OPS-CORE-PLAN.md §R, R-c) ----------------------------------------
+// --- Recording video pane (docs/plans/done/OPS-CORE-PLAN.md §R, R-c) ----------------------------------------
 // `GET /api/usages/{usageId}/recording` resolves a clip whose `start` is exactly the usage's own
 // `startedAt` (`ReplayService#recordingFor`'s own contract — "start is the usage's own startedAt")
 // — "clip t=0 aligns with usage start". Every function below anchors off that `recordingStartMs`
@@ -270,7 +270,7 @@ export function shouldSeekVideo(
   return Math.abs(currentSeconds - targetSeconds) > thresholdSeconds;
 }
 
-// --- Clip export (docs/OPS-CORE-PLAN.md §R, R-c: "Download clip") --------------------------------
+// --- Clip export (docs/plans/done/OPS-CORE-PLAN.md §R, R-c: "Download clip") --------------------------------
 
 export interface ClipWindow {
   /** Offset from the recording's own `start`, milliseconds — never negative. */
@@ -289,7 +289,7 @@ export function wholeFlightClipWindow(recordingStartMs: number, fromMs: number, 
 
 /**
  * The current selection's clip window when both marks are set and well-ordered, else the whole
- * flight (docs/OPS-CORE-PLAN.md §R, R-c: "current selected window (or whole flight if no selection)").
+ * flight (docs/plans/done/OPS-CORE-PLAN.md §R, R-c: "current selected window (or whole flight if no selection)").
  */
 export function selectedClipWindow(
   recordingStartMs: number,
@@ -334,7 +334,7 @@ export function buildClipDownloadUrl(recordingUrl: string, window: ClipWindow): 
   return parsed.toString();
 }
 
-// --- Event → replay deep link (docs/OPS-CORE-PLAN.md §Q1) ----------------------------------------
+// --- Event → replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1) ----------------------------------------
 
 /** Parses the `?t=` deep-link query param (a plain offset-ms string) — `undefined` for anything absent/non-numeric, never `NaN`. */
 export function parseDeepLinkOffsetMs(raw: string | undefined): number | undefined {

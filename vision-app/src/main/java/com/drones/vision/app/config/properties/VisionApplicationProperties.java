@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Configuration for {@code vision-application}'s own tunables ({@code vision.application.*}),
- * docs/LAYERING-REFACTOR-PLAN.md &sect;1.3/&sect;2.2 (Wave A). Mirrors {@link
+ * docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3/&sect;2.2 (Wave A). Mirrors {@link
  * VisionPublishProperties}'s record-plus-nested-record-plus-{@code @DefaultValue} idiom, one nested
  * record per feature package's plain settings record ({@code
  * com.drones.vision.application.replay.ReplayServiceSettings}, {@code
@@ -147,7 +147,7 @@ public record VisionApplicationProperties(
      * @param sourceReopenBackoff   backoff bounds {@code DefaultStreamService} uses when wrapping a
      *                              video source in a {@code SupervisedPublisher} (1s&ndash;30s
      *                              default, deliberately different from {@code detectionBackoff} —
-     *                              docs/LAYERING-REFACTOR-PLAN.md &sect;2.3); defaulted as a whole when absent
+     *                              docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;2.3); defaulted as a whole when absent
      */
     public record Pipeline(@DefaultValue(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS) int assumedSourceFps,
                             @DefaultValue(Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA) double measuredFpsEwmaAlpha,

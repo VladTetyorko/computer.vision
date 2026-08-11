@@ -6,7 +6,7 @@ import com.drones.vision.domain.model.ZoneId;
 
 /**
  * {@link GeofenceZone} &harr; {@link GeofenceZoneEntity} mapping, extracted from {@code
- * JpaGeofenceRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaGeofenceRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  */
 public final class GeofenceZoneMapper {
 

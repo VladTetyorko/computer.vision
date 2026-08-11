@@ -14,10 +14,10 @@ import {
 import { channelBindingLabel, engageDisabledReason, latencyLabel } from './rc-monitor-logic';
 
 /**
- * `vision-rc-monitor` — the cockpit's RC transmitter drawer. Phase 0 (docs/RC-CONTROL-PLAN.md) added
+ * `vision-rc-monitor` — the cockpit's RC transmitter drawer. Phase 0 (docs/plans/active/RC-CONTROL-PLAN.md) added
  * the read-only monitor at the top: a plugged-in RadioMaster's live sticks (axes) and switches
  * (buttons), so an operator can confirm the platform sees the controller and check its update rate.
- * R5 (docs/RC-CONTROL-PHASE1-PLAN.md) adds **Take control** below it — the SITL relay engage/
+ * R5 (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md) adds **Take control** below it — the SITL relay engage/
  * release gesture, additive, the monitor above is unchanged.
  *
  * Provides its own `RcInputService` **and** `ManualControlClient` and drives `RcInputService`'s

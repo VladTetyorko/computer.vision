@@ -3,7 +3,7 @@ package com.drones.vision.adapter.publishhls;
 import java.time.Duration;
 
 /**
- * Per-stream docs/MVP2-PLAN.md V-c capture→encode lag bookkeeping for {@link
+ * Per-stream docs/plans/done/MVP2-PLAN.md V-c capture→encode lag bookkeeping for {@link
  * MediamtxStreamPublisher}: a rolling {@link LagTracker} window of recent lag samples, plus the
  * gate ({@link #shouldLogLag}) that limits the periodic p50/p95 summary log to at most once every
  * {@value #LAG_LOG_INTERVAL_MILLIS}ms per stream.
@@ -15,12 +15,12 @@ import java.time.Duration;
 final class PublishDiagnostics {
 
     /**
-     * docs/MVP2-PLAN.md V-c: ring-buffer capacity for {@link #lagTracker}. 150 samples covers
+     * docs/plans/done/MVP2-PLAN.md V-c: ring-buffer capacity for {@link #lagTracker}. 150 samples covers
      * several seconds' worth of frames at typical 15-30fps sources — enough for a stable p50/p95
      * read between periodic log lines without holding an unbounded or needlessly large history.
      */
     static final int LAG_TRACKER_WINDOW_SIZE = 150;
-    /** docs/MVP2-PLAN.md V-c: minimum wall-clock gap between a stream's periodic capture→encode lag summary logs. */
+    /** docs/plans/done/MVP2-PLAN.md V-c: minimum wall-clock gap between a stream's periodic capture→encode lag summary logs. */
     static final long LAG_LOG_INTERVAL_MILLIS = Duration.ofSeconds(30).toMillis();
 
     // Package-private, not private: MediamtxStreamPublisher.writeFrame reads/writes it directly,
@@ -30,7 +30,7 @@ final class PublishDiagnostics {
     private long nextLagLogAtEpochMs = 0L;
 
     /**
-     * Gate for the periodic per-stream capture→encode lag summary log (docs/MVP2-PLAN.md V-c):
+     * Gate for the periodic per-stream capture→encode lag summary log (docs/plans/done/MVP2-PLAN.md V-c):
      * {@code true} at most once per {@value #LAG_LOG_INTERVAL_MILLIS}ms of wall-clock time, and
      * never on the very first call — that call only establishes the baseline, since logging
      * immediately would report a single-sample "p50/p95" before the rolling window holds anything

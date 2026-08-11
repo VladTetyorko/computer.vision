@@ -39,7 +39,7 @@ describe('resolveAssetScopedTransport', () => {
   });
 });
 
-describe('trackSessionKey (docs/REALTIME-PLAN.md §4 Phase R-c follow-up)', () => {
+describe('trackSessionKey (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c follow-up)', () => {
   it('is stable for the same (primaryId, assetId) pair', () => {
     expect(trackSessionKey('dev-1', 'a-1')).toBe(trackSessionKey('dev-1', 'a-1'));
   });

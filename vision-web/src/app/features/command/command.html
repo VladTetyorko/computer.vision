@@ -49,7 +49,7 @@
     <vision-marks-panel (closePanel)="toggleMarksPanel()" />
   }
 
-  <!-- Layer manager (docs/MAP-REWORK-PLAN.md §5.2). A sibling drawer rather than an expansion of
+  <!-- Layer manager (docs/plans/done/MAP-REWORK-PLAN.md §5.2). A sibling drawer rather than an expansion of
        the map's own data-layer panel — see `<vision-layer-manager>`'s own doc comment for why. Same
        non-blocking `<vision-side-panel>` shell as Marks, for the same reason (a modal backdrop would
        swallow map clicks). -->
@@ -132,7 +132,7 @@
           </div>
         </div>
       } @else {
-        <!-- `focusAssetId` centres the map on the selected asset (docs/design/02-command.md):
+        <!-- `focusAssetId` centres the map on the selected asset (docs/extracts/design/02-command.md):
              selecting a row in the asset list, or "Watch live" in a map popup, both land on
              `selectAsset`, so both move the camera. -->
         <vision-tactical-map
@@ -159,7 +159,7 @@
           (drawingSelected)="facade.selectDrawing($event)"
         />
 
-        <!-- Drawing toolbar (docs/MAP-REWORK-PLAN.md §5.2's "mode buttons on the map chrome") — a
+        <!-- Drawing toolbar (docs/plans/done/MAP-REWORK-PLAN.md §5.2's "mode buttons on the map chrome") — a
              `--panel-raised` card floating over the map, per frontend-style §2/§7: never `--hud-*`,
              which is only legal inside a `.surface-dark` enclave. Only rendered while the Draw
              overlay is on, so the map's own corners stay clear the rest of the time. -->

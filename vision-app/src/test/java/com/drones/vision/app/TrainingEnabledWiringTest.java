@@ -29,8 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Context test for {@code vision.training.enabled=true} (docs/CV-TRAINING-PLAN.md §3/Wave T4, as
- * delta'd by docs/CV-TRAINING-V2-PLAN.md §7): asserts {@link TrainingWiringConfiguration} wires the
+ * Context test for {@code vision.training.enabled=true} (docs/plans/done/CV-TRAINING-PLAN.md §3/Wave T4, as
+ * delta'd by docs/plans/done/CV-TRAINING-V2-PLAN.md §7): asserts {@link TrainingWiringConfiguration} wires the
  * real {@link DatasetService}/{@link LabelingService}/{@link DatasetUploadPort} (not absent, as
  * they are by default — see {@link TrainingDisabledWiringTest}), and that {@code
  * DatasetController}/{@code LabelingController} (vision-api, component-scanned) both resolve.
@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * one is exercised by the docker-gated adapter-publish-hls suite, not a context test).
  *
  * <p>Also covers the model registry control plane this class's own {@link
- * TrainingWiringConfiguration} gained (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): with {@code
+ * TrainingWiringConfiguration} gained (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9): with {@code
  * vision.cv.enabled} left at its default {@code false} (detection stays off), {@code
  * vision.training.enabled=true} alone is enough to build {@link WiringConfiguration#cvGrpcChannel}
  * (its {@code @ConditionalOnExpression} matches on training alone) and resolve {@code
@@ -50,8 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * CvAndTrainingSharedChannelWiringTest} for the both-enabled case that actually proves channel
  * <em>sharing</em>.
  *
- * <p>And the training-job flow (docs/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave, folded
- * with upload by docs/CV-TRAINING-V2-PLAN.md §4): {@code trainingPort}/{@code trainingJobService}/
+ * <p>And the training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave, folded
+ * with upload by docs/plans/done/CV-TRAINING-V2-PLAN.md §4): {@code trainingPort}/{@code trainingJobService}/
  * {@code TrainingJobController} all resolve on the same {@code vision.training.enabled=true}
  * switch, {@code trainingPort} sharing the identical {@link WiringConfiguration#cvGrpcChannel} bean
  * {@code modelRegistryPort} already does.

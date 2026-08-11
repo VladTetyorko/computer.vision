@@ -1,7 +1,7 @@
--- docs/CV-TRAINING-PLAN.md §1/§3, Wave T1/T3: the CV model-improvement loop's data pipeline --
+-- docs/plans/done/CV-TRAINING-PLAN.md §1/§3, Wave T1/T3: the CV model-improvement loop's data pipeline --
 -- datasets (a named accumulation of labeled frames), training_samples (one captured frame plus
 -- its evolving annotations), sample_images (the frame's raw bytes, keyed by sample id -- the
--- asset_images.data BYTEA precedent applied to training frames, docs/CV-TRAINING-PLAN.md §C).
+-- asset_images.data BYTEA precedent applied to training frames, docs/plans/done/CV-TRAINING-PLAN.md §C).
 --
 -- No FK between any of the three tables, or to assets/streams/users/groups -- same "no
 -- cross-entity foreign keys / stay parity-compatible with the in-memory reference repos"

@@ -72,7 +72,7 @@ public final class DefaultDiscoveryService implements DiscoveryService {
      * Default {@link #gracePeriod}: a small fixed allowance added to {@link
      * DiscoveryScanSpec#timeout()} when bounding the overall wait, so a well-behaved adapter that
      * returns right around the requested timeout is not falsely reported as failed. Exposed here
-     * purely so same-package tests can assert against it by name (docs/LAYERING-REFACTOR-PLAN.md
+     * purely so same-package tests can assert against it by name (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction).
      */
     static final Duration GRACE_PERIOD = Duration.ofMillis(200);
@@ -86,7 +86,7 @@ public final class DefaultDiscoveryService implements DiscoveryService {
 
     /**
      * @param gracePeriod small fixed allowance added to {@link DiscoveryScanSpec#timeout()} when
-     *                    bounding the overall wait (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
+     *                    bounding the overall wait (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
      *                    extraction, {@code vision.application.discovery-grace}); production always
      *                    uses the 1-argument constructor's {@link #GRACE_PERIOD} default
      */

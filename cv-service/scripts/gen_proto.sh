@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regenerates the Python protobuf/gRPC stubs for cv-service from the shared
 # proto contract at proto/vision/v1/cv.proto (single source of truth, also
-# consumed by vision-proto on the Java side - see docs/PHASE0-PLAN.md §4).
+# consumed by vision-proto on the Java side - see docs/plans/done/PHASE0-PLAN.md §4).
 #
 # Generated code is NOT committed (see cv-service/.gitignore) - run this
 # script after cloning and whenever proto/vision/v1/cv.proto changes.

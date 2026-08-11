@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Spring Security's view of an authenticated {@link User} (docs/U-AUTH-PLAN.md, wave 3) — the
+ * Spring Security's view of an authenticated {@link User} (docs/plans/done/U-AUTH-PLAN.md, wave 3) — the
  * principal stored in the session's {@code Authentication} when {@code vision.auth.enabled=true}.
  *
  * <p>It carries the whole domain {@link User} plus the derived {@link Ownership} so {@link
@@ -24,7 +24,7 @@ import java.util.Objects;
  * <p><strong>Ownership derivation.</strong> {@code ownerId} is the user's own id. {@code groupId}
  * is the group of the user's highest-privilege membership; a user with <em>no</em> membership yet
  * falls back to a <em>personal group whose id equals the user's own id</em> — a well-known, stable
- * rule (docs/U-AUTH-PLAN.md, wave 3) so an unassigned user still has a valid, non-null scope to own
+ * rule (docs/plans/done/U-AUTH-PLAN.md, wave 3) so an unassigned user still has a valid, non-null scope to own
  * assets under until slice 2's real visibility model lands. Roles map to authorities as {@code
  * ROLE_<name>} (e.g. {@code ROLE_ADMIN}).
  */

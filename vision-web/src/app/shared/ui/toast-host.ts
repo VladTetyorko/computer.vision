@@ -61,8 +61,8 @@ import { ToastService, type ToastAction } from '../../core/toast.service';
       color: var(--color-success-text);
     }
 
-    /* docs/UX-REWORK-PLAN.md §U-c's own header-bell notification toasts (ToastService.notify) —
-       the app's one accent, not a new hue (docs/UX-REWORK-PLAN.md §U-b item 2's "one saturated
+    /* docs/plans/done/UX-REWORK-PLAN.md §U-c's own header-bell notification toasts (ToastService.notify) —
+       the app's one accent, not a new hue (docs/plans/done/UX-REWORK-PLAN.md §U-b item 2's "one saturated
        accent" rule): this is neither a confirmation (.ok) nor a failure (.error), just "look at
        this", so it borrows the same accent every primary action/selection already uses. */
     .toast.notification {
@@ -71,7 +71,7 @@ import { ToastService, type ToastAction } from '../../core/toast.service';
       color: var(--color-info-text);
     }
 
-    /* docs/DRONE-INFRA-PLAN.md I-e Stage 1's "Bring home" NO_ACK toast — sent, not acknowledged: a
+    /* docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1's "Bring home" NO_ACK toast — sent, not acknowledged: a
        genuine amber (the app's existing --warn hue, same as .chip.warn), never .error's red (the
        command did go out) and never .ok's green (nothing was actually confirmed). */
     .toast.warning {

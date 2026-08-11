@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.AssetId;
 
 /**
  * Aggregates one asset's flight-utilization history into {@link AssetStats} — the read side
- * behind {@code GET /api/assets/{id}/stats} (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A), the
+ * behind {@code GET /api/assets/{id}/stats} (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A), the
  * manager page's KPI tile row.
  *
  * <p>The one implementation, {@link DefaultAssetStatsService}, deliberately never checks whether

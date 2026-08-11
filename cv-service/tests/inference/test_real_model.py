@@ -2,14 +2,14 @@
 
 Skipped unless `ultralytics` is importable AND the default model's weights
 can actually be loaded (cached locally, or network access to download them
-the first time). Per docs/MVP1-PLAN.md C7 bullet 1, this only asserts the
+the first time). Per docs/plans/done/MVP1-PLAN.md C7 bullet 1, this only asserts the
 real model runs on a frame and returns a well-formed (possibly empty)
 detection list -- a random/synthetic frame is not a reliable source of a
 known COCO object, so we don't assert on *what* is detected.
 
 The `yolo11n`/`orion12l` tests below load the two *local, checked-out*
 weight files directly (`cv-service/yolo11n.pt`, `cv-service/orion12l.pt` --
-see docs/CV-MODELS-PLAN.md's provenance note: ONLY these two local files,
+see docs/plans/done/CV-MODELS-PLAN.md's provenance note: ONLY these two local files,
 never a network fetch of weights) and additionally exercise
 `cv_service.registry` end-to-end -- real discovery, real lazy loading, real
 composite merge -- rather than only the single hard-loaded default model.
@@ -82,7 +82,7 @@ def test_real_model_detects_on_random_frame(real_detector):
     _assert_well_formed_detections(detections)
 
 
-# --- per-local-model smoke tests (registry item 4 of docs/CV-MODELS-PLAN.md) -
+# --- per-local-model smoke tests (registry item 4 of docs/plans/done/CV-MODELS-PLAN.md) -
 
 
 def _load_local_detector(filename: str):
@@ -103,7 +103,7 @@ def _load_local_detector(filename: str):
 
 @pytest.mark.parametrize("filename", ["yolo11n.pt", "orion12l.pt"])
 def test_local_model_smoke_detects_on_tiny_frame(filename):
-    """Each local checkpoint (docs/CV-MODELS-PLAN.md's two provenance-approved
+    """Each local checkpoint (docs/plans/done/CV-MODELS-PLAN.md's two provenance-approved
     files) loads and runs one real inference call on a tiny synthetic frame.
     Also records the measured `inference_millis` for MODULE.md -- see the
     printed line when run with `-s`."""
@@ -130,7 +130,7 @@ def test_local_model_smoke_detects_on_tiny_frame(filename):
 
 def test_yoloe_seg_pf_real_weights_smoke_boxes_work_masks_ignored():
     """Real-weights smoke test for the prompt-free open-vocabulary YOLOE
-    checkpoint `yoloe-26s-seg-pf.pt` (docs/CV-MODELS-PLAN.md follow-up: an
+    checkpoint `yoloe-26s-seg-pf.pt` (docs/plans/done/CV-MODELS-PLAN.md follow-up: an
     OPT-IN "everything incl. buildings" model, NOT the default).
 
     Skip-if-absent, same contract as `_load_local_detector` above: this file

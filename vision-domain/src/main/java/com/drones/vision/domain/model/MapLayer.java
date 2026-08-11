@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * A named, access-controlled layer marks and drawings live on (docs/MAP-REWORK-PLAN.md §2.1) —
+ * A named, access-controlled layer marks and drawings live on (docs/plans/done/MAP-REWORK-PLAN.md §2.1) —
  * DELTA's "give N participants access to a layer" idea. {@link #kind()} sets the default
  * visibility/write baseline ({@link LayerKind}'s own javadoc); {@link #grants()} extends it to
  * specific users/groups beyond that baseline. Resolving effective access for a viewer is {@code

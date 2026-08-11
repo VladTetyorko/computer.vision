@@ -53,7 +53,7 @@ video {
   text-align: center;
   font-size: 0.85rem;
   color: var(--text-muted);
-  /* --bg/--text-muted here rely on .frame's own .surface-dark (docs/VISUAL-REFRESH-PLAN.md
+  /* --bg/--text-muted here rely on .frame's own .surface-dark (docs/plans/done/VISUAL-REFRESH-PLAN.md
      F3/W4, see this class's own doc comment) to resolve dark — without it this placeholder
      would read theme-muted ink on a black gradient outside an enclave. Neither gradient stop
      has its own crosswalk entry; both sit within a few rgb units of an existing dark-ramp step
@@ -96,7 +96,7 @@ video {
   color: var(--text);
 }
 
-/* docs/OPS-CORE-PLAN.md §Q3b: only rendered once >=2 distinct models mix in the same frame — see
+/* docs/plans/done/OPS-CORE-PLAN.md §Q3b: only rendered once >=2 distinct models mix in the same frame — see
    showModelLegend's own doc comment. Top-right, clear of the bottom-left latency badge and any
    host chrome along the frame's own top edge (unlike the badge, this frame has no such host
    overlay to dodge, so a fixed top corner is safe here). */

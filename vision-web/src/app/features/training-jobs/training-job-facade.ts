@@ -15,7 +15,7 @@ const JOB_POLL_INTERVAL_MS = 3_000;
 const LOG_PREFIX = '[training-jobs]';
 
 /**
- * `TrainingJobPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — `/manage/training/jobs/:jobId`, the
+ * `TrainingJobPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/manage/training/jobs/:jobId`, the
  * live progress view for one fine-tune run started from `DatasetDetailPage`'s own "Train a model"
  * card. Injects `VisionApi` directly rather than growing a shared store — one job's own polled
  * state is page-local, single-consumer data, the same reasoning `DatasetDetailFacade`/

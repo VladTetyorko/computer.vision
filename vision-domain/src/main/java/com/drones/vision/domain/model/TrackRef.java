@@ -1,12 +1,12 @@
 package com.drones.vision.domain.model;
 
 /**
- * Per-detection track facts (docs/TRACKING-PLAN.md §4.B) — the identity, lifecycle state, and
+ * Per-detection track facts (docs/plans/done/TRACKING-PLAN.md §4.B) — the identity, lifecycle state, and
  * motion a {@link Detection} carries when tracking is on for its stream.
  *
  * <p>{@code trackId} starts at 1 per stream, per session; {@code 0} is the wire's "untracked"
  * sentinel and must never reach this type — an untracked {@link Detection} carries {@code track =
- * null} instead of a {@code TrackRef} with {@code trackId == 0} (docs/TRACKING-ORCHESTRATION.md
+ * null} instead of a {@code TrackRef} with {@code trackId == 0} (docs/extracts/TRACKING-ORCHESTRATION.md
  * §6 rule 2, "absent means untracked — exactly one spelling per layer"). {@code velocityX}/{@code
  * velocityY} are normalized frame-widths/heights per second, matching {@link BoundingBox}'s own
  * units.

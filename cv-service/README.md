@@ -6,7 +6,7 @@ optional dependency group is installed and the model loads successfully;
 otherwise it falls back to the original echo stub (empty detections) so the
 service never crash-loops for lack of a model. `Training` rpcs still return
 `UNIMPLEMENTED` (Phase 3) - see [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
-and [`../docs/MVP1-PLAN.md`](../docs/MVP1-PLAN.md) §C7.
+and [`../docs/plans/done/MVP1-PLAN.md`](../docs/plans/done/MVP1-PLAN.md) §C7.
 
 The gRPC contract lives in one place, shared with the Java side
 (`vision-proto`): [`../proto/vision/v1/cv.proto`](../proto/vision/v1/cv.proto).

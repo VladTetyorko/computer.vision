@@ -1,7 +1,7 @@
 import type { AssetSummary, Device, DeviceEdit, AssetEdit, LifecycleState, SettableLifecycleState } from '../api/models';
 
 /**
- * Pure, Angular-free device/asset lifecycle logic (docs/CYCLES-PLAN.md §8), shared across pages.
+ * Pure, Angular-free device/asset lifecycle logic (docs/main/CYCLES-PLAN.md §8), shared across pages.
  *
  * Started life in `features/devices/devices-page-logic.ts` (CW-b, the warehouse UI). CD-b's asset detail
  * page (`features/asset-detail/asset-detail.ts`) needs the exact same lifecycle-action-menu state
@@ -35,7 +35,7 @@ export type AssetLifecycleAction = 'rename' | 'activate' | 'deactivate' | 'archi
 
 /**
  * Which actions a device offers for a given lifecycle state, further narrowed by whether an asset
- * currently owns it. Mirrors the literal per-state matrix docs/CYCLES-PLAN.md §8 pins: `ACTIVE`
+ * currently owns it. Mirrors the literal per-state matrix docs/main/CYCLES-PLAN.md §8 pins: `ACTIVE`
  * gets the assign/unassign slot (resolved by ownership — assigning an already-owned device makes
  * no sense, nor does unassigning one nobody owns); `DEACTIVATED` does not carry that slot at all
  * (reactivate first); `DELETED` offers only `restore`.
@@ -110,7 +110,7 @@ export function buildAssetEdit(
   return edit;
 }
 
-// --- Verb+object action labels (docs/UX-REWORK-PLAN.md §U-a2 §1 — one verb dictionary, app-wide) -
+// --- Verb+object action labels (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1 — one verb dictionary, app-wide) -
 // A bare verb ("Archive") never says what it acts on; every kebab-menu entry this app renders
 // (Devices' Advanced table, the asset detail page's Hardware section and header) pulls its label
 // from here so the two surfaces that share this exact state machine can't drift apart in wording.
@@ -139,7 +139,7 @@ export const ASSET_ACTION_LABELS: Record<AssetLifecycleAction, string> = {
   restore: 'Restore asset',
 };
 
-// --- Poka-yoke: reasoned action availability (docs/UX-REWORK-PLAN.md §U-a2 item 3a) -------------
+// --- Poka-yoke: reasoned action availability (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3a) -------------
 // "Prevention over confirmation": an action that cannot apply right now should render disabled
 // *with the reason inline*, never enabled-then-error. `availableDeviceActions`/`availableAssetActions`
 // above already encode the one true state matrix (they're what every mutation is actually gated
@@ -212,7 +212,7 @@ const ALL_DEVICE_LIFECYCLE_ACTIONS: readonly DeviceLifecycleAction[] = [
 ];
 
 /**
- * The full device action menu, reasoned (docs/UX-REWORK-PLAN.md §U-a2 item 3a) — every action a
+ * The full device action menu, reasoned (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3a) — every action a
  * device could ever offer, each marked available or not, with a reason attached whenever not.
  * Backs the Devices page's Advanced table and the asset detail page's Hardware section, the two
  * surfaces that keep the full, granular lifecycle menu (item 2's "operator-facing" simplification
@@ -282,7 +282,7 @@ export function reasonedAssetActions(
 }
 
 /**
- * The asset-level lifecycle slice operator-facing surfaces actually render (docs/UX-REWORK-PLAN.md
+ * The asset-level lifecycle slice operator-facing surfaces actually render (docs/plans/done/UX-REWORK-PLAN.md
  * §U-a2 item 2 — "pick ONE lifecycle verb pair… surface it as Archive + Restore only, keep the
  * finer states in Advanced"). Narrows {@link reasonedAssetActions} to just `archive`/`restore`;
  * `activate`/`deactivate` don't retreat into an "Advanced" asset table the way device actions do

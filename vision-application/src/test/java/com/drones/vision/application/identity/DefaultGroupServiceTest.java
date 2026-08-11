@@ -70,7 +70,7 @@ class DefaultGroupServiceTest {
         assertEquals(List.of("alpha", "Bravo", "Charlie"), names);
     }
 
-    // --- management gates (docs/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
+    // --- management gates (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
 
     @Test
     void managerCreatesAChildUnderTheirOwnGroupButNotARoot() {

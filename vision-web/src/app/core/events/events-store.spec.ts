@@ -31,7 +31,7 @@ function stubSettings(eventNotifications = false) {
 }
 
 /**
- * A minimal `LiveStore` test double (docs/REALTIME-PLAN.md §4's backend follow-up batch), mirroring
+ * A minimal `LiveStore` test double (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), mirroring
  * `telemetry-store.spec.ts#stubLiveStore` — real Angular `signal`s so `EventsStore`'s own
  * `computed`/`effect` react to it exactly as they would to the real class, without a real
  * `EventSource` (jsdom has none). Defaults to `'closed'` — the same state the *real* `LiveStore`
@@ -300,7 +300,7 @@ describe('EventsStore', () => {
     Object.defineProperty(document, 'hidden', { value: false, configurable: true });
   });
 
-  // --- LiveStore projection (docs/REALTIME-PLAN.md §4's backend follow-up batch) ---------------
+  // --- LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch) ---------------
 
   it('does not poll at all when activated while LiveStore is already open', () => {
     const events = vi.fn().mockResolvedValue([]);

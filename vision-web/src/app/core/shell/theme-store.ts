@@ -3,13 +3,13 @@ import { readPersistedString, writePersistedString } from '../panel-state';
 
 const THEME_KEY = 'vision.theme';
 
-/** The app's two user-selectable themes (docs/VISUAL-REFRESH-PLAN.md F3) — the only two values
+/** The app's two user-selectable themes (docs/plans/done/VISUAL-REFRESH-PLAN.md F3) — the only two values
  * `data-theme` is ever set to; anything else read back from storage falls back to `'light'`. */
 export type Theme = 'light' | 'dark';
 
 /**
  * `ThemeStore` — the persisted theme choice behind `src/styles.css`'s two-theme token system
- * (docs/VISUAL-REFRESH-PLAN.md F3, `.claude/skills/frontend-style/SKILL.md` §2). One
+ * (docs/plans/done/VISUAL-REFRESH-PLAN.md F3, `.claude/skills/frontend-style/SKILL.md` §2). One
  * `localStorage`-backed value, `'light' | 'dark'`, mirroring `core/shell/sidebar-store.ts#SidebarStore`'s
  * shape for a single persisted preference (`readPersistedString`/`writePersistedString` — the
  * string-valued sibling of that store's own `readPersistedFlag`/`writePersistedFlag`, `core/panel-state.ts`)
@@ -17,7 +17,7 @@ export type Theme = 'light' | 'dark';
  * nothing to do with navigation layout and a future dark-mode toggle should not need to pull in the
  * sidebar's own full-bleed/disclosure machinery to depend on it.
  *
- * **Light is the default** (`docs/VISUAL-REFRESH-PLAN.md`'s "daylight chart" direction) — an absent
+ * **Light is the default** (`docs/plans/done/VISUAL-REFRESH-PLAN.md`'s "daylight chart" direction) — an absent
  * or unrecognized stored value (a stale key from before this store existed, or hand-edited
  * `localStorage`) resolves to `'light'`, never to whatever `:root`'s own bare declarations happen to
  * be; `readTheme()` below is the one place that fallback lives.
@@ -39,7 +39,7 @@ export type Theme = 'light' | 'dark';
  * that might read a themed colour renders) the same way `SidebarStore`/`FleetStore` already are.
  *
  * No visible toggle UI here — this store only holds and applies the value. Wave 1
- * (docs/VISUAL-REFRESH-PLAN.md) adds the sidebar-footer/Settings switch that calls `setTheme`/`toggle`.
+ * (docs/plans/done/VISUAL-REFRESH-PLAN.md) adds the sidebar-footer/Settings switch that calls `setTheme`/`toggle`.
  */
 @Injectable({ providedIn: 'root' })
 export class ThemeStore {

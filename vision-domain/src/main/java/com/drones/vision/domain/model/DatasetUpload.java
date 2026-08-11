@@ -4,7 +4,7 @@ import java.time.Instant;
 
 /**
  * What one completed {@code DatasetUploadPort.upload} run delivered to the training host
- * (docs/CV-TRAINING-V2-PLAN.md §3) — the replacement for {@code DatasetExport}: a delivery
+ * (docs/plans/done/CV-TRAINING-V2-PLAN.md §3) — the replacement for {@code DatasetExport}: a delivery
  * receipt for a gRPC upload rather than a manifest for a filesystem artifact.
  *
  * @param datasetId   the dataset that was uploaded

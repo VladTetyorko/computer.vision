@@ -11,8 +11,8 @@ import com.drones.vision.domain.model.UserId;
 import com.drones.vision.domain.model.Verification;
 
 /**
- * {@link Mark} ⟷ {@link MarkEntity} (docs/TACTICAL-MARKS-PLAN.md §3, reworked by
- * docs/MAP-REWORK-PLAN.md §4.4).
+ * {@link Mark} ⟷ {@link MarkEntity} (docs/plans/done/TACTICAL-MARKS-PLAN.md §3, reworked by
+ * docs/plans/done/MAP-REWORK-PLAN.md §4.4).
  *
  * <p>Three value objects are flattened rather than nested, matching the columns {@code
  * V10__marks.sql}/{@code V12__map_layers.sql} define: {@code position} into

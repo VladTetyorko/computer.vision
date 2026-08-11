@@ -8,14 +8,14 @@ import java.util.Map;
 
 /**
  * Response body element for {@code GET /api/usages/{usageId}/telemetry}, the replay timeline, and
- * the {@code telemetry:<assetId>} SSE topic — one DTO serves all three (docs/FC-INTEGRATIONS-PLAN.md
+ * the {@code telemetry:<assetId>} SSE topic — one DTO serves all three (docs/plans/done/FC-INTEGRATIONS-PLAN.md
  * F-b), no per-transport variant.
  *
  * <p>All fields except {@code deviceId} and {@code at} are omitted from the JSON entirely (rather
  * than serialized as {@code null}) when the underlying {@link Telemetry} sample did not carry that
  * reading — mirrors {@code Telemetry}'s own per-field nullability (not every device reports every
  * field). {@code deviceId} is never absent: {@link Telemetry#deviceId()} is non-{@code null}-
- * validated in its own compact constructor, so every sample carries one (docs/CYCLES-PLAN.md §11,
+ * validated in its own compact constructor, so every sample carries one (docs/main/CYCLES-PLAN.md §11,
  * CD-a — added so samples from different telemetry devices on the same asset/usage become
  * distinguishable, e.g. for grouping by source in a future multi-telemetry UI). {@code extra} is
  * omitted when empty rather than serialized as {@code {}}.

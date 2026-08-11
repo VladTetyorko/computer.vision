@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link GeofenceZone}s (docs/OPS-CORE-PLAN.md §G).
+ * Driven port: persist and retrieve {@link GeofenceZone}s (docs/plans/done/OPS-CORE-PLAN.md §G).
  *
  * <p>Zones are global reference data (no per-asset/per-group scoping yet), so this port has no
  * concept of ownership or a "belongs to" filter — every implementation just stores/returns the

@@ -7,13 +7,13 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link Mark}s (docs/TACTICAL-MARKS-PLAN.md §1) — the same
+ * Driven port: persist and retrieve {@link Mark}s (docs/plans/done/TACTICAL-MARKS-PLAN.md §1) — the same
  * minimal upsert/find/delete shape as {@link GeofenceRepositoryPort}, {@code Mark}'s own template.
  *
  * <p>Unlike {@link GeofenceRepositoryPort} (global reference data), a {@link Mark} carries
  * {@code ownership}, but this port still has no ownership- or group-aware query: {@link
  * #findAll()} always returns every mark, and scope filtering over that snapshot is the
- * application layer's job (docs/TACTICAL-MARKS-PLAN.md §2), the same "no referential integrity /
+ * application layer's job (docs/plans/done/TACTICAL-MARKS-PLAN.md §2), the same "no referential integrity /
  * no scope filtering baked into the repository" convention every other port here follows.
  *
  * <h2>Contract</h2>

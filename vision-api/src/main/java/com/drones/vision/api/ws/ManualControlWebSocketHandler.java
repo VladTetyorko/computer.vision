@@ -32,7 +32,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Raw (non-STOMP) {@code WebSocketHandler} for {@code /ws/manual-control}
- * (docs/RC-CONTROL-PHASE1-PLAN.md §4) — parses/emits the frozen JSON text-frame protocol on top of
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — parses/emits the frozen JSON text-frame protocol on top of
  * {@link ManualControlService}, the stateful RC-relay session service R2 built.
  *
  * <h2>One session per connection, service is a shared singleton</h2>
@@ -251,7 +251,7 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * This handler's own {@code source+rcChannel -> label} mapping (docs/RC-CONTROL-PHASE1-PLAN.md
+     * This handler's own {@code source+rcChannel -> label} mapping (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md
      * §5) — {@link ControlBinding} carries no label field, so the frozen default map's function
      * names are hardcoded here rather than derived.
      */

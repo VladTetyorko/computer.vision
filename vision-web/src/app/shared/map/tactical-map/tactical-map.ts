@@ -101,7 +101,7 @@ interface DrawingHandle {
 }
 
 /**
- * `<vision-tactical-map>` — the one Leaflet map in this app (docs/MAP-REWORK-PLAN.md §5.1),
+ * `<vision-tactical-map>` — the one Leaflet map in this app (docs/plans/done/MAP-REWORK-PLAN.md §5.1),
  * replacing the deleted `FleetMap` (774 ln) and `LiveMap` (437 ln), which duplicated
  * zones/marks/`escapeHtml`/layer-switch logic byte-for-byte. Every host — Command, the Fly cockpit,
  * `/live/:deviceId`, and asset detail — now embeds this component; `/live` and asset detail gained
@@ -119,7 +119,7 @@ interface DrawingHandle {
  * every symbol currently on the map (affiliation frames, kind glyphs, asset states, zone kinds, all
  * with counts) and a collapsible **data-layer panel** with an eye toggle per layer — persisted per
  * browser under `vision.map.hiddenLayers`, purely client-side decluttering that is *orthogonal* to
- * the server-side visibility scope (docs/MAP-REWORK-PLAN.md §3 decides what the viewer may see at
+ * the server-side visibility scope (docs/plans/done/MAP-REWORK-PLAN.md §3 decides what the viewer may see at
  * all; these toggles only decide what they're currently looking at). The basemap picker folds into
  * that same panel rather than claiming a second corner.
  *
@@ -156,7 +156,7 @@ export class TacticalMap {
   private readonly settings = inject(SettingsStore);
   private readonly theme = inject(ThemeStore);
 
-  // --- Inputs (docs/MAP-REWORK-PLAN.md §5.1's frozen superset) ----------------------------------
+  // --- Inputs (docs/plans/done/MAP-REWORK-PLAN.md §5.1's frozen superset) ----------------------------------
 
   /** Every plottable asset. Fleet mode plots all of them; follow mode expects the one being followed. */
   readonly assets = input<readonly FleetMarker[]>([]);
@@ -271,7 +271,7 @@ export class TacticalMap {
 
   /**
    * The basemap actually rendered — the operator's explicit pick once they have used the picker,
-   * otherwise the current theme's own default (docs/VISUAL-REFRESH-PLAN.md F7). `isMapLayerExplicit()`
+   * otherwise the current theme's own default (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). `isMapLayerExplicit()`
    * is a plain `localStorage` read, safe inside this `computed()`: the only writer is `setBasemap`,
    * which always writes it in the same call as the `settings.mapLayer` signal this already tracks.
    */
@@ -469,7 +469,7 @@ export class TacticalMap {
     this.layerVisibilityChanged.emit(next);
   }
 
-  /** A basemap pick always wins over the theme default from here on (docs/VISUAL-REFRESH-PLAN.md F7). */
+  /** A basemap pick always wins over the theme default from here on (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). */
   protected setBasemap(id: MapLayerId): void {
     markMapLayerExplicit();
     this.settings.mapLayer.set(id);
@@ -648,10 +648,10 @@ export class TacticalMap {
   }
 
   /**
-   * One asset glyph, state carried by colour only (docs/VISUAL-REFRESH-PLAN.md F7): a
+   * One asset glyph, state carried by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7): a
    * heading-rotated arrow while streaming, a dot while offline, `--color-danger` when the asset needs
    * attention, a `--color-info` ring when selected. Own assets are always friendly by definition
-   * (docs/MAP-REWORK-PLAN.md §5.1), which is why they keep this rounded glyph rather than ever
+   * (docs/plans/done/MAP-REWORK-PLAN.md §5.1), which is why they keep this rounded glyph rather than ever
    * taking a hostile/unknown frame — affiliation symbology applies to *marks*.
    */
   private assetIcon(L: typeof Leaflet, asset: FleetMarker): Leaflet.DivIcon {

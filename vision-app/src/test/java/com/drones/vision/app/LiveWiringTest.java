@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Context test for the <em>default</em> {@code vision.live.*} configuration (no override, per
- * {@link VisionLiveProperties#enabled()}'s default of {@code true} — docs/REALTIME-PLAN.md §4,
+ * {@link VisionLiveProperties#enabled()}'s default of {@code true} — docs/plans/done/REALTIME-PLAN.md §4,
  * item 4): asserts {@link WiringConfiguration} wires the real {@link LiveUpdateRegistry} (not the
  * no-op fallback), that {@code GET /api/live}'s {@link LiveController} bean exists, and that {@link
  * EventPublisherPort}/{@link AuditTrailPort}/{@link DetectionEventRepositoryPort} are each wrapped

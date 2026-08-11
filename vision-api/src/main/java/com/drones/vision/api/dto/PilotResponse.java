@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.UserId;
 
 /**
- * One pilot assigned to an asset, on the wire (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2) — the
+ * One pilot assigned to an asset, on the wire (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2) — the
  * element type of {@code GET /api/assets/{assetId}/pilots}.
  *
  * <p>Just the id: the org-settings roster UI resolves display names from the users list it already

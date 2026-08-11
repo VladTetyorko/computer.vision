@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 // Java <-> Python contract for the CV service (see ARCHITECTURE.md §1, §4 and
-// docs/PHASE0-PLAN.md §4 Task T3). This is the single source of truth for both
+// docs/plans/done/PHASE0-PLAN.md §4 Task T3). This is the single source of truth for both
 // the vision-proto (Java/grpc-java) and cv-service (Python/grpcio) codegen.
 package vision.v1;
 
@@ -19,7 +19,7 @@ enum ImageEncoding {
 
 // ---------------------------------------------------------------- NEW enums
 
-// How the two perception loops cooperate for one stream (docs/TRACKING-PLAN.md §3).
+// How the two perception loops cooperate for one stream (docs/plans/done/TRACKING-PLAN.md §3).
 enum TrackingMode {
   TRACKING_MODE_UNSPECIFIED = 0;  // old client / not stated -> treated as OFF
   TRACKING_MODE_OFF         = 1;  // detector only, no track ids -- byte-identical to pre-tracking
@@ -191,9 +191,9 @@ message Ack {
   string message = 2;
 }
 
-// One slice of an uploaded YOLO dataset archive (docs/CV-TRAINING-V2-PLAN.md §1). The
+// One slice of an uploaded YOLO dataset archive (docs/plans/done/CV-TRAINING-V2-PLAN.md §1). The
 // concatenation of every chunk's `content`, in stream order, is a ZIP file carrying exactly the
-// layout docs/CV-TRAINING-PLAN.md §5 freezes: `data.yaml`, `images/<name>`, `labels/<stem>.txt`.
+// layout docs/plans/done/CV-TRAINING-PLAN.md §5 freezes: `data.yaml`, `images/<name>`, `labels/<stem>.txt`.
 message DatasetChunk {
   string dataset_id = 1;   // set on EVERY chunk; must be identical throughout the stream
   bytes  content    = 2;   // next slice of the archive

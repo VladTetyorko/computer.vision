@@ -8,7 +8,7 @@ import com.drones.vision.application.asset.AssetSpec;
 import com.drones.vision.application.device.DeviceRegistration;
 
 /**
- * Everything needed to create or update a {@code GeofenceZone} (docs/OPS-CORE-PLAN.md §G) — one
+ * Everything needed to create or update a {@code GeofenceZone} (docs/plans/done/OPS-CORE-PLAN.md §G) — one
  * shape for both operations, since the wire contract's create/update request bodies are
  * identical (the response's shape minus {@code id}).
  *

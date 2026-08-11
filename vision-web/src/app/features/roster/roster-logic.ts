@@ -1,7 +1,7 @@
 import type { AssetSummary, AssignedPilot, UserSummary } from '../../core/api/models';
 
 /**
- * Pure, Angular-free logic behind `RosterPage` (`/manage/roster`, docs/UI-REDESIGN-PLAN.md Wave 4
+ * Pure, Angular-free logic behind `RosterPage` (`/manage/roster`, docs/plans/done/UI-REDESIGN-PLAN.md Wave 4
  * — FUNCTIONAL-NOW per the plan's own Additions table: `AssignmentController`/`PilotResponse`/
  * `OrgStore` are all already live, this is the first dedicated frontend surface for them). Mirrors
  * `features/asset-detail/pilots-card.ts`'s own `assigned` computed (userId → display name, falling
@@ -55,7 +55,7 @@ export function searchRosterRows(rows: readonly RosterRow[], query: string): rea
 }
 
 /**
- * The fleet-level gap indicator (docs/design/13-roster.md: "⚠ N assets have no pilot" — "makes the
+ * The fleet-level gap indicator (docs/extracts/design/13-roster.md: "⚠ N assets have no pilot" — "makes the
  * page answer a real management question at a glance"). Counts against **every** row this facade
  * loaded, not the search-filtered subset — the gap is a fleet fact, not something a typed query
  * should be able to hide.

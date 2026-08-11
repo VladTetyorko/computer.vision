@@ -1,7 +1,7 @@
 import type { RegisteredModel } from '../../core/api/models';
 
 /**
- * Pure logic behind `ModelsPage` (`/manage/training/models`, docs/CV-TRAINING-PLAN.md Phase 2 T10)
+ * Pure logic behind `ModelsPage` (`/manage/training/models`, docs/plans/done/CV-TRAINING-PLAN.md Phase 2 T10)
  * — which model is live, whether "Promote" is actionable right now, the version string a promote
  * request actually sends, and the list's display order. Split out per this app's own convention of
  * keeping component/facade logic thin and unit-testing the framework-free parts directly.
@@ -24,7 +24,7 @@ export function canPromoteModel(
 }
 
 /**
- * The `version` sent with `POST /api/cv/registry/models/{id}/promote` (docs/CV-TRAINING-PLAN.md
+ * The `version` sent with `POST /api/cv/registry/models/{id}/promote` (docs/plans/done/CV-TRAINING-PLAN.md
  * §8's frozen `PromoteModelRequest`).
  *
  * **A real backend quirk, worked around deliberately, not silently** — `GET

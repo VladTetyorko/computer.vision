@@ -27,7 +27,7 @@ import { AssetDetailFacade } from './asset-detail-facade';
 import { attributeRowsToRecord, attributesToRows, telemetryFactRows, type AttributeRow, type TelemetryFactRow } from './asset-detail-logic';
 import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
 
-/** The page's four independent editor overlays — docs/UI-ARCHITECTURE-PLAN.md's own migration
+/** The page's four independent editor overlays — docs/plans/done/UI-ARCHITECTURE-PLAN.md's own migration
  *  target for this page — consolidated into ONE mutually-exclusive `UiStore` group, mirroring
  *  `features/fly/flight-command-panel.ts`'s `dialog` group: opening any one implicitly closes
  *  whichever other was open, so this page can never show two editors at once. Transient (no
@@ -35,12 +35,12 @@ import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
 type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
 
 /**
- * The asset **manager** page (`/assets/:id`, docs/CYCLES-PLAN.md §11, CD-b item 2 — reworked from a
- * hybrid manager/cockpit page into a pure manager view by docs/ASSET-MANAGER-PAGE-PLAN.md Wave B).
+ * The asset **manager** page (`/assets/:id`, docs/main/CYCLES-PLAN.md §11, CD-b item 2 — reworked from a
+ * hybrid manager/cockpit page into a pure manager view by docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md Wave B).
  * **No video, ever, on this page** — piloting and live video are the cockpit's job (`/fly`) and the
  * lightweight `/live/:deviceId` watch page, both one click away via the cockpit-link band.
  *
- * **Layered per docs/UI-ARCHITECTURE-PLAN.md**: every store/service injection, derived read-model,
+ * **Layered per docs/plans/done/UI-ARCHITECTURE-PLAN.md**: every store/service injection, derived read-model,
  * and HTTP-backed command lives in {@link AssetDetailFacade} (provided below, alongside
  * `TelemetryStore` — unchanged, still one poller-set per route activation). This component is left
  * holding only:
@@ -49,7 +49,7 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  *   - the overlay/view-state a `UiStore`/`PanelState` group or a drill-in `subView` toggle is
  *     explicitly meant to be **host-owned**, per those classes' own doc comments ("a host owns one
  *     instance directly") — `editors` (the four-editor group), `panels` (the three/four drawers),
- *     `dialogs` (the Archive-asset confirm, added by docs/NAV-IA-REDESIGN-PLAN.md §2.2 wave 2 — see
+ *     `dialogs` (the Archive-asset confirm, added by docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 wave 2 — see
  *     this class's own `requestArchiveAsset` doc comment), `subView` (the two wide-table sub-views);
  *   - truly-ephemeral local view state no other component/route transition needs to stay consistent
  *     with: form drafts (`nameDraft`/`categoryDraft`/`registrationNumberDraft`/`renameDraft`/
@@ -58,7 +58,7 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  *     readers of a facade signal — the same "plain method reading a signal, called from `@for`"
  *     idiom `features/devices/devices.ts#simulatedInfo` already established).
  *
- * **Header** (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/05-asset-detail.md): the two
+ * **Header** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/05-asset-detail.md): the two
  * `.page-head` blocks this page used to carry (a skeleton title while loading, the real title +
  * chips + actions once loaded) are now one `<vision-page-bar>`, shared across both states via
  * `headerTitle`. `crumb` is a fixed `{ label: 'Assets', to: '/assets' }` (05-asset-detail.md's own
@@ -67,7 +67,7 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  * input (a frozen contract this task must not modify), so it cannot host projected `<input>`
  * elements — the rename form now renders as its own card directly under the bar instead, still
  * gated by the same `editors` group. The old decorative asset photo (`hasImage`/`imageUrl`,
- * docs/UX-REWORK-PLAN.md §U-d item 3) is dropped from this header for the same reason: it has no
+ * docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) is dropped from this header for the same reason: it has no
  * slot in the frozen bar and 05-asset-detail.md's own mockup shows no avatar — the underlying
  * `AssetDetailFacade`/`VisionApi` capability is untouched, only this page's presentation of it.
  */
@@ -96,7 +96,7 @@ export class AssetDetailPage {
   protected readonly headerTitle = computed(() => this.facade.asset()?.displayName ?? 'Asset');
 
   /**
-   * The asset photo (docs/UX-REWORK-PLAN.md §U-d item 3), fed to `<vision-page-bar>`'s `avatarSrc`.
+   * The asset photo (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3), fed to `<vision-page-bar>`'s `avatarSrc`.
    * Restored after the Wave 2 header migration dropped it: the photo was never part of the bar's
    * plain-string `title`, so that contract never required removing it — it only needed a home, which
    * `avatarSrc` now is. The graceful 404 (an asset with no uploaded photo) lives inside `PageBar`
@@ -119,7 +119,7 @@ export class AssetDetailPage {
   protected readonly subView = signal<'overview' | 'usage' | 'hardware'>('overview');
 
   /**
-   * The Archive-asset confirm's own one-member `UiStore` group (docs/design/05-asset-detail.md's
+   * The Archive-asset confirm's own one-member `UiStore` group (docs/extracts/design/05-asset-detail.md's
    * own acceptance criterion — "Archive asset requires a confirm and is not adjacent to Rename").
    * A separate group from `editors`/`panels` so a confirm can never coexist with either — mirrors
    * `features/fly/fly.ts`'s identical single-member `dialog` group for its Stop-stream confirm.
@@ -135,7 +135,7 @@ export class AssetDetailPage {
     // *different* asset shouldn't stay parked in the previous one's editor/drill-in (Angular reuses
     // this component instance across same-route navigations rather than recreating it).
     //
-    // **`rowAction`/`renameDraft`/`assignDraft` reset too** (docs/UI-STATE-PLAN.md §2 — a stale value
+    // **`rowAction`/`renameDraft`/`assignDraft` reset too** (docs/plans/done/UI-STATE-PLAN.md §2 — a stale value
     // surviving into a context where it's wrong), added alongside the pre-existing `panels`/`editors`/
     // `dialogs` resets above: without this, switching assets (the header switcher, a picker-card pick,
     // or a bare `?sel=`-adjacent link — all same-route navigations, same component instance) left a
@@ -161,7 +161,7 @@ export class AssetDetailPage {
     return relativeTimeLabel(event.lastSeen, this.facade.now());
   }
 
-  // --- Drill-in navigation (docs/UI-REDESIGN-PLAN.md Wave 3) ---------------------------------
+  // --- Drill-in navigation (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3) ---------------------------------
 
   protected openDrillIn(view: 'usage' | 'hardware'): void {
     this.subView.set(view);
@@ -230,7 +230,7 @@ export class AssetDetailPage {
   }
 
   /**
-   * Opens the Archive-asset confirm (docs/design/05-asset-detail.md's own acceptance criterion —
+   * Opens the Archive-asset confirm (docs/extracts/design/05-asset-detail.md's own acceptance criterion —
    * Archive requires a confirm and must not sit adjacent to Rename). The button that calls this
    * lives inside `<vision-kebab-menu>` in the page bar's `pageBarActions` slot (asset-detail.html),
    * not next to "Rename asset…" — the poka-yoke separation this class doc references.

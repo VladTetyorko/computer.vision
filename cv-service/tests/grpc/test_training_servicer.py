@@ -19,7 +19,7 @@ in the model dir + showing in ListModels, a missing dataset yielding a
 reported FAILED (not a gRPC abort), a training exception yielding FAILED, and
 client cancellation stopping the run.
 
-`UploadDataset` tests (CV-TRAINING-V2 Wave W2, docs/CV-TRAINING-V2-PLAN.md §2)
+`UploadDataset` tests (CV-TRAINING-V2 Wave W2, docs/plans/done/CV-TRAINING-V2-PLAN.md §2)
 drive real tmp dirs and real (small, in-memory-built) zip archives -- no
 ultralytics/torch either. They cover the happy path incl. overwrite-of-a-
 previous-upload, protocol-level `dataset_id` problems (blank/mid-stream-

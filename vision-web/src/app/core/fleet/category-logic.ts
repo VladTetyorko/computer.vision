@@ -1,8 +1,8 @@
 import type { AssetSummary } from '../api/models';
 
 /**
- * The "existing categories + backend seed list" category picker (docs/UX-QUICKWINS-PLAN.md QF-2's
- * "Create asset from this device"; docs/UX-REWORK-PLAN.md §U-d item 1 — the onboarding wizard's
+ * The "existing categories + backend seed list" category picker (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2's
+ * "Create asset from this device"; docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — the onboarding wizard's
  * Profile step reuses the exact same picker for its own category field).
  *
  * Started life in `features/devices/devices-page-logic.ts`; moved here once the onboarding wizard

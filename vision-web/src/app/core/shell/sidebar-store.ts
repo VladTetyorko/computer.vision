@@ -6,13 +6,13 @@ const ADVANCED_OPEN_KEY = 'vision.sidebar.advancedOpen';
 const UPCOMING_OPEN_KEY = 'vision.sidebar.upcomingOpen';
 
 /**
- * `SidebarStore` — the persisted view-state behind `shared/ui/app-sidebar/**` (docs/NAV-IA-REDESIGN-PLAN.md
- * §2.1, docs/design/00-shell.md). Three independent, `localStorage`-backed booleans:
+ * `SidebarStore` — the persisted view-state behind `shared/ui/app-sidebar/**` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md
+ * §2.1, docs/extracts/design/00-shell.md). Three independent, `localStorage`-backed booleans:
  *
  * - **`collapsed`** — whether the sidebar currently renders as a rail. Derived, not stored:
  *   `override ?? (preference || fullBleed)`. See "Auto-collapse is a default, not a lock" below.
  * - **`advancedOpen`** / **`upcomingOpen`** — the two collapsed-by-default disclosures inside each
- *   mode's own entry list (docs/NAV-IA-REDESIGN-PLAN.md §2.1 rule 7: "`soon` entries collapse under
+ *   mode's own entry list (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 7: "`soon` entries collapse under
  *   a `⌄ Upcoming` disclosure … the `advanced`/`diagnostics` Manage groups collapse under
  *   `⌄ Advanced`"). One flag each, shared across all three modes rather than one per mode: today
  *   only Manage ever has an `advanced` tier at all (`features/hubs/nav-entries.ts#navTiers` — Operate

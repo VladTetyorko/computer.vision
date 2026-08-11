@@ -1,4 +1,4 @@
-/* One 48px row replacing `.page-head`'s ~130px block (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — see
+/* One 48px row replacing `.page-head`'s ~130px block (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — see
    `page-bar.ts`'s class doc for why the prose it replaces was redundant once the sidebar started
    answering "where am I" permanently.
 
@@ -47,7 +47,7 @@
   white-space: nowrap;
 }
 
-/* Asset photo (docs/UX-REWORK-PLAN.md §U-d item 3). Sized to the bar's own row rather than the
+/* Asset photo (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3). Sized to the bar's own row rather than the
    larger block the old header used — the photo is identity, not content, so it reads as an avatar
    beside the name instead of competing with it. `object-fit: cover` keeps any aspect ratio from
    distorting; the element is removed outright on a 404 (see `page-bar.ts#showAvatar`). */

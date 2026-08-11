@@ -23,9 +23,9 @@ import java.util.Objects;
 
 /**
  * Driving REST adapter for {@code /api/usages}: the fleet-wide "replay library" list ({@link
- * #recent}, docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/design/10-replay.md), flight replay
- * (docs/MVP2-PLAN.md §R, R-a) — a downsampled, time-windowed view over one {@code AssetUsage}'s
- * telemetry/detection history — plus (docs/OPS-CORE-PLAN.md §R, R-b) that same usage's
+ * #recent}, docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8, docs/extracts/design/10-replay.md), flight replay
+ * (docs/plans/done/MVP2-PLAN.md §R, R-a) — a downsampled, time-windowed view over one {@code AssetUsage}'s
+ * telemetry/detection history — plus (docs/plans/done/OPS-CORE-PLAN.md §R, R-b) that same usage's
  * recorded-clip URL, if one is available. All three are usage-scoped reads that belong together on
  * one controller rather than standing up a new class per endpoint (see {@code
  * .claude/skills/java-clean-code/SKILL.md}: "can an existing service/controller own this method
@@ -40,7 +40,7 @@ import java.util.Objects;
  * AssetController}'s asset-management concerns. See that controller's Gotchas for the resulting
  * (harmless but slightly inconsistent) split of usage-scoped endpoints across two classes.
  *
- * <h2>Visibility scoping (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
+ * <h2>Visibility scoping (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
  * {@link #recent} is scoped to {@link CurrentUser#scope()}, exactly like {@link
  * AssetController#list}: a usage whose owning asset the caller may not see is silently excluded,
  * never revealed. {@link #timeline}/{@link #recording} are unchanged by this task and remain
@@ -123,7 +123,7 @@ public class UsageTimelineController {
     }
 
     /**
-     * Serves a usage's recording/clip-export URL, if one is available (docs/OPS-CORE-PLAN.md §R).
+     * Serves a usage's recording/clip-export URL, if one is available (docs/plans/done/OPS-CORE-PLAN.md §R).
      *
      * <p>An unknown usage id surfaces as {@link java.util.NoSuchElementException} (→404); a
      * malformed UUID surfaces as {@link IllegalArgumentException} (→400) — both via {@link

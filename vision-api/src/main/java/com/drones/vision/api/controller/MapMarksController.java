@@ -26,9 +26,9 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * The tactical marks half of the common operational picture (docs/MAP-REWORK-PLAN.md §4.1's frozen
+ * The tactical marks half of the common operational picture (docs/plans/done/MAP-REWORK-PLAN.md §4.1's frozen
  * wire contract) — replacing the deployment-wide, unscoped {@code /api/marks} surface
- * docs/TACTICAL-MARKS-PLAN.md shipped.
+ * docs/plans/done/TACTICAL-MARKS-PLAN.md shipped.
  *
  * <h2>Visibility is server-side and layer-scoped</h2>
  * {@link #list} returns only {@code ACTIVE} marks on layers the caller may view — resolved from

@@ -21,13 +21,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for the server-push data plane (docs/REALTIME-PLAN.md §4) — one SSE
+ * Driving REST adapter for the server-push data plane (docs/plans/done/REALTIME-PLAN.md §4) — one SSE
  * connection replacing the steady-state polling of fleet state, telemetry, detections, and
  * events.
  *
  * <p>Gated by {@code vision.live.enabled} (default {@code true}, {@code matchIfMissing}): when
  * {@code false}, neither this controller nor {@link LiveUpdateRegistry} is registered as a bean at
- * all, so {@code /api/live} 404s exactly like any other unmapped route (docs/REALTIME-PLAN.md §4,
+ * all, so {@code /api/live} 404s exactly like any other unmapped route (docs/plans/done/REALTIME-PLAN.md §4,
  * item 4) — {@code vision-app}'s wiring still supplies a no-op {@code LiveUpdatePublisherPort} to
  * the application layer in that case (see that module's {@code MODULE.md}).
  *
@@ -37,7 +37,7 @@ import java.util.Objects;
  *
  * <h2>Who the connection is</h2>
  * One thing beyond HTTP shape does happen here, and only here: the {@code map} topic's delivery is
- * scoped per viewer (docs/MAP-REWORK-PLAN.md §4.3), and identity is resolved at the API edge, never
+ * scoped per viewer (docs/plans/done/MAP-REWORK-PLAN.md §4.3), and identity is resolved at the API edge, never
  * inside the registry. So {@link #connect} reads {@link CurrentUser#viewer()} once, at connect time,
  * turns it into a delivery predicate via {@link MapVisibility#deliveryPredicate}, and hands that to
  * {@link LiveUpdateRegistry#connect} — which stores it on the connection and consults it on every

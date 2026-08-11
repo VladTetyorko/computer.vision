@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for geofence zone CRUD (docs/OPS-CORE-PLAN.md §G's frozen wire contract).
+ * Driving REST adapter for geofence zone CRUD (docs/plans/done/OPS-CORE-PLAN.md §G's frozen wire contract).
  *
  * <p>Constructor-injected with {@link GeofenceService} only — zones are global reference data
  * with no ownership/audit concerns (see that service's own javadoc), so this controller needs no

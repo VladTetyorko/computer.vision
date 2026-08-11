@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Lines, polygons, arrows and text annotations on the map (docs/MAP-REWORK-PLAN.md §4.1's frozen
+ * Lines, polygons, arrows and text annotations on the map (docs/plans/done/MAP-REWORK-PLAN.md §4.1's frozen
  * wire contract) — the substrate a later "plans" slice builds on.
  *
  * <p>Same shape as {@link MapMarksController}: {@link CurrentUser#viewer()} resolves who is acting,

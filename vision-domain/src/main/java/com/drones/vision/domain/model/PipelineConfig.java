@@ -13,13 +13,13 @@ import java.util.Set;
  * queuing them once the bound is reached. {@code labelFilter} is
  * defensively copied to an immutable set; an empty set means "all labels".
  *
- * <p>{@code eventRule} (docs/MVP2-PLAN.md §E, E-a) governs debounced {@link
+ * <p>{@code eventRule} (docs/plans/done/MVP2-PLAN.md §E, E-a) governs debounced {@link
  * DetectionEvent} tracking — the rule engine consuming this pipeline's
  * results decides, independently of {@code labelFilter}, when a label's
  * streak of qualifying results opens/closes an event; see {@link
  * EventRuleConfig}.
  *
- * <p>{@code overlayBurnIn} (docs/MVP2-PLAN.md §V, V-e) gates whether the
+ * <p>{@code overlayBurnIn} (docs/plans/done/MVP2-PLAN.md §V, V-e) gates whether the
  * application layer renders detection/telemetry overlays onto the published
  * video at all. {@code true} (the default, current behavior) burns boxes/OSD
  * into every published frame — the only thing an HLS-fallback viewer, an
@@ -31,7 +31,7 @@ import java.util.Set;
  * encode path — see {@code StreamPipeline}'s javadoc for exactly what the
  * skip saves.
  *
- * <p>{@code detectionEnabled} (docs/CV-CONTROL-PLAN.md §1, Wave B) is the
+ * <p>{@code detectionEnabled} (docs/plans/done/CV-CONTROL-PLAN.md §1, Wave B) is the
  * per-stream detection on/off switch: {@code false} means the pipeline skips
  * {@code detect()} entirely — no {@code DetectionPort} calls are made, so
  * detection costs zero CPU — while video keeps flowing at full rate,
@@ -39,7 +39,7 @@ import java.util.Set;
  * skip itself is enforced by the application layer's {@code StreamPipeline}
  * (Wave C); this record only carries the flag.
  *
- * <p>{@code tracking} (docs/TRACKING-PLAN.md §4.B) is this stream's {@link TrackingConfig} —
+ * <p>{@code tracking} (docs/plans/done/TRACKING-PLAN.md §4.B) is this stream's {@link TrackingConfig} —
  * mode, engine, duty-cycle cadences, and an optional {@link TargetLock}. {@link #defaults()}
  * returns {@link TrackingConfig#defaults()} ({@code ASSOCIATE}): a new stream tracks by default,
  * so every detection carries a stable {@code trackId}. The <em>convenience</em> constructors below
@@ -101,7 +101,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     /**
      * Convenience constructor for callers that don't care about {@link #tracking()} — defaults it
      * to {@link TrackingConfig#off()}, the same "N-1-arg convenience ctor" idiom used elsewhere.
-     * This was the canonical constructor before docs/TRACKING-PLAN.md §4.B added {@link
+     * This was the canonical constructor before docs/plans/done/TRACKING-PLAN.md §4.B added {@link
      * #tracking()}; every pre-existing 9-arg call site compiles <em>and behaves</em> unchanged.
      *
      * <p><strong>{@code off()} here, {@code ASSOCIATE} in {@link #defaults()}, deliberately.</strong>
@@ -123,7 +123,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * convenience ctor" idiom used elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s
      * 7-arg ctor, this record's own 6-/7-arg ctors below), chaining onto the 9-arg convenience
      * ctor above (so {@link #tracking()} also defaults to {@link TrackingConfig#off()}). This was
-     * the canonical constructor before docs/CV-CONTROL-PLAN.md Wave B added {@link
+     * the canonical constructor before docs/plans/done/CV-CONTROL-PLAN.md Wave B added {@link
      * #detectionEnabled()}; every pre-existing 8-arg call site compiles unchanged.
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
@@ -158,7 +158,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
 
     /**
      * Reasonable defaults for a new stream: the {@code "yolo26n.pt"} model
-     * (docs/CV-CONTROL-PLAN.md §1, Wave B — the real checkpoint id cv-service
+     * (docs/plans/done/CV-CONTROL-PLAN.md §1, Wave B — the real checkpoint id cv-service
      * already falls back to; the previous {@code "yolo"} id matched no actual
      * checkpoint and relied on that silent fallback), a 0.4 confidence
      * threshold, 10 FPS inference sampling, at most 2 in-flight inference
@@ -167,7 +167,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * enabled, and tracking {@link TrackingConfig#defaults() ASSOCIATE}.
      *
      * <p><strong>Tracking defaults to {@link TrackingConfig#defaults()} ({@code ASSOCIATE}), not
-     * {@link TrackingConfig#off()}</strong> — docs/TRACKING-PLAN.md §5.G, the one behavior change
+     * {@link TrackingConfig#off()}</strong> — docs/plans/done/TRACKING-PLAN.md §5.G, the one behavior change
      * wave T8 exists for. Every detection on a stream started from these defaults therefore carries
      * a stable {@code trackId} across frames, which is what S2 geolocation trails, click-to-follow
      * and cross-sensor fusion are all blocked on. Turning tracking off is now a deliberate act:

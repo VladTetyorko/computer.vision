@@ -2,12 +2,12 @@
 
 /* Sized to content ("All labels"/"All assets"), not the global `select { width: 100% }` default —
    the same `.asset-filter`/`.roster-search` explicit-width idiom every other Wave 2/3 page-bar
-   filter already uses (docs/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
+   filter already uses (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F4's "1075px-wide" finding). */
 .alerts-filter {
   width: 10rem;
 }
 
-/* Dense rows (docs/design/08-alerts.md: "~32px tall so ~25 events fit a screen") — a small gap
+/* Dense rows (docs/extracts/design/08-alerts.md: "~32px tall so ~25 events fit a screen") — a small gap
    between rows is still a real dense list, not the ~50-60px two-line rows this replaces on this
    page. `vision-event-row`'s own `:host{display:contents}` means this `<li>` sizes the row, not the
    component. */

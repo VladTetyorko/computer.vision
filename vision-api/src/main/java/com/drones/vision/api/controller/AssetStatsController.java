@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Objects;
 
 /**
- * Driving REST adapter for one asset's flight-utilization stats (docs/ASSET-MANAGER-PAGE-PLAN.md,
+ * Driving REST adapter for one asset's flight-utilization stats (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md,
  * Wave A) — {@code GET /api/assets/{assetId}/stats}, the manager page's KPI tile row (total flight
  * time, flight count, first/last flown, average flight length, last-known battery).
  *
@@ -23,7 +23,7 @@ import java.util.Objects;
  * .claude/skills/java-clean-code/SKILL.md} §3), and this endpoint's one real collaborator ({@link
  * AssetStatsService}) is otherwise unrelated to asset CRUD/streaming.
  *
- * <h2>404 for an unknown or out-of-scope asset (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
+ * <h2>404 for an unknown or out-of-scope asset (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1)</h2>
  * {@link AssetStatsService} deliberately never checks whether {@code assetId} is a real, known
  * asset (see its own javadoc) — aggregating "whatever usages exist" is honestly correct even for
  * an unknown id (zero usages). So this controller resolves the 404 itself, by calling {@link

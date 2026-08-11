@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
- * Wave T0 acceptance test (docs/TRACKING-PLAN.md §4.A, §7 "T0").
+ * Wave T0 acceptance test (docs/plans/done/TRACKING-PLAN.md §4.A, §7 "T0").
  *
  * <p>Proto3 additive rules require that an old client against a new server (no {@code tracking}
  * sent) and a new client that simply leaves tracking off both produce the exact wire bytes the

@@ -2,17 +2,17 @@ import type { GeoPosition } from '../api/models';
 
 /**
  * Pure, Angular-free logic behind `core/weather/weather-store.ts` and the go/no-go chip
- * (`shared/ui/weather-chip.ts`; docs/OPS-CORE-PLAN.md §W) — the wind severity thresholds, the
+ * (`shared/ui/weather-chip.ts`; docs/plans/done/OPS-CORE-PLAN.md §W) — the wind severity thresholds, the
  * chip's own label text, the fleet-centroid position helper, the Open-Meteo request URL/response
  * decoding, and the cache-vs-refetch decision — split out so every rule is unit-testable without
  * `fetch`/timers/a component, mirroring every other feature's own `*-logic.ts` split.
  */
 
-// --- Wind severity (docs/OPS-CORE-PLAN.md §W's pinned thresholds) -------------------------------
+// --- Wind severity (docs/plans/done/OPS-CORE-PLAN.md §W's pinned thresholds) -------------------------------
 
 export type WindSeverity = 'ok' | 'warn' | 'no-go';
 
-/** The asset attribute key an operator sets to override the default limit (docs/OPS-CORE-PLAN.md §W). */
+/** The asset attribute key an operator sets to override the default limit (docs/plans/done/OPS-CORE-PLAN.md §W). */
 export const WIND_LIMIT_ATTRIBUTE_KEY = 'windLimitMps';
 
 /** The limit used whenever an asset carries no `windLimitMps` attribute. */
@@ -25,7 +25,7 @@ const WARN_RATIO = 0.7;
  * `windSeverity(speedMps, gustsMps, limitMps)` — the worse of steady speed and gusts decides the
  * tier (a calm steady wind with a violent gust is still a no-go): `< 70%` of `limitMps` is `'ok'`,
  * `70–100%` is `'warn'`, `> 100%` is `'no-go'`. Advisory only — this function (and every caller of
- * it) never blocks anything, it only informs (docs/OPS-CORE-PLAN.md §W: "advisory only … informs,
+ * it) never blocks anything, it only informs (docs/plans/done/OPS-CORE-PLAN.md §W: "advisory only … informs,
  * doesn't fake authority").
  */
 export function windSeverity(speedMps: number, gustsMps: number, limitMps: number = DEFAULT_WIND_LIMIT_MPS): WindSeverity {
@@ -58,7 +58,7 @@ export function windAdvisory(speedMps: number, gustsMps: number, limitMps: numbe
 }
 
 /**
- * Reads `windLimitMps` off an asset's `attributes` map (docs/OPS-CORE-PLAN.md §W) — an absent,
+ * Reads `windLimitMps` off an asset's `attributes` map (docs/plans/done/OPS-CORE-PLAN.md §W) — an absent,
  * non-numeric, or non-positive value falls back to `DEFAULT_WIND_LIMIT_MPS` rather than a crash or
  * a nonsensical zero/negative limit.
  */
@@ -91,7 +91,7 @@ export function fleetCentroid(positions: readonly GeoPosition[]): GeoPosition | 
   return { latitude: sum.latitude / positions.length, longitude: sum.longitude / positions.length };
 }
 
-// --- Open-Meteo request/response (docs/OPS-CORE-PLAN.md §W: no key, CORS-open) -------------------
+// --- Open-Meteo request/response (docs/plans/done/OPS-CORE-PLAN.md §W: no key, CORS-open) -------------------
 
 /** Builds the exact Open-Meteo `forecast` URL for `position` — no API key, `wind_speed_unit=ms` so readings are already m/s. */
 export function openMeteoForecastUrl(position: GeoPosition): string {
@@ -144,7 +144,7 @@ export function parseOpenMeteoReading(payload: OpenMeteoForecastPayload, fetched
   };
 }
 
-// --- Cache decision (docs/OPS-CORE-PLAN.md §W: "refresh ≤ every 10 min, cached") -----------------
+// --- Cache decision (docs/plans/done/OPS-CORE-PLAN.md §W: "refresh ≤ every 10 min, cached") -----------------
 
 /** The plan's own pinned minimum refresh interval. */
 export const WEATHER_CACHE_MS = 10 * 60 * 1000;

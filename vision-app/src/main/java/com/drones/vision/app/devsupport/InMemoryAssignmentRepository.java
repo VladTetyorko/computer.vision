@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 
 /**
  * In-memory {@link AssignmentRepositoryPort}: dev fallback with no durability across restarts
- * (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 2).
+ * (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2).
  *
  * <p>Backed by a concurrent set of ({@code pilot}, {@code asset}) links, which gives {@code assign}
  * its idempotent no-duplicate semantics for free (adding an already-present link is a no-op) and

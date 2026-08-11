@@ -41,7 +41,7 @@ public interface StreamService {
 
     /**
      * Opens a stream for a device and starts its pipeline, stating the caller's tracking wishes
-     * separately from the rest of the configuration (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
+     * separately from the rest of the configuration (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
      *
      * <p>The new stream's {@link com.drones.vision.domain.model.TrackingConfig} is composed here from
      * all three configuration layers, precedence running strictly left to right: <b>{@code tracking}
@@ -88,7 +88,7 @@ public interface StreamService {
     Set<DeviceId> activeDeviceIds();
 
     /**
-     * The most recently published frame on a running stream (docs/MVP3-PLAN.md C-a) — post-overlay
+     * The most recently published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) — post-overlay
      * burn-in when one was drawn, exactly the instance the pipeline last handed to {@link
      * com.drones.vision.domain.port.out.StreamPublisherPort#publish}. Backs the per-stream JPEG
      * snapshot endpoint.
@@ -101,7 +101,7 @@ public interface StreamService {
 
     /**
      * The most recently arrived frame on a running stream, before overlay burn-in and at full
-     * resolution (docs/CV-TRAINING-PLAN.md &sect;2/&sect;D) — exactly {@link
+     * resolution (docs/plans/done/CV-TRAINING-PLAN.md &sect;2/&sect;D) — exactly {@link
      * StreamPipeline#latestRawFrame()}. Backs training-sample capture, which wants clean pixels to
      * label, never {@link #latestFrame}'s possibly-annotated one.
      *
@@ -113,7 +113,7 @@ public interface StreamService {
 
     /**
      * The most recently completed detection result's detections on a running stream — exactly {@link
-     * StreamPipeline#latestDetections()} (docs/CV-TRAINING-PLAN.md &sect;2), surfaced here so a
+     * StreamPipeline#latestDetections()} (docs/plans/done/CV-TRAINING-PLAN.md &sect;2), surfaced here so a
      * caller outside the pipeline (e.g. training-sample capture) never needs to reach into pipeline
      * internals.
      *
@@ -124,7 +124,7 @@ public interface StreamService {
     List<Detection> latestDetections(StreamId streamId);
 
     /**
-     * The tracks a running stream currently holds (docs/TRACKING-PLAN.md &sect;4.E) — exactly
+     * The tracks a running stream currently holds (docs/plans/done/TRACKING-PLAN.md &sect;4.E) — exactly
      * {@link StreamPipeline#tracks()}, surfaced here for the same reason {@link #latestDetections}
      * is: a caller outside the pipeline never reaches into pipeline internals.
      *
@@ -139,7 +139,7 @@ public interface StreamService {
     List<TrackedObject> tracks(StreamId streamId);
 
     /**
-     * A running stream's tracking-flow counters over the stats window (docs/TRACKING-PLAN.md
+     * A running stream's tracking-flow counters over the stats window (docs/plans/done/TRACKING-PLAN.md
      * &sect;4.E) — exactly {@link StreamPipeline#trackingStats()}.
      *
      * @param streamId the stream to inspect
@@ -151,8 +151,8 @@ public interface StreamService {
     Optional<TrackingStats> trackingStats(StreamId streamId);
 
     /**
-     * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md &sect;5,
-     * docs/TRACKING-PLAN.md &sect;4.D) — a partial patch folded onto the stream's current {@link
+     * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,
+     * docs/plans/done/TRACKING-PLAN.md &sect;4.D) — a partial patch folded onto the stream's current {@link
      * PipelineConfig}. Confidence threshold, inference fps, label filter, detection on/off and the
      * whole tracking configuration apply instantly with no video interruption; a changed model id
      * briefly re-arms detection instead (see {@link UpdateOutcome#modelReArmed()} and {@code

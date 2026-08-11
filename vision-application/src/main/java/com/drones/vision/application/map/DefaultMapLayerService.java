@@ -160,7 +160,7 @@ public final class DefaultMapLayerService implements MapLayerService {
 
     private void requireManage(Viewer v, MapLayer layer) {
         // A layer the viewer may not even view must be indistinguishable from one that does not
-        // exist (docs/MAP-REWORK-PLAN.md §4.1: out-of-scope → 404, never 403); only a viewer who
+        // exist (docs/plans/done/MAP-REWORK-PLAN.md §4.1: out-of-scope → 404, never 403); only a viewer who
         // can see the layer but lacks MANAGE gets an honest 403.
         if (!policy.canView(v, layer)) {
             throw new NoSuchElementException("Unknown layer: " + layer.id().value());

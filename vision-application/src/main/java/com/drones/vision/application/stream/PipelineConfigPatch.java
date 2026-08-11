@@ -8,7 +8,7 @@ import com.drones.vision.domain.model.TrackingConfig;
 
 /**
  * A partial live update to a running stream's {@link com.drones.vision.domain.model.PipelineConfig}
- * (docs/CV-CONTROL-PLAN.md &sect;5, the frozen {@code PATCH /api/streams/{streamId}/config}
+ * (docs/plans/done/CV-CONTROL-PLAN.md &sect;5, the frozen {@code PATCH /api/streams/{streamId}/config}
  * contract): every field is optional, {@code null} means "leave this knob unchanged" — the same
  * null-means-unchanged partial-edit idiom {@link AssetEdit}/{@link DeviceEdit} already use.
  * {@link DefaultStreamService#updateConfig} folds only the present fields onto the stream's
@@ -30,7 +30,7 @@ import com.drones.vision.domain.model.TrackingConfig;
  * has on {@code PipelineConfig} itself.
  *
  * <p>{@code tracking} is itself a <b>partial</b> statement — a {@link TrackingConfigPatch}, not a
- * whole {@link TrackingConfig} (docs/TRACKING-PLAN.md &sect;4.D). {@code null} leaves tracking
+ * whole {@link TrackingConfig} (docs/plans/done/TRACKING-PLAN.md &sect;4.D). {@code null} leaves tracking
  * entirely alone; a present patch changes only the knobs it names, because the UI adjusts them one
  * at a time and a whole-value replace made every partial patch silently reset the seven knobs it did
  * not mention. {@link TrackingConfigPatch} carries the fold and documents the two knobs whose
@@ -53,7 +53,7 @@ public record PipelineConfigPatch(Double confidenceThreshold, Integer inferenceF
     public static final PipelineConfigPatch NOTHING = new PipelineConfigPatch(null, null, null, null, null, null);
 
     /**
-     * The canonical constructor before docs/TRACKING-PLAN.md wave T3 added {@code tracking}, kept as
+     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T3 added {@code tracking}, kept as
      * a convenience constructor defaulting it to {@code null} ("leave tracking alone"), so every
      * pre-existing call site — {@code vision-api}'s {@code UpdateStreamConfigRequest#toPatch()}
      * among them — compiles unchanged. Same "N-1-arg convenience ctor" idiom the domain's {@code

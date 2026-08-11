@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Shape/mapping/wiring tests only (docs/MVP3-PLAN.md C-a) — the counts math, per-category
+ * Shape/mapping/wiring tests only (docs/plans/done/MVP3-PLAN.md C-a) — the counts math, per-category
  * accumulation, and battery/staleness derivation are proven against real inputs in {@code
  * DefaultFleetSummaryServiceTest} (vision-application), the same split this codebase already makes
  * between e.g. {@code UsageTimelineControllerTest} (pass-through/mapping) and {@code

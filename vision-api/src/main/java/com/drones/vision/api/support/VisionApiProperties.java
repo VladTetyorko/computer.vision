@@ -4,7 +4,7 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * Framework-free tunables for this module's edge-local infrastructure — docs/LAYERING-REFACTOR-PLAN.md
+ * Framework-free tunables for this module's edge-local infrastructure — docs/plans/active/LAYERING-REFACTOR-PLAN.md
  * §1.3/§2.2's frozen {@code vision.api} property-key contract, extracted structurally out of what
  * were previously scattered {@code private static final} constants on {@code SnapshotJpegEncoder},
  * {@code HlsProxyController}, {@code LiveUpdateRegistry}, {@code AssetImageController}, and a few
@@ -13,7 +13,7 @@ import java.util.Objects;
  *
  * <p><b>Why this record lives in {@code vision-api}, not {@code vision-app}</b>: {@code
  * vision-api} is a driving adapter and may not gain a dependency on {@code vision-app} (the
- * hexagon runs the other way — see docs/LAYERING-REFACTOR-PLAN.md §1.3 rule 1, which reserves
+ * hexagon runs the other way — see docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 rule 1, which reserves
  * {@code @ConfigurationProperties} records for {@code vision-app} alone). This is the same "plain
  * settings record, framework-free, with a {@code static defaults()} factory" shape {@code
  * FfmpegSettings} (adapter-rtsp) already establishes; a later wave adds a Spring {@code
@@ -22,7 +22,7 @@ import java.util.Objects;
  * adapter's own settings record.
  *
  * <p><b>Wiring status (this wave)</b>: only {@link SnapshotJpegEncoder} actually takes an instance
- * of this record today, per docs/LAYERING-REFACTOR-PLAN.md §7 row B ("makes {@code
+ * of this record today, per docs/plans/active/LAYERING-REFACTOR-PLAN.md §7 row B ("makes {@code
  * SnapshotJpegEncoder} an instance, not a static utility"). {@code HlsProxyController}'s timeouts,
  * {@code LiveUpdateRegistry}'s coalesce/heartbeat/buffer capacities, {@code
  * AssetImageController}'s upload cap, and the per-controller paging defaults still read their own
@@ -58,7 +58,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
     }
 
     /**
-     * {@code SnapshotJpegEncoder}'s downscale/encode tunables (docs/MVP3-PLAN.md C-a).
+     * {@code SnapshotJpegEncoder}'s downscale/encode tunables (docs/plans/done/MVP3-PLAN.md C-a).
      *
      * @param maxWidth    max width a snapshot is downscaled to before JPEG encoding; height scales
      *                    to preserve aspect ratio
@@ -100,7 +100,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
 
     /**
      * The SSE data plane's coalescing/heartbeat cadence and per-topic ring-buffer capacities
-     * (docs/REALTIME-PLAN.md §4).
+     * (docs/plans/done/REALTIME-PLAN.md §4).
      *
      * @param coalesce         how often pending telemetry/detections are flushed into one envelope
      *                         per topic
@@ -151,7 +151,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
     }
 
     /**
-     * {@code AssetImageController}'s upload size cap (docs/UX-REWORK-PLAN.md §U-d item 3).
+     * {@code AssetImageController}'s upload size cap (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3).
      *
      * @param maxImageBytes maximum accepted asset-image body size, bytes
      */

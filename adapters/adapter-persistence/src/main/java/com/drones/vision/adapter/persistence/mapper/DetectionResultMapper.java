@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /**
  * {@link DetectionResult} &harr; {@link DetectionResultEntity} mapping, extracted from {@code
- * JpaDetectionRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaDetectionRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  *
  * <p>{@link #toEntity} invents a synthetic {@code UUID} id at mapping time — {@link
  * DetectionResult} itself carries no identity (an append-only result, not an aggregate), so there

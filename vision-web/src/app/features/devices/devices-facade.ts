@@ -29,7 +29,7 @@ import {
 } from './devices-page-logic';
 
 /**
- * `DevicesPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection, the
+ * `DevicesPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — owns every store/service injection, the
  * warehouse-row read-model (search + `showArchived`, per the plan's own explicit "moves into the
  * facade" call-out for this exact toggle), and every command for the `/devices` table, so the page
  * component itself only injects this class.
@@ -37,11 +37,11 @@ import {
  * No behavior change from the pre-facade page: every HTTP call, toast, and silent-degrade path below
  * is carried over verbatim, just relocated.
  *
- * **Wave 3 addition (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md)**: the `?sel=`-
+ * **Wave 3 addition (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md)**: the `?sel=`-
  * addressable two-pane selection (`selectedId`/`selectedRow`/`selectRow`/`clearSelection`) and the
  * detail panel's clipboard copy affordance (`copyToClipboard`) — everything else predates this wave.
  *
- * **docs/VISUAL-REFRESH-PLAN.md W2** — no facade changes; the merged state indicator
+ * **docs/plans/done/VISUAL-REFRESH-PLAN.md W2** — no facade changes; the merged state indicator
  * (`devices-page-logic.ts#describeDeviceState`) is a pure read of fields `WarehouseRow` already
  * carries, called straight from `DevicesPage`.
  */
@@ -64,7 +64,7 @@ export class DevicesFacade {
   // --- Search ------------------------------------------------------------------------------------
   readonly searchQuery = signal('');
 
-  // --- Warehouse (docs/CYCLES-PLAN.md §8; kebab menus + poka-yoke docs/UX-REWORK-PLAN.md §U-a item 7, §U-a2) -
+  // --- Warehouse (docs/main/CYCLES-PLAN.md §8; kebab menus + poka-yoke docs/plans/done/UX-REWORK-PLAN.md §U-a item 7, §U-a2) -
 
   readonly showArchived = signal(false);
   /** Populated only while `showArchived` is on — `includeDeleted=true` returns *every* device. */
@@ -98,7 +98,7 @@ export class DevicesFacade {
    *  "search matched nothing" for the empty state. */
   readonly hasAnyDevices = computed(() => this.warehouseDevices().length > 0);
 
-  // --- Two-pane selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md) ----------
+  // --- Two-pane selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md) ----------
   // `DevicesPage`'s own constructor `effect()` forwards its route-bound `sel` input straight into
   // this signal on every change (same "only a component can receive a route input" split `addSource`
   // already documents). Read against `allRows`, not the search-narrowed `warehouseRows`, so typing
@@ -123,7 +123,7 @@ export class DevicesFacade {
 
   /**
    * The detail panel's copy affordances for the full source URI and the device UUID
-   * (docs/design/06-devices.md — "the full source URI, currently cut mid-path with no way to see it")
+   * (docs/extracts/design/06-devices.md — "the full source URI, currently cut mid-path with no way to see it")
    * — mirrors `shared/player/stream-info-panel.ts#copyViewUrl`'s own `navigator.clipboard` + toast
    * idiom exactly (that panel's the one other place this app copies a value to the clipboard). A
    * failed write (clipboard permission denied, insecure context) degrades to an error toast pointing
@@ -164,7 +164,7 @@ export class DevicesFacade {
     }
   }
 
-  /** "+ Add source" (docs/UX-REWORK-PLAN.md §U-d) — the onboarding wizard is the only way in now;
+  /** "+ Add source" (docs/plans/done/UX-REWORK-PLAN.md §U-d) — the onboarding wizard is the only way in now;
    *  also where `addSource`'s query-param redirect (`devices.ts`'s own constructor) lands. */
   goToAddSource(): Promise<boolean> {
     return this.router.navigate(['/add-source']);
@@ -193,8 +193,8 @@ export class DevicesFacade {
   }
 
   /**
-   * Archive executes immediately, no confirm dialog (docs/UX-REWORK-PLAN.md §U-a2 item 3b) — bypasses
-   * `FleetStore.deleteDevice` so this page can attach its own Undo action (docs/OPS-CORE-PLAN.md
+   * Archive executes immediately, no confirm dialog (docs/plans/done/UX-REWORK-PLAN.md §U-a2 item 3b) — bypasses
+   * `FleetStore.deleteDevice` so this page can attach its own Undo action (docs/plans/done/OPS-CORE-PLAN.md
    * §Q2). Undo reuses the existing explicit-Restore path (`setDeviceLifecycle`).
    */
   async archiveDeviceNow(device: Device): Promise<void> {
@@ -210,7 +210,7 @@ export class DevicesFacade {
     }
   }
 
-  /** Deactivate also offers an Undo toast (docs/OPS-CORE-PLAN.md §Q2) — same bypass-`FleetStore`
+  /** Deactivate also offers an Undo toast (docs/plans/done/OPS-CORE-PLAN.md §Q2) — same bypass-`FleetStore`
    *  reasoning as `archiveDeviceNow`. */
   async deactivateDeviceNow(device: Device): Promise<void> {
     this.busyDeviceId.set(device.id);

@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Drives {@link ManualControlWebSocketHandler} through the frozen §4 frame protocol
- * (docs/RC-CONTROL-PHASE1-PLAN.md) against a hand-fake {@link ManualControlService}/{@link
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md) against a hand-fake {@link ManualControlService}/{@link
  * ManualControlSession} and a hand-fake {@link WebSocketSession} — no Spring context, mirroring
  * this module's other pure unit-test controller/handler coverage.
  */

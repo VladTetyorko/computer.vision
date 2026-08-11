@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Context test for {@code vision.live.enabled=false} (docs/REALTIME-PLAN.md §4, item 4): asserts
+ * Context test for {@code vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md §4, item 4): asserts
  * the context still loads cleanly but with {@link LiveUpdatePublisherPort} falling back to {@link
  * NoopLiveUpdatePublisher}, {@code GET /api/live}'s {@link LiveController}/{@link
  * LiveUpdateRegistry} beans entirely absent (so the endpoint 404s, same as any other unmapped

@@ -1,4 +1,4 @@
-/* Single-column centered card at every width (docs/U-AUTH-PLAN.md wave 4's own "responsive from
+/* Single-column centered card at every width (docs/plans/done/U-AUTH-PLAN.md wave 4's own "responsive from
    the start" ask) — no layout branch between phone and desktop, only the card's own `min()`-clamped
    width changes. `100dvh` (not `100vh`) accounts for a mobile browser's own chrome without a jump
    as it shows/hides. */
@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  /* No more global header to subtract (docs/NAV-IA-REDESIGN-PLAN.md) — the sidebar itself is
+  /* No more global header to subtract (docs/plans/done/NAV-IA-REDESIGN-PLAN.md) — the sidebar itself is
      hidden on this page (`app.ts`'s own "hidden while unauthenticated" rule), so the login shell
      is the only thing on screen and can simply claim the full viewport height. */
   min-height: 100dvh;

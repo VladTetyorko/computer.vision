@@ -52,7 +52,7 @@ DEFAULT_GRPC_WORKERS = 10
 DEFAULT_SHUTDOWN_GRACE_SECONDS = 5
 _DATASET_DIRNAME = "datasets"
 
-# --- tracking (docs/TRACKING-PLAN.md §4.A / TRACKING-ORCHESTRATION §4.3) ----
+# --- tracking (docs/plans/done/TRACKING-PLAN.md §4.A / TRACKING-ORCHESTRATION §4.3) ----
 #
 # These back the wire's `<=0 = server default` sentinels on
 # `TrackingConfig` -- `cv_service/tracking/params.py`'s `resolve()` is their

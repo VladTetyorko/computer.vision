@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
 /**
- * Request body for {@code POST /api/auth/login} (docs/U-AUTH-PLAN.md, wave 3's frozen wire
+ * Request body for {@code POST /api/auth/login} (docs/plans/done/U-AUTH-PLAN.md, wave 3's frozen wire
  * contract).
  *
  * <p>Deliberately not shape-validated here: an unknown/blank username or password is a failed

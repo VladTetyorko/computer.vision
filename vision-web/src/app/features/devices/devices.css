@@ -5,7 +5,7 @@
 /* Contained horizontal scroll (see the template's own comment) — the wrapper scrolls, never the
    page. `table { min-width }` gives every column, especially Name, a floor the browser's auto table
    layout can't squeeze below just because Source's URI wants more room than is available (a real
-   regression this task's own row-collapse rework hit: removing the UUID line, per docs/design/06-
+   regression this task's own row-collapse rework hit: removing the UUID line, per docs/extracts/design/06-
    devices.md, removed the only thing that had been giving Name a natural minimum width). */
 .table-scroll {
     overflow-x: auto;
@@ -19,10 +19,10 @@ td:first-child {
     min-width: 14rem;
 }
 
-/* State is the merged Lifecycle+Streaming indicator (docs/VISUAL-REFRESH-PLAN.md F5 — at most one
+/* State is the merged Lifecycle+Streaming indicator (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — at most one
    chip, plus an occasional second "Simulated" call-out) in a plain wrapping flow. `nowrap` rather
    than a width that merely *usually* fits: measured at 1280px every row was 76px tall — two lines —
-   because the chips wrapped, which halves the density this whole wave is for (docs/design/06-
+   because the chips wrapped, which halves the density this whole wave is for (docs/extracts/design/06-
    devices.md's own acceptance criterion is a single-line row at 1280px). The `.table-scroll`
    wrapper above already contains any resulting overflow, so refusing to wrap costs a scrollbar in
    the rare 2-item case instead of costing every row its second line. */
@@ -72,11 +72,11 @@ td.actions {
     border-radius: 4px;
 }
 
-/* ---- Page-bar filters: search (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — projects into
+/* ---- Page-bar filters: search (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — projects into
    `<vision-page-bar>`'s `[pageBarFilters]` slot; gets an explicit width so the global
    `input { width: 100% }` rule (src/styles.css) can't stretch it across the bar. The `List | Grid`
    toggle that used to sit here (and its `.segmented vision-icon` color override) is gone outright,
-   docs/design/06-devices.md's own "drop the Grid toggle" call — see `devices.ts`'s own class doc
+   docs/extracts/design/06-devices.md's own "drop the Grid toggle" call — see `devices.ts`'s own class doc
    comment for the "nothing else depends on it" check. */
 
 .device-search {
@@ -101,7 +101,7 @@ tr.archived {
     background: transparent;
 }
 
-/* The merged Lifecycle+Streaming "ordinary" state (docs/VISUAL-REFRESH-PLAN.md F5 — at most one
+/* The merged Lifecycle+Streaming "ordinary" state (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — at most one
    chip per row): a dot + plain text instead of a fourth chip color for the common "active, not
    currently streaming" (Stopped) case. Reused verbatim by the detail panel's own status row below.
    See `features/assets/assets.css`'s identical copy — no shared table-utility class exists yet
@@ -113,9 +113,9 @@ tr.archived {
     gap: var(--space-4);
 }
 
-/* ---- Row selection (docs/NAV-IA-REDESIGN-PLAN.md §2.4, docs/design/06-devices.md) — every data
+/* ---- Row selection (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4, docs/extracts/design/06-devices.md) — every data
    row is clickable + keyboard-operable (F6: selecting opens the detail panel, never navigates).
-   Selected row per docs/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
+   Selected row per docs/plans/done/VISUAL-REFRESH-PLAN.md F4 (app-wide, one selection language): a 2px
    `--color-info` left inset bar plus a `--color-info-soft` background tint — `box-shadow: inset`
    stands in for a real `border-left` since `border-collapse` on a `<table>` won't reliably render a
    per-cell left border. Replaces the pre-refresh `--panel-raised` background + 3px accent. See
@@ -174,7 +174,7 @@ tbody tr.row-selectable.selected {
    CSS backing it yet — see that stylesheet's own doc comment for the expected `<details>`/`<summary>`
    shape). */
 
-/* ---- Devices: the detail panel (docs/VISUAL-REFRESH-PLAN.md F6 anatomy — title row [the pane's own
+/* ---- Devices: the detail panel (docs/plans/done/VISUAL-REFRESH-PLAN.md F6 anatomy — title row [the pane's own
    head] → status chip row → key-value fact grid → actions row). Content projected into
    `vision-two-pane`'s `[twoPaneDetail]` slot — see `features/assets/assets.css`'s identical note.
    ---------------------------------------------------------------------------------------------- */
@@ -225,7 +225,7 @@ tbody tr.row-selectable.selected {
     font-size: 0.85rem;
 }
 
-/* The full source URI/UUID (docs/design/06-devices.md — "cut mid-path with no way to see it") get
+/* The full source URI/UUID (docs/extracts/design/06-devices.md — "cut mid-path with no way to see it") get
    room to wrap rather than truncate, since this panel is exactly where the row's own truncated data
    is supposed to become readable. */
 .detail-copy-row {
@@ -256,7 +256,7 @@ tbody tr.row-selectable.selected {
     width: 100%;
 }
 
-/* ---- Create asset from a device (docs/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) - */
+/* ---- Create asset from a device (docs/plans/done/UX-QUICKWINS-PLAN.md QF-2's orphaned-device quick fix) - */
 
 .create-asset-panel .hint {
     margin-bottom: var(--space-16);

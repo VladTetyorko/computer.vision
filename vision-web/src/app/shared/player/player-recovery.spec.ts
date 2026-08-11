@@ -121,7 +121,7 @@ describe('reduceRecovery', () => {
     }
   });
 
-  // --- `stopped` (docs/MVP2-PLAN.md §S, S-b) ----------------------------------------------------
+  // --- `stopped` (docs/plans/done/MVP2-PLAN.md §S, S-b) ----------------------------------------------------
 
   it('stopped always wins, moving to the stopped phase with a reset attempt count, from any phase', () => {
     expect(reduceRecovery(INITIAL_RECOVERY_STATE, 'stopped')).toEqual({
@@ -253,7 +253,7 @@ describe('initialTransportState', () => {
   });
 });
 
-describe('reduceTransportRecovery — WHEP-first, HLS-fallback (docs/MVP2-PLAN.md §L / §U3)', () => {
+describe('reduceTransportRecovery — WHEP-first, HLS-fallback (docs/plans/done/MVP2-PLAN.md §L / §U3)', () => {
   it('attachStarted on a fresh webrtc state moves to connecting, transport unchanged', () => {
     const state = initialTransportState(true);
     expect(reduceTransportRecovery(state, 'attachStarted')).toEqual({
@@ -384,7 +384,7 @@ describe('reduceTransportRecovery — WHEP-first, HLS-fallback (docs/MVP2-PLAN.m
     expect(state).toEqual({ transport: 'hls', recovery: { phase: 'reconnecting', attempt: 1 } });
   });
 
-  // --- `stopped` (docs/MVP2-PLAN.md §S, S-b) ----------------------------------------------------
+  // --- `stopped` (docs/plans/done/MVP2-PLAN.md §S, S-b) ----------------------------------------------------
 
   it('stopped wins regardless of transport/neverPlayedYet, leaving transport untouched', () => {
     const webrtcConnecting: TransportRecoveryState = {
@@ -418,7 +418,7 @@ describe('reduceTransportRecovery — WHEP-first, HLS-fallback (docs/MVP2-PLAN.m
   });
 });
 
-// --- PacingState — cross-cycle reconnect pacing (docs/MVP2-PLAN.md §S, S-c) ----------------------
+// --- PacingState — cross-cycle reconnect pacing (docs/plans/done/MVP2-PLAN.md §S, S-c) ----------------------
 //
 // `RecoveryState`/`reduceRecovery` and `TransportRecoveryState`/`reduceTransportRecovery` are not
 // touched by any test below — every one of the 349 lines above this comment still exercises exactly
@@ -626,7 +626,7 @@ describe('genuine recovery — sustained playback resets the saga', () => {
   });
 });
 
-// --- WHEP real stall detection via getStats() (docs/REALTIME-PLAN.md Phase R-a item 1) ----------
+// --- WHEP real stall detection via getStats() (docs/plans/done/REALTIME-PLAN.md Phase R-a item 1) ----------
 
 describe('extractWhepStatsSnapshot', () => {
   const inboundVideo: WhepInboundRtpStatLike = {
@@ -657,7 +657,7 @@ describe('extractWhepStatsSnapshot', () => {
     expect(extractWhepStatsSnapshot([])).toBeNull();
   });
 
-  // --- Latency badge extension (docs/UX-QUICKWINS-PLAN.md QF-4) — same report, same pass -------
+  // --- Latency badge extension (docs/plans/done/UX-QUICKWINS-PLAN.md QF-4) — same report, same pass -------
 
   it('also reads jitter off the inbound video entry, when reported', () => {
     expect(
@@ -805,7 +805,7 @@ describe('didWhepStatsAdvance', () => {
   });
 });
 
-// --- Reattach identity key (docs/REALTIME-PLAN.md Phase R-a item 4) ------------------------------
+// --- Reattach identity key (docs/plans/done/REALTIME-PLAN.md Phase R-a item 4) ------------------------------
 
 describe('attachKey', () => {
   it('is equal for the same primitive values, regardless of how many separate calls produce them', () => {
@@ -842,7 +842,7 @@ describe('attachKey', () => {
   });
 });
 
-// --- WHEP ICE-restart-first recovery (docs/REALTIME-PLAN.md Phase R-b item 1) -------------------
+// --- WHEP ICE-restart-first recovery (docs/plans/done/REALTIME-PLAN.md Phase R-b item 1) -------------------
 
 describe('reduceWhepIce', () => {
   it('starts stable', () => {
@@ -955,12 +955,12 @@ describe('reduceWhepIce', () => {
 });
 
 describe('ICE_RESTART_GRACE_MS', () => {
-  it('is 5 seconds, per docs/REALTIME-PLAN.md Phase R-b item 1', () => {
+  it('is 5 seconds, per docs/plans/done/REALTIME-PLAN.md Phase R-b item 1', () => {
     expect(ICE_RESTART_GRACE_MS).toBe(5_000);
   });
 });
 
-// --- WHEP no-track timeout race (docs/REALTIME-PLAN.md Phase R-b follow-up — a live soak test's
+// --- WHEP no-track timeout race (docs/plans/done/REALTIME-PLAN.md Phase R-b follow-up — a live soak test's
 // own finding: 89 POSTs/88 DELETEs/0 PATCHes over a 10.5-minute *healthy* soak, teardown every
 // ~7.15s, confirmed at ~90 reproductions with near-zero jitter) ---------------------------------
 

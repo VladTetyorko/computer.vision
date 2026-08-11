@@ -4,7 +4,7 @@ import com.drones.vision.api.support.EnumParsing;
 import com.drones.vision.domain.model.Verification.VerificationState;
 
 /**
- * Body of {@code POST /api/map/marks/{id}/verify} (docs/MAP-REWORK-PLAN.md §4.1) — a manager's
+ * Body of {@code POST /api/map/marks/{id}/verify} (docs/plans/done/MAP-REWORK-PLAN.md §4.1) — a manager's
  * review decision.
  *
  * <p>{@code "UNVERIFIED"} parses here but is rejected downstream by {@code MarkService#verify} as a

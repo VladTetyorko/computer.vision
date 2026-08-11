@@ -26,10 +26,10 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
  *
  * Suspends its player while off-screen: a 30-camera wall that decodes every tile at once
  * saturates the CPU and drops frames on the tiles the user is actually looking at
- * (docs/WEB-PLAN.md, W6).
+ * (docs/plans/done/WEB-PLAN.md, W6).
  *
- * Also carries its own `TelemetryStore`/`DetectionsStore` (docs/CYCLES-PLAN.md §2,
- * docs/CYCLES-PLAN.md §11 item 6): a tile only exists for a device that is currently streaming
+ * Also carries its own `TelemetryStore`/`DetectionsStore` (docs/main/CYCLES-PLAN.md §2,
+ * docs/main/CYCLES-PLAN.md §11 item 6): a tile only exists for a device that is currently streaming
  * (`WallPage` builds `tiles()` from `fleet.streams()`), so "only show telemetry/detections while
  * the tile's stream is live" is automatic — what this component adds is gating both polls on
  * on-screen visibility too, the same idea as suspending the player, so a 30-tile wall doesn't run
@@ -67,13 +67,13 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
               }
             </span>
           }
-          <!-- Mode badge (docs/FC-INTEGRATIONS-PLAN.md F-d) — red when failsafe, otherwise the
+          <!-- Mode badge (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — red when failsafe, otherwise the
                plain neutral chip look every other wall-tile chip already uses; omitted entirely
                with no flightState yet, never a fabricated placeholder. -->
           @if (modeLabel(); as mode) {
             <span class="chip mode-chip" [class.failsafe]="failsafe()">{{ mode }}</span>
           }
-          <!-- Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
+          <!-- Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
                used to be the bare device name itself, silently clickable; it now states itself. -->
           <a
             class="btn secondary small watch-link"
@@ -130,7 +130,7 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
     .telemetry-chip {
       font-size: 0.72rem;
       white-space: nowrap;
-      /* docs/UX-REWORK-PLAN.md §U-b item 3 — battery/altitude readouts. */
+      /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — battery/altitude readouts. */
       font-variant-numeric: tabular-nums;
     }
 
@@ -153,7 +153,7 @@ const BOXES_MODE_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
       border-color: var(--color-live);
     }
 
-    /* Verb dictionary (docs/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
+    /* Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
        own default to fit alongside the telemetry chip and boxes toggle at wall-tile scale. */
     .watch-link {
       font-size: 0.72rem;
@@ -207,7 +207,7 @@ export class WallTile {
     return meters === undefined ? null : `${meters.toFixed(0)}m`;
   });
 
-  /** The FC's own human mode name (docs/FC-INTEGRATIONS-PLAN.md F-d) — no badge at all until one is reported. */
+  /** The FC's own human mode name (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — no badge at all until one is reported. */
   protected readonly modeLabel = computed(() => this.telemetry.latest()?.flightState?.mode ?? null);
   protected readonly failsafe = computed(() => this.telemetry.latest()?.flightState?.failsafe === true);
 
@@ -220,7 +220,7 @@ export class WallTile {
     observer.observe(host);
     inject(DestroyRef).onDestroy(() => observer.disconnect());
 
-    // Detections poll the same way — on-screen only (docs/CYCLES-PLAN.md §11 item 4/6), no
+    // Detections poll the same way — on-screen only (docs/main/CYCLES-PLAN.md §11 item 4/6), no
     // capability gate (any streaming device can have CV running on its stream).
     effect(() => {
       if (this.visible()) {
@@ -232,7 +232,7 @@ export class WallTile {
 
     // Poll only for a telemetry-capable device that is actually on-screen — off-screen tiles
     // already stop decoding video (above), so they stop polling telemetry too.
-    // No `assetId` to pass here (docs/REALTIME-PLAN.md Phase R-a item 3) — `stream: ActiveStream`
+    // No `assetId` to pass here (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3) — `stream: ActiveStream`
     // carries no asset id, only a bare `deviceId`; `TelemetryStore` falls back to its own
     // list-then-find lookup for this call site, unchanged.
     effect(() => {

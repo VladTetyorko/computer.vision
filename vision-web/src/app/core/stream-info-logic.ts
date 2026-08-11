@@ -1,8 +1,8 @@
 import type { Device } from './api/models';
 
 /**
- * Pure derivations behind `shared/player/stream-info-panel.ts` (docs/MVP2-PLAN.md §U-info, folded into
- * docs/CYCLES-PLAN.md §11/CD-b): turning plumbing (`protocol`/`uri`/`options`, a raw `startedAt`
+ * Pure derivations behind `shared/player/stream-info-panel.ts` (docs/plans/done/MVP2-PLAN.md §U-info, folded into
+ * docs/main/CYCLES-PLAN.md §11/CD-b): turning plumbing (`protocol`/`uri`/`options`, a raw `startedAt`
  * timestamp) into what a field user actually reads at a glance — a human source description and a
  * live session duration — rather than leading with identifiers. Split out so it is unit-testable
  * without HTTP, timers, or a component — mirrors `core/telemetry/telemetry-logic.ts`.
@@ -49,7 +49,7 @@ function fileName(uri: string): string {
  * `file`'s `loop` option (`adapter-rtsp/FfmpegVideoSource#OPTION_LOOP`) is surfaced as "(looped)"
  * since a looping demo file behaves differently from a one-shot recording and a viewer should know
  * which they're watching. An unrecognized protocol falls back to its own uppercased name and,
- * where the URI parses as one, its host — never invented video facts (docs/MVP2-PLAN.md §U-info:
+ * where the URI parses as one, its host — never invented video facts (docs/plans/done/MVP2-PLAN.md §U-info:
  * "implements what current APIs already serve").
  */
 export function describeSource(device: Pick<Device, 'protocol' | 'uri' | 'options'>): SourceDescription {
@@ -73,7 +73,7 @@ export function sessionDurationSeconds(startedAt: string, nowMs: number): number
 
 /**
  * A live-ticking session duration, e.g. `12s`, `4m 07s`, `1h 03m` — the "Started" timestamp's
- * user-meaningful replacement (docs/MVP2-PLAN.md §U-info: "Started becomes a live-ticking
+ * user-meaningful replacement (docs/plans/done/MVP2-PLAN.md §U-info: "Started becomes a live-ticking
  * duration"). The raw `startedAt` timestamp itself stays available in "Technical details".
  */
 export function formatDuration(totalSeconds: number): string {
@@ -93,7 +93,7 @@ export function formatDuration(totalSeconds: number): string {
 /**
  * The info panel's latency line — reuses `shared/player/player.ts`'s own measured `behindLive` (surfaced via
  * its `latencyChanged` output) rather than re-measuring, so the number never disagrees with the
- * badge already drawn on the video (docs/MVP2-PLAN.md §U-info: "viewer latency estimate from the
+ * badge already drawn on the video (docs/plans/done/MVP2-PLAN.md §U-info: "viewer latency estimate from the
  * player").
  */
 export function formatLatency(behindLiveSeconds: number | null): string {
@@ -101,7 +101,7 @@ export function formatLatency(behindLiveSeconds: number | null): string {
 }
 
 /**
- * The info panel's "Transport" fact (docs/MVP2-PLAN.md §L / §U3) — names whichever transport
+ * The info panel's "Transport" fact (docs/plans/done/MVP2-PLAN.md §L / §U3) — names whichever transport
  * `shared/player/player.ts` actually attached (`transportChanged`), replacing the old hardcoded "HLS" now
  * that WHEP-first playback exists. Kept a one-line pure function, mirroring `formatLatency`,
  * rather than a template ternary — this app's own convention for anything worth a unit test.

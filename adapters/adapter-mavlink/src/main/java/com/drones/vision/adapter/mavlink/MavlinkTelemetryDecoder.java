@@ -29,7 +29,7 @@ import java.util.Map;
  * {@link com.drones.vision.domain.port.out.TelemetrySourcePort#open} call, never shared across
  * two runtimes, since it accumulates the latest known value of each field across messages.
  *
- * <h2>Three state groups (docs/LAYERING-REFACTOR-PLAN.md E2)</h2>
+ * <h2>Three state groups (docs/plans/active/LAYERING-REFACTOR-PLAN.md E2)</h2>
  * The merged fields split across three package-private mutable holders, by which domain concept
  * they feed: {@link PositionAndPowerState} (position/velocity/battery — {@link
  * Telemetry}'s own named fields plus their {@code extra}-only siblings), {@link FlightStatusState}
@@ -45,7 +45,7 @@ import java.util.Map;
  * including {@code HEARTBEAT} — and silently ignores every subsequent message from a different
  * system for the remainder of this decoder's lifetime; that invariant is exercised directly by
  * this class's own unit tests and remains true for any caller that feeds one decoder instance
- * mixed-system traffic. As of docs/DRONE-INFRA-PLAN.md I-a, {@link MavlinkTelemetrySource} is no
+ * mixed-system traffic. As of docs/plans/active/DRONE-INFRA-PLAN.md I-a, {@link MavlinkTelemetrySource} is no
  * longer such a caller: {@link MavlinkSocketHub} demultiplexes by sysid <b>before</b> a message
  * ever reaches a decoder, and hands each claiming device a <b>fresh</b> decoder on every claim or
  * re-election, so in practice a decoder here only ever sees one system's messages for its whole
@@ -97,7 +97,7 @@ import java.util.Map;
  *       nothing.</li>
  *   <li>{@code WIND} (ardupilotmega) — {@code speed}/{@code direction} (m/s, degrees) → {@code
  *       extra} keys {@code windSpeedMps}/{@code windDirectionDegrees}, no conversion needed
- *       (docs/FC-INTEGRATIONS-PLAN.md F-e).</li>
+ *       (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e).</li>
  *   <li>{@code VIBRATION} (common) — {@code vibrationX}/{@code vibrationY}/{@code vibrationZ}
  *       (m/s²) → {@code extra} keys {@code vibeXMs2}/{@code vibeYMs2}/{@code vibeZMs2}; the
  *       {@code clipping0}/{@code clipping1}/{@code clipping2} accelerometer-clipping counts are
@@ -116,7 +116,7 @@ import java.util.Map;
  * silently ignored: this decoder only maps what {@link Telemetry}/{@code FlightState} actually
  * have fields for.
  *
- * <h2>ardupilotmega dialect selection (docs/FC-INTEGRATIONS-PLAN.md F-e)</h2>
+ * <h2>ardupilotmega dialect selection (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e)</h2>
  * {@code WIND}/{@code EKF_STATUS_REPORT}/{@code RANGEFINDER} live in the {@code ardupilotmega}
  * dialect, not {@code common} — but no wiring change was needed anywhere in this module to decode
  * them. {@code io.dronefleet.mavlink.MavlinkConnection.Builder}'s constructor (used by every

@@ -10,7 +10,7 @@ import type { AuthStatus } from './auth-logic';
 const LOG_PREFIX = '[auth]';
 
 /**
- * The app's one source of truth for "who is logged in" (docs/U-AUTH-PLAN.md wave 4) —
+ * The app's one source of truth for "who is logged in" (docs/plans/done/U-AUTH-PLAN.md wave 4) —
  * `providedIn: 'root'`, one instance app-wide, self-initializing: the constructor kicks off the
  * boot-time `GET /api/auth/me` check itself (mirrors `FleetStore`'s own "starts polling from its
  * own constructor" posture) rather than needing `app.ts` or an `APP_INITIALIZER` to remember to

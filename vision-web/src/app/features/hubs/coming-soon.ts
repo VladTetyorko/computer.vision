@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 
 /**
  * `ComingSoon` — the one shared placeholder every F4 "scaffold" route lands on
- * (docs/UI-REDESIGN-PLAN.md Wave 1; §D-G: "a scaffold never renders invented rows — it states
+ * (docs/plans/done/UI-REDESIGN-PLAN.md Wave 1; §D-G: "a scaffold never renders invented rows — it states
  * what's coming and links to the nearest real capability"). Every scaffold tile still routes
  * somewhere real (this page), so no hub tile ever 404s — Wave 4 replaces each scaffold route with
  * its real page later; nothing here is meant to survive that.

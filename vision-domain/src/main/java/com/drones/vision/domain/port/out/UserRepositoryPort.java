@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Driven port: persist and retrieve {@link User}s (docs/U-AUTH-PLAN.md, wave 1).
+ * Driven port: persist and retrieve {@link User}s (docs/plans/done/U-AUTH-PLAN.md, wave 1).
  *
  * <p>The full {@link User} aggregate — including its {@code memberships} — is saved and loaded
  * as a whole; there is no separate membership port.

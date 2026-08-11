@@ -12,7 +12,7 @@ import { applyMapEvents, deletedLayerIds, dropByLayer, type MapEntitySpec } from
 
 /**
  * Pure, Angular-free logic behind `core/map-data/drawings-store.ts` and
- * `shared/map/map-controls/drawing-toolbar.ts` (docs/MAP-REWORK-PLAN.md §5.2) — the SSE fold, the
+ * `shared/map/map-controls/drawing-toolbar.ts` (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — the SSE fold, the
  * wire↔display projection, the colour-token catalogue the toolbar offers, and the interaction-mode
  * resolution the hosts feed back into `<vision-tactical-map>`'s `[interactionMode]`.
  *

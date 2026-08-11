@@ -3,7 +3,7 @@ import { vehicleSysid } from './drone-scan-logic';
 
 /**
  * Pure logic behind the onboarding wizard's "Add a real drone" Connect method
- * (docs/DRONE-INFRA-PLAN.md I-g, wave B) — the guided firmware×link picker, the parameterized
+ * (docs/plans/active/DRONE-INFRA-PLAN.md I-g, wave B) — the guided firmware×link picker, the parameterized
  * copy-paste config snippets, and the device shape the eventual create call embeds. Split out per
  * this app's own convention (`onboarding-logic.ts`'s doc comment): Angular-free, unit-tested
  * without HTTP, the router, or a component.
@@ -21,7 +21,7 @@ import { vehicleSysid } from './drone-scan-logic';
 /** The three firmwares the wizard's picker offers — mirrors `infra/edge/*.md`'s own scope. */
 export type Firmware = 'ardupilot' | 'inav' | 'betaflight';
 
-/** The three link recipes `infra/edge/` documents (docs/DRONE-INFRA-PLAN.md I-d). */
+/** The three link recipes `infra/edge/` documents (docs/plans/active/DRONE-INFRA-PLAN.md I-d). */
 export type LinkType = 'elrs' | 'esp32' | 'companion';
 
 export const FIRMWARES: readonly Firmware[] = ['ardupilot', 'inav', 'betaflight'];
@@ -47,7 +47,7 @@ export const LINK_HINTS: Record<LinkType, string> = {
 };
 
 /**
- * The picker's poka-yoke verdict for one firmware×link combination (docs/DRONE-INFRA-PLAN.md I-g:
+ * The picker's poka-yoke verdict for one firmware×link combination (docs/plans/active/DRONE-INFRA-PLAN.md I-g:
  * "impossible/degraded combos are labeled honestly"). `supported` is `level !== 'no-go'` — kept as
  * its own field (rather than derived at every call site) since it's what the UI's disabled-state
  * check reads directly. `note` always explains *why*, never just *that*.
@@ -58,7 +58,7 @@ export interface LinkCompatibility {
   readonly note: string;
 }
 
-// --- The honest matrix (docs/DRONE-INFRA-PLAN.md I-g's own wording, sourced from infra/edge/*.md) -
+// --- The honest matrix (docs/plans/active/DRONE-INFRA-PLAN.md I-g's own wording, sourced from infra/edge/*.md) -
 // ArduPilot: full two-way MAVLink on every link (its own MAVLink implementation is complete).
 // INAV: monitor-only on every link — `elrs-backpack.md`'s own words, "INAV's MAVLink implementation
 // is transmit-only", is a firmware-wide limitation, not specific to the backpack link it happens to
@@ -109,7 +109,7 @@ const BETAFLIGHT_NOTES: Record<LinkType, string> = {
 };
 
 /**
- * The picker's per-cell verdict (docs/DRONE-INFRA-PLAN.md I-g's poka-yoke: "impossible combos are
+ * The picker's per-cell verdict (docs/plans/active/DRONE-INFRA-PLAN.md I-g's poka-yoke: "impossible combos are
  * labeled, never silently offered as if they'll work"). Firmware alone decides the `level` — every
  * link degrades identically for a given firmware, per the matrix note above — but the `note` text
  * is still per-link, since each recipe's own version floors/limitations differ.
@@ -125,7 +125,7 @@ export function linkCompatibility(firmware: Firmware, link: LinkType): LinkCompa
 }
 
 /**
- * One copy-paste block the "configure your drone" sub-step renders (docs/DRONE-INFRA-PLAN.md I-g).
+ * One copy-paste block the "configure your drone" sub-step renders (docs/plans/active/DRONE-INFRA-PLAN.md I-g).
  * `filename` present is what tells the UI to also offer a download button (client-side
  * `Blob` → `<a download>`) — only the companion path's `main.conf` carries one today.
  */
@@ -222,7 +222,7 @@ function esp32TargetBlock(serverAddress: string, mavlinkPort: number): ConfigBlo
 }
 
 /**
- * The companion path's `main.conf` (docs/DRONE-INFRA-PLAN.md I-g: "a downloadable, pre-filled
+ * The companion path's `main.conf` (docs/plans/active/DRONE-INFRA-PLAN.md I-g: "a downloadable, pre-filled
  * mavlink-router main.conf"), adapted from `infra/edge/mavlink-router/main.conf` verbatim except
  * the `[UdpEndpoint platform]` `Address`/`Port` pair, now pre-filled with this platform's own real
  * values instead of the source template's `platform.example.internal`/`14550` placeholders. `Device`/
@@ -270,7 +270,7 @@ function targetBlock(link: LinkType, serverAddress: string, mavlinkPort: number)
 }
 
 /**
- * The "configure your drone" sub-step's copy-paste blocks (docs/DRONE-INFRA-PLAN.md I-g) —
+ * The "configure your drone" sub-step's copy-paste blocks (docs/plans/active/DRONE-INFRA-PLAN.md I-g) —
  * always exactly two: the flight controller's own serial/protocol settings (firmware-specific, no
  * address/port — nothing in this block depends on where this platform is reachable), then the
  * link's own target settings (address/port-parameterized for `elrs`/`esp32`; the full `main.conf`,
@@ -295,7 +295,7 @@ export interface DroneDeviceSpec {
 }
 
 /**
- * The device this wizard's eventual create call embeds for a heard vehicle (docs/DRONE-INFRA-PLAN.md
+ * The device this wizard's eventual create call embeds for a heard vehicle (docs/plans/active/DRONE-INFRA-PLAN.md
  * I-g step 3: "create-step prefills ... mavlink device udp://0.0.0.0:<port> + sysid option pinned to
  * the heard vehicle") — the pin that makes multi-drone-on-one-port ingest work (I-a): the URI is
  * always `udp://0.0.0.0:<mavlinkPort>`, built from this platform's own authoritative

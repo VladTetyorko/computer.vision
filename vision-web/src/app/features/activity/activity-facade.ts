@@ -11,7 +11,7 @@ const ACTIVITY_LIMIT = 100;
 /** One rendered row — `ActivityView`'s existing display fields plus this task's own two additions. */
 export interface ActivityRow extends ActivityView {
   readonly accentTone: ActivityAccentTone;
-  /** A left-gutter absolute time (`docs/design/09-activity.md`: "an audit log is read by 'when'"). */
+  /** A left-gutter absolute time (`docs/extracts/design/09-activity.md`: "an audit log is read by 'when'"). */
   readonly absoluteTime: string;
 }
 
@@ -22,12 +22,12 @@ export interface ActivityDayRows {
 }
 
 /**
- * `ActivityPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md). Calls `VisionApi.myActivity` directly
+ * `ActivityPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md). Calls `VisionApi.myActivity` directly
  * rather than through a store — mirrors `features/fly/flight-command-panel.ts`'s own precedent for
  * a one-shot, page-scoped read with no shared/reusable state a store would sensibly model.
  *
  * **`Mine | Everyone` scope toggle — checked and omitted, not silently skipped.**
- * docs/design/09-activity.md's own refactor list calls for a manager-only `Everyone` scope behind
+ * docs/extracts/design/09-activity.md's own refactor list calls for a manager-only `Everyone` scope behind
  * `canManageOrg` (`core/org/org-logic.ts`). The backend's `GET /api/me/activity`
  * (`vision-api/.../ActivityController`) only ever reads `currentUser.userId()` — there is no
  * all-users query anywhere in `ActivityService`/`DefaultActivityService` (that interface's own doc
@@ -37,7 +37,7 @@ export interface ActivityDayRows {
  * shipping a control that silently shows the same rows"), the toggle is not built — see this task's
  * final report for the flag.
  *
- * **Day-grouping (docs/NAV-IA-REDESIGN-PLAN.md §2.4)**: `dayGroups` composes two independently
+ * **Day-grouping (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4)**: `dayGroups` composes two independently
  * pure/tested layers — `core/org/org-logic.ts#formatActivity` (unchanged, per-entry display fields)
  * and this feature's own new `core/activity/activity-logic.ts#groupActivityByDay`/`activityAccentTone`
  * (calendar bucketing + the verb→accent-color mapping) — rather than growing either existing export.

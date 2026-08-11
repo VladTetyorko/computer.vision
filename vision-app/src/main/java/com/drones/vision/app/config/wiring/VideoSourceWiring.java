@@ -22,7 +22,7 @@ import java.util.OptionalInt;
 
 /**
  * Wires every {@link VideoSourcePort} adapter (RX video ingest) — the video-source slice of what
- * used to be one 825-line {@code WiringConfiguration} (docs/LAYERING-REFACTOR-PLAN.md wave D).
+ * used to be one 825-line {@code WiringConfiguration} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave D).
  * Config extraction (wave F1): {@link #ffmpegVideoSource}/{@link #mjpegVideoSource}/{@link
  * #v4l2VideoSource}/{@link #simulatedVideoSource} each now build their adapter's plain settings
  * record from a {@code vision.<protocol>.*} properties record instead of the adapter's own
@@ -57,7 +57,7 @@ public class VideoSourceWiring {
     }
 
     /**
-     * RX half of the mjpeg TX/RX pair (docs/CYCLES-PLAN.md §5): ingests the {@code
+     * RX half of the mjpeg TX/RX pair (docs/main/CYCLES-PLAN.md §5): ingests the {@code
      * multipart/x-mixed-replace} HTTP stream served by {@code FeedTransmitterWiring#mjpegFeedTransmitter}
      * (or any real MJPEG camera, e.g. an ESP32-CAM) for {@code "mjpeg"}-protocol video devices.
      */
@@ -78,10 +78,10 @@ public class VideoSourceWiring {
     }
 
     /**
-     * USB/V4L2 local camera ingest (docs/MVP2-PLAN.md X-b), RX only (a local capture device has
+     * USB/V4L2 local camera ingest (docs/plans/done/MVP2-PLAN.md X-b), RX only (a local capture device has
      * no wire to transmit to -- same as {@code sim}/{@code file}). Supports protocol {@code
      * "v4l2"} with a {@code file:} URI naming a {@code /dev/videoN} node -- the exact shape
-     * {@code adapter-discovery}'s {@code V4l2Scanner} emits, not the docs/MVP2-PLAN.md brief's
+     * {@code adapter-discovery}'s {@code V4l2Scanner} emits, not the docs/plans/done/MVP2-PLAN.md brief's
      * originally-proposed {@code "usb"}/{@code v4l2://} shape; see adapter-v4l2/MODULE.md.
      */
     @Bean

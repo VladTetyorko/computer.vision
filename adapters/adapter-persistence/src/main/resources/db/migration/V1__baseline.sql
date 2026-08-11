@@ -1,4 +1,4 @@
--- Baseline schema for the fleet-side repository ports (docs/MVP2-PLAN.md P-a):
+-- Baseline schema for the fleet-side repository ports (docs/plans/done/MVP2-PLAN.md P-a):
 -- categories, devices, assets, and the asset<->device membership join. History
 -- (usages, telemetry, detections) is P-b's schema, not this one's.
 --

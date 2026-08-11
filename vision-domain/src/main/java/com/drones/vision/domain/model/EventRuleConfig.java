@@ -4,7 +4,7 @@ import java.time.Duration;
 import java.util.Set;
 
 /**
- * Debounce rule settings for {@link DetectionEvent}s (docs/MVP2-PLAN.md §E, E-a): how many
+ * Debounce rule settings for {@link DetectionEvent}s (docs/plans/done/MVP2-PLAN.md §E, E-a): how many
  * consecutive qualifying {@link DetectionResult}s open an event, and how long an absence must
  * last before it closes.
  *
@@ -46,7 +46,7 @@ public record EventRuleConfig(Set<String> labels, double confidenceThreshold, in
     }
 
     /**
-     * Reasonable defaults (docs/MVP2-PLAN.md §E, E-a): track {@code "person"}/{@code "car"} at a
+     * Reasonable defaults (docs/plans/done/MVP2-PLAN.md §E, E-a): track {@code "person"}/{@code "car"} at a
      * 0.5 confidence threshold, 3 consecutive qualifying results to open, 5 seconds of absence to
      * close.
      *

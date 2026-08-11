@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 
 /**
- * `vision-stat` — the shared KPI / stat tile (docs/STYLE-TOKENS-PLAN.md §Shared primitives),
+ * `vision-stat` — the shared KPI / stat tile (docs/plans/done/STYLE-TOKENS-PLAN.md §Shared primitives),
  * generalising asset-detail's hand-built `.kpi-tile` row into one primitive.
  *
  * Follows the `dataviz` skill's stat-tile contract (see its `marks-and-anatomy.md`): a muted,

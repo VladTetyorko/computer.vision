@@ -55,7 +55,7 @@ import com.drones.vision.application.pipeline.VideoSourceRegistry;
  * than only in a controller so every path into streaming — asset-level start, a future scheduler,
  * a test — honours deactivation.
  *
- * <h2>Source supervision (docs/MVP2-PLAN.md &sect;S, S-a)</h2>
+ * <h2>Source supervision (docs/plans/done/MVP2-PLAN.md &sect;S, S-a)</h2>
  * {@link #start} never hands the source adapter's own {@link VideoSourcePort#open} result straight
  * to {@link StreamPipeline}; it wraps it in a {@link SupervisedPublisher} first. A started stream
  * therefore survives a source I/O error or unexpected completion on its own — {@link
@@ -90,7 +90,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * One dedicated daemon thread scheduling every stream's supervised-reopen retries
-     * (docs/MVP2-PLAN.md §S, S-a). Shared, not per-stream: a demo/small-fleet stream count keeps
+     * (docs/plans/done/MVP2-PLAN.md §S, S-a). Shared, not per-stream: a demo/small-fleet stream count keeps
      * this thread's actual work trivial (each retry just calls {@code VideoSourcePort#open}, which
      * every registered adapter today returns from quickly — see {@link SupervisedPublisher}'s own
      * javadoc), and this class has no {@code close()}/shutdown lifecycle of its own to hook a
@@ -123,7 +123,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Same as the 7-argument constructor, plus an {@link OverlayPort} collaborator threaded into
-     * every {@link StreamPipeline} this service starts (docs/MVP1-PLAN.md §C8 bullet 2). When both
+     * every {@link StreamPipeline} this service starts (docs/plans/done/MVP1-PLAN.md §C8 bullet 2). When both
      * this and {@code usageTracker} are present, {@link #start} also builds and threads a telemetry
      * supplier (see that method's own comments) so {@link
      * com.drones.vision.domain.model.PipelineConfig#overlayTelemetry()}'s OSD gate becomes
@@ -144,7 +144,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Same as the 8-argument constructor, plus a {@link DetectionEventRepositoryPort} collaborator
-     * (docs/MVP2-PLAN.md §E, E-a): when present, every {@link StreamPipeline} this service starts
+     * (docs/plans/done/MVP2-PLAN.md §E, E-a): when present, every {@link StreamPipeline} this service starts
      * is given a fresh, per-stream {@link DetectionEventEngine} built from {@code config}'s {@link
      * com.drones.vision.domain.model.PipelineConfig#eventRule()}, {@code usageTracker} (for
      * asset/position resolution), and this port.
@@ -170,7 +170,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Same as the 9-argument constructor, plus a {@link LiveUpdatePublisherPort} collaborator
-     * (docs/REALTIME-PLAN.md §4): threaded into every {@link StreamPipeline} this service starts,
+     * (docs/plans/done/REALTIME-PLAN.md §4): threaded into every {@link StreamPipeline} this service starts,
      * alongside the owning asset id resolved once at {@link #start} via {@code usageTracker}, so
      * completed detection results are announced as live updates.
      *
@@ -211,7 +211,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Wiring/test seam: same as the 10-argument constructor, plus an explicit {@link
-     * StreamPipelineSettings} (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) —
+     * StreamPipelineSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) —
      * {@code vision-app} supplies a {@code vision.application.pipeline.*}-bound settings record
      * here instead of this class hardcoding one, and it is threaded into both this service's own
      * {@link SupervisedPublisher} source-reopen backoff and every {@link StreamPipeline} it starts.
@@ -256,7 +256,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Starts a stream, composing its tracking configuration from all three layers of
-     * docs/TRACKING-ORCHESTRATION.md &sect;4.1 in one place — {@code requested} over the deployment
+     * docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1 in one place — {@code requested} over the deployment
      * seed ({@link StreamPipelineSettings#trackingSeed()}) over {@code config}'s own {@link
      * PipelineConfig#tracking()}, which is the domain's code default on every call site today. Doing
      * it here rather than at each REST edge is what makes the device, asset, simulation and
@@ -286,7 +286,7 @@ public final class DefaultStreamService implements StreamService {
 
         try {
             VideoSourcePort source = videoSourceRegistry.sourceFor(device.stream());
-            // docs/MVP2-PLAN.md §S, S-a: never hand the adapter's own open() result straight to the
+            // docs/plans/done/MVP2-PLAN.md §S, S-a: never hand the adapter's own open() result straight to the
             // pipeline -- wrap it so a source I/O error/completion is retried with backoff instead
             // of ending the stream. See SupervisedPublisher's own javadoc and this class's javadoc
             // for exactly what does/doesn't get re-invoked across a reconnect.
@@ -299,7 +299,7 @@ public final class DefaultStreamService implements StreamService {
             DetectionEventEngine eventEngine = detectionEventRepositoryPort == null ? null
                     : new DetectionEventEngine(streamId, deviceId, config.eventRule(), usageTracker,
                             detectionEventRepositoryPort);
-            // docs/REALTIME-PLAN.md §4 / telemetry-OSD input: resolved once, here, rather than
+            // docs/plans/done/REALTIME-PLAN.md §4 / telemetry-OSD input: resolved once, here, rather than
             // re-resolved per completed detection result / per published frame -- a device's owning
             // asset does not change while its stream runs. Skipped entirely (not just discarded)
             // unless something could actually read the result -- a configured LiveUpdatePublisherPort
@@ -335,7 +335,7 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * Stops a stream: the only path that ever ends one (docs/MVP2-PLAN.md §S, S-a — a source
+     * Stops a stream: the only path that ever ends one (docs/plans/done/MVP2-PLAN.md §S, S-a — a source
      * failure alone never does, see {@link #start}). Returns promptly: the stream is removed from
      * every listing and {@link SupervisedPublisher#stop() supervision is cancelled} synchronously
      * before this method returns, but the actual pipeline/source teardown — which some adapters'
@@ -433,8 +433,8 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Resolves the running stream, merges {@code patch} onto its {@link
-     * StreamPipeline#config() current config}, and swaps it in (docs/CV-CONTROL-PLAN.md &sect;5,
-     * docs/TRACKING-PLAN.md &sect;4.D). The merge — and therefore the merged {@link PipelineConfig}'s
+     * StreamPipeline#config() current config}, and swaps it in (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,
+     * docs/plans/done/TRACKING-PLAN.md &sect;4.D). The merge — and therefore the merged {@link PipelineConfig}'s
      * own compact-ctor validation — runs <b>before</b> {@link StreamPipeline#updateConfig} is ever
      * called, so an invalid patch value never touches the running pipeline at all.
      *
@@ -466,7 +466,7 @@ public final class DefaultStreamService implements StreamService {
      * &sect;3) exactly as {@code current} has it.
      *
      * <p>The tracking component folds <b>per field</b> through {@link TrackingConfigPatch#foldOnto}
-     * (docs/TRACKING-PLAN.md &sect;4.D): an absent {@code tracking} leaves it entirely alone, and a
+     * (docs/plans/done/TRACKING-PLAN.md &sect;4.D): an absent {@code tracking} leaves it entirely alone, and a
      * present one changes only the knobs it names — which is why adjusting the verify cadence and
      * then the follow fps keeps both, and why neither ever drops the operator's target. A lock in
      * the patch has its {@code lockSeq} stamped from this stream's own {@link AtomicLong}, lazily:
@@ -505,7 +505,7 @@ public final class DefaultStreamService implements StreamService {
     /**
      * What this service holds per running stream; distinct from the {@link ActiveStream} read model.
      *
-     * @param lockSeq this stream's monotonic target-lock sequence (docs/TRACKING-PLAN.md &sect;4.D).
+     * @param lockSeq this stream's monotonic target-lock sequence (docs/plans/done/TRACKING-PLAN.md &sect;4.D).
      *                Per-stream, not global: two streams' locks are unrelated, and a shared counter
      *                would make one operator's click advance another's sequence. Starts at 0 and is
      *                only ever incremented, so it never decreases within a stream's life; a stream

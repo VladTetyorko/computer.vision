@@ -4,7 +4,7 @@ import com.drones.vision.domain.model.TargetLock;
 
 /**
  * The {@code lock} object nested inside {@link TrackingConfigRequest} on {@code PATCH
- * /api/streams/{streamId}/config} (docs/TRACKING-PLAN.md &sect;4.D) — which object {@code FOLLOW}
+ * /api/streams/{streamId}/config} (docs/plans/done/TRACKING-PLAN.md &sect;4.D) — which object {@code FOLLOW}
  * mode should hold.
  *
  * <p><b>Exactly one of three forms.</b> {@code {"trackId": 7}}, {@code {"pointX": .., "pointY": ..}}
@@ -19,7 +19,7 @@ import com.drones.vision.domain.model.TargetLock;
  * {@link #toTargetLock()} leaves it at {@code 0} and {@code DefaultStreamService#updateConfig}
  * (vision-application) stamps a fresh value from the stream's own monotonic counter. That is what
  * stops a replayed stale lock from resurrecting an abandoned target, and it keeps the UI free of a
- * counter it has no business tracking (docs/TRACKING-ORCHESTRATION.md &sect;3.3).
+ * counter it has no business tracking (docs/extracts/TRACKING-ORCHESTRATION.md &sect;3.3).
  *
  * @param trackId lock onto an existing track by id — the track-id form
  * @param pointX  normalized [0,1] click point x — the point form; requires {@code pointY}

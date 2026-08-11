@@ -57,7 +57,7 @@ describe('sortAssetsForPicker', () => {
   });
 });
 
-describe('rememberedStreamingAssetId (docs/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — "/fly skips the picker when it has nothing to ask")', () => {
+describe('rememberedStreamingAssetId (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — "/fly skips the picker when it has nothing to ask")', () => {
   const streaming = asset({ assetId: 'known-1', status: 'STREAMING' });
   const offline = asset({ assetId: 'known-2', status: 'OFFLINE' });
   const assets = [streaming, offline];
@@ -116,7 +116,7 @@ describe('cycleBoxesMode', () => {
   });
 });
 
-describe('isSwitcherOptionSelected (BROKEN #2 — switcher selection race, docs/UX-QUICKWINS-PLAN.md QF-1)', () => {
+describe('isSwitcherOptionSelected (BROKEN #2 — switcher selection race, docs/plans/done/UX-QUICKWINS-PLAN.md QF-1)', () => {
   it('selects the option matching the active asset', () => {
     expect(isSwitcherOptionSelected('drone-a', 'drone-a')).toBe(true);
   });
@@ -142,9 +142,9 @@ describe('isSwitcherOptionSelected (BROKEN #2 — switcher selection race, docs/
 });
 
 // `trackingIdChanged` itself is tested in `core/telemetry/telemetry-logic.spec.ts` now that it
-// lives there (docs/REALTIME-PLAN.md §4 Phase R-c follow-up) — `fly-logic.ts` only re-exports it.
+// lives there (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c follow-up) — `fly-logic.ts` only re-exports it.
 
-describe('streamStateLabel (docs/UX-REWORK-PLAN.md §U-a2 — the picker card states its stream state as a word)', () => {
+describe('streamStateLabel (docs/plans/done/UX-REWORK-PLAN.md §U-a2 — the picker card states its stream state as a word)', () => {
   it('reads "Streaming" for a streaming asset', () => {
     expect(streamStateLabel('STREAMING')).toBe('Streaming');
   });
@@ -183,7 +183,7 @@ describe('positionLabel', () => {
   });
 });
 
-describe('isAllDronesOption (docs/UX-REWORK-PLAN.md §U-a bullet 4 — merges "All drones" into the switcher)', () => {
+describe('isAllDronesOption (docs/plans/done/UX-REWORK-PLAN.md §U-a bullet 4 — merges "All drones" into the switcher)', () => {
   it('is true for the sentinel value', () => {
     expect(isAllDronesOption(ALL_DRONES_OPTION_VALUE)).toBe(true);
   });
@@ -193,7 +193,7 @@ describe('isAllDronesOption (docs/UX-REWORK-PLAN.md §U-a bullet 4 — merges "A
   });
 });
 
-describe('nextCollapseAction (docs/UI-REDESIGN-PLAN.md Wave 2 D-D — Esc\'s "closest thing open, first")', () => {
+describe('nextCollapseAction (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2 D-D — Esc\'s "closest thing open, first")', () => {
   it('closes an open tool-rail drawer first, even if the stop-confirm/map are also open', () => {
     expect(nextCollapseAction({ panelOpen: true, stopConfirmOpen: true, mapVisible: true })).toBe('panel');
   });

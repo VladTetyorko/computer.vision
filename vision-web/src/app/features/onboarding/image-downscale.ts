@@ -1,5 +1,5 @@
 /**
- * Client-side photo downscale for the onboarding wizard's Profile step (docs/UX-REWORK-PLAN.md §U-d
+ * Client-side photo downscale for the onboarding wizard's Profile step (docs/plans/done/UX-REWORK-PLAN.md §U-d
  * item 1 — "photo upload with preview … client-side downscale to ≤2MB jpeg — canvas"), backing
  * `PUT /api/assets/{id}/image`'s pinned ≤2MB limit.
  *
@@ -10,7 +10,7 @@
  * by hand against the running app (see this cycle's MODULE.md entry's own live-verification list).
  */
 
-/** The pinned `PUT /api/assets/{id}/image` size limit (docs/UX-REWORK-PLAN.md §U-d item 3). */
+/** The pinned `PUT /api/assets/{id}/image` size limit (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3). */
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
 /** The longest side a photo is scaled down to before quality is ever reduced. Generous for a thumbnail-ish use. */

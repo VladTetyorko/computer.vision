@@ -48,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * End-to-end smoke test for docs/CYCLES-PLAN.md §1c: {@code POST /api/simulations} with a real
+ * End-to-end smoke test for docs/main/CYCLES-PLAN.md §1c: {@code POST /api/simulations} with a real
  * (tiny, synthetic) video file must flow frames through the exact same {@code "file"}-protocol
  * FFmpeg ingest path a real drone simulation would use, open a usage, accumulate telemetry from
  * the paired {@code sim} telemetry device, and close cleanly on stop — all through the real HTTP
@@ -82,7 +82,7 @@ class FileSimulationSmokeTest {
     private static final Duration TELEMETRY_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(200);
 
-    // --- docs/CYCLES-PLAN.md §7 (CT-a): telemetry flight plan ------------------------
+    // --- docs/main/CYCLES-PLAN.md §7 (CT-a): telemetry flight plan ------------------------
 
     private static final double EARTH_RADIUS_METERS = 6_371_000.0;
     private static final double ROUTE_BASE_LATITUDE = 50.45;
@@ -159,7 +159,7 @@ class FileSimulationSmokeTest {
     }
 
     /**
-     * docs/CYCLES-PLAN.md §7 (CT-a): a 3-waypoint route with a high {@code speedMps} must fly the
+     * docs/main/CYCLES-PLAN.md §7 (CT-a): a 3-waypoint route with a high {@code speedMps} must fly the
      * simulated drone's telemetry along it — successive samples' distance to the final checkpoint
      * must trend toward zero (generous tolerance, since this runs at the real, unthrottled 1Hz
      * cadence — see the class-level Gotcha), and {@code routeMode=once} means it holds there once

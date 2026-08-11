@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# scripts/demo.sh — MVP1 "friends demo" assembly (docs/MVP1-PLAN.md §C9).
+# scripts/demo.sh — MVP1 "friends demo" assembly (docs/plans/done/MVP1-PLAN.md §C9).
 #
 # Starts >=3 simultaneous source protocols on the Wall (direct/rtsp/mjpeg
 # file playback plus one fully synthetic sim-protocol source), one of them
@@ -33,14 +33,14 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 
 # Deterministic names so re-runs (and --stop) can find what this script made
-# instead of accumulating duplicates (docs/MVP1-PLAN.md §C9's idempotency ask).
+# instead of accumulating duplicates (docs/plans/done/MVP1-PLAN.md §C9's idempotency ask).
 NAME_DIRECT="Demo drone 1 (direct)"
 NAME_RTSP="Demo drone 2 (rtsp)"
 NAME_MJPEG="Demo drone 3 (mjpeg)"
 NAME_SYNTHETIC="Demo drone 4 (synthetic)"
 
 # A nice 3-waypoint loop for the direct-transport asset's flight plan
-# (docs/CYCLES-PLAN.md §7 CT-a's TelemetryPlan wire shape) — a triangular
+# (docs/main/CYCLES-PLAN.md §7 CT-a's TelemetryPlan wire shape) — a triangular
 # patrol around Golden Gate Park, purely cosmetic coordinates for the Map tab.
 TELEMETRY_ROUTE=$(jq -n '{
   speedMps: 12,

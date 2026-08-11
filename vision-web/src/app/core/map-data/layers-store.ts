@@ -22,13 +22,13 @@ import {
  * Safety-net only, like `GeofenceStore`'s own 30s cadence: the `map` live topic is always-on and
  * this store folds every layer delta in as it arrives, so this poll exists purely to reconcile a
  * connection that was briefly down — and, unlike marks/drawings, to re-read the `grants` lists that
- * deliberately never travel over SSE (docs/MAP-REWORK-PLAN.md §4.3).
+ * deliberately never travel over SSE (docs/plans/done/MAP-REWORK-PLAN.md §4.3).
  */
 const LAYERS_POLL_INTERVAL_MS = 30_000;
 
 /**
  * `LayersStore` — the app's one source of truth for the map's data layers and, crucially, **the
- * viewer's own resolved access to each of them** (docs/MAP-REWORK-PLAN.md §3/§5.2).
+ * viewer's own resolved access to each of them** (docs/plans/done/MAP-REWORK-PLAN.md §3/§5.2).
  * `providedIn: 'root'` and started at boot alongside `GeofenceStore`/`MarksStore`: layers name the
  * rows of `<vision-tactical-map>`'s data-layer panel, gate the mark palette's layer picker, decide
  * which verify/promote controls a manager sees, and back the layer manager — every map host needs

@@ -6,7 +6,7 @@ import java.util.List;
 
 /**
  * One live relay session opened by {@link ManualControlService#engage}
- * (docs/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1 R2) — the stateful counterpart to {@code
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1 R2) — the stateful counterpart to {@code
  * ManualControlPort}'s streaming, ack-less relay link.
  *
  * <h2>Threading</h2>
@@ -23,7 +23,7 @@ public interface ManualControlSession {
      * session's {@link #channelMap()} and forwards the result to the {@code ManualControlPort} as
      * the newest frame — latest-wins, no per-frame throttle here; the fixed-rate wire cadence is the
      * adapter's job. Resets the watchdog deadline. {@code seq}/{@code tSent} are accepted only to
-     * satisfy the frozen client-frame shape (docs/RC-CONTROL-PHASE1-PLAN.md §4) — the caller already
+     * satisfy the frozen client-frame shape (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4) — the caller already
      * holds both to build its own {@code ack} and does not need them echoed back here. A no-op once
      * {@link #active()} is {@code false}.
      */

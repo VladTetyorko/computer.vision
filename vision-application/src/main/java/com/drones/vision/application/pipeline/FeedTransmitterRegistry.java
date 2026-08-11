@@ -12,7 +12,7 @@ import com.drones.vision.application.simulation.DefaultSimulationService;
  * TX-side mirror of {@link VideoSourceRegistry}.
  *
  * <p>{@link DefaultSimulationService} originally held a single {@code FeedTransmitterPort}
- * dependency (docs/CYCLES-PLAN.md §3, {@code transport=RTSP} only); this registry is the §5
+ * dependency (docs/main/CYCLES-PLAN.md §3, {@code transport=RTSP} only); this registry is the §5
  * generalization once a second transmit protocol ({@code mjpeg}) exists alongside {@code rtsp}.
  * Holds the set of registered transmitter adapters (one per transmit protocol) and picks the
  * first one whose {@link FeedTransmitterPort#supports(FeedSpec)} returns {@code true}. Adding a

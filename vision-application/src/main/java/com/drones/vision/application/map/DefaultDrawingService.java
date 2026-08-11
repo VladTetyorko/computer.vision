@@ -123,7 +123,7 @@ public final class DefaultDrawingService implements DrawingService {
 
     /**
      * A drawing on a layer the viewer may not {@link MapAccessPolicy#canView view} must be
-     * indistinguishable from a drawing that does not exist (docs/MAP-REWORK-PLAN.md §4.1:
+     * indistinguishable from a drawing that does not exist (docs/plans/done/MAP-REWORK-PLAN.md §4.1:
      * out-of-scope → 404, never 403). Checked before any per-action gate.
      */
     private void requireVisible(Viewer v, Drawing drawing, MapLayer layer) {

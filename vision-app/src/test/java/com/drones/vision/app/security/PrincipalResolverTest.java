@@ -25,8 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Both {@link PrincipalResolver} implementations (docs/U-AUTH-PLAN.md, wave 3; scope added
- * docs/U-SCOPE-PLAN.md, slice 2): the dev resolver (auth disabled) returns {@link DevPrincipal} and
+ * Both {@link PrincipalResolver} implementations (docs/plans/done/U-AUTH-PLAN.md, wave 3; scope added
+ * docs/plans/done/U-SCOPE-PLAN.md, slice 2): the dev resolver (auth disabled) returns {@link DevPrincipal} and
  * an unbounded scope; the security resolver (auth enabled) returns the authenticated user's
  * id/ownership from the {@link SecurityContextHolder} and delegates scope to {@link ScopeResolver}.
  */

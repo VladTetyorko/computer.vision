@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * docs/DRONE-INFRA-PLAN.md I-c: proves {@link MavlinkTelemetrySource} against genuine ArduPilot
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-c: proves {@link MavlinkTelemetrySource} against genuine ArduPilot
  * SITL firmware ({@code infra/sitl/}), not this module's own {@link MavlinkFeedTransmitter}
  * simulator — real {@code HEARTBEAT}/GPS/PreArm behavior our own TX side can't fake.
  *

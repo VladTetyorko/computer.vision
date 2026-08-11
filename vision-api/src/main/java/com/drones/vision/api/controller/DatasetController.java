@@ -26,7 +26,7 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for {@link Dataset} CRUD (docs/CV-TRAINING-PLAN.md §3's frozen wire
+ * Driving REST adapter for {@link Dataset} CRUD (docs/plans/done/CV-TRAINING-PLAN.md §3's frozen wire
  * contract) — {@code POST}/{@code GET}/{@code DELETE /api/datasets}[/{id}].
  *
  * <p>Gated by {@code vision.training.enabled} (default {@code false}): this whole controller is

@@ -23,7 +23,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 /**
  * `/debug` — the raw API console (WEB-PLAN W5).
  *
- * **Page bar + health-probe correctness fix (docs/NAV-IA-REDESIGN-PLAN.md §2.2, docs/design/18-debug.md,
+ * **Page bar + health-probe correctness fix (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/18-debug.md,
  * wave 2).** The old three-line description restated what "Debug" plus the console's own copy already
  * say, so it's deleted outright — no `hint`. `METHOD` (a 6-value enum) and `PATH` (the console's own
  * request path — the literal "API console path" example the `--field-lg` token names) each carry the
@@ -31,7 +31,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
  * doc comment (`debug-response.ts`) for why a missing probe (this deployment has no actuator
  * dependency at all) must never render as a red failure the way an actually-unhealthy system would.
  * **The response pane, request-history panel, and demoting Health to a header chip are out of this
- * wave's scope** (docs/NAV-IA-REDESIGN-PLAN.md's own wave-2 brief) — the console/Health/Last-scan
+ * wave's scope** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md's own wave-2 brief) — the console/Health/Last-scan
  * three-card layout is otherwise unchanged.
  */
 @Component({

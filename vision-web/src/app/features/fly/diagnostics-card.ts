@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input, signal } from '@angular/core
 import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
 
 /**
- * The Fly cockpit's Diagnostics HUD card (docs/FC-INTEGRATIONS-PLAN.md F-e) — a compact,
+ * The Fly cockpit's Diagnostics HUD card (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — a compact,
  * collapsible rundown of `flight-state-logic.ts#deriveDiagnostics`'s rows (wind, vibration, EKF,
  * rangefinder, mission progress), ArduPilot-only extras that ride `TelemetrySample.extra`.
  * Deliberately dumb, same convention as `PreflightChecklist`/`FailsafeBanner`: `rows` is the only
@@ -114,7 +114,7 @@ import type { DiagnosticRow } from '../../core/telemetry/flight-state-logic';
       text-align: right;
     }
 
-    /* Severity colors (docs/FC-INTEGRATIONS-PLAN.md F-e): plain default for 'ok'/no-threshold rows,
+    /* Severity colors (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e): plain default for 'ok'/no-threshold rows,
        --warn amber for 'warn', --danger red for 'bad' — never --live, which this app reserves for a
        genuine failsafe (see FailsafeBanner's own doc comment). */
     .row-warn .value {

@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /**
  * {@link Telemetry} &harr; {@link TelemetrySampleEntity} mapping, extracted from {@code
- * JpaTelemetryRepository} (docs/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
+ * JpaTelemetryRepository} (docs/plans/active/LAYERING-REFACTOR-PLAN.md §3/§7 row C).
  *
  * <p>{@link #toEntity} invents a synthetic {@code UUID} id at mapping time — {@link Telemetry}
  * itself carries no identity (an append-only sample, not an aggregate), so there is nothing

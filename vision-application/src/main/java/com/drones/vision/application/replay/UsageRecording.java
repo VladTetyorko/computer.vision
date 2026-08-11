@@ -4,7 +4,7 @@ import java.net.URI;
 import java.time.Instant;
 
 /**
- * A resolved recording/clip-export URL for one usage's flight window (docs/OPS-CORE-PLAN.md §R) —
+ * A resolved recording/clip-export URL for one usage's flight window (docs/plans/done/OPS-CORE-PLAN.md §R) —
  * {@link ReplayService#recordingFor}'s read model.
  *
  * <p>{@code durationSeconds} is whole seconds ({@link java.time.Duration#getSeconds()}) between

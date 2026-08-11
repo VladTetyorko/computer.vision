@@ -3,7 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.domain.model.DatasetId;
 
 /**
- * Request body for {@code POST /api/streams/{streamId}/samples} (docs/CV-TRAINING-PLAN.md §3's
+ * Request body for {@code POST /api/streams/{streamId}/samples} (docs/plans/done/CV-TRAINING-PLAN.md §3's
  * frozen wire contract) — the stream id itself is a path parameter, so the body carries only the
  * target dataset.
  *

@@ -4,7 +4,7 @@ import com.drones.vision.application.flight.DefaultFlightCommandService;
 import com.drones.vision.application.identity.DefaultAssignmentService;
 /**
  * Thrown when the acting user's {@link VisibilityScope} does not permit an operation they attempted
- * on a resource that does exist (docs/U-SCOPE-PLAN.md, U-e slice 2).
+ * on a resource that does exist (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2).
  *
  * <p>Deliberately distinct from {@link java.util.NoSuchElementException}: a scoped <em>read</em>
  * that hits an out-of-scope asset throws {@code NoSuchElementException} (a 404) so existence is not

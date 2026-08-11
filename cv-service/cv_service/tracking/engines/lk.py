@@ -1,6 +1,6 @@
 """`lk` -- the FOLLOW default: Lucas-Kanade sparse optical flow.
 
-`docs/TRACKING-PLAN.md` §5.B. Tracks <=40 `goodFeaturesToTrack` corners
+`docs/plans/done/TRACKING-PLAN.md` §5.B. Tracks <=40 `goodFeaturesToTrack` corners
 inside the locked box with `cv2.calcOpticalFlowPyrLK`, then moves the box by
 the median corner translation and rescales it by the median radial expansion
 about the corner centroid. Core OpenCV `video` module only -- no ONNX

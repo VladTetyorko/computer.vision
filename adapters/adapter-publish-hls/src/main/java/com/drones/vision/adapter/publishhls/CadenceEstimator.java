@@ -89,7 +89,7 @@ final class CadenceEstimator {
     }
 
     /**
-     * @param cadence {@code vision.publish.cadence.*} (docs/LAYERING-REFACTOR-PLAN.md wave F3) —
+     * @param cadence {@code vision.publish.cadence.*} (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F3) —
      *                replaces this class's own {@code CADENCE_MEASUREMENT_FRAMES}/{@code
      *                MIN_MEASURED_FRAME_RATE_FPS}/{@code MAX_MEASURED_FRAME_RATE_FPS}/{@code
      *                DRIFT_RATIO_HIGH}/{@code DRIFT_EWMA_ALPHA}/{@code SUSTAINED_DRIFT_WINDOW}/{@code

@@ -22,7 +22,7 @@ import com.drones.vision.application.replay.DefaultReplayService;
  * TELEMETRY_FETCH_LIMIT} discussion for the same honest-cap reasoning applied here to {@link
  * #STATS_FETCH_LIMIT}).
  *
- * <h2>Aggregation rules (docs/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen contract)</h2>
+ * <h2>Aggregation rules (docs/plans/done/ASSET-MANAGER-PAGE-PLAN.md, Wave A's frozen contract)</h2>
  * <ul>
  *   <li>Each usage's duration is {@code (endedAt != null ? endedAt : now) - startedAt}, floored at
  *       zero — defensive against the "now" clock reading before an open usage's own {@code
@@ -79,7 +79,7 @@ public final class DefaultAssetStatsService implements AssetStatsService {
     }
 
     /**
-     * Same as the 2-argument constructor, plus an explicit fetch bound (docs/LAYERING-REFACTOR-PLAN.md
+     * Same as the 2-argument constructor, plus an explicit fetch bound (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      * &sect;1.3 config extraction, {@code vision.application.stats.fetch-limit}) instead of {@link
      * #STATS_FETCH_LIMIT}.
      */

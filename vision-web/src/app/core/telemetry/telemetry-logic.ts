@@ -1,13 +1,13 @@
 import type { AssetDetails, AssetUsage, Device, GeoPosition, TelemetrySample } from '../api/models';
 
 /**
- * Pure derivations behind `TelemetryStore` (docs/CYCLES-PLAN.md §2), split out so the
+ * Pure derivations behind `TelemetryStore` (docs/main/CYCLES-PLAN.md §2), split out so the
  * open-usage/trail/staleness logic can be unit-tested without touching HTTP, timers, or
  * Leaflet — mirrors the `features/debug/debug-*.ts` split (pure logic, injectable orchestrates).
  */
 
 /**
- * Re-exported from `core/poll-scheduler.ts`, which is now its canonical home (docs/CYCLES-PLAN.md
+ * Re-exported from `core/poll-scheduler.ts`, which is now its canonical home (docs/main/CYCLES-PLAN.md
  * §9, CU-b item 3 — the shared poll scheduler). Kept here too so the existing
  * `telemetry-logic.ts#shouldPoll` import path every caller already used keeps working verbatim.
  */
@@ -71,13 +71,13 @@ export function isStale(age: number | undefined): boolean {
 }
 
 /**
- * Groups one usage's mixed-source telemetry samples by `deviceId` (docs/CYCLES-PLAN.md §11,
+ * Groups one usage's mixed-source telemetry samples by `deviceId` (docs/main/CYCLES-PLAN.md §11,
  * CD-a — every sample carries the telemetry device it came from), preserving each device's own
  * samples in their original (chronological) order — the same order `deriveTrail`/callers already
  * assume for the flat list.
  *
  * Originally `pages/asset-detail/asset-detail-logic.ts#groupTelemetryByDevice`; moved here in
- * docs/MVP2-PLAN.md §R (R-b) when the replay cockpit (`features/replay/replay-logic.ts`) needed the
+ * docs/plans/done/MVP2-PLAN.md §R (R-b) when the replay cockpit (`features/replay/replay-logic.ts`) needed the
  * identical per-device split for its own telemetry-at-scrub-time panels — this codebase has no
  * precedent for one page importing another page's module (see `core/fleet/device-logic.ts`'s doc
  * comment for the original precedent this follows), so a shared `core/` home was used instead.
@@ -107,7 +107,7 @@ export function telemetryDevices(devices: readonly Device[]): readonly Device[] 
   return devices.filter((device) => device.capabilities.includes('TELEMETRY'));
 }
 
-// --- Severity tiers (docs/MVP3-PLAN.md §C-b) --------------------------------------------------
+// --- Severity tiers (docs/plans/done/MVP3-PLAN.md §C-b) --------------------------------------------------
 // Two independent "how worried should the operator be" derivations, both pure so the Fly
 // cockpit's OSD chip bar can color-escalate without inventing new backend concepts. `batterySeverity`
 // started as a private computed inside `pages/live/telemetry-osd.ts`; lifted here (unchanged
@@ -134,7 +134,7 @@ export function batterySeverity(percent: number | undefined): BatterySeverity {
 
 /**
  * A third tier past the existing binary `isStale`, for the Fly cockpit's OSD chip bar
- * (docs/MVP3-PLAN.md §C-b: "telemetry age color escalation: fresh/amber >5s/red >10s"). `amber`
+ * (docs/plans/done/MVP3-PLAN.md §C-b: "telemetry age color escalation: fresh/amber >5s/red >10s"). `amber`
  * reuses `STALE_AFTER_SECONDS` — the exact threshold every other "this reading is stale" indicator
  * in this app already uses (`TelemetryStore.stale()`, `TelemetryOsd`'s `.stale`/`.stale-text`
  * classes) — so the OSD's medium tier lines up with what "stale" already means everywhere else;
@@ -153,14 +153,14 @@ export function telemetryAgeSeverity(age: number): TelemetryAgeSeverity {
 }
 
 /**
- * Whether a tracking effect (docs/REALTIME-PLAN.md Phase R-a item 2) should re-enter its store's
+ * Whether a tracking effect (docs/plans/done/REALTIME-PLAN.md Phase R-a item 2) should re-enter its store's
  * `track()`/`reset()` this run: only when the derived id primitive actually changed from the id it
  * last acted on. A page's own `asset()`/`stream()` signals are fresh objects on every ~5s poll tick
  * even when nothing about the tracked device/stream actually changed (signals compare with
  * `Object.is`), so an effect reading them re-fires on that cadence regardless — without this guard,
  * re-entering `TelemetryStore`/`DetectionsStore`'s `track()` with an *unchanged* id was the
  * diagnosed O(N) amplification bug (`FlyPage`) and, worse, a self-sustaining track/untrack
- * oscillation entirely decoupled from any poll cadence (`AssetDetailPage`, docs/REALTIME-PLAN.md §4
+ * oscillation entirely decoupled from any poll cadence (`AssetDetailPage`, docs/plans/done/REALTIME-PLAN.md §4
  * Phase R-c follow-up): re-entering `track()` re-runs its internal teardown, which reads that
  * store's own `currentAssetIdSignal` — a read that (because it happens synchronously while the
  * *caller's* effect is still the active reactive consumer) gets attributed to the caller's effect,
@@ -170,7 +170,7 @@ export function telemetryAgeSeverity(age: number): TelemetryAgeSeverity {
  * `core/map/map-store.ts#reconcileTrackers`'s own reconcile-by-id idiom: compare the id *value*,
  * never the enclosing object's identity.
  *
- * Originally `features/fly/fly-logic.ts#trackingIdChanged`; moved here (docs/REALTIME-PLAN.md §4
+ * Originally `features/fly/fly-logic.ts#trackingIdChanged`; moved here (docs/plans/done/REALTIME-PLAN.md §4
  * Phase R-c follow-up) when `features/asset-detail/asset-detail.ts` needed the identical guard for
  * its own telemetry/detections tracking effects — this codebase has no precedent for one page
  * importing another page's module (see `core/fleet/device-logic.ts`'s doc comment for the original

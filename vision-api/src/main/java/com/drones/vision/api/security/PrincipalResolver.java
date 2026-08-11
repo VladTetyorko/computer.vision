@@ -16,7 +16,7 @@ import java.util.Set;
  *
  * <p><strong>Why this interface, not a Spring Security type:</strong> {@code vision-api} is a
  * driving adapter and deliberately carries <em>no</em> dependency on {@code
- * org.springframework.security} (docs/U-AUTH-PLAN.md, wave 3). {@code vision-app} — the only module
+ * org.springframework.security} (docs/plans/done/U-AUTH-PLAN.md, wave 3). {@code vision-app} — the only module
  * allowed to know about Spring Security — provides the implementation: a fixed dev principal when
  * {@code vision.auth.enabled=false} (unchanged pre-auth behavior), or a resolver reading the
  * authenticated session's principal when {@code true}. Both are resolved per call, so a singleton
@@ -40,7 +40,7 @@ public interface PrincipalResolver {
 
     /**
      * What the current request may see — the acting user's resolved {@link VisibilityScope}
-     * (docs/U-SCOPE-PLAN.md, U-e slice 2). Controllers thread this into the scoped read/command
+     * (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2). Controllers thread this into the scoped read/command
      * methods; when auth is disabled the dev principal resolves to {@link
      * VisibilityScope#unbounded()}, so nothing downstream changes.
      *
@@ -50,14 +50,14 @@ public interface PrincipalResolver {
 
     /**
      * Who the current request is, as the <em>map's</em> authorization model sees it
-     * (docs/MAP-REWORK-PLAN.md §3/§4): identity + every group whose membership should count toward
+     * (docs/plans/done/MAP-REWORK-PLAN.md §3/§4): identity + every group whose membership should count toward
      * map visibility + the highest {@link Role} held.
      *
      * <p><strong>Deliberately not derived from {@link #scope()}.</strong> {@link
      * VisibilityScope#includesGroup} is hard-{@code false} for a PILOT's {@code ASSIGNED_ASSETS}
      * scope (it carries asset ids, not groups), which would make every {@code TEAM} layer
      * structurally invisible to the primary FPV-operator persona — the exact trap
-     * docs/MAP-REWORK-PLAN.md §1 records and {@link MapAccessPolicy}'s own javadoc explains. Map
+     * docs/plans/done/MAP-REWORK-PLAN.md §1 records and {@link MapAccessPolicy}'s own javadoc explains. Map
      * visibility resolves from plain group membership instead.
      *
      * <p><strong>Group-subtree expansion is not re-implemented here.</strong> A manager's subtree is

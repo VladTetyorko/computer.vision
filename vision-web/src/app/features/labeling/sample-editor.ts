@@ -10,7 +10,7 @@ import type { Annotation } from '../../core/api/models';
 
 /**
  * `/manage/training/:datasetId/samples/:sampleId` — the confirm/correct step
- * (docs/CV-TRAINING-PLAN.md Wave T5): the captured frame with its annotations drawn as editable
+ * (docs/plans/done/CV-TRAINING-PLAN.md Wave T5): the captured frame with its annotations drawn as editable
  * boxes (`vision-sample-box-editor`), a label vocabulary pulled from the dataset, and
  * Confirm/Discard. The suggested boxes are pre-filled from the model at capture time
  * (`Annotation.source === 'MODEL'`); anything the operator drags, resizes, adds, or removes becomes

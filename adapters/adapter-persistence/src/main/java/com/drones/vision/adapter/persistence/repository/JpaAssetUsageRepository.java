@@ -21,7 +21,7 @@ import java.util.Optional;
  * indexed queries (on {@code asset_usages.asset_id}, see {@code V3__history.sql}) rather than the
  * in-memory reference's linear scan, but the observable contract — newest-first, bounded to
  * {@code limit}; at most one open usage per asset — is identical. {@link #findRecent(int)}
- * (docs/NAV-IA-REDESIGN-PLAN.md Wave 4, F8) is the same query without the {@code asset_id}
+ * (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8) is the same query without the {@code asset_id}
  * predicate — no dedicated index needed, since it orders by {@code started_at} alone (already
  * indexed for range/ordering by Postgres's own primary-key-adjacent defaults at this table's
  * expected size; see {@code V<N>__*.sql} if a future large-fleet deployment needs a dedicated one).
@@ -29,7 +29,7 @@ import java.util.Optional;
  * {@link com.drones.vision.adapter.persistence.repository.JpaTelemetryRepository}/{@link
  * com.drones.vision.adapter.persistence.repository.JpaDetectionRepository}): a usage row is
  * written once per start/stop and a handful of times in between (position/sample-count updates),
- * not once per incoming sample, so it is not the "append-heavy" table docs/MVP2-PLAN.md P-b's
+ * not once per incoming sample, so it is not the "append-heavy" table docs/plans/done/MVP2-PLAN.md P-b's
  * retention guard targets.
  */
 public final class JpaAssetUsageRepository implements AssetUsageRepositoryPort {

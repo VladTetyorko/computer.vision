@@ -13,12 +13,12 @@ const EVENTS_DISPLAY_LIMIT = 20;
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * The detection-events rail (docs/MVP2-PLAN.md §E, E-b bullet 1): label/asset filters over
+ * The detection-events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1): label/asset filters over
  * `EventsStore`'s shared feed, a newest-first list capped to `EVENTS_DISPLAY_LIMIT`, each row
  * naming its source/confidence/relative time and, when resolvable, opening the owning asset's
  * cockpit or detail page on click.
  *
- * **Moved here from `pages/wall/wall.html`/`wall.ts`** (docs/MVP3-PLAN.md §C-c) when the Command
+ * **Moved here from `pages/wall/wall.html`/`wall.ts`** (docs/plans/done/MVP3-PLAN.md §C-c) when the Command
  * dashboard needed the identical rail as its own "events feed" section — this codebase's
  * established "move to a shared home once a second page needs it" precedent (see
  * `core/fleet/device-logic.ts`'s doc comment, most recently repeated by `shared/map/fleet-map.ts`/
@@ -36,8 +36,8 @@ const CLOCK_TICK_MS = 1_000;
  * exactly as before); a page that renders both this rail and the fleet map only needs to own the
  * refcount once, not per consumer.
  *
- * **Row markup extracted to `vision-event-row`** (docs/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3,
- * docs/design/08-alerts.md's own refactor list item 1) — this component still owns filters, the cap,
+ * **Row markup extracted to `vision-event-row`** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4/Wave 3,
+ * docs/extracts/design/08-alerts.md's own refactor list item 1) — this component still owns filters, the cap,
  * and every derivation (`sourceLabel`/`relativeTime`/`eventClickable`/`eventActionLabel` below), it
  * just no longer hand-rolls the row's own DOM; `/monitor/alerts` (which used to embed this whole
  * component to get the identical row look) now renders `vision-event-row` directly instead, in its
@@ -111,7 +111,7 @@ export class EventsRail {
   }
 
   /**
-   * The row's own explicit affordance (docs/UX-REWORK-PLAN.md U-a2 §2.6 — a hover-only style isn't
+   * The row's own explicit affordance (docs/plans/done/UX-REWORK-PLAN.md U-a2 §2.6 — a hover-only style isn't
    * a label): which of the two-verb dictionary a click actually does, since `resolveEventTarget`
    * resolves either an asset (→ "Details") or a live stream (→ "Watch live"); `null` when neither
    * resolves, matching `eventClickable`'s own `false` — the row shows no promise it can't keep.

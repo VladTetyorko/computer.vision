@@ -61,7 +61,7 @@ describe('buildTestDroneRequest', () => {
     expect(buildTestDroneRequest(testDroneForm())).not.toHaveProperty('telemetry');
   });
 
-  it('includes telemetry verbatim when the form carries a flight plan (docs/CYCLES-PLAN.md §7, CT-b)', () => {
+  it('includes telemetry verbatim when the form carries a flight plan (docs/main/CYCLES-PLAN.md §7, CT-b)', () => {
     const telemetry: TestDroneForm['telemetry'] = {
       routeMode: 'once',
       route: [
@@ -112,7 +112,7 @@ describe('buildSimulationRequest', () => {
     expect(buildSimulationRequest(fileForm())).not.toHaveProperty('telemetry');
   });
 
-  it('includes telemetry verbatim when the form carries a flight plan (docs/CYCLES-PLAN.md §7, CT-b)', () => {
+  it('includes telemetry verbatim when the form carries a flight plan (docs/main/CYCLES-PLAN.md §7, CT-b)', () => {
     const telemetry: FileSimulateForm['telemetry'] = {
       speedMps: 12,
       routeMode: 'loop',

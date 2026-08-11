@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Flight-controller-reported state, decoded from ArduPilot/INAV/Betaflight/PX4 telemetry
- * (docs/FC-INTEGRATIONS-PLAN.md) — arm state, active mode, failsafe, GPS fix quality, RSSI, and
+ * (docs/plans/done/FC-INTEGRATIONS-PLAN.md) — arm state, active mode, failsafe, GPS fix quality, RSSI, and
  * any known arming blockers. Rides {@link Telemetry} as its nullable 9th component: a device with
  * no flight-controller telemetry (a camera, a legacy sample, or a MAVLink stream that hasn't
  * received a {@code HEARTBEAT} yet) simply carries {@code null} here, same "honest null over fake

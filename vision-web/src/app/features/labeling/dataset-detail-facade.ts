@@ -20,7 +20,7 @@ import {
 const LOG_PREFIX = '[labeling]';
 
 /**
- * `DatasetDetailPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — one dataset's own sample grid,
+ * `DatasetDetailPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — one dataset's own sample grid,
  * capture flow, and train action. Injects `VisionApi` directly rather than `TrainingStore` (the
  * same "a routed page's facade may talk to a service directly for page-local state" shape
  * `RosterFacade` already uses) — this dataset's own record and its samples are both single-consumer
@@ -28,16 +28,16 @@ const LOG_PREFIX = '[labeling]';
  * `FleetStore` (already app-wide, `providedIn: 'root'`) supplies the capture stream picker's live
  * stream list for free — no second poller.
  *
- * **Capture entry point lives here, not in Fly/Live/Replay** (docs/CV-TRAINING-PLAN.md Wave T5's own
+ * **Capture entry point lives here, not in Fly/Live/Replay** (docs/plans/done/CV-TRAINING-PLAN.md Wave T5's own
  * task brief flags the collision with parallel `features/fly/**` work) — the operator picks *which*
  * active stream to capture from right here, inside the dataset they're building, rather than a
  * scattered "Add to dataset" button on every video surface. One coherent place to do the whole
  * capture → correct → train loop, and zero risk of touching a file another task owns. (A second,
  * replay-driven capture entry point lives in `features/replay/**` — see that facade's own doc
- * comment; docs/CV-TRAINING-V2-PLAN.md §8.)
+ * comment; docs/plans/done/CV-TRAINING-V2-PLAN.md §8.)
  *
- * **"Train a model" (docs/CV-TRAINING-PLAN.md Phase 2's last web wave; the manual export step this
- * doc comment used to describe was deleted in docs/CV-TRAINING-V2-PLAN.md — `POST
+ * **"Train a model" (docs/plans/done/CV-TRAINING-PLAN.md Phase 2's last web wave; the manual export step this
+ * doc comment used to describe was deleted in docs/plans/done/CV-TRAINING-V2-PLAN.md — `POST
  * /api/datasets/{id}/train` now uploads the dataset itself, no separate export artifact) lives here
  * too, not a separate page of its own** — starting a fine-tune is one more action against *this*
  * dataset, the same footing as capture. `TrainingJobController#start` requires `canManageOrg` (a

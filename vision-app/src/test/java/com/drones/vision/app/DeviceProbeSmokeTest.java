@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * End-to-end smoke test for CONTRACT 1 (docs/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
+ * End-to-end smoke test for CONTRACT 1 (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
  * {@code POST /api/devices/probe} must actually resolve a real {@code VideoSourcePort} adapter,
  * grab a real frame, and encode it — over the full production wiring ({@link WiringConfiguration},
  * no test doubles needed since a probe never touches {@code StreamPublisherPort} at all), for both

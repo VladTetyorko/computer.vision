@@ -10,10 +10,10 @@ import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
- * Driving REST adapter for the manager dashboard's aggregated fleet read (docs/MVP3-PLAN.md C-a).
+ * Driving REST adapter for the manager dashboard's aggregated fleet read (docs/plans/done/MVP3-PLAN.md C-a).
  *
  * <p>Constructor-injected with {@link FleetSummaryService} and {@link CurrentUser} — the summary is
- * scoped to what the acting user may see (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 1), so the
+ * scoped to what the acting user may see (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1), so the
  * per-category counts and attention list a manager sees cover only their own group subtree. With
  * auth off the scope is unbounded, so this returns the whole fleet exactly as before scoping.
  */
@@ -30,7 +30,7 @@ public class FleetController {
 
     /**
      * Summarizes the fleet: per-category counts plus a capped, per-asset attention list
-     * (docs/MVP3-PLAN.md C-a) — one poll for everything the Command page's attention queue and
+     * (docs/plans/done/MVP3-PLAN.md C-a) — one poll for everything the Command page's attention queue and
      * warehouse-readiness tiles need.
      *
      * @param includeArchived whether to include soft-deleted assets; defaults to {@code false}

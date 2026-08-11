@@ -6,7 +6,7 @@ import com.drones.vision.application.fleet.FleetSummaryService;
 
 /**
  * Per-category asset counts for one row of {@code GET /api/fleet/summary}'s "warehouse readiness"
- * breakdown (docs/MVP3-PLAN.md C-a) — lifecycle state crossed with whether the asset is currently
+ * breakdown (docs/plans/done/MVP3-PLAN.md C-a) — lifecycle state crossed with whether the asset is currently
  * streaming.
  *
  * @param categoryId   the category

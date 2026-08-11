@@ -1,5 +1,5 @@
 /* The protocol/capability chips riding `<vision-page-bar>`'s own `[pageBarFilters]` slot
-   (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — `.row` (src/styles.css) already supplies the flex row +
+   (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — `.row` (src/styles.css) already supplies the flex row +
    gap; this only tightens it to match the chip row's old `--space-4` spacing. */
 .device-chips {
     gap: var(--space-4);
@@ -20,7 +20,7 @@
     min-width: 0;
 }
 
-/* A slim, deliberately narrow tab between stage and rail (docs/CYCLES-PLAN.md §9, CU-b item 4)
+/* A slim, deliberately narrow tab between stage and rail (docs/main/CYCLES-PLAN.md §9, CU-b item 4)
    rather than a full-width "hide details" button competing with the page-head chrome — it reads
    as part of the rail's edge, the same way a drawer handle does. */
 .rail-toggle {
@@ -63,7 +63,7 @@
     font-family: var(--mono);
     /* Bespoke 25% black wash for an inline code chip — much lighter than either `--scrim` (55%) or
        `--scrim-strong` (70%), and not a video/map compositing overlay, so neither canonical scrim
-       step reproduces this look without visibly darkening the chip (docs/STYLE-TOKENS-PLAN.md
+       step reproduces this look without visibly darkening the chip (docs/plans/done/STYLE-TOKENS-PLAN.md
        §Geometry note's "bespoke opacity... genuinely needed" exception). Left literal; flagged. */
     background: rgb(0 0 0 / 25%);
     padding: var(--space-2) var(--space-4);
@@ -121,7 +121,7 @@ dd {
 
 /* The "boxes: Overlay/Burned/Off" toggle group used to carry its own local `.boxes-toggle`
    active-state CSS here (mirrored verbatim in `asset-detail.css`); both were removed in favor of
-   the shared global `.segmented` (docs/UX-REWORK-PLAN.md §U-b item 5, `src/styles.css`) once the
+   the shared global `.segmented` (docs/plans/done/UX-REWORK-PLAN.md §U-b item 5, `src/styles.css`) once the
    template's wrapper class changed from `boxes-toggle` to `segmented` — same promotion-to-global
    precedent as the kebab menu (see vision-web/MODULE.md's U-a2 map/command/shell entry). */
 

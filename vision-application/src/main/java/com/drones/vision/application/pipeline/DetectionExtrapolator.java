@@ -19,7 +19,7 @@ import java.util.Objects;
  * Smooths burned-in detection boxes between completed inferences by
  * extrapolating forward to the timestamp of the frame currently being
  * published, instead of freezing the latest result's raw boxes until the
- * next one lands (docs/CYCLES-PLAN.md &sect;12, CP-c).
+ * next one lands (docs/main/CYCLES-PLAN.md &sect;12, CP-c).
  *
  * <p>Keeps only the two most recently {@linkplain #accept accepted} results
  * — the previous one ({@code P}) and the latest ({@code L}). {@link
@@ -32,7 +32,7 @@ import java.util.Objects;
  * them) are dropped. A matched detection keeps its label, confidence, model
  * and {@link Detection#track() track facts} — only the box's origin moves.
  *
- * <h2>Matching (docs/TRACKING-PLAN.md &sect;5.F)</h2>
+ * <h2>Matching (docs/plans/done/TRACKING-PLAN.md &sect;5.F)</h2>
  * Two passes, in this order:
  * <ol>
  *   <li><b>By track id, exactly, with no gate.</b> When a detection on each
@@ -66,7 +66,7 @@ final class DetectionExtrapolator {
      * How far past {@code L}'s capture time extrapolation runs before the output freezes, and the
      * default max normalized box-center distance for a {@code P}&rarr;{@code L} match of the same
      * label — the {@link StreamPipelineSettings#defaults()} values, exposed here purely so
-     * same-package tests can assert against them by name (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3
+     * same-package tests can assert against them by name (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3
      * config extraction); this instance's own working values always come from its constructor, not
      * these constants.
      */
@@ -116,7 +116,7 @@ final class DetectionExtrapolator {
     }
 
     /**
-     * Clears both remembered results (docs/CV-CONTROL-PLAN.md &sect;A) — called by {@link
+     * Clears both remembered results (docs/plans/done/CV-CONTROL-PLAN.md &sect;A) — called by {@link
      * StreamPipeline#updateConfig} on a model-id change, since a box matched/extrapolated across a
      * model swap would blend two different models' outputs. After this call, {@link #at} behaves
      * exactly as it does before any result has ever been {@linkplain #accept accepted}.

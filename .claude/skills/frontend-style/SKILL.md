@@ -8,7 +8,7 @@ description: Visual style and decoration rules for vision-web — the daylight-c
 The app's look is **"daylight chart"**: cool paper-gray canvas, ink text, one aviation blue,
 colour reserved for status, B612 Mono for telemetry numerals. Calm and instrumental — an aviation
 chart in daylight, not a SaaS dashboard and not an "AI product". Migration history:
-`docs/VISUAL-REFRESH-PLAN.md`; token contract: `docs/STYLE-TOKENS-PLAN.md`.
+`docs/plans/done/VISUAL-REFRESH-PLAN.md`; token contract: `docs/plans/done/STYLE-TOKENS-PLAN.md`.
 
 ## 1. Tokens are the only vocabulary
 
@@ -41,7 +41,7 @@ chart in daylight, not a SaaS dashboard and not an "AI product". Migration histo
   than the viewport, give it its own `min-height: 100dvh` (or equivalent) scoped to that page's own
   file — `.page` and other shared containers are content-height-only by design, so a short enclave
   leaves the themed page's background showing through the gap (this happened to Wall — see
-  `docs/VISUAL-REFRESH-PLAN.md`'s post-launch fix note); (2) verify with a live check, not just
+  `docs/plans/done/VISUAL-REFRESH-PLAN.md`'s post-launch fix note); (2) verify with a live check, not just
   `tsc`/tests, that plain elements with no explicit `color` of their own (a bare `<h1>`, a stray
   `<p>`) actually render light-on-dark — a `color`/`background` inherited from an ancestor *outside*
   the enclave is the ancestor's already-*computed* value, not a live `var()` lookup, so it does not

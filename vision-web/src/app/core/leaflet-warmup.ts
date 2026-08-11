@@ -8,7 +8,7 @@ interface IdleWindow {
 const IDLE_TIMEOUT_MS = 4_000;
 
 /**
- * Warms the Leaflet chunk on browser idle (docs/CYCLES-PLAN.md §9, CU-b item 2), so the first
+ * Warms the Leaflet chunk on browser idle (docs/main/CYCLES-PLAN.md §9, CU-b item 2), so the first
  * `/map` visit or telemetry-capable `/live/:deviceId` view doesn't pay Leaflet's ~38 kB gz
  * fetch+parse cost on click. `App` calls `schedule()` once, from `afterNextRender`.
  *

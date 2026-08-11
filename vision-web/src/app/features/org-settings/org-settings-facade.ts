@@ -7,11 +7,11 @@ import type { CreateUserRequest, Role, UserMembership } from '../../core/api/mod
 type Tab = 'users' | 'groups';
 
 /**
- * `OrgSettingsPage`'s facade (docs/UI-ARCHITECTURE-PLAN.md) — orchestrates `OrgStore` plus the two
+ * `OrgSettingsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OrgStore` plus the two
  * forms' own draft state; every read-model/command below is byte-for-byte what `OrgSettingsPage`
  * owned before this refactor. `tab` is a plain non-exclusive view toggle (a segmented tab, not an
  * overlay another route/component could ever need to stay consistent with), so it stays a plain
- * signal here rather than a `UiStore` group — see docs/UI-ARCHITECTURE-PLAN.md's own "toggle-style
+ * signal here rather than a `UiStore` group — see docs/plans/done/UI-ARCHITECTURE-PLAN.md's own "toggle-style
  * state that is NOT mutually exclusive... stays a plain boolean/enum" carve-out.
  */
 @Injectable()
@@ -26,7 +26,7 @@ export class OrgSettingsFacade {
   readonly flatGroups = computed(() => flattenGroupTree(this.org.groupTree()));
 
   /**
-   * The page bar's count chip (docs/NAV-IA-REDESIGN-PLAN.md §2.2) — "how many" for whichever section
+   * The page bar's count chip (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2) — "how many" for whichever section
    * is showing, so it answers before the eye reaches the list below, same as every other migrated
    * page's `[count]`. Tab-dependent rather than always "users": a Groups count next to "Organization"
    * while looking at the group tree would be answering the wrong question.
@@ -61,7 +61,7 @@ export class OrgSettingsFacade {
 
   /**
    * A single, comma-joined "GroupName · Role" summary of a user's memberships — the Users list's
-   * own membership column (docs/VISUAL-REFRESH-PLAN.md F5 rule 4: at most one chip per row; this
+   * own membership column (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4: at most one chip per row; this
    * row's one chip is Enabled/Disabled, the row's actual state). Was one `.chip` per membership,
    * unbounded; collapsed to plain text the same way `features/roster/roster.ts#RosterPage
    * .assetNames` already collapses a pilot's N asset assignments into one comma-joined list.

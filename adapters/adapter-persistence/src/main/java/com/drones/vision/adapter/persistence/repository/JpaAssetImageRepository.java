@@ -13,7 +13,7 @@ import java.util.Optional;
 
 /**
  * {@link AssetImageRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}) —
- * docs/UX-REWORK-PLAN.md §U-d item 3.
+ * docs/plans/done/UX-REWORK-PLAN.md §U-d item 3.
  *
  * <p>{@link #save} is an upsert (merge-by-{@code assetId}), matching {@code
  * InMemoryAssetImageRepository}'s {@code Map#put} exactly. {@link #existsByAssetId} runs a {@code

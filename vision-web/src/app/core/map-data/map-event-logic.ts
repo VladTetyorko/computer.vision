@@ -1,7 +1,7 @@
 import type { MapEventPayload } from '../api/models';
 
 /**
- * The one place the `map` SSE topic's fold-into-a-list rule lives (docs/MAP-REWORK-PLAN.md §4.3) —
+ * The one place the `map` SSE topic's fold-into-a-list rule lives (docs/plans/done/MAP-REWORK-PLAN.md §4.3) —
  * pure, Angular-free, shared by all three `core/map-data/**` stores so "created/updated upsert,
  * cleared/deleted remove" can never drift between marks, drawings and layers.
  *

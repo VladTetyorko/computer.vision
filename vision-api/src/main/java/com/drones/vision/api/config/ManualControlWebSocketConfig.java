@@ -11,7 +11,7 @@ import java.util.Objects;
 
 /**
  * Registers {@link ManualControlWebSocketHandler} at {@code /ws/manual-control}
- * (docs/RC-CONTROL-PHASE1-PLAN.md §4), guarded by {@link ManualControlHandshakeInterceptor}.
+ * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4), guarded by {@link ManualControlHandshakeInterceptor}.
  *
  * <p><strong>Origin policy: same-origin (Spring's own default).</strong> Neither {@link
  * org.springframework.web.socket.config.annotation.WebSocketHandlerRegistration#setAllowedOrigins}

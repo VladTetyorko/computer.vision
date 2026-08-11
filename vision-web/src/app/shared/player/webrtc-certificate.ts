@@ -16,7 +16,7 @@ const CERTIFICATE_ALGORITHM: EcKeyGenParams = { name: 'ECDSA', namedCurve: 'P-25
 
 /**
  * One stable ECDSA DTLS certificate per browser, shared by every `<vision-player>` WHEP attach on
- * this page (docs/REALTIME-PLAN.md Phase R-b item 3) — `providedIn: 'root'`, the same convention
+ * this page (docs/plans/done/REALTIME-PLAN.md Phase R-b item 3) — `providedIn: 'root'`, the same convention
  * `FleetStore`/`PollScheduler` already use for a single app-wide instance.
  *
  * **Why this matters**: without it, every fresh `RTCPeerConnection` generates its own ephemeral
@@ -30,7 +30,7 @@ const CERTIFICATE_ALGORITHM: EcKeyGenParams = { name: 'ECDSA', namedCurve: 'P-25
  * **Lazy, memoized, and re-validated on every call** — `certificates()` only ever does real work
  * (an IndexedDB read, or a `generateCertificate()` call) the first time, or again once the
  * previously-resolved certificate has actually expired (Safari caps a certificate's own lifetime at
- * roughly a week regardless of what's requested — docs/REALTIME-PLAN.md Phase R-b item 3's own
+ * roughly a week regardless of what's requested — docs/plans/done/REALTIME-PLAN.md Phase R-b item 3's own
  * caveat) — `isCertificateUsable` (`core/webrtc-certificate-logic.ts`) is the one place that
  * decision is made, unit-tested independent of any real certificate/IndexedDB.
  *

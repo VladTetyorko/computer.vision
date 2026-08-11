@@ -52,7 +52,7 @@ function openMenu(fixture: { nativeElement: HTMLElement; detectChanges(): void }
 }
 
 /**
- * Wave 1's own profile-menu extension (docs/UI-REDESIGN-PLAN.md, F4 "(shell) Account settings →
+ * Wave 1's own profile-menu extension (docs/plans/done/UI-REDESIGN-PLAN.md, F4 "(shell) Account settings →
  * `/settings` via profile menu") — added alongside the pre-existing My activity/Organization/Log
  * out, per `identity-chip.ts`'s own updated class doc comment.
  */
@@ -79,7 +79,7 @@ describe('IdentityChip — profile menu', () => {
 });
 
 /**
- * The dropdown's open state (docs/UI-STATE-PLAN.md §1/§2.2) — moved off native `<details>` onto
+ * The dropdown's open state (docs/plans/done/UI-STATE-PLAN.md §1/§2.2) — moved off native `<details>` onto
  * `GlobalOverlayStore`'s `'identity-menu'` id. `GlobalOverlayStore` itself is left real (root-provided,
  * no HTTP deps) — its own exclusivity/Escape/outside-click/close-on-navigation behavior is covered by
  * `core/ui/overlay-store.spec.ts`; these tests only check that this component wires into it correctly.

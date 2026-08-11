@@ -1,5 +1,5 @@
 /**
- * The `registrationNumber` attribute-key convention (docs/UX-REWORK-PLAN.md §U-d item 3): a
+ * The `registrationNumber` attribute-key convention (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3): a
  * registration/tail number is not a first-class field on `Asset`/`AssetSummary` — it rides in the
  * existing free-form `attributes` map `PATCH /api/assets/{id}` already carries (the plan's own
  * "attributes map works; registrationNumber is an attributes key by convention" pinned note), same

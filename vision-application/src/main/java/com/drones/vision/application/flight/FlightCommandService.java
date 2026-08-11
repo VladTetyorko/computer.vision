@@ -9,7 +9,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
- * Commands an asset's aircraft (docs/DRONE-INFRA-PLAN.md I-e — "bring it home", then Stage 2's
+ * Commands an asset's aircraft (docs/plans/active/DRONE-INFRA-PLAN.md I-e — "bring it home", then Stage 2's
  * arm/disarm + mode select). One interface, one implementation
  * ({@link DefaultFlightCommandService}), mirroring every other service in this package.
  *
@@ -27,7 +27,7 @@ public interface FlightCommandService {
 
     /**
      * Commands {@code assetId}'s aircraft to return to home (return-to-launch), gated by the acting
-     * user's visibility scope (docs/U-SCOPE-PLAN.md, U-e slice 2, feature 3).
+     * user's visibility scope (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 3).
      *
      * <p>The command is refused up front with {@link AccessDeniedException} (mapped to 403 by
      * vision-api) when {@code scope} does not include the asset — an honest "you may not command
@@ -53,7 +53,7 @@ public interface FlightCommandService {
     CommandResult returnToHome(AssetId assetId, UserId actor, VisibilityScope scope);
 
     /**
-     * Commands {@code assetId}'s aircraft into the named flight mode (docs/DRONE-INFRA-PLAN.md I-e
+     * Commands {@code assetId}'s aircraft into the named flight mode (docs/plans/active/DRONE-INFRA-PLAN.md I-e
      * Stage 2), gated by the acting user's visibility scope exactly like {@link #returnToHome}.
      *
      * <p>The requested mode is validated against the vehicle's own {@link
@@ -77,7 +77,7 @@ public interface FlightCommandService {
     CommandResult setMode(AssetId assetId, String modeName, UserId actor, VisibilityScope scope);
 
     /**
-     * Commands {@code assetId}'s aircraft to arm — spin up its motors (docs/DRONE-INFRA-PLAN.md I-e
+     * Commands {@code assetId}'s aircraft to arm — spin up its motors (docs/plans/active/DRONE-INFRA-PLAN.md I-e
      * Stage 2). <b>The highest-danger action this service exposes</b>; the driving adapter gates it
      * with a distinct, higher-friction confirmation than any other command. Scope-gated exactly
      * like {@link #returnToHome}.
@@ -95,7 +95,7 @@ public interface FlightCommandService {
     CommandResult arm(AssetId assetId, boolean force, UserId actor, VisibilityScope scope);
 
     /**
-     * Commands {@code assetId}'s aircraft to disarm — stop its motors (docs/DRONE-INFRA-PLAN.md I-e
+     * Commands {@code assetId}'s aircraft to disarm — stop its motors (docs/plans/active/DRONE-INFRA-PLAN.md I-e
      * Stage 2). Scope-gated exactly like {@link #returnToHome}.
      *
      * @param assetId the asset to command
@@ -113,7 +113,7 @@ public interface FlightCommandService {
 
     /**
      * A best-effort snapshot of what commands {@code assetId}'s aircraft currently accepts, for a
-     * driving adapter to decide which controls to show (docs/DRONE-INFRA-PLAN.md I-e Stage 2).
+     * driving adapter to decide which controls to show (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2).
      *
      * <p>This is a <em>read</em>, not a command: it is scope-checked the way the scoped asset reads
      * are — an out-of-scope (or unknown) asset yields {@link java.util.NoSuchElementException}

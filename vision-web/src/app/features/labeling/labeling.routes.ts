@@ -1,8 +1,8 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/manage/training` and its two drill-ins (docs/CV-TRAINING-PLAN.md Wave T5) — own lazy chunks
- * each, split per vision-web/docs/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
+ * `/manage/training` and its two drill-ins (docs/plans/done/CV-TRAINING-PLAN.md Wave T5) — own lazy chunks
+ * each, split per vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
  * `authGuard`-wrapped children group, no extra role gate (mirrors `/assets`/`/manage/categories`) —
  * create/delete are hidden client-side (and 403 server-side) for a non-manager, but browsing,
  * capturing, and labeling samples are open to any signed-in user who can see the dataset, so the

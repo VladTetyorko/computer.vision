@@ -8,11 +8,11 @@ import java.time.Instant;
 
 /**
  * Wire representation of a {@link Mark} — the response body for every {@code /api/map/marks}
- * endpoint (docs/MAP-REWORK-PLAN.md §4.2's frozen wire contract) and the {@code mark} field inside
+ * endpoint (docs/plans/done/MAP-REWORK-PLAN.md §4.2's frozen wire contract) and the {@code mark} field inside
  * {@link MapEventPayload} on the {@code map} SSE topic (§4.3), so one shape is parsed regardless of
  * whether it arrived via REST or live push.
  *
- * <p>Reworked from the docs/TACTICAL-MARKS-PLAN.md shape it replaces. Three deliberate, breaking
+ * <p>Reworked from the docs/plans/done/TACTICAL-MARKS-PLAN.md shape it replaces. Three deliberate, breaking
  * differences (the SPA migrates in Wave E; no compatibility fields are kept):
  * <ul>
  *   <li>The identity field is {@code markId}, not {@code id} — matching {@code layerId}/{@code

@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * The per-stream <b>track book</b> (docs/TRACKING-PLAN.md &sect;5.E): a {@code Map<Long,
+ * The per-stream <b>track book</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.E): a {@code Map<Long,
  * TrackedObject>} keyed by track id, maintaining each track's {@code firstSeen}/{@code lastSeen}
  * lifetime and expiring tracks that have ended.
  *
@@ -29,14 +29,14 @@ import java.util.Objects;
  * of a second, divergent implementation of the thing cv-service already does.
  *
  * <h2>This is a read model for any consumer, not the SSE topic's private cache</h2>
- * <b>Invariant P3</b> (docs/TRACKING-PLAN.md &sect;3.4, TRACKING-ORCHESTRATION.md &sect;2.3): the
+ * <b>Invariant P3</b> (docs/plans/done/TRACKING-PLAN.md &sect;3.4, TRACKING-ORCHESTRATION.md &sect;2.3): the
  * pipeline's product is a <i>sink-agnostic</i> track update stream, and this book is its
  * application-side read model. Three consumers are planned and all three read exactly this:
  * <ul>
  *   <li><b>UI</b> (today) — {@code GET /api/streams/{id}/tracks} and the live overlay: boxes, ids,
  *       trails, click-to-follow. Consumer-local knowledge it adds: screen size, canvas scale,
  *       colour palette.</li>
- *   <li><b>Geo / COP</b> (docs/TWO-TARGETS-PLAN.md &sect;S2) — box bottom-center plus camera pose
+ *   <li><b>Geo / COP</b> (docs/main/TWO-TARGETS-PLAN.md &sect;S2) — box bottom-center plus camera pose
  *       &rarr; a ground coordinate &rarr; a map mark carrying the track id. Consumer-local
  *       knowledge it adds: camera lat/lon/AGL/yaw/pitch/FOV and {@code GeoProjection}.</li>
  *   <li><b>Guidance</b> (deferred and gated) — the locked track's offset from frame center as the
@@ -55,7 +55,7 @@ import java.util.Objects;
  * <ul>
  *   <li><b>{@link TrackState#LOST} is terminal</b> — a track observed as {@code LOST} leaves the
  *       book immediately. Recovering the same id after an occlusion is cv-service's job (it holds
- *       the track in its own buffer for {@code maxAgeFrames}, docs/TRACKING-PLAN.md &sect;3.2), and
+ *       the track in its own buffer for {@code maxAgeFrames}, docs/plans/done/TRACKING-PLAN.md &sect;3.2), and
  *       when it does recover it, the id simply arrives again and is re-booked. Keeping a dead track
  *       here so it could be "recognised" on return would be association by another name.</li>
  *   <li><b>Silence expires a track too</b> — anything unobserved for {@code retention} is dropped,
@@ -174,7 +174,7 @@ final class TrackBook {
 
     /**
      * @return an immutable snapshot of every currently booked track, ordered by {@code trackId}
-     *         ascending (the order docs/TRACKING-PLAN.md &sect;4.E freezes for {@code GET
+     *         ascending (the order docs/plans/done/TRACKING-PLAN.md &sect;4.E freezes for {@code GET
      *         /api/streams/{id}/tracks}, so no consumer has to sort). Empty before the first tracked
      *         detection arrives, and permanently empty for a stream running {@code
      *         TrackingMode.OFF}. Never {@code null}, never throws.

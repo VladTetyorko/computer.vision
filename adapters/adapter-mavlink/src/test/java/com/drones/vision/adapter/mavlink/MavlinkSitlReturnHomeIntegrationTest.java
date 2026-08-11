@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * docs/DRONE-INFRA-PLAN.md I-e Stage 1 × I-c: proves {@link MavlinkFlightCommander} against a
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1 × I-c: proves {@link MavlinkFlightCommander} against a
  * <em>genuine, flying</em> ArduPilot SITL aircraft ({@code infra/sitl/}) — the one scenario the
  * loopback fakes in {@link MavlinkFlightCommanderTest} cannot cover: a real autopilot accepting
  * {@code DO_SET_MODE → RTL} mid-flight and actually switching modes.
@@ -112,7 +112,7 @@ class MavlinkSitlReturnHomeIntegrationTest {
     }
 
     /**
-     * docs/DRONE-INFRA-PLAN.md I-e Stage 2: the general mode-select path against a genuinely flying
+     * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2: the general mode-select path against a genuinely flying
      * aircraft — {@code setMode(device, "Loiter")} accepted mid-flight, confirmed by the aircraft's
      * own telemetry reporting {@code mode=Loiter}. Deliberately does <b>not</b> arm/disarm SITL:
      * arming mid-test is race-prone (the autofly circuit arms/disarms on its own schedule), so

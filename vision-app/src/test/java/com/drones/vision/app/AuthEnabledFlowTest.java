@@ -17,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * docs/U-AUTH-PLAN.md wave 3 exit criteria with {@code vision.auth.enabled=true}: an
+ * docs/plans/done/U-AUTH-PLAN.md wave 3 exit criteria with {@code vision.auth.enabled=true}: an
  * unauthenticated {@code /api/**} call is {@code 401}, one of the seeded users can log in via
  * {@code /api/auth/login}, the session then reflects that identity through {@code /api/auth/me}, and
  * {@code /api/auth/logout} ends it (a subsequent {@code me} is {@code 401} again).

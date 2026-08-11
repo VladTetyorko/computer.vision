@@ -14,9 +14,9 @@ import java.util.function.Predicate;
 
 /**
  * One open {@code GET /api/live} connection: its {@link SseEmitter}, the mutable set of topics it
- * currently cares about (docs/REALTIME-PLAN.md §4, item 2 — grown/shrunk in place by {@code PATCH
+ * currently cares about (docs/plans/done/REALTIME-PLAN.md §4, item 2 — grown/shrunk in place by {@code PATCH
  * /api/live/{connectionId}/topics} without reconnecting), and the map-visibility predicate captured
- * for its viewer at connect time (docs/MAP-REWORK-PLAN.md §4.3).
+ * for its viewer at connect time (docs/plans/done/MAP-REWORK-PLAN.md §4.3).
  *
  * <h2>Threading</h2>
  * {@link #topics()} is a concurrent set — safe to read/mutate from the connecting request thread,

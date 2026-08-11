@@ -22,8 +22,8 @@ import java.util.concurrent.SubmissionPublisher;
 
 /**
  * {@link TelemetrySourcePort} implementation that ingests MAVLink 2 telemetry over UDP — the
- * de-facto transport for telemetry radios and ArduPilot/PX4 SITL (docs/MVP2-PLAN.md X-a) — and,
- * as of docs/DRONE-INFRA-PLAN.md I-a, the fleet gateway: N vehicles sharing one well-known GCS
+ * de-facto transport for telemetry radios and ArduPilot/PX4 SITL (docs/plans/done/MVP2-PLAN.md X-a) — and,
+ * as of docs/plans/active/DRONE-INFRA-PLAN.md I-a, the fleet gateway: N vehicles sharing one well-known GCS
  * port (14550), matching how every real radio bridge actually behaves in the field. Supports
  * {@link StreamDescriptor#protocol()} {@code "mavlink"} with a {@code udp://host:port} {@link
  * StreamDescriptor#uri()}.
@@ -53,7 +53,7 @@ import java.util.concurrent.SubmissionPublisher;
  *       claim/re-election rules.</li>
  * </ul>
  * Vehicles heard but claimed by nobody are not silently dropped — see {@link
- * MavlinkSocketHub#unclaimedVehicles()} (docs/DRONE-INFRA-PLAN.md I-b consumes this next).
+ * MavlinkSocketHub#unclaimedVehicles()} (docs/plans/active/DRONE-INFRA-PLAN.md I-b consumes this next).
  *
  * <h2>Robustness</h2>
  * Unparseable/garbage datagrams are never fatal — {@code MavlinkConnection#next()} itself scans
@@ -73,7 +73,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     private static final String SCHEME_UDP = "udp";
     static final String DEFAULT_BIND_HOST = "0.0.0.0";
 
-    /** {@code StreamDescriptor.options} key for pinning a device to one MAVLink system id (docs/DRONE-INFRA-PLAN.md I-a). */
+    /** {@code StreamDescriptor.options} key for pinning a device to one MAVLink system id (docs/plans/active/DRONE-INFRA-PLAN.md I-a). */
     static final String OPTION_SYSID = "sysid";
     private static final int MIN_SYSID = 1;
     private static final int MAX_SYSID = 255;
@@ -88,7 +88,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /**
-     * @param settings this module's {@code vision.mavlink.*} tunables (docs/LAYERING-REFACTOR-PLAN.md
+     * @param settings this module's {@code vision.mavlink.*} tunables (docs/plans/active/LAYERING-REFACTOR-PLAN.md
      *                 wave F2) — supplies the local bind-host fallback, the unpinned re-election
      *                 silence window, the shared hub's close-join timeout, and the bounded
      *                 unclaimed-vehicle registry cap, all threaded into each {@link MavlinkSocketHub}
@@ -168,7 +168,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
     /**
      * Whether a hub for this bind address is currently active (i.e. some device has it open right
-     * now). docs/DRONE-INFRA-PLAN.md I-b: lets {@code MavlinkHeartbeatScanner} borrow an already-
+     * now). docs/plans/active/DRONE-INFRA-PLAN.md I-b: lets {@code MavlinkHeartbeatScanner} borrow an already-
      * running hub's socket instead of trying (and failing) to bind a port the gateway already owns.
      */
     boolean hasActiveHub(String bindKey) {
@@ -179,7 +179,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     /**
      * Vehicles currently claimed by an open device on the given bind address — delegates to {@link
      * MavlinkSocketHub#claimedVehicles()}; empty when nothing is open on that address. Package-
-     * private, same "future consumer" shape as {@link #unclaimedVehicles}: docs/DRONE-INFRA-PLAN.md
+     * private, same "future consumer" shape as {@link #unclaimedVehicles}: docs/plans/active/DRONE-INFRA-PLAN.md
      * I-b (`MavlinkHeartbeatScanner`) is the consumer.
      */
     List<MavlinkSocketHub.ClaimedVehicle> claimedVehicles(String bindKey) {
@@ -190,7 +190,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     /**
      * The bind key ({@code host:port}) a supported device's {@code udp://host:port} stream
      * resolves to — the same key {@link #open}/{@link #close} use internally to find/create a
-     * {@link MavlinkSocketHub}. docs/DRONE-INFRA-PLAN.md I-e Stage 1: lets {@code
+     * {@link MavlinkSocketHub}. docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: lets {@code
      * MavlinkFlightCommander} address the same hub this device's telemetry uses, without
      * duplicating the host-defaulting logic. Callers must have already confirmed {@link
      * #supports(Device)} — this assumes a non-null URI with a port, exactly like {@link #open}.
@@ -201,7 +201,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /**
-     * docs/DRONE-INFRA-PLAN.md I-e Stage 1: {@code deviceId}'s current command-TX coordinates on
+     * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: {@code deviceId}'s current command-TX coordinates on
      * the hub for {@code bindKey}, or {@code null} if no hub is active for that address or the
      * device holds no claim on it right now — delegates to {@link MavlinkSocketHub#commandTarget}.
      */
@@ -213,7 +213,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     /**
      * The shared socket for {@code bindKey}'s hub, so a command sender can push a reply through
      * the same socket that receives that hub's traffic instead of opening a second one
-     * (docs/DRONE-INFRA-PLAN.md I-e Stage 1). {@code null} if no active hub.
+     * (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1). {@code null} if no active hub.
      */
     DatagramSocket socket(String bindKey) {
         MavlinkSocketHub hub = hubs.get(bindKey);
@@ -221,7 +221,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /**
-     * docs/DRONE-INFRA-PLAN.md I-e Stage 1: registers interest in the next {@code COMMAND_ACK}
+     * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: registers interest in the next {@code COMMAND_ACK}
      * matching {@code sysid}/{@code commandId} on {@code bindKey}'s hub — delegates to {@link
      * MavlinkSocketHub#awaitAck}. Returns an already-failed future (never {@code null}) if no hub
      * is active for that address, so callers can treat both cases uniformly.
@@ -235,7 +235,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         return hub.awaitAck(sysid, commandId);
     }
 
-    /** docs/DRONE-INFRA-PLAN.md I-e Stage 1: releases a waiter registered via {@link #awaitAck}, idempotent. */
+    /** docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1: releases a waiter registered via {@link #awaitAck}, idempotent. */
     void cancelAckWait(String bindKey, int sysid, int commandId) {
         MavlinkSocketHub hub = hubs.get(bindKey);
         if (hub != null) {
