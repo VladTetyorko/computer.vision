@@ -62,7 +62,7 @@ class VisionCvPropertiesTest {
     void defaultsMatchApplicationPropertiesDocumentedValues() {
         // VisionCvProperties is only ever constructed with all four components explicitly (this
         // record has no no-arg form) -- this test pins the *values* the @DefaultValue
-        // annotations declare (see the class itself), which is what application.properties'
+        // annotations declare (see the class itself), which is what application.yaml'
         // commented vision.cv.detect-width/vision.cv.jpeg-quality lines document as "the default".
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f);
         assertEquals(640, properties.detectWidth());

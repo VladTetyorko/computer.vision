@@ -126,7 +126,7 @@ class PublishWiringTest {
      * docs/plans/done/MVP2-PLAN.md §L: unlike {@code viewUrl}, {@code whepUrl} is deliberately mediamtx's own
      * address, not app-relative (see {@code VisionPublishProperties}'s "WHEP has no third base"
      * javadoc section) — the default is the host-mode {@code whep-base} in {@code
-     * application.properties} (port 18889, matching {@code docker-compose.yml}'s host mapping).
+     * application.yaml} (port 18889, matching {@code docker-compose.yml}'s host mapping).
      */
     @Test
     void whepUrlIsMediamtxsOwnAddressPerHostModeDefault() {

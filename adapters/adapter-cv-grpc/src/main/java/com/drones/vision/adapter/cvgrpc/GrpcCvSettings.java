@@ -7,7 +7,7 @@ import java.util.Objects;
  * Plain, framework-free settings for this module's gRPC transport to cv-service — the single source
  * for every {@code vision.cv} tunable {@link GrpcDetectionPort} and {@link GrpcDatasetUploadPort}
  * need (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;2.2/&sect;2.3). No Spring annotations here: {@code
- * vision-app} owns a {@code VisionCvProperties} record bound to {@code application.properties} and
+ * vision-app} owns a {@code VisionCvProperties} record bound to {@code application.yaml} and
  * maps it to one of these before handing it to either adapter's constructor — this class must never
  * be constructed from a {@code @ConfigurationProperties} type directly (that would point this module
  * at {@code vision-app}, breaking the hexagon).

@@ -39,7 +39,7 @@ public record VisionMjpegProperties(
      *                          Transmit#DEFAULT_BIND_HOST}
      * @param maxViewerThreads  dispatch-pool cap for concurrent viewer connections; {@code null}
      *                          (absent, the default) reproduces the unbounded cached thread pool —
-     *                          commented out in {@code application.properties}, documenting the
+     *                          commented out in {@code application.yaml}, documenting the
      *                          "no cap" default rather than setting one
      * @param jpegQuality       JPEG compression quality in {@code (0,1]}; default {@value
      *                          Transmit#DEFAULT_JPEG_QUALITY}

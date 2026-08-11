@@ -9,7 +9,7 @@ import java.util.Objects;
  * .resilience.*}/{@code .cadence.*} tunable {@link MediamtxStreamPublisher}, {@link
  * H264RecorderFactory}, {@link PublishBackoff}, and {@link CadenceEstimator} need. No Spring
  * annotations here: {@code vision-app} owns a {@code VisionPublishProperties} record bound to {@code
- * application.properties} and maps it to one of these before handing it to {@link
+ * application.yaml} and maps it to one of these before handing it to {@link
  * MediamtxStreamPublisher}'s constructor — this class must never be constructed from a {@code
  * @ConfigurationProperties} type directly (that would point this module at {@code vision-app},
  * breaking the hexagon).

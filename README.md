@@ -32,7 +32,7 @@ End-to-end vertical slice: register a device (the built-in `sim` source, or a re
    ```
    ./mvnw spring-boot:run -pl vision-app
    ```
-   By default (`vision.publish.enabled=true`) it publishes to mediamtx at `rtsp://localhost:8554` (push) / `http://localhost:8888` (HLS view) — see `vision-app/src/main/resources/application.properties`. Without mediamtx running, the publisher just drops frames and retries with backoff (see `docs/plans/done/PHASE1-PLAN.md` §0.3) rather than failing the app; set `vision.publish.enabled=false` to use the no-op publisher instead.
+   By default (`vision.publish.enabled=true`) it publishes to mediamtx at `rtsp://localhost:8554` (push) / `http://localhost:8888` (HLS view) — see `vision-app/src/main/resources/application.yaml`. Without mediamtx running, the publisher just drops frames and retries with backoff (see `docs/plans/done/PHASE1-PLAN.md` §0.3) rather than failing the app; set `vision.publish.enabled=false` to use the no-op publisher instead.
 3. **Open the dev console**: [http://localhost:8080](http://localhost:8080).
 4. **Register a `sim` device** in the form (protocol `sim`, e.g. uri `sim://demo` — no camera needed), then **start** its stream.
 5. **Watch**: the console opens the returned `viewUrl` (`http://localhost:8888/<streamId>/index.m3u8`) in its built-in `hls.js` player. Expect **~5–10 s of latency** before video appears — mediamtx's default HLS muxer buffers a few segments (segment duration × segment count) before the playlist is servable, and `hls.js`/native HLS add their own start-up buffering on top; this is inherent to HLS, not a bug.

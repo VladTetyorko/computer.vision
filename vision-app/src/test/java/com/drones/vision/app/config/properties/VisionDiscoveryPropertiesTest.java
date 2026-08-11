@@ -46,7 +46,7 @@ class VisionDiscoveryPropertiesTest {
     void defaultMatchesApplicationPropertiesDocumentedValue() {
         // VisionDiscoveryProperties is only ever constructed with mavlinkPort explicitly (this
         // record has no no-arg form) -- this test pins the *value* the @DefaultValue annotation
-        // declares (see the class itself), which is what application.properties' commented
+        // declares (see the class itself), which is what application.yaml's commented
         // vision.discovery.mavlink-port line documents as "the default".
         assertEquals(14550, Integer.parseInt(VisionDiscoveryProperties.DEFAULT_MAVLINK_PORT));
     }

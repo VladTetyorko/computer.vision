@@ -13,7 +13,7 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
  * them.
  *
  * <p>Framework-free (no Spring annotation): {@code vision-app} binds a {@code
- * VisionApplicationProperties} record from {@code application.properties} and maps it onto this
+ * VisionApplicationProperties} record from {@code application.yaml} and maps it onto this
  * record's constructor, one field at a time, before handing it to {@link DefaultStreamService}.
  * Every {@link #defaults()} value is byte-identical to the literal it replaces.
  *

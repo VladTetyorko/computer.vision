@@ -16,7 +16,7 @@ import java.time.Duration;
  * are deliberately two distinct types in two distinct packages, never the same class: {@code
  * vision-api} may not depend on Spring's {@code @ConfigurationProperties} machinery (the dependency
  * rule runs the other way), so it keeps its own plain mirror; this record's only job is to bind
- * {@code application.properties} and map onto an instance of that one. Always reference either type
+ * {@code application.yaml} and map onto an instance of that one. Always reference either type
  * by its fully-qualified name in a file that needs both (see {@code wiring.ApplicationServiceWiring}).
  *
  * @param snapshot {@code SnapshotJpegEncoder}'s downscale/encode tunables

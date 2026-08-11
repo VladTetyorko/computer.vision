@@ -161,14 +161,16 @@ laptop, no new firewall hole there). Either works:
 
 ## 5. Laptop side
 
-In `vision-app/src/main/resources/application.properties` (or override via
-env — Spring's relaxed binding maps these to `VISION_CV_ENABLED` /
+In `vision-app/src/main/resources/application.yaml`, under its `cv:` block (or
+override via env — Spring's relaxed binding maps these to `VISION_CV_ENABLED` /
 `VISION_CV_ENDPOINT`, see `docker-compose.yml` for the same pattern used
 against the in-compose `cv-service` container):
 
-```properties
-vision.cv.enabled=true
-vision.cv.endpoint=<gpu-box-host-or-tailnet-name>:50051
+```yaml
+vision:
+  cv:
+    enabled: true
+    endpoint: <gpu-box-host-or-tailnet-name>:50051
 ```
 
 `vision.cv.endpoint` must be `host:port` (`VisionCvProperties` validates

@@ -81,14 +81,14 @@ services:
       # ports aren't remapped between containers), see vision-app's
       # VISION_PUBLISH_MEDIAMTX_HLS_BASE below. Must match
       # vision.publish.mediamtx.hls-base's host-mode default in vision-app's
-      # application.properties.
+      # application.yaml.
       - "18888:8888" # HLS
       # WHEP (docs/plans/done/MVP2-PLAN.md L-a): same collision-avoidance rationale and
       # host/container split as HLS above -- host 18889, container's own
       # default 8889 unaffected. Unlike HLS, WHEP has no vision-app-side
       # proxy, so *browsers* hit this mapped port directly; must match
       # vision.publish.mediamtx.whep-base's host-mode default in vision-app's
-      # application.properties.
+      # application.yaml.
       - "18889:8889" # WHEP (WebRTC signaling: POST offer / HTTP)
       # WebRTC media (ICE/UDP). This one CANNOT be renumbered like the two
       # above: mediamtx bakes its own listening port (mediamtx.yml's default
@@ -290,7 +290,7 @@ services:
       # to the *browser* (see VisionPublishProperties's "WHEP has no third
       # base" javadoc), and "mediamtx" is not resolvable from the host where
       # the browser runs. So this stays the same host-mapped-port value as
-      # application.properties' own default (http://localhost:18889) even
+      # application.yaml's own default (http://localhost:18889) even
       # though vision-app is containerized here -- set explicitly (rather
       # than left to the default) so this reasoning is visible at the compose
       # level, not just in source.
@@ -306,7 +306,7 @@ services:
       VISION_PERSISTENCE_PASSWORD: ${POSTGRES_PASSWORD}
       # docs/plans/done/U-AUTH-PLAN.md wave 3: turn on real Spring Security session auth
       # for anyone using `docker compose up`. The *compiled* default
-      # (vision.auth.enabled=false in vision-app's application.properties)
+      # (vision.auth.enabled=false in vision-app's application.yaml)
       # stays off on purpose -- ~26 unrelated @SpringBootTest classes plus
       # AuthDisabledSecurityTest rely on that default, so only this
       # compose-level override flips it, never the compiled default (see

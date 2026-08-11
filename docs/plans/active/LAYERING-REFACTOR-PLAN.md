@@ -98,7 +98,7 @@ Explicitly **out** of scope — these stay `static final` and must not be "exter
    dependency at `vision-app` and break the hexagon.
 
 **The behavior guardrail (non-negotiable):** each extracted property's `@DefaultValue` must be
-**byte-identical to the literal it replaces**, and new keys are added to `application.properties`
+**byte-identical to the literal it replaces**, and new keys are added to `application.yaml`
 **commented out**, documenting the default rather than overriding it — matching the existing style of
 `vision.discovery.mavlink-port` and `vision.rc.watchdog-timeout-ms`. Consequence: a freshly-built app
 behaves exactly as today, and every existing test stays green without touching an assertion. A wave
@@ -349,7 +349,7 @@ for that wave.
 | **C** | `adapter-persistence` → `repository/`, `mapper/` (extract the inlined `toDomain`/`toEntity` per repo), `config/`; `PersistenceUnit`'s Hibernate settings → properties | B | `-pl adapters/adapter-persistence,vision-app` |
 | **D** | `vision-app` → `config/properties/` (the 8 records off the root), **split the 825-line `WiringConfiguration`/44 beans into per-concern `wiring/` classes** (`VideoSourceWiring`, `TelemetryWiring`, `PublishWiring`, `CvWiring`, `ApplicationServiceWiring`, `FeedTransmitterWiring`, …), root classes → `security/` + `events/` + `bootstrap/` | A,B,C | `-pl vision-app` |
 | **E1–E4** | Adapter **internal splits only**, public constructors unchanged: E1 rtsp+v4l2, E2 mavlink, E3 publish-hls+overlay, E4 cv-grpc+mjpeg+simulation+discovery | — (parallel with A–D) | `-pl adapters/<each>` |
-| **F1–F4** | Adapter **config extraction**: settings record + `Vision*Properties` + its own `wiring/` class + its own `application.properties` block. Pairs 1:1 with E1–E4 | D + matching E | `-pl adapters/<each>,vision-app` |
+| **F1–F4** | Adapter **config extraction**: settings record + `Vision*Properties` + its own `wiring/` class + its own `application.yaml` block. Pairs 1:1 with E1–E4 | D + matching E | `-pl adapters/<each>,vision-app` |
 | **G** | `cv-service` restructure + `config.py` | — (parallel from day 0) | `cv-service/scripts/test.sh` |
 | **H** | Final: add ArchUnit package-shape rules (controllers only in `..api.controller`, `@ConfigurationProperties` only in `..app.config.properties`, no `..application..` class outside its feature/pipeline/scope/exception packages); `MODULE.md` sweep; `./mvnw -B verify` | all | full `verify` |
 
@@ -359,7 +359,7 @@ per-concern wiring classes each F-wave owns its own file and they parallelize cl
 file is also the single worst "no separation of responsibilities" instance in `vision-app`, so this
 pays twice.
 
-**The one genuinely shared file across F1–F4 is `application.properties`.** Each wave appends only its
+**The one genuinely shared file across F1–F4 is `application.yaml`.** Each wave appends only its
 own commented block, in the existing `# --- Section ---` style, at the end. Conflicts are trivial to
 resolve but waves should not reorder or reformat existing sections.
 
@@ -367,7 +367,7 @@ resolve but waves should not reorder or reformat existing sections.
 
 - Scoped `-pl` build green (or `scripts/test.sh` for G); no test deleted or weakened.
 - No literal from §1.3's in-scope list left in the wave's classes; every new default byte-identical.
-- New keys documented and **commented out** in `application.properties`.
+- New keys documented and **commented out** in `application.yaml`.
 - Package-private visibility preserved except where §4.1 names an unavoidable widening.
 - `MODULE.md` updated.
 
