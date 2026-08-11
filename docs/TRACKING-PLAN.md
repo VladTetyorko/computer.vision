@@ -1,6 +1,17 @@
 # TRACKING-PLAN — the tracking engine (detect-then-track duty cycle)
 
-Status: **draft for review** (2026-08-11). Implements **S1** of docs/TWO-TARGETS-PLAN.md ("the one
+Status: **implemented** (2026-08-11) — waves **T0–T8 all landed green**, including T8's default flip
+to `ASSOCIATE`. Two of §10's three touchable outcomes are **measured** (cv-service/MODULE.md, "Wave T8
+— the measured outcome"): `ASSOCIATE` costs less than run-to-run noise over `OFF`, and `FOLLOW` drops
+detector passes 30× (15.07/s → 0.50/s) and CPU 22.9× (297% → 13% of one core). **The camera-facing
+half of §10 is deliberately NOT claimed**: this repo has no camera (H1 unbought), so "stable ids on
+live street video through a real occlusion" and the cockpit follow-lock demo await H1 hardware —
+what was measured instead is a real detector and real engines over a panned real photograph with a
+drawn occluder, and it is labelled as exactly that. The §3.3 portability criterion is met as a
+**resolution** check (`manylinux_2_28_aarch64`, exit 0), not as a green ARM build; there is still no
+ARM CI and no Pi.
+
+Implements **S1** of docs/TWO-TARGETS-PLAN.md ("the one
 real hole in the core", matrix row **K2**), extended with the detect-then-track duty-cycle
 architecture the user specified: two perception loops on the same stream, running at very different
 rates, cooperating so that **detection stops loading the machine once a target is captured**.

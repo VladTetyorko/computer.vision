@@ -177,7 +177,7 @@ Historically wired directly in `WiringConfiguration` (`@EnableConfigurationPrope
 
 ## application.properties
 
-`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:18888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below; host-mode value, not mediamtx's own default 8888, for the collision-avoidance reason documented inline in `application.properties`) · `vision.publish.mediamtx.whep-base=http://localhost:18889` (docs/MVP2-PLAN.md L-a — mediamtx's WebRTC/WHEP egress; unlike `hls-base`, handed to viewers verbatim, so this must already be browser-reachable — see "WHEP viewing" below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true` · `vision.cv.enabled=false` (default — no cv-service required; see "CV inference wiring" below) · `vision.cv.endpoint=localhost:50051` (cv-service's `DetectStream` gRPC endpoint, only read when `vision.cv.enabled=true`) · `vision.cv.detect-width`/`vision.cv.jpeg-quality` (docs/REMOTE-CV-PLAN.md P1 item 5, `GrpcDetectionPort`'s wire-tuning knobs — see "CV inference wiring" below; commented out in `application.properties`, documenting their `640`/`0.8` defaults rather than setting them, only read when `vision.cv.enabled=true`) · `vision.persistence.enabled=false` (default — in-memory fleet + history repositories, no database required; see "Persistence wiring" below) · `vision.persistence.jdbc-url=jdbc:postgresql://localhost:5432/vision` / `vision.persistence.username=vision` / `vision.persistence.password=vision` (only read when `vision.persistence.enabled=true`) · `vision.live.enabled=true` (default — server-push `/api/live` SSE endpoint + `LiveUpdatePublisherPort` wired to the real registry; see "Server-push data plane" below) · `vision.simulation.resume-on-boot=true` (default — backend follow-up batch; whether `SimulationResumeRunner` calls `SimulationService#resumeAll()` once at boot; only takes effect when `vision.persistence.enabled=true` too; see "Simulated-feed resume-on-boot" below) · `vision.tracking.default-mode=OFF` / `.follow-fps=15` / `.verify-every-millis=2000` / `.stats-window-seconds=30` / `.track-retention-seconds=5` (all defaults, all commented out in `application.properties` — docs/TRACKING-PLAN.md, docs/TRACKING-ORCHESTRATION.md §4.3; see "Tracking engine wiring" below for which of them seed a new stream and which configure the read models) · `vision.rc.watchdog-timeout-ms=300` (default, commented out in `application.properties` — docs/RC-CONTROL-PHASE1-PLAN.md R4; `manualControlService`'s input-loss watchdog timeout; SITL-tune against measured glass-to-stick latency before relying on it, per the plan's own verification steps).
+`spring.application.name=vision` · `vision.publish.enabled=true` · `vision.publish.mediamtx.rtsp-base=rtsp://localhost:8554` · `vision.publish.mediamtx.hls-base=http://localhost:18888` (internal upstream mediamtx address; viewers never see it — see HLS proxy below; host-mode value, not mediamtx's own default 8888, for the collision-avoidance reason documented inline in `application.properties`) · `vision.publish.mediamtx.whep-base=http://localhost:18889` (docs/MVP2-PLAN.md L-a — mediamtx's WebRTC/WHEP egress; unlike `hls-base`, handed to viewers verbatim, so this must already be browser-reachable — see "WHEP viewing" below) · `vision.publish.view-base=/hls` (app-relative URL base actually handed to viewers) · `vision.discovery.enabled=true` · `vision.cv.enabled=false` (default — no cv-service required; see "CV inference wiring" below) · `vision.cv.endpoint=localhost:50051` (cv-service's `DetectStream` gRPC endpoint, only read when `vision.cv.enabled=true`) · `vision.cv.detect-width`/`vision.cv.jpeg-quality` (docs/REMOTE-CV-PLAN.md P1 item 5, `GrpcDetectionPort`'s wire-tuning knobs — see "CV inference wiring" below; commented out in `application.properties`, documenting their `640`/`0.8` defaults rather than setting them, only read when `vision.cv.enabled=true`) · `vision.persistence.enabled=false` (default — in-memory fleet + history repositories, no database required; see "Persistence wiring" below) · `vision.persistence.jdbc-url=jdbc:postgresql://localhost:5432/vision` / `vision.persistence.username=vision` / `vision.persistence.password=vision` (only read when `vision.persistence.enabled=true`) · `vision.live.enabled=true` (default — server-push `/api/live` SSE endpoint + `LiveUpdatePublisherPort` wired to the real registry; see "Server-push data plane" below) · `vision.simulation.resume-on-boot=true` (default — backend follow-up batch; whether `SimulationResumeRunner` calls `SimulationService#resumeAll()` once at boot; only takes effect when `vision.persistence.enabled=true` too; see "Simulated-feed resume-on-boot" below) · `vision.tracking.default-mode=ASSOCIATE` (wave T8 — was `OFF`; set `OFF` for the pre-tracking behavior) / `.follow-fps=15` / `.verify-every-millis=2000` / `.stats-window-seconds=30` / `.track-retention-seconds=5` (all defaults, all commented out in `application.properties` — docs/TRACKING-PLAN.md, docs/TRACKING-ORCHESTRATION.md §4.3; see "Tracking engine wiring" below for which of them seed a new stream and which configure the read models) · `vision.rc.watchdog-timeout-ms=300` (default, commented out in `application.properties` — docs/RC-CONTROL-PHASE1-PLAN.md R4; `manualControlService`'s input-loss watchdog timeout; SITL-tune against measured glass-to-stick latency before relying on it, per the plan's own verification steps).
 
 **New in docs/LAYERING-REFACTOR-PLAN.md wave D** (all commented out, documenting rather than overriding every default — see "Package shape" above for the full record table): `vision.rtsp.*` (transport/timeouts/probesize/`transmit.*`), `vision.mjpeg.*` (read-timeout/buffer-capacity/`transmit.*`), `vision.v4l2.*` (buffer-capacity/close-join-timeout only — no `default-video-size`/`framerate`/`input-format`, see `VisionV4l2Properties`'s own javadoc for why), `vision.mavlink.*` (bind-host/silence-window/timeouts/`scan.*`/`transmit.*`), `vision.rc.override-hz`/`.min-override-hz`/`.max-override-hz`/`.release-frames` (extends the pre-existing `vision.rc.watchdog-timeout-ms`), `vision.overlay.*` (jpeg-quality/stroke/font/OSD tunables), `vision.cv.response-timeout`/`.keepalive-*`/`.channel-shutdown-timeout`/`.plaintext`/`.upload.*`/`.registry.call-timeout` (extends the pre-existing `vision.cv.enabled`/`.endpoint`/`.detect-width`/`.jpeg-quality`), `vision.discovery.mdns.*`/`.v4l2.*` (extends the pre-existing `vision.discovery.enabled`/`.mavlink-port`), `vision.simulation.video.*`/`.telemetry.*` (extends the pre-existing `vision.simulation.resume-on-boot`), `vision.publish.encoder.*`/`.resilience.*`/`.cadence.*`/`.replay.*` (extends the pre-existing `vision.publish.*`), and `vision.api.*` (Spring-bound counterpart of vision-api's own framework-free `VisionApiProperties`, wiring a real `SnapshotJpegEncoder` bean).
 
@@ -205,7 +205,7 @@ layering, so it is spelled out rather than left to the reader:
 
 | Key | Default | What it does |
 |---|---|---|
-| `vision.tracking.default-mode` | `OFF` | seeds **new** streams (`TrackingWiring#streamStartTrackingSeed` → `StreamPipelineSettings#trackingSeed` → `DefaultStreamService#start`, i.e. *every* start path) |
+| `vision.tracking.default-mode` | `ASSOCIATE` (wave T8; was `OFF`) | seeds **new** streams (`TrackingWiring#streamStartTrackingSeed` → `StreamPipelineSettings#trackingSeed` → `DefaultStreamService#start`, i.e. *every* start path). Set `OFF` for the pre-tracking behavior |
 | `vision.tracking.follow-fps` | `15` | same — the *Java*-side sampler's rate while `FOLLOW` is active (cv-service has no such knob and must never care how often it is fed) |
 | `vision.tracking.verify-every-millis` | `2000` | same — `FOLLOW`'s detector re-verify cadence |
 | `vision.tracking.stats-window-seconds` | `30` | configures the per-stream **read model** `TrackingStatsWindow`, via `ApplicationServiceWiring#streamPipelineSettings` → `StreamPipelineSettings#trackingStatsWindow` |
@@ -1330,6 +1330,50 @@ measurements.
   Harmless today (Wave E refetches `GET /api/map/layers` on connect); worth remembering when
   debugging a dev session that looks like it "lost" its shared marks.
 
+## docs/TRACKING-PLAN.md wave T8 done (the default flip + the end-to-end proof)
+
+`./mvnw -B -pl vision-app test`: **220/220 green** (was 218 — +2: `TrackingAssociateE2ETest`, and
+`TrackingWiringTest` split its "default seed" test into the ASSOCIATE default plus a new
+`aDeploymentCanStillPinTrackingOffAndThatIsTheOnlyWayToGetThePreTrackingBehaviour`).
+
+**`vision.tracking.default-mode` flipped `OFF` → `ASSOCIATE`, and that is not a cosmetic companion to
+the domain flip — it is half of it.** `TrackingWiring#streamStartTrackingSeed` states a mode
+*unconditionally*, and `DefaultStreamService#start` folds the seed **over** `PipelineConfig.defaults()`
+(request > deployment > code default). A seed still saying `OFF` therefore wins over the domain's new
+`ASSOCIATE` on every real start path — device, asset, simulation, demo fleet — while
+`PipelineConfigTest` happily goes green proving a flip that reaches nothing. That is exactly the
+failure mode this deployment layer is shaped to produce, so it is called out in
+`VisionTrackingProperties`' javadoc, in `TrackingWiringContextTest`, and here. A deployment that wants
+the old behavior pins `vision.tracking.default-mode=OFF`, which `TrackingWiringTest` now covers as its
+own test — the honest place for that decision to live.
+
+**`TrackingAssociateE2ETest` — the wave's headline test.** Same shape as `CvDetectionE2ETest` (real
+in-test loopback-TCP `Inference/DetectStream` server, real production wiring via `vision.cv.endpoint`,
+asset+stream created through `AssetService`, endpoint hit through a hand-built `MockMvc`). It drives
+the whole chain — proto → `DetectionFrameCodec` → `Detection.track()` → `TrackBook`/
+`TrackingStatsWindow` → `GET /api/streams/{id}/tracks` — and asserts **identity**, not field presence:
+
+- the servicer emits track-bearing detections **only** for a `FrameRequest` that actually states
+  `TRACKING_MODE_ASSOCIATE`, so the test fails loudly if either half of the flip is reverted —
+  **verified, not assumed**: reverting both production literals and re-running made it fail, and its
+  failure message names the modes the server actually saw rather than just "expected true";
+- ids `7`/`8` are sent on ≥3 **distinct** frame sequences with a box that drifts between them;
+- the endpoint reports **exactly two** tracks. Identity dropped anywhere gives an empty list
+  (`track == null` is filtered); identity churned gives one entry per frame. Two is only reachable if
+  every layer carried the same id through;
+- each track's `firstSeen` is strictly before its `lastSeen` — the book *merged* observations from
+  different frames rather than replacing an entry, which is the identity claim itself;
+- `stats.mode`/`stats.lastDetectorReason`/`stats.detectorPasses` are asserted too, as an independent
+  second witness off the same responses.
+
+**Gotcha this wave paid for, worth knowing before you debug a vision-app test:** `-pl vision-app`
+resolves every adapter from `~/.m2`, and the `adapter-cv-grpc` jar there was **five days stale**
+(pre-wave-T4). The full vision-app suite was green against it while `FrameRequest.tracking` was never
+being set at all — the new E2E test is what surfaced it, reporting
+`modes=[TRACKING_MODE_UNSPECIFIED]`. **Install the adapters before running `-pl vision-app test`**:
+`./mvnw -B -pl adapters/adapter-cv-grpc,adapters/adapter-overlay install -DskipTests`. A green
+vision-app suite proves nothing about a cross-module contract if the other module's jar predates it.
+
 ## docs/TRACKING-PLAN.md wave T6 done (tracking wiring + deployment properties)
 
 `./mvnw -B -pl vision-app test`: **215/215 green** (was 205 — +10: `config.wiring.TrackingWiringTest`
@@ -1337,13 +1381,16 @@ measurements.
 the new `TrackingConfig`/`List<CvTrackerResponse>` beans are a domain record and a `vision-api` DTO
 list, so no rule about adapter/`@ConfigurationProperties`/package placement is touched.
 
-**The default-config bar, proven:** every default in `VisionTrackingProperties` leaves behavior
-exactly as it was. `default-mode=OFF` is the same value `PipelineConfig.defaults()` carries through
-waves T2–T7, so a stream started with no request-side `tracking` object gets `TrackingConfig.off()` —
-asserted twice, once without Spring (`TrackingWiringTest#defaultPropertiesSeedNewStreamsWithTrackingOffExactlyAsBeforeTrackingExisted`)
-and once through the real context (`TrackingWiringContextTest#defaultConfigurationSeedsNewStreamsWithTrackingOff`).
-The two window keys map to the exact durations `StreamPipelineSettings.defaults()` already used
+**The default-config bar, as it stood at T6:** every default in `VisionTrackingProperties` left
+behavior exactly as it was. `default-mode=OFF` was the same value `PipelineConfig.defaults()` carried
+through waves T2–T7, so a stream started with no request-side `tracking` object got
+`TrackingConfig.off()` — asserted both without Spring and through the real context. The two window
+keys map to the exact durations `StreamPipelineSettings.defaults()` already used
 (`theDefaultWindowsAreByteIdenticalToTheSettingsRecordsOwnDefaults`).
+
+**Wave T8 moved `default-mode` to `ASSOCIATE`** together with the domain default; both assertions
+above were rewritten to the new truth rather than weakened. See the T8 section below for why the
+property *had* to move with the domain and could not simply lag it.
 
 New/changed here: `config/properties/VisionTrackingProperties.java`, `config/wiring/TrackingWiring.java`,
 `ApplicationServiceWiring#streamService`/`#streamPipelineSettings` (one more properties argument, and

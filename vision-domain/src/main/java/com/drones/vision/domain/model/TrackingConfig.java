@@ -71,10 +71,14 @@ public record TrackingConfig(TrackingMode mode, String engineId, int verifyEvery
     }
 
     /**
-     * Tracking off — today's behavior, byte-identical. {@link PipelineConfig#defaults()} returns
-     * this (deliberately <strong>not</strong> {@link #defaults()}) through docs/TRACKING-PLAN.md
-     * waves T2–T7; the flip to {@link #defaults()} is wave T8's own single, reviewable commit
-     * (docs/TRACKING-PLAN.md §5.G, docs/TRACKING-ORCHESTRATION.md D15).
+     * Tracking off — the detector runs on every sampled frame and no detection carries an id, which
+     * is byte-identical to how the pipeline behaved before tracking existed. Reachable two ways:
+     * {@code PATCH /api/streams/{id}/config} for one stream, {@code vision.tracking.default-mode=OFF}
+     * for a deployment. It is <strong>no longer</strong> what {@link PipelineConfig#defaults()}
+     * returns — that flipped to {@link #defaults()} in docs/TRACKING-PLAN.md wave T8 (§5.G).
+     *
+     * <p>Still the value every {@link PipelineConfig} <em>convenience</em> constructor defaults to,
+     * so a call site written before tracking existed behaves exactly as it did.
      *
      * @return an {@code OFF} tracking configuration with no lock
      */
@@ -85,8 +89,13 @@ public record TrackingConfig(TrackingMode mode, String engineId, int verifyEvery
 
     /**
      * The Mode-A default: every detection tracked across frames with a stable id, server-default
-     * engine, and every cadence at its documented default. Not used by {@link
-     * PipelineConfig#defaults()} until wave T8 — see {@link #off()}.
+     * engine, and every cadence at its documented default. <strong>This is what {@link
+     * PipelineConfig#defaults()} ships</strong> as of docs/TRACKING-PLAN.md wave T8 (§5.G) — a new
+     * stream associates unless something says otherwise.
+     *
+     * <p>{@code ASSOCIATE} costs one association pass per <em>sampled</em> frame (measured ~0.78 ms
+     * against a 22.8 ms {@code yolo26n} detector pass, cv-service/MODULE.md), and never raises the
+     * sample rate — {@code FOLLOW} is the mode that does.
      *
      * @return an {@code ASSOCIATE} tracking configuration with no lock
      */

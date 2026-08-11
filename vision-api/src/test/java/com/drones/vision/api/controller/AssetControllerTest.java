@@ -727,7 +727,7 @@ class AssetControllerTest {
         Asset asset = asset(device);
 
         StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), isNull(), any())).thenReturn(streamId);
+        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId))
                 .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
 
@@ -737,7 +737,7 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$.viewUrl")
                         .value("http://localhost:8888/" + streamId.value() + "/index.m3u8"));
 
-        verify(assetService).startStream(eq(asset.id()), isNull(), any());
+        verify(assetService).startStream(eq(asset.id()), isNull(), any(), any());
     }
 
     @Test
@@ -746,7 +746,7 @@ class AssetControllerTest {
         Asset asset = asset(device);
 
         StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), eq(device.id()), any())).thenReturn(streamId);
+        when(assetService.startStream(eq(asset.id()), eq(device.id()), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
 
         String body = "{\"deviceId\":\"" + device.id().value() + "\"}";
@@ -757,7 +757,7 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
                 .andExpect(jsonPath("$.viewUrl").doesNotExist());
 
-        verify(assetService).startStream(eq(asset.id()), eq(device.id()), any());
+        verify(assetService).startStream(eq(asset.id()), eq(device.id()), any(), any());
     }
 
     @Test
@@ -766,7 +766,7 @@ class AssetControllerTest {
         Asset asset = asset(device);
 
         StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), isNull(), any())).thenReturn(streamId);
+        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId))
                 .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
         when(streamPublisherPort.whepUrl(streamId))
@@ -786,7 +786,7 @@ class AssetControllerTest {
         Asset asset = asset(device);
 
         StreamId streamId = StreamId.random();
-        when(assetService.startStream(eq(asset.id()), isNull(), any())).thenReturn(streamId);
+        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenReturn(streamId);
         when(streamPublisherPort.viewUrl(streamId))
                 .thenReturn(Optional.of(URI.create("http://localhost:8888/" + streamId.value() + "/index.m3u8")));
         when(streamPublisherPort.whepUrl(streamId)).thenReturn(Optional.empty());
@@ -801,7 +801,7 @@ class AssetControllerTest {
         Device device = videoDevice();
         Asset asset = asset(device);
 
-        when(assetService.startStream(eq(asset.id()), isNull(), any())).thenThrow(new IllegalArgumentException(
+        when(assetService.startStream(eq(asset.id()), isNull(), any(), any())).thenThrow(new IllegalArgumentException(
                 "Asset " + asset.id().value() + " has multiple video-capable devices, specify which one to start"));
 
         mockMvc.perform(post("/api/assets/{id}/stream", asset.id().value()))
@@ -812,7 +812,7 @@ class AssetControllerTest {
     @Test
     void startStreamReturns404ForUnknownAsset() throws Exception {
         AssetId unknown = AssetId.random();
-        when(assetService.startStream(eq(unknown), isNull(), any()))
+        when(assetService.startStream(eq(unknown), isNull(), any(), any()))
                 .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         mockMvc.perform(post("/api/assets/{id}/stream", unknown.value()))

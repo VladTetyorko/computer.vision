@@ -8,6 +8,8 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,10 +31,13 @@ class PipelineConfigTest {
         assertEquals(EventRuleConfig.defaults(), defaults.eventRule());
         assertTrue(defaults.overlayBurnIn(), "overlay burn-in defaults on, unchanged behavior");
         assertTrue(defaults.detectionEnabled(), "detection defaults on, unchanged behavior");
-        // docs/TRACKING-PLAN.md §5.G / §6.C: PipelineConfig.defaults() ships TrackingConfig.off()
-        // through waves T2-T7, deliberately NOT TrackingConfig.defaults() (ASSOCIATE) - the flip
-        // is wave T8's own single, reviewable commit. Do not "fix" this assertion before T8.
-        assertEquals(TrackingMode.OFF, defaults.tracking().mode(), "tracking defaults OFF until wave T8");
+        // docs/TRACKING-PLAN.md §5.G, wave T8: this is the flip. PipelineConfig.defaults() shipped
+        // TrackingConfig.off() through waves T2-T7 so every pre-tracking test stayed green while the
+        // chain was built; T8 turns it on, and this assertion is the line that says so. A new stream
+        // associates, so every detection it produces carries a stable trackId.
+        assertEquals(TrackingConfig.defaults(), defaults.tracking(), "tracking defaults ASSOCIATE as of wave T8");
+        assertEquals(TrackingMode.ASSOCIATE, defaults.tracking().mode());
+        assertNull(defaults.tracking().lock(), "a default stream holds no target -- FOLLOW is what locks");
     }
 
     @Test
@@ -81,8 +86,14 @@ class PipelineConfigTest {
         assertEquals(customRule, config.eventRule());
         assertFalse(config.overlayBurnIn());
         assertFalse(config.detectionEnabled());
+        // Wave T8 flipped defaults() to ASSOCIATE but deliberately left the convenience ctors on
+        // off(): "the component you did not mention keeps its pre-existing value" is a different
+        // contract from "what a new stream should be", and conflating them would turn tracking on
+        // for every call site that merely predates the field.
         assertEquals(TrackingConfig.off(), config.tracking(),
-                "old 9-arg canonical ctor (pre-TRACKING-PLAN) now defaults tracking=off");
+                "old 9-arg canonical ctor (pre-TRACKING-PLAN) still defaults tracking=off");
+        assertNotEquals(PipelineConfig.defaults().tracking(), config.tracking(),
+                "and that is deliberately NOT what defaults() ships as of wave T8");
     }
 
     @Test

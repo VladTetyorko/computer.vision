@@ -3,7 +3,9 @@ package com.drones.vision.app;
 import com.drones.vision.api.controller.CvTrackersController;
 import com.drones.vision.api.dto.CvTrackerResponse;
 import com.drones.vision.app.config.properties.VisionTrackingProperties;
+import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -16,10 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 /**
  * Context test for the <em>default</em> {@code vision.tracking.*} configuration
  * (docs/TRACKING-PLAN.md &sect;4.F, docs/TRACKING-ORCHESTRATION.md &sect;4.3): the properties bind in
- * a real context, the shipped default is the one that <b>leaves stream starts unchanged</b>
- * ({@code TrackingMode.OFF}, the same value {@code PipelineConfig.defaults()} carries until wave T8
- * flips it), and {@code GET /api/cv/trackers}' roster bean resolves for its component-scanned
- * controller.
+ * a real context, the shipped default <b>agrees with the domain's</b> ({@code
+ * TrackingMode.ASSOCIATE}, the value {@code PipelineConfig.defaults()} carries as of wave T8), and
+ * {@code GET /api/cv/trackers}' roster bean resolves for its component-scanned controller.
  *
  * <p>The property&rarr;seed mapping itself is unit-tested without a context in {@code
  * config.wiring.TrackingWiringTest}. There is deliberately <b>no seed bean</b> to autowire here: the
@@ -43,13 +44,17 @@ class TrackingWiringContextTest {
     private CvTrackersController cvTrackersController;
 
     @Test
-    void defaultConfigurationSeedsNewStreamsWithTrackingOff() {
+    void defaultConfigurationSeedsNewStreamsWithAssociate() {
         // What only a context can prove: the shipped properties bind, and they bind to the values
-        // that leave a stream start byte-identical to before tracking existed. That they then fold
-        // to TrackingConfig.off() is TrackingWiringTest's job, without a context.
-        assertEquals("OFF", trackingProperties.defaultMode());
-        assertEquals(TrackingConfig.off().followFps(), trackingProperties.followFps());
-        assertEquals(TrackingConfig.off().verifyEveryMillis(), trackingProperties.verifyEveryMillis());
+        // that AGREE with the domain default wave T8 flipped. The seed is unconditional -- it always
+        // states a mode, folded over PipelineConfig.defaults() at every start path -- so an OFF here
+        // would quietly undo the flip for every real stream. That they then fold to
+        // TrackingConfig.defaults() is TrackingWiringTest's job, without a context.
+        assertEquals("ASSOCIATE", trackingProperties.defaultMode());
+        assertEquals(TrackingMode.ASSOCIATE, PipelineConfig.defaults().tracking().mode(),
+                "the deployment default must not lag the domain default");
+        assertEquals(TrackingConfig.defaults().followFps(), trackingProperties.followFps());
+        assertEquals(TrackingConfig.defaults().verifyEveryMillis(), trackingProperties.verifyEveryMillis());
     }
 
     @Test

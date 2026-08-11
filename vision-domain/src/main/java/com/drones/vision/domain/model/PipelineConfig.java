@@ -41,10 +41,11 @@ import java.util.Set;
  *
  * <p>{@code tracking} (docs/TRACKING-PLAN.md §4.B) is this stream's {@link TrackingConfig} —
  * mode, engine, duty-cycle cadences, and an optional {@link TargetLock}. {@link #defaults()}
- * returns {@link TrackingConfig#off()}, <strong>not</strong> {@link TrackingConfig#defaults()} —
- * today's byte-identical behavior stays the default through docs/TRACKING-PLAN.md waves T2–T7;
- * the flip to {@code ASSOCIATE} is wave T8's own single, reviewable commit (§5.G). Do not "fix"
- * this to {@code TrackingConfig.defaults()} outside of wave T8.
+ * returns {@link TrackingConfig#defaults()} ({@code ASSOCIATE}): a new stream tracks by default,
+ * so every detection carries a stable {@code trackId}. The <em>convenience</em> constructors below
+ * deliberately keep defaulting to {@link TrackingConfig#off()} — they exist so call sites written
+ * before tracking existed compile <em>and behave</em> unchanged, which is a different question from
+ * what a new stream should do.
  *
  * @param model                  model to run
  * @param confidenceThreshold    minimum confidence to keep a detection, range [0,1]
@@ -56,8 +57,8 @@ import java.util.Set;
  * @param overlayBurnIn          whether to render overlays onto published video at all
  * @param detectionEnabled       whether the pipeline runs detection at all; {@code false} skips
  *                               {@code detect()} entirely while video keeps flowing
- * @param tracking               per-stream tracking configuration; see class javadoc for why
- *                               {@link #defaults()} ships this {@code OFF}
+ * @param tracking               per-stream tracking configuration; never {@code null} —
+ *                               {@link TrackingConfig#off()} is how "no tracking" is spelled
  */
 public record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps,
                               int maxInFlightInferences, boolean overlayTelemetry, Set<String> labelFilter,
@@ -99,9 +100,15 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
 
     /**
      * Convenience constructor for callers that don't care about {@link #tracking()} — defaults it
-     * to {@link TrackingConfig#off()} (unchanged behavior), the same "N-1-arg convenience ctor"
-     * idiom used elsewhere. This was the canonical constructor before docs/TRACKING-PLAN.md §4.B
-     * added {@link #tracking()}; every pre-existing 9-arg call site compiles unchanged.
+     * to {@link TrackingConfig#off()}, the same "N-1-arg convenience ctor" idiom used elsewhere.
+     * This was the canonical constructor before docs/TRACKING-PLAN.md §4.B added {@link
+     * #tracking()}; every pre-existing 9-arg call site compiles <em>and behaves</em> unchanged.
+     *
+     * <p><strong>{@code off()} here, {@code ASSOCIATE} in {@link #defaults()}, deliberately.</strong>
+     * A convenience constructor's contract is "the component you did not mention keeps the value it
+     * had before the component existed"; {@link #defaults()}'s contract is "what a new stream
+     * should be". Those are different questions, and answering the first one with the second would
+     * silently turn tracking on for every caller that merely predates the field.
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            boolean overlayTelemetry, Set<String> labelFilter, EventRuleConfig eventRule,
@@ -157,20 +164,23 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * threshold, 10 FPS inference sampling, at most 2 in-flight inference
      * calls, telemetry overlay on, no label filtering (all labels kept),
      * {@link EventRuleConfig#defaults()}, overlay burn-in on, detection
-     * enabled, and tracking {@link TrackingConfig#off() off}.
+     * enabled, and tracking {@link TrackingConfig#defaults() ASSOCIATE}.
      *
-     * <p><strong>Tracking is deliberately {@link TrackingConfig#off()}, not {@link
-     * TrackingConfig#defaults()}</strong> (docs/TRACKING-PLAN.md §5.G, docs/TRACKING-ORCHESTRATION.md
-     * D15): every existing {@code PipelineConfig}/{@code StreamPipeline}/adapter/API test must
-     * keep passing unchanged through waves T2–T7, and the moment tracking turns on by default is
-     * wave T8's own single, reviewable commit — not a side effect of this wave. Do not "fix" this
-     * to {@code TrackingConfig.defaults()} before T8.
+     * <p><strong>Tracking defaults to {@link TrackingConfig#defaults()} ({@code ASSOCIATE}), not
+     * {@link TrackingConfig#off()}</strong> — docs/TRACKING-PLAN.md §5.G, the one behavior change
+     * wave T8 exists for. Every detection on a stream started from these defaults therefore carries
+     * a stable {@code trackId} across frames, which is what S2 geolocation trails, click-to-follow
+     * and cross-sensor fusion are all blocked on. Turning tracking off is now a deliberate act:
+     * per stream via {@code PATCH /api/streams/{id}/config}, or per deployment via {@code
+     * vision.tracking.default-mode=OFF} (vision-app) — there is no JVM-wide tracking flag, because
+     * {@code vision.cv.enabled} already kills CV wholesale and a per-stream switch is strictly
+     * better than a global one.
      *
      * @return a default {@code PipelineConfig}
      */
     public static PipelineConfig defaults() {
         return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true, Set.of(),
                 EventRuleConfig.defaults(), DEFAULT_OVERLAY_BURN_IN, DEFAULT_DETECTION_ENABLED,
-                TrackingConfig.off());
+                TrackingConfig.defaults());
     }
 }

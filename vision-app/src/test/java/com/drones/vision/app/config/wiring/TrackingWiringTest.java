@@ -38,16 +38,28 @@ class TrackingWiringTest {
                 trackRetentionSeconds);
     }
 
+    /** The values {@code VisionTrackingProperties}' own {@code @DefaultValue}s bind to. */
     private static VisionTrackingProperties defaults() {
-        return properties("OFF", 15, 2000, 30, 5);
+        return properties("ASSOCIATE", 15, 2000, 30, 5);
     }
 
     @Test
-    void defaultPropertiesSeedNewStreamsWithTrackingOffExactlyAsBeforeTrackingExisted() {
+    void defaultPropertiesSeedNewStreamsWithAssociateSoTheDomainFlipReachesEveryStartPath() {
+        // Wave T8's flip lives in PipelineConfig.defaults(), but the seed is folded OVER that
+        // default at every start and always states a mode -- so a seed still saying OFF would have
+        // made the flip inert for every real stream while the domain test proving it stayed green.
         TrackingConfigPatch seed = TrackingWiring.streamStartTrackingSeed(defaults());
 
-        assertEquals(TrackingConfig.off(), seed.foldOnto(TrackingConfig.off(), () -> 1L),
-                "the shipped default must leave stream starts unchanged");
+        assertEquals(TrackingConfig.defaults(), seed.foldOnto(TrackingConfig.off(), () -> 1L),
+                "the shipped default starts streams tracking, even folded over an OFF base");
+    }
+
+    @Test
+    void aDeploymentCanStillPinTrackingOffAndThatIsTheOnlyWayToGetThePreTrackingBehaviour() {
+        TrackingConfigPatch seed = TrackingWiring.streamStartTrackingSeed(properties("OFF", 15, 2000, 30, 5));
+
+        assertEquals(TrackingConfig.off(), seed.foldOnto(PipelineConfig.defaults().tracking(), () -> 1L),
+                "an explicit OFF wins over the domain's ASSOCIATE default -- deployment > code default");
     }
 
     @Test
@@ -131,12 +143,15 @@ class TrackingWiringTest {
     }
 
     @Test
-    void theDefaultSeedLeavesStreamStartsByteIdenticalToBeforeTrackingExisted() {
+    void theDefaultSeedAgreesWithTheDomainDefaultSoAStartThatSaysNothingGetsExactlyIt() {
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
                 new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults());
 
+        // The two layers must not drift: a start request that states nothing gets the domain default
+        // back unchanged, rather than a deployment layer quietly re-deciding it.
         assertEquals(PipelineConfig.defaults().tracking(),
                 mapped.trackingSeed().foldOnto(PipelineConfig.defaults().tracking(), () -> 1L));
+        assertEquals(TrackingMode.ASSOCIATE, mapped.trackingSeed().mode());
     }
 
     @Test

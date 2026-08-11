@@ -34,11 +34,16 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * TrackingConfig.off()}/{@code .defaults()} stay constants in a framework-free module, which is
  * exactly why the deployment layer lives here (docs/TRACKING-ORCHESTRATION.md &sect;4.1).
  *
- * <p><b>Every default below leaves behavior unchanged.</b> {@link #defaultMode()} is {@code OFF} —
- * the same value {@code PipelineConfig.defaults()} carries through waves T2–T7 — so a deployment
- * that sets nothing starts streams byte-identically to before tracking existed. Wave T8 flips the
- * <i>domain</i> default to {@code ASSOCIATE}; this record's own default is the deployment's
- * independent say, and a deployment can pin {@code OFF} afterwards.
+ * <p><b>{@link #defaultMode()} is {@code ASSOCIATE}</b> — the same value {@code
+ * PipelineConfig.defaults()} carries as of docs/TRACKING-PLAN.md wave T8, so a deployment that sets
+ * nothing starts every stream tracking, and every detection it produces carries a stable {@code
+ * trackId}. <b>This default has to move with the domain's, not lag it.</b> The seed is
+ * unconditional — {@link
+ * com.drones.vision.app.config.wiring.TrackingWiring#streamStartTrackingSeed} always states a mode
+ * — so it is folded <i>over</i> {@code PipelineConfig.defaults()} at every start, and leaving it
+ * {@code OFF} here would have silently made T8's domain flip inert for every real stream while the
+ * domain test that proves the flip stayed green. A deployment that wants the old behavior pins
+ * {@code vision.tracking.default-mode=OFF}, which is the honest place for that decision to live.
  *
  * <p>The remaining wire knobs of &sect;4.A — {@code redetectIouPercent}, {@code maxAgeFrames},
  * {@code minHits} — deliberately have <b>no Java property</b>: they are cv-service-side resolution
@@ -74,7 +79,7 @@ public record VisionTrackingProperties(@DefaultValue(VisionTrackingProperties.DE
                                         @DefaultValue(VisionTrackingProperties.DEFAULT_TRACK_RETENTION_SECONDS)
                                         int trackRetentionSeconds) {
 
-    static final String DEFAULT_MODE = "OFF";
+    static final String DEFAULT_MODE = "ASSOCIATE";
     static final String DEFAULT_FOLLOW_FPS = "15";
     static final String DEFAULT_VERIFY_EVERY_MILLIS = "2000";
     static final String DEFAULT_STATS_WINDOW_SECONDS = "30";

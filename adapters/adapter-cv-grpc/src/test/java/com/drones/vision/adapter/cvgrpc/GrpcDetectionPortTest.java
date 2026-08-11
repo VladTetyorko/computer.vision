@@ -595,13 +595,15 @@ class GrpcDetectionPortTest {
         GrpcDetectionPort port = newPort(servicer);
         StreamId streamId = StreamId.random();
 
-        // PipelineConfig.defaults() carries TrackingConfig.off() -- mode OFF, no lock.
+        // PipelineConfig.defaults() carries TrackingConfig.defaults() as of docs/TRACKING-PLAN.md
+        // wave T8 -- mode ASSOCIATE, and still no lock, since a lock names a track that cannot
+        // exist before the stream has produced one.
         port.detect(frame(streamId, 0, PixelFormat.BGR24), PipelineConfig.defaults())
                 .toCompletableFuture().get(5, TimeUnit.SECONDS);
 
         FrameRequest sent = servicer.received.get(0L);
         assertTrue(sent.hasTracking());
-        assertEquals(com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_OFF, sent.getTracking().getMode());
+        assertEquals(com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_ASSOCIATE, sent.getTracking().getMode());
         assertFalse(sent.getTracking().hasLock());
     }
 

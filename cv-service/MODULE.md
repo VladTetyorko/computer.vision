@@ -235,7 +235,46 @@ Directional, not a clean isolated benchmark — same caveat every other number i
 
 **The two numbers that matter.** The engine itself costs **0.24–0.53 ms/frame**, i.e. **43×–95× cheaper** than a `yolo26n` pass on the same frame (and 650×–1400× cheaper than an `orion12l` pass at ~343 ms). End to end through the session the tracker-only frame costs **1.8–2.4 ms on a pathological all-noise JPEG**, of which the **frame decode is the dominant term, not the tracker** — on realistic content the same path is ~0.9–1.1 ms. Recorded explicitly because it says where the next optimization is if one is ever needed (a BGR24 feed or a smaller frame, not a faster tracker).
 
-**`FOLLOW` duty ratio, measured over 300 frames at 15 fps with the default 2000 ms cadence: 10 detector passes / 300 frames = exactly 1 in 30 (3.3%), i.e. 0.50 detector passes per second instead of 15.** The detector pass rate drops **30×**; the mean per-frame server cost drops from ~23.6 ms (`ASSOCIATE`: a detector pass plus an association every frame) to ~3.2 ms (`FOLLOW`: one pass in thirty plus a tracker update), a **~7×** reduction per stream. Both figures come from `tests/grpc/test_detect_stream_tracking.py`'s fake-clock harness plus the measured per-call costs above; the end-to-end before/after on live camera footage is TRACKING-PLAN's wave T8, deliberately, because it needs a real camera rather than a synthetic frame.
+**`FOLLOW` duty ratio, measured over 300 frames at 15 fps with the default 2000 ms cadence: 10 detector passes / 300 frames = exactly 1 in 30 (3.3%), i.e. 0.50 detector passes per second instead of 15.** The detector pass rate drops **30×**; the mean per-frame server cost drops from ~23.6 ms (`ASSOCIATE`: a detector pass plus an association every frame) to ~3.2 ms (`FOLLOW`: one pass in thirty plus a tracker update), a **~7×** reduction per stream. Both figures come from `tests/grpc/test_detect_stream_tracking.py`'s fake-clock harness plus the measured per-call costs above. The end-to-end before/after is wave T8's, below — run against real photographic content and a real detector, but **not against a camera**, for the reason T8's section states.
+
+### Wave T8 — the measured outcome (TRACKING-PLAN §10), and exactly what it is not
+
+**The boundary first, because it determines how every number below should be read. This repo has no camera — hardware tier H1 is unbought (docs/TWO-TARGETS-PLAN.md). §10 asks for a camera pointed at a street; that demo was not run, and nothing here is camera footage.**
+
+What *was* run, on this dev box (12 logical cores, under normal IDE load — directional, same caveat as every other number in this file): a 150-frame, 640×360, 15 fps sequence built by **panning a 960×540 crop window across one real 1280×720 photograph** (`datasets/…/bb30d92a-….jpg` — a real truck and real people, real texture, real lighting), JPEG-encoded at ~21 KB/frame, with an opaque bar drawn across frames **70–89** standing in for an occluder. Real objects therefore genuinely traverse the frame and are genuinely hidden for 1.33 s. Everything below the frame source is production code: the real `InferenceServicer.DetectStream`, the real `ModelRegistry`/`yolo26n.pt` detector, the real `TrackerRegistry`/`bytetrack`/`lk` engines, over the frozen wire contract. Frames are paced at **15 fps of real time** deliberately: the `FOLLOW` cadence is wall-clock, so running flat out would have flattered the duty ratio.
+
+| | detector passes | CPU (`process_time`) per 9.96 s of video | tracker-only frames | frames fed → responses |
+|---|---|---|---|---|
+| **`OFF`** (pre-tracking behavior) | 150 = **15.07/s** | 28.92 s = **290% of one core** | — | 150 → 150, **0 dropped** |
+| **`ASSOCIATE` / `bytetrack`** (the T8 default) | 150 = **15.07/s** | 29.56 s = **297% of one core** | — | 150 → 150, **0 dropped** |
+| **`FOLLOW` / `lk`, verify 2000 ms** | 5 = **0.50/s** | 1.29 s = **13% of one core** | 145, `tracker_millis` mean **1.81 ms**, p95 2.00 | 150 → 150, **0 dropped** |
+
+Repeat run: `OFF` 30.25 s, `ASSOCIATE` 29.17 s, `FOLLOW` 1.31 s — so run-to-run spread is ~±4%.
+
+**The two numbers that matter, measured rather than claimed:**
+
+1. **Turning tracking on by default costs nothing measurable.** `ASSOCIATE` vs `OFF` is 29.56 s vs 28.92 s of CPU on run 1 and 29.17 s vs 30.25 s on run 2 — i.e. the association pass sits *inside* the run-to-run noise of the detector-only baseline. That is the number that justifies wave T8 flipping the default at all, and it is why the flip did not need a feature flag to hide behind.
+2. **§10's "the CPU drop" — detector passes 15.07/s → 0.50/s (30.1×), CPU 297% → 13% of one core (22.9×).** Read off the response's own `detector_ran`/`tracker_millis` fields, not `htop` — which is what TRACKING-ORCHESTRATION §7 asked for, and it works identically in every placement including one that is flying.
+
+**Track-id stability, and the occluder** (`ASSOCIATE`, ids as cv-service allocated them):
+
+| id | label | frames | behavior |
+|---|---|---|---|
+| `#1` | person | 0–149, **150 of 150** | one id for the entire sequence, no gap |
+| `#2` | person | 3–149, 105 frames | **gap exactly 70–89 — the occluder window — then returns as `#2`** |
+| `#3` | truck | 49–149, 101 frames | enters mid-sequence, one id to the end, no gap |
+| `#4` | truck | 149 only, 1 frame | a single-frame id on the last frame — the flicker `min_hits` exists to keep out of the UI |
+
+**`#2` disappearing for precisely the 20 occluded frames and coming back with the same id is the "same box number through a pole" outcome of §10 item 1** — demonstrated, but on a *drawn* occluder over a *panned still*, which is not the same evidence as a car passing a real pole. In `FOLLOW` the locked target held `#1` across all 150 frames including the occlusion, on 5 detector passes.
+
+**What remains unproven until H1 hardware exists** — none of it blocked on code:
+
+- **§10 item 1 on real footage.** Motion blur, rolling shutter, exposure changes, genuine 3-D occlusion and real inter-frame jitter are all absent from a panned still. Association across *those* is the actual claim, and it is untested.
+- **§10 item 2's operator-facing half.** The CPU drop is measured above, but "click a box in the Fly cockpit → it locks → watch the flow strip" was not performed: it needs a browser, a live stream and a camera. The wire and API tiers that feed that strip are covered by tests; the demo is not.
+- **§10 item 3 (a trail behind a tracked car in the player)** — wave T7 built it against the frozen contract; it has not been seen over camera footage.
+- **Every Pi/onboard number**, unchanged from T1: designed-for budgets, not measurements.
+
+The measurement harness was a throwaway script, deliberately not added to `tests/` — it needs real weights, a gitignored dataset image, and ~30 s of wall clock, none of which belong in a suite that must stay green on a clean checkout.
 
 ### Engine roster (§5.B) — dictated by what is actually installed
 
@@ -305,21 +344,44 @@ python -m cv_service.grpc.server
 
 **Invariant P1 — nothing x86-only or CUDA-only may ever enter the `cv` extra.** It is free to hold and expensive to recover: one CUDA-gated dependency, or `openvino` promoted out of the Dockerfile into `pyproject.toml`, silently ends the onboard story. This is why the shipped tracker engines are pure core-OpenCV (`lk`, `ncc`) and pure Python over numpy (`bytetrack`), and why `openvino` stays a Docker-image-only install.
 
-**aarch64 wheel availability — verified by downloading the wheels, not by reading a table** (2026-08-11):
+**aarch64 wheel availability — verified by downloading the wheels, not by reading a table.** This is
+TRACKING-PLAN wave T8's **portability acceptance check**, and it is a *resolution* check, nothing
+more: **it does not promise a green ARM build.** There is no ARM CI in this repo and no Pi. What it
+establishes is that every pinned member of the `cv` extra has a real aarch64/cp312 wheel that pip
+will actually select — which is the honest bound available without hardware. Re-run verbatim on
+**2026-08-11 (wave T8)**, exit code 0:
 
 ```bash
 pip download --no-deps --platform manylinux_2_28_aarch64 --python-version 312 \
     --only-binary=:all: -d /tmp/arm 'opencv-python>=5.0,<6' 'lap>=0.5.12' ultralytics torch==2.13.0
 ```
 
-| Package | aarch64 wheel | Size |
+```
+Collecting opencv-python<6,>=5.0
+  Using cached opencv_python-5.0.0.93-cp37-abi3-manylinux_2_28_aarch64.whl.metadata (19 kB)
+Collecting lap>=0.5.12
+  Using cached lap-0.5.13-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (6.6 kB)
+Collecting ultralytics
+  Using cached ultralytics-8.4.117-py3-none-any.whl.metadata (45 kB)
+Collecting torch==2.13.0
+  Using cached torch-2.13.0-cp312-cp312-manylinux_2_28_aarch64.whl.metadata (38 kB)
+Successfully downloaded torch opencv-python lap ultralytics
+```
+
+| Package | aarch64 wheel | Size on disk |
 |---|---|---|
 | `opencv-python 5.0.0.93` | `cp37-abi3-manylinux_2_28_aarch64` | 47.5 MB |
 | `lap 0.5.13` | `cp312-cp312-manylinux2014/2_17/2_28_aarch64` | 1.6 MB |
 | `ultralytics 8.4.117` | `py3-none-any` (pure Python) | 1.4 MB |
 | `torch 2.13.0` | `cp312-cp312-manylinux_2_28_aarch64` | **407 MB** |
 
-**`torch` requires glibc ≥ 2.28** — its aarch64 wheel is tagged `manylinux_2_28`, not `manylinux2014`. Raspberry Pi OS Bullseye (glibc 2.31) and Bookworm (2.36) both satisfy it. **Use `--platform manylinux_2_28_aarch64` for the resolution check, not `manylinux2014_aarch64`**: measured here, the `manylinux2014` (glibc 2.17) platform silently resolves `torch` back to **2.5.1** (87.6 MB) because 2.13.0's wheel does not satisfy that tag — a check that passes while validating a different torch than the one that will actually install. Worth knowing when wave T8 runs its portability acceptance check.
+**What this check does NOT establish**, stated plainly so nobody reads it as more than it is: that
+the wheels import on ARM, that the engines construct there, that `python -m cv_service.grpc.server`
+starts, or that any of it is fast enough on a Pi. An actual `pip install -e '.[cv]'` +
+`python -m cv_service.grpc.server` smoke run on real hardware supersedes this the day H4 exists;
+until then this is the bound, and it is labelled as one.
+
+**`torch` requires glibc ≥ 2.28** — its aarch64 wheel is tagged `manylinux_2_28`, not `manylinux2014`. Raspberry Pi OS Bullseye (glibc 2.31) and Bookworm (2.36) both satisfy it. **Use `--platform manylinux_2_28_aarch64` for the resolution check, not `manylinux2014_aarch64`**: measured here, the `manylinux2014` (glibc 2.17) platform silently resolves `torch` back to **2.5.1** (87.6 MB) because 2.13.0's wheel does not satisfy that tag — a check that passes while validating a different torch than the one that will actually install. **Re-confirmed independently in wave T8** — `pip download --no-deps --platform manylinux2014_aarch64 --python-version 312 --only-binary=:all: torch` resolved `torch-2.5.1-cp312-cp312-manylinux2014_aarch64.whl` (91.8 MB on disk) rather than 2.13.0, so the trap is live and not a one-off. Use `manylinux_2_28_aarch64`.
 
 **No Pi number in this document is measured — there is no companion-computer hardware yet.** Everything below is a **designed-for budget**, explicitly labelled as such, and stays that way until someone runs it on real silicon:
 
@@ -362,7 +424,9 @@ pip download --no-deps --platform manylinux_2_28_aarch64 --python-version 312 \
 ## Status
 Real inference (Ultralytics YOLO, CPU by default) implements `Inference.DetectStream` per `docs/MVP1-PLAN.md` §C7 bullet 1; falls back to the Phase 0 echo stub when the `cv` extra is absent or the model can't load, so the service never crash-loops for lack of a model. `Training.ListModels`/`Training.PromoteModel`/`Training.StartTraining`/`Training.UploadDataset` are all implemented (CV-TRAINING Phase 2 + CV-TRAINING-V2 Wave W2) — see the API surface above and MODULE.md history for the full per-item design writeups (`ListModels`/`PromoteModel` against the shared `ModelRegistry`; `StartTraining` a real Ultralytics fine-tune with cancellation, off-thread execution, and never-auto-promote; `UploadDataset` a streamed dataset archive landed atomically). **`docs/MVP2-PLAN.md` §V-d done**: `DetectStream` decouples per-stream frame receipt from inference and bounds cross-stream concurrent inference — see "V-d" above. **`docs/CV-MODELS-PLAN.md` items 1-2 done (CP-b)**: model registry replaces the single hard-loaded detector with a lazy `{model_id -> YoloDetector}`, plus comma-separated composite mode — see "Model registry & composite mode" above. **CV-MODELS-PLAN follow-up done**: `yoloe-26s-seg-pf.pt` is a routable, opt-in open-vocabulary `model_id` covering people/vehicles/buildings — see "Routable model roster" above. **`docs/REMOTE-CV-PLAN.md` P0/P1 done**: explicit `CV_DEVICE` knob + HTTP/2 keepalive server options — see `cv-service/DEPLOY-GPU.md`.
 
-**`docs/TRACKING-PLAN.md` wave T1 done (this task)**: `cv_service/tracking/` implements the detect-then-track duty cycle behind the frozen wire contract of TRACKING-PLAN §4.A — eight modules, one charter each (`params`/`scheduler`/`track`/`lock`/`registry`/`engines.base`/`engines.{bytetrack,lk,ncc}`/`session`), everything but the three engines pure stdlib, no module importing `cv_pb2`. `InferenceServicer` creates one `StreamTrackingSession` per `DetectStream` call and threads it into `_handle_request`; `serve()` builds and probes the `TrackerRegistry` at startup. `OFF` (the default, and what an old Java client produces) is **byte-identical** to the pre-T1 service, verified by comparing serialized responses. Three real defects found and fixed while building it, all documented in Gotchas: ultralytics' process-global track-id counter, the `BOX_INVALID`/`TRACKER_FAILED` latch that collapsed the duty cycle back into per-frame detection, and a locked target serving `min_hits` verify passes (six seconds) before it stopped rendering as tentative. `pyproject.toml`'s `cv` extra gains explicit `opencv-python>=5.0,<6` and `lap>=0.5.12` pins (R2/R3 — `lap` is a hidden runtime dependency ultralytics AutoUpdates from the network *mid-stream*, which is a guaranteed in-flight failure offline) plus invariant P1 stated in a comment; the Dockerfile gains a verified "no new install step needed" note and a commented, ready-to-uncomment fetch of the deferred ONNX tracker assets, and stays deliberately single-arch. Measured numbers (engine cost, end-to-end per-frame cost, `FOLLOW` duty ratio) are in "Tracking engine" above; ARM64 wheel verification and the honest "no Pi number is measured" statement are in "Running on ARM64 / a companion computer". **127 new tests, 320 total, all green.** Not in this wave, by design: the domain/application/adapter/API/UI halves (T2–T7) and the default flip to `ASSOCIATE` (T8) — `PipelineConfig.defaults()` still ships `TrackingConfig.off()`, so nothing in the running product changes until a client asks for tracking.
+**`docs/TRACKING-PLAN.md` wave T1 done (this task)**: `cv_service/tracking/` implements the detect-then-track duty cycle behind the frozen wire contract of TRACKING-PLAN §4.A — eight modules, one charter each (`params`/`scheduler`/`track`/`lock`/`registry`/`engines.base`/`engines.{bytetrack,lk,ncc}`/`session`), everything but the three engines pure stdlib, no module importing `cv_pb2`. `InferenceServicer` creates one `StreamTrackingSession` per `DetectStream` call and threads it into `_handle_request`; `serve()` builds and probes the `TrackerRegistry` at startup. `OFF` (the default, and what an old Java client produces) is **byte-identical** to the pre-T1 service, verified by comparing serialized responses. Three real defects found and fixed while building it, all documented in Gotchas: ultralytics' process-global track-id counter, the `BOX_INVALID`/`TRACKER_FAILED` latch that collapsed the duty cycle back into per-frame detection, and a locked target serving `min_hits` verify passes (six seconds) before it stopped rendering as tentative. `pyproject.toml`'s `cv` extra gains explicit `opencv-python>=5.0,<6` and `lap>=0.5.12` pins (R2/R3 — `lap` is a hidden runtime dependency ultralytics AutoUpdates from the network *mid-stream*, which is a guaranteed in-flight failure offline) plus invariant P1 stated in a comment; the Dockerfile gains a verified "no new install step needed" note and a commented, ready-to-uncomment fetch of the deferred ONNX tracker assets, and stays deliberately single-arch. Measured numbers (engine cost, end-to-end per-frame cost, `FOLLOW` duty ratio) are in "Tracking engine" above; ARM64 wheel verification and the honest "no Pi number is measured" statement are in "Running on ARM64 / a companion computer". **127 new tests, 320 total, all green.** Not in this wave, by design: the domain/application/adapter/API/UI halves (T2–T7) and the default flip to `ASSOCIATE` (T8).
+
+**`docs/TRACKING-PLAN.md` wave T8 done — the plan is fully implemented.** No cv-service code changed: the flip is one line in `vision-domain` (`PipelineConfig.defaults()` → `TrackingConfig.defaults()`) plus its deployment counterpart `vision.tracking.default-mode=ASSOCIATE` in vision-app, which is what a stream now states on every `FrameRequest.tracking` — cv-service simply takes the `ASSOCIATE` branch it has had since T1. What landed *here* is documentation of two measurements: the **aarch64 resolution check** (re-run verbatim, exit 0, real output recorded in "Running on ARM64" above — and it is a resolution check, **not** a promise of a green ARM build) and the **§10 touchable-outcome numbers** ("Wave T8 — the measured outcome" above): `ASSOCIATE` costs less than run-to-run noise over `OFF`, `FOLLOW` drops the detector 30× and CPU 22.9×, and a track id survived a synthetic occluder over real photographic content. The two outcomes that need a camera — stable ids on live video and the cockpit follow-lock demo — are **not** done and are recorded as awaiting H1 hardware, not as passed.
 
 **`docs/LAYERING-REFACTOR-PLAN.md` wave G done**: the former 1031-line `cv_service/server.py` monolith is split into `config.py` (the one `Settings`/`Settings.from_env()`, replacing 5 ad-hoc env reads — 3 of them previously frozen at import time), `grpc/servicers.py` (wire<->domain translation only, the sole `cv_pb2` touchpoint), `grpc/server.py` (composition root — `serve()`/`main()`), `training/dataset.py` (dataset layout + zip landing + the one `sanitize_dataset_id` definition, previously duplicated), `training/trainer.py` (the ultralytics fine-tune core, moved with its dataset-layout re-exports), `training/marker.py` (renamed from the misleading `training.py`), and `training/orchestrator.py` (the `StartTraining` job-lifecycle state machine, lifted out of the servicer method, yielding plain `JobEvent`s instead of touching `cv_pb2` directly). `cv_service/inference.py`/`registry.py`/`concurrency.py` moved to `cv_service/inference/{detector,registry,concurrency}.py` unchanged in behavior. The four previously-unannotated `TrainingServicer` gRPC handler methods (`StartTraining`/`UploadDataset`/`ListModels`/`PromoteModel`) are now type-annotated. `_build_default_detector()` (dead code — confirmed via repo-wide grep, no call site, only mentioned in comments/docstrings) was deleted. The `yolo11n.pt` vs `yolo26n.pt` doc-drift between `README.md`/`DEPLOY-GPU.md` and the actual code default (`cv_service/config.py`'s `DEFAULT_MODEL = "yolo26n.pt"`) is reconciled — both docs now say `yolo26n.pt`; the Dockerfile's independently-chosen baked OpenVINO export (`yolo11n.pt`) is unrelated and left as-is (see Gotchas). This is a **structural refactor only**: every `CV_*` env var default is byte-identical to the literal it replaced (verified in `tests/test_config.py`), the gRPC wire format/HTTP-visible behavior is unchanged, and all 193 tests pass (`scripts/test.sh`) — up from the prior suite's total test count, the difference being modest new direct-unit coverage for functions that gained their own dedicated module (`Settings.from_env()`, `cv_service.training.dataset`'s path-safety helpers) rather than any removed coverage; every pre-existing test was moved (not rewritten) to mirror the new package layout (`tests/{inference,training,grpc}/` + `tests/test_config.py`), with two deliberate, narrow adaptations where the code they exercise structurally changed: (1) `TrainingServicer`'s upload-size-cap test now passes `max_upload_bytes=` as a constructor kwarg instead of monkeypatching a module-level constant (the constant became a `Settings`-sourced constructor default); (2) `YoloDetector`'s `CV_DEVICE`-resolution tests now `monkeypatch.setenv(...)` instead of patching an import-time-frozen module attribute (which no longer exists — `CV_DEVICE` is resolved fresh via `Settings.from_env()` at each construction instead of once at import time, per the plan's explicit "kill the import-time reads" goal).
 
