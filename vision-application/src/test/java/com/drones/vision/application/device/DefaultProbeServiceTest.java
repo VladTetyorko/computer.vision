@@ -30,8 +30,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import com.drones.vision.application.exception.ProbeFailedException;
-import com.drones.vision.application.exception.UnsupportedProtocolException;
+import com.drones.vision.application.device.ProbeFailedException;
+import com.drones.vision.application.stream.UnsupportedProtocolException;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
 
 class DefaultProbeServiceTest {

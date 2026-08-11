@@ -117,6 +117,18 @@ distribution goal.
 C1–C3 break the application cycle. C4–C5 break the domain cycle. C6 is hygiene that makes extraction
 clean rather than being strictly required.
 
+> **Landed in W1.2 — and it turned out cheaper than this table implies.** C1 and C2 were perception's
+> *only* two outgoing cross-context edges, so removing them made perception a **sink**, and the whole
+> application graph went acyclic on the spot. **C3 is therefore not an extraction blocker** — it is a
+> design problem (a CRUD context reading runtime state is what stops warehouse from being replicated
+> independently), and it can be paid on its own schedule, most naturally alongside the gateway
+> composition in W2/W3. Two imports, not eleven, were standing between this codebase and separable
+> modules.
+>
+> C4/C5 are recorded as **assignment decisions, not code changes**: `domain.model` is still one flat
+> package, so nothing physically moves until W1.5 — there is no package boundary yet for a relocation
+> to mean anything.
+
 ---
 
 ## 6. Sub-waves
@@ -151,9 +163,18 @@ nothing else can be in flight while every import in the repo moves.
 ## 8. Status
 
 - [x] measurement + context assignment (this doc)
-- [ ] W1.1 walls
-- [ ] W1.2 small cycles
-- [ ] W1.3 warehouse ⇄ perception
-- [ ] W1.4 javadoc de-import
+- [x] **W1.1 walls** — `ContextArchitectureTest`, 13 declared edges frozen
+- [x] **W1.2 small cycles** — C1 (`exception` package dissolved) + C2 (`UsageTracker` telemetry-observer seam).
+      **The application context graph is now acyclic**; mutual pairs held at zero by test.
+      Verified: `./mvnw -B -pl vision-application,vision-api,vision-app test` green (vision-app 222/222)
+- [ ] W1.3 warehouse → perception (C3) — *demoted from blocker to design debt; may move to W2 with the gateway*
+- [ ] W1.4 javadoc de-import (98)
 - [ ] W1.5 package reorganization
 - [ ] W1.6 Maven extraction
+
+### Known collision ahead of W1.5/W1.6
+
+The branch `feat/visual-geo` adds two more adapters (`adapter-geo-grpc`, `adapter-tiles`) and a
+`vision-model-contracts` module — present in this working tree as untracked leftovers, and in that
+branch's `adapters/pom.xml`, but not on `master`. W1.5 rewrites every import in the repo, so that
+branch must be merged **before** W1.5 or it will conflict with essentially every file it touches.

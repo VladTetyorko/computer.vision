@@ -79,10 +79,15 @@ class UsageTrackerTest {
                 liveUpdatePublisherPort);
     }
 
-    /** docs/plans/done/OPS-CORE-PLAN.md §G: same as {@link #tracker}, plus a {@link GeofenceMonitor} collaborator. */
+    /**
+     * docs/plans/done/OPS-CORE-PLAN.md §G: same as {@link #tracker}, plus the telemetry observer
+     * seam — bound to {@link GeofenceMonitor#evaluate} exactly as {@code vision-app} wires it in
+     * production, so these tests still exercise the real geofence collaboration even though the
+     * tracker no longer names that type (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2).
+     */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
         return new UsageTracker(assetRepository, deviceRepository, usageRepository, telemetryRepository, sources,
-                null, geofenceMonitor);
+                null, geofenceMonitor::evaluate);
     }
 
     /**

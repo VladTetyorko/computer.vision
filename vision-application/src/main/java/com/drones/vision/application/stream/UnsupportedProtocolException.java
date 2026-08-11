@@ -1,4 +1,4 @@
-package com.drones.vision.application.exception;
+package com.drones.vision.application.stream;
 
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;

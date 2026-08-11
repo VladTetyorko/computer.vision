@@ -2,8 +2,7 @@ package com.drones.vision.application.device;
 
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.exception.ProbeFailedException;
-import com.drones.vision.application.exception.UnsupportedProtocolException;
+import com.drones.vision.application.stream.UnsupportedProtocolException;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
 
 /**

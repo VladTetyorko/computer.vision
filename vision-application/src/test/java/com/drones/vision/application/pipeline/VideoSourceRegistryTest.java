@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import com.drones.vision.application.exception.UnsupportedProtocolException;
+import com.drones.vision.application.stream.UnsupportedProtocolException;
 
 class VideoSourceRegistryTest {
 

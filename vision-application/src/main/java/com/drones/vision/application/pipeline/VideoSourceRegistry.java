@@ -5,7 +5,7 @@ import com.drones.vision.domain.port.out.VideoSourcePort;
 
 import java.util.List;
 import java.util.Objects;
-import com.drones.vision.application.exception.UnsupportedProtocolException;
+import com.drones.vision.application.stream.UnsupportedProtocolException;
 
 /**
  * Selects the {@link VideoSourcePort} adapter able to open a given

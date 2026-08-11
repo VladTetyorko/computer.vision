@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
-import com.drones.vision.application.geofence.GeofenceMonitor;
+import java.util.function.BiConsumer;
 import com.drones.vision.application.stream.DefaultStreamService;
 import com.drones.vision.application.stream.StreamService;
 
@@ -59,9 +59,9 @@ import com.drones.vision.application.stream.StreamService;
  *       position), {@code lastPosition} (the most recent one), and {@code
  *       sampleCount} — via {@link #applySample}, kept in one method per the
  *       port's "single write path" note so it can be batched later. The same
- *       method also feeds the sample to {@link GeofenceMonitor#evaluate}
- *       (docs/plans/done/OPS-CORE-PLAN.md §G) when one is configured, right alongside the
- *       existing persist/live-update steps.</li>
+ *       method also hands the sample to the configured {@code telemetryObserver}
+ *       (docs/plans/done/OPS-CORE-PLAN.md §G — geofence evaluation in practice), right
+ *       alongside the existing persist/live-update steps.</li>
  *   <li>{@link #onStreamStopped(DeviceId)} — if this was the asset's
  *       <b>last</b> currently-active device, closes the open usage ({@link
  *       AssetUsage#closed(Instant)}) and unsubscribes/closes every telemetry
@@ -103,7 +103,7 @@ public final class UsageTracker {
     private final TelemetryRepositoryPort telemetryRepository;
     private final List<TelemetrySourcePort> telemetrySources;
     private final LiveUpdatePublisherPort liveUpdatePublisherPort;
-    private final GeofenceMonitor geofenceMonitor;
+    private final BiConsumer<AssetId, Telemetry> telemetryObserver;
     private final long sourceInitialBackoffNanos;
     private final long sourceMaxBackoffNanos;
 
@@ -139,20 +139,28 @@ public final class UsageTracker {
     }
 
     /**
-     * Same as the 6-argument constructor, plus a {@link GeofenceMonitor} collaborator
-     * (docs/plans/done/OPS-CORE-PLAN.md §G): every telemetry sample folded via {@link #applySample} is also
-     * evaluated for geofence breaches, right alongside the existing persist/live-update steps.
+     * Same as the 6-argument constructor, plus an observer of every telemetry sample folded via
+     * {@link #applySample}, invoked right alongside the existing persist/live-update steps.
      *
-     * @param geofenceMonitor nullable, following the same convention as {@code
-     *                        liveUpdatePublisherPort}: {@code null} means no geofence evaluation at
-     *                        all for samples this tracker applies.
+     * <p>Deliberately a {@link BiConsumer} rather than the geofence collaborator this was written
+     * for (docs/plans/done/OPS-CORE-PLAN.md §G): breach evaluation belongs to the flight context,
+     * and a direct call from here made perception depend on it, closing the context cycle that
+     * blocks module extraction (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2). Perception now
+     * declares the seam and {@code vision-app} wires {@code GeofenceMonitor::evaluate} into it —
+     * the same functional-seam convention {@link SupervisedPublisher}'s {@code onOutageBegan}
+     * already follows.
+     *
+     * @param telemetryObserver nullable, following the same convention as {@code
+     *                          liveUpdatePublisherPort}: {@code null} means samples are only
+     *                          persisted and announced, never observed. Must be cheap and must not
+     *                          throw — it runs on the telemetry path.
      */
     public UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                          AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
                          List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort,
-                         GeofenceMonitor geofenceMonitor) {
+                         BiConsumer<AssetId, Telemetry> telemetryObserver) {
         this(assetRepository, deviceRepository, usageRepository, telemetryRepository, telemetrySources,
-                liveUpdatePublisherPort, geofenceMonitor, SupervisedPublisher.INITIAL_BACKOFF_NANOS,
+                liveUpdatePublisherPort, telemetryObserver, SupervisedPublisher.INITIAL_BACKOFF_NANOS,
                 SupervisedPublisher.MAX_BACKOFF_NANOS);
     }
 
@@ -164,7 +172,8 @@ public final class UsageTracker {
     UsageTracker(AssetRepositoryPort assetRepository, DeviceRepositoryPort deviceRepository,
                  AssetUsageRepositoryPort usageRepository, TelemetryRepositoryPort telemetryRepository,
                  List<TelemetrySourcePort> telemetrySources, LiveUpdatePublisherPort liveUpdatePublisherPort,
-                 GeofenceMonitor geofenceMonitor, long sourceInitialBackoffNanos, long sourceMaxBackoffNanos) {
+                 BiConsumer<AssetId, Telemetry> telemetryObserver, long sourceInitialBackoffNanos,
+                 long sourceMaxBackoffNanos) {
         this.assetRepository = Objects.requireNonNull(assetRepository, "assetRepository must not be null");
         this.deviceRepository = Objects.requireNonNull(deviceRepository, "deviceRepository must not be null");
         this.usageRepository = Objects.requireNonNull(usageRepository, "usageRepository must not be null");
@@ -172,7 +181,7 @@ public final class UsageTracker {
         Objects.requireNonNull(telemetrySources, "telemetrySources must not be null");
         this.telemetrySources = List.copyOf(telemetrySources);
         this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
-        this.geofenceMonitor = geofenceMonitor; // nullable: no geofence evaluation when absent
+        this.telemetryObserver = telemetryObserver; // nullable: samples are merely persisted/announced when absent
         this.sourceInitialBackoffNanos = sourceInitialBackoffNanos;
         this.sourceMaxBackoffNanos = sourceMaxBackoffNanos;
     }
@@ -395,8 +404,8 @@ public final class UsageTracker {
         if (liveUpdatePublisherPort != null) { // docs/plans/done/REALTIME-PLAN.md §4
             liveUpdatePublisherPort.publishTelemetryAppended(assetId, sample);
         }
-        if (geofenceMonitor != null) { // docs/plans/done/OPS-CORE-PLAN.md §G
-            geofenceMonitor.evaluate(assetId, sample);
+        if (telemetryObserver != null) { // docs/plans/done/OPS-CORE-PLAN.md §G — geofence, wired in vision-app
+            telemetryObserver.accept(assetId, sample);
         }
     }
 

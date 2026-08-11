@@ -204,8 +204,10 @@ public class ApplicationServiceWiring {
                                       List<TelemetrySourcePort> telemetrySources,
                                       LiveUpdatePublisherPort liveUpdatePublisherPort,
                                       GeofenceMonitor geofenceMonitor) {
+        // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
+        // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
         return new UsageTracker(assetRepositoryPort, deviceRepositoryPort, assetUsageRepositoryPort,
-                telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort, geofenceMonitor);
+                telemetryRepositoryPort, telemetrySources, liveUpdatePublisherPort, geofenceMonitor::evaluate);
     }
 
     /**

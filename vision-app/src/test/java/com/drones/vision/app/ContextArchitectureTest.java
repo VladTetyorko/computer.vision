@@ -46,7 +46,6 @@ class ContextArchitectureTest {
             Map.entry("discovery", "warehouse"),
             Map.entry("fleet", "warehouse"),
             Map.entry("usage", "warehouse"),
-            Map.entry("exception", "warehouse"),
             Map.entry("stream", "perception"),
             Map.entry("pipeline", "perception"),
             Map.entry("flight", "flight"),
@@ -78,11 +77,11 @@ class ContextArchitectureTest {
             "simulation -> warehouse",
             "warehouse -> identity",
 
-            // --- DEBT C1: UnsupportedProtocolException filed under `exception`, thrown by perception (W1.2) ---
-            "perception -> warehouse",
-            // --- DEBT C2: UsageTracker calls GeofenceMonitor directly (W1.2) ---
-            "perception -> flight",
             // --- DEBT C3: warehouse asks perception "is this asset live?" (W1.3) ---
+            // The last cross-context edge that is a design problem rather than a fact of life:
+            // a CRUD context must not read runtime state, which is what stops warehouse from
+            // being replicated independently. It no longer blocks extraction — C1/C2 made
+            // perception a sink, so the graph is already acyclic.
             "warehouse -> perception"));
 
     private static JavaClasses classes;
@@ -126,8 +125,8 @@ class ContextArchitectureTest {
     }
 
     /**
-     * The five contexts that are already free of the cycle must stay free of it, so that the ones
-     * W1.6 can extract first cannot be re-entangled by a later feature.
+     * The context graph must stay acyclic: Maven cannot express a cycle, so a single mutual pair
+     * would block extraction for every context at once (W1.6). Held at zero since W1.2.
      */
     @Test
     void acyclicContextsDoNotDependOnEachOtherInBothDirections() {
@@ -143,7 +142,7 @@ class ContextArchitectureTest {
         }
         assertThat(mutual)
                 .withFailMessage("Mutually dependent contexts cannot become Maven modules: %s", mutual)
-                .containsExactly("perception <-> warehouse");
+                .isEmpty();
     }
 
     private static String contextOf(JavaClass javaClass) {

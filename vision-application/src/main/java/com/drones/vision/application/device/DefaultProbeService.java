@@ -21,7 +21,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import com.drones.vision.application.exception.ProbeFailedException;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
 import com.drones.vision.application.stream.DefaultStreamService;
 

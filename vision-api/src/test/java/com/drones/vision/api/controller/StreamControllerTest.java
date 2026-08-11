@@ -6,7 +6,7 @@ import com.drones.vision.application.stream.ActiveStream;
 import com.drones.vision.application.stream.PipelineConfigPatch;
 import com.drones.vision.application.stream.TrackingConfigPatch;
 import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.exception.UnsupportedProtocolException;
+import com.drones.vision.application.stream.UnsupportedProtocolException;
 import com.drones.vision.application.stream.UpdateOutcome;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;

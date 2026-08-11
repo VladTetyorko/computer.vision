@@ -26,9 +26,9 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  *
  * <h2>Status codes</h2>
  * A malformed request (blank/missing {@code protocol}/{@code uri}, an unparseable {@code uri}, or
- * an unrecognized protocol — {@link com.drones.vision.application.exception.UnsupportedProtocolException})
+ * an unrecognized protocol — {@link com.drones.vision.application.stream.UnsupportedProtocolException})
  * maps to {@code 400}; a recognized protocol whose connection attempt itself fails, times out, or
- * ends without a frame ({@link com.drones.vision.application.exception.ProbeFailedException}) maps to {@code
+ * ends without a frame ({@link com.drones.vision.application.device.ProbeFailedException}) maps to {@code
  * 422} — both via {@link ApiExceptionHandler}. Success is always {@code 200}, never {@code 201}:
  * nothing is created.
  */
