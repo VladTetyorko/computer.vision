@@ -97,6 +97,12 @@ class TrackingRequest:
     max_age_frames: int = 0
     min_hits: int = 0
     lock: Optional[LockRequest] = None
+    # TRACKING-V2-PLAN wave C2 -- proto field 8, frozen at C0. "" = server
+    # default for the deployment (`CV_TRACK_MOTION_ENGINE`); "off" disables
+    # ego-motion compensation outright rather than falling back to a
+    # different engine, which is why `resolve()` below does not fold it into
+    # the blank-sentinel branch the way `engine_id` is.
+    motion_engine_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -119,6 +125,14 @@ class TrackingParams:
     # per-request sentinel to interpret, unlike every field above.
     track_max_age_millis: int
     min_tracker_confidence: float
+    # TRACKING-V2-PLAN wave C2 addition. Unlike `engine_id`, this is never
+    # rewritten to a concrete roster id here -- `"off"` is a legitimate
+    # resolved value, not a sentinel, and it is `session.py`'s job (not
+    # `resolve()`'s) to decide what engine, if any, actually serves it,
+    # because that decision also needs a live `CameraPose` (see
+    # `TrackerRegistry.compensator` and `StreamTrackingSession`'s
+    # pose-unavailable-falls-back-to-flow policy).
+    motion_engine_id: str
 
     @property
     def active(self) -> bool:
@@ -221,4 +235,15 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
         # back FROM.
         track_max_age_millis=settings.track_max_age_millis,
         min_tracker_confidence=settings.track_min_tracker_confidence,
+        # Blank -> the deployment default (`CV_TRACK_MOTION_ENGINE`, itself
+        # possibly "off"); anything else, including an explicit "off",
+        # passes through untouched -- same blank-only-sentinel shape
+        # `engine_id` above uses, just with a value space ("off" included)
+        # `session.py` interprets rather than a roster id `resolve()` could
+        # validate here.
+        motion_engine_id=(
+            request.motion_engine_id.strip()
+            if request.motion_engine_id
+            else settings.track_motion_engine
+        ),
     )

@@ -8,12 +8,19 @@
       |- decision          scheduler.decide(now, state): PURE, before any pixel
       |- if run_detector:  detect()   <-- THE ONLY GATE ACQUISITION, and it is
       |                                    the servicer's callable, not ours
+      |- if FOLLOW:        motion.estimate(frame, pose) ONCE, before the mode
+      |                     branches -- ASSOCIATE is not compensated (C2)
+      |- book.warp(transform)   EVERY live track, before ANYTHING reads one --
+      |                     this is what makes a stalled track accumulate N
+      |                     frames of camera motion instead of one frame's
+      |                     worth read once (the coordinator's C2 fix)
       |- ASSOCIATE:        associator.associate(dets, now)
-      |  FOLLOW:           re-anchor on best-IoU det, else tracker.update(frame)
+      |  FOLLOW:           re-anchor on best-IoU det (against the ALREADY-
+      |                     warped held box), else tracker.update(frame)
       |                                   <-- NEVER TOUCHES THE GATE
       |- book.apply(obs, now)
       `- FrameOutcome{boxes, detector_ran, detector_reason, tracker_millis,
-                      engine_id, locked_track_id}
+                      engine_id, locked_track_id, motion_millis, motion_engine_id}
 
 Every branch above delegates: policy is `scheduler.py`, identity is
 `track.py`, target selection is `lock.py`, pixels are `engines/`. If this
@@ -52,7 +59,14 @@ from typing import Any, Callable, Optional, Sequence
 
 from cv_service.tracking import lock as lock_module
 from cv_service.tracking import params as params_module
-from cv_service.tracking.engines.base import SOURCE_TRACKER, Box, Observation
+from cv_service.tracking.engines.base import (
+    IDENTITY,
+    SOURCE_TRACKER,
+    Box,
+    CameraPose,
+    Observation,
+    Transform,
+)
 from cv_service.tracking.lock import LockArbiter
 from cv_service.tracking.params import (
     MODE_ASSOCIATE,
@@ -62,7 +76,7 @@ from cv_service.tracking.params import (
     TrackingRequest,
 )
 from cv_service.tracking.predict import predict
-from cv_service.tracking.registry import TrackerRegistry
+from cv_service.tracking.registry import MOTION_ENGINE_FLOW, MOTION_ENGINE_POSE, TrackerRegistry
 from cv_service.tracking.scheduler import (
     REASON_UNSPECIFIED,
     DutyCycleScheduler,
@@ -77,6 +91,13 @@ LOGGER = logging.getLogger("cv_service.tracking.session")
 # model resolved at all -- echo this frame".
 DetectFn = Callable[[], "tuple[Optional[list], int]"]
 FrameFn = Callable[[], Any]
+
+# `TrackingParams.motion_engine_id`'s one non-roster value (TRACKING-V2-PLAN
+# §3, wire docstring "off disables") -- checked here, not in `params.py`,
+# because it is this module that decides what to DO with the resolved
+# value, the same division of labour `resolve()`'s own docstring draws
+# between "turn a sentinel into a value" and "decide what serves it".
+_MOTION_ENGINE_OFF = "off"
 
 
 @dataclass(frozen=True)
@@ -109,6 +130,11 @@ class FrameOutcome:
     tracker_millis: int = 0
     engine_id: str = ""
     locked_track_id: int = 0
+    # TRACKING-V2-PLAN wave C2 -- 0 / "" on every frame this wave does not
+    # compensate (OFF, ASSOCIATE -- see the module docstring's "on ASSOCIATE"
+    # note -- and any FOLLOW frame where nothing was constructible).
+    motion_millis: int = 0
+    motion_engine_id: str = ""
 
 
 class StreamTrackingSession:
@@ -137,6 +163,15 @@ class StreamTrackingSession:
         self._tracker_stalled = False
         self._followed: Optional[Track] = None
         self._degraded_engine_ids: set[str] = set()
+        # Ego-motion compensator (TRACKING-V2-PLAN wave C2) -- resolved
+        # lazily on the first active FOLLOW frame, same build-once shape as
+        # `_engine`/`_engine_id` above, but independent of it: which SOT
+        # holds the target and which engine measures the camera's own motion
+        # are orthogonal choices (`motion_engine_id` is its own wire field).
+        self._motion_engine: Any = None
+        self._motion_engine_id = ""
+        self._motion_resolved = False
+        self._degraded_motion_ids: set[str] = set()
         # The last wire `TrackingConfig` message applied, held opaquely and
         # compared by equality (a protobuf `==`, no allocation) so the
         # restated-every-frame config costs one comparison per frame and
@@ -178,6 +213,12 @@ class StreamTrackingSession:
             # do not: those are read per frame from `TrackingParams` and must
             # not cost the operator their track ids.
             self._release_engine()
+        if self._params.motion_engine_id != previous.motion_engine_id:
+            # A separate check from the block above: the motion compensator
+            # is independent of the SOT engine (and of `mode` -- an operator
+            # may switch `lk` <-> `ncc` without ever touching this), so it
+            # is only rebuilt when ITS OWN wire field actually changes.
+            self._release_motion_compensator()
         if self._lock.apply(request.lock):
             self._followed = None
         if not self._params.active:
@@ -185,7 +226,14 @@ class StreamTrackingSession:
 
     # -- the per-frame hot path --------------------------------------------
 
-    def process(self, *, now_millis: float, detect: DetectFn, frame: FrameFn) -> FrameOutcome:
+    def process(
+        self,
+        *,
+        now_millis: float,
+        detect: DetectFn,
+        frame: FrameFn,
+        pose: CameraPose = CameraPose(),
+    ) -> FrameOutcome:
         """Run one frame through §3.1's sequence."""
         engine = self._resolve_engine()
 
@@ -210,6 +258,38 @@ class StreamTrackingSession:
                 return FrameOutcome(boxes=None)
 
         now = now_millis / 1000.0
+
+        # Ego-motion, once per frame, before the mode branches.
+        #
+        # ASSOCIATE is deliberately NOT compensated in this wave
+        # (TRACKING-V2-PLAN C2): its association state lives inside a
+        # third-party engine (`ByteTrackEngine`'s own Kalman filters) with no
+        # seam to warp, and this ultralytics version has no `STrack.
+        # multi_gmc` -- reaching into that library's internals one wave
+        # before C3 replaces the whole association core with `assign.py`'s
+        # `CostAssociator` (which cv-service owns, and where the same change
+        # is two lines) is not worth doing twice. Gating on FOLLOW here is
+        # also what keeps ASSOCIATE from ever decoding a frame it would
+        # otherwise have no reason to touch (see `_estimate_motion`).
+        transform = IDENTITY
+        motion_millis = 0
+        motion_engine_id = ""
+        if self._params.mode == MODE_FOLLOW:
+            transform, motion_millis, motion_engine_id = self._estimate_motion(pose, frame, now)
+
+        # Warp every LIVE track's stored state through this frame's
+        # transform, BEFORE anything reads a track box this frame --
+        # prediction, the re-anchor test, a lock-by-id lookup, coasting.
+        # This is what makes compensation accumulate correctly across a
+        # stall instead of undercorrecting: a track nobody reads for N
+        # frames still gets N single-frame warps, one per `process()` call,
+        # matching N frames of real camera motion. No-op for `IDENTITY`
+        # (OFF/ASSOCIATE, or FOLLOW with nothing to compensate with) -- see
+        # `TrackBook.warp()`'s own docstring for the full reasoning and the
+        # defect this replaced (warping only the READ, once, at whatever
+        # frame happened to call `predict()`).
+        self._book.warp(transform)
+
         started = perf_counter()
         if engine is None or self._params.mode == MODE_OFF:
             boxes = [_box_for(detection) for detection in (detections or [])]
@@ -229,6 +309,8 @@ class StreamTrackingSession:
             tracker_millis=tracker_millis,
             engine_id=self._engine_id,
             locked_track_id=self._lock.bound_track_id,
+            motion_millis=motion_millis,
+            motion_engine_id=motion_engine_id,
         )
 
     # -- mode A: associate --------------------------------------------------
@@ -342,7 +424,9 @@ class StreamTrackingSession:
             # here is exactly what used to make the eventual re-anchor test
             # fail against a position the object had long since left.
             box = predict(held, now).box
+            predicted = True
         else:
+            predicted = False
             try:
                 update = engine.update(frame())
             except Exception as exc:  # noqa: BLE001
@@ -353,6 +437,7 @@ class StreamTrackingSession:
                 # Same predict-don't-freeze fix as above, for the one-off
                 # failure that has not yet latched `_tracker_stalled`.
                 box = predict(held, now).box
+                predicted = True
                 if detector_ran:
                     self._tracker_stalled = True
                 elif update is None:
@@ -384,6 +469,9 @@ class StreamTrackingSession:
             label=held.label,
             confidence=held.confidence,
             source=SOURCE_TRACKER,
+            # True exactly when `box` came from `predict()` rather than from
+            # the engine -- see `Observation.predicted`.
+            predicted=predicted,
         )
         track = self._book.apply([observation], now, detector_ran=detector_ran)[0]
         self._followed = track
@@ -401,11 +489,15 @@ class StreamTrackingSession:
         """Which detection FOLLOW should hold on this pass, or -1. All the
         actual selection is `lock.py`'s; this only supplies the state.
 
-        The held/known box fed into the re-anchor test is the PREDICTED one,
-        not the stale last-committed one (review finding C1's other half):
-        matching this frame's detections against where the target physically
-        was several coasted frames ago is exactly the freeze that used to
-        make a legitimate re-anchor fail its own IoU test.
+        The held/known box fed into the re-anchor test is the PREDICTED one
+        (review finding C1's other half): matching this frame's detections
+        against where the target physically was several coasted frames ago
+        is exactly the freeze that used to make a legitimate re-anchor fail
+        its own IoU test. `TrackBook.warp()` (TRACKING-V2-PLAN C2) already
+        carried the underlying track through every frame of camera motion
+        since it was last read, so `predict()` here needs no transform of
+        its own -- `self._followed.box` is already expressed in THIS
+        frame's coordinates.
         """
         held_box = predict(self._followed, now).box if self._followed is not None else None
         return lock_module.select_target(
@@ -482,6 +574,93 @@ class StreamTrackingSession:
         self._scheduler.retune(self._params)
         self._book.retune(self._params)
 
+    # -- ego-motion (TRACKING-V2-PLAN wave C2) -------------------------------
+
+    def _estimate_motion(
+        self, pose: CameraPose, frame: FrameFn, now: float
+    ) -> "tuple[Transform, int, str]":
+        """This frame's camera-motion transform, timed, plus who served it.
+
+        Only ever called for FOLLOW (see `process()`) -- resolving an engine
+        here is cheap (no pixels touched yet), but actually running `flow`
+        needs a decoded frame, and `frame()` is the servicer's MEMOIZED
+        loader, so calling it here costs nothing extra on the path that
+        already needs pixels for the SOT engine. `pose` engines ignore
+        `frame` entirely but are handed it anyway -- harmless, since it is
+        the same memoized call either way.
+        """
+        engine = self._resolve_motion_compensator(pose)
+        if engine is None:
+            return IDENTITY, 0, ""
+        started = perf_counter()
+        try:
+            transform = engine.estimate(frame(), pose)
+        except Exception as exc:  # noqa: BLE001 - a bad estimate costs accuracy, never the stream
+            LOGGER.warning(
+                "motion compensator %r raised (%s); this frame runs uncompensated",
+                self._motion_engine_id,
+                exc,
+            )
+            self._motion_engine = None
+            self._motion_resolved = False
+            return IDENTITY, int(round((perf_counter() - started) * 1000.0)), ""
+        motion_millis = int(round((perf_counter() - started) * 1000.0))
+        return transform, motion_millis, self._motion_engine_id
+
+    def _resolve_motion_compensator(self, pose: CameraPose) -> Any:
+        """The compensator serving this stream, built and pose-checked once.
+
+        Mirrors `_resolve_engine`'s build-once shape, plus a policy that one
+        does not need: `pose` is always CONSTRUCTIBLE (it needs no cv2, no
+        telemetry, to build) but can still be UNAVAILABLE for this stream --
+        no FOV on the wire, which is the documented normal state until the
+        Java one-liner of TRACKING-V2-PLAN §2.1 lands. That is a runtime fact
+        about this stream's OWN poses, not a startup constructibility result,
+        so it is checked here against a live `CameraPose` rather than by
+        `TrackerRegistry.probe()`. Falls back to `flow`, logged once; if
+        nothing at all is constructible, no compensation -- never an
+        exception, never a dead stream (P5).
+        """
+        if self._motion_resolved:
+            return self._motion_engine
+        self._motion_resolved = True
+
+        requested = self._params.motion_engine_id
+        if requested == _MOTION_ENGINE_OFF:
+            return None
+        registry = self._registry_provider()
+        if registry is None:
+            return None
+
+        created = registry.compensator(requested)
+        if created is None:
+            return None
+        engine_id, engine = created
+        if engine_id == MOTION_ENGINE_POSE and not engine.available(pose):
+            if engine_id not in self._degraded_motion_ids:
+                self._degraded_motion_ids.add(engine_id)
+                LOGGER.info(
+                    "motion: engine_id=%r has no usable camera_pose on this stream yet; "
+                    "falling back to %r",
+                    engine_id,
+                    MOTION_ENGINE_FLOW,
+                )
+            created = registry.compensator(MOTION_ENGINE_FLOW)
+            if created is None:
+                return None
+            engine_id, engine = created
+
+        self._motion_engine_id = engine_id
+        self._motion_engine = engine
+        return engine
+
+    def _release_motion_compensator(self) -> None:
+        """Drop the current compensator so the next active FOLLOW frame
+        rebuilds (and re-checks pose availability) from scratch."""
+        self._motion_engine = None
+        self._motion_engine_id = ""
+        self._motion_resolved = False
+
     def _reset_engine(self, exc: BaseException) -> None:
         """An engine raised mid-frame: that frame loses its track facts, the
         engine is reset, and the stream continues (TRACKING-PLAN §5.I).
@@ -542,6 +721,7 @@ class StreamTrackingSession:
         self._tracker_failed = False
         self._box_invalid = False
         self._tracker_stalled = False
+        self._release_motion_compensator()
 
 
 def _box_for(detection: Any, track: Optional[Track] = None) -> TrackedBox:

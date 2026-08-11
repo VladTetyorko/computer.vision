@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from cv_service.tracking.engines.base import Box, Transform
+from cv_service.tracking.engines.base import Box
 from cv_service.tracking.predict import predict
 from cv_service.tracking.track import Track
 
@@ -93,11 +93,15 @@ def test_confidence_decay_reads_last_confirmed_not_last_seen():
     assert predict(subject, now=100.0).confidence == pytest.approx(0.0)
 
 
-def test_a_transform_warps_the_predicted_box_after_extrapolation():
-    subject = track(velocity_x=0.0, velocity_y=0.0, box=Box(0.1, 0.1, 0.2, 0.2))
-    shift = Transform(c=0.1)  # translate x by +0.1, everything else identity
+def test_predict_takes_no_transform_argument():
+    # TRACKING-V2-PLAN wave C2: warping moved to `TrackBook.warp()`, called
+    # once per frame for EVERY live track before anything reads one, so a
+    # track stalled N frames accumulates N single-frame warps instead of
+    # picking up only the current frame's delta at read time (an up-to-N-x
+    # undercorrection the old `predict(track, now, transform)` signature
+    # had). By the time `predict()` runs, `track.box` is already expressed
+    # in the current frame's coordinates -- see `tests/tracking/test_track.
+    # py`'s `TrackBook.warp()` tests for the accumulation proof itself.
+    import inspect
 
-    prediction = predict(subject, now=0.0, transform=shift)
-
-    assert prediction.box.x == pytest.approx(0.2)
-    assert prediction.box.width == pytest.approx(0.2)
+    assert "transform" not in inspect.signature(predict).parameters

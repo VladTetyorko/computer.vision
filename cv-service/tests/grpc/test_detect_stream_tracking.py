@@ -16,9 +16,9 @@ import pytest
 
 from cv_service.config import Settings
 from cv_service.grpc import servicers as servicers_module
-from cv_service.grpc.servicers import InferenceServicer, cv_pb2
+from cv_service.grpc.servicers import InferenceServicer, _camera_pose_from_wire, cv_pb2
 from cv_service.inference.detector import Detection
-from cv_service.tracking.engines.base import Box, Observation, TrackerUpdate
+from cv_service.tracking.engines.base import Box, CameraPose, Observation, Transform, TrackerUpdate
 
 WIDTH, HEIGHT = 8, 6
 FRAME_BYTES = bytes(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8).tobytes())
@@ -126,10 +126,30 @@ class StubFollower:
         pass
 
 
+class StubCompensator:
+    """`MotionCompensator` test double -- a fixed, distinguishable transform,
+    no pixels touched (TRACKING-V2-PLAN wave C2)."""
+
+    engine_id = "stub-motion"
+
+    def estimate(self, frame, pose):
+        assert isinstance(frame, np.ndarray), "FOLLOW's memoized frame loader must still be reused"
+        return Transform(c=0.02)
+
+    def available(self, pose):
+        return True
+
+    def reset(self):
+        pass
+
+
 class StubTrackerRegistry:
-    def __init__(self, *, associator=StubAssociator, follower=StubFollower) -> None:
+    def __init__(
+        self, *, associator=StubAssociator, follower=StubFollower, compensator=None
+    ) -> None:
         self._associator = associator
         self._follower = follower
+        self._compensator = compensator
         self.created = []
 
     def associator(self, engine_id, *, max_age_frames):
@@ -143,6 +163,18 @@ class StubTrackerRegistry:
         if self._follower is None:
             return None
         engine = self._follower()
+        self.created.append(engine)
+        return engine.engine_id, engine
+
+    def compensator(self, engine_id):
+        # No motion compensator by default (TRACKING-V2-PLAN wave C2): most
+        # of this file's tests predate ego-motion compensation and assert
+        # exact byte/field-count equality, so the default keeps them
+        # behaviourally unchanged. Tests that DO exercise motion pass their
+        # own `compensator=`.
+        if self._compensator is None:
+            return None
+        engine = self._compensator()
         self.created.append(engine)
         return engine.engine_id, engine
 
@@ -325,7 +357,10 @@ def test_follow_runs_the_detector_at_the_cadence_and_no_more(clock):
 
 def test_the_tracker_update_never_acquires_the_inference_gate(clock):
     gate = RecordingGate()
-    subject = servicer(gate=gate)
+    # A live motion compensator too (TRACKING-V2-PLAN wave C2, P2): the
+    # ego-motion path must be exactly as gate-free as the SOT engine's own
+    # update path, structurally, not just by the absence of a test for it.
+    subject = servicer(gate=gate, tracker_registry=StubTrackerRegistry(compensator=StubCompensator))
     config = follow_config(verify_every_millis=100_000)  # exactly one pass, ever
 
     session = servicers_module.StreamTrackingSession(
@@ -399,6 +434,93 @@ def test_restating_the_identical_config_never_re_resolves_it(clock):
         subject._handle_request(frame_request(frame, config), session)
 
     assert len(applications) == 1
+
+
+# --- ego-motion compensation (TRACKING-V2-PLAN wave C2) ------------------------
+
+
+def test_camera_pose_from_wire_maps_every_field():
+    wire = cv_pb2.CameraPose(
+        yaw_degrees=12.0,
+        pitch_degrees=-3.5,
+        roll_degrees=1.5,
+        hfov_degrees=62.0,
+        vfov_degrees=36.0,
+        pose_timestamp_millis=987,
+    )
+
+    pose = _camera_pose_from_wire(wire)
+
+    assert pose == CameraPose(
+        yaw_degrees=12.0,
+        pitch_degrees=-3.5,
+        roll_degrees=1.5,
+        hfov_degrees=62.0,
+        vfov_degrees=36.0,
+        timestamp_millis=987,
+    )
+
+
+def test_an_absent_camera_pose_maps_to_unknown():
+    absent = _camera_pose_from_wire(cv_pb2.FrameRequest().camera_pose)
+
+    assert absent == CameraPose()
+    assert absent.known is False
+
+
+def test_follow_reports_the_serving_motion_engine_and_its_cost_on_the_wire(clock):
+    subject = servicer(tracker_registry=StubTrackerRegistry(compensator=StubCompensator))
+    config = follow_config(verify_every_millis=100_000)
+
+    responses = drive(subject, [frame_request(0, config)])
+
+    assert responses[0].motion_engine_id == "stub-motion"
+    assert responses[0].motion_millis >= 0
+
+
+def test_no_motion_compensator_reports_no_compensation_on_the_wire(clock):
+    subject = servicer()  # StubTrackerRegistry() default: no compensator
+    config = follow_config(verify_every_millis=100_000)
+
+    responses = drive(subject, [frame_request(0, config)])
+
+    assert responses[0].motion_engine_id == ""
+    assert responses[0].motion_millis == 0
+
+
+def test_associate_never_populates_motion_fields_on_the_wire(clock):
+    # ASSOCIATE is deliberately NOT compensated in this wave -- even with a
+    # compensator available, it must never be asked for one.
+    subject = servicer(tracker_registry=StubTrackerRegistry(compensator=StubCompensator))
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, min_hits=1)
+
+    responses = drive(subject, [frame_request(0, config)])
+
+    assert responses[0].motion_engine_id == ""
+    assert responses[0].motion_millis == 0
+
+
+def test_a_camera_pose_on_the_wire_reaches_the_session(clock):
+    # An end-to-end plumbing check: a `pose`-requesting stream with a real
+    # FOV on the wire gets `pose` compensation credited on the response,
+    # never falling back to `flow` -- proving `camera_pose` genuinely
+    # crosses from `FrameRequest` into `StreamTrackingSession.process`.
+    class StubPoseCompensator(StubCompensator):
+        engine_id = "pose"
+
+        def estimate(self, frame, pose):
+            assert pose.known, "a wire camera_pose with a real hfov must reach the compensator"
+            return Transform()
+
+    subject = servicer(tracker_registry=StubTrackerRegistry(compensator=StubPoseCompensator))
+    config = follow_config(verify_every_millis=100_000, motion_engine_id="pose")
+
+    responses = drive(
+        subject,
+        [frame_request(0, config, camera_pose=cv_pb2.CameraPose(hfov_degrees=60.0))],
+    )
+
+    assert responses[0].motion_engine_id == "pose"
 
 
 # --- degradation --------------------------------------------------------------

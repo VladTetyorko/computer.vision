@@ -38,7 +38,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
-from cv_service.tracking.engines.base import SOURCE_DETECTOR, SOURCE_TRACKER, Box, Observation
+from cv_service.tracking.engines.base import SOURCE_DETECTOR, SOURCE_TRACKER, Box, Observation, Transform
 from cv_service.tracking.params import TrackingParams
 
 LOGGER = logging.getLogger("cv_service.tracking.track")
@@ -57,6 +57,15 @@ STATE_LOST = "TRACK_STATE_LOST"
 # promise gets), not an operator knob: the knob is `max_age_frames`, and this
 # scales with it.
 _LOST_RETENTION_MULTIPLIER = 2
+
+# How much of a new velocity measurement to believe. Structural, not an
+# operator knob: it is how much the motion model trusts one frame against its
+# own history, and the number an operator tunes is `max_age`, not this.
+_VELOCITY_SMOOTHING = 0.3
+
+
+def _blend(previous: float, measured: float) -> float:
+    return _VELOCITY_SMOOTHING * measured + (1.0 - _VELOCITY_SMOOTHING) * previous
 
 
 @dataclass
@@ -166,6 +175,46 @@ class TrackBook:
             LOGGER.debug("tracking: retiring %d track(s) after an engine reset", len(self._tracks))
         self._tracks.clear()
 
+    def warp(self, transform: Transform) -> None:
+        """Carry every live track's stored box (and velocity) through one
+        frame of camera motion (TRACKING-V2-PLAN wave C2).
+
+        Called once per frame, in `StreamTrackingSession.process()`, BEFORE
+        anything reads a track -- prediction, the FOLLOW re-anchor test, a
+        lock-by-id lookup, coasting. That placement is the whole fix: an
+        earlier version of this correction warped only the box a `predict()`
+        call happened to READ, using THAT FRAME's transform regardless of
+        how long the track had actually been unread. A track stalled for N
+        frames while the camera panned at a constant rate then picked up
+        only the LAST frame's delta -- an up-to-N-x undercorrection, worst
+        exactly when compensation matters most (a stalled tracker, nothing
+        but prediction left). Warping the STORED state every single frame
+        instead means N stalled frames accumulate N single-frame warps, one
+        per `process()` call, matching N frames of real camera motion --
+        and it means `predict()` itself needs no transform argument at all:
+        by the time it runs, `track.box`/`velocity_*` are already correct
+        for the CURRENT frame.
+
+        No-op for `IDENTITY` -- cheap (skips every track without even
+        entering the loop), and it is what keeps an OFF/ASSOCIATE stream (no
+        compensation attempted in this wave) or a FOLLOW stream with nothing
+        constructible bit-for-bit untouched.
+
+        `box` warps by the FULL affine -- a position has somewhere to
+        translate to. `velocity_x`/`velocity_y` warp by the LINEAR part
+        only (`a`, `b`, `d`, `e` -- no `c`/`f`): a rate is a difference of
+        two positions, so any constant translation term cancels out of it
+        by construction, and only rotation/scale changes how fast something
+        reads in the now-current frame.
+        """
+        if transform.identity:
+            return
+        for track in self._tracks.values():
+            track.box = transform.apply_box(track.box)
+            vx, vy = track.velocity_x, track.velocity_y
+            track.velocity_x = transform.a * vx + transform.b * vy
+            track.velocity_y = transform.d * vx + transform.e * vy
+
     def apply(
         self,
         observations: Sequence[Observation],
@@ -248,11 +297,34 @@ class TrackBook:
         self, track: Track, observation: Observation, now: float, *, detector_ran: bool
     ) -> None:
         elapsed = now - track.last_seen
-        if elapsed > 0.0:
+        if elapsed > 0.0 and not observation.predicted:
+            # Evidence only, and smoothed. Two defects sit behind these two
+            # conditions, both measured rather than supposed:
+            #
+            # Updating from a PREDICTED box makes the motion model
+            # self-confirming -- the velocity re-derived from an
+            # extrapolated box is exactly the velocity that produced it, so
+            # one bad estimate is preserved forever and no amount of
+            # coasting can correct it.
+            #
+            # Taking the instantaneous single-frame difference makes the
+            # estimate noise, not motion: at a realistic detector jitter a
+            # perfectly STATIC target measures a non-zero velocity, and
+            # extrapolating that across an occlusion walks its box off the
+            # object and fails the re-anchor that would have recovered it.
+            # The smoothing costs a little lag on a genuine acceleration,
+            # which is the right trade -- a coasting box is already an
+            # approximation, and a wrong direction is far worse than a late one.
             old_cx, old_cy = track.box.center
             new_cx, new_cy = observation.box.center
-            track.velocity_x = (new_cx - old_cx) / elapsed
-            track.velocity_y = (new_cy - old_cy) / elapsed
+            measured_x = (new_cx - old_cx) / elapsed
+            measured_y = (new_cy - old_cy) / elapsed
+            if track.hits <= 1:
+                track.velocity_x = measured_x
+                track.velocity_y = measured_y
+            else:
+                track.velocity_x = _blend(track.velocity_x, measured_x)
+                track.velocity_y = _blend(track.velocity_y, measured_y)
         track.box = observation.box
         track.label = observation.label
         track.confidence = observation.confidence

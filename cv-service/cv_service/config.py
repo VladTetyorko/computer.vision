@@ -81,6 +81,14 @@ DEFAULT_TRACK_MAX_AGE_MILLIS = 3000
 # construction: a track that has lost half its corners or dropped to a weak
 # correlation is worth double-checking, not yet worth declaring lost.
 DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE = 0.5
+# TRACKING-V2-PLAN wave C2: which `MotionCompensator` a stream gets when its
+# `TrackingConfig.motion_engine_id` is blank (proto field 8, frozen at C0).
+# `flow` -- pixel-based, needs no telemetry -- is the default because it
+# works on every client today; `pose` only activates once a client actually
+# populates `camera_pose` (TRACKING-V2-PLAN §2.1's Java one-liner, not yet
+# built). `"off"` is a legitimate value here too, disabling compensation
+# fleet-wide without touching a single stream's request.
+DEFAULT_TRACK_MOTION_ENGINE = "flow"
 
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
@@ -257,6 +265,7 @@ class Settings:
     track_min_hits: int = DEFAULT_TRACK_MIN_HITS
     track_max_age_millis: int = DEFAULT_TRACK_MAX_AGE_MILLIS
     track_min_tracker_confidence: float = DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE
+    track_motion_engine: str = DEFAULT_TRACK_MOTION_ENGINE
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -319,5 +328,8 @@ class Settings:
                 os.environ.get("CV_TRACK_MIN_TRACKER_CONFIDENCE"),
                 DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE,
                 "CV_TRACK_MIN_TRACKER_CONFIDENCE",
+            ),
+            track_motion_engine=_parse_engine_id(
+                os.environ.get("CV_TRACK_MOTION_ENGINE"), DEFAULT_TRACK_MOTION_ENGINE
             ),
         )

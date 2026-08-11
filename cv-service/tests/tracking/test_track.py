@@ -7,7 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from cv_service.tracking.engines.base import SOURCE_DETECTOR, SOURCE_TRACKER, Box, Observation
+from cv_service.tracking.engines.base import (
+    SOURCE_DETECTOR,
+    SOURCE_TRACKER,
+    Box,
+    Observation,
+    Transform,
+)
 from cv_service.tracking.params import MODE_ASSOCIATE, TrackingParams
 from cv_service.tracking.track import (
     STATE_COASTING,
@@ -33,6 +39,7 @@ def params(**overrides) -> TrackingParams:
         # override this explicitly with a small value.
         track_max_age_millis=1_000_000,
         min_tracker_confidence=0.5,
+        motion_engine_id="",
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -254,3 +261,77 @@ def test_bump_epoch_stops_a_re_issued_engine_key_from_resurrecting_the_old_track
 
     assert reborn.track_id != born.track_id
     assert book.get(born.track_id) is not None  # the old one still lives too
+
+
+# -- ego-motion warp (TRACKING-V2-PLAN wave C2) ------------------------------
+
+
+def test_warp_moves_every_live_tracks_box():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.10), seen("b", x=0.50)], 0.0, detector_ran=True)
+    shift = Transform(c=0.01)  # +0.01 to x, everything else identity
+
+    book.warp(shift)
+
+    assert book.get(born[0].track_id).box.x == pytest.approx(0.11)
+    assert book.get(born[1].track_id).box.x == pytest.approx(0.51)
+
+
+def test_n_consecutive_identical_warps_move_a_track_by_n_steps_not_one():
+    # THE accumulation invariant the coordinator's fix exists for: a track
+    # nobody reads for N frames must still pick up N single-frame warps
+    # (matching N frames of real camera motion), not the ONE frame's worth
+    # a call site would see if warping only happened at read time. This is
+    # the direct, book-level proof; `tests/tracking/test_session.py` proves
+    # the same thing end to end through a stalled FOLLOW session.
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.10)], 0.0, detector_ran=True)[0]
+    step = Transform(c=0.01)
+
+    for _ in range(30):
+        book.warp(step)
+
+    assert book.get(born.track_id).box.x == pytest.approx(0.10 + 30 * 0.01)
+
+
+def test_warp_is_an_exact_no_op_for_identity():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.10, y=0.20)], 0.0, detector_ran=True)[0]
+    original_box = born.box
+
+    book.warp(Transform())  # IDENTITY
+
+    assert book.get(born.track_id).box == original_box
+
+
+def test_warp_moves_velocity_by_the_linear_part_only():
+    # A rate has no position to translate -- `c`/`f` must NOT leak into it,
+    # only the rotation/scale part (`a`, `b`, `d`, `e`).
+    book = TrackBook(params(min_hits=1))
+    book.apply([seen("a", x=0.10, y=0.10)], 0.0, detector_ran=True)
+    moved = book.apply([seen("a", x=0.20, y=0.10)], 1.0, detector_ran=True)[0]
+    assert moved.velocity_x == pytest.approx(0.1)
+    assert moved.velocity_y == pytest.approx(0.0)
+
+    # A pure translation: velocity is unaffected (it already excludes c/f).
+    book.warp(Transform(c=0.5, f=0.5))
+    assert book.get(moved.track_id).velocity_x == pytest.approx(0.1)
+    assert book.get(moved.track_id).velocity_y == pytest.approx(0.0)
+
+    # A pure 2x scale (a=e=2, b=d=0, no translation): the rate scales too.
+    book.warp(Transform(a=2.0, e=2.0))
+    assert book.get(moved.track_id).velocity_x == pytest.approx(0.2)
+    assert book.get(moved.track_id).velocity_y == pytest.approx(0.0)
+
+
+def test_warp_never_touches_a_track_born_after_it():
+    # Ordering sanity: `warp()` only ever sees the tracks that exist AT THE
+    # TIME it is called -- a track born later in the same frame (e.g. a
+    # fresh re-anchor) is not retroactively shifted by a warp that already
+    # ran before it existed.
+    book = TrackBook(params(min_hits=1))
+
+    book.warp(Transform(c=0.5))  # nothing alive yet -- must not raise
+
+    born = book.apply([seen("a", x=0.10)], 0.0, detector_ran=True)[0]
+    assert born.box.x == pytest.approx(0.10)

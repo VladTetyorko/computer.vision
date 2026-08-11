@@ -159,3 +159,48 @@ def test_garbage_wave_c1_env_vars_fall_back_and_never_raise(monkeypatch):
 
     assert settings.track_max_age_millis == Settings().track_max_age_millis
     assert settings.track_min_tracker_confidence == Settings().track_min_tracker_confidence
+
+
+# -- wave C2 addition: motion_engine_id (proto field 8) ----------------------
+
+
+def test_a_blank_motion_engine_id_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_motion_engine="pose")
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_FOLLOW), settings)
+
+    assert resolved.motion_engine_id == "pose"
+
+
+def test_a_requested_motion_engine_id_wins_over_the_deployment_default():
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_FOLLOW, motion_engine_id="pose"), SETTINGS
+    )
+
+    assert resolved.motion_engine_id == "pose"
+
+
+def test_an_explicit_off_passes_through_rather_than_falling_back():
+    # "off" is a legitimate resolved value (TRACKING-V2-PLAN §2's wire
+    # docstring), not a sentinel resolve() rewrites -- unlike a blank
+    # engine_id, it must reach `session.py` as "off", not as whatever
+    # CV_TRACK_MOTION_ENGINE happens to default to.
+    settings = dataclasses.replace(SETTINGS, track_motion_engine="flow")
+
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_FOLLOW, motion_engine_id="off"), settings
+    )
+
+    assert resolved.motion_engine_id == "off"
+
+
+def test_settings_read_the_motion_engine_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_MOTION_ENGINE", "pose")
+
+    assert Settings.from_env().track_motion_engine == "pose"
+
+
+def test_a_blank_motion_engine_env_var_falls_back_to_flow(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_MOTION_ENGINE", "   ")
+
+    assert Settings.from_env().track_motion_engine == Settings().track_motion_engine == "flow"

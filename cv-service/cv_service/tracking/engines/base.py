@@ -107,6 +107,17 @@ class Observation:
     geometry a second time. `-1` means the observation was synthesized by a
     tracker-only frame and has no detector box behind it.
 
+    `predicted` means this box is the system's OWN extrapolation rather than
+    evidence -- what a coasting track emits when the visual tracker has
+    stalled and there is nothing left but the motion model. It is never set
+    by an engine, only by the session, and it exists because feeding a
+    prediction back as if it were a measurement makes the motion model
+    self-confirming: `_observe` would re-derive from the predicted box
+    exactly the velocity it had just used to produce it, so a velocity that
+    came from nothing but measurement noise could never decay or be
+    corrected. Measured, it drifts a static target by a fifth of its own
+    height across one occlusion -- enough to fail the re-anchor on its own.
+
     `authoritative` means "this box is ground truth for its identity", which
     skips the `min_hits` anti-flicker gate. **Engines never set it** -- it
     exists for FOLLOW's operator-chosen lock, where TRACKING-PLAN §3.1 says a
@@ -124,6 +135,7 @@ class Observation:
     source: str = SOURCE_DETECTOR
     det_index: int = -1
     authoritative: bool = False
+    predicted: bool = False
 
 
 @dataclass(frozen=True)

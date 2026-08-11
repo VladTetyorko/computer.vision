@@ -13,7 +13,7 @@ import pytest
 
 from cv_service.config import Settings
 from cv_service.inference.detector import Detection
-from cv_service.tracking.engines.base import Box, Observation, TrackerUpdate
+from cv_service.tracking.engines.base import Box, CameraPose, Observation, Transform, TrackerUpdate
 from cv_service.tracking.params import (
     MODE_ASSOCIATE,
     MODE_FOLLOW,
@@ -21,6 +21,7 @@ from cv_service.tracking.params import (
     LockRequest,
     TrackingRequest,
 )
+from cv_service.tracking.registry import MOTION_ENGINE_FLOW, MOTION_ENGINE_POSE
 from cv_service.tracking.scheduler import REASON_ALWAYS, REASON_CADENCE, REASON_NO_LOCK
 from cv_service.tracking.session import StreamTrackingSession
 from cv_service.tracking.track import STATE_CONFIRMED
@@ -94,11 +95,13 @@ class FakeFollower:
 
 
 class FakeRegistry:
-    def __init__(self, associator=None, follower=None):
+    def __init__(self, associator=None, follower=None, compensator=None):
         self._associator = associator
         self._follower = follower
+        self._compensator = compensator
         self.associator_calls = 0
         self.follower_calls = 0
+        self.compensator_calls = 0
 
     def associator(self, engine_id, *, max_age_frames):
         self.associator_calls += 1
@@ -113,6 +116,64 @@ class FakeRegistry:
             return None
         engine = self._follower() if callable(self._follower) else self._follower
         return engine.engine_id, engine
+
+    def compensator(self, engine_id):
+        self.compensator_calls += 1
+        if self._compensator is None:
+            return None
+        engine = self._compensator() if callable(self._compensator) else self._compensator
+        return engine.engine_id, engine
+
+
+class FakeMotionCompensator:
+    """`MotionCompensator` test double -- a fixed transform, no pixels needed."""
+
+    def __init__(self, engine_id="fake-motion", *, transform=None, is_available=True):
+        self.engine_id = engine_id
+        self.transform = transform if transform is not None else Transform(c=0.05)
+        self.estimate_calls = 0
+        self.raise_on_next = False
+        self._is_available = is_available
+
+    def available(self, pose):
+        return self._is_available
+
+    def estimate(self, frame, pose):
+        self.estimate_calls += 1
+        if self.raise_on_next:
+            self.raise_on_next = False
+            raise RuntimeError("motion compensator exploded")
+        return self.transform
+
+    def reset(self):
+        pass
+
+
+class PoseOrFlowRegistry:
+    """Distinguishes `pose` vs `flow` engine ids, for proving `session.py`'s
+    pose-unavailable-falls-back-to-flow policy without wiring a real
+    `TrackerRegistry`. `associator`/`follower` are the minimum needed to
+    keep a FOLLOW session alive; only `compensator` is the point of this
+    fake."""
+
+    def __init__(self, *, pose_available):
+        self.pose = FakeMotionCompensator(MOTION_ENGINE_POSE, is_available=pose_available)
+        self.flow = FakeMotionCompensator(MOTION_ENGINE_FLOW)
+        self.requested_ids = []
+
+    def associator(self, engine_id, *, max_age_frames):
+        return None
+
+    def follower(self, engine_id, *, max_age_frames):
+        return "fake-follow", FakeFollower()
+
+    def compensator(self, engine_id):
+        self.requested_ids.append(engine_id)
+        if engine_id == MOTION_ENGINE_POSE:
+            return self.pose.engine_id, self.pose
+        if engine_id == MOTION_ENGINE_FLOW:
+            return self.flow.engine_id, self.flow
+        return None
 
 
 def session(registry, settings=None) -> StreamTrackingSession:
@@ -218,14 +279,17 @@ def test_a_detection_the_engine_did_not_identify_is_reported_untracked():
 # -- FOLLOW -----------------------------------------------------------------
 
 
-def follow_session(follower=None, *, verify_every_millis=2000, lock_seq=1, **lock_kwargs):
+def follow_session(
+    follower=None, *, verify_every_millis=2000, lock_seq=1, compensator=None, motion_engine_id="", **lock_kwargs
+):
     engine = follower or FakeFollower()
-    subject = session(FakeRegistry(follower=engine))
+    subject = session(FakeRegistry(follower=engine, compensator=compensator))
     subject.apply_config(
         TrackingRequest(
             mode=MODE_FOLLOW,
             verify_every_millis=verify_every_millis,
             min_hits=1,
+            motion_engine_id=motion_engine_id,
             lock=LockRequest(lock_seq=lock_seq, **(lock_kwargs or {"point_x": 0.15, "point_y": 0.15})),
         )
     )
@@ -481,6 +545,223 @@ def test_a_persistently_weak_confidence_never_forces_two_verify_passes_in_a_row(
         outcome = run(subject, now_millis=frame * 66.0, detections=[det("bus", x=0.8, y=0.8)])
         consecutive = consecutive + 1 if outcome.detector_ran else 0
         assert consecutive <= 1
+
+
+# -- ego-motion compensation (TRACKING-V2-PLAN wave C2) ---------------------
+
+
+def test_no_compensator_reports_no_compensation_on_the_outcome():
+    # Default `FakeRegistry()` offers no compensator -- every other FOLLOW
+    # test in this file runs through this path, so it stays behaviourally
+    # identical to before wave C2 (motion fields at their proto3 zero).
+    subject, _engine = follow_session()
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert outcome.motion_millis == 0
+    assert outcome.motion_engine_id == ""
+
+
+def test_associate_never_asks_for_a_motion_compensator():
+    # TRACKING-V2-PLAN C2's design decision: ASSOCIATE is deliberately NOT
+    # compensated this wave (association still lives inside ByteTrack's own
+    # state, with no seam to warp) -- so the registry is never even asked.
+    registry = FakeRegistry(associator=FakeAssociator(), compensator=FakeMotionCompensator)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert registry.compensator_calls == 0
+    assert outcome.motion_millis == 0
+    assert outcome.motion_engine_id == ""
+
+
+def test_a_follow_frame_estimates_motion_once_and_reports_it():
+    compensator = FakeMotionCompensator("fake-motion")
+    subject, _engine = follow_session(compensator=compensator)
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert compensator.estimate_calls == 1
+    assert outcome.motion_engine_id == "fake-motion"
+    assert outcome.motion_millis >= 0
+
+
+def test_the_coasted_box_is_warped_by_the_compensators_transform():
+    # A track with zero velocity would otherwise coast in place exactly
+    # where it was last confirmed, so any movement here can only be
+    # `TrackBook.warp()` carrying the stored box through the compensator's
+    # transform (called once per frame in `process()`, before `_coast`
+    # reads the track).
+    engine = FakeFollower()
+    compensator = FakeMotionCompensator(transform=Transform(c=0.1))
+    subject = session(FakeRegistry(follower=engine, compensator=compensator))
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=100_000,
+            min_hits=1,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    born_box = born.boxes[0].track.box
+
+    engine.update_returns = "lost"
+    coasted = run(subject, now_millis=66.0, detections=[det()])
+
+    assert coasted.boxes[0].track.box.x == pytest.approx(born_box.x + 0.1)
+    assert coasted.boxes[0].track.box.y == pytest.approx(born_box.y)
+
+
+def test_n_stalled_frames_accumulate_n_warps_not_one():
+    # THE end-to-end accumulation proof, at the session level: a track that
+    # nobody re-anchors for N consecutive tracker-only frames must drift by
+    # N times one frame's ego-motion, not by one frame's worth applied once
+    # regardless of how long the stall has run -- the coordinator's fix.
+    # Warping only the box a `predict()` call happened to READ (using that
+    # call's own single frame's transform) would leave this asserting a
+    # `+1 x shift`, not `+N x shift`.
+    engine = FakeFollower()
+    step = Transform(c=0.01)
+    compensator = FakeMotionCompensator(transform=step)
+    subject = session(FakeRegistry(follower=engine, compensator=compensator))
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=100_000,  # no verify pass interrupts the stall
+            min_hits=1,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
+    born_box = born.boxes[0].track.box
+
+    # The tracker itself never recovers: every remaining frame coasts on
+    # prediction alone -- exactly when compensation has to do its job (the
+    # "tracker stalled, nothing but prediction left" case). Empty
+    # detections throughout -- a static detection here would let a
+    # trigger-(b)-forced verify pass re-anchor onto it and reset the box,
+    # which is a confound this test does not want; a real occluder offers
+    # nothing to re-anchor onto either.
+    engine.update_returns = "lost"
+    outcome = None
+    frame_count = 20
+    for frame in range(1, frame_count + 1):
+        outcome = run(subject, now_millis=frame * 66.0, detections=[])
+
+    assert outcome.boxes[0].track.box.x == pytest.approx(born_box.x + frame_count * 0.01)
+
+
+def test_pose_is_selected_when_it_has_a_usable_camera_pose():
+    registry = PoseOrFlowRegistry(pose_available=True)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            min_hits=1,
+            motion_engine_id=MOTION_ENGINE_POSE,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+
+    outcome = subject.process(
+        now_millis=0.0, detect=detect_returning(det()), frame=lambda: FRAME, pose=CameraPose(hfov_degrees=60.0)
+    )
+
+    assert outcome.motion_engine_id == MOTION_ENGINE_POSE
+    assert registry.pose.estimate_calls == 1
+    assert registry.flow.estimate_calls == 0
+
+
+def test_flow_serves_when_pose_is_requested_but_has_no_usable_camera_pose():
+    # The documented normal state today: Java does not populate `camera_
+    # pose` yet, so an operator (or a deployment default) asking for `pose`
+    # gets `flow` instead of silent non-compensation -- logged once.
+    registry = PoseOrFlowRegistry(pose_available=False)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            min_hits=1,
+            motion_engine_id=MOTION_ENGINE_POSE,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert outcome.motion_engine_id == MOTION_ENGINE_FLOW
+    assert registry.pose.estimate_calls == 0
+    assert registry.flow.estimate_calls == 1
+
+
+def test_motion_off_never_asks_the_registry_for_a_compensator():
+    registry = FakeRegistry(follower=FakeFollower(), compensator=FakeMotionCompensator)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            min_hits=1,
+            motion_engine_id="off",
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert registry.compensator_calls == 0
+    assert outcome.motion_engine_id == ""
+    assert outcome.motion_millis == 0
+
+
+def test_a_raising_motion_compensator_degrades_this_frame_without_killing_the_stream():
+    compensator = FakeMotionCompensator()
+    compensator.raise_on_next = True
+    subject, _engine = follow_session(compensator=compensator)
+
+    degraded = run(subject, now_millis=0.0, detections=[det()])
+    assert degraded.motion_engine_id == ""
+    assert degraded.boxes[0].track is not None  # tracking itself is unaffected
+
+    recovered = run(subject, now_millis=66.0, detections=[det("bus", x=0.8, y=0.8)])
+    assert recovered.motion_engine_id == compensator.engine_id
+
+
+def test_changing_the_motion_engine_id_rebuilds_it_without_touching_the_tracker():
+    first = FakeMotionCompensator("fake-motion-a")
+    second = FakeMotionCompensator("fake-motion-b")
+    engines = iter([first, second])
+    tracker = FakeFollower()
+    subject = session(FakeRegistry(follower=tracker, compensator=lambda: next(engines)))
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            min_hits=1,
+            motion_engine_id="a",
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    before = run(subject, now_millis=0.0, detections=[det()])
+    assert before.motion_engine_id == "fake-motion-a"
+    assert tracker.inits == 1
+
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            min_hits=1,
+            motion_engine_id="b",
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    after = run(subject, now_millis=66.0, detections=[det()])
+
+    assert after.motion_engine_id == "fake-motion-b"
+    # The SOT engine and the track's id survive untouched -- only the
+    # independent motion field changed.
+    assert tracker.inits == 1
+    assert after.locked_track_id == before.locked_track_id
 
 
 # -- configuration ----------------------------------------------------------

@@ -15,7 +15,10 @@ from cv_service.config import Settings
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 from cv_service.tracking.registry import (
     BUILTIN_ASSOCIATORS,
+    BUILTIN_COMPENSATORS,
     BUILTIN_FOLLOWERS,
+    MOTION_ENGINE_FLOW,
+    MOTION_ENGINE_POSE,
     TrackerRegistry,
     build_default_registry,
 )
@@ -41,8 +44,10 @@ def registry(**overrides) -> TrackerRegistry:
     base = dict(
         associators={"bytetrack": factory("bytetrack")},
         followers={"lk": factory("lk"), "ncc": factory("ncc")},
+        compensators={MOTION_ENGINE_FLOW: factory(MOTION_ENGINE_FLOW), MOTION_ENGINE_POSE: factory(MOTION_ENGINE_POSE)},
         default_associate_id="bytetrack",
         default_follow_id="lk",
+        default_motion_id=MOTION_ENGINE_FLOW,
     )
     base.update(overrides)
     return TrackerRegistry(**base)
@@ -51,8 +56,10 @@ def registry(**overrides) -> TrackerRegistry:
 def test_the_roster_reports_which_modes_each_engine_serves():
     assert registry().roster() == {
         "bytetrack": [MODE_ASSOCIATE],
+        "flow": ["MOTION_COMPENSATOR"],
         "lk": [MODE_FOLLOW],
         "ncc": [MODE_FOLLOW],
+        "pose": ["MOTION_COMPENSATOR"],
     }
 
 
@@ -61,6 +68,15 @@ def test_engines_are_per_stream_not_singletons():
 
     first = subject.follower("lk", max_age_frames=30)
     second = subject.follower("lk", max_age_frames=30)
+
+    assert first[1] is not second[1]
+
+
+def test_compensators_are_per_stream_not_singletons():
+    subject = registry()
+
+    first = subject.compensator(MOTION_ENGINE_FLOW)
+    second = subject.compensator(MOTION_ENGINE_FLOW)
 
     assert first[1] is not second[1]
 
@@ -100,8 +116,28 @@ def test_the_probe_drops_engines_that_cannot_be_constructed_here(caplog):
     with caplog.at_level(logging.WARNING, logger="cv_service.tracking.registry"):
         roster = subject.probe()
 
-    assert roster == {"bytetrack": [MODE_ASSOCIATE], "lk": [MODE_FOLLOW]}
+    assert roster == {
+        "bytetrack": [MODE_ASSOCIATE],
+        "flow": ["MOTION_COMPENSATOR"],
+        "lk": [MODE_FOLLOW],
+        "pose": ["MOTION_COMPENSATOR"],
+    }
     assert any("vit" in record.getMessage() for record in caplog.records)
+
+
+def test_the_probe_drops_a_compensator_that_cannot_be_constructed_here(caplog):
+    subject = registry(compensators={MOTION_ENGINE_FLOW: factory(MOTION_ENGINE_FLOW), "nano-gmc": exploding})
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.registry"):
+        roster = subject.probe()
+
+    assert roster == {
+        "bytetrack": [MODE_ASSOCIATE],
+        "flow": ["MOTION_COMPENSATOR"],
+        "lk": [MODE_FOLLOW],
+        "ncc": [MODE_FOLLOW],
+    }
+    assert any("nano-gmc" in record.getMessage() for record in caplog.records)
 
 
 def test_the_probe_logs_the_roster_once_at_info(caplog):
@@ -119,11 +155,13 @@ def test_the_probe_logs_the_roster_once_at_info(caplog):
 def test_the_probe_never_mutates_the_shared_builtin_rosters():
     before_associators = dict(BUILTIN_ASSOCIATORS)
     before_followers = dict(BUILTIN_FOLLOWERS)
+    before_compensators = dict(BUILTIN_COMPENSATORS)
 
     build_default_registry(Settings(), probe=True)
 
     assert BUILTIN_ASSOCIATORS == before_associators
     assert BUILTIN_FOLLOWERS == before_followers
+    assert BUILTIN_COMPENSATORS == before_compensators
 
 
 def test_a_default_that_itself_fails_still_serves_a_surviving_engine():
@@ -135,24 +173,51 @@ def test_a_default_that_itself_fails_still_serves_a_surviving_engine():
     assert engine.engine_id == "ncc"
 
 
+def test_a_default_compensator_that_itself_fails_still_serves_a_surviving_one():
+    subject = registry(compensators={MOTION_ENGINE_FLOW: exploding, MOTION_ENGINE_POSE: factory(MOTION_ENGINE_POSE)})
+
+    engine_id, engine = subject.compensator(MOTION_ENGINE_FLOW)
+
+    assert engine_id == MOTION_ENGINE_POSE
+    assert engine.engine_id == MOTION_ENGINE_POSE
+
+
 def test_an_empty_roster_returns_none_rather_than_raising():
     subject = registry(followers={})
 
     assert subject.follower("lk", max_age_frames=30) is None
 
 
+def test_an_empty_compensator_roster_returns_none_rather_than_raising():
+    subject = registry(compensators={})
+
+    assert subject.compensator(MOTION_ENGINE_FLOW) is None
+
+
+def test_an_unknown_compensator_id_falls_back_to_the_motion_default(caplog):
+    subject = registry()
+
+    with caplog.at_level(logging.INFO, logger="cv_service.tracking.registry"):
+        engine_id, engine = subject.compensator("nano-gmc")
+
+    assert engine_id == MOTION_ENGINE_FLOW
+    assert engine.engine_id == MOTION_ENGINE_FLOW
+    assert any("nano-gmc" in record.getMessage() for record in caplog.records)
+
+
 def test_build_default_registry_takes_its_defaults_from_settings():
-    settings = dataclasses.replace(Settings(), track_follow_engine="ncc")
+    settings = dataclasses.replace(Settings(), track_follow_engine="ncc", track_motion_engine="pose")
 
     subject = build_default_registry(settings, probe=False)
 
     assert subject.default_follow_id == "ncc"
     assert subject.default_associate_id == Settings().track_associate_engine
-    assert set(subject.roster()) == {"bytetrack", "lk", "ncc"}
+    assert subject.default_motion_id == "pose"
+    assert set(subject.roster()) == {"bytetrack", "lk", "ncc", "flow", "pose"}
 
 
-@pytest.mark.parametrize("engine_id", ["bytetrack", "lk", "ncc"])
-def test_the_three_shipped_engines_are_advertised(engine_id):
+@pytest.mark.parametrize("engine_id", ["bytetrack", "lk", "ncc", "flow", "pose"])
+def test_the_five_shipped_engines_are_advertised(engine_id):
     assert engine_id in build_default_registry(Settings(), probe=False).roster()
 
 

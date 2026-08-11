@@ -8,9 +8,23 @@ sat still while the object kept moving -- and the verify pass that followed
 then measured IoU against that stale position and failed to re-anchor. The
 freeze was what caused the very re-anchor failure it was trying to survive.
 
-Pure stdlib -- `Box`/`Transform`/`IDENTITY` are the same vocabulary
-`track.py`/`session.py` already share, so importing this module costs
-nothing extra on a build with no `cv` extra at all.
+**No `transform` argument here (TRACKING-V2-PLAN wave C2).** An earlier
+version of this function took one and warped the extrapolated box by it,
+which looked right in isolation but undercorrected badly in practice: a
+track stalled for N frames only ever picked up the CURRENT frame's
+single-frame delta at the moment something finally called `predict()`,
+never the N frames of camera motion that accumulated while nothing read it
+-- worst exactly when compensation matters most (a stalled tracker, nothing
+but prediction left). The fix moved the warp to `TrackBook.warp()`, called
+once per frame in `session.py`'s `process()` for EVERY live track, whether
+or not anything reads it that frame, so N stalled frames accumulate N
+single-frame warps instead of one applied once. By the time this function
+runs, `track.box`/`velocity_*` are already expressed in the CURRENT frame's
+coordinates -- there is nothing left for `predict()` itself to warp.
+
+Pure stdlib -- `Box` is the same vocabulary `track.py`/`session.py` already
+share, so importing this module costs nothing extra on a build with no `cv`
+extra at all.
 """
 
 from __future__ import annotations
@@ -18,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from cv_service.tracking.engines.base import IDENTITY, Box, Transform
+from cv_service.tracking.engines.base import Box
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cv_service.tracking.track import Track
@@ -49,16 +63,13 @@ class Prediction:
     confidence: float
 
 
-def predict(track: "Track", now: float, transform: Transform = IDENTITY) -> Prediction:
-    """Extrapolate `track`'s box to `now` at constant velocity, then warp it.
+def predict(track: "Track", now: float) -> Prediction:
+    """Extrapolate `track`'s box to `now` at constant velocity.
 
-    Extrapolation runs from the track's own last position/velocity, clamped
-    against `_MAX_EXTRAPOLATION_SECONDS` so a long gap cannot fling the box
-    off-frame on one old estimate. `transform` then expresses whatever camera
-    motion happened since -- `IDENTITY` (a no-op) until wave C2 ships a real
-    motion compensator, at which point warping always runs last: the box is
-    predicted in the track's own frame of reference first, then re-expressed
-    in the current one.
+    Runs from the track's own last position/velocity -- already warped for
+    every frame of camera motion since (`TrackBook.warp()`, see the module
+    docstring) -- clamped against `_MAX_EXTRAPOLATION_SECONDS` so a long gap
+    cannot fling the box off-frame on one old estimate.
     """
     elapsed = now - track.last_seen
     if elapsed < 0.0:
@@ -73,8 +84,7 @@ def predict(track: "Track", now: float, transform: Transform = IDENTITY) -> Pred
         box.width,
         box.height,
     )
-    warped = transform.apply_box(predicted)
 
     since_confirmed = max(0.0, now - track.last_confirmed)
     confidence = max(0.0, 1.0 - since_confirmed / _CONFIDENCE_DECAY_SECONDS)
-    return Prediction(box=warped, confidence=confidence)
+    return Prediction(box=predicted, confidence=confidence)

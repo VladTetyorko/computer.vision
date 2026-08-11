@@ -64,6 +64,7 @@ import grpc
 from cv_service.config import DEFAULT_MAX_UPLOAD_BYTES, Settings
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
 from cv_service.tracking import params as tracking_params
+from cv_service.tracking.engines.base import CameraPose
 from cv_service.tracking.registry import TrackerRegistry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
 from cv_service.training import dataset, orchestrator, trainer
@@ -149,6 +150,28 @@ def _tracking_request_from_wire(
         max_age_frames=message.max_age_frames,
         min_hits=message.min_hits,
         lock=_lock_request_from_wire(message.lock) if message.HasField("lock") else None,
+        # motion_engine_id (field 8, TRACKING-V2-PLAN wave C2). appearance_
+        # engine_id/memory_ttl_millis (fields 9-10) are also frozen on the
+        # wire but belong to waves C3/C4 -- not read here yet.
+        motion_engine_id=message.motion_engine_id,
+    )
+
+
+def _camera_pose_from_wire(message: "cv_pb2.CameraPose") -> CameraPose:
+    """`cv_pb2.CameraPose` -> the plain `CameraPose` (`engines/base.py`).
+
+    No `HasField` check: every field this reads is a scalar whose proto3
+    zero already means what the plain type's own default means (`hfov_
+    degrees == 0` -> "unknown" either way), so an absent `camera_pose` on
+    the wire and an explicitly all-zero one map to the identical value.
+    """
+    return CameraPose(
+        yaw_degrees=message.yaw_degrees,
+        pitch_degrees=message.pitch_degrees,
+        roll_degrees=message.roll_degrees,
+        hfov_degrees=message.hfov_degrees,
+        vfov_degrees=message.vfov_degrees,
+        timestamp_millis=message.pose_timestamp_millis,
     )
 
 
@@ -204,6 +227,8 @@ def _tracked_response(
         tracker_engine_id=outcome.engine_id,
         locked_track_id=outcome.locked_track_id,
         detector_reason=cv_pb2.DetectorReason.Value(outcome.detector_reason),
+        motion_millis=outcome.motion_millis,
+        motion_engine_id=outcome.motion_engine_id,
     )
 
 
@@ -484,6 +509,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     now_millis=time.monotonic() * 1000.0,
                     detect=lambda: self._run_detector(request),
                     frame=_frame_loader(request),
+                    pose=_camera_pose_from_wire(request.camera_pose),
                 )
                 if outcome.boxes is None:
                     return self._echo(request)

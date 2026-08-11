@@ -30,11 +30,12 @@ def params(mode: str, **overrides) -> TrackingParams:
         redetect_iou_threshold=0.3,
         max_age_frames=30,
         min_hits=3,
-        # Neither knob is read by `DutyCycleScheduler` -- `TrackBook` and
-        # `StreamTrackingSession` are the only consumers -- so any value is
-        # inert here; included only because `TrackingParams` requires it.
+        # None of these three are read by `DutyCycleScheduler` -- `TrackBook`
+        # and `StreamTrackingSession` are the only consumers -- so any value
+        # is inert here; included only because `TrackingParams` requires it.
         track_max_age_millis=3000,
         min_tracker_confidence=0.5,
+        motion_engine_id="",
     )
     base.update(overrides)
     return TrackingParams(**base)

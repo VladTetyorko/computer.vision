@@ -177,7 +177,13 @@ def run_replay(
     its box on the first frame that object is visible -- exactly what an
     operator's click does in production (`lock.select_by_point`).
     """
-    settings = settings or Settings()
+    # `from_env()`, NOT a bare `Settings()`: production resolves every CV_*
+    # knob from the environment (`YoloDetector`, `process_gate()`), and a
+    # harness that quietly ignored them would make every configuration
+    # experiment a silent no-op -- an A/B comparison would return two
+    # identical rows and read as "this feature changes nothing" when in fact
+    # neither arm ever applied the setting. Found exactly that way.
+    settings = settings or Settings.from_env()
     registry = registry or build_default_registry(settings, probe=True)
     session = StreamTrackingSession(settings=settings, registry_provider=lambda: registry)
     detector = SyntheticDetector(detector_config)
