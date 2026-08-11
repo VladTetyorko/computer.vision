@@ -27,12 +27,14 @@ rewrite the citations in the same commit.
 | [TWO-TARGETS-PLAN.md](main/TWO-TARGETS-PLAN.md) | what to do on Monday — the hardware track (H1–H4) and the software track (S1–S3) |
 | [UX-DESIGN.md](main/UX-DESIGN.md) | what the product is, for whom, and what its surfaces look like |
 | [CYCLES-PLAN.md](main/CYCLES-PLAN.md) | how the work is run — alternating backend/UI cycles, delegation model, TX/RX doctrine |
+| [vision-architecture.drawio](main/vision-architecture.drawio) | the whole system as pictures — C4 context and containers, the hexagon, the runtime pipeline, the four human-in-the-loop flows, deployment |
 
 ## plans/active/ — unbuilt or gated
 
 | Doc | State |
 |---|---|
 | [CV-SCALE-PLAN.md](plans/active/CV-SCALE-PLAN.md) | S1/S2 shipped via CV-CONTROL; **S3 model roster, S4 multi-worker pool, S5 pull-based frames unbuilt** |
+| [DOMAIN-SEPARATION-PLAN.md](plans/active/DOMAIN-SEPARATION-PLAN.md) | target architecture: 8 bounded contexts, 4 runtime roles, urgency-classed communication (direct for U0/U1, NATS JetStream for U2/U3), asset-unit leases; **waves W1–W5 unbuilt** |
 | [LAYERING-REFACTOR-PLAN.md](plans/active/LAYERING-REFACTOR-PLAN.md) | conventions in force and widely cited; **the class decompositions (matrix K3) are not done** |
 | [DRONE-INFRA-PLAN.md](plans/active/DRONE-INFRA-PLAN.md) | I-a/b/e/g shipped; **edge kits (I-d) and command TX stage 3 remain, stage 3 gated** |
 | [RC-CONTROL-PLAN.md](plans/active/RC-CONTROL-PLAN.md) | Phase 0 + Phase 1 shipped; **Phase 2 (real airframe) gated on explicit user go** |
