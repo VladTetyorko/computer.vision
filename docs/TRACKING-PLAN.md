@@ -808,8 +808,12 @@ contained in `DetectionExtrapolator`, and it makes burned-in boxes visibly bette
 
 - Every existing `PipelineConfig`, `StreamPipeline`, adapter and API test compiles and passes
   unchanged (the 9-arg canonical constructor lives on as a convenience constructor).
-- `FrameRequest.tracking` serializes as absent → cv-service takes the `OFF` branch → byte-identical
-  behavior to today.
+- `FrameRequest.tracking` states `TRACKING_MODE_OFF` → cv-service takes the `OFF` branch →
+  **behaviorally** identical to today. Note the adapter (T4) **always states its intent**, including
+  an explicit `OFF`, rather than omitting the field: that is what the declarative per-frame contract
+  (invariant P2) asks for, and it costs ~4 bytes against an ~80 KB frame. The proto's "absent means
+  `OFF`" affordance remains, for a genuinely pre-tracking client; T0's byte-identical additivity test
+  is what proves that path. **Do not "fix" the adapter to omit the field** — explicit is the design.
 - `Detection.track()` is `null` everywhere → the SSE payload, the jsonb blob and the burned overlay
   are byte-identical to today.
 
