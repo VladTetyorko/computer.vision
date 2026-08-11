@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.TrackedObject;
 import com.drones.vision.domain.model.VideoFrame;
 
 import java.util.List;
@@ -12,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.pipeline.StreamPipeline;
+import com.drones.vision.application.pipeline.TrackingStats;
 
 /**
  * The lifecycle of live streams: start one for a device, stop it, list what is running.
@@ -94,17 +96,48 @@ public interface StreamService {
     List<Detection> latestDetections(StreamId streamId);
 
     /**
-     * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md &sect;5) — a
-     * partial patch folded onto the stream's current {@link PipelineConfig}. Confidence threshold,
-     * inference fps, label filter and detection on/off apply instantly with no video interruption;
-     * a changed model id briefly re-arms detection instead (see {@link
-     * UpdateOutcome#modelReArmed()} and {@code StreamPipeline#updateConfig}'s own javadoc for what
-     * that means concretely).
+     * The tracks a running stream currently holds (docs/TRACKING-PLAN.md &sect;4.E) — exactly
+     * {@link StreamPipeline#tracks()}, surfaced here for the same reason {@link #latestDetections}
+     * is: a caller outside the pipeline never reaches into pipeline internals.
+     *
+     * <p><b>Never errors.</b> An unknown or stopped stream reads as an empty list, the same
+     * forgiving idiom {@link #latestDetections} already uses — "no tracks" is the honest answer for
+     * a stream that is not running, and a 404 would make the polling UI handle two cases where one
+     * suffices.
+     *
+     * @param streamId the stream to inspect
+     * @return the booked tracks, ordered by {@code trackId} ascending, or an empty list
+     */
+    List<TrackedObject> tracks(StreamId streamId);
+
+    /**
+     * A running stream's tracking-flow counters over the stats window (docs/TRACKING-PLAN.md
+     * &sect;4.E) — exactly {@link StreamPipeline#trackingStats()}.
+     *
+     * @param streamId the stream to inspect
+     * @return the counters, or {@link Optional#empty()} if {@code streamId} is unknown or not
+     *         running on this instance — deliberately empty rather than a zeroed {@link
+     *         TrackingStats}, because a stream that is not running has no window length or mode to
+     *         report honestly; what the API renders for that case is its own decision
+     */
+    Optional<TrackingStats> trackingStats(StreamId streamId);
+
+    /**
+     * Live-updates a running stream's detection config (docs/CV-CONTROL-PLAN.md &sect;5,
+     * docs/TRACKING-PLAN.md &sect;4.D) — a partial patch folded onto the stream's current {@link
+     * PipelineConfig}. Confidence threshold, inference fps, label filter, detection on/off and the
+     * whole tracking configuration apply instantly with no video interruption; a changed model id
+     * briefly re-arms detection instead (see {@link UpdateOutcome#modelReArmed()} and {@code
+     * StreamPipeline#updateConfig}'s own javadoc for what that means concretely).
+     *
+     * <p>A {@code tracking} patch carrying a lock has its {@code lockSeq} allocated <b>here</b>,
+     * from the stream's own monotonic counter — clients never send one, which is what stops a
+     * replayed stale lock from re-acquiring an abandoned target.
      *
      * @param streamId the running stream to update
      * @param patch    the knobs to change; a {@code null} field on {@code patch} keeps that knob at
      *                 its current value
-     * @return whether the patch changed the running model
+     * @return whether the patch changed the running model and/or the tracking configuration
      * @throws NoSuchElementException  if {@code streamId} is unknown or not running on this instance
      * @throws IllegalArgumentException if the merged config fails {@link PipelineConfig}'s own
      *                                   validation (e.g. confidence outside [0,1])

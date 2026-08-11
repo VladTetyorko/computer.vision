@@ -6,6 +6,7 @@ import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Capability;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.DetectionSource;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
@@ -17,6 +18,11 @@ import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.domain.model.TrackState;
+import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.domain.model.TrackingTelemetry;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
@@ -54,6 +60,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -1158,6 +1165,159 @@ class StreamPipelineTest {
         verify(detectionPort, times(2)).detect(any(), configCaptor.capture());
         assertEquals("orion12l", configCaptor.getAllValues().get(1).model().id(),
                 "the very next sampled frame must already carry the new model");
+    }
+
+    // --- docs/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
+
+    private static PipelineConfig trackingConfig(int inferenceFps, TrackingConfig tracking) {
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, inferenceFps, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, true, tracking);
+    }
+
+    private static TrackingConfig mode(TrackingMode trackingMode, int followFps) {
+        return new TrackingConfig(trackingMode, "lk", 2000, followFps, 30, 30, 3, null);
+    }
+
+    private DetectionResult trackedResult(long sequence, long trackId, TrackState state) {
+        Detection detection = new Detection("car", 0.9, new BoundingBox(0.3, 0.4, 0.1, 0.1),
+                new ModelRef("yolo", "latest"), new TrackRef(trackId, state, DetectionSource.TRACKER));
+        return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
+                List.of(detection), Duration.ofMillis(5),
+                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId));
+    }
+
+    @Test
+    void followRaisesTheEffectiveSampleRateWhileOffAndAssociateDoNot() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of());
+
+        assertEquals(10, pipeline(publisher, trackingConfig(10, mode(TrackingMode.OFF, 15))).effectiveInferenceFps());
+        assertEquals(10,
+                pipeline(publisher, trackingConfig(10, mode(TrackingMode.ASSOCIATE, 15))).effectiveInferenceFps());
+        assertEquals(15,
+                pipeline(publisher, trackingConfig(10, mode(TrackingMode.FOLLOW, 15))).effectiveInferenceFps());
+    }
+
+    @Test
+    void followNeverLowersTheSampleRateBelowTheConfiguredInferenceFps() {
+        // max(inferenceFps, followFps), not "followFps wins": an operator who asked for 25fps
+        // inference must not be quietly slowed to the 15fps follow default.
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()),
+                trackingConfig(25, mode(TrackingMode.FOLLOW, 15)));
+
+        assertEquals(25, pipeline.effectiveInferenceFps());
+    }
+
+    /** A nanotime source that advances exactly one 30fps frame interval per read. */
+    private static LongSupplier thirtyFpsClock() {
+        long[] nanos = {0L};
+        return () -> nanos[0] += 33_333_333L;
+    }
+
+    private int sampledFramesOver30(TrackingMode trackingMode) {
+        DetectionPort port = mock(DetectionPort.class);
+        when(port.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, trackingConfig(10, mode(trackingMode, 15)),
+                NO_OP_SOURCE, port, streamPublisherPort, detectionRepositoryPort, eventPublisher, null, null, null,
+                null, null, thirtyFpsClock());
+        pipeline.onSubscribe(NOOP_SUBSCRIPTION);
+        for (int i = 0; i < 30; i++) {
+            pipeline.onNext(frame(i));
+        }
+        return mockingDetails(port).getInvocations().size();
+    }
+
+    @Test
+    void aRaisedEffectiveRateActuallySamplesMoreFramesOfTheSameSource() {
+        // 30 frames off a measured-30fps source: inferenceFps 10 samples every 3rd frame, and
+        // FOLLOW at 15fps samples every 2nd. Same source, same inferenceFps, only the mode differs.
+        assertEquals(10, sampledFramesOver30(TrackingMode.ASSOCIATE));
+        assertEquals(15, sampledFramesOver30(TrackingMode.FOLLOW));
+    }
+
+    @Test
+    void aResultCarryingATrackIdIsBookedAndVisibleThroughTracks() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000, mode(TrackingMode.ASSOCIATE, 15)), () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(1, pipeline.tracks().size());
+        assertEquals(7L, pipeline.tracks().getFirst().trackId());
+    }
+
+    @Test
+    void resultsAlsoFeedTheStatsWindow() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000, mode(TrackingMode.FOLLOW, 15)), () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        TrackingStats stats = pipeline.trackingStats();
+        assertEquals(TrackingMode.FOLLOW, stats.mode(), "the snapshot is stamped with the live configured mode");
+        assertEquals(1L, stats.trackerFrames());
+        assertEquals(0L, stats.detectorPasses());
+        assertEquals(7L, stats.lockedTrackId());
+    }
+
+    @Test
+    void anUntrackedStreamKeepsAnEmptyBookAndAnEmptyStatsWindow() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertTrue(pipeline.tracks().isEmpty());
+        assertEquals(0L, pipeline.trackingStats().trackerFrames());
+        assertEquals(TrackingMode.OFF, pipeline.trackingStats().mode());
+    }
+
+    @Test
+    void aModelReArmClearsTheTrackBookAndTheStatsWindowJustAsItClearsTheExtrapolator() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000, mode(TrackingMode.ASSOCIATE, 15)), () -> 0L);
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.tracks().isEmpty());
+
+        pipeline.updateConfig(new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, true, mode(TrackingMode.ASSOCIATE, 15)));
+
+        assertTrue(pipeline.tracks().isEmpty(), "track ids are bound to the model that produced them");
+        assertEquals(0L, pipeline.trackingStats().trackerFrames());
+    }
+
+    @Test
+    void aTrackingOnlyConfigChangeClearsNothingBecauseTrackingIsAHotKnob() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000, mode(TrackingMode.ASSOCIATE, 15)), () -> 0L);
+        pipeline.onNext(frame(0));
+
+        pipeline.updateConfig(trackingConfig(1000, mode(TrackingMode.FOLLOW, 15)));
+
+        assertEquals(1, pipeline.tracks().size(), "a mode change must never behave like a model re-arm");
+        assertEquals(1L, pipeline.trackingStats().trackerFrames());
+        assertEquals(TrackingMode.FOLLOW, pipeline.trackingStats().mode());
+    }
+
+    @Test
+    void theLabelFilterDropsDetectionsButNeverThePerFrameTrackingTelemetry() {
+        // Filtering drops boxes; whether the detector ran, and what the tracker cost, are facts
+        // about the frame that survive the filter.
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackedResult(0, 7, TrackState.CONFIRMED)));
+        PipelineConfig filtered = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true,
+                Set.of("person"), EventRuleConfig.defaults(), true, true, mode(TrackingMode.FOLLOW, 15));
+        StreamPipeline pipeline = manualPipeline(filtered, () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertTrue(pipeline.latestDetections().isEmpty(), "the 'car' detection is filtered out");
+        assertTrue(pipeline.tracks().isEmpty(), "and therefore never booked");
+        assertEquals(1L, pipeline.trackingStats().trackerFrames(), "but the frame still counted");
+        assertEquals(7L, pipeline.trackingStats().lockedTrackId());
     }
 
     /**

@@ -1,5 +1,8 @@
 package com.drones.vision.application.stream;
 
+import com.drones.vision.domain.model.TargetLock;
+import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
@@ -50,5 +53,25 @@ class PipelineConfigPatchTest {
 
         assertThrows(UnsupportedOperationException.class, () -> patch.labelFilter().add("truck"));
         assertEquals(Set.of("person"), patch.labelFilter());
+    }
+
+    @Test
+    void theFiveArgConvenienceConstructorLeavesTrackingUntouched() {
+        // docs/TRACKING-PLAN.md §4.D: absent tracking = leave tracking as-is, and every pre-T3
+        // call site (vision-api's UpdateStreamConfigRequest#toPatch among them) keeps compiling.
+        assertNull(new PipelineConfigPatch(0.5, null, null, null, null).tracking());
+        assertNull(PipelineConfigPatch.NOTHING.tracking());
+    }
+
+    @Test
+    void aPresentTrackingConfigIsCarriedThroughVerbatim() {
+        TrackingConfig requested = new TrackingConfig(TrackingMode.FOLLOW, "lk", 2000, 15, 30, 30, 3,
+                new TargetLock(0, 7L, null, null, false));
+
+        PipelineConfigPatch patch = new PipelineConfigPatch(null, null, null, null, null, requested);
+
+        assertEquals(requested, patch.tracking());
+        assertEquals(0L, patch.tracking().lock().lockSeq(),
+                "a client leaves lockSeq at 0; DefaultStreamService allocates the real one");
     }
 }

@@ -10,6 +10,9 @@ import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.model.TrackedObject;
+import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionPort;
 import com.drones.vision.domain.port.out.DetectionRepositoryPort;
@@ -132,6 +135,15 @@ import com.drones.vision.application.stream.StreamService;
  * is a separate concern from {@link #latestDetections()}/overlay burn-in: the engine only ever
  * reads results, it never influences what gets published or returned from this class.
  *
+ * <p><b>Tracking</b> (docs/TRACKING-PLAN.md &sect;5.D/&sect;5.E): two further consumers on that same
+ * fan-out. {@link TrackBook} keeps this stream's tracks by id with their lifetimes ({@link
+ * #tracks()}); {@link TrackingStatsWindow} keeps rolling duty-cycle counters over the {@link
+ * com.drones.vision.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()}).
+ * Both are cleared on a model re-arm, exactly as {@link #extrapolator} is. Tracking also reaches the
+ * sampling logic above through one value: {@link #effectiveInferenceFps()}, which raises the sample
+ * rate to {@code followFps} while the stream is in {@link TrackingMode#FOLLOW}. Nothing else in this
+ * class knows tracking exists — no branch in the publish path, none in {@link #maybeDetect}.
+ *
  * <h2>Error handling &amp; lifecycle</h2>
  * Two failure classes are handled very differently, on purpose: a CV service
  * outage must never take the video path down with it.
@@ -208,6 +220,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final Supplier<Telemetry> telemetrySupplier;
     private final LongSupplier nanoTimeSource;
     private final DetectionExtrapolator extrapolator;
+
+    /**
+     * Two more consumers on {@link #onDetectionResult}'s existing fan-out, built here rather than
+     * injected for exactly the reason {@link #extrapolator} is (docs/TRACKING-PLAN.md &sect;5.E,
+     * TRACKING-ORCHESTRATION.md &sect;2.3): they are this pipeline's own per-stream bookkeeping, not
+     * substitutable collaborators, so they cost this class's constructor nothing. They are peers,
+     * not one class — see {@link TrackingStatsWindow}'s javadoc for why the counters do not live on
+     * the book.
+     */
+    private final TrackBook trackBook;
+
+    /** @see #trackBook */
+    private final TrackingStatsWindow trackingStats;
 
     // Frame-cadence and detection-outage tuning (docs/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
     // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
@@ -430,6 +455,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.detectionBackoffMaxNanos = settings.detectionBackoffMaxNanos();
         this.extrapolator =
                 new DetectionExtrapolator(settings.extrapolationMaxMillis(), settings.extrapolationMatchGate());
+        this.trackBook = new TrackBook(settings.trackRetention());
+        this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
         this.backoffNanos = this.detectionBackoffInitialNanos;
         this.sampleEveryNthFrame = everyNth(assumedSourceFps);
     }
@@ -498,6 +525,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         if (modelChanged) {
             extrapolator.reset();
             latestDetections = List.of();
+            // Same reason as the extrapolator: track ids and duty-cycle counters describe the model
+            // that produced them, so carrying either across a swap would attribute one model's
+            // objects and CPU to another's. A tracking-config change (mode, engine, cadences, lock)
+            // deliberately clears nothing -- tracking is a hot knob like confidence and fps.
+            trackBook.clear();
+            trackingStats.clear();
         }
     }
 
@@ -515,6 +548,29 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      */
     public List<Detection> latestDetections() {
         return latestDetections;
+    }
+
+    /**
+     * @return every track currently booked for this stream (docs/TRACKING-PLAN.md &sect;4.E),
+     *         ordered by {@code trackId} ascending — an immutable snapshot, the same
+     *         read-from-any-thread convention as {@link #latestDetections()}. Empty when tracking is
+     *         off, when no tracked detection has arrived yet, or when every track has expired.
+     *         Unlike {@link #latestDetections()}, this survives an empty result: a track is a
+     *         lifetime, not a frame. See {@link TrackBook} for what booking does and does not mean.
+     */
+    public List<TrackedObject> tracks() {
+        return trackBook.tracks();
+    }
+
+    /**
+     * @return this stream's tracking flow over the stats window (docs/TRACKING-PLAN.md &sect;4.E) —
+     *         detector passes, tracker frames, duty ratio, tracker-latency percentiles, the last
+     *         detector reason, the confirmed lock and a state histogram — stamped with the tracking
+     *         mode currently configured. {@link TrackingStats#empty} until the first result carrying
+     *         {@link com.drones.vision.domain.model.TrackingTelemetry} arrives. Never {@code null}.
+     */
+    public TrackingStats trackingStats() {
+        return trackingStats.snapshot(config.tracking().mode());
     }
 
     /**
@@ -687,7 +743,29 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     private long everyNth(double effectiveFps) {
-        return Math.max(1L, Math.round(effectiveFps / config.inferenceFps()));
+        return Math.max(1L, Math.round(effectiveFps / effectiveInferenceFps()));
+    }
+
+    /**
+     * The rate this pipeline actually samples frames at (docs/TRACKING-PLAN.md &sect;5.D): {@link
+     * PipelineConfig#inferenceFps()} normally, but {@code max(inferenceFps, followFps)} in {@link
+     * TrackingMode#FOLLOW} — in {@code FOLLOW} the tracker wants frames faster than the detector
+     * does, and raising the sample rate is the whole of that change because {@link
+     * #recordArrivalAndRecomputeSampling} already recomputes {@link #sampleEveryNthFrame} from this
+     * value on every frame, reading the volatile config live.
+     *
+     * <p>{@code OFF} and {@code ASSOCIATE} return {@code inferenceFps()} unchanged, so a stream that
+     * is not following samples exactly as it did before tracking existed. {@code followFps} defaults
+     * to 15 rather than "every frame" deliberately — see &sect;5.D for the bandwidth reasoning.
+     *
+     * <p>Package-private rather than private so the same-package test can assert the three modes
+     * directly instead of inferring the rate from frame counts.
+     */
+    int effectiveInferenceFps() {
+        TrackingConfig tracking = config.tracking();
+        return tracking.mode() == TrackingMode.FOLLOW
+                ? Math.max(config.inferenceFps(), tracking.followFps())
+                : config.inferenceFps();
     }
 
     private static double clamp(double value, double min, double max) {
@@ -837,15 +915,23 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()} exactly
      * once, centrally, here (docs/CV-CONTROL-PLAN.md &sect;A, the dormant-field fix) — to every
      * downstream consumer: {@link #latestDetections()}, {@link #extrapolator} (and therefore
-     * overlay burn-in), {@link #eventEngine}, {@link #liveUpdatePublisherPort}, and persistence/the
-     * {@code DETECTION} event. Filtering once here, before any of those, is what makes every
-     * consumer see the same filtered set uniformly instead of each having to know about {@code
-     * labelFilter} itself.
+     * overlay burn-in), {@link #trackBook}, {@link #trackingStats}, {@link #eventEngine}, {@link
+     * #liveUpdatePublisherPort}, and persistence/the {@code DETECTION} event. Filtering once here,
+     * before any of those, is what makes every consumer see the same filtered set uniformly instead
+     * of each having to know about {@code labelFilter} itself.
+     *
+     * <p>This list is a <b>fan-out of consumers by design</b>: adding one is not a new
+     * responsibility for this class (TRACKING-ORCHESTRATION.md &sect;2.3). The tracking work
+     * genuinely lives in {@link TrackBook}/{@link TrackingStatsWindow}, carved as peers of {@link
+     * DetectionExtrapolator} so the decomposition this class is queued for inherits well-shaped
+     * perception stages rather than a fatter method.
      */
     private void onDetectionResult(DetectionResult result) {
         DetectionResult filtered = applyLabelFilter(result);
         latestDetections = filtered.detections();
         extrapolator.accept(filtered);
+        trackBook.accept(filtered);
+        trackingStats.accept(filtered);
         if (eventEngine != null) {
             eventEngine.accept(filtered);
         }
@@ -865,6 +951,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * PipelineConfig} itself. Returns {@code result} unchanged (same instance) when nothing was
      * actually dropped, so the common case (no filter configured, or every detection already
      * matches) allocates nothing new.
+     *
+     * <p>The rebuilt result carries {@link DetectionResult#tracking()} through unchanged: a label
+     * filter drops <i>detections</i>, and per-frame tracking facts (whether the detector ran, why,
+     * what the tracker cost, which track is locked) are true of the frame regardless of which of its
+     * boxes survived filtering. Dropping them here would silently zero the duty-cycle stats of every
+     * stream that happens to use a label filter.
      */
     private DetectionResult applyLabelFilter(DetectionResult result) {
         Set<String> labelFilter = config.labelFilter();
@@ -876,7 +968,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             return result;
         }
         return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
-                result.inferenceLatency());
+                result.inferenceLatency(), result.tracking());
     }
 
     @Override

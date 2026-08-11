@@ -3,8 +3,11 @@ package com.drones.vision.application.pipeline;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.DetectionSource;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.domain.model.TrackState;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -275,5 +278,98 @@ class DetectionExtrapolatorTest {
         List<Detection> at = extrapolator.at(T0.plusMillis(500));
 
         assertEquals(laterSequenceDetection.box().x(), at.get(0).box().x(), DELTA);
+    }
+
+    // --- docs/TRACKING-PLAN.md §5.F: trackId makes matching exact ---
+
+    private static Detection trackedDetection(String label, long trackId, double x, double y,
+                                               double width, double height) {
+        return new Detection(label, 0.9, new BoundingBox(x, y, width, height), MODEL,
+                new TrackRef(trackId, TrackState.CONFIRMED, DetectionSource.DETECTOR));
+    }
+
+    /**
+     * Two same-label objects crossing, laid out so the distance gate <b>must</b> swap them: over one
+     * second track 1's center travels 0.25&rarr;0.50 and track 2's 0.55&rarr;0.30, so each latest box
+     * ends up 0.05 from the <i>other</i> track's previous box and 0.25 from its own — well outside
+     * the 0.15 gate. The two tests below run the identical geometry with and without track ids; the
+     * only difference is the ids, and the extrapolated boxes come out moving in opposite directions.
+     */
+    @Test
+    void crossingSameLabelBoxesAreMatchedByTrackIdWhereTheGateWouldHaveSwappedThem() {
+        DetectionExtrapolator extrapolator = new DetectionExtrapolator();
+        extrapolator.accept(result(0, T0,
+                trackedDetection("car", 1, 0.20, 0.40, 0.10, 0.10),
+                trackedDetection("car", 2, 0.50, 0.40, 0.10, 0.10)));
+        extrapolator.accept(result(1, T0.plusSeconds(1),
+                trackedDetection("car", 1, 0.45, 0.40, 0.10, 0.10),
+                trackedDetection("car", 2, 0.25, 0.40, 0.10, 0.10)));
+
+        List<Detection> at = extrapolator.at(T0.plusSeconds(1).plusMillis(500));
+
+        // Track 1 was moving right at +0.25/s and keeps going right: 0.50 + 0.25*0.5 = 0.625.
+        assertEquals(1L, at.get(0).track().trackId());
+        assertEquals(0.625, centerX(at.get(0)), DELTA);
+        // Track 2 was moving left at -0.25/s and keeps going left: 0.30 - 0.25*0.5 = 0.175.
+        assertEquals(2L, at.get(1).track().trackId());
+        assertEquals(0.175, centerX(at.get(1)), DELTA);
+    }
+
+    @Test
+    void theSameCrossingGeometryWithoutTrackIdsIsSwappedByTheDistanceGate() {
+        // The control that gives the test above its meaning: identical boxes, no ids, and the gate
+        // pairs each latest box with the other object's previous box -- so both boxes extrapolate
+        // backwards, at a tenth of the real speed and in the wrong direction.
+        DetectionExtrapolator extrapolator = new DetectionExtrapolator();
+        extrapolator.accept(result(0, T0,
+                detection("car", 0.20, 0.40, 0.10, 0.10),
+                detection("car", 0.50, 0.40, 0.10, 0.10)));
+        extrapolator.accept(result(1, T0.plusSeconds(1),
+                detection("car", 0.45, 0.40, 0.10, 0.10),
+                detection("car", 0.25, 0.40, 0.10, 0.10)));
+
+        List<Detection> at = extrapolator.at(T0.plusSeconds(1).plusMillis(500));
+
+        assertEquals(0.475, centerX(at.get(0)), DELTA);
+        assertEquals(0.325, centerX(at.get(1)), DELTA);
+    }
+
+    @Test
+    void twoDifferentTrackIdsAreNeverMatchedOnProximityEvenInsideTheGate() {
+        DetectionExtrapolator extrapolator = new DetectionExtrapolator();
+        // Track 1 disappears and track 2 appears right where it was: the gate would happily pair
+        // them (distance 0.02), but the tracker has already said they are different objects.
+        extrapolator.accept(result(0, T0, trackedDetection("car", 1, 0.20, 0.40, 0.10, 0.10)));
+        extrapolator.accept(result(1, T0.plusSeconds(1), trackedDetection("car", 2, 0.22, 0.40, 0.10, 0.10)));
+
+        List<Detection> at = extrapolator.at(T0.plusSeconds(1).plusMillis(500));
+
+        assertEquals(0.27, centerX(at.getFirst()), DELTA, "unmatched: returned exactly as it arrived");
+    }
+
+    @Test
+    void anUntrackedSideStillFallsBackToTheDistanceGate() {
+        DetectionExtrapolator extrapolator = new DetectionExtrapolator();
+        // Previous is untracked (e.g. the frame before tracking was switched on), latest is tracked:
+        // no id to match on, so the gate does its usual job.
+        extrapolator.accept(result(0, T0, detection("car", 0.20, 0.40, 0.10, 0.10)));
+        extrapolator.accept(result(1, T0.plusSeconds(1), trackedDetection("car", 1, 0.30, 0.40, 0.10, 0.10)));
+
+        List<Detection> at = extrapolator.at(T0.plusSeconds(1).plusMillis(500));
+
+        assertEquals(0.40, centerX(at.getFirst()), DELTA);
+    }
+
+    @Test
+    void anExtrapolatedDetectionKeepsItsTrackFacts() {
+        DetectionExtrapolator extrapolator = new DetectionExtrapolator();
+        extrapolator.accept(result(0, T0, trackedDetection("car", 7, 0.20, 0.40, 0.10, 0.10)));
+        extrapolator.accept(result(1, T0.plusSeconds(1), trackedDetection("car", 7, 0.30, 0.40, 0.10, 0.10)));
+
+        Detection extrapolated = extrapolator.at(T0.plusSeconds(1).plusMillis(500)).getFirst();
+
+        assertEquals(0.40, centerX(extrapolated), DELTA, "it really was extrapolated, not returned as-is");
+        assertEquals(7L, extrapolated.track().trackId());
+        assertEquals(TrackState.CONFIRMED, extrapolated.track().state());
     }
 }

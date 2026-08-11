@@ -1,5 +1,7 @@
 package com.drones.vision.application.pipeline;
 
+import java.time.Duration;
+
 /**
  * Tunables for one running stream's {@link StreamPipeline} runtime — frame-cadence measurement,
  * detection-outage backoff, video-source reopen backoff (the bounds {@link DefaultStreamService}
@@ -43,7 +45,14 @@ package com.drones.vision.application.pipeline;
  *                                        {@link DetectionExtrapolator} extrapolates before the
  *                                        output freezes; must not be negative
  * @param extrapolationMatchGate         max normalized box-center distance for a same-label match
- *                                        between two completed results; must not be negative
+ *                                        between two completed results, used only where at least
+ *                                        one side is untracked; must not be negative
+ * @param trackingStatsWindow            how far back {@link TrackingStatsWindow}'s counters reach
+ *                                        (docs/TRACKING-PLAN.md &sect;4.E); must be positive.
+ *                                        {@code vision-app} binds this to {@code
+ *                                        vision.tracking.stats-window-seconds}
+ * @param trackRetention                 how long a track that stops arriving stays in {@link
+ *                                        TrackBook} before being expired; must be positive
  */
 public record StreamPipelineSettings(
         int assumedSourceFps,
@@ -56,7 +65,30 @@ public record StreamPipelineSettings(
         long sourceReopenBackoffInitialNanos,
         long sourceReopenBackoffMaxNanos,
         long extrapolationMaxMillis,
-        double extrapolationMatchGate) {
+        double extrapolationMatchGate,
+        Duration trackingStatsWindow,
+        Duration trackRetention) {
+
+    /** @see #trackRetention() */
+    private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
+
+    /**
+     * The canonical constructor before docs/TRACKING-PLAN.md wave T3 added the two tracking
+     * tunables, kept as a convenience constructor defaulting both to {@link #defaults()}'s values,
+     * so every pre-existing call site — including {@code vision-app}'s own property mapping —
+     * compiles unchanged. Same "N-1-arg convenience ctor" idiom the domain's {@code
+     * PipelineConfig}/{@code Detection}/{@code DetectionResult} already use.
+     */
+    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
+                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
+                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
+                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
+                                   double extrapolationMatchGate) {
+        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
+                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
+                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate,
+                Duration.ofSeconds(TrackingStatsWindow.DEFAULT_WINDOW_SECONDS), DEFAULT_TRACK_RETENTION);
+    }
 
     public StreamPipelineSettings {
         if (assumedSourceFps <= 0) {
@@ -90,6 +122,12 @@ public record StreamPipelineSettings(
         }
         if (extrapolationMatchGate < 0) {
             throw new IllegalArgumentException("extrapolationMatchGate must not be negative");
+        }
+        if (trackingStatsWindow == null || trackingStatsWindow.isZero() || trackingStatsWindow.isNegative()) {
+            throw new IllegalArgumentException("trackingStatsWindow must be positive, was " + trackingStatsWindow);
+        }
+        if (trackRetention == null || trackRetention.isZero() || trackRetention.isNegative()) {
+            throw new IllegalArgumentException("trackRetention must be positive, was " + trackRetention);
         }
     }
 

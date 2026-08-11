@@ -3,13 +3,16 @@ package com.drones.vision.application.pipeline;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.TrackRef;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -20,15 +23,38 @@ import java.util.Objects;
  *
  * <p>Keeps only the two most recently {@linkplain #accept accepted} results
  * — the previous one ({@code P}) and the latest ({@code L}). {@link
- * #at(Instant)} matches {@code L}'s detections to {@code P}'s greedily by
- * nearest normalized box-center (same {@code label}, gated at {@value
- * #MATCH_GATE_DISTANCE} center distance — each {@code P} detection matches
- * at most one {@code L} detection and vice versa) and extrapolates every
- * matched detection's center at the resulting velocity, capping the horizon
- * at {@value #MAX_EXTRAPOLATION_MILLIS}ms past {@code L}'s capture time so a
- * stalled/outaged detector freezes rather than running boxes off the frame
- * forever. Unmatched {@code L} detections are returned unchanged; {@code
- * P}-only detections (nothing in {@code L} matched them) are dropped.
+ * #at(Instant)} matches {@code L}'s detections to {@code P}'s (see "Matching"
+ * below) and extrapolates every matched detection's center at the resulting
+ * velocity, capping the horizon at {@value #MAX_EXTRAPOLATION_MILLIS}ms past
+ * {@code L}'s capture time so a stalled/outaged detector freezes rather than
+ * running boxes off the frame forever. Unmatched {@code L} detections are
+ * returned unchanged; {@code P}-only detections (nothing in {@code L} matched
+ * them) are dropped. A matched detection keeps its label, confidence, model
+ * and {@link Detection#track() track facts} — only the box's origin moves.
+ *
+ * <h2>Matching (docs/TRACKING-PLAN.md &sect;5.F)</h2>
+ * Two passes, in this order:
+ * <ol>
+ *   <li><b>By track id, exactly, with no gate.</b> When a detection on each
+ *       side carries a {@link com.drones.vision.domain.model.TrackRef} and the
+ *       two ids are equal, they are the same object — cv-service's tracker
+ *       already decided that, and no distance heuristic can improve on an
+ *       identity. This is what makes velocity correct through an occlusion
+ *       and across two same-label objects that cross, where the distance gate
+ *       below would confidently swap them.</li>
+ *   <li><b>By nearest normalized box-center, gated</b>, over whatever the
+ *       first pass left unmatched: same {@code label}, within {@value
+ *       #MATCH_GATE_DISTANCE} center distance, closest pairs assigned first,
+ *       each detection used at most once. Unchanged from before tracking
+ *       existed — with tracking off, {@code track()} is {@code null}
+ *       everywhere, pass 1 matches nothing and the behavior is byte-identical
+ *       to what it always was.
+ *       <p>One pair is deliberately <b>never</b> considered here: two
+ *       detections that both carry ids, when those ids differ. The tracker has
+ *       already stated they are different objects, so matching them on
+ *       proximity would reintroduce exactly the swap pass 1 exists to
+ *       prevent.</li>
+ * </ol>
  *
  * <p><b>Threading:</b> {@link #accept} and {@link #at} are both {@code
  * synchronized} — both are called at most once per sampled/published frame
@@ -145,26 +171,74 @@ final class DetectionExtrapolator {
     }
 
     /**
-     * Greedy nearest-center bipartite matching of {@code latestDetections}
-     * to {@code previousDetections}: every same-label candidate pair within
-     * {@value #MATCH_GATE_DISTANCE} normalized center distance is considered,
-     * closest pairs are assigned first, and an already-assigned detection on
-     * either side is never reused.
+     * Matches {@code latestDetections} to {@code previousDetections} — first by track id, then by
+     * gated nearest center over the remainder. See the class javadoc's "Matching" section for the
+     * two passes and why the second one skips id-vs-id pairs.
      *
      * @return one entry per {@code latestDetections} index, holding the
      *         matched {@code previousDetections} index or {@code -1}
      */
     private static int[] match(List<Detection> latestDetections, List<Detection> previousDetections,
                                 double matchGateDistance) {
+        int[] matchedPreviousIndex = new int[latestDetections.size()];
+        Arrays.fill(matchedPreviousIndex, -1);
+        boolean[] previousUsed = new boolean[previousDetections.size()];
+
+        matchByTrackId(latestDetections, previousDetections, matchedPreviousIndex, previousUsed);
+        matchByNearestCenter(latestDetections, previousDetections, matchGateDistance, matchedPreviousIndex,
+                previousUsed);
+        return matchedPreviousIndex;
+    }
+
+    /** Pass 1: equal, non-{@code null} track ids on both sides are the same object — exact, ungated. */
+    private static void matchByTrackId(List<Detection> latestDetections, List<Detection> previousDetections,
+                                        int[] matchedPreviousIndex, boolean[] previousUsed) {
+        Map<Long, Integer> previousIndexByTrackId = new HashMap<>();
+        for (int pi = 0; pi < previousDetections.size(); pi++) {
+            TrackRef track = previousDetections.get(pi).track();
+            if (track != null) {
+                previousIndexByTrackId.putIfAbsent(track.trackId(), pi);
+            }
+        }
+        if (previousIndexByTrackId.isEmpty()) {
+            return;
+        }
+        for (int li = 0; li < latestDetections.size(); li++) {
+            TrackRef track = latestDetections.get(li).track();
+            if (track == null) {
+                continue;
+            }
+            Integer pi = previousIndexByTrackId.get(track.trackId());
+            if (pi != null && !previousUsed[pi]) {
+                matchedPreviousIndex[li] = pi;
+                previousUsed[pi] = true;
+            }
+        }
+    }
+
+    /**
+     * Pass 2: greedy nearest-center bipartite matching over what pass 1 left unmatched. Every
+     * same-label candidate pair within {@code matchGateDistance} normalized center distance is
+     * considered — <b>except</b> a pair whose two sides both carry a track id, which the tracker has
+     * already declared to be different objects — closest pairs are assigned first, and an
+     * already-assigned detection on either side is never reused.
+     */
+    private static void matchByNearestCenter(List<Detection> latestDetections, List<Detection> previousDetections,
+                                              double matchGateDistance, int[] matchedPreviousIndex,
+                                              boolean[] previousUsed) {
         record Candidate(int latestIndex, int previousIndex, double distance) { }
 
         List<Candidate> candidates = new ArrayList<>();
         for (int li = 0; li < latestDetections.size(); li++) {
+            if (matchedPreviousIndex[li] >= 0) {
+                continue;
+            }
             Detection l = latestDetections.get(li);
             double[] lCenter = center(l.box());
             for (int pi = 0; pi < previousDetections.size(); pi++) {
                 Detection p = previousDetections.get(pi);
-                if (!p.label().equals(l.label())) {
+                if (previousUsed[pi] || !p.label().equals(l.label())
+                        || (l.track() != null && p.track() != null)) {
                     continue;
                 }
                 double distance = distance(lCenter, center(p.box()));
@@ -175,25 +249,25 @@ final class DetectionExtrapolator {
         }
         candidates.sort(Comparator.comparingDouble(Candidate::distance));
 
-        int[] matchedPreviousIndex = new int[latestDetections.size()];
-        Arrays.fill(matchedPreviousIndex, -1);
-        boolean[] previousUsed = new boolean[previousDetections.size()];
         for (Candidate c : candidates) {
             if (matchedPreviousIndex[c.latestIndex()] < 0 && !previousUsed[c.previousIndex()]) {
                 matchedPreviousIndex[c.latestIndex()] = c.previousIndex();
                 previousUsed[c.previousIndex()] = true;
             }
         }
-        return matchedPreviousIndex;
     }
 
     /**
      * Extrapolates {@code l}'s box center along the velocity implied by
      * {@code p}&rarr;{@code l} over {@code deltaSeconds}, {@code
      * extrapolateSeconds} further ahead (already capped by the caller).
-     * {@code l}'s width/height, label, confidence and model are kept as-is;
-     * only the box's {@code x}/{@code y} move, clamped back into {@code
-     * BoundingBox}'s {@code [0,1]} per-component invariant.
+     * {@code l}'s width/height, label, confidence, model and {@link
+     * Detection#track() track facts} are kept as-is; only the box's {@code
+     * x}/{@code y} move, clamped back into {@code BoundingBox}'s {@code [0,1]}
+     * per-component invariant. Carrying {@code track} through matters: the
+     * burned-in overlay reads the id and state off exactly this detection, so
+     * dropping it here would make every extrapolated box lose its {@code #id}
+     * and its {@code COASTING} dashes between completed inferences.
      */
     private static Detection extrapolate(Detection l, Detection p, double deltaSeconds, double extrapolateSeconds) {
         double[] lCenter = center(l.box());
@@ -208,7 +282,7 @@ final class DetectionExtrapolator {
         double newY = clampUnit(newCenterY - l.box().height() / 2.0);
 
         BoundingBox extrapolatedBox = new BoundingBox(newX, newY, l.box().width(), l.box().height());
-        return new Detection(l.label(), l.confidence(), extrapolatedBox, l.model());
+        return new Detection(l.label(), l.confidence(), extrapolatedBox, l.model(), l.track());
     }
 
     private static double[] center(BoundingBox box) {

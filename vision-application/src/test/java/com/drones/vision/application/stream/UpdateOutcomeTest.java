@@ -11,5 +11,18 @@ class UpdateOutcomeTest {
     void reportsExactlyWhatItWasGiven() {
         assertTrue(new UpdateOutcome(true).modelReArmed());
         assertFalse(new UpdateOutcome(false).modelReArmed());
+        assertTrue(new UpdateOutcome(false, true).trackingChanged());
+        assertFalse(new UpdateOutcome(true, false).trackingChanged());
+    }
+
+    @Test
+    void theTwoFlagsAreIndependentBecauseTrackingNeverReArmsTheDetector() {
+        assertTrue(new UpdateOutcome(true, true).modelReArmed());
+        assertTrue(new UpdateOutcome(true, true).trackingChanged());
+    }
+
+    @Test
+    void theOneArgConvenienceConstructorMeansTrackingWasUntouched() {
+        assertFalse(new UpdateOutcome(true).trackingChanged());
     }
 }

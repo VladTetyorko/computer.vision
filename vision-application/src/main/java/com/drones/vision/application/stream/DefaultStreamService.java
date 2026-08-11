@@ -9,7 +9,10 @@ import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.TargetLock;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.model.TrackedObject;
+import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
@@ -30,12 +33,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import com.drones.vision.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.application.pipeline.DetectionEventEngine;
 import com.drones.vision.application.pipeline.StreamPipeline;
 import com.drones.vision.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.application.pipeline.SupervisedPublisher;
+import com.drones.vision.application.pipeline.TrackingStats;
 import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
 
@@ -241,7 +246,7 @@ public final class DefaultStreamService implements StreamService {
         return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
                 base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
                 base.detectionBackoffMaxNanos(), initialNanos, maxNanos, base.extrapolationMaxMillis(),
-                base.extrapolationMatchGate());
+                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention());
     }
 
     @Override
@@ -392,12 +397,31 @@ public final class DefaultStreamService implements StreamService {
         return active == null ? List.of() : active.pipeline().latestDetections();
     }
 
+    @Override
+    public List<TrackedObject> tracks(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? List.of() : active.pipeline().tracks();
+    }
+
+    @Override
+    public Optional<TrackingStats> trackingStats(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : Optional.of(active.pipeline().trackingStats());
+    }
+
     /**
      * Resolves the running stream, merges {@code patch} onto its {@link
-     * StreamPipeline#config() current config}, and swaps it in (docs/CV-CONTROL-PLAN.md &sect;5).
-     * The merge — and therefore the merged {@link PipelineConfig}'s own compact-ctor validation —
-     * runs <b>before</b> {@link StreamPipeline#updateConfig} is ever called, so an invalid patch
-     * value never touches the running pipeline at all.
+     * StreamPipeline#config() current config}, and swaps it in (docs/CV-CONTROL-PLAN.md &sect;5,
+     * docs/TRACKING-PLAN.md &sect;4.D). The merge — and therefore the merged {@link PipelineConfig}'s
+     * own compact-ctor validation — runs <b>before</b> {@link StreamPipeline#updateConfig} is ever
+     * called, so an invalid patch value never touches the running pipeline at all.
+     *
+     * <p>{@code trackingChanged} is decided by comparing the <i>folded</i> {@link TrackingConfig}
+     * with the running one, not by the patch merely carrying the object: restating the identical
+     * configuration is not a change. A re-issued lock does compare unequal, because the fold stamps
+     * it with a freshly allocated {@code lockSeq} — see {@link #foldTracking}.
      */
     @Override
     public UpdateOutcome updateConfig(StreamId streamId, PipelineConfigPatch patch) {
@@ -409,8 +433,10 @@ public final class DefaultStreamService implements StreamService {
         }
         PipelineConfig current = active.pipeline().config();
         boolean modelReArmed = patch.modelId() != null && !patch.modelId().equals(current.model().id());
-        active.pipeline().updateConfig(mergeConfig(current, patch));
-        return new UpdateOutcome(modelReArmed);
+        PipelineConfig merged = mergeConfig(current, patch, active.lockSeq());
+        boolean trackingChanged = patch.tracking() != null && !merged.tracking().equals(current.tracking());
+        active.pipeline().updateConfig(merged);
+        return new UpdateOutcome(modelReArmed, trackingChanged);
     }
 
     /**
@@ -419,7 +445,8 @@ public final class DefaultStreamService implements StreamService {
      * eventRule}, {@code overlayBurnIn}, and the model's own {@code version}, frozen contract
      * &sect;3) exactly as {@code current} has it.
      */
-    private static PipelineConfig mergeConfig(PipelineConfig current, PipelineConfigPatch patch) {
+    private static PipelineConfig mergeConfig(PipelineConfig current, PipelineConfigPatch patch,
+                                               AtomicLong lockSeq) {
         ModelRef model = patch.modelId() == null
                 ? current.model()
                 : new ModelRef(patch.modelId(), current.model().version());
@@ -431,11 +458,55 @@ public final class DefaultStreamService implements StreamService {
                 patch.detectionEnabled() == null ? current.detectionEnabled() : patch.detectionEnabled();
         return new PipelineConfig(model, confidenceThreshold, inferenceFps, current.maxInFlightInferences(),
                 current.overlayTelemetry(), labelFilter, current.eventRule(), current.overlayBurnIn(),
-                detectionEnabled);
+                detectionEnabled, foldTracking(current.tracking(), patch.tracking(), lockSeq));
     }
 
-    /** What this service holds per running stream; distinct from the {@link ActiveStream} read model. */
+    /**
+     * Folds the patch's {@link TrackingConfig} onto the running one (docs/TRACKING-PLAN.md
+     * &sect;4.D): absent leaves tracking entirely alone; present replaces mode, engine and every
+     * cadence, and then resolves the lock in one of two ways.
+     *
+     * <ul>
+     *   <li><b>No lock in the patch</b> — the running lock is carried through untouched, so
+     *       adjusting a cadence or switching {@code ASSOCIATE}&rarr;{@code FOLLOW} never silently
+     *       drops the operator's target. Releasing is the explicit {@code release} form.</li>
+     *   <li><b>A lock in the patch</b> — its {@code lockSeq} is <b>discarded and replaced</b> with
+     *       the next value from this stream's own {@link AtomicLong}. Clients never allocate one:
+     *       cv-service applies a restated lock only when its sequence exceeds the last it applied,
+     *       so a client that could choose the number could replay an abandoned target back into
+     *       existence, and the UI would have to track a counter it has no business knowing. Allocated
+     *       lazily — a patch without a lock burns no number, keeping the sequence readable in a
+     *       log.</li>
+     * </ul>
+     */
+    private static TrackingConfig foldTracking(TrackingConfig current, TrackingConfig requested, AtomicLong lockSeq) {
+        if (requested == null) {
+            return current;
+        }
+        TargetLock lock = requested.lock() == null
+                ? current.lock()
+                : new TargetLock(lockSeq.incrementAndGet(), requested.lock().trackId(), requested.lock().pointX(),
+                        requested.lock().pointY(), requested.lock().release());
+        return new TrackingConfig(requested.mode(), requested.engineId(), requested.verifyEveryMillis(),
+                requested.followFps(), requested.redetectIouPercent(), requested.maxAgeFrames(),
+                requested.minHits(), lock);
+    }
+
+    /**
+     * What this service holds per running stream; distinct from the {@link ActiveStream} read model.
+     *
+     * @param lockSeq this stream's monotonic target-lock sequence (docs/TRACKING-PLAN.md &sect;4.D).
+     *                Per-stream, not global: two streams' locks are unrelated, and a shared counter
+     *                would make one operator's click advance another's sequence. Starts at 0 and is
+     *                only ever incremented, so it never decreases within a stream's life; a stream
+     *                restart starts a fresh pipeline (and a fresh cv-service session) at 0 again.
+     */
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
-                                  StreamPipeline pipeline, Instant startedAt) {
+                                  StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq) {
+
+        RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
+                       StreamPipeline pipeline, Instant startedAt) {
+            this(deviceId, source, supervisedSource, pipeline, startedAt, new AtomicLong());
+        }
     }
 }

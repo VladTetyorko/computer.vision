@@ -8,13 +8,17 @@ import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
 import com.drones.vision.domain.model.DeviceId;
 import com.drones.vision.domain.model.Event;
+import com.drones.vision.domain.model.EventRuleConfig;
 import com.drones.vision.domain.model.EventType;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.TargetLock;
 import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
 import com.drones.vision.domain.port.out.DetectionPort;
@@ -53,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -702,5 +707,169 @@ class DefaultStreamServiceTest {
         assertEquals("yolo", merged.model().id());
         assertEquals("v1", merged.model().version());
         assertTrue(merged.detectionEnabled());
+    }
+
+    // --- docs/TRACKING-PLAN.md §4.D, wave T3: the tracking fold and server-allocated lockSeq ---
+
+    private static TrackingConfig tracking(TrackingMode mode, TargetLock lock) {
+        return new TrackingConfig(mode, "lk", 2000, 15, 30, 30, 3, lock);
+    }
+
+    private static PipelineConfigPatch trackingPatch(TrackingConfig requested) {
+        return new PipelineConfigPatch(null, null, null, null, null, requested);
+    }
+
+    private static PipelineConfig startedWith(TrackingConfig tracking) {
+        return new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, true, Set.of(),
+                EventRuleConfig.defaults(), true, true, tracking);
+    }
+
+    /**
+     * Starts a stream on a publisher the test drives frame by frame, so {@link #runningTracking} can
+     * read back exactly what the pipeline is configured with — the same idiom the {@code
+     * updateConfig} tests above already use to observe a merged config.
+     */
+    private StreamId startCapturable(ControllableFramePublisher publisher, PipelineConfig started) {
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(inv -> CompletableFuture.completedFuture(
+                emptyResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        return service.start(device.id(), started);
+    }
+
+    /** Pushes one frame and returns the {@link TrackingConfig} it carried into {@code detect}. */
+    private TrackingConfig runningTracking(ControllableFramePublisher publisher, StreamId streamId, long sequence) {
+        publisher.push(frameOn(streamId, sequence));
+        ArgumentCaptor<PipelineConfig> captor = ArgumentCaptor.forClass(PipelineConfig.class);
+        verify(detectionPort, atLeastOnce()).detect(any(), captor.capture());
+        return captor.getValue().tracking();
+    }
+
+    @Test
+    void aPatchWithoutTrackingLeavesTheRunningTrackingConfigUntouched() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        TrackingConfig running = tracking(TrackingMode.FOLLOW, new TargetLock(4, 7L, null, null, false));
+        StreamId streamId = startCapturable(publisher, startedWith(running));
+
+        UpdateOutcome outcome = service.updateConfig(streamId, new PipelineConfigPatch(0.75, null, null, null, null));
+
+        assertFalse(outcome.trackingChanged());
+        assertEquals(running, runningTracking(publisher, streamId, 0));
+    }
+
+    @Test
+    void aTrackingPatchAppliesWithoutEverReArmingTheDetector() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        StreamId streamId = startCapturable(publisher, startedWith(TrackingConfig.off()));
+
+        UpdateOutcome outcome = service.updateConfig(streamId, trackingPatch(tracking(TrackingMode.FOLLOW, null)));
+
+        assertTrue(outcome.trackingChanged());
+        assertFalse(outcome.modelReArmed(), "tracking is a hot knob like confidence and fps");
+        TrackingConfig applied = runningTracking(publisher, streamId, 0);
+        assertEquals(TrackingMode.FOLLOW, applied.mode());
+        assertEquals("lk", applied.engineId());
+    }
+
+    @Test
+    void restatingTheIdenticalTrackingConfigIsNotAChange() {
+        StreamId streamId = service.start(device.id(), startedWith(TrackingConfig.defaults()));
+
+        UpdateOutcome outcome = service.updateConfig(streamId, trackingPatch(TrackingConfig.defaults()));
+
+        assertFalse(outcome.trackingChanged());
+    }
+
+    @Test
+    void lockSeqIsAllocatedByTheServerAndIncrementsPerLockNeverDecreasing() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        StreamId streamId = startCapturable(publisher, startedWith(TrackingConfig.off()));
+
+        // Every patch below carries lockSeq 0, exactly as a client always does.
+        service.updateConfig(streamId,
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, 7L, null, null, false))));
+        TargetLock first = runningTracking(publisher, streamId, 0).lock();
+
+        service.updateConfig(streamId,
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, 9L, null, null, false))));
+        TargetLock second = runningTracking(publisher, streamId, 1).lock();
+
+        service.updateConfig(streamId,
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, null, null, null, true))));
+        TargetLock third = runningTracking(publisher, streamId, 2).lock();
+
+        assertEquals(1L, first.lockSeq(), "the server allocates, so a client's 0 never reaches the pipeline");
+        assertEquals(7L, first.trackId());
+        assertEquals(2L, second.lockSeq());
+        assertEquals(9L, second.trackId());
+        assertEquals(3L, third.lockSeq());
+        assertTrue(third.release(), "a release is a lock request too, and takes the next sequence");
+    }
+
+    @Test
+    void aReplayedIdenticalLockStillGetsAFreshSequenceSoItIsARequestNotAResurrection() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        StreamId streamId = startCapturable(publisher, startedWith(TrackingConfig.off()));
+        PipelineConfigPatch sameLock =
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, 7L, null, null, false)));
+
+        service.updateConfig(streamId, sameLock);
+        UpdateOutcome second = service.updateConfig(streamId, sameLock);
+
+        assertEquals(2L, runningTracking(publisher, streamId, 0).lock().lockSeq());
+        assertTrue(second.trackingChanged(), "a re-issued lock is a new request, and its sequence says so");
+    }
+
+    @Test
+    void aTrackingPatchWithoutALockKeepsTheRunningLockAndBurnsNoSequenceNumber() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        StreamId streamId = startCapturable(publisher, startedWith(TrackingConfig.off()));
+        service.updateConfig(streamId,
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, 7L, null, null, false))));
+
+        // A pure cadence tweak must never drop the operator's target, nor advance the sequence.
+        service.updateConfig(streamId, trackingPatch(
+                new TrackingConfig(TrackingMode.FOLLOW, "lk", 1000, 15, 30, 30, 3, null)));
+
+        TargetLock lock = runningTracking(publisher, streamId, 0).lock();
+        assertEquals(7L, lock.trackId());
+        assertEquals(1L, lock.lockSeq());
+    }
+
+    @Test
+    void lockSequencesAreScopedPerStreamNotShared() {
+        ControllableFramePublisher first = new ControllableFramePublisher();
+        ControllableFramePublisher secondPublisher = new ControllableFramePublisher();
+        Device second = new Device(DeviceId.random(), "cam2", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://cam2"), Map.of()));
+        when(deviceRepository.findById(second.id())).thenReturn(Optional.of(second));
+        when(videoSourceRegistry.sourceFor(second.stream())).thenReturn(videoSourcePort);
+        when(videoSourcePort.open(any(), eq(second.stream()))).thenReturn(secondPublisher);
+        StreamId a = startCapturable(first, startedWith(TrackingConfig.off()));
+        StreamId b = service.start(second.id(), startedWith(TrackingConfig.off()));
+        PipelineConfigPatch lock =
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, 7L, null, null, false)));
+
+        service.updateConfig(a, lock);
+        service.updateConfig(a, lock);
+        service.updateConfig(b, lock);
+
+        assertEquals(2L, runningTracking(first, a, 0).lock().lockSeq());
+        assertEquals(1L, runningTracking(secondPublisher, b, 0).lock().lockSeq(),
+                "one operator's clicks must not advance another stream's sequence");
+    }
+
+    @Test
+    void tracksAndTrackingStatsAreEmptyForAnUnknownOrStoppedStream() {
+        StreamId unknown = StreamId.random();
+        assertEquals(List.of(), service.tracks(unknown));
+        assertEquals(Optional.empty(), service.trackingStats(unknown));
+
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+        assertEquals(List.of(), service.tracks(streamId), "a running stream with no tracks yet reads empty too");
+        assertTrue(service.trackingStats(streamId).isPresent());
+
+        service.stop(streamId);
+        assertEquals(List.of(), service.tracks(streamId));
+        assertEquals(Optional.empty(), service.trackingStats(streamId));
     }
 }
