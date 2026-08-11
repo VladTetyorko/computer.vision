@@ -191,7 +191,8 @@ nothing else can be in flight while every import in the repo moves.
       when its name equals the context (no `flight.application.flight`) or when it is the context's
       only feature (no `events.application.replay`); otherwise the feature subpackage is kept.
       Verified: domain 518 · application 819 · api 551 · app 223 · adapters 396, all green.
-- [ ] **W1.6 break the module cycles** — see §14, seven of them, newly visible
+- [ ] **W1.6 break the module cycles** — seven of them (§14); specified as four sub-waves in §15
+  - [ ] W1.6a platform seams · [ ] W1.6b events-as-sink · [ ] W1.6c ownership · [ ] W1.6d C3
 - [ ] W1.7 Maven extraction
 
 ---
@@ -236,6 +237,107 @@ test. Measured causes, per cycle:
 are what actually bind the contexts together, far more than any business coupling. Splitting the
 live-update port per context is not extra work invented by this refactor — DOMAIN-SEPARATION-PLAN
 already requires it for scoped U1 delivery.
+
+---
+
+## 15. W1.6 — the cycle break, specified
+
+Every cycle was traced to a concrete class-to-class reference (script: `scratchpad/edges.py`, which
+reproduces ArchUnit's 26/7 exactly, so it can be used as a fast inner loop without a Maven run).
+Four sub-waves, in order; each must end green and is independently revertable.
+
+### The rule that decides every direction
+
+Two contexts point at each other and only one direction may survive. The tie-breaker is the same one
+C3 already established:
+
+> **Inventory is the stable layer. Runtime reads inventory; inventory never reads runtime.**
+
+So `perception → warehouse` and `flight → warehouse` stay (a stream must resolve its device); the
+reverse edges must reach zero. Symmetrically, `events` is a pure *downstream reader* — replay and
+history — so it may read every context, and nothing may read it back.
+
+### W1.6a — `com.drones.vision.platform`
+
+A ninth package, universal like the kernel: every context may depend on it, it depends only on the
+kernel. Kernel stays what it is — pure values, no ports. Platform holds the **cross-cutting seams**,
+the things every context writes to.
+
+| Move | From | Why |
+|---|---|---|
+| `Event`, `EventType`, `EventPublisherPort` | `events` | already kernel-only in their references; nothing about them is replay-specific |
+| `AuditEntry`, `AuditId`, `AuditAction`, `AuditTargetType`, `AuditTrailPort` | `identity` | audit is not an identity concern, it is a platform concern that happens to name a `UserId` (kernel) |
+| `VisibilityScope` | `identity.application.scope` | every context filters by it; it is the authorization *value*, not identity's aggregate |
+
+`VisibilityScope` needs two edits before it can move: `includes(Asset)` becomes
+`includes(AssetId, Ownership)` — both kernel types, and all 8 call sites already hold an `Asset` —
+and `maxGrantableRole()` moves to identity (its single caller is `DefaultUserService`; granting roles
+is user administration, not visibility).
+
+**Kills `identity ↔ warehouse`.**
+
+### W1.6b — events becomes a sink
+
+| Move | From → To | Why |
+|---|---|---|
+| `DetectionRepositoryPort`, `DetectionEvent`, `DetectionEventId`, `DetectionEventState`, `DetectionEventRepositoryPort` | events → **perception** | they store and shape *detections*; only perception's `DetectionEventEngine`/`DefaultStreamService` ever construct them. Filed by consumer, not by owner |
+| `ReplayCaptureSpec` (**C8**) | events → **learning** | it exists to capture frames *for a dataset*, so it names `DatasetId` and learning names it back |
+
+And the god-port dies (**C7b**). `LiveUpdatePublisherPort`'s six methods are six contexts' business;
+each becomes a port in the context that publishes it:
+
+```
+publishFleetChanged()                   -> warehouse.domain.port.FleetLiveUpdatePort
+publishTelemetryAppended(AssetId, …)    -> flight.domain.port.TelemetryLiveUpdatePort
+publishDetections(AssetId, …)           -> perception.domain.port.DetectionLiveUpdatePort
+publishDetectionEvent(DetectionEvent)   -> perception.domain.port.DetectionLiveUpdatePort
+publishMapEvent(MapEvent)               -> map.domain.port.MapLiveUpdatePort
+publishEvent(Event)                     -> platform.port.EventLiveUpdatePort
+```
+
+`LiveUpdateRegistry` (vision-api) implements all five — an adapter may depend on every context, that
+is what an adapter is for. This is not extra work invented by the refactor: DOMAIN-SEPARATION-PLAN §3
+requires per-context U1 delivery anyway, and a single port that names four contexts' payloads cannot
+be scoped.
+
+**Kills all four `events ↔ …` cycles.**
+
+### W1.6c — ownership of a session and a sample
+
+| Move | Why |
+|---|---|
+| `Telemetry`, `FlightState` → **kernel** | pure records (`DeviceId` + primitives, no ports) read by five contexts. They are the platform's shared payload in exactly the way `GeoPosition` and `BoundingBox` already are. Revisit if W2's wire DTOs make per-context divergence real |
+| `AssetUsage`, `AssetUsageRepositoryPort`: flight → **warehouse** (**C9**) | split ownership today: the record is flight, all four readers (`AssetDetails`, `DefaultAssetService`, `DefaultAssetStatsService`, `DefaultUsageService`) are warehouse. Moving the record is four imports; moving the readers would drag fleet-summary into flight and create `flight ↔ perception` instead |
+
+Also collapses `perception → flight` to just the two telemetry ports `UsageTracker` opens, and
+`warehouse → flight` to `DefaultProbeService` alone — which W1.6d takes.
+
+### W1.6d — C3, warehouse stops reading runtime
+
+The last and only design-heavy one. Warehouse's whole reach into perception/flight is five call
+shapes:
+
+```
+streamService.activeDeviceIds()            DefaultAssetService
+streamService.streams() / .stop(id)        DefaultAssetService, DefaultDeviceService, DefaultFleetSummaryService
+streamService.start(device, cfg, tracking) DefaultAssetService
+usageTracker.latestTelemetry(assetId)      DefaultAssetStatsService, DefaultFleetSummaryService
+VideoSourceRegistry + TelemetrySourcePort  DefaultProbeService
+```
+
+1. **`PipelineConfig`, `TrackingConfigPatch`, `EventRuleConfig` → warehouse.** CV *configuration* is
+   asset data; CV *execution* is perception. Perception reads them when a stream starts — the correct
+   direction. (This re-homes C4's `EventRuleConfig`, whose W1.2 assignment was made before the config
+   family's owner was settled.)
+2. **`warehouse.domain.port.AssetLiveStatePort`** — warehouse declares what it needs
+   (`activeDeviceIds`, `streamsFor`, `stopStreamsFor`, `latestTelemetry`, `startStream`), returning
+   warehouse-owned records. Perception implements it; vision-app wires it.
+3. **`warehouse.domain.port.DevicePlumbingProbePort`** — `DefaultProbeService`'s body moves behind
+   it, composed in vision-app from `VideoSourceRegistry` + `TelemetrySourcePort`. `ProbeResult` keeps
+   its snapshot as bytes rather than a perception `VideoFrame`.
+
+**Kills `perception ↔ warehouse` and `flight ↔ warehouse`** — the last two. `DECLARED_CYCLES` empties
+and W1.7 unblocks.
 
 ### Package scheme (fixed in W1.5a, applies to W1.5b and W1.6)
 
