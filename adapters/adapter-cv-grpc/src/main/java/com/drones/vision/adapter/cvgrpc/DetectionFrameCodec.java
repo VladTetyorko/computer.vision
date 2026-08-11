@@ -3,10 +3,18 @@ package com.drones.vision.adapter.cvgrpc;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.DetectionSource;
+import com.drones.vision.domain.model.DetectorReason;
 import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.TargetLock;
+import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.domain.model.TrackState;
+import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.domain.model.TrackingTelemetry;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
@@ -54,6 +62,27 @@ import java.util.List;
  * come back normalized to {@code [0,1]} and {@link DetectionResult} never references the source
  * frame's pixel dimensions.
  *
+ * <h2>Tracking (docs/TRACKING-PLAN.md &sect;4.A/&sect;4.B, docs/TRACKING-ORCHESTRATION.md &sect;5.1/&sect;5.2)</h2>
+ * {@link #encode} maps {@link PipelineConfig#tracking()} onto every outbound {@code FrameRequest} —
+ * {@code redetectIouPercent} (an {@code int} percent) converts to the wire's {@code float} ratio via
+ * {@code / 100f}; a present {@link TrackingConfig#lock()} maps to a wire {@code TargetLock}, absent
+ * leaves the wire {@code lock} field unset. {@link #decode} maps the wire's per-detection track fields
+ * (4-9) onto {@link Detection#track()} and — the headline requirement of this class, not an
+ * afterthought (TRACKING-ORCHESTRATION.md &sect;5.2) — the response's per-<em>frame</em> fields
+ * ({@code detector_ran}/{@code detector_reason}/{@code tracker_millis}/{@code tracker_engine_id}/
+ * {@code locked_track_id}) onto {@link DetectionResult#tracking()} as a {@link TrackingTelemetry}.
+ * {@code track_id == 0} always decodes to {@code track() == null} — the wire's untracked sentinel
+ * never becomes a {@code TrackRef(0, …)}. An {@code UNSPECIFIED}/unrecognized {@code TrackState} or
+ * {@code DetectionSource} decodes defensively to no {@code TrackRef} at all rather than a guessed
+ * one, mirroring this class's own {@code JOB_STATE_UNSPECIFIED -> RUNNING} "never guess" posture
+ * elsewhere in this module (see {@code GrpcTrainingPort}). A response carrying none of the five
+ * per-frame tracking fields (every one at its proto zero-value — the shape an old, pre-tracking
+ * server's response has) decodes {@code tracking() == null}, byte-identical to this class's
+ * pre-tracking behavior; this is indistinguishable at the wire level from a modern server explicitly
+ * reporting all-default values, which never legitimately happens because a modern cv-service always
+ * reports {@code detector_ran}/{@code detector_reason} on every response regardless of mode
+ * (docs/TRACKING-PLAN.md T1 wave).
+ *
  * <h2>Failure shape</h2>
  * {@link #encode} throws {@link IllegalArgumentException} for an unsupported {@link PixelFormat}
  * (only {@code JPEG}/{@code BGR24} are mapped), {@link IOException} if the JPEG encoder fails, and a
@@ -93,7 +122,8 @@ final class DetectionFrameCodec {
                 .setTimestampMillis(frame.capturedAt().toEpochMilli())
                 .setModelId(config.model().id())
                 .setModelVersion(config.model().version())
-                .setConfidenceThreshold((float) config.confidenceThreshold());
+                .setConfidenceThreshold((float) config.confidenceThreshold())
+                .setTracking(toWireTrackingConfig(config.tracking()));
 
         if (encoding == ImageEncoding.IMAGE_ENCODING_BGR24 && frame.width() > detectWidth) {
             return withDownscaledJpeg(builder, frame);
@@ -118,7 +148,132 @@ final class DetectionFrameCodec {
                 response.getSequence(),
                 Instant.ofEpochMilli(response.getTimestampMillis()),
                 detections,
-                Duration.ofMillis(response.getInferenceMillis()));
+                Duration.ofMillis(response.getInferenceMillis()),
+                toTrackingTelemetry(response));
+    }
+
+    /**
+     * Maps the response's five per-frame tracking fields (docs/TRACKING-PLAN.md &sect;4.A fields
+     * 8-12) onto a {@link TrackingTelemetry} — the docs/TRACKING-ORCHESTRATION.md &sect;5.2 gap fix
+     * this wave exists to close. Returns {@code null} (tracking off for this result, matching this
+     * class's pre-tracking behavior byte-for-byte) only when every one of the five fields is still
+     * at its proto zero-value — the shape an old, pre-tracking server's response has, since a modern
+     * cv-service always reports {@code detector_ran}/{@code detector_reason} on every response
+     * regardless of mode (see class javadoc).
+     */
+    private static TrackingTelemetry toTrackingTelemetry(DetectionResponse response) {
+        boolean detectorRan = response.getDetectorRan();
+        long trackerMillis = response.getTrackerMillis();
+        String engineId = response.getTrackerEngineId();
+        long lockedTrackId = response.getLockedTrackId();
+        com.drones.vision.proto.v1.DetectorReason wireReason = response.getDetectorReason();
+        if (!detectorRan && trackerMillis == 0 && engineId.isEmpty() && lockedTrackId == 0
+                && wireReason == com.drones.vision.proto.v1.DetectorReason.DETECTOR_REASON_UNSPECIFIED) {
+            return null;
+        }
+        // detector_reason is meaningful only when detector_ran is true (docs/TRACKING-PLAN.md
+        // §4.G); an UNSPECIFIED reason on a detector-ran frame is a contract violation, not
+        // something to guess at, and is left to fail via TrackingTelemetry's own compact-ctor
+        // validation (caught per-response by DetectionStreamSession#onResponse).
+        DetectorReason reason = detectorRan ? toDetectorReason(wireReason) : null;
+        return new TrackingTelemetry(detectorRan, reason, Duration.ofMillis(trackerMillis), engineId, lockedTrackId);
+    }
+
+    private static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {
+        com.drones.vision.proto.v1.TrackingConfig.Builder builder = com.drones.vision.proto.v1.TrackingConfig.newBuilder()
+                .setMode(toWireTrackingMode(tracking.mode()))
+                .setEngineId(tracking.engineId())
+                .setVerifyEveryMillis(tracking.verifyEveryMillis())
+                .setRedetectIouThreshold(tracking.redetectIouPercent() / 100f)
+                .setMaxAgeFrames(tracking.maxAgeFrames())
+                .setMinHits(tracking.minHits());
+        TargetLock lock = tracking.lock();
+        if (lock != null) {
+            builder.setLock(toWireTargetLock(lock));
+        }
+        return builder.build();
+    }
+
+    private static com.drones.vision.proto.v1.TrackingMode toWireTrackingMode(TrackingMode mode) {
+        return switch (mode) {
+            case OFF -> com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_OFF;
+            case ASSOCIATE -> com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_ASSOCIATE;
+            case FOLLOW -> com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_FOLLOW;
+        };
+    }
+
+    /**
+     * {@code box} is deliberately never set: the domain {@link TargetLock} carries no box component
+     * (docs/TRACKING-PLAN.md §4.D — the PATCH surface accepts only {@code trackId}/point/{@code
+     * release}), so the wire's optional explicit-box override is a cv-service-only affordance this
+     * adapter has nothing to populate it from.
+     */
+    private static com.drones.vision.proto.v1.TargetLock toWireTargetLock(TargetLock lock) {
+        com.drones.vision.proto.v1.TargetLock.Builder builder = com.drones.vision.proto.v1.TargetLock.newBuilder()
+                .setLockSeq(lock.lockSeq())
+                .setRelease(lock.release());
+        if (lock.trackId() != null) {
+            builder.setTrackId(lock.trackId());
+        }
+        if (lock.pointX() != null) {
+            builder.setPointX(lock.pointX().floatValue());
+            builder.setPointY(lock.pointY().floatValue());
+        }
+        return builder.build();
+    }
+
+    private static DetectorReason toDetectorReason(com.drones.vision.proto.v1.DetectorReason wire) {
+        return switch (wire) {
+            case DETECTOR_REASON_ALWAYS -> DetectorReason.ALWAYS;
+            case DETECTOR_REASON_CADENCE -> DetectorReason.CADENCE;
+            case DETECTOR_REASON_TRACKER_FAILED -> DetectorReason.TRACKER_FAILED;
+            case DETECTOR_REASON_NO_LOCK -> DetectorReason.NO_LOCK;
+            case DETECTOR_REASON_BOX_INVALID -> DetectorReason.BOX_INVALID;
+            case DETECTOR_REASON_COASTED_OUT -> DetectorReason.COASTED_OUT;
+            case DETECTOR_REASON_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
+    }
+
+    private static TrackState toTrackState(com.drones.vision.proto.v1.TrackState wire) {
+        return switch (wire) {
+            case TRACK_STATE_TENTATIVE -> TrackState.TENTATIVE;
+            case TRACK_STATE_CONFIRMED -> TrackState.CONFIRMED;
+            case TRACK_STATE_COASTING -> TrackState.COASTING;
+            case TRACK_STATE_LOST -> TrackState.LOST;
+            case TRACK_STATE_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
+    }
+
+    private static DetectionSource toDetectionSource(com.drones.vision.proto.v1.DetectionSource wire) {
+        return switch (wire) {
+            case DETECTION_SOURCE_DETECTOR -> DetectionSource.DETECTOR;
+            case DETECTION_SOURCE_TRACKER -> DetectionSource.TRACKER;
+            case DETECTION_SOURCE_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
+    }
+
+    /**
+     * Maps a wire {@code Detection}'s track fields (4-9) onto a {@link TrackRef}, or {@code null} if
+     * untracked. {@code track_id == 0} is the wire's untracked sentinel and short-circuits everything
+     * else — it never reaches {@link TrackRef}'s constructor as a guessed {@code trackId}, regardless
+     * of what the other track fields say (docs/TRACKING-ORCHESTRATION.md §6 rule 2). An {@code
+     * UNSPECIFIED}/unrecognized {@code TrackState} or {@code DetectionSource} on an otherwise-tracked
+     * detection decodes defensively to {@code null} too — never a guessed state/source.
+     */
+    private static TrackRef toTrackRef(com.drones.vision.proto.v1.Detection wire) {
+        if (wire.getTrackId() == 0) {
+            return null;
+        }
+        TrackState state = toTrackState(wire.getTrackState());
+        if (state == null) {
+            return null;
+        }
+        DetectionSource source = toDetectionSource(wire.getSource());
+        if (source == null) {
+            return null;
+        }
+        return new TrackRef(wire.getTrackId(), state, source, wire.getVelocityX(), wire.getVelocityY(),
+                wire.getTrackAgeFrames());
     }
 
     private static ImageEncoding toImageEncoding(PixelFormat format) {
@@ -191,6 +346,6 @@ final class DetectionFrameCodec {
     private static Detection toDetection(com.drones.vision.proto.v1.Detection wire, ModelRef model) {
         var wireBox = wire.getBox();
         BoundingBox box = new BoundingBox(wireBox.getX(), wireBox.getY(), wireBox.getWidth(), wireBox.getHeight());
-        return new Detection(wire.getLabel(), wire.getConfidence(), box, model);
+        return new Detection(wire.getLabel(), wire.getConfidence(), box, model, toTrackRef(wire));
     }
 }

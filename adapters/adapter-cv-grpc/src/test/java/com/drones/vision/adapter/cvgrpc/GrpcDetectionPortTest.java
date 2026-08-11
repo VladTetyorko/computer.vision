@@ -2,9 +2,14 @@ package com.drones.vision.adapter.cvgrpc;
 
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
+import com.drones.vision.domain.model.EventRuleConfig;
+import com.drones.vision.domain.model.ModelRef;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.domain.model.TargetLock;
+import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.domain.model.TrackingMode;
 import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
@@ -53,6 +58,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -550,6 +556,77 @@ class GrpcDetectionPortTest {
     }
 
     @Test
+    void trackingConfigAndTargetLockCapturedExactlyOnTheWire() throws Exception {
+        // docs/TRACKING-PLAN.md §4.A/§4.B, T4: PipelineConfig.tracking() -> FrameRequest.tracking,
+        // including the TargetLock and the redetectIouPercent (int, [0,100]) -> redetect_iou_threshold
+        // (float ratio) unit conversion. Asserted against what the server actually received, not
+        // just that encode() ran without throwing.
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+        TargetLock lock = new TargetLock(3, 7L, null, null, false);
+        TrackingConfig tracking = new TrackingConfig(TrackingMode.FOLLOW, "lk", 1500, 20, 45, 25, 4, lock);
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, true,
+                java.util.Set.of(), EventRuleConfig.defaults(), true, true, tracking);
+
+        port.detect(frame(streamId, 0, PixelFormat.BGR24), config).toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        FrameRequest sent = servicer.received.get(0L);
+        assertTrue(sent.hasTracking());
+        com.drones.vision.proto.v1.TrackingConfig wireTracking = sent.getTracking();
+        assertEquals(com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_FOLLOW, wireTracking.getMode());
+        assertEquals("lk", wireTracking.getEngineId());
+        assertEquals(1500, wireTracking.getVerifyEveryMillis());
+        assertEquals(0.45f, wireTracking.getRedetectIouThreshold(), 1e-6f);
+        assertEquals(25, wireTracking.getMaxAgeFrames());
+        assertEquals(4, wireTracking.getMinHits());
+        assertTrue(wireTracking.hasLock());
+        com.drones.vision.proto.v1.TargetLock wireLock = wireTracking.getLock();
+        assertEquals(3L, wireLock.getLockSeq());
+        assertEquals(7L, wireLock.getTrackId());
+        assertFalse(wireLock.getRelease());
+        // followFps is Java-side sampler rate only, never a cv-service knob (TRACKING-ORCHESTRATION
+        // §4.3) -- there is no wire field for it at all, so nothing to assert here.
+    }
+
+    @Test
+    void trackingConfigWithNoLockLeavesWireLockAbsent() throws Exception {
+        CapturingServicer servicer = new CapturingServicer();
+        GrpcDetectionPort port = newPort(servicer);
+        StreamId streamId = StreamId.random();
+
+        // PipelineConfig.defaults() carries TrackingConfig.off() -- mode OFF, no lock.
+        port.detect(frame(streamId, 0, PixelFormat.BGR24), PipelineConfig.defaults())
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        FrameRequest sent = servicer.received.get(0L);
+        assertTrue(sent.hasTracking());
+        assertEquals(com.drones.vision.proto.v1.TrackingMode.TRACKING_MODE_OFF, sent.getTracking().getMode());
+        assertFalse(sent.getTracking().hasLock());
+    }
+
+    @Test
+    void malformedTrackFieldFailsOnlyThatFrameAndSubsequentGoodFrameOnSameStreamSucceeds() throws Exception {
+        // Unlike detectConversionFailureFails...(below), which fails before any session/gRPC call is
+        // made, this proves the per-response failure contract *inside* an already-open
+        // DetectionStreamSession: DetectionFrameCodec.decode() throwing (a non-finite velocity, here)
+        // is caught per-response by DetectionStreamSession#onResponse and fails only that frame's
+        // future -- the session itself, and every subsequent frame on it, is unaffected.
+        GrpcDetectionPort port = newPort(new MalformedTrackFieldThenGoodServicer());
+        StreamId streamId = StreamId.random();
+        PipelineConfig config = PipelineConfig.defaults();
+
+        CompletionStage<DetectionResult> failed = port.detect(frame(streamId, 0, PixelFormat.BGR24), config);
+        ExecutionException ex = assertThrows(ExecutionException.class,
+                () -> failed.toCompletableFuture().get(5, TimeUnit.SECONDS));
+        assertInstanceOf(IllegalArgumentException.class, ex.getCause());
+
+        DetectionResult recovered = port.detect(frame(streamId, 1, PixelFormat.BGR24), config)
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+        assertEquals(1L, recovered.frameSequence());
+    }
+
+    @Test
     void detectConversionFailureFailsOnlyThatFrameAndSubsequentGoodFrameOnSameStreamSucceeds() throws Exception {
         GrpcDetectionPort port = newPort(new EchoServicer());
         StreamId streamId = StreamId.random();
@@ -662,6 +739,52 @@ class GrpcDetectionPortTest {
                             .setModelId(request.getModelId())
                             .setModelVersion(request.getModelVersion())
                             .build());
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // test double: nothing to clean up
+                }
+
+                @Override
+                public void onCompleted() {
+                    responseObserver.onCompleted();
+                }
+            };
+        }
+    }
+
+    /**
+     * Frame 0's response carries one {@code Detection} with a non-finite {@code velocity_x} (a
+     * malformed track field: {@link com.drones.vision.domain.model.TrackRef} requires finite
+     * velocities) inside an already-open session; every later frame on the same session echoes back
+     * a plain, valid response.
+     */
+    private static final class MalformedTrackFieldThenGoodServicer extends InferenceGrpc.InferenceImplBase {
+        @Override
+        public StreamObserver<FrameRequest> detectStream(StreamObserver<DetectionResponse> responseObserver) {
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(FrameRequest request) {
+                    DetectionResponse.Builder builder = DetectionResponse.newBuilder()
+                            .setStreamId(request.getStreamId())
+                            .setSequence(request.getSequence())
+                            .setTimestampMillis(request.getTimestampMillis())
+                            .setModelId(request.getModelId())
+                            .setModelVersion(request.getModelVersion());
+                    if (request.getSequence() == 0) {
+                        com.drones.vision.proto.v1.BoundingBox box = com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                                .setX(0.1f).setY(0.1f).setWidth(0.2f).setHeight(0.2f).build();
+                        com.drones.vision.proto.v1.Detection malformed = com.drones.vision.proto.v1.Detection.newBuilder()
+                                .setLabel("person").setConfidence(0.9f).setBox(box)
+                                .setTrackId(5)
+                                .setTrackState(com.drones.vision.proto.v1.TrackState.TRACK_STATE_CONFIRMED)
+                                .setSource(com.drones.vision.proto.v1.DetectionSource.DETECTION_SOURCE_DETECTOR)
+                                .setVelocityX(Float.NaN)
+                                .build();
+                        builder.addDetections(malformed);
+                    }
+                    responseObserver.onNext(builder.build());
                 }
 
                 @Override
