@@ -4,8 +4,6 @@ import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.ZoneKind;
 
 import java.util.List;
-import com.drones.vision.application.asset.AssetSpec;
-import com.drones.vision.application.device.DeviceRegistration;
 
 /**
  * Everything needed to create or update a {@code GeofenceZone} (docs/plans/done/OPS-CORE-PLAN.md §G) — one
@@ -14,13 +12,13 @@ import com.drones.vision.application.device.DeviceRegistration;
  *
  * <p>A top-level record rather than a type nested in {@link GeofenceService}, so callers can name
  * their input without importing the service, and so the wire DTO in {@code …api.dto} maps to one
- * plain value — same reasoning as {@link DeviceRegistration}/{@link AssetSpec}.
+ * plain value — same reasoning as {@link com.drones.vision.application.device.DeviceRegistration}/{@link com.drones.vision.application.asset.AssetSpec}.
  *
  * @param name              human-readable name; must not be blank
  * @param kind              {@link ZoneKind#KEEP_IN} or {@link ZoneKind#KEEP_OUT}
  * @param polygon           boundary vertices, at least 3, defensively copied — the same invariant
  *                          {@code GeofenceZone} itself enforces, duplicated here (mirroring {@link
- *                          AssetSpec}'s own "at least one device" duplication of {@code Asset}'s
+ *                          com.drones.vision.application.asset.AssetSpec}'s own "at least one device" duplication of {@code Asset}'s
  *                          invariant) so a malformed request fails fast with a spec-specific
  *                          message before any repository interaction
  * @param maxAltitudeMeters altitude ceiling in meters, or {@code null} for no ceiling; must not be

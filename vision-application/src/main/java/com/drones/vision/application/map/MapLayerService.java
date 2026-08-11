@@ -7,7 +7,6 @@ import com.drones.vision.domain.model.MapLayer;
 
 import java.util.List;
 import com.drones.vision.application.map.MapAccessPolicy.Viewer;
-import com.drones.vision.application.scope.AccessDeniedException;
 
 /**
  * Layer CRUD and grant management (docs/plans/done/MAP-REWORK-PLAN.md §3) — the shared, access-controlled
@@ -20,7 +19,7 @@ import com.drones.vision.application.scope.AccessDeniedException;
  * {@link LayerKind#TEAM} layer on "MANAGER of that group, or ADMIN" and leaves {@link
  * LayerKind#PERSONAL} open to anyone; {@link #rename}/{@link #delete}/{@link #setGrants} require
  * {@link MapAccessPolicy#canManage}. An unknown layer id is {@link java.util.NoSuchElementException}
- * (404); an in-scope-but-insufficient access level is {@link AccessDeniedException} (403).
+ * (404); an in-scope-but-insufficient access level is {@link com.drones.vision.application.scope.AccessDeniedException} (403).
  *
  * <h2>The COP layer</h2>
  * Exactly one {@link LayerKind#COP} layer exists per deployment — the default mark-promotion target
@@ -47,7 +46,7 @@ public interface MapLayerService {
      * @param v    who is creating it
      * @param spec what to create
      * @return the created layer
-     * @throws AccessDeniedException if {@code spec.kind()} is {@link LayerKind#TEAM} and {@code v} is
+     * @throws com.drones.vision.application.scope.AccessDeniedException if {@code spec.kind()} is {@link LayerKind#TEAM} and {@code v} is
      *                                neither an ADMIN nor a MANAGER of {@code spec.groupId()}
      */
     MapLayer create(Viewer v, LayerSpec spec);
@@ -61,7 +60,7 @@ public interface MapLayerService {
      * @return the renamed layer
      * @throws java.util.NoSuchElementException if no layer has that id
      * @throws IllegalStateException             if the layer is the COP layer
-     * @throws AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.application.scope.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canManage} it
      */
     MapLayer rename(Viewer v, LayerId id, String name);
@@ -74,7 +73,7 @@ public interface MapLayerService {
      * @param id the layer to delete
      * @throws java.util.NoSuchElementException if no layer has that id
      * @throws IllegalStateException             if the layer is the COP layer
-     * @throws AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.application.scope.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canManage} it
      */
     void delete(Viewer v, LayerId id);
@@ -87,7 +86,7 @@ public interface MapLayerService {
      * @param grants the complete replacement grant list
      * @return the updated layer
      * @throws java.util.NoSuchElementException if no layer has that id
-     * @throws AccessDeniedException              if {@code v} does not {@link
+     * @throws com.drones.vision.application.scope.AccessDeniedException              if {@code v} does not {@link
      *                                             MapAccessPolicy#canManage} it
      */
     MapLayer setGrants(Viewer v, LayerId id, List<LayerGrant> grants);

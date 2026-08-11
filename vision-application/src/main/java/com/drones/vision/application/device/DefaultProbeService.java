@@ -22,11 +22,10 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
-import com.drones.vision.application.stream.DefaultStreamService;
 
 /**
  * {@link ProbeService} backed by the same {@link VideoSourcePort} adapters {@link
- * DefaultStreamService} streams from — resolved the same way ({@link
+ * com.drones.vision.application.stream.DefaultStreamService} streams from — resolved the same way ({@link
  * VideoSourceRegistry#sourceFor}), opened under a transient, never-persisted {@link StreamId},
  * subscribed for exactly one frame, then closed. See {@link #probe} for the exact sequence.
  *

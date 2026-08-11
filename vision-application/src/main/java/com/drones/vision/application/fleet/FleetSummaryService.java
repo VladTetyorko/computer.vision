@@ -1,16 +1,15 @@
 package com.drones.vision.application.fleet;
 
 import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.application.stream.StreamService;
 /**
  * The manager dashboard's single aggregated read (docs/plans/done/MVP3-PLAN.md C-a) — a server-side join of
  * per-category counts and per-asset attention facts, so the browser issues one poll per cycle
  * instead of assembling the picture from several (assets, streams, telemetry, events).
  *
  * <p>One interface, one implementation ({@link DefaultFleetSummaryService}), composing {@link
- * AssetService}, {@link StreamService}, {@link UsageTracker}, and {@link
+ * AssetService}, {@link com.drones.vision.application.stream.StreamService}, {@link
+ * com.drones.vision.application.pipeline.UsageTracker}, and {@link
  * com.drones.vision.domain.port.out.DetectionEventRepositoryPort} rather than reaching past them to
  * repositories directly — every rule those already enforce (soft-delete visibility, streaming
  * derivation) applies here without duplication.

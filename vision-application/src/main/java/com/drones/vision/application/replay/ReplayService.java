@@ -5,7 +5,6 @@ import com.drones.vision.domain.model.UsageId;
 import java.time.Instant;
 import java.util.NoSuchElementException;
 import java.util.Optional;
-import com.drones.vision.application.pipeline.UsageTracker;
 
 /**
  * Serves a scrubbable replay window over one finished (or still-open) {@link

@@ -6,8 +6,6 @@ import com.drones.vision.domain.port.out.SampleImageStorePort;
 import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
 
 import java.util.Objects;
-import com.drones.vision.application.replay.ReplaySources;
-import com.drones.vision.application.stream.StreamService;
 
 /**
  * The four Wave-T1 CV-training ports (docs/plans/done/CV-TRAINING-PLAN.md §1) — {@code exports} replaced by
@@ -17,8 +15,8 @@ import com.drones.vision.application.stream.StreamService;
  * sprawl"): each port is a genuine, independently-substitutable dependency in its own right (a JPA
  * implementation and an in-memory fallback both exist per repository port, and {@link
  * DatasetUploadPort} has its own real gRPC implementation), so none of the four is speculative —
- * but {@link DefaultLabelingService} also needs {@link StreamService}, {@link
- * com.drones.vision.domain.port.out.AssetRepositoryPort}, {@link ReplaySources}, and {@link
+ * but {@link DefaultLabelingService} also needs {@link com.drones.vision.application.stream.StreamService}, {@link
+ * com.drones.vision.domain.port.out.AssetRepositoryPort}, {@link com.drones.vision.application.replay.ReplaySources}, and {@link
  * com.drones.vision.domain.port.out.AuditTrailPort}, which would push its constructor past the
  * five-parameter ceiling if all seven were listed individually. Grouping the four that land
  * together, as one T1 wave, keeps every one of them a real (not speculative) collaborator while

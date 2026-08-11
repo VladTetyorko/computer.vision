@@ -29,10 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import com.drones.vision.application.asset.AssetDetails;
 import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.pipeline.SupervisedPublisher;
 import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.application.simulation.SimulationSpec;
 
 /**
  * The one implementation of {@link ManualControlService} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md,
@@ -223,7 +221,7 @@ public final class DefaultManualControlService implements ManualControlService {
 
     /**
      * The one implementation of {@link ManualControlSession}, returned by {@link #engage}. A
-     * private inner class (mirrors {@link SupervisedPublisher}'s own {@code SupervisingSubscriber})
+     * private inner class (mirrors {@link com.drones.vision.application.pipeline.SupervisedPublisher}'s own {@code SupervisingSubscriber})
      * so it can reach the enclosing service's {@code manualControlPort}/{@code auditTrail}/{@code
      * clock}/{@code watchdogScheduler}/{@code watchdogTimeoutMs} directly, without re-threading five
      * more collaborators through its own constructor.

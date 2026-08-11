@@ -5,7 +5,6 @@ import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
 
 import java.util.List;
-import com.drones.vision.application.asset.AssetService;
 
 /**
  * The one-call, zero-hardware simulation entry point (docs/main/CYCLES-PLAN.md §0-1): a video file path
@@ -13,7 +12,7 @@ import com.drones.vision.application.asset.AssetService;
  *
  * <p>One interface, one implementation ({@link DefaultSimulationService}) — see
  * {@code .claude/skills/java-clean-code/SKILL.md}. Ownership is derived from the acting user at
- * call time, never injected at construction, mirroring {@link AssetService}.
+ * call time, never injected at construction, mirroring {@link com.drones.vision.application.asset.AssetService}.
  *
  * <h2>Threading</h2>
  * Implementations must be safe for concurrent use; all shared state lives behind driven ports.
@@ -42,7 +41,8 @@ public interface SimulationService {
      * SimulationTransport#RTSP}, its transmitted feed too — docs/main/CYCLES-PLAN.md §3's TX-side
      * teardown.
      *
-     * <p>Idempotent and tolerant of an unknown asset, mirroring {@link AssetService#stopStream(AssetId)}'s
+     * <p>Idempotent and tolerant of an unknown asset, mirroring {@link
+     * com.drones.vision.application.asset.AssetService#stopStream(AssetId)}'s
      * no-op semantics: calling this twice, or for an asset that was never simulated (or never had
      * {@code RTSP} transport), is always safe.
      *

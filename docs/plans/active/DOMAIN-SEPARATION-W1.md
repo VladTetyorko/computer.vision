@@ -168,7 +168,16 @@ nothing else can be in flight while every import in the repo moves.
       **The application context graph is now acyclic**; mutual pairs held at zero by test.
       Verified: `./mvnw -B -pl vision-application,vision-api,vision-app test` green (vision-app 222/222)
 - [ ] W1.3 warehouse → perception (C3) — *demoted from blocker to design debt; may move to W2 with the gateway*
-- [ ] W1.4 javadoc de-import (98)
+- [x] **W1.4 javadoc de-import** — 70 cross-context javadoc-only imports removed across 43 files, each
+      surviving `{@link}`/`@throws` reference rewritten fully-qualified. Delegated to three Sonnet
+      agents on disjoint directory scopes (warehouse+simulation · learning+events+map ·
+      flight+identity+perception); verified centrally, not from their reports: re-measurement reports
+      **0 remaining**, exactly 43 files touched, no dangling FQNs, and
+      `./mvnw -B -pl vision-domain,vision-application,vision-api,vision-app test` green
+      (518 + 819 + 551 + 222 = **2110 tests**).
+      The 98 measured earlier included intra-context imports; 70 is the cross-context subset that
+      actually breaks Maven extraction. `{@code X}` mentions were correctly left bare — they resolve
+      nothing and need no import.
 - [ ] W1.5 package reorganization
 - [ ] W1.6 Maven extraction
 

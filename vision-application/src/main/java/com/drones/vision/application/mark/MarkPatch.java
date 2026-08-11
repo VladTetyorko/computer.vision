@@ -6,8 +6,6 @@ import com.drones.vision.domain.model.MarkKind;
 import com.drones.vision.domain.model.MarkStatus;
 
 import java.util.Optional;
-import com.drones.vision.application.asset.AssetEdit;
-import com.drones.vision.application.device.DeviceEdit;
 
 /**
  * A partial edit to a {@link com.drones.vision.domain.model.Mark} — annotation (label / note / kind
@@ -15,7 +13,7 @@ import com.drones.vision.application.device.DeviceEdit;
  * (docs/plans/done/MAP-REWORK-PLAN.md §3/§4.2, the frozen {@code PATCH /api/map/marks/{id}} contract,
  * superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape — {@link #affiliation()} is the one new field).
  *
- * <p>Unlike {@link AssetEdit}/{@link DeviceEdit} (which use a bare nullable field to mean "leave
+ * <p>Unlike {@link com.drones.vision.application.asset.AssetEdit}/{@link com.drones.vision.application.device.DeviceEdit} (which use a bare nullable field to mean "leave
  * unchanged" — a field that can never itself legitimately be {@code null}), every component here is
  * an {@link Optional}: {@link Optional#empty()} means "leave this field unchanged",
  * {@code Optional.of(value)} means "set it to {@code value}". {@link #note()}'s own blank-normalizes-

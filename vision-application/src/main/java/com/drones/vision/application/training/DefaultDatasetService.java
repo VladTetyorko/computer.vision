@@ -18,7 +18,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.function.Supplier;
-import com.drones.vision.application.flight.DefaultFlightCommandService;
 import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 

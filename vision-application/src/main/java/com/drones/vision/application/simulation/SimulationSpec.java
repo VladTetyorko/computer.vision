@@ -1,7 +1,5 @@
 package com.drones.vision.application.simulation;
 
-import com.drones.vision.application.asset.AssetEdit;
-import com.drones.vision.application.device.DeviceEdit;
 /**
  * Everything needed to turn a video file — or, since docs/main/CYCLES-PLAN.md §9 (CU-a), nothing at all
  * — into a watchable, telemetry-emitting simulated drone in one call (docs/main/CYCLES-PLAN.md §1b): the

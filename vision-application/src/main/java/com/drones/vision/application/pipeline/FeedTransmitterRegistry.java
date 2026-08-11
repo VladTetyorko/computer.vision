@@ -5,19 +5,18 @@ import com.drones.vision.domain.port.out.FeedTransmitterPort;
 
 import java.util.List;
 import java.util.Objects;
-import com.drones.vision.application.simulation.DefaultSimulationService;
 
 /**
  * Selects the {@link FeedTransmitterPort} adapter able to transmit a given {@link FeedSpec} — the
  * TX-side mirror of {@link VideoSourceRegistry}.
  *
- * <p>{@link DefaultSimulationService} originally held a single {@code FeedTransmitterPort}
+ * <p>{@link com.drones.vision.application.simulation.DefaultSimulationService} originally held a single {@code FeedTransmitterPort}
  * dependency (docs/main/CYCLES-PLAN.md §3, {@code transport=RTSP} only); this registry is the §5
  * generalization once a second transmit protocol ({@code mjpeg}) exists alongside {@code rtsp}.
  * Holds the set of registered transmitter adapters (one per transmit protocol) and picks the
  * first one whose {@link FeedTransmitterPort#supports(FeedSpec)} returns {@code true}. Adding a
  * new transmit protocol means adding a new {@code FeedTransmitterPort} implementation to the
- * wiring, not changing this class or {@link DefaultSimulationService}.
+ * wiring, not changing this class or {@link com.drones.vision.application.simulation.DefaultSimulationService}.
  *
  * <p>Holds no framework dependency: adapters are supplied via the constructor (plain dependency
  * injection), and the wiring module decides which adapters are registered.

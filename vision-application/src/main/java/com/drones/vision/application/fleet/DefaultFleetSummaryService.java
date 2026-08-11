@@ -24,7 +24,6 @@ import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.asset.AssetStatus;
 import com.drones.vision.application.asset.AssetSummary;
 import com.drones.vision.application.category.CategoryCounts;
-import com.drones.vision.application.pipeline.DetectionEventEngine;
 import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.stream.ActiveStream;

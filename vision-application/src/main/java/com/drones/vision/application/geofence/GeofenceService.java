@@ -5,9 +5,6 @@ import com.drones.vision.domain.model.ZoneId;
 
 import java.util.List;
 import java.util.Optional;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.category.CategoryService;
-import com.drones.vision.application.device.DeviceService;
 
 /**
  * CRUD/list over {@link GeofenceZone}s (docs/plans/done/OPS-CORE-PLAN.md §G).

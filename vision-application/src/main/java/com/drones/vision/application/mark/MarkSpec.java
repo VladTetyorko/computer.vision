@@ -4,8 +4,6 @@ import com.drones.vision.domain.model.Affiliation;
 import com.drones.vision.domain.model.GeoPosition;
 import com.drones.vision.domain.model.LayerId;
 import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.application.asset.AssetSpec;
-import com.drones.vision.application.geofence.GeofenceZoneSpec;
 import com.drones.vision.application.map.LayerResolver;
 
 /**
@@ -14,11 +12,11 @@ import com.drones.vision.application.map.LayerResolver;
  *
  * <p>A top-level record rather than a type nested in {@link MarkService}, so callers can name their
  * input without importing the service, and so the wire DTO in {@code …api.dto} maps to one plain
- * value — same reasoning as {@link GeofenceZoneSpec}/{@link AssetSpec}.
+ * value — same reasoning as {@link com.drones.vision.application.geofence.GeofenceZoneSpec}/{@link com.drones.vision.application.asset.AssetSpec}.
  *
  * <p>Duplicates {@link com.drones.vision.domain.model.Mark}'s own {@code label}/{@code note}
  * invariants so a malformed request fails fast with a spec-specific message before touching the
- * repository, mirroring {@link GeofenceZoneSpec}'s own duplication of {@code GeofenceZone}'s
+ * repository, mirroring {@link com.drones.vision.application.geofence.GeofenceZoneSpec}'s own duplication of {@code GeofenceZone}'s
  * invariants.
  *
  * @param layerId     the layer this mark lands on, or {@code null} to use the creator's default

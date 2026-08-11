@@ -6,7 +6,6 @@ import com.drones.vision.domain.port.out.TrainingPort;
 
 import java.util.List;
 import java.util.Optional;
-import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
@@ -37,7 +36,7 @@ public interface TrainingJobService {
      * @param actor who is starting it, for the audit trail
      * @param scope the acting user's visibility; must satisfy {@link VisibilityScope#canManageOrg()}
      * @return the locally generated job id; poll it via {@link #job(String)}
-     * @throws AccessDeniedException             if {@code scope} may not manage the organization
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if {@code scope} may not manage the organization
      *                                             (audited as a denial before this method throws),
      *                                             or the job's dataset is outside {@code scope}
      * @throws java.util.NoSuchElementException  if the job's dataset is unknown

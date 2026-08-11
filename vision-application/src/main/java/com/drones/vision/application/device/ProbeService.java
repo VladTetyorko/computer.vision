@@ -2,8 +2,6 @@ package com.drones.vision.application.device;
 
 import com.drones.vision.domain.model.StreamDescriptor;
 import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.stream.UnsupportedProtocolException;
-import com.drones.vision.application.pipeline.VideoSourceRegistry;
 
 /**
  * Test-before-save connectivity probe (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, UX-DESIGN.md §5.1):
@@ -23,9 +21,9 @@ public interface ProbeService {
      * Probes {@code descriptor} for a live frame.
      *
      * @param descriptor the connection to test; {@code protocol} selects the adapter exactly like
-     *                    {@link VideoSourceRegistry#sourceFor}
+     *                    {@link com.drones.vision.application.pipeline.VideoSourceRegistry#sourceFor}
      * @return what the probe found
-     * @throws com.drones.vision.application.UnsupportedProtocolException if no adapter is
+     * @throws com.drones.vision.application.stream.UnsupportedProtocolException if no adapter is
      *         registered for {@code descriptor}'s protocol — a malformed/unrecognized request, not
      *         a probe failure
      * @throws ProbeFailedException if the adapter recognizes the protocol but the connection

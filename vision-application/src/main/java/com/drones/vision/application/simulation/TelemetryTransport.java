@@ -1,6 +1,5 @@
 package com.drones.vision.application.simulation;
 
-import com.drones.vision.application.pipeline.FeedTransmitterRegistry;
 /**
  * How a simulated asset's telemetry reaches its {@code TelemetrySourcePort} — the telemetry-transport
  * half of {@link SimulationSpec}, orthogonal to {@link SimulationTransport} (the video-transport

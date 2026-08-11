@@ -2,7 +2,6 @@ package com.drones.vision.application.flight;
 
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.UserId;
-import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
@@ -22,7 +21,7 @@ public interface ManualControlService {
      * @param onWatchdog invoked, exactly once, if the returned session's watchdog later
      *                   auto-releases it for input loss — the session is already released and
      *                   audited by the time this fires
-     * @throws AccessDeniedException  the asset is outside {@code scope} (audited {@code
+     * @throws com.drones.vision.application.scope.AccessDeniedException  the asset is outside {@code scope} (audited {@code
      *                                 DENIED:out of scope}) — vision-api maps this to 403
      * @throws IllegalStateException  no active device {@code ManualControlPort} supports, or the
      *                                 one found is not currently reachable — vision-api maps this

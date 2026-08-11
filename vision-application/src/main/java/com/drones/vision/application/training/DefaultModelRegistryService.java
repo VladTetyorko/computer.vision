@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import com.drones.vision.application.flight.DefaultFlightCommandService;
 import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 

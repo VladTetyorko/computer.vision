@@ -9,12 +9,8 @@ import com.drones.vision.domain.model.TrainingSampleId;
 import com.drones.vision.domain.model.UserId;
 
 import java.util.List;
-import com.drones.vision.application.mark.DefaultMarkService;
 import com.drones.vision.application.replay.ReplayCaptureSpec;
-import com.drones.vision.application.replay.ReplaySources;
-import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.application.stream.StreamService;
 
 /**
  * Capture, correction/labeling and export of {@link TrainingSample}s (docs/plans/done/CV-TRAINING-PLAN.md
@@ -42,8 +38,8 @@ public interface LabelingService {
 
     /**
      * Captures a training sample from a stream's <b>current</b> raw frame and detections: reads
-     * {@link StreamService#latestRawFrame} (full-resolution, pre-overlay) and {@link
-     * StreamService#latestDetections}, maps every detection to a {@link
+     * {@link com.drones.vision.application.stream.StreamService#latestRawFrame} (full-resolution, pre-overlay) and {@link
+     * com.drones.vision.application.stream.StreamService#latestDetections}, maps every detection to a {@link
      * com.drones.vision.domain.model.AnnotationSource#MODEL} annotation, and saves a new {@link
      * com.drones.vision.domain.model.SampleStatus#PENDING} sample (+ its JPEG image) into {@code
      * spec}'s dataset.
@@ -55,7 +51,7 @@ public interface LabelingService {
      * @throws java.util.NoSuchElementException if the dataset is unknown, or the stream has no
      *                                            frame available yet (unknown/not running/no frame
      *                                            published)
-     * @throws AccessDeniedException             if the dataset, or (when its owning asset can be
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if the dataset, or (when its owning asset can be
      *                                            resolved) the stream's source asset, is outside
      *                                            {@code scope}
      */
@@ -64,7 +60,7 @@ public interface LabelingService {
     /**
      * Captures a training sample from a finished usage's <b>recorded</b> replay at a specific
      * instant (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) — the replay counterpart to {@link #capture}'s live
-     * path. Pulls one decoded frame via {@link ReplaySources#frames()} at {@code
+     * path. Pulls one decoded frame via {@link com.drones.vision.application.replay.ReplaySources#frames()} at {@code
      * usage.startedAt() + spec.atSeconds()}, and pre-fills suggested annotations from the nearest
      * stored {@link com.drones.vision.domain.model.DetectionResult} within a ±2s window (server-side
      * lookup — see {@link DefaultLabelingService}'s own javadoc for why), mapped to {@link
@@ -81,7 +77,7 @@ public interface LabelingService {
      * @throws java.util.NoSuchElementException if the dataset or usage is unknown, the usage has no
      *                                            recorded video stream, or no frame is recorded at
      *                                            the requested instant
-     * @throws AccessDeniedException             if the dataset, or the usage's asset, is outside
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if the dataset, or the usage's asset, is outside
      *                                            {@code scope} — unlike {@link #capture}, the
      *                                            usage's asset is never unresolvable, so this gate
      *                                            always applies
@@ -100,7 +96,7 @@ public interface LabelingService {
      * @param scope        the acting user's visibility
      * @return an immutable snapshot
      * @throws java.util.NoSuchElementException if the dataset is unknown
-     * @throws AccessDeniedException             if the dataset is outside {@code scope}
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if the dataset is outside {@code scope}
      */
     List<TrainingSample> samples(DatasetId id, SampleStatus statusOrNull, int limit, UserId actor,
                                   VisibilityScope scope);
@@ -113,7 +109,7 @@ public interface LabelingService {
      * @param scope the acting user's visibility
      * @return the sample's image
      * @throws java.util.NoSuchElementException if the sample is unknown, or has no stored image
-     * @throws AccessDeniedException             if the sample's dataset is outside {@code scope}
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if the sample's dataset is outside {@code scope}
      */
     SampleImage image(TrainingSampleId id, UserId actor, VisibilityScope scope);
 
@@ -134,7 +130,7 @@ public interface LabelingService {
      * @param scope the acting user's visibility
      * @return the updated, persisted sample
      * @throws java.util.NoSuchElementException if the sample is unknown
-     * @throws AccessDeniedException             if the sample's dataset, or (when its asset is
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if the sample's dataset, or (when its asset is
      *                                            known) source asset, is outside {@code scope}
      * @throws IllegalArgumentException          if any annotation's label is not a member of the
      *                                            dataset's class vocabulary
@@ -158,7 +154,7 @@ public interface LabelingService {
      * @param scope the acting user's visibility
      * @return the completed upload's receipt
      * @throws java.util.NoSuchElementException if the dataset is unknown
-     * @throws AccessDeniedException             if the dataset is outside {@code scope}
+     * @throws com.drones.vision.application.scope.AccessDeniedException             if the dataset is outside {@code scope}
      * @throws IllegalStateException             if a {@code LABELED} sample has no stored image (a
      *                                            data-integrity condition that should never occur
      *                                            in a well-formed system)

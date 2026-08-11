@@ -3,8 +3,6 @@ package com.drones.vision.application.training;
 import com.drones.vision.domain.model.CategoryId;
 
 import java.util.List;
-import com.drones.vision.application.geofence.GeofenceZoneSpec;
-import com.drones.vision.application.mark.MarkSpec;
 
 /**
  * {@link DatasetService#create}'s command record (docs/plans/done/CV-TRAINING-PLAN.md §2/§3) — the wire

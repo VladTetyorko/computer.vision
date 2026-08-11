@@ -18,13 +18,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import com.drones.vision.application.pipeline.UsageTracker;
 
 /**
  * Evaluates live telemetry against the enabled {@link GeofenceZone} set and raises {@link
  * EventType#GEOFENCE_BREACH} events on edge transitions (docs/plans/done/OPS-CORE-PLAN.md §G).
  *
- * <p>Called from {@link UsageTracker#applySample} once per telemetry sample — the same hot path
+ * <p>Called from {@link com.drones.vision.application.pipeline.UsageTracker#applySample} once per telemetry sample — the same hot path
  * that already persists/live-announces the sample — so {@link #evaluate(AssetId, Telemetry)} must
  * stay cheap: no repository I/O per call beyond the enabled-zone cache (refreshed out of band, see
  * below) and, on an actual breach edge, one {@link EventPublisherPort#publish}/{@link

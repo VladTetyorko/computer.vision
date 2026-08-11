@@ -36,15 +36,11 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.identity.DefaultAssignmentService;
-import com.drones.vision.application.pipeline.UsageTracker;
 import com.drones.vision.application.replay.ReplayCaptureSpec;
 import com.drones.vision.application.replay.ReplaySources;
 import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 import com.drones.vision.application.stream.ActiveStream;
-import com.drones.vision.application.stream.DefaultStreamService;
 import com.drones.vision.application.stream.StreamService;
 
 /**
@@ -56,7 +52,7 @@ import com.drones.vision.application.stream.StreamService;
  * matching {@code streamId} against {@link StreamService#streams()}'s live snapshot to find the
  * device, then {@link AssetRepositoryPort#findByDeviceId}, exactly the device→asset resolution
  * {@code UsageTracker}/{@code DefaultStreamService} already perform internally when a stream
- * starts. Reaching {@link AssetRepositoryPort} directly (rather than through {@link AssetService})
+ * starts. Reaching {@link AssetRepositoryPort} directly (rather than through {@link com.drones.vision.application.asset.AssetService})
  * mirrors {@code DefaultAssignmentService}'s own precedent — reaching a repository port directly
  * for the one fact this class needs, without pulling in a service's larger surface. A device with
  * no owning asset (or a stream not currently running) leaves the captured sample's {@code assetId}

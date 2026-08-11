@@ -11,7 +11,6 @@ import com.drones.vision.domain.model.UserId;
 
 import java.util.List;
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.application.stream.StreamService;
 import com.drones.vision.application.stream.TrackingConfigPatch;
 
 /**
@@ -21,7 +20,7 @@ import com.drones.vision.application.stream.TrackingConfigPatch;
  * <p>One interface, one implementation ({@link DefaultAssetService}). Streaming an asset lives
  * here rather than in a separate service because it is an operation <em>on an asset</em>: it
  * resolves which of the asset's devices to use, then delegates the mechanics to
- * {@link StreamService}.
+ * {@link com.drones.vision.application.stream.StreamService}.
  *
  * <p>Ownership is derived from the acting user at call time, never injected at construction.
  *
@@ -165,7 +164,7 @@ public interface AssetService {
 
     /**
      * Starts streaming from one of the asset's devices, stating the caller's tracking wishes
-     * separately — the asset-level twin of {@link StreamService#start(DeviceId, PipelineConfig,
+     * separately — the asset-level twin of {@link com.drones.vision.application.stream.StreamService#start(DeviceId, PipelineConfig,
      * TrackingConfigPatch)}, whose javadoc describes how the three configuration layers fold.
      *
      * @param id       the asset to stream

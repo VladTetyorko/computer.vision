@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
-import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.pipeline.StreamPipeline;
 import com.drones.vision.application.pipeline.TrackingStats;
 
@@ -19,7 +18,7 @@ import com.drones.vision.application.pipeline.TrackingStats;
  * The lifecycle of live streams: start one for a device, stop it, list what is running.
  *
  * <p>One interface, one implementation ({@link DefaultStreamService}). Asset-level streaming
- * lives in {@link AssetService}, which resolves the device and then calls in here.
+ * lives in {@link com.drones.vision.application.asset.AssetService}, which resolves the device and then calls in here.
  *
  * <h2>Threading</h2>
  * Implementations must be safe for concurrent use — one pipeline per stream, started and stopped

@@ -5,10 +5,6 @@ import com.drones.vision.domain.model.CategoryId;
 import com.drones.vision.domain.model.LifecycleState;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.application.fleet.DefaultFleetSummaryService;
-import com.drones.vision.application.pipeline.SupervisedPublisher;
-import com.drones.vision.application.pipeline.UsageTracker;
-import com.drones.vision.application.stream.DefaultStreamService;
-import com.drones.vision.application.stream.StreamService;
 
 /**
  * One asset's attention-relevant facts — one row of {@code GET /api/fleet/summary}'s per-asset list
@@ -20,8 +16,8 @@ import com.drones.vision.application.stream.StreamService;
  * com.drones.vision.domain.port.out.EventPublisherPort} is write-only — its only implementation
  * just logs, with no matching read/query port (see vision-api/MODULE.md's Gotchas, first documented
  * for {@code GET /api/events}'s inability to surface {@code PIPELINE_ERROR}) — and {@link
- * SupervisedPublisher}'s in-progress-outage/backoff state is private bookkeeping inside {@link
- * DefaultStreamService}'s per-stream map, never exposed through {@link StreamService} at all. There
+ * com.drones.vision.application.pipeline.SupervisedPublisher}'s in-progress-outage/backoff state is private bookkeeping inside {@link
+ * com.drones.vision.application.stream.DefaultStreamService}'s per-stream map, never exposed through {@link com.drones.vision.application.stream.StreamService} at all. There
  * is no honest "reconnecting"/"degraded" signal to read today; a future task that adds either a
  * queryable event store or a supervision-state read method can add this field then.
  *
@@ -48,7 +44,8 @@ import com.drones.vision.application.stream.StreamService;
  *                       asset has never reported telemetry
  * @param telemetryAgeMs milliseconds since the freshest telemetry sample, or {@code null} under the
  *                       same condition as {@code batteryPercent} — deliberately still reported once
- *                       the asset stops streaming (see {@link UsageTracker#latestTelemetry}), since
+ *                       the asset stops streaming (see {@link
+ *                       com.drones.vision.application.pipeline.UsageTracker#latestTelemetry}), since
  *                       staleness is exactly "how long since we last heard from this asset" and that
  *                       question is most useful once it has gone quiet
  * @param openEventCount how many {@code OPEN} detection events currently name this asset, within

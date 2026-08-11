@@ -6,10 +6,6 @@ import com.drones.vision.domain.model.Ownership;
 import com.drones.vision.domain.model.UserId;
 
 import java.util.List;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.mark.DefaultMarkService;
-import com.drones.vision.application.mark.MarkService;
-import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
@@ -34,15 +30,15 @@ public interface DatasetService {
      *
      * @param spec      the dataset's name/target category/class vocabulary
      * @param ownership who owns the new dataset and which group it belongs to (resolved at the API
-     *                  edge from the acting user, the same way {@link AssetService#create} and
-     *                  {@link MarkService#create} are — never derived from {@code scope} here,
+     *                  edge from the acting user, the same way {@link com.drones.vision.application.asset.AssetService#create} and
+     *                  {@link com.drones.vision.application.mark.MarkService#create} are — never derived from {@code scope} here,
      *                  since a {@link VisibilityScope.Kind#GROUPS} scope carries a manager's whole
      *                  visible subtree, not their own single home group)
      * @param actor     who is creating it, for the audit trail
      * @param scope     the acting user's visibility; must satisfy {@link
      *                  VisibilityScope#canManageOrg()}
      * @return the created, persisted dataset
-     * @throws AccessDeniedException if {@code scope} may not manage the organization
+     * @throws com.drones.vision.application.scope.AccessDeniedException if {@code scope} may not manage the organization
      */
     Dataset create(DatasetSpec spec, Ownership ownership, UserId actor, VisibilityScope scope);
 
@@ -65,7 +61,7 @@ public interface DatasetService {
      * @param scope the acting user's visibility
      * @return the dataset
      * @throws java.util.NoSuchElementException if no dataset has that id
-     * @throws AccessDeniedException            if {@code id} exists but is outside {@code scope}
+     * @throws com.drones.vision.application.scope.AccessDeniedException            if {@code id} exists but is outside {@code scope}
      *                                           (audited as a denial, unlike a plain hiding 404)
      */
     Dataset get(DatasetId id, UserId actor, VisibilityScope scope);
@@ -81,7 +77,7 @@ public interface DatasetService {
      * @param scope the acting user's visibility; must satisfy {@link
      *              VisibilityScope#canManageOrg()}
      * @throws java.util.NoSuchElementException if no dataset has that id
-     * @throws AccessDeniedException            if {@code scope} may not manage the organization
+     * @throws com.drones.vision.application.scope.AccessDeniedException            if {@code scope} may not manage the organization
      */
     void delete(DatasetId id, UserId actor, VisibilityScope scope);
 }

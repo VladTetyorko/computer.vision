@@ -20,7 +20,6 @@ import java.util.Optional;
 import java.util.function.Function;
 import com.drones.vision.application.asset.AssetDetails;
 import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.DefaultAssetService;
 import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
@@ -32,7 +31,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * java.util.NoSuchElementException} for an unknown asset — the same 404 every other asset-scoped
  * read/write in this package already produces), then picks the first of the asset's <b>active</b>
  * (not soft-deleted, not deactivated — the same {@link Device#isActive()} filter {@link
- * DefaultAssetService#startStream} already applies when resolving a video device) devices {@link
+ * com.drones.vision.application.asset.DefaultAssetService#startStream} already applies when resolving a video device) devices {@link
  * FlightCommandPort#supports} claims. Zero matches is {@link IllegalStateException} ("not
  * commandable" → 409, docs/plans/active/DRONE-INFRA-PLAN.md I-e's frozen wire contract); more than one match
  * silently takes the first — Stage 1/2 fleets pair exactly one flight controller per asset, so this
@@ -66,7 +65,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * called) — success and refusal alike — plus one for a scope denial. Guards that fail before any
  * command is sent are <em>not</em> attempts and are not audited: resolving no commandable device at
  * all, and an unknown-mode rejection (nothing ever left for any aircraft), both mirror {@link
- * DefaultAssetService#create}'s category-validation guard failing before its own first audit write.
+ * com.drones.vision.application.asset.DefaultAssetService#create}'s category-validation guard failing before its own first audit write.
  * {@link AuditAction} (vision-domain, out of this wave's file scope) has no dedicated "commanded"
  * value; {@link AuditAction#UPDATED} is used as the closest existing fit — the free-form {@code
  * summary}/{@code details} carry the actual specifics ({@code command}, {@code result}).

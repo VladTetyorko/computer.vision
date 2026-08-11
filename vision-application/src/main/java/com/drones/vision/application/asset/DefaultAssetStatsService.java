@@ -13,12 +13,11 @@ import java.util.function.Supplier;
 import com.drones.vision.application.fleet.DefaultFleetSummaryService;
 import com.drones.vision.application.fleet.FleetSummaryService;
 import com.drones.vision.application.pipeline.UsageTracker;
-import com.drones.vision.application.replay.DefaultReplayService;
 
 /**
  * {@link AssetStatsService}'s one implementation: fetch-then-aggregate over {@link
  * AssetUsageRepositoryPort#findRecentByAsset(AssetId, int)}, mirroring {@link
- * DefaultReplayService}'s own fetch-then-aggregate precedent (see its javadoc's {@code
+ * com.drones.vision.application.replay.DefaultReplayService}'s own fetch-then-aggregate precedent (see its javadoc's {@code
  * TELEMETRY_FETCH_LIMIT} discussion for the same honest-cap reasoning applied here to {@link
  * #STATS_FETCH_LIMIT}).
  *
@@ -60,7 +59,7 @@ public final class DefaultAssetStatsService implements AssetStatsService {
 
     /**
      * Best-effort fetch bound passed to {@link AssetUsageRepositoryPort#findRecentByAsset(AssetId,
-     * int)} — mirrors {@link DefaultReplayService#TELEMETRY_FETCH_LIMIT}'s own honest-cap caveat:
+     * int)} — mirrors {@link com.drones.vision.application.replay.DefaultReplayService#TELEMETRY_FETCH_LIMIT}'s own honest-cap caveat:
      * an asset with more than {@value #STATS_FETCH_LIMIT} recorded flights under-reports (both the
      * counters and, since {@code findRecentByAsset} returns newest-first, biased toward its
      * <b>most recent</b> history rather than a random sample) until this port grows a real

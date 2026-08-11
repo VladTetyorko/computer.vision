@@ -9,14 +9,13 @@ import com.drones.vision.domain.port.out.AssetRepositoryPort;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
-import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.scope.AccessDeniedException;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**
  * The one implementation of {@link AssignmentService}.
  *
- * <p>Reaches the {@link AssetRepositoryPort} directly (rather than through {@link AssetService}) for
+ * <p>Reaches the {@link AssetRepositoryPort} directly (rather than through {@link com.drones.vision.application.asset.AssetService}) for
  * the single fact it needs — does the asset exist, and what group owns it — so the &le;-own-scope
  * check ({@link VisibilityScope#includes(Asset)}) can run without pulling in the full asset-detail
  * assembly. Two dependencies, well under the cap.

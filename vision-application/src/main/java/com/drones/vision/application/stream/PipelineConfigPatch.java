@@ -1,8 +1,6 @@
 package com.drones.vision.application.stream;
 
 import java.util.Set;
-import com.drones.vision.application.asset.AssetEdit;
-import com.drones.vision.application.device.DeviceEdit;
 import com.drones.vision.application.pipeline.StreamPipeline;
 import com.drones.vision.domain.model.TrackingConfig;
 
@@ -10,7 +8,7 @@ import com.drones.vision.domain.model.TrackingConfig;
  * A partial live update to a running stream's {@link com.drones.vision.domain.model.PipelineConfig}
  * (docs/plans/done/CV-CONTROL-PLAN.md &sect;5, the frozen {@code PATCH /api/streams/{streamId}/config}
  * contract): every field is optional, {@code null} means "leave this knob unchanged" — the same
- * null-means-unchanged partial-edit idiom {@link AssetEdit}/{@link DeviceEdit} already use.
+ * null-means-unchanged partial-edit idiom {@link com.drones.vision.application.asset.AssetEdit}/{@link com.drones.vision.application.device.DeviceEdit} already use.
  * {@link DefaultStreamService#updateConfig} folds only the present fields onto the stream's
  * current config; the merged result is validated by {@link
  * com.drones.vision.domain.model.PipelineConfig}'s own compact constructor, so an out-of-range

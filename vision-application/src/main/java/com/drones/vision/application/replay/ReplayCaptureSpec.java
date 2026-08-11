@@ -4,10 +4,9 @@ import com.drones.vision.domain.model.DatasetId;
 import com.drones.vision.domain.model.UsageId;
 
 import java.util.Objects;
-import com.drones.vision.application.training.LabelingService;
 
 /**
- * {@link LabelingService#captureFromReplay}'s command record (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) —
+ * {@link com.drones.vision.application.training.LabelingService#captureFromReplay}'s command record (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) —
  * the wire shape for {@code POST /api/usages/{usageId}/samples}, whose body carries only {@code
  * datasetId}/{@code atSeconds} (the usage id itself is a path parameter).
  *

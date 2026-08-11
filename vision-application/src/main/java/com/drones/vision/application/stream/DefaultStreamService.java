@@ -34,7 +34,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
-import com.drones.vision.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.application.pipeline.DetectionEventEngine;
 import com.drones.vision.application.pipeline.StreamPipeline;
 import com.drones.vision.application.pipeline.StreamPipelineSettings;
@@ -368,7 +367,7 @@ public final class DefaultStreamService implements StreamService {
      * Releases the pipeline's subscription ({@link StreamPipeline#close()}, which also signals
      * {@link com.drones.vision.domain.port.out.StreamPublisherPort#streamEnded}) and the underlying
      * source ({@link VideoSourcePort#close}) off the calling thread — see {@link #stop}'s javadoc
-     * for why. A fire-and-forget virtual thread, the same idiom {@link DefaultDiscoveryService}
+     * for why. A fire-and-forget virtual thread, the same idiom {@link com.drones.vision.application.discovery.DefaultDiscoveryService}
      * already uses for its own scan calls: cheap, effectively daemon (a virtual thread never blocks
      * JVM exit), never tracked or interrupted — there is nothing further to do with it once
      * started, and both calls are already idempotent/best-effort by their own contracts.
