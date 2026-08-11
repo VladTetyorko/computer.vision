@@ -1,7 +1,8 @@
 # MASTER-MATRIX — every capability, one table
 
-Status: **consolidated decision document (2026-08-09).** This is the single row-level view. The
-reasoning behind it lives in the companions and is not repeated here:
+Status: **consolidated decision document (2026-08-09)** · **reconciled 2026-08-11** — K2 delivered,
+S2 promoted to the head of the list. This is the single row-level view. The reasoning behind it
+lives in the companions and is not repeated here:
 
 | Doc | Answers |
 |---|---|
@@ -68,7 +69,7 @@ fail, never execute.** This applies to Class B too — it is the price of allowi
 
 | # | Capability | Group | Status | Drone | Link | Owner € | Dev | Why here |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **Tracking engine** — persistent target IDs | **K2** | new | D0 | C | **€0** | L 180 h | `TrackedObject` is a dead type; C12 and C2 are blocked on it. **The one real hole in the core**. Spec: **docs/plans/done/TRACKING-PLAN.md** |
+| ~~1~~ | ~~**Tracking engine** — persistent target IDs~~ | **K2** | **HAVE** | D0 | C | **€0** | ~~L 180 h~~ | **DELIVERED 2026-08-11**, waves T0–T8, default `ASSOCIATE`. `TrackedObject` is live; C12 and C2 are unblocked. Spec: **docs/plans/done/TRACKING-PLAN.md** |
 | 2 | **Fixed-camera geolocation** — tracked object → map coordinate | **S2** | new | D0 | C | **€0** | M 60 h | the touchable demo, and it needs **no aircraft and no VPR** — known camera pose + `GeoProjection` |
 | 3 | Message inventory + readiness report | I | new | **D0** | A | **€0** | M 70 h | the funnel in front of every other feature |
 | 3b | `SET_MESSAGE_INTERVAL` auto-request | I | new | **D0** | B | **€0** | S 12 h | fixes most degraded setups, writes nothing |
@@ -89,6 +90,14 @@ fail, never execute.** This applies to Class B too — it is the price of allowi
 | 18 | Cross-sensor detection fusion | C12 | PUNCH | **D0** | C | €0 | L 180 h | the COP's actual payoff |
 | 19 | Coverage planner + on-screen guidance | M2 | PUNCH | **D0** | A | €0 | M 60 h | mission value without command TX |
 | 20 | Tier-A param write + rollback | I4 | new | **D1** | B | €0 | M 60 h | makes the fleet gateway work for real owners |
+
+**Row 1 is delivered (2026-08-11).** The tracking engine shipped as specced — pluggable
+`TrackerRegistry`, detect-then-track duty cycle, tracks on the wire and on the COP. Measured on the
+GB4005 box: `ASSOCIATE` costs less than run-to-run noise over `OFF`; `FOLLOW` drops detector passes
+30× (15.07/s → 0.50/s) and CPU 22.9× (297 % → 13 % of one core). **What is not claimed:** the
+camera-facing half of TRACKING-PLAN §10 — stable ids through a real occlusion on live street video,
+and the cockpit follow-lock demo — because there is no camera yet (H1 unbought, ~€50). That is a
+hardware errand, not a build. **Row 2 (S2) is now the head of the list.**
 
 **Every row here is D0 or D1, at €0 to the drone owner.** That is not a coincidence — it is the
 ranking criterion.
@@ -112,6 +121,7 @@ build **when an aircraft exists**, not before.
 | FC-aware telemetry (mode/armed/failsafe/GPS/RSSI/blockers) | D1 | A | FC-INTEGRATIONS F-a |
 | ArduPilot extras (wind, vibration, EKF, rangefinder, mission seq) | D1 | A | F-e |
 | CV detection — YOLO, composite, open-vocab YOLOE, live per-stream control | D0 | C | cv-service, CV-CONTROL |
+| **Tracking engine — persistent ids, detect-then-track duty cycle, `OFF`/`ASSOCIATE`/`FOLLOW`, tracks on SSE + overlay + COP** | D0 | C | **TRACKING-PLAN T0–T8 (2026-08-11)** |
 | Overlay burn-in; HLS + WHEP publishing | D0 | C | `adapter-overlay`, `adapter-publish-hls` |
 | Recording + clip export + replay with deep links | D0 | C | OPS-CORE R |
 | Tactical COP — layers + grants, affiliation, marks, verify/promote, drawings | D0 | — | MAP-REWORK |
@@ -275,7 +285,7 @@ Groups B/C/M/T waits behind them. This supersedes §10's ordering for as long as
 | # | Item | Verdict | Effort | Why |
 |---|---|---|---|---|
 | **K1** | **`feat/visual-geo`** | **PARK — do not merge** (revised 2026-08-11) | — | **The engine does not deliver.** Latest eval (`angle-probe-wire-eval-20260809`): correct tile top-1 in **0 of 12** frames, `GEO_NO_FIX` × 12, sequence never converged. Merging 337 files / 57k insertions of research code into `master` is a tax on every future refactor, not an asset. **One redeeming number: `n_confident_wrong: 0`** — it never produced a confident wrong fix even when a wrong tile ranked #1 all 12 times. The abstention machinery is sound; the *ranking* is what fails (correct tile at median rank 14 of ~40 — signal present, not random; matches the plan's own recall@5 0.87–1.00). Revive if and when ranking is solved. **Harvest `adapter-tiles` separately when B6 needs it** — small targeted extraction, not a branch merge |
-| **K2** | **Tracking engine — persistent target IDs across frames** | **REAL GAP — build** | L ~180 h | `TrackedObject` exists in `vision-domain/model` **and its own test, and nowhere else in the tree** — a dead type. No tracker, no ID association, no occlusion handling. This is **core, not a feature**: C12 cross-sensor fusion, C2 click-to-follow, target trajectories and the whole "where is that thing over time" story all sit on it and none can be built without it. **Spec: docs/plans/done/TRACKING-PLAN.md** — detect-then-track duty cycle (cheap per-frame tracker + duty-cycled detector), pluggable `TrackerRegistry`, frozen proto contract, waves T0–T8 |
+| **K2** | **Tracking engine — persistent target IDs across frames** | **BUILT — 2026-08-11** | ~~L ~180 h~~ | Was the one real hole: `TrackedObject` was a dead type. Now live end to end — detect-then-track duty cycle, pluggable `TrackerRegistry` (bytetrack/botsort/norfair), frozen additive proto contract, `OFF`/`ASSOCIATE`/`FOLLOW` per stream, tracks through domain → SSE → overlay → COP, waves T0–T8 all green with T8 flipping the default to `ASSOCIATE`. **C12 and C2 are unblocked.** Open tail, both hardware-gated, neither a build: the camera-facing demos of §10 (no camera until H1) and ARM CI for the §3.3 portability claim (resolution-checked only, no Pi). **Spec: docs/plans/done/TRACKING-PLAN.md**, companion docs/extracts/TRACKING-ORCHESTRATION.md |
 | **K3** | `StreamPipeline` decomposition | **DEBT — pay** | M ~60 h | 927 lines, the largest class in `vision-application`; carries sampling, in-flight bounding, overlay, fan-out, telemetry and usage tracking at once. `DefaultSimulationService` (759) is the next one |
 | **K4** | Dead-type / dead-port audit | **DO** | S ~16 h | K2 was found by grepping one type's usages. Do it for every domain type and port — anything referenced only by its own test is either a gap like K2 or removable |
 | K5 | Cross-stream dynamic batching `[B,C,H,W]` | **DEFER — hardware-gated** | M | Genuinely absent. But it is a *GPU* optimization, and the deployment box has no GPU (see below). Revisit when the hardware does |
@@ -342,9 +352,9 @@ touchable outcome per step.
 
 | Order | What | Rows | Time |
 |---|---|---|---|
-| **1** | **Tracking engine** — the one real foundational hole (docs/plans/done/TRACKING-PLAN.md) | **K2** | ~4 wk |
-| **2** | **Fixed-camera geolocation** — the first demo you can show someone | **S2** | ~1.5 wk |
-| **3** | `StreamPipeline` decomposition + dead-type audit | **K3, K4** | ~2 wk |
+| ~~1~~ | ~~**Tracking engine**~~ — **DONE 2026-08-11** (docs/plans/done/TRACKING-PLAN.md) | **K2** | ~~~4 wk~~ |
+| **1** | **Fixed-camera geolocation** — the first demo you can show someone | **S2** | ~1.5 wk |
+| **2** | `StreamPipeline` decomposition + dead-type audit | **K3, K4** | ~2 wk |
 | 4 | Integration funnel | I1, I2, I3 | ~2 wk |
 | 5 | DEM + the advisory cluster | X, C3, C4, C6, C9 | ~6 wk |
 | 6 | Honest position stack | A1, A2, C7a | ~2 wk |
@@ -353,9 +363,14 @@ touchable outcome per step.
 | 9 | COP payoff (**C12 now buildable — K2 landed**) | C12, C13, I4, I5, I7 | ~7 wk |
 | later, gated | P8, P9, C2, C7b, C8, C17, M4, M6, K9 | — | each needs its own go |
 
-**Steps 1–3 are the freeze.** They add no capability a user can see — that is the point. They
-finish the core so that everything after them is buildable at all: C12 and C2 are *blocked* on K2,
-and every P-row is blocked on K1.
+**The freeze is two thirds served.** K2 landed 2026-08-11; K1 was decided by parking the branch, not
+by building it. What remains of it is **K3 + K4** — no capability a user can see, which is the
+point: they finish the core. C12 and C2 are no longer blocked. Every P-row remains blocked on K1,
+which is now a *research* dependency (tile ranking), not a merge.
+
+**S2 is the exception worth taking first.** It is not part of the freeze — it is one week and a half
+that turns the freeze's invisible work into the first thing showable to a stranger, and it is the
+only row on this page whose prerequisite (K2) just landed.
 
 **Sources:** [ArduPilot Guided Mode](https://ardupilot.org/copter/docs/ac2_guidedmode.html) ·
 [MAVLink Offboard Control](https://mavlink.io/en/services/offboard_control.html) ·
