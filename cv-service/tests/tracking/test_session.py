@@ -1,0 +1,549 @@
+"""`cv_service.tracking.session` -- the per-frame sequence, composed.
+
+Pure stdlib: fake engines, a fake clock, a fake "frame" that is just a
+sentinel object. Nothing here imports cv2, numpy or gRPC -- which is the
+point of keeping everything but `engines/` stdlib-only.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from cv_service.config import Settings
+from cv_service.inference.detector import Detection
+from cv_service.tracking.engines.base import Box, Observation, TrackerUpdate
+from cv_service.tracking.params import (
+    MODE_ASSOCIATE,
+    MODE_FOLLOW,
+    MODE_OFF,
+    LockRequest,
+    TrackingRequest,
+)
+from cv_service.tracking.scheduler import REASON_ALWAYS, REASON_CADENCE, REASON_NO_LOCK
+from cv_service.tracking.session import StreamTrackingSession
+from cv_service.tracking.track import STATE_CONFIRMED
+
+FRAME = object()  # the session never looks at a frame; only engines do.
+
+
+def det(label="car", x=0.1, y=0.1, w=0.1, h=0.1, confidence=0.9) -> Detection:
+    return Detection(label, confidence, x, y, w, h)
+
+
+class FakeAssociator:
+    """Keys every detection by its label, so identity is trivially assertable."""
+
+    def __init__(self, engine_id="fake-assoc"):
+        self.engine_id = engine_id
+        self.resets = 0
+        self.raise_on_next = False
+
+    def associate(self, detections, now):
+        if self.raise_on_next:
+            self.raise_on_next = False
+            raise RuntimeError("engine exploded mid-frame")
+        return [
+            Observation(
+                key=detection.label,
+                box=Box(detection.x, detection.y, detection.width, detection.height),
+                label=detection.label,
+                confidence=detection.confidence,
+                det_index=index,
+            )
+            for index, detection in enumerate(detections)
+        ]
+
+    def reset(self):
+        self.resets += 1
+
+
+class FakeFollower:
+    def __init__(self, engine_id="fake-follow"):
+        self.engine_id = engine_id
+        self.inits = 0
+        self.updates = 0
+        self.resets = 0
+        self.box = None
+        self.init_returns = True
+        self.update_returns = "ok"
+        self.raise_on_next = False
+        self.drift = 0.0
+
+    def init(self, frame, box):
+        self.inits += 1
+        self.box = box
+        return self.init_returns
+
+    def update(self, frame):
+        self.updates += 1
+        if self.raise_on_next:
+            self.raise_on_next = False
+            raise RuntimeError("engine exploded mid-frame")
+        if self.update_returns == "lost":
+            return None
+        if self.update_returns == "invalid":
+            return TrackerUpdate(box=Box(0.1, 0.1, 0.0, 0.0), confidence=0.5)
+        self.box = Box(self.box.x + self.drift, self.box.y, self.box.width, self.box.height)
+        return TrackerUpdate(box=self.box, confidence=0.9)
+
+    def reset(self):
+        self.resets += 1
+
+
+class FakeRegistry:
+    def __init__(self, associator=None, follower=None):
+        self._associator = associator
+        self._follower = follower
+        self.associator_calls = 0
+        self.follower_calls = 0
+
+    def associator(self, engine_id, *, max_age_frames):
+        self.associator_calls += 1
+        if self._associator is None:
+            return None
+        engine = self._associator() if callable(self._associator) else self._associator
+        return engine.engine_id, engine
+
+    def follower(self, engine_id, *, max_age_frames):
+        self.follower_calls += 1
+        if self._follower is None:
+            return None
+        engine = self._follower() if callable(self._follower) else self._follower
+        return engine.engine_id, engine
+
+
+def session(registry, settings=None) -> StreamTrackingSession:
+    return StreamTrackingSession(
+        settings=settings or Settings(), registry_provider=lambda: registry
+    )
+
+
+def detect_returning(*detections, millis=7):
+    def detect():
+        return list(detections), millis
+
+    return detect
+
+
+def run(subject, *, now_millis, detections=(), millis=7):
+    return subject.process(
+        now_millis=now_millis, detect=detect_returning(*detections, millis=millis), frame=lambda: FRAME
+    )
+
+
+# -- OFF --------------------------------------------------------------------
+
+
+def test_a_fresh_session_is_off():
+    subject = session(FakeRegistry())
+
+    assert subject.active is False
+    assert subject.params.mode == MODE_OFF
+
+
+def test_off_stays_off_when_the_config_restates_nothing():
+    subject = session(FakeRegistry())
+
+    subject.apply_config(TrackingRequest())
+
+    assert subject.active is False
+
+
+# -- ASSOCIATE --------------------------------------------------------------
+
+
+def test_associate_detects_on_every_frame_and_books_stable_ids():
+    engine = FakeAssociator()
+    subject = session(FakeRegistry(associator=engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+
+    ids = []
+    for frame in range(4):
+        outcome = run(subject, now_millis=frame * 66.0, detections=[det(), det("person", x=0.6)])
+        assert outcome.detector_ran is True
+        assert outcome.detector_reason == REASON_ALWAYS
+        ids.append([box.track.track_id for box in outcome.boxes])
+
+    assert ids == [[1, 2]] * 4
+    assert all(box.track.state == STATE_CONFIRMED for box in outcome.boxes)
+
+
+def test_the_serving_engine_id_is_reported_on_every_response():
+    subject = session(FakeRegistry(associator=FakeAssociator("bytetrack")))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE))
+
+    assert run(subject, now_millis=0.0, detections=[det()]).engine_id == "bytetrack"
+
+
+def test_two_sessions_never_share_engines_or_ids():
+    left = session(FakeRegistry(associator=FakeAssociator))
+    right = session(FakeRegistry(associator=FakeAssociator))
+    for subject in (left, right):
+        subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+
+    left_outcome = run(left, now_millis=0.0, detections=[det("car")])
+    right_outcome = run(right, now_millis=0.0, detections=[det("van"), det("bus", x=0.5)])
+
+    assert [b.track.track_id for b in left_outcome.boxes] == [1]
+    assert [b.track.track_id for b in right_outcome.boxes] == [1, 2]
+    assert [t.label for t in left.tracks] == ["car"]
+    assert [t.label for t in right.tracks] == ["van", "bus"]
+
+
+def test_a_detection_the_engine_did_not_identify_is_reported_untracked():
+    class Partial(FakeAssociator):
+        def associate(self, detections, now):
+            return [
+                Observation(
+                    key="only-the-first",
+                    box=Box(detections[0].x, detections[0].y, detections[0].width, detections[0].height),
+                    label=detections[0].label,
+                    confidence=detections[0].confidence,
+                    det_index=0,
+                )
+            ]
+
+    subject = session(FakeRegistry(associator=Partial()))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+
+    outcome = run(subject, now_millis=0.0, detections=[det("car"), det("person", x=0.6)])
+
+    assert outcome.boxes[0].track is not None
+    assert outcome.boxes[1].track is None
+
+
+# -- FOLLOW -----------------------------------------------------------------
+
+
+def follow_session(follower=None, *, verify_every_millis=2000, lock_seq=1, **lock_kwargs):
+    engine = follower or FakeFollower()
+    subject = session(FakeRegistry(follower=engine))
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=verify_every_millis,
+            min_hits=1,
+            lock=LockRequest(lock_seq=lock_seq, **(lock_kwargs or {"point_x": 0.15, "point_y": 0.15})),
+        )
+    )
+    return subject, engine
+
+
+def test_follow_without_a_lock_keeps_re_acquiring():
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW))
+
+    for frame in range(5):
+        outcome = run(subject, now_millis=frame * 66.0, detections=[det()])
+        assert outcome.detector_ran is True
+        assert outcome.detector_reason == REASON_NO_LOCK
+        assert outcome.locked_track_id == 0
+
+
+def test_a_click_lock_binds_the_target_and_confirms_it_at_once():
+    subject, engine = follow_session()
+
+    outcome = run(subject, now_millis=0.0, detections=[det("car"), det("person", x=0.7, y=0.7)])
+
+    assert engine.inits == 1
+    assert outcome.locked_track_id == 1
+    assert outcome.boxes[0].track.state == STATE_CONFIRMED
+    assert outcome.boxes[1].track is None  # the unlocked box stays untracked
+
+
+def test_follow_runs_the_detector_at_the_configured_cadence_and_no_more():
+    subject, engine = follow_session(verify_every_millis=2000)
+
+    passes = 0
+    frames = 150  # 10 seconds at 15 fps
+    for frame in range(frames):
+        outcome = run(subject, now_millis=frame * (1000.0 / 15.0), detections=[det()])
+        if outcome.detector_ran:
+            passes += 1
+
+    # Frame 0 acquires; then one verify pass per 2000 ms across 9933 ms.
+    assert passes == 5
+    assert engine.updates == frames - passes
+    assert passes / frames == pytest.approx(1 / 30, abs=0.005)
+
+
+def test_an_unhappy_tracker_never_collapses_the_duty_cycle_into_every_frame():
+    # Regression: raising trigger (b)/(d) again on the verify frame that had
+    # ALREADY been brought forward by it made the detector run on every
+    # single frame for as long as the tracker stayed unhappy.
+    subject, engine = follow_session(verify_every_millis=2000)
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+    engine.update_returns = "invalid"
+
+    passes = 0
+    for frame in range(1, 150):
+        # The detector only ever offers a box the held target cannot match.
+        outcome = run(subject, now_millis=frame * (1000.0 / 15.0), detections=[det("bus", x=0.8, y=0.8)])
+        passes += int(outcome.detector_ran)
+
+    assert passes <= 10
+
+
+def test_a_tracker_only_frame_emits_the_held_box_alone_from_the_tracker():
+    subject, engine = follow_session(verify_every_millis=100_000)
+    run(subject, now_millis=0.0, detections=[det("car"), det("person", x=0.7, y=0.7)])
+
+    outcome = run(subject, now_millis=66.0, detections=[det()])
+
+    assert outcome.detector_ran is False
+    assert outcome.detector_reason == "DETECTOR_REASON_UNSPECIFIED"
+    assert len(outcome.boxes) == 1
+    assert outcome.boxes[0].track.source == "DETECTION_SOURCE_TRACKER"
+    assert outcome.boxes[0].track.track_id == 1
+
+
+def test_a_lost_tracker_forces_the_next_frame_to_verify():
+    subject, engine = follow_session(verify_every_millis=100_000)
+    run(subject, now_millis=0.0, detections=[det()])
+    engine.update_returns = "lost"
+
+    coasted = run(subject, now_millis=66.0, detections=[det()])
+    assert coasted.detector_ran is False
+
+    recovered = run(subject, now_millis=132.0, detections=[det()])
+    assert recovered.detector_ran is True
+    assert recovered.detector_reason == "DETECTOR_REASON_TRACKER_FAILED"
+
+
+def test_a_collapsed_box_forces_the_next_frame_to_verify():
+    subject, engine = follow_session(verify_every_millis=100_000)
+    run(subject, now_millis=0.0, detections=[det()])
+    engine.update_returns = "invalid"
+
+    run(subject, now_millis=66.0, detections=[det()])
+    forced = run(subject, now_millis=132.0, detections=[det()])
+
+    assert forced.detector_ran is True
+    assert forced.detector_reason == "DETECTOR_REASON_BOX_INVALID"
+
+
+def test_a_verify_pass_that_cannot_re_anchor_coasts_beside_the_detections():
+    subject, engine = follow_session(verify_every_millis=1)
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    # The detector now only sees something far away from the held box.
+    outcome = run(subject, now_millis=10.0, detections=[det("bus", x=0.8, y=0.8)])
+
+    assert outcome.detector_ran is True
+    assert [box.track is None for box in outcome.boxes] == [True, False]
+    assert outcome.boxes[-1].track.state == "TRACK_STATE_COASTING"
+    assert outcome.boxes[-1].track.misses == 1
+
+
+def test_a_target_lost_past_max_age_drops_the_lock():
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=1,
+            min_hits=1,
+            max_age_frames=2,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    # Verify passes that see nothing at all: the target is gone, not merely
+    # unmatched, so there is nothing to re-acquire onto either.
+    states = []
+    for frame in range(1, 5):
+        outcome = run(subject, now_millis=frame * 10.0, detections=[])
+        states.append(outcome.boxes[0].track.state if outcome.boxes else None)
+
+    assert states == [
+        "TRACK_STATE_COASTING",
+        "TRACK_STATE_COASTING",
+        "TRACK_STATE_LOST",
+        None,
+    ]
+    assert outcome.locked_track_id == 0
+    assert outcome.detector_reason == REASON_NO_LOCK
+
+
+def test_a_re_acquired_target_recovers_the_id_it_had_before_it_was_lost():
+    subject = session(FakeRegistry(follower=FakeFollower()))
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=1,
+            min_hits=1,
+            max_age_frames=2,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    for frame in range(1, 4):  # occluded: the detector sees nothing
+        run(subject, now_millis=frame * 10.0, detections=[])
+
+    recovered = run(subject, now_millis=40.0, detections=[det("car", x=0.1)])
+
+    assert recovered.locked_track_id == born.locked_track_id
+    assert recovered.boxes[0].track.state == STATE_CONFIRMED
+
+
+def test_releasing_a_lock_then_re_acquiring_yields_a_new_id():
+    subject, _engine = follow_session()
+    first = run(subject, now_millis=0.0, detections=[det()])
+
+    subject.apply_config(
+        TrackingRequest(mode=MODE_FOLLOW, min_hits=1, lock=LockRequest(lock_seq=2, release=True))
+    )
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            min_hits=1,
+            lock=LockRequest(lock_seq=3, point_x=0.15, point_y=0.15),
+        )
+    )
+    second = run(subject, now_millis=1000.0, detections=[det()])
+
+    assert second.locked_track_id != first.locked_track_id
+
+
+def test_a_target_the_engine_cannot_anchor_reports_no_lock():
+    engine = FakeFollower()
+    engine.init_returns = False
+    subject, _engine = follow_session(engine)
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert outcome.locked_track_id == 0
+    assert all(box.track is None for box in outcome.boxes)
+
+
+# -- configuration ----------------------------------------------------------
+
+
+def test_a_cadence_change_keeps_the_engine_and_the_track_ids():
+    subject, engine = follow_session(verify_every_millis=2000)
+    first = run(subject, now_millis=0.0, detections=[det()])
+
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_FOLLOW,
+            verify_every_millis=500,
+            min_hits=1,
+            lock=LockRequest(lock_seq=1, point_x=0.15, point_y=0.15),
+        )
+    )
+    later = run(subject, now_millis=600.0, detections=[det()])
+
+    assert later.locked_track_id == first.locked_track_id
+    assert later.detector_ran is True
+    assert later.detector_reason == REASON_CADENCE
+
+
+def test_an_engine_change_rebuilds_and_retires_the_ids():
+    subject = session(FakeRegistry(associator=FakeAssociator))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="a", min_hits=1))
+    first = run(subject, now_millis=0.0, detections=[det()])
+
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="b", min_hits=1))
+    second = run(subject, now_millis=66.0, detections=[det()])
+
+    assert second.boxes[0].track.track_id > first.boxes[0].track.track_id
+
+
+def test_switching_to_off_clears_the_state():
+    subject, _engine = follow_session()
+    run(subject, now_millis=0.0, detections=[det()])
+
+    subject.apply_config(TrackingRequest(mode=MODE_OFF))
+
+    assert subject.active is False
+    assert subject.tracks == []
+
+
+# -- degradation ------------------------------------------------------------
+
+
+def test_a_raising_engine_degrades_that_frame_to_untracked_without_killing_the_stream():
+    engine = FakeAssociator()
+    subject = session(FakeRegistry(associator=engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+    run(subject, now_millis=0.0, detections=[det()])
+
+    engine.raise_on_next = True
+    degraded = run(subject, now_millis=66.0, detections=[det("car"), det("person", x=0.6)])
+
+    assert [box.track for box in degraded.boxes] == [None, None]
+    assert [box.label for box in degraded.boxes] == ["car", "person"]
+    assert engine.resets == 1
+
+    survived = run(subject, now_millis=132.0, detections=[det()])
+    assert survived.boxes[0].track is not None
+
+
+def test_no_follow_engine_degrades_to_associate(caplog):
+    subject = session(FakeRegistry(associator=FakeAssociator("bytetrack"), follower=None))
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW, min_hits=1))
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.session"):
+        outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert subject.params.mode == MODE_ASSOCIATE
+    assert outcome.engine_id == "bytetrack"
+    assert outcome.boxes[0].track is not None
+    assert sum("degrading" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_no_engine_at_all_degrades_to_off_and_still_emits_the_detections():
+    subject = session(FakeRegistry(associator=None, follower=None))
+    subject.apply_config(TrackingRequest(mode=MODE_FOLLOW))
+
+    outcome = run(subject, now_millis=0.0, detections=[det("car")])
+
+    assert subject.params.mode == MODE_OFF
+    assert outcome.engine_id == ""
+    assert [box.label for box in outcome.boxes] == ["car"]
+    assert outcome.boxes[0].track is None
+
+
+def test_no_registry_at_all_degrades_to_off():
+    subject = StreamTrackingSession(settings=Settings(), registry_provider=lambda: None)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE))
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert subject.params.mode == MODE_OFF
+    assert outcome.boxes[0].track is None
+
+
+def test_degradation_is_logged_once_per_engine_id(caplog):
+    subject = session(FakeRegistry(associator=None, follower=None))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="ghost"))
+
+    with caplog.at_level(logging.WARNING, logger="cv_service.tracking.session"):
+        for frame in range(10):
+            run(subject, now_millis=frame * 66.0, detections=[det()])
+
+    assert sum("ghost" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_a_frame_with_no_model_resolved_asks_for_an_echo():
+    subject = session(FakeRegistry(associator=FakeAssociator()))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE))
+
+    outcome = subject.process(
+        now_millis=0.0, detect=lambda: (None, 0), frame=lambda: FRAME
+    )
+
+    assert outcome.boxes is None
+
+
+def test_the_session_holds_no_reference_to_an_inference_gate():
+    # Structural guard for TRACKING-PLAN §3.1's hard rule: the tracker path
+    # cannot acquire the gate even by accident, because the session has no
+    # way to reach one. The behavioural counterpart lives in
+    # tests/grpc/test_detect_stream_tracking.py.
+    subject = session(FakeRegistry(associator=FakeAssociator()))
+
+    assert not any("gate" in name for name in vars(subject))

@@ -80,6 +80,30 @@ def _build_default_registry(settings: Settings):
     return build_default_registry(settings)
 
 
+def _build_tracker_registry(settings: Settings):
+    """Build + probe the `TrackerRegistry` at STARTUP, not on first frame.
+
+    Probing here is the whole point (TRACKING-PLAN R3/R11): each engine is
+    constructed once and the roster that actually survived is logged at INFO,
+    so an operator can see which trackers are routable on this box without
+    reading code -- exactly what `discover_roster` already does for models.
+    A box where nothing constructs still starts and still serves detections;
+    its sessions just degrade to OFF.
+    """
+    try:
+        from cv_service.tracking.registry import build_default_registry as build_trackers
+
+        return build_trackers(settings)
+    except Exception as exc:  # noqa: BLE001 - never block startup on a tracker
+        LOGGER.warning(
+            "cv-service tracker registry unavailable (%s); DetectStream will serve "
+            "detections without track ids until the 'cv' optional dependency group "
+            "is installed.",
+            exc,
+        )
+        return None
+
+
 def serve(settings: Settings | None = None) -> grpc.Server:
     """Build, start, and return a gRPC server.
 
@@ -102,9 +126,16 @@ def serve(settings: Settings | None = None) -> grpc.Server:
     # degrades to echo, `TrainingServicer` reports an empty roster.
     registry = _build_default_registry(settings)
     gate = InferenceGate(settings.max_concurrent_inferences)
+    tracker_registry = _build_tracker_registry(settings)
 
     cv_pb2_grpc.add_InferenceServicer_to_server(
-        InferenceServicer(registry=registry, inference_gate=gate), server
+        InferenceServicer(
+            registry=registry,
+            inference_gate=gate,
+            settings=settings,
+            tracker_registry=tracker_registry,
+        ),
+        server,
     )
     cv_pb2_grpc.add_TrainingServicer_to_server(
         TrainingServicer(

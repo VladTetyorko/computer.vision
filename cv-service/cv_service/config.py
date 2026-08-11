@@ -52,6 +52,20 @@ DEFAULT_GRPC_WORKERS = 10
 DEFAULT_SHUTDOWN_GRACE_SECONDS = 5
 _DATASET_DIRNAME = "datasets"
 
+# --- tracking (docs/TRACKING-PLAN.md §4.A / TRACKING-ORCHESTRATION §4.3) ----
+#
+# These back the wire's `<=0 = server default` sentinels on
+# `TrackingConfig` -- `cv_service/tracking/params.py`'s `resolve()` is their
+# ONLY consumer, and this module stays the only place they are read from the
+# environment (the one-place rule, see this module's docstring). The values
+# are byte-identical to the defaults named in TRACKING-PLAN §4.A.
+DEFAULT_TRACK_ASSOCIATE_ENGINE = "bytetrack"
+DEFAULT_TRACK_FOLLOW_ENGINE = "lk"
+DEFAULT_TRACK_VERIFY_MILLIS = 2000
+DEFAULT_TRACK_IOU = 0.3
+DEFAULT_TRACK_MAX_AGE_FRAMES = 30
+DEFAULT_TRACK_MIN_HITS = 3
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -154,6 +168,52 @@ def _parse_positive_int(raw: Optional[str], default: int, var_name: str) -> int:
     return value
 
 
+def _parse_unit_fraction(raw: Optional[str], default: float, var_name: str) -> float:
+    """Forgiving-parse for a normalized `(0, 1]` threshold knob (`CV_TRACK_IOU`).
+
+    Same "unset/garbage -> default, never raise" contract as the int helpers
+    above. Deliberately rejects values outside `(0, 1]` with a warning rather
+    than clamping: the single most likely mistake is writing the *percent*
+    the REST/Java layer uses (`30`) into the *fraction* this layer wants
+    (`0.3`), and silently clamping `30` to `1.0` would turn a typo into a
+    tracker that never re-anchors, which is far harder to diagnose than a
+    logged fallback to the documented default.
+    """
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid number; using default %s", var_name, raw, default)
+        return default
+    if not 0.0 < value <= 1.0:
+        LOGGER.warning(
+            "%s=%r must be a fraction in (0, 1] (0.3, not 30); using default %s",
+            var_name,
+            raw,
+            default,
+        )
+        return default
+    return value
+
+
+def _parse_engine_id(raw: Optional[str], default: str) -> str:
+    """Unset/blank -> `default`; anything else passes through stripped.
+
+    Deliberately does NOT validate against the engine roster: the roster is
+    discovered at startup by `cv_service.tracking.registry.TrackerRegistry`
+    (which probes what is actually constructible on this box), and an
+    unknown id there is already a log-once-and-fall-back-to-the-default
+    outcome -- exactly the posture `ModelRegistry` takes for an unknown
+    `model_id`. Validating here would duplicate that in a second place and
+    make a typo a startup crash instead of a degradation.
+    """
+    if raw is None:
+        return default
+    stripped = raw.strip()
+    return stripped or default
+
+
 @dataclass(frozen=True)
 class Settings:
     """Every ``CV_*``-configurable knob cv-service has, resolved once.
@@ -173,6 +233,12 @@ class Settings:
     max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES
     grpc_workers: int = DEFAULT_GRPC_WORKERS
     shutdown_grace_seconds: int = DEFAULT_SHUTDOWN_GRACE_SECONDS
+    track_associate_engine: str = DEFAULT_TRACK_ASSOCIATE_ENGINE
+    track_follow_engine: str = DEFAULT_TRACK_FOLLOW_ENGINE
+    track_verify_millis: int = DEFAULT_TRACK_VERIFY_MILLIS
+    track_iou: float = DEFAULT_TRACK_IOU
+    track_max_age_frames: int = DEFAULT_TRACK_MAX_AGE_FRAMES
+    track_min_hits: int = DEFAULT_TRACK_MIN_HITS
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -203,5 +269,27 @@ class Settings:
                 os.environ.get("CV_SHUTDOWN_GRACE"),
                 DEFAULT_SHUTDOWN_GRACE_SECONDS,
                 "CV_SHUTDOWN_GRACE",
+            ),
+            track_associate_engine=_parse_engine_id(
+                os.environ.get("CV_TRACK_ASSOCIATE_ENGINE"), DEFAULT_TRACK_ASSOCIATE_ENGINE
+            ),
+            track_follow_engine=_parse_engine_id(
+                os.environ.get("CV_TRACK_FOLLOW_ENGINE"), DEFAULT_TRACK_FOLLOW_ENGINE
+            ),
+            track_verify_millis=_parse_positive_int(
+                os.environ.get("CV_TRACK_VERIFY_MS"),
+                DEFAULT_TRACK_VERIFY_MILLIS,
+                "CV_TRACK_VERIFY_MS",
+            ),
+            track_iou=_parse_unit_fraction(
+                os.environ.get("CV_TRACK_IOU"), DEFAULT_TRACK_IOU, "CV_TRACK_IOU"
+            ),
+            track_max_age_frames=_parse_positive_int(
+                os.environ.get("CV_TRACK_MAX_AGE"),
+                DEFAULT_TRACK_MAX_AGE_FRAMES,
+                "CV_TRACK_MAX_AGE",
+            ),
+            track_min_hits=_parse_positive_int(
+                os.environ.get("CV_TRACK_MIN_HITS"), DEFAULT_TRACK_MIN_HITS, "CV_TRACK_MIN_HITS"
             ),
         )

@@ -54,14 +54,18 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Optional
 
 import grpc
 
 from cv_service.config import DEFAULT_MAX_UPLOAD_BYTES, Settings
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
+from cv_service.tracking import params as tracking_params
+from cv_service.tracking.registry import TrackerRegistry
+from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
 from cv_service.training import dataset, orchestrator, trainer
 from cv_service.training.marker import write_active_model
 
@@ -97,6 +101,140 @@ except ModuleNotFoundError as exc:  # pragma: no cover - operator guidance only
     ) from exc
 
 LOGGER = logging.getLogger("cv_service.grpc.servicers")
+
+
+# --------------------------------------------------------------- tracking
+#
+# `cv_service/tracking/` never imports `cv_pb2` (that package's own
+# docstring states the rule); these four functions are the whole translation
+# between `cv_pb2.TrackingConfig`/`TargetLock` and the plain
+# `TrackingRequest`/`LockRequest`, and between a `FrameOutcome` and the
+# response's tracking fields. Enum-valued fields cross as the proto enum's
+# own VALUE NAMES, so `Name()`/`Value()` is the entire mapping and there is
+# no lookup table to drift.
+
+
+def _tracking_mode_name(mode: int) -> str:
+    try:
+        return cv_pb2.TrackingMode.Name(mode)
+    except ValueError:
+        # A mode number this build does not know can only come from a NEWER
+        # client. `normalize_mode` turns it into OFF, which is the same
+        # defensive posture proto3 additivity already gives an unset field.
+        return tracking_params.MODE_UNSPECIFIED
+
+
+def _lock_request_from_wire(message: "cv_pb2.TargetLock") -> tracking_params.LockRequest:
+    box = None
+    if message.HasField("box"):
+        box = (message.box.x, message.box.y, message.box.width, message.box.height)
+    return tracking_params.LockRequest(
+        lock_seq=message.lock_seq,
+        track_id=message.track_id,
+        point_x=message.point_x,
+        point_y=message.point_y,
+        box=box,
+        release=message.release,
+    )
+
+
+def _tracking_request_from_wire(
+    message: "cv_pb2.TrackingConfig",
+) -> tracking_params.TrackingRequest:
+    return tracking_params.TrackingRequest(
+        mode=_tracking_mode_name(message.mode),
+        engine_id=message.engine_id,
+        verify_every_millis=message.verify_every_millis,
+        redetect_iou_threshold=message.redetect_iou_threshold,
+        max_age_frames=message.max_age_frames,
+        min_hits=message.min_hits,
+        lock=_lock_request_from_wire(message.lock) if message.HasField("lock") else None,
+    )
+
+
+def _tracked_detection(box: "object") -> "cv_pb2.Detection":
+    """One `TrackedBox` as a wire `Detection`.
+
+    An untracked box (`track is None`) sets NO track field at all, so it
+    serializes to exactly the three bytes-worth of fields it did before
+    tracking existed -- `track_id == 0` is the wire's one spelling of
+    "untracked" (TRACKING-ORCHESTRATION §6 rule 2).
+    """
+    detection = cv_pb2.Detection(
+        label=box.label,
+        confidence=box.confidence,
+        box=cv_pb2.BoundingBox(
+            x=box.box.x, y=box.box.y, width=box.box.width, height=box.box.height
+        ),
+    )
+    track = box.track
+    if track is not None:
+        detection.track_id = track.track_id
+        detection.track_state = cv_pb2.TrackState.Value(track.state)
+        detection.source = cv_pb2.DetectionSource.Value(track.source)
+        detection.velocity_x = track.velocity_x
+        detection.velocity_y = track.velocity_y
+        detection.track_age_frames = track.age_frames
+    return detection
+
+
+def _tracked_response(
+    request: "cv_pb2.FrameRequest", outcome: FrameOutcome
+) -> "cv_pb2.DetectionResponse":
+    """A `DetectionResponse` carrying this frame's tracking telemetry.
+
+    Only reached when tracking is ACTIVE. In `OFF` the servicer builds its
+    pre-tracking response instead and sets none of these fields, so a stream
+    that never asks for tracking (or an old Java client, whose `FrameRequest`
+    carries no `tracking` at all) gets a **byte-identical** response to the
+    one it got before this wave existed -- which is the acceptance criterion
+    for proto3 additivity here, and why `detector_ran` is not asserted true
+    on a frame where no duty cycle was ever running to report on.
+    """
+    return cv_pb2.DetectionResponse(
+        stream_id=request.stream_id,
+        sequence=request.sequence,
+        timestamp_millis=request.timestamp_millis,
+        model_id=request.model_id,
+        model_version=request.model_version,
+        detections=[_tracked_detection(box) for box in outcome.boxes or []],
+        inference_millis=outcome.inference_millis,
+        tracker_millis=outcome.tracker_millis,
+        detector_ran=outcome.detector_ran,
+        tracker_engine_id=outcome.engine_id,
+        locked_track_id=outcome.locked_track_id,
+        detector_reason=cv_pb2.DetectorReason.Value(outcome.detector_reason),
+    )
+
+
+def _frame_loader(request: "cv_pb2.FrameRequest") -> Callable[[], Any]:
+    """A memoized decoder for this frame's pixels, for the FOLLOW path.
+
+    Lazy for two reasons: `ASSOCIATE` never needs pixels at all, and
+    `cv_service.inference.detector` imports `cv2`/`numpy` at module scope --
+    importing it here would break this module's (and hence
+    `python -m cv_service.grpc.server`'s) ability to start without the `cv`
+    extra. Memoized because a FOLLOW verify frame touches the frame twice
+    (re-anchor plus the response), and decoding a JPEG twice for that would
+    be a real, avoidable per-frame cost.
+    """
+    decoded: list[Any] = []
+
+    def load() -> Any:
+        if not decoded:
+            from cv_service.inference.detector import decode_frame
+
+            decoded.append(
+                decode_frame(
+                    request.width,
+                    request.height,
+                    cv_pb2.ImageEncoding.Name(request.encoding),
+                    request.data,
+                )
+            )
+        return decoded[0]
+
+    return load
 
 
 def _build_default_registry() -> Optional["ModelRegistry"]:
@@ -260,9 +398,22 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         *,
         inference_gate: Optional[InferenceGate] = None,
         registry: object = _UNSET_REGISTRY,
+        settings: Optional[Settings] = None,
+        tracker_registry: object = _UNSET_REGISTRY,
     ) -> None:
         self._inference_gate = inference_gate if inference_gate is not None else process_gate()
         self._warned_model_ids: set[str] = set()
+        # `Settings` is needed for the `CV_TRACK_*` defaults `params.resolve`
+        # falls back to; resolved fresh here when not supplied, exactly like
+        # `YoloDetector` does (see cv_service/config.py's module docstring).
+        self._settings = settings if settings is not None else Settings.from_env()
+        # Omitted -> built LAZILY, on the first frame that actually asks for
+        # an active tracking mode, so neither the OFF path nor a test that
+        # never tracks pays for constructing (and probing) engines. The
+        # production composition root, `serve()`, passes an already-probed
+        # registry instead -- that is what makes the roster get logged at
+        # STARTUP, per TRACKING-PLAN R3/R11, rather than on first use.
+        self._tracker_registry: object = tracker_registry
         if detector is not None:
             # Explicit single-detector injection: registry routing is
             # bypassed entirely, see class docstring.
@@ -289,6 +440,14 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 yield self._echo(request)
             return
 
+        # Per-stream tracking state, created here for exactly the reason
+        # `_StreamReader` is: it belongs to one bidi call, not to this
+        # servicer, which every stream shares. Construction is free -- no
+        # engine exists until a frame asks for an active tracking mode.
+        session = StreamTrackingSession(
+            settings=self._settings, registry_provider=self._resolve_tracker_registry
+        )
+
         # Claim the first frame directly and synchronously -- see
         # _StreamReader's docstring for why the background reader thread
         # only starts on the *rest* of the stream, not this one.
@@ -299,31 +458,40 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
 
         reader = _StreamReader(request_iterator)
         try:
-            yield self._handle_request(first_request)
+            yield self._handle_request(first_request, session)
             while True:
                 request = reader.next()
                 if request is None:
                     return
-                yield self._handle_request(request)
+                yield self._handle_request(request, session)
         finally:
             reader.stop()
 
-    def _handle_request(self, request: "cv_pb2.FrameRequest") -> "cv_pb2.DetectionResponse":
+    def _handle_request(
+        self,
+        request: "cv_pb2.FrameRequest",
+        session: Optional[StreamTrackingSession] = None,
+    ) -> "cv_pb2.DetectionResponse":
         try:
-            if self._registry is not None:
-                detections, inference_millis = self._detect_via_registry(request)
-                if detections is None:
+            if session is not None and self._sync_tracking(session, request):
+                outcome = session.process(
+                    # A LOCAL monotonic clock, deliberately, not
+                    # `request.timestamp_millis`: the duty cycle is about how
+                    # much wall time this host has spent since its last
+                    # detector pass, and a capture timestamp comes from
+                    # another machine's clock and can go backwards across a
+                    # reconnect.
+                    now_millis=time.monotonic() * 1000.0,
+                    detect=lambda: self._run_detector(request),
+                    frame=_frame_loader(request),
+                )
+                if outcome.boxes is None:
                     return self._echo(request)
-            else:
-                self._warn_once_on_unknown_model(request.model_id)
-                with self._inference_gate.acquire():
-                    detections, inference_millis = self._detector.detect(
-                        width=request.width,
-                        height=request.height,
-                        encoding=cv_pb2.ImageEncoding.Name(request.encoding),
-                        data=request.data,
-                        confidence_threshold=request.confidence_threshold or None,
-                    )
+                return _tracked_response(request, outcome)
+
+            detections, inference_millis = self._run_detector(request)
+            if detections is None:
+                return self._echo(request)
         except Exception:  # noqa: BLE001 - one bad frame must not kill the stream
             LOGGER.exception(
                 "inference failed for stream_id=%s sequence=%s; echoing "
@@ -354,6 +522,65 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             ],
             inference_millis=inference_millis,
         )
+
+    def _sync_tracking(
+        self, session: StreamTrackingSession, request: "cv_pb2.FrameRequest"
+    ) -> bool:
+        """Fold this frame's restated `TrackingConfig` in; report whether
+        tracking is active.
+
+        `TrackingConfig` is restated on EVERY frame by design (TRACKING-PLAN
+        invariant P2: the mailbox may drop a frame silently, so only a
+        restated desired state is self-healing). The per-frame cost of that
+        design is exactly the protobuf equality check below -- `resolve()`
+        and any engine rebuild happen only when the config genuinely
+        changed (TRACKING-ORCHESTRATION §4.2).
+        """
+        wire = request.tracking
+        if wire != session.applied_wire_config:
+            session.apply_config(_tracking_request_from_wire(wire), wire)
+        return session.active
+
+    def _run_detector(self, request: "cv_pb2.FrameRequest") -> tuple[Optional[list], int]:
+        """One full detector pass. **The only place `InferenceGate` is taken.**
+
+        Both model paths live here so the tracking session can spend a
+        detector pass through one callable without knowing which one this
+        servicer was built with -- and so the gate acquisition stays in a
+        single, greppable location (TRACKING-ORCHESTRATION §3.1).
+        """
+        if self._registry is not None:
+            return self._detect_via_registry(request)
+        self._warn_once_on_unknown_model(request.model_id)
+        with self._inference_gate.acquire():
+            return self._detector.detect(
+                width=request.width,
+                height=request.height,
+                encoding=cv_pb2.ImageEncoding.Name(request.encoding),
+                data=request.data,
+                confidence_threshold=request.confidence_threshold or None,
+            )
+
+    def _resolve_tracker_registry(self) -> Optional[TrackerRegistry]:
+        """The shared `TrackerRegistry`, built on first actual use.
+
+        `None` only when the `cv` extra is missing entirely, in which case
+        every session degrades to OFF -- the same "never crash-loop for lack
+        of a backend" posture the model registry already takes.
+        """
+        if self._tracker_registry is _UNSET_REGISTRY:
+            try:
+                from cv_service.tracking.registry import build_default_registry
+
+                self._tracker_registry = build_default_registry(self._settings)
+            except Exception as exc:  # noqa: BLE001 - never a dead stream
+                LOGGER.warning(
+                    "cv-service tracker registry unavailable (%s); streams requesting "
+                    "tracking will fall back to detector-only behavior.",
+                    exc,
+                )
+                self._tracker_registry = None
+        return self._tracker_registry  # type: ignore[return-value]
 
     def _detect_via_registry(
         self, request: "cv_pb2.FrameRequest"
