@@ -16,11 +16,15 @@ import { WebrtcCertificateService } from './webrtc-certificate';
 import type { Detection, DetectionResult } from '../../core/api/models';
 import {
   DEFAULT_SLACK_BATCHES,
+  TRAIL_WINDOW_MS,
   detectionModelKey,
   distinctModelKeys,
+  formatDetectionLabel,
   modelHue,
   selectDetectionResult,
   shouldDrawOverlay,
+  trackHue,
+  trackTrails,
   type BoxesMode,
 } from './detection-overlay-logic';
 import {
@@ -266,225 +270,8 @@ interface DrawnBox {
 @Component({
   selector: 'vision-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="frame surface-dark" [class.compact]="compact()">
-      <video #video playsinline muted autoplay [controls]="!compact()"></video>
-
-      <canvas
-        #overlay
-        class="overlay-canvas"
-        [class.interactive]="overlayInteractive()"
-        (mousemove)="onOverlayMouseMove($event)"
-        (mouseleave)="onOverlayMouseLeave()"
-      ></canvas>
-
-      @if (hoveredDetection(); as hovered) {
-        <div class="box-tooltip" [style.left.px]="tooltipX()" [style.top.px]="tooltipY()">
-          {{ hovered.label }} · {{ (hovered.confidence * 100).toFixed(0) }}%
-        </div>
-      }
-
-      @if (phase() !== 'playing') {
-        <div class="overlay-status" [class.error]="phase() === 'error'">
-          @switch (phase()) {
-            @case ('idle') {
-              <span class="muted">Not streaming</span>
-            }
-            @case ('connecting') {
-              <span class="spinner" aria-hidden="true"></span>
-              <span>Connecting…</span>
-            }
-            @case ('waiting') {
-              <span class="spinner" aria-hidden="true"></span>
-              <span>Waiting for the first segment…</span>
-              <span class="hint">HLS buffers a few segments before playback can start.</span>
-            }
-            @case ('reconnecting') {
-              <span class="spinner" aria-hidden="true"></span>
-              <span>Feed unreachable</span>
-              <span class="hint">{{ reconnectHint() }}</span>
-              <button type="button" class="btn secondary small" (click)="retryNow()">
-                Retry now
-              </button>
-            }
-            @case ('error') {
-              <span class="err-title">Playback failed</span>
-              <span class="hint">{{ message() }}</span>
-            }
-            @case ('stopped') {
-              <span class="muted">Stream stopped</span>
-            }
-          }
-        </div>
-      }
-
-      @if (phase() !== 'idle' && phase() !== 'stopped') {
-        <div class="badge" [title]="latencyTitle()">
-          <span class="dot" [class.live]="phase() === 'playing'"></span>{{ latencyLabel() }}
-        </div>
-      }
-
-      @if (showModelLegend()) {
-        <div class="model-legend" title="Detection models in this frame" aria-hidden="true">
-          @for (key of overlayModelKeys(); track key) {
-            <span class="legend-chip">
-              <span class="swatch" [style.background]="modelSwatch(key)"></span>{{ key }}
-            </span>
-          }
-        </div>
-      }
-    </div>
-  `,
-  styles: `
-    .frame {
-      position: relative;
-      background: var(--black);
-      border-radius: var(--radius-sm);
-      overflow: hidden;
-      aspect-ratio: 16 / 9;
-    }
-
-    video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-    }
-
-    .overlay-canvas {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-
-    .overlay-canvas.interactive {
-      pointer-events: auto;
-    }
-
-    .box-tooltip {
-      position: absolute;
-      transform: translate(-50%, -100%);
-      /* Nearest of the two canonical scrim steps (55%/70%) to the original 80% — a tooltip needs to
-         read clearly over any frame content, slightly denser than --scrim-strong's own 70%. */
-      background: var(--scrim-strong);
-      color: var(--white);
-      font-size: 0.7rem;
-      font-family: var(--mono);
-      padding: var(--space-2) var(--space-8);
-      border-radius: 4px;
-      pointer-events: none;
-      white-space: nowrap;
-      z-index: 2;
-    }
-
-    .overlay-status {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-8);
-      padding: var(--space-16);
-      text-align: center;
-      font-size: 0.85rem;
-      color: var(--text-muted);
-      /* --bg/--text-muted here rely on .frame's own .surface-dark (docs/VISUAL-REFRESH-PLAN.md
-         F3/W4, see this class's own doc comment) to resolve dark — without it this placeholder
-         would read theme-muted ink on a black gradient outside an enclave. Neither gradient stop
-         has its own crosswalk entry; both sit within a few rgb units of an existing dark-ramp step
-         (#0d1117 ~= --bg's dark value #0b0e13, #05070a is darker still, past even --gray-950) so
-         this consolidates onto --bg/--black rather than adding a new ramp shade. */
-      background: linear-gradient(180deg, var(--bg) 0%, var(--black) 100%);
-    }
-
-    .overlay-status.error {
-      color: var(--color-danger-text);
-    }
-
-    .err-title {
-      color: var(--color-danger);
-      font-weight: 600;
-    }
-
-    .hint {
-      font-size: 0.78rem;
-      color: var(--text-faint);
-      max-width: 40ch;
-    }
-
-    .badge {
-      /* Bottom-anchored: hosts (the Fly cockpit) overlay their own chrome along the frame's top
-         edge, and a top-left badge bleeds through transparent gaps in that chrome. */
-      position: absolute;
-      bottom: var(--space-8);
-      left: var(--space-8);
-      display: flex;
-      align-items: center;
-      gap: var(--space-8);
-      padding: var(--space-2) var(--space-8);
-      border-radius: var(--radius-pill);
-      background: var(--scrim);
-      backdrop-filter: blur(4px);
-      font-size: 0.72rem;
-      font-family: var(--mono);
-      font-variant-numeric: tabular-nums;
-      color: var(--text);
-    }
-
-    /* docs/OPS-CORE-PLAN.md §Q3b: only rendered once >=2 distinct models mix in the same frame — see
-       showModelLegend's own doc comment. Top-right, clear of the bottom-left latency badge and any
-       host chrome along the frame's own top edge (unlike the badge, this frame has no such host
-       overlay to dodge, so a fixed top corner is safe here). */
-    .model-legend {
-      position: absolute;
-      top: var(--space-8);
-      right: var(--space-8);
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: var(--space-4);
-      pointer-events: none;
-    }
-
-    .legend-chip {
-      display: flex;
-      align-items: center;
-      gap: var(--space-4);
-      padding: var(--space-2) var(--space-8);
-      border-radius: var(--radius-pill);
-      background: var(--scrim);
-      backdrop-filter: blur(4px);
-      font-size: 0.68rem;
-      font-family: var(--mono);
-      color: var(--text);
-      white-space: nowrap;
-    }
-
-    .swatch {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .spinner {
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      border: 2px solid var(--border-strong);
-      border-top-color: var(--color-info);
-      animation: spin 0.8s linear infinite;
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-  `,
+  templateUrl: './player.html',
+  styleUrl: './player.css',
 })
 export class Player {
   /** HLS playlist URL, or `null` when nothing is streaming — also the WHEP fallback target. */
@@ -526,6 +313,19 @@ export class Player {
 
   /** Emits the live transport whenever it changes — see class doc's "WHEP-first, HLS-fallback". */
   readonly transportChanged = output<Transport>();
+
+  /**
+   * Click-to-follow (docs/TRACKING-PLAN.md §4.D, wave T7) — emits a track id when the operator
+   * clicks a **tracked** box in the overlay (an untracked box has no id to lock onto, and is
+   * deliberately a no-op click — the point/box lock forms the wire contract also allows are out of
+   * this wave's scope). The host (`CockpitFacade#followTrack`) is the one that actually PATCHes
+   * `{tracking:{mode:'FOLLOW', lock:{trackId}}}` — this component never calls `VisionApi`/`FleetStore`
+   * itself, same "dumb component, host owns the write" rule as `latencyChanged`/`transportChanged`
+   * above. No optimistic UI here either: nothing in this component claims the lock took until a host
+   * that reads it back (`cv-control-panel.ts`'s own tracks poll) says so — see that class's own doc
+   * comment for docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule.
+   */
+  readonly trackFollowed = output<number>();
 
   private readonly video = viewChild.required<ElementRef<HTMLVideoElement>>('video');
   private readonly overlayCanvas = viewChild.required<ElementRef<HTMLCanvasElement>>('overlay');
@@ -642,6 +442,12 @@ export class Player {
   );
 
   protected readonly hoveredDetection = signal<Detection | null>(null);
+  /** The hover tooltip's own text — `formatDetectionLabel` so the tooltip and the canvas-drawn box
+   * label always agree on whether a box is carrying a track id (docs/TRACKING-PLAN.md §10). */
+  protected readonly hoveredLabel = computed(() => {
+    const hovered = this.hoveredDetection();
+    return hovered ? formatDetectionLabel(hovered) : '';
+  });
   protected readonly tooltipX = signal(0);
   protected readonly tooltipY = signal(0);
   private drawnBoxes: readonly DrawnBox[] = [];
@@ -1901,6 +1707,9 @@ export class Player {
     }
 
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
+    // Trails first, so every box (drawn next) sits visually on top of its own tail rather than
+    // under it — docs/TRACKING-PLAN.md §10 touchable outcome #3.
+    this.drawTrails(ctx, content, results);
     const drawn: DrawnBox[] = [];
     for (const detection of result.detections) {
       const box = detection.box;
@@ -1937,27 +1746,76 @@ export class Player {
   }
 
   /**
-   * Box color is per-model (docs/OPS-CORE-PLAN.md §Q3b, `modelHue`/`detectionModelKey` —
-   * `detection-overlay-logic.ts`): a single-model stream's boxes stay the exact `#4f8cff` this
-   * always drew (no prefixed label → `DEFAULT_MODEL_KEY`), composite-model boxes get a stable hue
-   * per member. Hover still overrides to the same amber it always has, for every model alike —
-   * hover means "this box", not "this model".
+   * Box color is per-**track** once a detection carries one (docs/TRACKING-PLAN.md §10 — `trackHue`,
+   * `detection-overlay-logic.ts`), so one object keeps one color across every frame even as its
+   * label flips (a composite-mode member handoff mid-track); **per-model** otherwise (docs/OPS-CORE-
+   * PLAN.md §Q3b, `modelHue`/`detectionModelKey`) — a single-model, untracked stream's boxes stay
+   * the exact `#4f8cff` this always drew. Hover still overrides to the same amber it always has,
+   * for every box alike — hover means "this box", not "this model" or "this track". A `COASTING`
+   * track (tracker-predicted, not detector-reconfirmed on the most recent pass) draws **dashed** —
+   * the honest-UI doctrine made pixel-level: the system is visibly saying "I am extrapolating, not
+   * seeing" (docs/TRACKING-ORCHESTRATION.md §3.3's same doctrine, applied to a box instead of a lock).
    */
   private drawBox(ctx: CanvasRenderingContext2D, rect: DrawnBox, detection: Detection): void {
     const hovered = this.hoveredDetection() === detection;
+    const track = detection.track;
     const modelKey = detectionModelKey(detection);
-    ctx.lineWidth = hovered ? 3 : 2;
-    ctx.strokeStyle = hovered ? '#ffd479' : modelHue(modelKey);
-    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    const strokeColor = track ? trackHue(track.id) : modelHue(modelKey);
+    const fillColor = track ? trackHue(track.id, 85) : modelHue(modelKey, 85);
 
-    const label = `${detection.label} ${(detection.confidence * 100).toFixed(0)}%`;
+    ctx.lineWidth = hovered ? 3 : 2;
+    ctx.strokeStyle = hovered ? '#ffd479' : strokeColor;
+    ctx.setLineDash(track?.state === 'COASTING' ? [6, 4] : []);
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.setLineDash([]); // never leak dashing into the label fill below, or a later stroke (a trail, another box)
+
+    const label = formatDetectionLabel(detection);
     ctx.font = '11px ui-monospace, monospace';
     const metrics = ctx.measureText(label);
     const labelHeight = 14;
-    ctx.fillStyle = hovered ? 'rgb(255 212 121 / 90%)' : modelHue(modelKey, 85);
+    ctx.fillStyle = hovered ? 'rgb(255 212 121 / 90%)' : fillColor;
     ctx.fillRect(rect.x, Math.max(0, rect.y - labelHeight), metrics.width + 6, labelHeight);
     ctx.fillStyle = '#04101f';
     ctx.fillText(label, rect.x + 3, Math.max(labelHeight - 3, rect.y - 3));
+  }
+
+  /**
+   * Fading per-track trails (docs/TRACKING-PLAN.md §10 touchable outcome #3) — `trackTrails` is a
+   * pure recomputation from `results` on every redraw tick (`detection-overlay-logic.ts`'s own doc
+   * comment on why that's enough to "clear on stream change" with no extra bookkeeping here). A
+   * track with fewer than two points in the window has nothing to connect yet and draws nothing —
+   * a lone dot would just be noise next to the box itself. Segments fade from `0.15` (oldest) to
+   * `0.80` (newest) alpha, the "history, not a snapshot" effect the plan's own touchable outcome
+   * asks for; `content` is the same letterboxed video rect `redrawOverlay` already computed for boxes,
+   * so a trail point and its own box always land on the identical pixel.
+   */
+  private drawTrails(
+    ctx: CanvasRenderingContext2D,
+    content: { x: number; y: number; width: number; height: number },
+    results: readonly DetectionResult[],
+  ): void {
+    const trails = trackTrails(results, Date.now(), TRAIL_WINDOW_MS);
+    if (trails.size === 0) {
+      return;
+    }
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    for (const [trackId, points] of trails) {
+      if (points.length < 2) {
+        continue;
+      }
+      ctx.strokeStyle = trackHue(trackId);
+      for (let i = 1; i < points.length; i++) {
+        const from = points[i - 1];
+        const to = points[i];
+        ctx.globalAlpha = 0.15 + 0.65 * (i / (points.length - 1));
+        ctx.beginPath();
+        ctx.moveTo(content.x + from.x * content.width, content.y + from.y * content.height);
+        ctx.lineTo(content.x + to.x * content.width, content.y + to.y * content.height);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 
   protected onOverlayMouseMove(event: MouseEvent): void {
@@ -1982,6 +1840,27 @@ export class Player {
     if (this.hoveredDetection() !== null) {
       this.hoveredDetection.set(null);
       this.redrawOverlay();
+    }
+  }
+
+  /**
+   * Click-to-follow's hit-test (docs/TRACKING-PLAN.md §4.D) — reuses the exact same
+   * {@link drawnBoxes} hit-test {@link onOverlayMouseMove} already does; a click that lands on a
+   * **tracked** box emits its id via {@link trackFollowed}. A click on an untracked box, or on empty
+   * canvas, is a no-op — there is no id to lock onto (the wire's point/box lock forms are out of
+   * this wave's scope, see {@link trackFollowed}'s own doc comment).
+   */
+  protected onOverlayClick(event: MouseEvent): void {
+    const canvas = this.overlayCanvas().nativeElement;
+    const bounds = canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    const hit = this.drawnBoxes.find(
+      (box) => x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height,
+    );
+    const trackId = hit?.detection.track?.id;
+    if (trackId !== undefined) {
+      this.trackFollowed.emit(trackId);
     }
   }
 

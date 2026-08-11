@@ -22,6 +22,7 @@ import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import type { BoxesMode, Transport } from '../../shared/player/player';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
+import { buildFollowLockPatch } from './cv-control-panel-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
@@ -593,6 +594,23 @@ export class CockpitFacade {
   onTransport(transport: Transport): void {
     console.info(`${LOG_PREFIX} player transport changed to ${transport}`);
     this.transport.set(transport);
+  }
+
+  /**
+   * Click-to-follow (docs/TRACKING-PLAN.md §4.D, wave T7) — `<vision-player>`'s own
+   * `(trackFollowed)`, the operator clicking a tracked box in the video. A single PATCH, always
+   * `mode:'FOLLOW'` + the lock together (`cv-control-panel-logic.ts#buildFollowLockPatch`'s own doc
+   * comment); no toast, no optimistic UI update here — the "Following #N" chip's own confirmation
+   * comes from `cv-control-panel.ts`'s independent tracks poll, never from this call's return value
+   * (docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule — a lock is a request until the wire says
+   * otherwise). A no-op with nothing running has no stream to patch.
+   */
+  followTrack(trackId: number): void {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId));
   }
 
   // --- Start / Stop ------------------------------------------------------------------------

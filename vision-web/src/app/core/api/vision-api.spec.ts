@@ -480,4 +480,30 @@ describe('VisionApi', () => {
     http.expectOne({ method: 'GET', url: '/api/system/network' }).flush({ addresses: [], mavlinkPort: 14550 });
     await expect(promise).resolves.toEqual({ addresses: [], mavlinkPort: 14550 });
   });
+
+  // --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
+
+  it('fetches the tracker-engine roster', async () => {
+    const promise = api.getCvTrackers();
+    const request = http.expectOne({ method: 'GET', url: '/api/cv/trackers' });
+    request.flush({ trackers: [{ id: 'lk', displayName: 'Optical flow', modes: ['FOLLOW'], needsAssets: false, costHint: '~0.4 ms/frame' }] });
+    await expect(promise).resolves.toEqual({
+      trackers: [{ id: 'lk', displayName: 'Optical flow', modes: ['FOLLOW'], needsAssets: false, costHint: '~0.4 ms/frame' }],
+    });
+  });
+
+  it('reads one stream\'s track book on the tracks sub-path, escaping the stream id', async () => {
+    const promise = api.getStreamTracks('s/1 a');
+    const request = http.expectOne({ method: 'GET', url: '/api/streams/s%2F1%20a/tracks' });
+    request.flush({ streamId: 's/1 a', lockedTrackId: 0, tracks: [] });
+    await expect(promise).resolves.toEqual({ streamId: 's/1 a', lockedTrackId: 0, tracks: [] });
+  });
+
+  it('patches a stream\'s tracking config through the same config PATCH', async () => {
+    const promise = api.patchStreamConfig('s-1', { tracking: { mode: 'FOLLOW', lock: { trackId: 7 } } });
+    const request = http.expectOne({ method: 'PATCH', url: '/api/streams/s-1/config' });
+    expect(request.request.body).toEqual({ tracking: { mode: 'FOLLOW', lock: { trackId: 7 } } });
+    request.flush({ streamId: 's-1', modelReArmed: false, trackingChanged: true });
+    await expect(promise).resolves.toEqual({ streamId: 's-1', modelReArmed: false, trackingChanged: true });
+  });
 });

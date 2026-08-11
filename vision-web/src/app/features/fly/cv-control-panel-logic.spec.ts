@@ -1,16 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CvModel, DetectionResult } from '../../core/api/models';
+import type { CvModel, CvTracker, DetectionResult, TrackStats } from '../../core/api/models';
 import type { PipelineSettings } from '../../core/settings/settings-store';
 import {
   PEOPLE_VEHICLES_BUILDINGS_PRESET,
   addLabel,
   applyPreset,
+  buildFollowFpsPatch,
+  buildFollowLockPatch,
   buildHotKnobPatch,
   buildModelChangePatch,
+  buildReleaseLockPatch,
+  buildTrackingEnginePatch,
+  buildTrackingModePatch,
+  buildVerifyCadencePatch,
   chipCandidates,
   debounce,
+  engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
+  formatFlowStrip,
   hasExactLabelMatch,
   isLabelChecked,
   observedLabels,
@@ -312,6 +320,101 @@ describe('cv-control-panel-logic', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) ---------------
+
+  describe('tracking patch builders', () => {
+    it('buildTrackingModePatch sends mode alone', () => {
+      expect(buildTrackingModePatch('FOLLOW')).toEqual({ tracking: { mode: 'FOLLOW' } });
+      expect(buildTrackingModePatch('OFF')).toEqual({ tracking: { mode: 'OFF' } });
+    });
+
+    it('buildTrackingEnginePatch sends engineId alone', () => {
+      expect(buildTrackingEnginePatch('lk')).toEqual({ tracking: { engineId: 'lk' } });
+    });
+
+    it('buildVerifyCadencePatch sends verifyEveryMillis alone', () => {
+      expect(buildVerifyCadencePatch(1500)).toEqual({ tracking: { verifyEveryMillis: 1500 } });
+    });
+
+    it('buildFollowFpsPatch sends followFps alone', () => {
+      expect(buildFollowFpsPatch(20)).toEqual({ tracking: { followFps: 20 } });
+    });
+
+    it('buildFollowLockPatch sets mode FOLLOW alongside the lock, in one call', () => {
+      expect(buildFollowLockPatch(7)).toEqual({ tracking: { mode: 'FOLLOW', lock: { trackId: 7 } } });
+    });
+
+    it('buildReleaseLockPatch leaves mode untouched', () => {
+      expect(buildReleaseLockPatch()).toEqual({ tracking: { lock: { release: true } } });
+    });
+  });
+
+  describe('engineOptionsForMode', () => {
+    const bytetrack: CvTracker = { id: 'bytetrack', displayName: 'ByteTrack', modes: ['ASSOCIATE'], needsAssets: false, costHint: '~0.8 ms/frame' };
+    const lk: CvTracker = { id: 'lk', displayName: 'Optical flow', modes: ['FOLLOW'], needsAssets: false, costHint: '~0.4 ms/frame' };
+    const ncc: CvTracker = { id: 'ncc', displayName: 'Template match', modes: ['FOLLOW'], needsAssets: false, costHint: '~0.6 ms/frame' };
+    const roster = [bytetrack, lk, ncc];
+
+    it('OFF always has no engine to pick, regardless of roster contents', () => {
+      expect(engineOptionsForMode(roster, 'OFF')).toEqual([]);
+    });
+
+    it('ASSOCIATE offers only engines advertising ASSOCIATE', () => {
+      expect(engineOptionsForMode(roster, 'ASSOCIATE')).toEqual([bytetrack]);
+    });
+
+    it('FOLLOW offers only engines advertising FOLLOW', () => {
+      expect(engineOptionsForMode(roster, 'FOLLOW')).toEqual([lk, ncc]);
+    });
+
+    it('an empty roster degrades to no options for any mode', () => {
+      expect(engineOptionsForMode([], 'FOLLOW')).toEqual([]);
+    });
+  });
+
+  describe('formatFlowStrip', () => {
+    function stats(partial: Partial<TrackStats> = {}): TrackStats {
+      return {
+        mode: 'FOLLOW',
+        engineId: 'lk',
+        windowSeconds: 30,
+        detectorPasses: 1,
+        trackerFrames: 450,
+        dutyRatio: 1 / 30,
+        trackerMillisP50: 0.4,
+        trackerMillisP95: 0.9,
+        lastDetectorReason: 'CADENCE',
+        byState: { TENTATIVE: 0, CONFIRMED: 3, COASTING: 1, LOST: 2 },
+        ...partial,
+      };
+    }
+
+    it('renders the DETECT/TRACK/duty/engine/cadence line', () => {
+      expect(formatFlowStrip(stats())).toBe('DETECT 0/s ▸ TRACK 15/s · 1 in 30 · lk 0.4 ms · cadence');
+    });
+
+    it('shows the engine actually serving, per R11 — this is a display concern only, no roster involved', () => {
+      expect(formatFlowStrip(stats({ engineId: 'ncc' }))).toContain('ncc');
+    });
+
+    it('lowercases the detector reason, expanding an underscore to a space', () => {
+      expect(formatFlowStrip(stats({ lastDetectorReason: 'TRACKER_FAILED' }))).toContain('tracker failed');
+    });
+
+    it('degrades a zero duty ratio to an em dash rather than "1 in Infinity"', () => {
+      expect(formatFlowStrip(stats({ dutyRatio: 0, detectorPasses: 0 }))).toContain('· — ·');
+    });
+
+    it('degrades a blank engine id to an em dash', () => {
+      expect(formatFlowStrip(stats({ engineId: '' }))).toContain(' — ');
+    });
+
+    it('a zero-second window never divides by zero', () => {
+      expect(() => formatFlowStrip(stats({ windowSeconds: 0 }))).not.toThrow();
+      expect(formatFlowStrip(stats({ windowSeconds: 0 }))).toContain('0/s');
     });
   });
 });

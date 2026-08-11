@@ -162,3 +162,98 @@ export function distinctModelKeys(detections: readonly Pick<Detection, 'label'>[
   }
   return [...seen];
 }
+
+// --- Track-aware rendering (docs/TRACKING-PLAN.md §4/§10, wave T7) ------------------------------
+// Everything below gates on `detection.track` alone — one null check (per §4.G's own "the client
+// gets a single null check gating all track rendering" design) — so a stream running an old/absent
+// server, or a detection tracking hasn't (yet) assigned an id to, draws byte-identically to before
+// this wave: `shared/player/player.ts#drawBox` only reaches these functions once `detection.track`
+// is present.
+
+/**
+ * The box label `shared/player/player.ts#drawBox` draws — `"#7 car 82%"` once `detection.track` is
+ * present (docs/TRACKING-PLAN.md §10 touchable outcome #1's "stable box numbers"), the exact,
+ * unchanged `"car 82%"` otherwise. Also used for the hover tooltip's own text, so the two always
+ * agree on whether a box is carrying an id.
+ */
+export function formatDetectionLabel(detection: Detection): string {
+  const confidence = `${(detection.confidence * 100).toFixed(0)}%`;
+  return detection.track
+    ? `#${detection.track.id} ${detection.label} ${confidence}`
+    : `${detection.label} ${confidence}`;
+}
+
+/**
+ * Stable per-track box color (docs/TRACKING-PLAN.md §10 touchable outcome #1) — the same hash-to-hue
+ * mechanism as {@link modelHue}, keyed on `trackId` instead of a model key, so one tracked object
+ * keeps one color across every frame **even as its label flips** (composite-mode member handoff,
+ * docs/TRACKING-PLAN.md §5.I risk R9) — a track's identity is its id, never its current label.
+ * `drawBox` calls this instead of `modelHue` whenever `detection.track` is present; the two never
+ * mix on the same box. A distinct hash seed (`"track-"` prefix) from `modelHue`'s own model-key hash
+ * is deliberate, not load-bearing — the two are never compared or blended, only each internally
+ * stable.
+ */
+export function trackHue(trackId: number, alphaPercent = 100): string {
+  const hue = hashHue(`track-${trackId}`);
+  return alphaPercent >= 100
+    ? `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}%)`
+    : `hsl(${hue} ${MODEL_HUE_SATURATION}% ${MODEL_HUE_LIGHTNESS}% / ${alphaPercent}%)`;
+}
+
+/** One point of a per-track trail — a tracked box's normalized center, `[0,1]` against frame dimensions. */
+export interface TrailPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** How far back a trail reaches (docs/TRACKING-PLAN.md §10 touchable outcome #3 — "a trail behind a
+ *  tracked car", not a full trajectory history; S2's map trails are the durable, longer-lived kind). */
+export const TRAIL_WINDOW_MS = 2_000;
+
+/**
+ * Per-track fading trails (docs/TRACKING-PLAN.md §10 touchable outcome #3), recomputed fresh on
+ * every call from `results` — `DetectionsStore.results()`, which already retains a short
+ * newest-first history (up to 50 batches, `DetectionsStore#DETECTIONS_LIMIT`). **Not a mutable
+ * accumulator**: there is nothing stateful in this module for `results` to be cleared *from* — a
+ * stream switch already empties `DetectionsStore.results()` to `[]` (`DetectionsStore#track`'s own
+ * doc comment), so the very next call here naturally returns an empty map, which is what "cleared on
+ * stream change" means in a pure-function world.
+ *
+ * Points for one track come out **oldest-first** (draw order for a fading polyline); a track with
+ * only one point in the window (a track that just appeared) still gets an entry — the caller decides
+ * whether a single-point trail is worth stroking.
+ */
+export function trackTrails(
+  results: readonly DetectionResult[],
+  nowMs: number,
+  windowMs: number = TRAIL_WINDOW_MS,
+): ReadonlyMap<number, readonly TrailPoint[]> {
+  const cutoffMs = nowMs - windowMs;
+  const byTrack = new Map<number, TrailPoint[]>();
+  // `results` is newest-first (VisionApi.streamDetections's own contract); walk it back-to-front so
+  // each track's own point list comes out oldest-first without a second reverse pass.
+  for (let i = results.length - 1; i >= 0; i--) {
+    const result = results[i];
+    const capturedAtMs = Date.parse(result.capturedAt);
+    if (!Number.isFinite(capturedAtMs) || capturedAtMs < cutoffMs) {
+      continue;
+    }
+    for (const detection of result.detections) {
+      const trackId = detection.track?.id;
+      if (trackId === undefined) {
+        continue;
+      }
+      const point: TrailPoint = {
+        x: detection.box.x + detection.box.width / 2,
+        y: detection.box.y + detection.box.height / 2,
+      };
+      const points = byTrack.get(trackId);
+      if (points) {
+        points.push(point);
+      } else {
+        byTrack.set(trackId, [point]);
+      }
+    }
+  }
+  return byTrack;
+}

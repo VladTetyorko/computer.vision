@@ -1,4 +1,13 @@
-import type { CvModel, DetectionResult, PatchStreamConfigResponse, UpdateStreamConfigRequest } from '../../core/api/models';
+import type {
+  CvModel,
+  CvTracker,
+  DetectionResult,
+  DetectorReason,
+  PatchStreamConfigResponse,
+  TrackingMode,
+  TrackStats,
+  UpdateStreamConfigRequest,
+} from '../../core/api/models';
 import type { PipelineSettings } from '../../core/settings/settings-store';
 
 /**
@@ -252,6 +261,131 @@ export function perfHint(openVocabSelected: boolean): string {
   return openVocabSelected
     ? 'This model is open-vocabulary — materially slower on a laptop CPU (open-set lookup + segmentation). Lower the inference rate or turn detection off to reclaim CPU; video keeps streaming at full rate regardless.'
     : "Inference rate and detection on/off are the CPU-budget controls — the class filter only trims what's shown, not what the model computes.";
+}
+
+// --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
+// The Tracking section's own patch builders, roster filter, and flow-strip formatter — pure so the
+// mode-gating, the follow-lock honesty rule, and the flow-strip math (docs/TRACKING-ORCHESTRATION.md
+// §7) are all testable without Angular/HTTP/timers, mirroring every other builder in this file.
+// **The backend for this contract had not shipped when this wave landed** — every function here is
+// coded against docs/TRACKING-PLAN.md §4 with nothing live to exercise it against.
+
+/** `TrackingConfigRequest.verifyEveryMillis`'s server-side default (docs/TRACKING-PLAN.md §4.A) —
+ *  seeds the verify-cadence slider before any confirmed value has ever come back from the wire (the
+ *  `stats` object carries no such figure — see `TrackStats`'s own doc comment — so, unlike
+ *  mode/engine, this slider has no ground-truth readback in this app). */
+export const DEFAULT_VERIFY_EVERY_MILLIS = 2_000;
+
+/** `TrackingConfigRequest.followFps`'s server-side default (docs/TRACKING-ORCHESTRATION.md §4.3,
+ *  decision D12) — same "no readback" caveat as {@link DEFAULT_VERIFY_EVERY_MILLIS} above. */
+export const DEFAULT_FOLLOW_FPS = 15;
+
+/** A mode-only patch — the Off/Associate/Follow segmented control's own PATCH body. Never coalesced
+ *  with a hot knob or a model change (see `UpdateStreamConfigRequest#tracking`'s own doc comment). */
+export function buildTrackingModePatch(mode: TrackingMode): UpdateStreamConfigRequest {
+  return { tracking: { mode } };
+}
+
+/** An engine-only patch — the engine picker's own PATCH body. */
+export function buildTrackingEnginePatch(engineId: string): UpdateStreamConfigRequest {
+  return { tracking: { engineId } };
+}
+
+/** The verify-cadence slider's own patch body (`FOLLOW`-only knob, milliseconds between detector
+ *  re-verify passes — docs/TRACKING-PLAN.md §3.1). */
+export function buildVerifyCadencePatch(verifyEveryMillis: number): UpdateStreamConfigRequest {
+  return { tracking: { verifyEveryMillis } };
+}
+
+/** The follow-fps slider's own patch body (`FOLLOW`-only knob — the Java-side sampler rate feeding
+ *  the tracker, docs/TRACKING-ORCHESTRATION.md §4.3: "`followFps` has no Python knob on purpose"). */
+export function buildFollowFpsPatch(followFps: number): UpdateStreamConfigRequest {
+  return { tracking: { followFps } };
+}
+
+/**
+ * Click-to-follow's own patch body (docs/TRACKING-PLAN.md §4.D) — always sets `mode: 'FOLLOW'`
+ * alongside the lock in the same call, matching the plan's own worked example
+ * (`{tracking:{mode:"FOLLOW", lock:{trackId}}}`) so clicking a box while `ASSOCIATE`/`OFF` is active
+ * both switches the mode and locks in one PATCH, not two.
+ *
+ * **This patch alone never shows the "Following #N" chip.** The chip renders only once a later poll
+ * of `GET .../tracks` echoes back this same `trackId` as `lockedTrackId` —
+ * docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule: "the UI reflects confirmed state from the
+ * wire, never local intent." A lock cv-service couldn't honor (the target already `LOST`) simply
+ * never shows a chip, rather than a lying one.
+ */
+export function buildFollowLockPatch(trackId: number): UpdateStreamConfigRequest {
+  return { tracking: { mode: 'FOLLOW', lock: { trackId } } };
+}
+
+/** The "release" chip's own patch body — drops the current lock, falling back to the mode's own
+ *  policy (docs/TRACKING-PLAN.md §4.A's `TargetLock#release`). Leaves `mode` untouched. */
+export function buildReleaseLockPatch(): UpdateStreamConfigRequest {
+  return { tracking: { lock: { release: true } } };
+}
+
+/**
+ * The engine picker's own candidate list — every roster entry whose `modes` includes `mode`
+ * (docs/TRACKING-PLAN.md §4.F: `bytetrack` advertises `["ASSOCIATE"]`, `lk`/`ncc` advertise
+ * `["FOLLOW"]`). `OFF` has no engine to pick, by construction — always `[]`, so the caller never has
+ * to special-case "there is no tracker running" separately from "the roster is empty".
+ */
+export function engineOptionsForMode(trackers: readonly CvTracker[], mode: TrackingMode): readonly CvTracker[] {
+  if (mode === 'OFF') {
+    return [];
+  }
+  return trackers.filter((tracker) => tracker.modes.includes(mode));
+}
+
+/** `DETECT ?/s` / `TRACK ?/s` — one decimal only when the value isn't a whole number, so a common
+ *  round figure (`15/s`) doesn't read as `15.0/s`. */
+function formatRatePerSecond(count: number, windowSeconds: number): string {
+  if (windowSeconds <= 0 || !Number.isFinite(count) || count < 0) {
+    return '0/s';
+  }
+  const perSecond = count / windowSeconds;
+  const rounded = Math.round(perSecond * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}/s`;
+}
+
+/** `"1 in N"` — the duty ratio expressed the way an operator reads it ("roughly one frame in
+ *  thirty gets a real detector pass"), rather than the raw fraction the wire carries. `—` for a
+ *  window with no detector passes recorded yet (division by zero would otherwise read "1 in ∞"). */
+function formatDutyRatio(dutyRatio: number): string {
+  if (!Number.isFinite(dutyRatio) || dutyRatio <= 0) {
+    return '—';
+  }
+  return `1 in ${Math.max(1, Math.round(1 / dutyRatio))}`;
+}
+
+/**
+ * The flow strip's own text (docs/TRACKING-PLAN.md §10 touchable outcome #2, docs/TRACKING-
+ * ORCHESTRATION.md §7's "visible flow" tier) — e.g. `"DETECT 0.5/s ▸ TRACK 15/s · 1 in 29 · lk 0.4 ms
+ * · cadence"`. Turns the plan's own core claim ("the detector stopped running and the tracker took
+ * over") into something read off the screen instead of `htop` on a remote inference box.
+ *
+ * **Callers must check `stats` for presence before calling this** — there is no "no stats" case
+ * represented here at all; an absent `stats` means the strip doesn't render, full stop (`TrackStats`'s
+ * own doc comment). `engineId` and `lastDetectorReason` are shown exactly as the wire reports them —
+ * the engine **actually serving**, per R11 (docs/TRACKING-PLAN.md §9), not whatever the operator last
+ * requested in the picker.
+ */
+export function formatFlowStrip(stats: TrackStats): string {
+  const detectRate = formatRatePerSecond(stats.detectorPasses, stats.windowSeconds);
+  const trackRate = formatRatePerSecond(stats.trackerFrames, stats.windowSeconds);
+  const duty = formatDutyRatio(stats.dutyRatio);
+  const engine = stats.engineId.length > 0 ? stats.engineId : '—';
+  const p50 = Number.isFinite(stats.trackerMillisP50) ? `${stats.trackerMillisP50.toFixed(1)} ms` : '— ms';
+  const reason = formatDetectorReason(stats.lastDetectorReason);
+  return `DETECT ${detectRate} ▸ TRACK ${trackRate} · ${duty} · ${engine} ${p50} · ${reason}`;
+}
+
+/** `"CADENCE"` → `"cadence"` — every `DetectorReason` member reads as a plain lowercase word once
+ *  formatted, per docs/TRACKING-PLAN.md §4.A's own naming (`ALWAYS`/`CADENCE`/`TRACKER_FAILED`/
+ *  `NO_LOCK`/`BOX_INVALID`/`COASTED_OUT`); the one multi-word member gets a space, not an underscore. */
+function formatDetectorReason(reason: DetectorReason): string {
+  return reason.toLowerCase().replace(/_/g, ' ');
 }
 
 // --- Debounce (hot-knob coalescing) -------------------------------------------------------------

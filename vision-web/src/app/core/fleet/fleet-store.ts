@@ -13,6 +13,7 @@ import type {
   AssetEdit,
   AssetSummary,
   CvModel,
+  CvTracker,
   Device,
   DeviceEdit,
   DevicesSnapshot,
@@ -23,6 +24,7 @@ import type {
   StartSimulationRequest,
   StartStreamRequest,
   StartStreamResult,
+  StreamTracksResponse,
   UpdateStreamConfigRequest,
 } from '../api/models';
 
@@ -82,6 +84,15 @@ export class FleetStore {
    */
   private readonly modelsSignal = signal<readonly CvModel[]>([]);
 
+  /**
+   * The tracker-engine roster (docs/TRACKING-PLAN.md §4.F, wave T7) — fetched once, same "config-
+   * backed, changes at deploy time not runtime" posture as {@link models} above, and the identical
+   * degrade-on-failure shape: an empty list means either "still loading" or "the request failed" (a
+   * pre-tracking server included — this endpoint didn't exist at all when this wave landed), and
+   * every reader treats both the same way, per {@link trackers}'s own doc comment.
+   */
+  private readonly trackersSignal = signal<readonly CvTracker[]>([]);
+
   readonly devices = this.devicesSignal.asReadonly();
   readonly streams = this.streamsSignal.asReadonly();
   readonly loading = this.loadingSignal.asReadonly();
@@ -90,6 +101,12 @@ export class FleetStore {
    * "the request itself failed" (network down); every reader degrades to "no extra model facts"
    * rather than blocking on either (`cv-control-panel-logic.ts#findModel`). */
   readonly models = this.modelsSignal.asReadonly();
+
+  /** Empty until the one-shot fetch resolves, and permanently empty on failure or against a
+   * pre-tracking server — `cv-control-panel.ts`'s Tracking section degrades to "engine list
+   * unavailable" exactly like `models` does for the detection-model picker (see that signal's own
+   * doc comment for the shared reasoning). */
+  readonly trackers = this.trackersSignal.asReadonly();
 
   /** `null` until the first request settles, so the header shows no verdict prematurely. */
   readonly reachable = this.reachableSignal.asReadonly();
@@ -105,6 +122,7 @@ export class FleetStore {
   constructor() {
     void this.refresh(); // one-time initial fetch, regardless of live — see class doc.
     void this.loadModels(); // one-time, unrelated to the devices/streams poll — see `models`' own doc comment.
+    void this.loadTrackers(); // one-time, same shape as `loadModels()` — see `trackers`' own doc comment.
     // Poll-while-visible now runs off the app's one shared timer (docs/CYCLES-PLAN.md §9, CU-b
     // item 3 — `PollScheduler`) rather than this store's own `setInterval`. Started unconditionally
     // here so today's (pre-live, or live-unavailable) behavior is unchanged byte-for-byte; the
@@ -226,6 +244,33 @@ export class FleetStore {
     } catch (error) {
       console.warn(`${LOG_PREFIX} could not load the CV model roster`, { error });
     }
+  }
+
+  /** One-shot fetch of the tracker-engine roster — same silent-degrade shape as {@link loadModels}
+   * above, including "the endpoint doesn't exist yet" (docs/TRACKING-PLAN.md wave T6 hadn't shipped
+   * when this wave landed): a 404/network failure just logs and leaves {@link trackers} empty. */
+  private async loadTrackers(): Promise<void> {
+    try {
+      const response = await this.api.getCvTrackers();
+      this.trackersSignal.set(response.trackers);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not load the tracker-engine roster`, { error });
+    }
+  }
+
+  /**
+   * One stream's live track book + duty-cycle stats (docs/TRACKING-PLAN.md §4.E) —
+   * `cv-control-panel.ts`'s own poll for the flow strip + the "Following #N" lock-confirmation chip.
+   * **Deliberately not `run()`-wrapped** (unlike {@link patchStreamConfig} below): this is a
+   * background enrichment read on a fast poll cadence, not a user-initiated action — a failure (an
+   * old/absent server most of all, since this endpoint is new in docs/TRACKING-PLAN.md wave T6) must
+   * degrade the flow strip/chip to hidden, silently, the same posture `loadModels`/`DetectionsStore`'s
+   * own poll already take, never a toast fired every couple of seconds against a backend that simply
+   * doesn't have this route yet. Rethrows on failure — the caller's own `catch` decides what "hidden"
+   * means for its signal.
+   */
+  getStreamTracks(streamId: string): Promise<StreamTracksResponse> {
+    return this.api.getStreamTracks(streamId);
   }
 
   async register(request: RegisterDeviceRequest): Promise<Device | null> {

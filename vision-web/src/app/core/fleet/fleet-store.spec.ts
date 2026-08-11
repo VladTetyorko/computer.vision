@@ -68,7 +68,9 @@ function stubScheduler() {
   return { schedule, calls, lastFor };
 }
 
-function stubApi(overrides: Partial<Record<'listDevices' | 'listStreams', ReturnType<typeof vi.fn>>> = {}) {
+function stubApi(
+  overrides: Partial<Record<'listDevices' | 'listStreams' | 'getStreamTracks', ReturnType<typeof vi.fn>>> = {},
+) {
   return {
     listDevices: vi.fn().mockResolvedValue([]),
     listStreams: vi.fn().mockResolvedValue([]),
@@ -170,5 +172,26 @@ describe('FleetStore — LiveStore projection (docs/REALTIME-PLAN.md §4 backend
     TestBed.tick(); // the connectionState effect's first run — already not-live, must not re-poll
 
     expect(scheduler.schedule).toHaveBeenCalledTimes(1); // the constructor's own unconditional registration, only
+  });
+});
+
+describe('FleetStore — tracking engine passthroughs (docs/TRACKING-PLAN.md §4, wave T7)', () => {
+  it('getStreamTracks delegates straight to VisionApi, with no run()-wrapped toast on failure', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue({ streamId: 's-1', lockedTrackId: 7, tracks: [] });
+    const api = stubApi({ getStreamTracks });
+    const store = create(api);
+    await flush();
+
+    await expect(store.getStreamTracks('s-1')).resolves.toEqual({ streamId: 's-1', lockedTrackId: 7, tracks: [] });
+    expect(getStreamTracks).toHaveBeenCalledWith('s-1');
+  });
+
+  it('getStreamTracks rethrows on failure — the caller decides what "hidden" means, not this store', async () => {
+    const getStreamTracks = vi.fn().mockRejectedValue(new Error('offline'));
+    const api = stubApi({ getStreamTracks });
+    const store = create(api);
+    await flush();
+
+    await expect(store.getStreamTracks('s-1')).rejects.toThrow('offline');
   });
 });

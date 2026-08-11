@@ -150,6 +150,121 @@
       <p class="muted hint">{{ perfHintText() }}</p>
     </section>
 
+    <!-- ---- Tracking (docs/TRACKING-PLAN.md, wave T7) — mode / engine / cadence, all live-only
+         (see the component's own "Tracking section" doc comment for why there is no draft here). -->
+    <section class="cv-section">
+      <span class="label">Tracking</span>
+
+      @if (!streamId()) {
+        <p class="muted hint">Start a stream to configure tracking — every control below is a live knob with nothing to save into a draft.</p>
+      } @else {
+        <div class="segmented" role="tablist" aria-label="Tracking mode">
+          <button
+            type="button"
+            role="tab"
+            class="btn secondary small"
+            [class.active]="trackingMode() === 'OFF'"
+            [attr.aria-selected]="trackingMode() === 'OFF'"
+            (click)="onTrackingMode('OFF')"
+          >
+            Off
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="btn secondary small"
+            [class.active]="trackingMode() === 'ASSOCIATE'"
+            [attr.aria-selected]="trackingMode() === 'ASSOCIATE'"
+            (click)="onTrackingMode('ASSOCIATE')"
+          >
+            Associate
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="btn secondary small"
+            [class.active]="trackingMode() === 'FOLLOW'"
+            [attr.aria-selected]="trackingMode() === 'FOLLOW'"
+            (click)="onTrackingMode('FOLLOW')"
+          >
+            Follow
+          </button>
+        </div>
+
+        <p class="muted hint">
+          @switch (trackingMode()) {
+            @case ('OFF') {
+              Detections carry no id — today's behavior.
+            }
+            @case ('ASSOCIATE') {
+              Every detection keeps a stable #id across frames, through a brief occlusion.
+            }
+            @case ('FOLLOW') {
+              One locked target is tracked every frame; the detector drops to a periodic verify pass.
+              Click a tracked box in the video to lock onto it.
+            }
+          }
+        </p>
+
+        @if (trackingMode() !== 'OFF') {
+          @if (engineOptions().length === 0) {
+            <p class="muted hint">Engine list unavailable — using the server default for this mode.</p>
+          } @else {
+            <div class="segmented" role="tablist" aria-label="Tracking engine">
+              @for (engine of engineOptions(); track engine.id) {
+                <button
+                  type="button"
+                  role="tab"
+                  class="btn secondary small"
+                  [class.active]="engine.id === trackingEngineId()"
+                  [attr.aria-selected]="engine.id === trackingEngineId()"
+                  [title]="engine.costHint"
+                  (click)="onTrackingEngine(engine.id)"
+                >
+                  {{ engine.displayName }}
+                </button>
+              }
+            </div>
+          }
+        }
+
+        @if (trackingMode() === 'FOLLOW') {
+          <label class="label" for="tracking-verify-ms">Re-verify every {{ verifyEveryMillis() }} ms</label>
+          <input
+            id="tracking-verify-ms"
+            type="range"
+            min="500"
+            max="5000"
+            step="100"
+            [value]="verifyEveryMillis()"
+            (input)="onVerifyEveryMillis($any($event.target).value)"
+          />
+
+          <label class="label" for="tracking-follow-fps">Follow sampling {{ followFps() }} fps</label>
+          <input
+            id="tracking-follow-fps"
+            type="range"
+            min="5"
+            max="30"
+            step="1"
+            [value]="followFps()"
+            (input)="onFollowFps($any($event.target).value)"
+          />
+        }
+
+        @if (lockedTrackId(); as locked) {
+          <div class="tracking-lock-row">
+            <span class="chip accent">Following #{{ locked }}</span>
+            <button type="button" class="btn secondary small" (click)="releaseLock()">Release</button>
+          </div>
+        }
+
+        @if (flowStripText(); as flow) {
+          <p class="mono hint tracking-flow-strip">{{ flow }}</p>
+        }
+      }
+    </section>
+
     <!-- ---- Boxes rendering — merged in from the former standalone `layers` drawer (per direct user
          request); a client-side rendering preference (`FlyPage`'s `facade.boxesMode`), not part of
          the `PipelineSettings` wire contract, so it round-trips via {@link boxesMode}/

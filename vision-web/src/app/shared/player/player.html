@@ -1,0 +1,68 @@
+<div class="frame surface-dark" [class.compact]="compact()">
+  <video #video playsinline muted autoplay [controls]="!compact()"></video>
+
+  <canvas
+    #overlay
+    class="overlay-canvas"
+    [class.interactive]="overlayInteractive()"
+    (mousemove)="onOverlayMouseMove($event)"
+    (mouseleave)="onOverlayMouseLeave()"
+    (click)="onOverlayClick($event)"
+  ></canvas>
+
+  @if (hoveredDetection(); as hovered) {
+    <div class="box-tooltip" [style.left.px]="tooltipX()" [style.top.px]="tooltipY()">
+      {{ hoveredLabel() }}
+    </div>
+  }
+
+  @if (phase() !== 'playing') {
+    <div class="overlay-status" [class.error]="phase() === 'error'">
+      @switch (phase()) {
+        @case ('idle') {
+          <span class="muted">Not streaming</span>
+        }
+        @case ('connecting') {
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Connecting…</span>
+        }
+        @case ('waiting') {
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Waiting for the first segment…</span>
+          <span class="hint">HLS buffers a few segments before playback can start.</span>
+        }
+        @case ('reconnecting') {
+          <span class="spinner" aria-hidden="true"></span>
+          <span>Feed unreachable</span>
+          <span class="hint">{{ reconnectHint() }}</span>
+          <button type="button" class="btn secondary small" (click)="retryNow()">
+            Retry now
+          </button>
+        }
+        @case ('error') {
+          <span class="err-title">Playback failed</span>
+          <span class="hint">{{ message() }}</span>
+        }
+        @case ('stopped') {
+          <span class="muted">Stream stopped</span>
+        }
+      }
+    </div>
+  }
+
+  @if (phase() !== 'idle' && phase() !== 'stopped') {
+    <div class="badge" [title]="latencyTitle()">
+      <span class="dot" [class.live]="phase() === 'playing'"></span>{{ latencyLabel() }}
+    </div>
+  }
+
+  @if (showModelLegend()) {
+    <div class="model-legend" title="Detection models in this frame" aria-hidden="true">
+      @for (key of overlayModelKeys(); track key) {
+        <span class="legend-chip">
+          <span class="swatch" [style.background]="modelSwatch(key)"></span>{{ key }}
+        </span>
+      }
+    </div>
+  }
+</div>

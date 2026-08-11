@@ -20,6 +20,7 @@ import type {
   CreateMarkRequest,
   CreateUserRequest,
   CvModelsResponse,
+  CvTrackersResponse,
   Dataset,
   DatasetsResponse,
   DetectionEvent,
@@ -62,6 +63,7 @@ import type {
   StartStreamRequest,
   StartStreamResult,
   StartTrainingJobRequest,
+  StreamTracksResponse,
   SystemNetworkResponse,
   TelemetrySample,
   TrainingJobResponse,
@@ -186,6 +188,36 @@ export class VisionApi {
    */
   getCvModels(): Promise<CvModelsResponse> {
     return firstValueFrom(this.http.get<CvModelsResponse>('/api/cv/models'));
+  }
+
+  // --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -------------
+  // `features/fly/cv-control-panel.ts` is the one UI caller of both (via `FleetStore`'s own thin
+  // wrappers — see that class's doc comments for why neither is `run()`-wrapped). **Neither
+  // endpoint had shipped server-side when this wave landed** — both simply reject until docs/
+  // TRACKING-PLAN.md wave T6 builds them, and every caller here degrades to "hidden"/"—", never a
+  // blocked page or a fabricated value.
+
+  /**
+   * The tracker-engine roster for the Tracking section's engine picker (`200 {trackers}` — see
+   * `CvTrackersResponse`'s own doc comment). Config-backed and static like `getCvModels()`'s own
+   * roster — fetched once by `FleetStore`, never re-polled.
+   */
+  getCvTrackers(): Promise<CvTrackersResponse> {
+    return firstValueFrom(this.http.get<CvTrackersResponse>('/api/cv/trackers'));
+  }
+
+  /**
+   * One stream's live track book + duty-cycle stats (docs/TRACKING-PLAN.md §4.E) — feeds the Fly
+   * cockpit's flow strip and its "Following #N" lock-confirmation chip (see
+   * `StreamTracksResponse`'s own doc comment). Never errors server-side once T6 ships (an
+   * unknown/stopped stream returns an empty track list) — see `FleetStore.getStreamTracks`'s own
+   * doc comment for how *this app* degrades a transport failure (an old/absent server, or a genuine
+   * network error) into "nothing to show" rather than a crash.
+   */
+  getStreamTracks(streamId: string): Promise<StreamTracksResponse> {
+    return firstValueFrom(
+      this.http.get<StreamTracksResponse>(`/api/streams/${encodeURIComponent(streamId)}/tracks`),
+    );
   }
 
   // --- Discovery -----------------------------------------------------------

@@ -140,6 +140,13 @@ export interface StartStreamRequest {
  * deliberately **not** fields here — not PATCH-able in v1 (docs/CV-CONTROL-PLAN.md's own non-goals:
  * `overlayBurnIn` changes the encode path, `eventRule` is bound into the event engine at stream
  * start). Start-time only, via `StartStreamRequest` above.
+ *
+ * `tracking` (docs/TRACKING-PLAN.md §4.D, wave T7) is a **third**, independent family of change
+ * alongside the hot knobs above and `model` — never coalesced with either
+ * (`cv-control-panel-logic.ts#buildTrackingModePatch`/`buildTrackingEnginePatch`/
+ * `buildTrackingCadencePatch`/`buildFollowLockPatch`/`buildReleaseLockPatch` each build a
+ * `tracking`-only patch). See {@link TrackingConfigRequest}'s own doc comment for the one-of-three
+ * `lock` rule.
  */
 export interface UpdateStreamConfigRequest {
   readonly confidenceThreshold?: number;
@@ -147,6 +154,7 @@ export interface UpdateStreamConfigRequest {
   readonly labelFilter?: readonly string[];
   readonly detectionEnabled?: boolean;
   readonly model?: string;
+  readonly tracking?: TrackingConfigRequest;
 }
 
 /**
@@ -156,10 +164,21 @@ export interface UpdateStreamConfigRequest {
  * interrupted, per docs/CV-CONTROL-PLAN.md §A) — `cv-control-panel-logic.ts#reArmHint` is the one
  * place this app turns that into operator-facing copy; `404`/`400`/`409` never reach this type at
  * all (an `HttpErrorResponse`, decoded by the caller via `describeHttpError`).
+ *
+ * `trackingChanged` (docs/TRACKING-PLAN.md §4.D, wave T7) is `true` iff the request's `tracking`
+ * object was present **and** produced a different `TrackingConfig` than the one already running — a
+ * mode/engine change never re-arms the detector, tracking is a hot knob throughout exactly like
+ * confidence/fps. Typed **optional** rather than required, unlike `modelReArmed`: this field is added
+ * server-side by docs/TRACKING-PLAN.md wave T6, which lands after this one — a backend this app talks
+ * to before T6 ships simply omits it, and no reader here should assume a missing key means `false`.
+ * The Fly cockpit's own "Following #N" chip does **not** read this flag at all — see
+ * `StreamTracksResponse#lockedTrackId`'s own doc comment for why a lock's confirmation comes from a
+ * different, polled response instead (docs/TRACKING-ORCHESTRATION.md §3.3's honesty rule).
  */
 export interface PatchStreamConfigResponse {
   readonly streamId: string;
   readonly modelReArmed: boolean;
+  readonly trackingChanged?: boolean;
 }
 
 /**
@@ -200,6 +219,212 @@ export interface CvModel {
  * class's own doc comment). */
 export interface CvModelsResponse {
   readonly models: readonly CvModel[];
+}
+
+// --- Tracking engine (docs/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
+// Two perception loops per stream (`ASSOCIATE`: every detection gets a stable id that survives a
+// brief occlusion; `FOLLOW`: one locked target, the detector duty-cycled to a periodic verify pass)
+// — `features/fly/cv-control-panel.ts`'s new Tracking section + flow strip, `shared/player/player.ts`'s
+// track-aware box label/color/dashed-COASTING/trails/click-to-follow. **The backend for this wire
+// contract had not shipped when this wave landed** (docs/TRACKING-PLAN.md §7: T0-T6 land concurrently,
+// T7 integrates last against the frozen contract with nothing live to test against) — every reader
+// below treats every field on this page as possibly absent (an old server, or no server at all yet)
+// and degrades to "hidden"/"—", exactly this file's own long-standing convention, doubly load-bearing
+// here since it was written ahead of the thing it describes.
+
+/** Mirrors `domain.model.TrackingMode` — `OFF` (today's behavior, byte-identical, the default until
+ *  docs/TRACKING-PLAN.md wave T8 flips it), `ASSOCIATE` (every detection gets a stable id),
+ *  `FOLLOW` (one locked target; the detector duty-cycles down to a periodic verify pass). */
+export type TrackingMode = 'OFF' | 'ASSOCIATE' | 'FOLLOW';
+
+/**
+ * Mirrors `domain.model.TrackState` — the track lifecycle (docs/TRACKING-PLAN.md §3.2):
+ * `TENTATIVE` (born, below `minHits` detector confirmations — not yet a stable identity) →
+ * `CONFIRMED` (a real, confirmed object) → `COASTING` (tracker-predicted only; the detector hasn't
+ * re-confirmed it on the most recent pass — renders as a **dashed** box, the system visibly saying
+ * "I am extrapolating, not seeing") → `LOST` (unmatched past `maxAgeFrames`, kept briefly so a
+ * re-appearance after an occlusion recovers the same id).
+ */
+export type TrackState = 'TENTATIVE' | 'CONFIRMED' | 'COASTING' | 'LOST';
+
+/** Mirrors `domain.model.DetectionSource` — which loop produced this particular box on this particular frame. */
+export type DetectionSource = 'DETECTOR' | 'TRACKER';
+
+/**
+ * Mirrors `domain.model.DetectorReason` — *why* a detector pass was spent on a frame, paired with
+ * `FrameTracking#detectorRan` (which only says *whether*) — docs/TRACKING-ORCHESTRATION.md §5.1;
+ * without this, "why is the detector still running in FOLLOW mode?" is answerable only by reading
+ * cv-service logs on whichever box it happens to run on. The wire's `DETECTOR_REASON_UNSPECIFIED`
+ * sentinel (old server, or no pass ran this particular frame) never reaches here as a seventh member
+ * — same absent-not-guessed convention as every other sentinel in this file.
+ */
+export type DetectorReason =
+  | 'ALWAYS'
+  | 'CADENCE'
+  | 'TRACKER_FAILED'
+  | 'NO_LOCK'
+  | 'BOX_INVALID'
+  | 'COASTED_OUT';
+
+/**
+ * Mirrors the nested `"track"` object on `dto.DetectionResponse` (docs/TRACKING-PLAN.md §4.G,
+ * docs/TRACKING-ORCHESTRATION.md §5.3) — **grouped, not five flat fields**, so a single
+ * `detection.track?.id` check gates all track-aware rendering (the `#id` label prefix, a per-track
+ * box color, the dashed `COASTING` stroke, trails, click-to-follow) rather than several fields that
+ * could disagree with each other. Absent entirely for an untracked detection — mode `OFF`, or a
+ * detection `ASSOCIATE`/`FOLLOW` hasn't (yet) assigned a `TENTATIVE`-or-above id to; the wire's
+ * `track_id == 0` sentinel never reaches here as `id: 0` (mirrors `LayerGrant`/every other
+ * absent-not-zero rule in this file). `ageFrames` deliberately doesn't ride here — it's
+ * `StreamTrack`'s own book-keeping, not something a box needs six times a second (§4.G's own note).
+ */
+export interface DetectionTrack {
+  readonly id: number;
+  readonly state: TrackState;
+  readonly source: DetectionSource;
+  readonly velocityX: number;
+  readonly velocityY: number;
+}
+
+/**
+ * Mirrors the nested `"tracking"` object on `dto.DetectionResultResponse` (docs/TRACKING-PLAN.md
+ * §4.G) — one frame's duty-cycle facts, riding beside `detections` rather than flattened onto
+ * `DetectionResult` (docs/TRACKING-ORCHESTRATION.md §5.2's own gap fix: `DetectionResult` had
+ * nowhere to carry `detectorRan` before `TrackingTelemetry` existed). Absent entirely while tracking
+ * is off for this stream, or on an old server — never a batch of zeroed-out fields.
+ */
+export interface FrameTracking {
+  readonly detectorRan: boolean;
+  readonly detectorReason: DetectorReason;
+  readonly trackerMillis: number;
+  readonly engineId: string;
+  readonly lockedTrackId: number;
+}
+
+/**
+ * Mirrors the `lock` object nested inside `tracking` on `PATCH .../config` (docs/TRACKING-PLAN.md
+ * §4.D) — exactly one of `trackId` / (`pointX` + `pointY`) / `release` may be present; sending two
+ * of the three is a server-validated **400** (not re-checked client-side — every builder in
+ * `cv-control-panel-logic.ts` only ever populates one form at a time). `lockSeq` is never sent by a
+ * client at all — the server allocates it per stream (`DefaultStreamService`'s own monotonic
+ * counter), so unlike the domain's own `TargetLock` this type has no such field.
+ */
+export interface TargetLockRequest {
+  readonly trackId?: number;
+  readonly pointX?: number;
+  readonly pointY?: number;
+  readonly release?: boolean;
+}
+
+/**
+ * Mirrors the `tracking` object accepted by `PATCH /api/streams/{streamId}/config` (docs/TRACKING-PLAN.md
+ * §4.D) — every field independently optional, the same partial-patch convention
+ * `UpdateStreamConfigRequest` itself already follows: an absent field leaves that knob exactly as it
+ * is. `redetectIouPercent` is an `int` percent (0-100), not a fraction — matches the domain's own
+ * `TrackingConfig` (§4.B); converted to the proto's `float` fraction server-side, never here.
+ */
+export interface TrackingConfigRequest {
+  readonly mode?: TrackingMode;
+  readonly engineId?: string;
+  readonly verifyEveryMillis?: number;
+  readonly followFps?: number;
+  readonly redetectIouPercent?: number;
+  readonly maxAgeFrames?: number;
+  readonly minHits?: number;
+  readonly lock?: TargetLockRequest;
+}
+
+/**
+ * Mirrors the `"stats"` object of `GET /api/streams/{streamId}/tracks`'s 200 body (docs/TRACKING-PLAN.md
+ * §4.E) — computed **Java-side** by `TrackingStatsWindow` from responses already flowing through the
+ * pipeline (no new wire field, no cv-service read-model concern — invariant P3). Backs the Fly
+ * cockpit's flow strip (docs/TRACKING-ORCHESTRATION.md §7, the plan's own "visible flow" deliverable)
+ * — the one place this app turns the "the detector stopped running, the tracker took over" claim
+ * into something read off the screen. **Absent entirely** (not a zeroed object) whenever the endpoint
+ * has nothing to report yet — mode `OFF` with no tracking session ever configured, or an old/absent
+ * server — so the flow strip hides itself rather than showing a strip of zeros
+ * (`cv-control-panel-logic.ts#formatFlowStrip`'s caller checks this before ever calling it).
+ *
+ * `engineId` is the engine **actually serving** this stream right now, not necessarily the one the
+ * operator last requested (docs/TRACKING-PLAN.md R11 — a requested engine can fail to construct and
+ * fall back to the mode's default). The flow strip, and the Tracking section's own engine-picker
+ * selected-state, both read this field for exactly that reason — never the locally-drafted request.
+ */
+export interface TrackStats {
+  readonly mode: TrackingMode;
+  readonly engineId: string;
+  readonly windowSeconds: number;
+  readonly detectorPasses: number;
+  readonly trackerFrames: number;
+  readonly dutyRatio: number;
+  readonly trackerMillisP50: number;
+  readonly trackerMillisP95: number;
+  readonly lastDetectorReason: DetectorReason;
+  readonly byState: Readonly<Record<TrackState, number>>;
+}
+
+/**
+ * One row of `GET /api/streams/{streamId}/tracks`'s `"tracks"` array (docs/TRACKING-PLAN.md §4.E) —
+ * the application layer's track-book entry (`TrackedObject`, made live by this plan after sitting as
+ * a dead type — see that record's own Java doc comment), ordered by `trackId` ascending server-side.
+ * The exact backend DTO class name isn't pinned yet (T6 lands after this wave, docs/TRACKING-PLAN.md
+ * §7) — this mirrors the *JSON shape* §4.E froze, not a specific Java type name.
+ */
+export interface StreamTrack {
+  readonly trackId: number;
+  readonly label: string;
+  readonly confidence: number;
+  readonly box: BoundingBox;
+  readonly state: TrackState;
+  readonly source: DetectionSource;
+  readonly velocityX: number;
+  readonly velocityY: number;
+  readonly ageFrames: number;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+}
+
+/**
+ * Mirrors `GET /api/streams/{streamId}/tracks`'s 200 body (docs/TRACKING-PLAN.md §4.E) — never
+ * errors server-side; an unknown/stopped stream returns an empty `tracks` list and `lockedTrackId:
+ * 0` (the same forgiving idiom `GET .../detections` already uses). A **transport failure** (this
+ * endpoint not existing yet on an old/absent server, or a genuine network error) is therefore the
+ * only "nothing to show" case a reader needs to handle — see `FleetStore.getStreamTracks`'s own doc
+ * comment for how that degrades (silently, no toast — a background enrichment poll).
+ *
+ * `lockedTrackId` is `0` when no lock is held — the wire's own "not this" sentinel, never `null`/
+ * absent, mirroring the domain's own `TargetLock`/`lockedTrackId` convention. **This is the field
+ * the Fly cockpit's "Following #N — release" chip gates on**: the chip renders only once this
+ * response confirms a lock, never from local click intent (docs/TRACKING-ORCHESTRATION.md §3.3's
+ * honesty rule) — see `cv-control-panel.ts`'s own doc comment.
+ */
+export interface StreamTracksResponse {
+  readonly streamId: string;
+  readonly lockedTrackId: number;
+  readonly tracks: readonly StreamTrack[];
+  readonly stats?: TrackStats;
+}
+
+/**
+ * Mirrors one entry of `GET /api/cv/trackers`'s roster (docs/TRACKING-PLAN.md §4.F) — the Tracking
+ * section's engine picker, filtered to whichever `modes` include the currently-selected
+ * `TrackingMode` (`cv-control-panel-logic.ts#engineOptionsForMode`). Config-backed and static, like
+ * `CvModel`'s own roster — "changes at deploy time, not runtime" (docs/CV-CONTROL-PLAN.md §D's frozen
+ * decision, mirrored here for trackers) — fetched once, never re-polled. `needsAssets` is unused by
+ * every one of this wave's three built-in engines (`bytetrack`/`lk`/`ncc`, all `false`) but mirrored
+ * from the wire for the deferred ONNX engines (docs/TRACKING-PLAN.md §5.B) that will eventually need it.
+ */
+export interface CvTracker {
+  readonly id: string;
+  readonly displayName: string;
+  readonly modes: readonly TrackingMode[];
+  readonly needsAssets: boolean;
+  readonly costHint: string;
+}
+
+/** Mirrors `GET /api/cv/trackers`'s 200 body — never errors server-side, always at least the
+ *  built-in roster (docs/TRACKING-PLAN.md §4.F), the same "wrapped list" shape as `CvModelsResponse`. */
+export interface CvTrackersResponse {
+  readonly trackers: readonly CvTracker[];
 }
 
 /** Mirrors `dto.StartStreamResponse`. `whepUrl` follows the same absolute-origin rule as `ActiveStream#whepUrl`. */
@@ -593,19 +818,29 @@ export interface BoundingBox {
   readonly height: number;
 }
 
-/** Mirrors `dto.DetectionResponse`, embedded in `DetectionResult#detections`. */
+/**
+ * Mirrors `dto.DetectionResponse`, embedded in `DetectionResult#detections`. `track` is this
+ * cycle's own addition (docs/TRACKING-PLAN.md §4.G, see {@link DetectionTrack}'s own doc comment) —
+ * absent for an untracked detection, which is every detection today and every detection on a
+ * pre-tracking server; `shared/player/player.ts`'s box label/color/dashed-stroke/trails/click-to-
+ * follow all gate on this one field.
+ */
 export interface Detection {
   readonly label: string;
   readonly confidence: number;
   readonly box: BoundingBox;
   readonly modelId: string;
   readonly modelVersion: string;
+  readonly track?: DetectionTrack;
 }
 
 /**
  * Mirrors `dto.DetectionResultResponse`, the body element of `GET
  * /api/streams/{streamId}/detections` (docs/MVP1-PLAN.md §C8 bullet 3) — one completed inference
- * result. Backs the Live page's detections strip (`core/detections/detections-store.ts`).
+ * result. Backs the Live page's detections strip (`core/detections/detections-store.ts`) and, via
+ * the same store, the Fly cockpit's player overlay + trails. `tracking` is this cycle's own addition
+ * (docs/TRACKING-PLAN.md §4.G, see {@link FrameTracking}'s own doc comment) — absent while tracking
+ * is off for this stream, or on a pre-tracking server.
  */
 export interface DetectionResult {
   readonly streamId: string;
@@ -613,6 +848,7 @@ export interface DetectionResult {
   readonly capturedAt: string;
   readonly inferenceMillis: number;
   readonly detections: readonly Detection[];
+  readonly tracking?: FrameTracking;
 }
 
 /**
