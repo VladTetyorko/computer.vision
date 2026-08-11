@@ -2,11 +2,16 @@ package com.drones.vision.adapter.overlay;
 
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Detection;
+import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.domain.model.TrackState;
 
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
+import java.awt.Stroke;
 import java.util.Locale;
 
 /**
@@ -15,6 +20,12 @@ import java.util.Locale;
  * Label→color assignment ({@link Java2DOverlayRenderer#colorForLabel})
  * deliberately stays on the renderer, not here — its palette length is baked
  * into pixel-probe test expectations and must not move (§1.3).
+ *
+ * <p>Track rendering (docs/TRACKING-PLAN.md §7, wave T5): when {@link
+ * Detection#track()} is present, the label bar is prefixed {@code "#<id>
+ * "} and the box colors by {@link Java2DOverlayRenderer#colorForTrack}
+ * instead of {@link Java2DOverlayRenderer#colorForLabel} — an untracked
+ * detection is rendered exactly as before this wave, byte-identical.</p>
  */
 final class DetectionBoxPainter {
 
@@ -36,6 +47,14 @@ final class DetectionBoxPainter {
      * 1.0} edge, or the domain does not guarantee {@code x+width <= 1}), then
      * draws its border and label. A box clipped down to zero width/height is
      * simply not drawn.
+     *
+     * <p>A tracked detection ({@link Detection#track()} non-null) colors by
+     * track id ({@link Java2DOverlayRenderer#colorForTrack}) instead of by
+     * label, and its label bar is prefixed {@code "#<id>"}; a {@link
+     * TrackState#COASTING} track additionally draws a dashed rather than
+     * solid border, so an operator can see the system is extrapolating
+     * rather than seeing (docs/TRACKING-PLAN.md §3.2). An untracked
+     * detection is unaffected by any of this.
      */
     void draw(Graphics2D g, int frameWidth, int frameHeight, Detection detection) {
         BoundingBox box = detection.box();
@@ -47,12 +66,34 @@ final class DetectionBoxPainter {
             return;
         }
 
-        Color color = Java2DOverlayRenderer.colorForLabel(detection.label());
+        TrackRef track = detection.track();
+        Color color = track != null
+                ? Java2DOverlayRenderer.colorForTrack(track.trackId())
+                : Java2DOverlayRenderer.colorForLabel(detection.label());
         int strokeWidth = Math.max(minStrokeWidth, Math.min(frameWidth, frameHeight) / strokeDivisor);
-        drawInsetBorder(g, x, y, w, h, strokeWidth, color);
+        if (track != null && track.state() == TrackState.COASTING) {
+            drawDashedBorder(g, x, y, w, h, strokeWidth, color);
+        } else {
+            drawInsetBorder(g, x, y, w, h, strokeWidth, color);
+        }
 
-        String text = String.format(Locale.ROOT, "%s %.2f", detection.label(), detection.confidence());
-        drawLabel(g, x, y, frameWidth, frameHeight, text, color);
+        drawLabel(g, x, y, frameWidth, frameHeight, labelText(detection), color);
+    }
+
+    /**
+     * {@code "#<trackId> <label> <confidence>"} when {@link
+     * Detection#track()} is present, unchanged {@code "<label>
+     * <confidence>"} otherwise (docs/TRACKING-PLAN.md §7, wave T5).
+     * Package-private so it can be asserted directly, without going through
+     * {@code FontMetrics}-dependent pixel geometry (this module's
+     * determinism convention — label bar pixel positions are never
+     * asserted exactly in tests).
+     */
+    static String labelText(Detection detection) {
+        TrackRef track = detection.track();
+        return track != null
+                ? String.format(Locale.ROOT, "#%d %s %.2f", track.trackId(), detection.label(), detection.confidence())
+                : String.format(Locale.ROOT, "%s %.2f", detection.label(), detection.confidence());
     }
 
     /**
@@ -68,6 +109,31 @@ final class DetectionBoxPainter {
         g.fillRect(x, y + h - thickness, w, thickness);   // bottom
         g.fillRect(x, y, thickness, h);                   // left
         g.fillRect(x + w - thickness, y, thickness, h);   // right
+    }
+
+    /**
+     * Draws a dashed rectangle for a {@link TrackState#COASTING} track —
+     * the tracker is extrapolating the box, not re-confirming it against a
+     * fresh detector pass (docs/TRACKING-PLAN.md §3.2). Unlike {@link
+     * #drawInsetBorder}'s four filled strips, a dashed line has no
+     * fillRect-exact equivalent; it goes through a real {@link Stroke} and
+     * {@link Graphics2D#draw(java.awt.Shape)} instead. Per this module's
+     * determinism convention (adapter-overlay/MODULE.md) its rasterized
+     * pixels are therefore never pixel-probed in a test — only that this
+     * method, and not {@link #drawInsetBorder}, ran for a coasting track.
+     * The caller's {@link Graphics2D} paint/stroke state is restored before
+     * returning, so a later draw call (the label bar) is unaffected.
+     */
+    private static void drawDashedBorder(Graphics2D g, int x, int y, int w, int h, int strokeWidth, Color color) {
+        Stroke previousStroke = g.getStroke();
+        Color previousColor = g.getColor();
+        float dash = Math.max(1f, strokeWidth * 2f);
+        g.setColor(color);
+        g.setStroke(new BasicStroke(strokeWidth, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+                10f, new float[] {dash, dash}, 0f));
+        g.draw(new Rectangle(x, y, Math.max(w - 1, 0), Math.max(h - 1, 0)));
+        g.setStroke(previousStroke);
+        g.setColor(previousColor);
     }
 
     private void drawLabel(Graphics2D g, int boxX, int boxY, int frameWidth, int frameHeight,

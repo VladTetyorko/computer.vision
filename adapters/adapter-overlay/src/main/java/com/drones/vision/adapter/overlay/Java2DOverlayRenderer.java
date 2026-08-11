@@ -152,4 +152,23 @@ public final class Java2DOverlayRenderer implements OverlayPort {
         int index = Math.floorMod(label.hashCode(), LABEL_PALETTE.length);
         return LABEL_PALETTE[index];
     }
+
+    /**
+     * Assigns a stable color to a track by hashing its numeric id into the
+     * same {@link #LABEL_PALETTE} {@link #colorForLabel} draws from, so a
+     * tracked detection keeps one color for the life of its track even when
+     * its label flips between frames (composite-mode detectors can report
+     * different labels for the same physical object,
+     * docs/TRACKING-PLAN.md §9 risk R9) — coloring by id rather than by
+     * label is exactly what makes that stable. An untracked detection is
+     * unaffected: it still colors by {@link #colorForLabel}.
+     *
+     * <p>Package-private for the same reason {@link #colorForLabel} is:
+     * {@link DetectionBoxPainter} calls back into this method rather than
+     * owning its own copy, and tests assert the mapping directly.
+     */
+    static Color colorForTrack(long trackId) {
+        int index = Math.floorMod(trackId, LABEL_PALETTE.length);
+        return LABEL_PALETTE[index];
+    }
 }
