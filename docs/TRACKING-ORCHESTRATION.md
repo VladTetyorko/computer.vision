@@ -315,7 +315,7 @@ already arrive — no new wire field, no new endpoint, and cv-service stays free
 
 ## 6. DTO scalability rules
 
-Five rules. Every wave that adds a field obeys them; a reviewer can check them mechanically.
+Six rules. Every wave that adds a field obeys them; a reviewer can check them mechanically.
 
 1. **Group, don't widen.** A new track fact is a key inside the existing group (`TrackRef`,
    `"track"`, `TrackingTelemetry`, `"tracking"`), never a new sibling field on the parent. Two flat
@@ -331,6 +331,15 @@ Five rules. Every wave that adds a field obeys them; a reviewer can check them m
 5. **Per-frame payload budget.** `TrackingConfig` restated every frame is ~30–40 bytes against a
    ~80 KB downscaled JPEG — **≈0.05%**. Recorded so the restated-config design is never re-litigated
    on bandwidth grounds; if a future field would move that materially, it does not belong per-frame.
+6. **A convenience constructor is for *construction*, never *reconstruction*.** Any code that
+   rebuilds a record from an existing one — a filter, a mapper, a copy-with-one-change — must use the
+   **canonical** constructor, or it silently drops every component the convenience ctor defaults.
+   This is the cost of the N-1-arg idiom that keeps call sites compiling, and it fails **silently**:
+   the build stays green and a field just goes missing at runtime. Wave T3 found exactly two of these
+   left by T2 (`applyLabelFilter` dropping `tracking()`, `extrapolate` dropping `track()`), which
+   between them would have emptied every label-filtered stream's stats window and stripped `#id` and
+   the `COASTING` dashes from every burned-in box. **When adding a component to an existing record,
+   grep for every site that rebuilds it** — the compiler will not.
 
 ---
 
