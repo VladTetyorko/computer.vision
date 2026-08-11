@@ -1,6 +1,6 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.kernel.CategoryId;
 
 import java.util.List;
 
@@ -8,7 +8,7 @@ import java.util.List;
  * {@link DatasetService#create}'s command record (docs/plans/done/CV-TRAINING-PLAN.md §2/§3) — the wire
  * shape for {@code POST /api/datasets}.
  *
- * <p>Duplicates {@link com.drones.vision.domain.model.Dataset}'s own blank-name check so a
+ * <p>Duplicates {@link com.drones.vision.learning.domain.model.Dataset}'s own blank-name check so a
  * malformed request fails fast before ever reaching the repository, the same reasoning {@code
  * GeofenceZoneSpec}/{@code MarkSpec} already apply to their own domain counterparts.
  *

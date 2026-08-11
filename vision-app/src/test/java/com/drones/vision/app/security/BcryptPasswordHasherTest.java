@@ -1,6 +1,6 @@
 package com.drones.vision.app.security;
 
-import com.drones.vision.domain.port.out.PasswordHasherPort;
+import com.drones.vision.identity.domain.port.PasswordHasherPort;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;

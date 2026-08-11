@@ -1,17 +1,17 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetStatus;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.DatasetRepositoryPort;
+import com.drones.vision.identity.domain.model.AuditAction;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.learning.domain.model.Dataset;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetStatus;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

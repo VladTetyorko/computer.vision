@@ -1,8 +1,8 @@
 package com.drones.vision.application.stream;
 
-import com.drones.vision.domain.model.TargetLock;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TargetLock;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
 
 import java.util.Objects;
 import java.util.function.LongSupplier;

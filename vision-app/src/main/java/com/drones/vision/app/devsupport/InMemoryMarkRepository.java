@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkId;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkId;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
 
 import java.util.List;
 import java.util.Map;

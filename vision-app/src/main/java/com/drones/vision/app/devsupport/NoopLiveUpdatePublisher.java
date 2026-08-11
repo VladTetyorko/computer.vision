@@ -1,12 +1,12 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 /**
  * No-op {@link LiveUpdatePublisherPort}: every method is a no-op. Wired when {@code

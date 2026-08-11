@@ -1,7 +1,7 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.port.out.ModelRegistryPort;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.learning.domain.port.ModelRegistryPort;
 
 import java.util.Objects;
 

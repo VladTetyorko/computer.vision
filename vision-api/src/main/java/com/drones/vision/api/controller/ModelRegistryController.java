@@ -5,7 +5,7 @@ import com.drones.vision.api.dto.RegisteredModelResponse;
 import com.drones.vision.api.dto.RegisteredModelsResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.training.ModelRegistryService;
-import com.drones.vision.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ModelRef;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;

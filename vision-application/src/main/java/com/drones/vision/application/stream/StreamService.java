@@ -1,11 +1,11 @@
 package com.drones.vision.application.stream;
 
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrackedObject;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -42,7 +42,7 @@ public interface StreamService {
      * Opens a stream for a device and starts its pipeline, stating the caller's tracking wishes
      * separately from the rest of the configuration (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.1).
      *
-     * <p>The new stream's {@link com.drones.vision.domain.model.TrackingConfig} is composed here from
+     * <p>The new stream's {@link com.drones.vision.perception.domain.model.TrackingConfig} is composed here from
      * all three configuration layers, precedence running strictly left to right: <b>{@code tracking}
      * &gt; the deployment seed ({@code vision.tracking.*}, carried on {@link
      * com.drones.vision.application.pipeline.StreamPipelineSettings#trackingSeed()}) &gt; {@code
@@ -60,7 +60,7 @@ public interface StreamService {
      * @throws java.util.NoSuchElementException if no device has that id
      * @throws IllegalStateException            if the device is not in service, or already streaming
      * @throws IllegalArgumentException         if the composed tracking configuration fails {@link
-     *                                           com.drones.vision.domain.model.TrackingConfig}'s own
+     *                                           com.drones.vision.perception.domain.model.TrackingConfig}'s own
      *                                           validation
      */
     StreamId start(DeviceId deviceId, PipelineConfig config, TrackingConfigPatch tracking);
@@ -89,7 +89,7 @@ public interface StreamService {
     /**
      * The most recently published frame on a running stream (docs/plans/done/MVP3-PLAN.md C-a) — post-overlay
      * burn-in when one was drawn, exactly the instance the pipeline last handed to {@link
-     * com.drones.vision.domain.port.out.StreamPublisherPort#publish}. Backs the per-stream JPEG
+     * com.drones.vision.perception.domain.port.StreamPublisherPort#publish}. Backs the per-stream JPEG
      * snapshot endpoint.
      *
      * @param streamId the stream to inspect

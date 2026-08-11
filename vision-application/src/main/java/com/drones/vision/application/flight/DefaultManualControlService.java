@@ -1,17 +1,17 @@
 package com.drones.vision.application.flight;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.ChannelMap;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.RcChannels;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.ManualControlLink;
-import com.drones.vision.domain.port.out.ManualControlPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.identity.domain.model.AuditAction;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.flight.domain.model.RcChannels;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.flight.domain.port.ManualControlLink;
+import com.drones.vision.flight.domain.port.ManualControlPort;
 
 import java.time.Clock;
 import java.time.Duration;

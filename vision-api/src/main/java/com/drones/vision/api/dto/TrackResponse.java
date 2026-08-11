@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.TrackRef;
-import com.drones.vision.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackedObject;
 
 import java.time.Instant;
 

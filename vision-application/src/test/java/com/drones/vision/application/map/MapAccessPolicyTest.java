@@ -1,15 +1,15 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.AccessLevel;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerGrant;
-import com.drones.vision.domain.model.LayerGrant.SubjectType;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.map.domain.model.AccessLevel;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerGrant;
+import com.drones.vision.map.domain.model.LayerGrant.SubjectType;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;

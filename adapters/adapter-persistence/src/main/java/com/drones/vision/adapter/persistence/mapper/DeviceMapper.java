@@ -1,9 +1,9 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import java.net.URI;
 

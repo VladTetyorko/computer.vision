@@ -6,7 +6,7 @@ import com.drones.vision.api.dto.PatchDrawingRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.application.map.DrawingService;
-import com.drones.vision.domain.model.DrawingId;
+import com.drones.vision.map.domain.model.DrawingId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

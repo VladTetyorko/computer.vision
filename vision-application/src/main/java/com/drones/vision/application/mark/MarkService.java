@@ -1,10 +1,10 @@
 package com.drones.vision.application.mark;
 
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkId;
-import com.drones.vision.domain.model.MarkStatus;
-import com.drones.vision.domain.model.Verification.VerificationState;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkId;
+import com.drones.vision.map.domain.model.MarkStatus;
+import com.drones.vision.map.domain.model.Verification.VerificationState;
 
 import java.util.List;
 import com.drones.vision.application.map.MapAccessPolicy;
@@ -27,7 +27,7 @@ import com.drones.vision.application.map.MapLayerService;
  * workaround for a trap in {@code VisibilityScope}: a PILOT's {@code ASSIGNED_ASSETS} scope carries
  * no group information, so group-filtering hid every mark from the primary FPV-operator persona,
  * including their own. This rework fixes that properly instead of routing around it: every mark now
- * lives on a {@link com.drones.vision.domain.model.MapLayer}, and {@link #list} filters to layers
+ * lives on a {@link com.drones.vision.map.domain.model.MapLayer}, and {@link #list} filters to layers
  * {@link MapAccessPolicy#canView} for the given {@link Viewer} — built from identity and group
  * membership directly, never from {@code VisibilityScope} (see {@link MapAccessPolicy}'s own javadoc
  * for exactly why). A PILOT reaches the COP layer (everyone can view it) and their own team's layer
@@ -38,7 +38,7 @@ import com.drones.vision.application.map.MapLayerService;
  * Creating/geolocating a mark requires {@link MapAccessPolicy#canContribute} on the resolved layer
  * (explicit, or the creator's default layer if none is given — see {@code LayerResolver
  * #defaultLayerFor}). Editing/clearing/deleting a mark is gated on: the mark's own creator, while its
- * {@link com.drones.vision.domain.model.Verification} is still {@code UNVERIFIED}; or {@link
+ * {@link com.drones.vision.map.domain.model.Verification} is still {@code UNVERIFIED}; or {@link
  * MapAccessPolicy#canManage} on its layer, unconditionally — once a mark is {@code CONFIRMED}, its
  * creator loses the standing edit right and only a manager may touch it. {@link #verify} requires
  * {@link MapAccessPolicy#canManage} on the mark's current layer. {@link #promote} requires {@link
@@ -53,8 +53,8 @@ import com.drones.vision.application.map.MapLayerService;
  *
  * <h2>Live broadcast</h2>
  * Every create/patch/verify/promote/delete publishes a {@link
- * com.drones.vision.domain.model.MapEvent} through {@link
- * com.drones.vision.domain.port.out.LiveUpdatePublisherPort#publishMapEvent}, so the shared picture
+ * com.drones.vision.map.domain.model.MapEvent} through {@link
+ * com.drones.vision.events.domain.port.LiveUpdatePublisherPort#publishMapEvent}, so the shared picture
  * stays live for every viewer whose {@link Viewer} may see the event's layer (scoped SSE delivery is
  * a Wave C concern). {@link #patch} publishes {@code CLEARED} when the patch flips {@link
  * #patch}'s status to {@link MarkStatus#CLEARED}, {@code UPDATED} otherwise; {@link #delete} now

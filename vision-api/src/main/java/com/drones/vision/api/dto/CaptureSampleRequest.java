@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetId;
 
 /**
  * Request body for {@code POST /api/streams/{streamId}/samples} (docs/plans/done/CV-TRAINING-PLAN.md §3's

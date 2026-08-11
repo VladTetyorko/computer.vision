@@ -1,5 +1,25 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.flight.domain.port.FlightCommandPort;
+import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
+import com.drones.vision.flight.domain.port.ManualControlPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetrySourcePort;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.map.domain.port.DrawingRepositoryPort;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionPort;
+import com.drones.vision.perception.domain.port.OverlayPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
@@ -29,7 +49,7 @@ import com.drones.vision.application.replay.*;
 import com.drones.vision.application.simulation.*;
 import com.drones.vision.application.stream.*;
 import com.drones.vision.application.usage.*;
-import com.drones.vision.domain.port.out.*;
+
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -192,7 +212,7 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Drives {@link com.drones.vision.domain.model.AssetUsage} lifecycle and telemetry sampling
+     * Drives {@link com.drones.vision.flight.domain.model.AssetUsage} lifecycle and telemetry sampling
      * from {@link StreamService}'s start/stop notifications. {@code liveUpdatePublisherPort} and
      * {@code geofenceMonitor} are threaded through unconditionally — both are always real beans.
      */

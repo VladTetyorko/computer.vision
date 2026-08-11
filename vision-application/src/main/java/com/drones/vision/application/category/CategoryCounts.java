@@ -1,6 +1,6 @@
 package com.drones.vision.application.category;
 
-import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.application.asset.AssetSummary;
 import com.drones.vision.application.fleet.FleetSummaryService;
 
@@ -13,7 +13,7 @@ import com.drones.vision.application.fleet.FleetSummaryService;
  * @param categoryName human-readable name (mirrors {@link AssetSummary#categoryName()})
  * @param total        every asset in this category in scope for this summary (see {@link
  *                     FleetSummaryService#summary(boolean)}'s {@code includeArchived})
- * @param active       {@code total}'s subset in {@link com.drones.vision.domain.model.LifecycleState#ACTIVE}
+ * @param active       {@code total}'s subset in {@link com.drones.vision.kernel.LifecycleState#ACTIVE}
  * @param deactivated  {@code total}'s subset in {@code DEACTIVATED}
  * @param deleted      {@code total}'s subset in {@code DELETED} (only non-zero when the summary
  *                     included archived assets)

@@ -1,7 +1,7 @@
 package com.drones.vision.application.simulation;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.StreamId;
 
 /**
  * What {@link SimulationService#simulate} produced: the newly created asset, and — when

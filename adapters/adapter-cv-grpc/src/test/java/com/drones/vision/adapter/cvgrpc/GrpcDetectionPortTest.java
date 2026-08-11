@@ -1,16 +1,16 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.EventRuleConfig;
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TargetLock;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TargetLock;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
 import com.drones.vision.proto.v1.ImageEncoding;
@@ -758,7 +758,7 @@ class GrpcDetectionPortTest {
 
     /**
      * Frame 0's response carries one {@code Detection} with a non-finite {@code velocity_x} (a
-     * malformed track field: {@link com.drones.vision.domain.model.TrackRef} requires finite
+     * malformed track field: {@link com.drones.vision.perception.domain.model.TrackRef} requires finite
      * velocities) inside an already-open session; every later frame on the same session echoes back
      * a plain, valid response.
      */

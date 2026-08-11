@@ -1,13 +1,13 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.DrawingId;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.map.domain.model.DrawingId;
 
 import java.util.List;
 import com.drones.vision.application.map.MapAccessPolicy.Viewer;
 
 /**
- * Lines, polygons, arrows and text annotations on a {@link com.drones.vision.domain.model.MapLayer}
+ * Lines, polygons, arrows and text annotations on a {@link com.drones.vision.map.domain.model.MapLayer}
  * (docs/plans/done/MAP-REWORK-PLAN.md §3/§5.1) — the substrate for a later "plans" slice. One interface, one
  * implementation ({@link DefaultDrawingService}).
  *

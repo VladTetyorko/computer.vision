@@ -1,7 +1,7 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.GeoPosition;
 
 import java.time.Instant;
 

@@ -1,10 +1,10 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.RcChannels;
-import com.drones.vision.domain.port.out.ManualControlLink;
-import com.drones.vision.domain.port.out.ManualControlPort;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.flight.domain.model.RcChannels;
+import com.drones.vision.flight.domain.port.ManualControlLink;
+import com.drones.vision.flight.domain.port.ManualControlPort;
 
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.common.RcChannelsOverride;

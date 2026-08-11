@@ -1,9 +1,9 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.LifecycleState;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.application.fleet.DefaultFleetSummaryService;
 
 /**
@@ -13,7 +13,7 @@ import com.drones.vision.application.fleet.DefaultFleetSummaryService;
  *
  * <p><b>{@code sourceState} was deliberately left out</b> (docs/plans/done/MVP3-PLAN.md C-a's own instruction:
  * "if nothing is cleanly readable, omit the field and document rather than fake"). Today's {@link
- * com.drones.vision.domain.port.out.EventPublisherPort} is write-only — its only implementation
+ * com.drones.vision.events.domain.port.EventPublisherPort} is write-only — its only implementation
  * just logs, with no matching read/query port (see vision-api/MODULE.md's Gotchas, first documented
  * for {@code GET /api/events}'s inability to surface {@code PIPELINE_ERROR}) — and {@link
  * com.drones.vision.application.pipeline.SupervisedPublisher}'s in-progress-outage/backoff state is private bookkeeping inside {@link
@@ -24,7 +24,7 @@ import com.drones.vision.application.fleet.DefaultFleetSummaryService;
  * <p>{@code flightMode}/{@code armed}/{@code failsafe} (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) are a
  * different case from {@code sourceState} above, not another exception to the same rule: they are
  * cleanly readable today, straight off the freshest telemetry sample's {@link
- * com.drones.vision.domain.model.FlightState}, with the same honest-null behavior as {@code
+ * com.drones.vision.flight.domain.model.FlightState}, with the same honest-null behavior as {@code
  * batteryPercent} when no sample (or no flight state on that sample) exists — so they were added,
  * not omitted.
  *
@@ -55,7 +55,7 @@ import com.drones.vision.application.fleet.DefaultFleetSummaryService;
  *                       reported telemetry, or has but with no {@code flightState} attached
  *                       (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-b) — same honest-null discipline as {@code
  *                       batteryPercent}, not a fabricated read: this is {@link
- *                       com.drones.vision.domain.model.FlightState#mode()} carried straight
+ *                       com.drones.vision.flight.domain.model.FlightState#mode()} carried straight
  *                       through, never guessed at
  * @param armed          the freshest telemetry sample's armed flag, or {@code null} under the same
  *                       condition as {@code flightMode}

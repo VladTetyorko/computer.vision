@@ -1,9 +1,9 @@
 package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.InMemoryGroupRepository;
-import com.drones.vision.domain.model.Group;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.identity.domain.model.Group;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

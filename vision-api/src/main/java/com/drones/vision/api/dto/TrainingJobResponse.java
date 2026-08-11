@@ -24,7 +24,7 @@ import java.time.Instant;
  * @param loss        the latest reported loss
  * @param map50       the latest reported mAP@50
  * @param state       {@code RUNNING}/{@code SUCCEEDED}/{@code FAILED} — {@link
- *                    com.drones.vision.domain.model.JobState#name()} verbatim; a training failure
+ *                    com.drones.vision.learning.domain.model.JobState#name()} verbatim; a training failure
  *                    is reported here, never as an HTTP error
  * @param message     free-form text — {@code ""} before the first progress message, the produced
  *                    model id on success, the failure reason on {@code FAILED}

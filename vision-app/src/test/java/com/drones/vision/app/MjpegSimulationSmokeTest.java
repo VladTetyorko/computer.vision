@@ -1,12 +1,12 @@
 package com.drones.vision.app;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.jayway.jsonpath.JsonPath;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
@@ -45,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * — {@code MjpegFeedTransmitter} (TX) serves it as an HTTP {@code multipart/x-mixed-replace}
  * stream on its own ephemeral {@code 127.0.0.1} port, {@code MjpegVideoSource} (RX) ingests it
  * back over that same HTTP connection — through the actual production wiring from {@link
- * WiringConfiguration} (only {@link com.drones.vision.domain.port.out.StreamPublisherPort} swapped
+ * WiringConfiguration} (only {@link com.drones.vision.perception.domain.port.StreamPublisherPort} swapped
  * for a frame-recording test double, same technique as {@link FileSimulationSmokeTest}, whose
  * {@link FileSimulationSmokeTest.RecordingPublisherConfig}/{@link
  * FileSimulationSmokeTest.RecordingStreamPublisher} are reused here rather than duplicated).

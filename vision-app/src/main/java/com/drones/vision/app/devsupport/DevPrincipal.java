@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
 
 import java.util.UUID;
 

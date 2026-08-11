@@ -1,8 +1,8 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.DetectionEventResponse;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;

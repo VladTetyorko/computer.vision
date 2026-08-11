@@ -1,8 +1,8 @@
 package com.drones.vision.application.replay;
 
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.flight.domain.model.Telemetry;
 
 import java.time.Instant;
 import java.util.List;

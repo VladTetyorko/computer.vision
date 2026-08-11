@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.kernel.StreamId;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
 import com.drones.vision.proto.v1.InferenceGrpc;

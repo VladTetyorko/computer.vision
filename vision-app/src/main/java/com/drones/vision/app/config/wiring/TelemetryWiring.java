@@ -28,7 +28,7 @@ import org.springframework.context.annotation.Configuration;
 public class TelemetryWiring {
 
     /**
-     * Synthetic 1&nbsp;Hz {@link com.drones.vision.domain.port.out.TelemetrySourcePort}, collected
+     * Synthetic 1&nbsp;Hz {@link com.drones.vision.flight.domain.port.TelemetrySourcePort}, collected
      * (alongside any other registered {@code TelemetrySourcePort} beans) into {@code
      * ApplicationServiceWiring#usageTracker}'s {@code List<TelemetrySourcePort>} so a {@code sim}
      * telemetry-capable device produces a demoable usage trail with zero hardware.

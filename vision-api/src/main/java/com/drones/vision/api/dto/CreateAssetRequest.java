@@ -2,10 +2,10 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.application.asset.AssetSpec;
 import com.drones.vision.application.device.DeviceRegistration;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import java.net.URI;
 import java.util.List;

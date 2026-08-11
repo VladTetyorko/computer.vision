@@ -5,7 +5,7 @@ import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
-import com.drones.vision.domain.port.out.DetectionPort;
+import com.drones.vision.perception.domain.port.DetectionPort;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.ObjectProvider;

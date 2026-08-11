@@ -1,10 +1,10 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 
 import java.util.NoSuchElementException;
 import java.util.Objects;

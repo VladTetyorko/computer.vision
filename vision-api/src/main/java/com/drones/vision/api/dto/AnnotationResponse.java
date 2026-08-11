@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.Annotation;
 
 /**
  * Wire representation of one {@link Annotation}, embedded in {@link SampleResponse}
@@ -8,7 +8,7 @@ import com.drones.vision.domain.model.Annotation;
  *
  * @param label  class label
  * @param source {@code "MODEL"} or {@code "OPERATOR"} — the annotation's {@link
- *               com.drones.vision.domain.model.AnnotationSource}
+ *               com.drones.vision.learning.domain.model.AnnotationSource}
  * @param box    the annotated region, normalized [0,1], top-left origin
  */
 public record AnnotationResponse(String label, String source, BoundingBoxResponse box) {

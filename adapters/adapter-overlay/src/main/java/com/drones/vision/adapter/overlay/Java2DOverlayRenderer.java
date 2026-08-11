@@ -1,11 +1,11 @@
 package com.drones.vision.adapter.overlay;
 
-import com.drones.vision.domain.model.AnnotatedFrame;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.OverlayPort;
+import com.drones.vision.perception.domain.model.AnnotatedFrame;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.OverlayPort;
 
 import java.awt.Color;
 import java.awt.Graphics2D;

@@ -1,34 +1,34 @@
 package com.drones.vision.application.stream;
 
-import com.drones.vision.domain.model.AnnotatedFrame;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.EventRuleConfig;
-import com.drones.vision.domain.model.EventType;
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TargetLock;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionPort;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.DeviceRepositoryPort;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.OverlayPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
-import com.drones.vision.domain.port.out.VideoSourcePort;
+import com.drones.vision.perception.domain.model.AnnotatedFrame;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
+import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TargetLock;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionPort;
+import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.OverlayPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.perception.domain.port.VideoSourcePort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -388,7 +388,7 @@ class DefaultStreamServiceTest {
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
         Detection detection = new Detection("person", 0.9,
-                new com.drones.vision.domain.model.BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new com.drones.vision.kernel.BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
                 Duration.ZERO);
@@ -405,7 +405,7 @@ class DefaultStreamServiceTest {
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
         Detection detection = new Detection("person", 0.9,
-                new com.drones.vision.domain.model.BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new com.drones.vision.kernel.BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
                 Duration.ZERO);

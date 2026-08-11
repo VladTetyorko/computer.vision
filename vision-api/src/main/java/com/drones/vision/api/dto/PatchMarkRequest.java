@@ -2,10 +2,10 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.api.support.EnumParsing;
 import com.drones.vision.application.mark.MarkPatch;
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.MarkStatus;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.map.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.MarkStatus;
 
 import java.util.Optional;
 

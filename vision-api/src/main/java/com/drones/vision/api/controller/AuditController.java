@@ -3,8 +3,8 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.AuditEntryResponse;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.port.out.AuditTrailPort;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -77,7 +77,7 @@ public class AuditController {
             throw new IllegalArgumentException("targetType and targetId must be supplied together");
         }
 
-        List<com.drones.vision.domain.model.AuditEntry> entries = targetType == null
+        List<com.drones.vision.identity.domain.model.AuditEntry> entries = targetType == null
                 ? auditTrail.findRecent(limit)
                 : auditTrail.findByTarget(parseTargetType(targetType), targetId, limit);
         return entries.stream().map(AuditEntryResponse::from).toList();

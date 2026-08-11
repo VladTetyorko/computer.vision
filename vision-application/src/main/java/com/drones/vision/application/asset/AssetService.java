@@ -1,13 +1,13 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.LifecycleState;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.application.scope.VisibilityScope;

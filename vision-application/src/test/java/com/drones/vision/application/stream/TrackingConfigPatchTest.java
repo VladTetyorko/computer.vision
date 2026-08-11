@@ -1,8 +1,8 @@
 package com.drones.vision.application.stream;
 
-import com.drones.vision.domain.model.TargetLock;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TargetLock;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicLong;

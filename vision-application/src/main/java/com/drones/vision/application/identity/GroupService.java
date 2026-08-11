@@ -1,6 +1,6 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.Group;
+import com.drones.vision.identity.domain.model.Group;
 
 import java.util.List;
 import com.drones.vision.application.scope.AccessDeniedException;

@@ -1,9 +1,9 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.EventType;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 import java.util.Objects;
 import java.util.Set;

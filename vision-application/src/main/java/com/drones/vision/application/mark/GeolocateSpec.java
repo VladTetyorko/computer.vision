@@ -1,19 +1,19 @@
 package com.drones.vision.application.mark;
 
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MarkKind;
 import com.drones.vision.application.map.LayerResolver;
 
 /**
- * Everything needed to create a {@code DETECTION} {@link com.drones.vision.domain.model.Mark} from
+ * Everything needed to create a {@code DETECTION} {@link com.drones.vision.map.domain.model.Mark} from
  * an asset's current pose (the cockpit "geolocate" action) — docs/plans/done/MAP-REWORK-PLAN.md §3/§4.2,
  * superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape.
  *
  * <p>{@link MarkService#geolocate} resolves {@code assetId}'s freshest telemetry itself (via {@code
  * UsageTracker#latestTelemetry}) and projects a ground point via {@code
- * com.drones.vision.domain.model.GeoProjection#project} using {@link #depressionDegrees()} — this
+ * com.drones.vision.kernel.GeoProjection#project} using {@link #depressionDegrees()} — this
  * spec carries no position, unlike {@link MarkSpec}.
  *
  * @param assetId            the asset whose pose to project from

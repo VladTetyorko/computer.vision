@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 import com.drones.vision.adapter.persistence.mapper.TelemetryMapper;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;

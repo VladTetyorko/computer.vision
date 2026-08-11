@@ -1,19 +1,19 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.AccessLevel;
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerGrant;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.port.out.DrawingRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.map.domain.model.AccessLevel;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerGrant;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.map.domain.port.DrawingRepositoryPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
 
 import java.time.Instant;
 import java.util.ArrayList;

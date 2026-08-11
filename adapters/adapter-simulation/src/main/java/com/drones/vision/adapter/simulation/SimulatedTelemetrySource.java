@@ -1,11 +1,11 @@
 package com.drones.vision.adapter.simulation;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.FlightState;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.port.out.TelemetrySourcePort;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.flight.domain.model.FlightState;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 
 import java.time.Instant;
 import java.util.Map;
@@ -28,9 +28,9 @@ import java.util.concurrent.Flow;
  * checkpoints instead.
  *
  * <p>Supports devices that both expose {@link Capability#TELEMETRY} and use
- * {@code "sim"} as their {@link com.drones.vision.domain.model.StreamDescriptor#protocol()}
+ * {@code "sim"} as their {@link com.drones.vision.kernel.StreamDescriptor#protocol()}
  * — i.e. the same simulated device a {@link SimulatedVideoSource} would also
- * serve. Recognized {@link com.drones.vision.domain.model.StreamDescriptor#options()}
+ * serve. Recognized {@link com.drones.vision.kernel.StreamDescriptor#options()}
  * keys (all optional, all lenient — a blank/unparseable/malformed value silently falls
  * back to its default rather than throwing, see {@code doubleOption}/{@link RoutePlan#parse}):
  * <ul>

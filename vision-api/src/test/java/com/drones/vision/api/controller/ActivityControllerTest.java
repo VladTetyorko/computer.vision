@@ -1,11 +1,11 @@
 package com.drones.vision.api.controller;
 
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
+import com.drones.vision.identity.domain.model.AuditAction;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
 import com.drones.vision.application.identity.ActivityService;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.web.servlet.MockMvc;
@@ -32,7 +32,7 @@ class ActivityControllerTest {
     private final ActivityService activityService = mock(ActivityService.class);
     private final UserId actor = UserId.random();
     private final CurrentUser currentUser =
-            new CurrentUser(new Ownership(actor, com.drones.vision.domain.model.GroupId.random()));
+            new CurrentUser(new Ownership(actor, com.drones.vision.kernel.GroupId.random()));
 
     private final MockMvc mockMvc = MockMvcBuilders
             .standaloneSetup(new ActivityController(activityService, currentUser))

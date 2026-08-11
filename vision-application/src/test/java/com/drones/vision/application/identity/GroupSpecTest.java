@@ -1,6 +1,6 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.kernel.GroupId;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertNull;

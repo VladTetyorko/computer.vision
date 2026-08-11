@@ -1,6 +1,6 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.kernel.CategoryId;
 
 import java.util.Map;
 

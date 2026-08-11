@@ -10,7 +10,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  * <p>One interface, one implementation ({@link DefaultFleetSummaryService}), composing {@link
  * AssetService}, {@link com.drones.vision.application.stream.StreamService}, {@link
  * com.drones.vision.application.pipeline.UsageTracker}, and {@link
- * com.drones.vision.domain.port.out.DetectionEventRepositoryPort} rather than reaching past them to
+ * com.drones.vision.events.domain.port.DetectionEventRepositoryPort} rather than reaching past them to
  * repositories directly — every rule those already enforce (soft-delete visibility, streaming
  * derivation) applies here without duplication.
  */
@@ -20,7 +20,7 @@ public interface FleetSummaryService {
      * Summarizes the fleet, unscoped (every asset). Used by internal/system callers.
      *
      * @param includeArchived whether to include soft-deleted ({@link
-     *                        com.drones.vision.domain.model.LifecycleState#DELETED}) assets —
+     *                        com.drones.vision.kernel.LifecycleState#DELETED}) assets —
      *                        mirrors {@link AssetService#assets(boolean)}'s {@code includeDeleted},
      *                        under the name docs/plans/done/MVP3-PLAN.md C-a's own spec gives the query
      *                        parameter it backs

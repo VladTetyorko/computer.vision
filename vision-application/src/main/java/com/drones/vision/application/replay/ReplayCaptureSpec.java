@@ -1,7 +1,7 @@
 package com.drones.vision.application.replay;
 
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.kernel.UsageId;
 
 import java.util.Objects;
 

@@ -1,11 +1,11 @@
 package com.drones.vision.application.usage;
 
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
 
 import java.time.Duration;
 import java.util.List;

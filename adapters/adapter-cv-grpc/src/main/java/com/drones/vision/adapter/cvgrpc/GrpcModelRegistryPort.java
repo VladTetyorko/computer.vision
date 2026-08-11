@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.port.out.ModelRegistryPort;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.learning.domain.port.ModelRegistryPort;
 import com.drones.vision.proto.v1.Ack;
 import com.drones.vision.proto.v1.ModelInfo;
 import com.drones.vision.proto.v1.ModelList;

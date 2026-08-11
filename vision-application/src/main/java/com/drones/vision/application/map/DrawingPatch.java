@@ -1,7 +1,7 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.kernel.GeoPosition;
 
 import java.util.List;
 import java.util.Optional;

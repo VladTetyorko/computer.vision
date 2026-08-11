@@ -8,9 +8,9 @@ import com.drones.vision.application.simulation.SimulationSpec;
 import com.drones.vision.application.simulation.SimulationTransport;
 import com.drones.vision.application.simulation.TelemetryPlan;
 import com.drones.vision.application.simulation.Waypoint;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.UserId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 

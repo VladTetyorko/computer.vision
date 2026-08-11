@@ -32,8 +32,14 @@ class ArchitectureTest {
 
     @Test
     void domainDependsOnlyOnDomainAndJava() {
-        ArchRule rule = noClasses().that().resideInAPackage("..domain..")
-                .should().dependOnClassesThat().resideOutsideOfPackages("..domain..", "java..");
+        // `..kernel..` joins the allowed set with the bounded-context split
+        // (docs/plans/active/DOMAIN-SEPARATION-W1.md, W1.5a): the shared kernel — typed ids and pure
+        // value objects (GeoPosition, Ownership, StreamDescriptor, GeoProjection) — is domain code
+        // that every context's domain may depend on. It sits at `com.drones.vision.kernel` rather
+        // than under a `domain` segment precisely because it belongs to no single context, so the
+        // `..domain..` pattern cannot match it. Its own contents are still bound by this same rule.
+        ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..kernel..")
+                .should().dependOnClassesThat().resideOutsideOfPackages("..domain..", "..kernel..", "java..");
         rule.check(classes);
     }
 
@@ -48,7 +54,7 @@ class ArchitectureTest {
         // a BufferedImage but not write one was an inconsistent line, not a principled one.
         ArchRule rule = noClasses().that().resideInAPackage("..application..")
                 .should().dependOnClassesThat()
-                .resideOutsideOfPackages("..application..", "..domain..", "java..", "javax.imageio..");
+                .resideOutsideOfPackages("..application..", "..domain..", "..kernel..", "java..", "javax.imageio..");
         rule.check(classes);
     }
 
@@ -68,7 +74,7 @@ class ArchitectureTest {
 
     @Test
     void domainAndApplicationAreSpringAnnotationFree() {
-        ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..application..")
+        ArchRule rule = noClasses().that().resideInAnyPackage("..domain..", "..application..", "..kernel..")
                 .should().dependOnClassesThat().resideInAPackage("org.springframework..");
         rule.check(classes);
     }

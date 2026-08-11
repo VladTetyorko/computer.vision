@@ -1,11 +1,11 @@
 package com.drones.vision.adapter.overlay;
 
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionSource;
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.model.TrackRef;
-import com.drones.vision.domain.model.TrackState;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionSource;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackState;
 
 import org.junit.jupiter.api.Test;
 

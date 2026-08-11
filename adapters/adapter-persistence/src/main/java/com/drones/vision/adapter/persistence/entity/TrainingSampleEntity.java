@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.SampleStatus;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.SampleStatus;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,7 +20,7 @@ import java.util.UUID;
 
 /**
  * JPA row for {@code training_samples} — mirrors {@link
- * com.drones.vision.domain.model.TrainingSample} field-for-field (docs/plans/done/CV-TRAINING-PLAN.md §1,
+ * com.drones.vision.learning.domain.model.TrainingSample} field-for-field (docs/plans/done/CV-TRAINING-PLAN.md §1,
  * Wave T1/T3); {@link com.drones.vision.adapter.persistence.JpaTrainingSampleRepository} owns
  * the mapping in both directions.
  *

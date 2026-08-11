@@ -1,11 +1,11 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.identity.domain.model.AuditAction;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

@@ -1,8 +1,8 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.TrainingJobSpec;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.TrainingPort;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.learning.domain.port.TrainingPort;
 
 import java.util.List;
 import java.util.Optional;
@@ -41,7 +41,7 @@ public interface TrainingJobService {
      *                                             or the job's dataset is outside {@code scope}
      * @throws java.util.NoSuchElementException  if the job's dataset is unknown
      * @throws IllegalArgumentException          if the dataset id is malformed, or the dataset has
-     *                                             no {@link com.drones.vision.domain.model.SampleStatus#LABELED}
+     *                                             no {@link com.drones.vision.learning.domain.model.SampleStatus#LABELED}
      *                                             samples to train on — in every one of these cases
      *                                             the job is never registered or started
      */

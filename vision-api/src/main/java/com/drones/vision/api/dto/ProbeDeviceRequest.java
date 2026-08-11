@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import java.net.URI;
 import java.util.Map;

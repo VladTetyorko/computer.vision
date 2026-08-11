@@ -1,20 +1,20 @@
 package com.drones.vision.application.mark;
 
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MarkKind;
 import com.drones.vision.application.map.LayerResolver;
 
 /**
- * Everything needed to create a {@code MANUAL} {@link com.drones.vision.domain.model.Mark} (a map
+ * Everything needed to create a {@code MANUAL} {@link com.drones.vision.map.domain.model.Mark} (a map
  * click) — docs/plans/done/MAP-REWORK-PLAN.md §3, superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape.
  *
  * <p>A top-level record rather than a type nested in {@link MarkService}, so callers can name their
  * input without importing the service, and so the wire DTO in {@code …api.dto} maps to one plain
  * value — same reasoning as {@link com.drones.vision.application.geofence.GeofenceZoneSpec}/{@link com.drones.vision.application.asset.AssetSpec}.
  *
- * <p>Duplicates {@link com.drones.vision.domain.model.Mark}'s own {@code label}/{@code note}
+ * <p>Duplicates {@link com.drones.vision.map.domain.model.Mark}'s own {@code label}/{@code note}
  * invariants so a malformed request fails fast with a spec-specific message before touching the
  * repository, mirroring {@link com.drones.vision.application.geofence.GeofenceZoneSpec}'s own duplication of {@code GeofenceZone}'s
  * invariants.

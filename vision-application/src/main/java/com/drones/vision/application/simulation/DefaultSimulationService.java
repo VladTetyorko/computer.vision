@@ -1,19 +1,19 @@
 package com.drones.vision.application.simulation;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.FeedId;
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.CategoryRepositoryPort;
-import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.perception.domain.model.FeedId;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
@@ -82,12 +82,12 @@ public final class DefaultSimulationService implements SimulationService {
     private static final String SOURCE_ATTRIBUTE = "source";
 
     /**
-     * The URL path prefix {@link com.drones.vision.domain.port.out.FeedTransmitterPort#start} uses
+     * The URL path prefix {@link com.drones.vision.perception.domain.port.FeedTransmitterPort#start} uses
      * for an RTSP feed's target (duplicated from {@code adapter-rtsp}'s {@code RtspFeedTransmitter}
      * — a private constant there, and this class may not depend on that adapter module anyway).
      * {@link #resumeAll} parses this same shape back out of a persisted device's URI to recover its
      * {@link FeedId} — a deliberate, narrow coupling to one adapter's URL convention, not enforced
-     * by {@link com.drones.vision.domain.port.out.FeedTransmitterPort}'s own contract, which makes
+     * by {@link com.drones.vision.perception.domain.port.FeedTransmitterPort}'s own contract, which makes
      * no promise about URL shape at all.
      */
     private static final String FEED_PATH_PREFIX = "feed-";

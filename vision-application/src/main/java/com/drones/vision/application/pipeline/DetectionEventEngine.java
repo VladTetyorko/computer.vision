@@ -1,16 +1,16 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionEventId;
-import com.drones.vision.domain.model.DetectionEventState;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.EventRuleConfig;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.events.domain.model.DetectionEventId;
+import com.drones.vision.events.domain.model.DetectionEventState;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
 
 import java.time.Duration;
 import java.time.Instant;

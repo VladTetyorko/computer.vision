@@ -1,7 +1,7 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
 
 import java.util.Optional;
 

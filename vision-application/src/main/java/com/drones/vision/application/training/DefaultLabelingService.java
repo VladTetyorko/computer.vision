@@ -1,30 +1,30 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.AnnotationSource;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetUpload;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionQuery;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.SampleStatus;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.DatasetUploadPort;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.AnnotationSource;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.identity.domain.model.AuditAction;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.learning.domain.model.Dataset;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetUpload;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionQuery;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.SampleStatus;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.learning.domain.port.DatasetUploadPort;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -48,7 +48,7 @@ import com.drones.vision.application.stream.StreamService;
  *
  * <h2>Resolving a capture's source asset</h2>
  * {@link CaptureSpec} carries only a {@link StreamId}, not an {@link
- * com.drones.vision.domain.model.AssetId} — {@link #capture} resolves the owning asset itself by
+ * com.drones.vision.kernel.AssetId} — {@link #capture} resolves the owning asset itself by
  * matching {@code streamId} against {@link StreamService#streams()}'s live snapshot to find the
  * device, then {@link AssetRepositoryPort#findByDeviceId}, exactly the device→asset resolution
  * {@code UsageTracker}/{@code DefaultStreamService} already perform internally when a stream

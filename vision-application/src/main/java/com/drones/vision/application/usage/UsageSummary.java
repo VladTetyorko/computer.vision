@@ -1,7 +1,7 @@
 package com.drones.vision.application.usage;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UsageId;
 
 import java.time.Instant;
 

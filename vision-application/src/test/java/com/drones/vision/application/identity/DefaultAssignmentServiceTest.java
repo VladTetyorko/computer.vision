@@ -1,14 +1,14 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

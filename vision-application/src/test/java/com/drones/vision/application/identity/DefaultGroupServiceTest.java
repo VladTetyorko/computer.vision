@@ -1,8 +1,8 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.Group;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.identity.domain.model.Group;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

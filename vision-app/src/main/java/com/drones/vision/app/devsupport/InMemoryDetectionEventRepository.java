@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
 
 import java.time.Instant;
 import java.util.Comparator;

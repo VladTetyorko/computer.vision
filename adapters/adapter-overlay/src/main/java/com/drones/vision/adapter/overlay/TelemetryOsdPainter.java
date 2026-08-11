@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.overlay;
 
-import com.drones.vision.domain.model.Telemetry;
+import com.drones.vision.flight.domain.model.Telemetry;
 
 import java.awt.Color;
 import java.awt.Font;

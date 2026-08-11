@@ -1,25 +1,25 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.AnnotatedFrame;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.EventType;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.TrackedObject;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.DetectionPort;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.OverlayPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
+import com.drones.vision.perception.domain.model.AnnotatedFrame;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.DetectionPort;
+import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.OverlayPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
 
 import java.util.List;
 import java.util.Objects;
@@ -138,7 +138,7 @@ import com.drones.vision.application.stream.StreamService;
  * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): two further consumers on that same
  * fan-out. {@link TrackBook} keeps this stream's tracks by id with their lifetimes ({@link
  * #tracks()}); {@link TrackingStatsWindow} keeps rolling duty-cycle counters over the {@link
- * com.drones.vision.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()}).
+ * com.drones.vision.perception.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()}).
  * Both are cleared on a model re-arm, exactly as {@link #extrapolator} is. Tracking also reaches the
  * sampling logic above through one value: {@link #effectiveInferenceFps()}, which raises the sample
  * rate to {@code followFps} while the stream is in {@link TrackingMode#FOLLOW}. Nothing else in this
@@ -567,7 +567,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         detector passes, tracker frames, duty ratio, tracker-latency percentiles, the last
      *         detector reason, the confirmed lock and a state histogram — stamped with the tracking
      *         mode currently configured. {@link TrackingStats#empty} until the first result carrying
-     *         {@link com.drones.vision.domain.model.TrackingTelemetry} arrives. Never {@code null}.
+     *         {@link com.drones.vision.perception.domain.model.TrackingTelemetry} arrives. Never {@code null}.
      */
     public TrackingStats trackingStats() {
         return trackingStats.snapshot(config.tracking().mode());

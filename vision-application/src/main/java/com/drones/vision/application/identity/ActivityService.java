@@ -1,7 +1,7 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.application.scope.VisibilityScope;

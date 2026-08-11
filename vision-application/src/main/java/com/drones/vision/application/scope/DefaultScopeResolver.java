@@ -1,12 +1,12 @@
 package com.drones.vision.application.scope;
 
-import com.drones.vision.domain.model.Group;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Membership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
-import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.identity.domain.model.Group;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;

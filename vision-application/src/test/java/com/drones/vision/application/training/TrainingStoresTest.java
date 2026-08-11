@@ -1,9 +1,9 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.port.out.DatasetRepositoryPort;
-import com.drones.vision.domain.port.out.DatasetUploadPort;
-import com.drones.vision.domain.port.out.SampleImageStorePort;
-import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.learning.domain.port.DatasetUploadPort;
+import com.drones.vision.learning.domain.port.SampleImageStorePort;
+import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;

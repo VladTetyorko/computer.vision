@@ -1,6 +1,6 @@
 package com.drones.vision.application.category;
 
-import com.drones.vision.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.domain.model.DeviceCategory;
 
 import java.util.List;
 

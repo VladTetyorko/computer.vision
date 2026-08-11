@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.AnnotationSource;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.AnnotationSource;
 
 import java.util.Arrays;
 import java.util.stream.Collectors;

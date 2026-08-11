@@ -1,11 +1,11 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.AssetUsageEntity;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.UsageId;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.UsageId;
 
 /**
  * {@link AssetUsage} &harr; {@link AssetUsageEntity} mapping, extracted from {@code

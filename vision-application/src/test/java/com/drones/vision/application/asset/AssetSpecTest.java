@@ -1,9 +1,9 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.StreamDescriptor;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;

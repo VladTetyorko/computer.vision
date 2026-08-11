@@ -4,12 +4,12 @@ import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.application.map.MapAccessPolicy;
 import com.drones.vision.application.scope.ScopeResolver;
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Membership;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 

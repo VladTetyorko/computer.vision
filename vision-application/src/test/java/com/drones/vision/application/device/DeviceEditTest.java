@@ -1,6 +1,6 @@
 package com.drones.vision.application.device;
 
-import com.drones.vision.domain.model.Capability;
+import com.drones.vision.kernel.Capability;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;

@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
 import com.drones.vision.adapter.persistence.mapper.MapLayerMapper;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 

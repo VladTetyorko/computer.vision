@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
 
 import java.util.Arrays;
 import java.util.stream.Collectors;

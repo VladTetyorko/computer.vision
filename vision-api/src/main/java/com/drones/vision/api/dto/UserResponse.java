@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Membership;
-import com.drones.vision.domain.model.User;
+import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.identity.domain.model.User;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;

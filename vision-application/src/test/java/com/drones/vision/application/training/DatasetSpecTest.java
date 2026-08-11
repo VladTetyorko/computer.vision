@@ -1,6 +1,6 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.kernel.CategoryId;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

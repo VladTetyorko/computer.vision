@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.CommandResult;
+import com.drones.vision.flight.domain.model.CommandResult;
 
 /**
  * Response body for {@code POST /api/assets/{assetId}/return-home} (docs/plans/active/DRONE-INFRA-PLAN.md I-e,

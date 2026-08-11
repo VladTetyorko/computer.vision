@@ -1,7 +1,7 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
 
 import java.util.List;
 import java.util.Map;
@@ -15,7 +15,7 @@ import com.drones.vision.application.device.DeviceRegistration;
  * unowned devices to the new asset in the same act — the "promote to asset" flow, letting a caller
  * combine both in a single {@code create} rather than creating with a placeholder device and
  * assigning the real one(s) as a second call. At least one device, from either list or both
- * combined, is required — mirroring {@link com.drones.vision.domain.model.Asset}'s own "devices
+ * combined, is required — mirroring {@link com.drones.vision.warehouse.domain.model.Asset}'s own "devices
  * must be non-empty" invariant.
  *
  * @param displayName       human-readable name (e.g. "my drone"); must not be blank

@@ -5,9 +5,9 @@ import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionTrackingProperties;
 import com.drones.vision.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

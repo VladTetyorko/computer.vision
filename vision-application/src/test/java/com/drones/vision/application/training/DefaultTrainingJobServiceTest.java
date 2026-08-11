@@ -1,20 +1,20 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetUpload;
-import com.drones.vision.domain.model.JobState;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.SampleStatus;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.TrainingJobSpec;
-import com.drones.vision.domain.model.TrainingProgress;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.TrainingPort;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetUpload;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.SampleStatus;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.learning.domain.model.TrainingProgress;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.learning.domain.port.TrainingPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

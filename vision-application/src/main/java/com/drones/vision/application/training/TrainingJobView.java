@@ -1,8 +1,8 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.JobState;
-import com.drones.vision.domain.model.TrainingJobSpec;
-import com.drones.vision.domain.model.TrainingProgress;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.learning.domain.model.TrainingProgress;
 
 import java.time.Instant;
 import java.util.Objects;

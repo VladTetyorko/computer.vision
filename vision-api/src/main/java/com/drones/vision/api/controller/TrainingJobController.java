@@ -5,8 +5,8 @@ import com.drones.vision.api.dto.TrainingJobResponse;
 import com.drones.vision.api.dto.TrainingJobsResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.training.TrainingJobService;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.TrainingJobSpec;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -50,7 +50,7 @@ import com.drones.vision.api.security.CurrentUser;
  * compact-constructor checks; or a dataset with no {@code LABELED} samples to train on,
  * docs/plans/done/CV-TRAINING-V2-PLAN.md §4's synchronous pre-check) → 400. A training run that fails
  * mid-flight (including a rejected dataset upload, docs/plans/done/CV-TRAINING-V2-PLAN.md §4) is <b>never</b>
- * a thrown exception — it is a polled {@link com.drones.vision.domain.model.JobState#FAILED} {@link
+ * a thrown exception — it is a polled {@link com.drones.vision.learning.domain.model.JobState#FAILED} {@link
  * TrainingJobResponse#state()}, so {@link #job}/{@link #jobs} never special-case it.
  */
 @RestController

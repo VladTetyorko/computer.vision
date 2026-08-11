@@ -1,6 +1,6 @@
 package com.drones.vision.application.scope;
 
-import com.drones.vision.domain.model.User;
+import com.drones.vision.identity.domain.model.User;
 
 /**
  * Resolves a {@link User}'s {@link VisibilityScope} (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1).

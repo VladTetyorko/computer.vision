@@ -12,7 +12,7 @@ import com.drones.vision.app.config.properties.VisionRtspProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
 import com.drones.vision.app.config.properties.VisionV4l2Properties;
 import com.drones.vision.application.pipeline.VideoSourceRegistry;
-import com.drones.vision.domain.port.out.VideoSourcePort;
+import com.drones.vision.perception.domain.port.VideoSourcePort;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

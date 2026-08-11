@@ -1,12 +1,12 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

@@ -1,29 +1,29 @@
 package com.drones.vision.application.mark;
 
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.GeoProjection;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkId;
-import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.MarkSource;
-import com.drones.vision.domain.model.MarkStatus;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.model.Verification;
-import com.drones.vision.domain.model.Verification.VerificationState;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
-import com.drones.vision.domain.port.out.MarkRepositoryPort;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.kernel.GeoProjection;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkId;
+import com.drones.vision.map.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.MarkSource;
+import com.drones.vision.map.domain.model.MarkStatus;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.map.domain.model.Verification;
+import com.drones.vision.map.domain.model.Verification.VerificationState;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
+import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -637,15 +637,15 @@ class DefaultMarkServiceTest {
         }
 
         @Override
-        public void publishDetections(AssetId assetId, com.drones.vision.domain.model.DetectionResult result) {
+        public void publishDetections(AssetId assetId, com.drones.vision.perception.domain.model.DetectionResult result) {
         }
 
         @Override
-        public void publishEvent(com.drones.vision.domain.model.Event event) {
+        public void publishEvent(com.drones.vision.events.domain.model.Event event) {
         }
 
         @Override
-        public void publishDetectionEvent(com.drones.vision.domain.model.DetectionEvent event) {
+        public void publishDetectionEvent(com.drones.vision.events.domain.model.DetectionEvent event) {
         }
 
         @Override

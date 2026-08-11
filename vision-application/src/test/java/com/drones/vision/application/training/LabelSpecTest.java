@@ -1,9 +1,9 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.AnnotationSource;
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.SampleStatus;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.AnnotationSource;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.learning.domain.model.SampleStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

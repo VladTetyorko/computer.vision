@@ -1,6 +1,6 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 
 /**
  * Aggregates one asset's flight-utilization history into {@link AssetStats} — the read side

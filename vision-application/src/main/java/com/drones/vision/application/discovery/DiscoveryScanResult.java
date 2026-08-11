@@ -1,6 +1,6 @@
 package com.drones.vision.application.discovery;
 
-import com.drones.vision.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 
 import java.util.List;
 import java.util.Set;

@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.mapper.DetectionResultMapper;
-import com.drones.vision.domain.model.DetectionQuery;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
+import com.drones.vision.perception.domain.model.DetectionQuery;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.events.domain.port.DetectionRepositoryPort;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;

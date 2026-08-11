@@ -1,9 +1,9 @@
 package com.drones.vision.application.device;
 
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.LifecycleState;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import java.util.Optional;

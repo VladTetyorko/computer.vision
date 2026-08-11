@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.domain.model.DeviceId;
+import com.drones.vision.kernel.DeviceId;
 
 import io.dronefleet.mavlink.MavlinkMessage;
 import io.dronefleet.mavlink.minimal.Heartbeat;

@@ -1,7 +1,7 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -19,7 +19,7 @@ import java.util.Iterator;
 
 /**
  * Encodes a raw {@link VideoFrame} to <b>full-resolution</b> JPEG bytes for a captured {@link
- * com.drones.vision.domain.model.TrainingSample} (docs/plans/done/CV-TRAINING-PLAN.md §D) — training truth
+ * com.drones.vision.learning.domain.model.TrainingSample} (docs/plans/done/CV-TRAINING-PLAN.md §D) — training truth
  * wants real pixels, never the downscaled thumbnail {@code vision-api}'s own snapshot encoder
  * produces for a dashboard.
  *

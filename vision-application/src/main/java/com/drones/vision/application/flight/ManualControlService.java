@@ -1,7 +1,7 @@
 package com.drones.vision.application.flight;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**

@@ -1,7 +1,7 @@
 package com.drones.vision.app;
 
 import com.drones.vision.adapter.overlay.Java2DOverlayRenderer;
-import com.drones.vision.domain.port.out.OverlayPort;
+import com.drones.vision.perception.domain.port.OverlayPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

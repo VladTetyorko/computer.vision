@@ -1,6 +1,6 @@
 package com.drones.vision.app.security;
 
-import com.drones.vision.domain.port.out.PasswordHasherPort;
+import com.drones.vision.identity.domain.port.PasswordHasherPort;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.util.Objects;

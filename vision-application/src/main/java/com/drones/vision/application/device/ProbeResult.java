@@ -1,6 +1,6 @@
 package com.drones.vision.application.device;
 
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.VideoFrame;
 
 import java.util.List;
 
@@ -15,7 +15,7 @@ import java.util.List;
  *                          that only happens to the preview thumbnail the API layer derives from
  *                          this frame
  * @param codec             a best-effort codec label derived from {@link
- *                          com.drones.vision.domain.model.PixelFormat}, or {@code null} when it
+ *                          com.drones.vision.perception.domain.model.PixelFormat}, or {@code null} when it
  *                          isn't knowable from that alone. A raw, already-decoded pixel format
  *                          (e.g. {@code BGR24}) carries no memory of the wire codec that produced
  *                          it (H.264, H.265, ...) once an adapter has decoded it — this is an

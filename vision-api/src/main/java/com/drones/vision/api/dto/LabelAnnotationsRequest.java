@@ -1,8 +1,8 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.application.training.LabelSpec;
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.SampleStatus;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.SampleStatus;
 
 import java.util.Arrays;
 import java.util.List;

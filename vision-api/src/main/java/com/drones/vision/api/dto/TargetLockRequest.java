@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.TargetLock;
+import com.drones.vision.perception.domain.model.TargetLock;
 
 /**
  * The {@code lock} object nested inside {@link TrackingConfigRequest} on {@code PATCH

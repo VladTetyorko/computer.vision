@@ -1,14 +1,14 @@
 package com.drones.vision.application.mark;
 
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.MarkStatus;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.map.domain.model.MarkKind;
+import com.drones.vision.map.domain.model.MarkStatus;
 
 import java.util.Optional;
 
 /**
- * A partial edit to a {@link com.drones.vision.domain.model.Mark} — annotation (label / note / kind
+ * A partial edit to a {@link com.drones.vision.map.domain.model.Mark} — annotation (label / note / kind
  * / affiliation / position, including drag-to-correct) plus an optional lifecycle transition
  * (docs/plans/done/MAP-REWORK-PLAN.md §3/§4.2, the frozen {@code PATCH /api/map/marks/{id}} contract,
  * superseding docs/plans/done/TACTICAL-MARKS-PLAN.md §2's shape — {@link #affiliation()} is the one new field).
@@ -18,7 +18,7 @@ import java.util.Optional;
  * an {@link Optional}: {@link Optional#empty()} means "leave this field unchanged",
  * {@code Optional.of(value)} means "set it to {@code value}". {@link #note()}'s own blank-normalizes-
  * to-{@code null} rule still applies once a present value reaches {@link
- * com.drones.vision.domain.model.Mark#withDetails}, so a present-but-blank note clears it.
+ * com.drones.vision.map.domain.model.Mark#withDetails}, so a present-but-blank note clears it.
  *
  * <p>Every field here is gated identically by {@link DefaultMarkService#patch}: the mark's creator
  * while it is still {@code UNVERIFIED}, or a viewer with {@code MapAccessPolicy#canManage} on its

@@ -1,7 +1,7 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.port.out.VideoSourcePort;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.perception.domain.port.VideoSourcePort;
 
 import java.util.List;
 import java.util.Objects;

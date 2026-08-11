@@ -1,7 +1,7 @@
 package com.drones.vision.application.geofence;
 
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.ZoneKind;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.ZoneKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;

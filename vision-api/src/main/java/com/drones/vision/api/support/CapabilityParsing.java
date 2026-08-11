@@ -1,6 +1,6 @@
 package com.drones.vision.api.support;
 
-import com.drones.vision.domain.model.Capability;
+import com.drones.vision.kernel.Capability;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;

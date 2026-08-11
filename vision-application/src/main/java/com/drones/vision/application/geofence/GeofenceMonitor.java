@@ -1,16 +1,16 @@
 package com.drones.vision.application.geofence;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.EventType;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.GeofenceZone;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.ZoneId;
-import com.drones.vision.domain.model.ZoneKind;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.flight.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.ZoneKind;
+import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 import java.time.Instant;
 import java.util.List;

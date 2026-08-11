@@ -1,9 +1,9 @@
 package com.drones.vision.application.scope;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Role;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.model.Role;
 
 import java.util.Objects;
 import java.util.Optional;

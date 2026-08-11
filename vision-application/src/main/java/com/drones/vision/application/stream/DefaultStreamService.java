@@ -1,27 +1,27 @@
 package com.drones.vision.application.stream;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.EventType;
-import com.drones.vision.domain.model.ModelRef;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.TrackedObject;
-import com.drones.vision.domain.model.TrackingConfig;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionPort;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.DeviceRepositoryPort;
-import com.drones.vision.domain.port.out.EventPublisherPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.OverlayPort;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
-import com.drones.vision.domain.port.out.VideoSourcePort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.perception.domain.port.DetectionPort;
+import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.events.domain.port.EventPublisherPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.perception.domain.port.OverlayPort;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.perception.domain.port.VideoSourcePort;
 
 import java.time.Instant;
 import java.util.List;
@@ -60,7 +60,7 @@ import com.drones.vision.application.pipeline.VideoSourceRegistry;
  * therefore survives a source I/O error or unexpected completion on its own — {@link
  * StreamPipeline} itself is completely unaware this is happening (it only ever sees the normal
  * {@code onSubscribe}/{@code onNext} traffic the wrapper forwards), so its own detection-outage
- * machinery, {@code latestDetections()}, and the {@link com.drones.vision.domain.port.out.StreamPublisherPort}
+ * machinery, {@code latestDetections()}, and the {@link com.drones.vision.perception.domain.port.StreamPublisherPort}
  * session it opened via {@code streamStarted} are all completely untouched by a reconnect —
  * {@code streamStarted}/{@code streamEnded} fire exactly once each, at {@link #start}/{@link #stop}
  * respectively, never again in between. {@link UsageTracker#onStreamStarted}/{@code
@@ -125,7 +125,7 @@ public final class DefaultStreamService implements StreamService {
      * every {@link StreamPipeline} this service starts (docs/plans/done/MVP1-PLAN.md §C8 bullet 2). When both
      * this and {@code usageTracker} are present, {@link #start} also builds and threads a telemetry
      * supplier (see that method's own comments) so {@link
-     * com.drones.vision.domain.model.PipelineConfig#overlayTelemetry()}'s OSD gate becomes
+     * com.drones.vision.perception.domain.model.PipelineConfig#overlayTelemetry()}'s OSD gate becomes
      * reachable, closing the gap adapter-overlay/MODULE.md documented ("OSD gate not reachable" —
      * {@code StreamPipeline} had no telemetry input at all).
      *
@@ -145,7 +145,7 @@ public final class DefaultStreamService implements StreamService {
      * Same as the 8-argument constructor, plus a {@link DetectionEventRepositoryPort} collaborator
      * (docs/plans/done/MVP2-PLAN.md §E, E-a): when present, every {@link StreamPipeline} this service starts
      * is given a fresh, per-stream {@link DetectionEventEngine} built from {@code config}'s {@link
-     * com.drones.vision.domain.model.PipelineConfig#eventRule()}, {@code usageTracker} (for
+     * com.drones.vision.perception.domain.model.PipelineConfig#eventRule()}, {@code usageTracker} (for
      * asset/position resolution), and this port.
      *
      * @param detectionEventRepositoryPort nullable, following the same convention as {@code
@@ -365,7 +365,7 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Releases the pipeline's subscription ({@link StreamPipeline#close()}, which also signals
-     * {@link com.drones.vision.domain.port.out.StreamPublisherPort#streamEnded}) and the underlying
+     * {@link com.drones.vision.perception.domain.port.StreamPublisherPort#streamEnded}) and the underlying
      * source ({@link VideoSourcePort#close}) off the calling thread — see {@link #stop}'s javadoc
      * for why. A fire-and-forget virtual thread, the same idiom {@link com.drones.vision.application.discovery.DefaultDiscoveryService}
      * already uses for its own scan calls: cheap, effectively daemon (a virtual thread never blocks

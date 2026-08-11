@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.discovery.mdns;
 
-import com.drones.vision.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import org.junit.jupiter.api.Test;
 
 import javax.jmdns.JmDNS;
@@ -53,7 +53,7 @@ class MdnsScannerLoopbackTest {
 
     /**
      * Regression test for the "mdns scan takes longer than its timeout"
-     * contract bug: {@link com.drones.vision.domain.port.out.DeviceDiscoveryPort#scan(Duration)}
+     * contract bug: {@link com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort#scan(Duration)}
      * must return within ~timeout because {@code DiscoveryService} (the
      * caller, in {@code vision-application}) hard-bounds its wait at {@code
      * timeout + 200ms} grace and reports anything slower as a failed method.

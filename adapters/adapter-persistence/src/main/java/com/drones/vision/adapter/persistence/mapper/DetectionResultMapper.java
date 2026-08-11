@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.kernel.StreamId;
 
 import java.time.Duration;
 import java.util.UUID;

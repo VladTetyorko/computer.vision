@@ -2,12 +2,12 @@ package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.LayerGrantEmbeddable;
 import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerGrant;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerGrant;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 

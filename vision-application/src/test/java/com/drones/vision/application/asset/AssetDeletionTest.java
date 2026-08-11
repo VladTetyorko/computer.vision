@@ -1,6 +1,6 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

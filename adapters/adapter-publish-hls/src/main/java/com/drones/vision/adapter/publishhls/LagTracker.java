@@ -22,7 +22,7 @@ import java.util.Arrays;
  *
  * <p>Not thread-safe — mirrors {@link MediamtxStreamPublisher.StreamState}'s
  * own per-stream, single-writer contract ({@link
- * com.drones.vision.domain.port.out.StreamPublisherPort} guarantees calls
+ * com.drones.vision.perception.domain.port.StreamPublisherPort} guarantees calls
  * for one {@code streamId} are never concurrent).
  */
 final class LagTracker {

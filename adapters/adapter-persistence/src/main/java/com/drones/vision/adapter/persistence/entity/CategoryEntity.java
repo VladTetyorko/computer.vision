@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JPA row for {@code categories} — mirrors {@link com.drones.vision.domain.model.DeviceCategory}
+ * JPA row for {@code categories} — mirrors {@link com.drones.vision.warehouse.domain.model.DeviceCategory}
  * field-for-field; {@link com.drones.vision.adapter.persistence.JpaCategoryRepository} owns the
  * mapping in both directions, so this class never leaks outside this module.
  *

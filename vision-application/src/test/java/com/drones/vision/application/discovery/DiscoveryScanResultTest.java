@@ -1,6 +1,6 @@
 package com.drones.vision.application.discovery;
 
-import com.drones.vision.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;

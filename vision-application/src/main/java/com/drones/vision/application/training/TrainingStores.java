@@ -1,9 +1,9 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.port.out.DatasetRepositoryPort;
-import com.drones.vision.domain.port.out.DatasetUploadPort;
-import com.drones.vision.domain.port.out.SampleImageStorePort;
-import com.drones.vision.domain.port.out.TrainingSampleRepositoryPort;
+import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.learning.domain.port.DatasetUploadPort;
+import com.drones.vision.learning.domain.port.SampleImageStorePort;
+import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 
 import java.util.Objects;
 
@@ -16,8 +16,8 @@ import java.util.Objects;
  * implementation and an in-memory fallback both exist per repository port, and {@link
  * DatasetUploadPort} has its own real gRPC implementation), so none of the four is speculative —
  * but {@link DefaultLabelingService} also needs {@link com.drones.vision.application.stream.StreamService}, {@link
- * com.drones.vision.domain.port.out.AssetRepositoryPort}, {@link com.drones.vision.application.replay.ReplaySources}, and {@link
- * com.drones.vision.domain.port.out.AuditTrailPort}, which would push its constructor past the
+ * com.drones.vision.warehouse.domain.port.AssetRepositoryPort}, {@link com.drones.vision.application.replay.ReplaySources}, and {@link
+ * com.drones.vision.identity.domain.port.AuditTrailPort}, which would push its constructor past the
  * five-parameter ceiling if all seven were listed individually. Grouping the four that land
  * together, as one T1 wave, keeps every one of them a real (not speculative) collaborator while
  * keeping the constructor small.

@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.UserEntity;
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
 
 /**
  * {@link User} &harr; {@link UserEntity} mapping, extracted from {@code JpaUserRepository}

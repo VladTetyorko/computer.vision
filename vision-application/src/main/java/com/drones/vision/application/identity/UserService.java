@@ -1,7 +1,7 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.User;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.application.scope.AccessDeniedException;
@@ -34,7 +34,7 @@ public interface UserService {
      *       fall outside anyone's subtree.</li>
      *   <li>For each membership: its group must satisfy {@link VisibilityScope#includesGroup} (else
      *       {@link AccessDeniedException} "cannot grant membership in a group outside your scope"),
-     *       and its {@link com.drones.vision.domain.model.Role} must not exceed
+     *       and its {@link com.drones.vision.identity.domain.model.Role} must not exceed
      *       {@link VisibilityScope#maxGrantableRole()} by ordinal (else {@link AccessDeniedException}
      *       "cannot grant a role above your own").</li>
      * </ul>

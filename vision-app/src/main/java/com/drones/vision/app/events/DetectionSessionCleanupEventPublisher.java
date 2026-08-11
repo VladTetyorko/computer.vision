@@ -1,9 +1,9 @@
 package com.drones.vision.app.events;
 
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.EventType;
-import com.drones.vision.domain.port.out.EventPublisherPort;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.events.domain.model.EventType;
+import com.drones.vision.events.domain.port.EventPublisherPort;
 
 import java.util.Objects;
 
@@ -19,7 +19,7 @@ import java.util.Objects;
  * is still delegated unchanged to the real {@link EventPublisherPort} (today {@code
  * com.drones.vision.app.devsupport.LoggingEventPublisher}), and a {@link
  * EventType#STREAM_STOPPED} event additionally calls {@link
- * GrpcDetectionPort#streamEnded(com.drones.vision.domain.model.StreamId)} for the event's stream.
+ * GrpcDetectionPort#streamEnded(com.drones.vision.kernel.StreamId)} for the event's stream.
  *
  * <p>Only wired ({@link WiringConfiguration#eventPublisherPort}) when {@code vision.cv.enabled}
  * is {@code true} and the current {@code DetectionPort} bean actually is a {@link

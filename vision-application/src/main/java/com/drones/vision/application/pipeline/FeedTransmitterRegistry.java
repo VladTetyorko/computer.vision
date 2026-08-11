@@ -1,7 +1,7 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.port.out.FeedTransmitterPort;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 
 import java.util.List;
 import java.util.Objects;

@@ -1,6 +1,6 @@
 package com.drones.vision.application.flight;
 
-import com.drones.vision.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.ChannelMap;
 
 import java.util.List;
 

@@ -1,10 +1,10 @@
 package com.drones.vision.application.flight;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.CommandResult;
-import com.drones.vision.domain.model.FlightCapability;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.FlightCommandPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.CommandResult;
+import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.flight.domain.port.FlightCommandPort;
 import com.drones.vision.application.scope.VisibilityScope;
 
 /**

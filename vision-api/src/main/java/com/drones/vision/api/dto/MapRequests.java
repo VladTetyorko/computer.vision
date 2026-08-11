@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerId;
 
 /**
  * The one place the {@code /api/map} request bodies agree on what an <em>optional</em> {@code

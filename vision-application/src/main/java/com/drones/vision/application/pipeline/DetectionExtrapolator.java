@@ -1,9 +1,9 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.TrackRef;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -36,7 +36,7 @@ import java.util.Objects;
  * Two passes, in this order:
  * <ol>
  *   <li><b>By track id, exactly, with no gate.</b> When a detection on each
- *       side carries a {@link com.drones.vision.domain.model.TrackRef} and the
+ *       side carries a {@link com.drones.vision.perception.domain.model.TrackRef} and the
  *       two ids are equal, they are the same object — cv-service's tracker
  *       already decided that, and no distance heuristic can improve on an
  *       identity. This is what makes velocity correct through an occlusion

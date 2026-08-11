@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.simulation;
 
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.FlightState;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.flight.domain.model.FlightState;
 
 import java.util.List;
 import java.util.Random;

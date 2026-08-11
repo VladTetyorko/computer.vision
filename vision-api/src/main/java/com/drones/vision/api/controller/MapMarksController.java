@@ -10,7 +10,7 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.application.map.MapAccessPolicy.Viewer;
 import com.drones.vision.application.mark.MarkService;
-import com.drones.vision.domain.model.MarkId;
+import com.drones.vision.map.domain.model.MarkId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

@@ -1,7 +1,7 @@
 package com.drones.vision.application.category;
 
-import com.drones.vision.domain.model.DeviceCategory;
-import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.warehouse.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 
 import java.util.Comparator;
 import java.util.List;

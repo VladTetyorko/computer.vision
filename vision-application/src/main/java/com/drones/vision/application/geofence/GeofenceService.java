@@ -1,7 +1,7 @@
 package com.drones.vision.application.geofence;
 
-import com.drones.vision.domain.model.GeofenceZone;
-import com.drones.vision.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.ZoneId;
 
 import java.util.List;
 import java.util.Optional;
@@ -13,7 +13,7 @@ import java.util.Optional;
  * reference data — no ownership, no per-user scoping, no audit trail (unlike {@code
  * AssetService}/{@code DeviceService}, nothing in the plan calls for one here) — so this
  * interface stays a thin, direct pass-through over {@link
- * com.drones.vision.domain.port.out.GeofenceRepositoryPort} plus keeping {@link GeofenceMonitor}'s
+ * com.drones.vision.flight.domain.port.GeofenceRepositoryPort} plus keeping {@link GeofenceMonitor}'s
  * cache current.
  *
  * <h2>Threading</h2>

@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.mapper.SampleImageMapper;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.port.out.SampleImageStorePort;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.learning.domain.port.SampleImageStorePort;
 
 import jakarta.persistence.EntityManagerFactory;
 

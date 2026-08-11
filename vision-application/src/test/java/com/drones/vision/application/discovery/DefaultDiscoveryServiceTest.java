@@ -1,9 +1,9 @@
 package com.drones.vision.application.discovery;
 
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DiscoveredDevice;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.port.out.DeviceDiscoveryPort;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 

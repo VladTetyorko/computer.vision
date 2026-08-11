@@ -1,8 +1,8 @@
 package com.drones.vision.application.replay;
 
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.DetectionRepositoryPort;
-import com.drones.vision.domain.port.out.ReplayFrameExtractionPort;
+import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.events.domain.port.DetectionRepositoryPort;
+import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 
 import java.util.Objects;
 
@@ -13,8 +13,8 @@ import java.util.Objects;
  * genuine, independently-substitutable port (a real usage/detection repository and, once
  * implemented, a real {@link ReplayFrameExtractionPort} adapter all exist or are on their way), so
  * none of the three is speculative — but listing all three individually alongside {@link
- * com.drones.vision.application.training.TrainingStores}, {@link com.drones.vision.application.stream.StreamService}, {@link com.drones.vision.domain.port.out.AssetRepositoryPort}
- * and {@link com.drones.vision.domain.port.out.AuditTrailPort} would push {@link
+ * com.drones.vision.application.training.TrainingStores}, {@link com.drones.vision.application.stream.StreamService}, {@link com.drones.vision.warehouse.domain.port.AssetRepositoryPort}
+ * and {@link com.drones.vision.identity.domain.port.AuditTrailPort} would push {@link
  * com.drones.vision.application.training.DefaultLabelingService}'s constructor past the five-parameter ceiling.
  *
  * @param usages     asset usage lookup — resolves the finished usage a replay capture reads from

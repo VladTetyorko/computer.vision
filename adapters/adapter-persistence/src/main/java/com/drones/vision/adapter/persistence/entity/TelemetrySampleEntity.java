@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.FlightState;
+import com.drones.vision.flight.domain.model.FlightState;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,8 +16,8 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * JPA row for {@code telemetry_samples} — mirrors {@link com.drones.vision.domain.model.Telemetry}
- * field-for-field. {@link com.drones.vision.domain.model.Telemetry} itself carries no identity of
+ * JPA row for {@code telemetry_samples} — mirrors {@link com.drones.vision.flight.domain.model.Telemetry}
+ * field-for-field. {@link com.drones.vision.flight.domain.model.Telemetry} itself carries no identity of
  * its own (it is an append-only sample, not an aggregate), so {@code id} is a synthetic UUID this
  * entity invents at save time ({@link com.drones.vision.adapter.persistence.JpaTelemetryRepository}
  * generates it) and never surfaces back to the domain — the round-tripped {@code Telemetry} is
@@ -30,7 +30,7 @@ import java.util.UUID;
  * persistence-local wrapper type is needed, {@link FlightState} (plus its {@code List<String>
  * armingBlockers}) serializes/deserializes as-is. {@code null} means either the sample pre-dates
  * this column (older row) or the device reported no flight-controller state at all — both read
- * back as {@link com.drones.vision.domain.model.Telemetry#flightState()} {@code == null}, exactly
+ * back as {@link com.drones.vision.flight.domain.model.Telemetry#flightState()} {@code == null}, exactly
  * matching {@code Telemetry}'s own nullable-9th-component contract; there is no way to distinguish
  * the two cases from this column alone, and nothing needs to.
  *

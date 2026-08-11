@@ -1,6 +1,6 @@
 package com.drones.vision.api.demo;
 
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 
 /**
  * One asset the demo created, carried between {@link DemoFleet}'s create and start-stream passes

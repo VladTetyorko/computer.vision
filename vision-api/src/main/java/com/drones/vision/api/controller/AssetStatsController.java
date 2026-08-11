@@ -6,7 +6,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.asset.AssetStatsService;
 import com.drones.vision.application.scope.VisibilityScope;
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;

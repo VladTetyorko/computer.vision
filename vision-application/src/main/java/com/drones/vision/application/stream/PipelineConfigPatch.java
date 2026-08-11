@@ -2,21 +2,21 @@ package com.drones.vision.application.stream;
 
 import java.util.Set;
 import com.drones.vision.application.pipeline.StreamPipeline;
-import com.drones.vision.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingConfig;
 
 /**
- * A partial live update to a running stream's {@link com.drones.vision.domain.model.PipelineConfig}
+ * A partial live update to a running stream's {@link com.drones.vision.perception.domain.model.PipelineConfig}
  * (docs/plans/done/CV-CONTROL-PLAN.md &sect;5, the frozen {@code PATCH /api/streams/{streamId}/config}
  * contract): every field is optional, {@code null} means "leave this knob unchanged" — the same
  * null-means-unchanged partial-edit idiom {@link com.drones.vision.application.asset.AssetEdit}/{@link com.drones.vision.application.device.DeviceEdit} already use.
  * {@link DefaultStreamService#updateConfig} folds only the present fields onto the stream's
  * current config; the merged result is validated by {@link
- * com.drones.vision.domain.model.PipelineConfig}'s own compact constructor, so an out-of-range
+ * com.drones.vision.perception.domain.model.PipelineConfig}'s own compact constructor, so an out-of-range
  * value surfaces as {@link IllegalArgumentException} without this record needing to duplicate that
  * validation.
  *
  * <p>{@code modelId} carries only the model checkpoint id, never the version — {@link
- * com.drones.vision.domain.model.PipelineConfig#model()}'s version component is deliberately not
+ * com.drones.vision.perception.domain.model.PipelineConfig#model()}'s version component is deliberately not
  * PATCH-able (frozen contract &sect;3); a present {@code modelId} keeps the running config's
  * current version unchanged. {@code maxInFlightInferences}, {@code overlayTelemetry}, {@code
  * overlayBurnIn}, and {@code eventRule} are likewise not PATCH-able in v1 and have no field here at

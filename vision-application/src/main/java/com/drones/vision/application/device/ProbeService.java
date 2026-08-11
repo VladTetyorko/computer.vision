@@ -1,6 +1,6 @@
 package com.drones.vision.application.device;
 
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.application.asset.AssetService;
 
 /**
@@ -13,7 +13,7 @@ import com.drones.vision.application.asset.AssetService;
  * written to, no audit entry is recorded — this is a read-only connectivity check, the opposite of
  * {@link DeviceService#register}/{@link AssetService#create}.
  *
- * @see com.drones.vision.domain.port.out.VideoSourcePort
+ * @see com.drones.vision.perception.domain.port.VideoSourcePort
  */
 public interface ProbeService {
 

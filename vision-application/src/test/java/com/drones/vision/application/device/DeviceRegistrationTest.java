@@ -1,7 +1,7 @@
 package com.drones.vision.application.device;
 
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.StreamDescriptor;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;

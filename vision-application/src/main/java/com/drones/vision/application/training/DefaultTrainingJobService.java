@@ -1,18 +1,18 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.AuditAction;
-import com.drones.vision.domain.model.AuditEntry;
-import com.drones.vision.domain.model.AuditTargetType;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetUpload;
-import com.drones.vision.domain.model.JobState;
-import com.drones.vision.domain.model.SampleStatus;
-import com.drones.vision.domain.model.TrainingJobSpec;
-import com.drones.vision.domain.model.TrainingProgress;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AuditTrailPort;
-import com.drones.vision.domain.port.out.TrainingPort;
+import com.drones.vision.identity.domain.model.AuditAction;
+import com.drones.vision.identity.domain.model.AuditEntry;
+import com.drones.vision.identity.domain.model.AuditTargetType;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetUpload;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.SampleStatus;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.learning.domain.model.TrainingProgress;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.learning.domain.port.TrainingPort;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -39,7 +39,7 @@ import com.drones.vision.application.scope.VisibilityScope;
  *
  * <h2>Synchronous dataset pre-check (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
  * After the scope gate, {@link #start} runs one cheap, bounded {@link
- * LabelingService#samples(DatasetId, com.drones.vision.domain.model.SampleStatus, int, UserId,
+ * LabelingService#samples(DatasetId, com.drones.vision.learning.domain.model.SampleStatus, int, UserId,
  * VisibilityScope) LabelingService#samples} read (limit {@code 1}, filtered to {@code LABELED})
  * before ever registering or submitting the job. This surfaces an unknown dataset ({@link
  * java.util.NoSuchElementException}), an out-of-scope one ({@link AccessDeniedException}), and an

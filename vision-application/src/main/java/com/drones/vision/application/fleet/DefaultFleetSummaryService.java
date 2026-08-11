@@ -1,15 +1,15 @@
 package com.drones.vision.application.fleet;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionEventState;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.FlightState;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.events.domain.model.DetectionEventState;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.flight.domain.model.FlightState;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
 
 import java.time.Duration;
 import java.time.Instant;

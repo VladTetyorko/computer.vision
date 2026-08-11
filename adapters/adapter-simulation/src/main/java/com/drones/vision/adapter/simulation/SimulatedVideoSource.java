@@ -1,10 +1,10 @@
 package com.drones.vision.adapter.simulation;
 
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamDescriptor;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.VideoSourcePort;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.VideoSourcePort;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

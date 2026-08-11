@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackRef;
 
 /**
  * The nested {@code "track"} object on {@link DetectionResponse} (docs/plans/done/TRACKING-PLAN.md &sect;4.G) —

@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 
 import java.util.List;
 import java.util.Map;

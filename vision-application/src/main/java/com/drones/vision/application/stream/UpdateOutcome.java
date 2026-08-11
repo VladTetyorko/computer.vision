@@ -12,7 +12,7 @@ package com.drones.vision.application.stream;
  *                        patch that only touches confidence/inference-fps/label-filter/detection-on-
  *                        off/<b>tracking</b> reports {@code false}.
  * @param trackingChanged {@code true} iff the patch carried a {@code tracking} object <b>and</b> the
- *                        fold produced a different {@link com.drones.vision.domain.model.TrackingConfig}
+ *                        fold produced a different {@link com.drones.vision.perception.domain.model.TrackingConfig}
  *                        than the one already running — so restating the identical configuration
  *                        reports {@code false}, while re-issuing a lock reports {@code true} (its
  *                        server-allocated {@code lockSeq} is new, which is exactly what makes it a

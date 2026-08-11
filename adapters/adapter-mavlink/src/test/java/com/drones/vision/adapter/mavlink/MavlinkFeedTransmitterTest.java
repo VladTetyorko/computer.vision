@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.domain.model.FeedId;
-import com.drones.vision.domain.model.FeedSpec;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.perception.domain.model.FeedId;
+import com.drones.vision.perception.domain.model.FeedSpec;
+import com.drones.vision.kernel.StreamDescriptor;
 
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.MavlinkMessage;

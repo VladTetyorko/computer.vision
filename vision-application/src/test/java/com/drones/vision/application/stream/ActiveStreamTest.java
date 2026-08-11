@@ -1,7 +1,7 @@
 package com.drones.vision.application.stream;
 
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.StreamId;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;

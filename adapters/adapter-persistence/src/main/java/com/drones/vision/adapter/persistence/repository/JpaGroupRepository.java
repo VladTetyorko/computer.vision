@@ -3,9 +3,9 @@ package com.drones.vision.adapter.persistence.repository;
 import com.drones.vision.adapter.persistence.config.JpaOperations;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
 import com.drones.vision.adapter.persistence.mapper.GroupMapper;
-import com.drones.vision.domain.model.Group;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.port.out.GroupRepositoryPort;
+import com.drones.vision.identity.domain.model.Group;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 

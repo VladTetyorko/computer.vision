@@ -1,7 +1,7 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.AccessLevel;
-import com.drones.vision.domain.model.MapLayer;
+import com.drones.vision.map.domain.model.AccessLevel;
+import com.drones.vision.map.domain.model.MapLayer;
 
 /**
  * One row of {@link MapLayerService#layers}: a layer the viewer may see, plus the highest {@link

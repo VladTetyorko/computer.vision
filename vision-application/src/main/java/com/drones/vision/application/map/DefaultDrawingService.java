@@ -1,14 +1,14 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.Drawing;
-import com.drones.vision.domain.model.DrawingId;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.port.out.DrawingRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.model.Drawing;
+import com.drones.vision.map.domain.model.DrawingId;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.map.domain.port.DrawingRepositoryPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -135,7 +135,7 @@ public final class DefaultDrawingService implements DrawingService {
     /**
      * The gate shared by {@link #patch} and {@link #delete}: the drawing's own creator may always
      * edit/delete it (no verification carve-out — {@link Drawing} has none, unlike {@link
-     * com.drones.vision.domain.model.Mark}), or a viewer with {@link MapAccessPolicy#canManage} on
+     * com.drones.vision.map.domain.model.Mark}), or a viewer with {@link MapAccessPolicy#canManage} on
      * its layer may.
      */
     private void requireCreatorOrManager(Viewer v, Drawing drawing, MapLayer layer) {

@@ -1,8 +1,8 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.AssignmentRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;

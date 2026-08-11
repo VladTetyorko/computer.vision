@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.AssetImageEntity;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetImage;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.warehouse.domain.model.AssetImage;
 
 import java.time.Instant;
 

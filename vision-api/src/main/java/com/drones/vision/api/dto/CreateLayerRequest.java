@@ -2,8 +2,8 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.api.support.EnumParsing;
 import com.drones.vision.application.map.LayerSpec;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerKind;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerKind;
 
 /**
  * Body of {@code POST /api/map/layers} (docs/plans/done/MAP-REWORK-PLAN.md §4.2).

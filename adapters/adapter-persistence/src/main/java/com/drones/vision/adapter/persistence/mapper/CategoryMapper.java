@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.persistence.mapper;
 
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceCategory;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.DeviceCategory;
 
 /**
  * {@link DeviceCategory} &harr; {@link CategoryEntity} mapping, extracted from {@code

@@ -14,7 +14,7 @@ import java.nio.ByteBuffer;
  * on every subsequent {@code grab()} call, so the bytes must be copied out
  * before they can be handed to code that outlives the current grab-loop
  * iteration — in particular before wrapping them in a {@link
- * com.drones.vision.domain.model.VideoFrame}, whose compact constructor
+ * com.drones.vision.perception.domain.model.VideoFrame}, whose compact constructor
  * stores the buffer for the lifetime of that immutable record.
  *
  * <p>Deliberately a byte-for-byte duplicate of {@code adapter-rtsp}'s

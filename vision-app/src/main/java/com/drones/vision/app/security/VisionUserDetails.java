@@ -1,9 +1,9 @@
 package com.drones.vision.app.security;
 
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.Membership;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.User;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.identity.domain.model.Membership;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.User;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;

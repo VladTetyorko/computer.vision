@@ -1,8 +1,8 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.DetectorReason;
-import com.drones.vision.domain.model.TrackState;
-import com.drones.vision.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.TrackState;
+import com.drones.vision.perception.domain.model.TrackingMode;
 
 import java.time.Duration;
 import java.util.EnumMap;
@@ -15,8 +15,8 @@ import java.util.Objects;
  * /api/streams/{streamId}/tracks}'s {@code stats} object and the operator-facing flow strip.
  *
  * <p><b>Computed Java-side, from responses that already arrive.</b> Every field here is derived by
- * {@link TrackingStatsWindow} from the {@link com.drones.vision.domain.model.TrackingTelemetry}
- * riding each {@link com.drones.vision.domain.model.DetectionResult}. There is no new wire field, no
+ * {@link TrackingStatsWindow} from the {@link com.drones.vision.perception.domain.model.TrackingTelemetry}
+ * riding each {@link com.drones.vision.perception.domain.model.DetectionResult}. There is no new wire field, no
  * new endpoint, and no read-model concern inside cv-service (invariant P3) — which is also why this
  * works identically in every deployment placement, including onboard a companion computer where
  * nobody can read a log.

@@ -4,7 +4,7 @@ import com.drones.vision.api.dto.GeofenceZoneRequest;
 import com.drones.vision.api.dto.GeofenceZoneResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.geofence.GeofenceService;
-import com.drones.vision.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.ZoneId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

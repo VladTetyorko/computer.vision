@@ -1,9 +1,9 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 
 import java.time.Instant;
 import java.util.List;

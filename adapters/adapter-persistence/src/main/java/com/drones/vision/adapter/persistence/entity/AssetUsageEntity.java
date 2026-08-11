@@ -9,19 +9,19 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * JPA row for {@code asset_usages} — mirrors {@link com.drones.vision.domain.model.AssetUsage}
+ * JPA row for {@code asset_usages} — mirrors {@link com.drones.vision.flight.domain.model.AssetUsage}
  * field-for-field, with {@code startPosition}/{@code lastPosition} each flattened to a
  * latitude/longitude/altitude column triple (same "flatten a small value type into columns"
  * choice {@code AssetEntity} makes for {@code Ownership}, rather than a jsonb column). A
  * latitude/longitude pair is {@code null} together iff the corresponding {@code GeoPosition} is
- * {@code null} — {@link com.drones.vision.domain.model.GeoPosition#latitude()}/{@code longitude()}
+ * {@code null} — {@link com.drones.vision.kernel.GeoPosition#latitude()}/{@code longitude()}
  * are non-nullable primitives on the domain side, so only the altitude column is independently
  * nullable once a position exists.
  *
  * <p>{@code streamId} (docs/plans/done/MVP2-PLAN.md §R, R-a2, {@code V4__usage_stream_id.sql}) is a nullable
  * UUID column — additive on top of V1-V3, so every pre-existing row simply reads back {@code
  * null} (a legacy usage, honestly carrying no stream link — see {@link
- * com.drones.vision.domain.model.AssetUsage}'s javadoc).
+ * com.drones.vision.flight.domain.model.AssetUsage}'s javadoc).
  *
  * <p>{@link com.drones.vision.adapter.persistence.JpaAssetUsageRepository} owns the mapping in
  * both directions. No FK to {@code assets} — same no-cross-entity-FK convention as the P-a schema

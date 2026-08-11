@@ -1,11 +1,11 @@
 package com.drones.vision.app.events;
 
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionEventId;
-import com.drones.vision.domain.model.DetectionEventState;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.port.out.DetectionEventRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.events.domain.model.DetectionEventId;
+import com.drones.vision.events.domain.model.DetectionEventState;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.events.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

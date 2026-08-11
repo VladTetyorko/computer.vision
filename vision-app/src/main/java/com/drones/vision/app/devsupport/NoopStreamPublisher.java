@@ -1,9 +1,9 @@
 package com.drones.vision.app.devsupport;
 
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
-import com.drones.vision.domain.port.out.StreamPublisherPort;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.port.StreamPublisherPort;
 
 /**
  * No-op {@link StreamPublisherPort}: does not fan frames out anywhere;

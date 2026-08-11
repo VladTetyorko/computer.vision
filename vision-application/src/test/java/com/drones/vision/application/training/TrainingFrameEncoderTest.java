@@ -1,8 +1,8 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.PixelFormat;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.PixelFormat;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.VideoFrame;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;

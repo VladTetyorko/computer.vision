@@ -1,21 +1,21 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.AssetUsage;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.DeviceId;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.StreamId;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UsageId;
-import com.drones.vision.domain.port.out.AssetRepositoryPort;
-import com.drones.vision.domain.port.out.AssetUsageRepositoryPort;
-import com.drones.vision.domain.port.out.DeviceRepositoryPort;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.TelemetryRepositoryPort;
-import com.drones.vision.domain.port.out.TelemetrySourcePort;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.flight.domain.model.AssetUsage;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.UsageId;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.flight.domain.port.AssetUsageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
+import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,7 +46,7 @@ import com.drones.vision.application.stream.StreamService;
  *       device, opens a new {@link AssetUsage} (persisted via {@link
  *       AssetUsageRepositoryPort}), stamping it with the given {@code
  *       streamId} (docs/plans/done/MVP2-PLAN.md §R, R-a2 — the live stream that opened
- *       it, later joined against {@link com.drones.vision.domain.model.DetectionResult}
+ *       it, later joined against {@link com.drones.vision.perception.domain.model.DetectionResult}
  *       for replay), and subscribes to a {@link TelemetrySourcePort} for
  *       each of the asset's {@link Capability#TELEMETRY}-capable devices
  *       that a registered source supports. An asset with several devices
@@ -77,7 +77,7 @@ import com.drones.vision.application.stream.StreamService;
  * result — it wraps it in a {@link SupervisedPublisher} so a telemetry source error/completion is
  * retried with the same capped exponential backoff instead of silently ending telemetry for the
  * rest of the usage. Unlike the video path, this does <b>not</b> publish a {@code PIPELINE_ERROR}
- * event on an outage — this class has no {@link com.drones.vision.domain.port.out.EventPublisherPort}
+ * event on an outage — this class has no {@link com.drones.vision.events.domain.port.EventPublisherPort}
  * (and no {@code StreamId} to publish one against; telemetry is tracked per-asset/device, not
  * per-stream), and {@link TelemetrySubscriber#onError} was already, deliberately, a completely
  * silent no-op before this task (see the Gotchas below) — reconnection is new, the pre-existing

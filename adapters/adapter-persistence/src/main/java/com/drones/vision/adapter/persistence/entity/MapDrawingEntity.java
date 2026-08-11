@@ -1,7 +1,7 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.DrawKind;
-import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.map.domain.model.DrawKind;
+import com.drones.vision.kernel.GeoPosition;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

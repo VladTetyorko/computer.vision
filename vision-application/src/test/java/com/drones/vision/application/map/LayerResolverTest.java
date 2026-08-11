@@ -1,20 +1,20 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.AssetId;
-import com.drones.vision.domain.model.DetectionEvent;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.Event;
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.Role;
-import com.drones.vision.domain.model.Telemetry;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.events.domain.model.DetectionEvent;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.events.domain.model.Event;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.flight.domain.model.Telemetry;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

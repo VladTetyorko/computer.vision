@@ -1,5 +1,11 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.identity.domain.port.AuditTrailPort;
+import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.identity.domain.port.PasswordHasherPort;
+import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.SessionAuthenticator;
 import com.drones.vision.app.bootstrap.AuthSeedRunner;
@@ -10,7 +16,7 @@ import com.drones.vision.app.security.SecurityContextPrincipalResolver;
 import com.drones.vision.app.security.SecuritySessionAuthenticator;
 import com.drones.vision.application.identity.*;
 import com.drones.vision.application.scope.*;
-import com.drones.vision.domain.port.out.*;
+
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;

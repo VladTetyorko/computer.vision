@@ -1,14 +1,14 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.GroupId;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapEvent;
-import com.drones.vision.domain.model.MapLayer;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
-import com.drones.vision.domain.port.out.LiveUpdatePublisherPort;
-import com.drones.vision.domain.port.out.MapLayerRepositoryPort;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapEvent;
+import com.drones.vision.map.domain.model.MapLayer;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.events.domain.port.LiveUpdatePublisherPort;
+import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -22,7 +22,7 @@ import com.drones.vision.application.map.MapAccessPolicy.Viewer;
  * Shared layer-lookup and default-layer-selection collaborator for {@code DefaultMapLayerService}
  * (same package), {@code DefaultMarkService} and {@code DefaultDrawingService} (package {@code
  * com.drones.vision.application.mark}/{@code map}) — the one place {@link
- * com.drones.vision.domain.port.out.MapLayerRepositoryPort} is reached from this module, so the
+ * com.drones.vision.map.domain.port.MapLayerRepositoryPort} is reached from this module, so the
  * COP-bootstrap and default-personal-layer-bootstrap invariants ("exactly one COP layer", "at most
  * one personal layer per user") can never drift between the three services that all need them.
  *
@@ -183,7 +183,7 @@ public final class LayerResolver {
      * Picks a {@link GroupId} to satisfy {@link Ownership}'s non-null contract when constructing a
      * mark, drawing, or personal layer on {@code viewer}'s behalf. Deliberately inert for
      * authorization purposes — {@link MapAccessPolicy}'s creator/ownerId rule already grants the
-     * owner {@link com.drones.vision.domain.model.AccessLevel#MANAGE} regardless of which group is
+     * owner {@link com.drones.vision.map.domain.model.AccessLevel#MANAGE} regardless of which group is
      * recorded here — so this only needs to be <em>some</em> well-formed value: the viewer's own
      * lowest-UUID membership group (deterministic, so the same viewer always gets the same answer),
      * or {@link #SYSTEM_GROUP_ID} for a viewer with no memberships at all.

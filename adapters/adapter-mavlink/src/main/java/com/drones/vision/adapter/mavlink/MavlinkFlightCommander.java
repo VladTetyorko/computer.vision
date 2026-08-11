@@ -1,9 +1,9 @@
 package com.drones.vision.adapter.mavlink;
 
-import com.drones.vision.domain.model.CommandResult;
-import com.drones.vision.domain.model.Device;
-import com.drones.vision.domain.model.FlightCapability;
-import com.drones.vision.domain.port.out.FlightCommandPort;
+import com.drones.vision.flight.domain.model.CommandResult;
+import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.port.FlightCommandPort;
 
 import io.dronefleet.mavlink.MavlinkConnection;
 import io.dronefleet.mavlink.common.CommandAck;

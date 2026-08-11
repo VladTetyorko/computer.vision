@@ -1,8 +1,8 @@
 package com.drones.vision.adapter.cvgrpc;
 
-import com.drones.vision.domain.model.JobState;
-import com.drones.vision.domain.model.TrainingJobSpec;
-import com.drones.vision.domain.model.TrainingProgress;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.TrainingJobSpec;
+import com.drones.vision.learning.domain.model.TrainingProgress;
 import com.drones.vision.proto.v1.TrainingGrpc;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;

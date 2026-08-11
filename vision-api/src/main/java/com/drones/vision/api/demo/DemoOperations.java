@@ -6,12 +6,12 @@ import com.drones.vision.application.map.MapAccessPolicy.Viewer;
 import com.drones.vision.application.map.MapLayerService;
 import com.drones.vision.application.mark.MarkService;
 import com.drones.vision.application.mark.MarkSpec;
-import com.drones.vision.domain.model.Affiliation;
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.MarkKind;
-import com.drones.vision.domain.model.ZoneKind;
+import com.drones.vision.map.domain.model.Affiliation;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.MarkKind;
+import com.drones.vision.flight.domain.model.ZoneKind;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 

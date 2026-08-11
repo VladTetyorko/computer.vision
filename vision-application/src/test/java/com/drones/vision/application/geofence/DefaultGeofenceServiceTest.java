@@ -1,10 +1,10 @@
 package com.drones.vision.application.geofence;
 
-import com.drones.vision.domain.model.GeoPosition;
-import com.drones.vision.domain.model.GeofenceZone;
-import com.drones.vision.domain.model.ZoneId;
-import com.drones.vision.domain.model.ZoneKind;
-import com.drones.vision.domain.port.out.GeofenceRepositoryPort;
+import com.drones.vision.kernel.GeoPosition;
+import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.ZoneKind;
+import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

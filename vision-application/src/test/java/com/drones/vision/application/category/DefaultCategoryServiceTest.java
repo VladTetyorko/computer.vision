@@ -1,8 +1,8 @@
 package com.drones.vision.application.category;
 
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.DeviceCategory;
-import com.drones.vision.domain.port.out.CategoryRepositoryPort;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.UserId;
 
 /**
  * One pilot assigned to an asset, on the wire (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2) — the

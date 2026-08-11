@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.model.FlightCapability;
 
 import java.util.List;
 

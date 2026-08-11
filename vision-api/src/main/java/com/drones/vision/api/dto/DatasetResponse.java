@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Dataset;
+import com.drones.vision.learning.domain.model.Dataset;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
@@ -12,7 +12,7 @@ import java.util.Map;
  *
  * @param id             typed dataset identity, as its canonical UUID string
  * @param name           human-readable name
- * @param targetCategory the target {@link com.drones.vision.domain.model.CategoryId} slug, absent
+ * @param targetCategory the target {@link com.drones.vision.kernel.CategoryId} slug, absent
  *                        if this dataset is not tied to one category
  * @param classes        the ordered YOLO class list
  * @param status         {@code OPEN}/{@code ARCHIVED}
@@ -20,7 +20,7 @@ import java.util.Map;
  * @param sampleCounts   this dataset's sample count broken down by {@code PENDING}/{@code
  *                       LABELED}/{@code DISCARDED} — every key always present, even at zero (not a
  *                       {@link Dataset} field — computed by the controller from {@link
- *                       com.drones.vision.domain.port.out.TrainingSampleRepositoryPort#countByDataset})
+ *                       com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort#countByDataset})
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record DatasetResponse(String id, String name, String targetCategory, List<String> classes, String status,

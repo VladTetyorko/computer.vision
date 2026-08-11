@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.Mark;
-import com.drones.vision.domain.model.Verification;
+import com.drones.vision.map.domain.model.Mark;
+import com.drones.vision.map.domain.model.Verification;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;

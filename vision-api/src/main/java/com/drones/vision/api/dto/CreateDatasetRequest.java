@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.application.training.DatasetSpec;
-import com.drones.vision.domain.model.CategoryId;
+import com.drones.vision.kernel.CategoryId;
 
 import java.util.List;
 

@@ -1,9 +1,9 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.Dataset;
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.Ownership;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.learning.domain.model.Dataset;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.application.scope.VisibilityScope;
@@ -26,7 +26,7 @@ import com.drones.vision.application.scope.VisibilityScope;
 public interface DatasetService {
 
     /**
-     * Creates a new {@link Dataset} in {@link com.drones.vision.domain.model.DatasetStatus#OPEN}.
+     * Creates a new {@link Dataset} in {@link com.drones.vision.learning.domain.model.DatasetStatus#OPEN}.
      *
      * @param spec      the dataset's name/target category/class vocabulary
      * @param ownership who owns the new dataset and which group it belongs to (resolved at the API
@@ -68,7 +68,7 @@ public interface DatasetService {
 
     /**
      * Deletes a dataset. Does not cascade to its samples/images (matches {@link
-     * com.drones.vision.domain.port.out.DatasetRepositoryPort#delete}'s own "no referential
+     * com.drones.vision.learning.domain.port.DatasetRepositoryPort#delete}'s own "no referential
      * integrity between repositories" contract) — orphaned samples/images for a deleted dataset are
      * a known, accepted gap this wave does not close.
      *

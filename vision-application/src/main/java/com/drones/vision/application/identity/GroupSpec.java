@@ -1,7 +1,7 @@
 package com.drones.vision.application.identity;
 
-import com.drones.vision.domain.model.Group;
-import com.drones.vision.domain.model.GroupId;
+import com.drones.vision.identity.domain.model.Group;
+import com.drones.vision.kernel.GroupId;
 
 /**
  * Everything needed to create a {@link Group} (docs/plans/done/U-AUTH-PLAN.md, wave 2) — a top-level record

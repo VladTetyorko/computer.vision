@@ -1,6 +1,6 @@
 package com.drones.vision.application.asset;
 
-import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.kernel.AssetId;
 
 /**
  * A record of what one soft delete did.

@@ -3,7 +3,7 @@ package com.drones.vision.application.asset;
 /**
  * Whether an asset is streaming right now.
  *
- * <p>A separate axis from {@link com.drones.vision.domain.model.LifecycleState}: "idle at the
+ * <p>A separate axis from {@link com.drones.vision.kernel.LifecycleState}: "idle at the
  * moment" and "withdrawn from service" are different facts, and collapsing them would make a
  * deactivated asset indistinguishable from one that simply is not flying.
  */

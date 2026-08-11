@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.Detection;
+import com.drones.vision.perception.domain.model.Detection;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * JPA row for {@code detection_results} — mirrors {@link com.drones.vision.domain.model.DetectionResult}
+ * JPA row for {@code detection_results} — mirrors {@link com.drones.vision.perception.domain.model.DetectionResult}
  * field-for-field. {@code id} is a synthetic UUID this entity invents at save time (same rationale
  * as {@link TelemetrySampleEntity}: the domain record carries no identity of its own — it is
  * addressed by {@code (streamId, frameSequence, capturedAt)}, per its own javadoc).
@@ -30,7 +30,7 @@ import java.util.UUID;
  * happens in Java after fetch, exactly like {@code InMemoryDetectionRepository} does), so a join
  * table would add schema without adding any real query capability.
  *
- * <p>{@code inferenceLatencyNanos} stores {@link com.drones.vision.domain.model.DetectionResult#inferenceLatency()}
+ * <p>{@code inferenceLatencyNanos} stores {@link com.drones.vision.perception.domain.model.DetectionResult#inferenceLatency()}
  * as a plain {@code bigint} of nanoseconds (via {@code Duration#toNanos()}/{@code Duration#ofNanos}
  * in the repository's mapping) rather than relying on Hibernate's implicit {@code Duration} basic
  * type, keeping this entity's field types uniformly plain scalars like every other entity in this

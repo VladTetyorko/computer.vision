@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.GeoPosition;
+import com.drones.vision.kernel.GeoPosition;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**

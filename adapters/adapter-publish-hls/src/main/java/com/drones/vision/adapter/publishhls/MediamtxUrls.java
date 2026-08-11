@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.publishhls;
 
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.kernel.StreamId;
 
 import java.net.URI;
 

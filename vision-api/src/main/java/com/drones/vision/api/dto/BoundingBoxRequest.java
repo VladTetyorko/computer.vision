@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.domain.model.BoundingBox;
+import com.drones.vision.kernel.BoundingBox;
 
 /**
  * Wire representation of a corrected/drawn {@link BoundingBox}, embedded in {@link

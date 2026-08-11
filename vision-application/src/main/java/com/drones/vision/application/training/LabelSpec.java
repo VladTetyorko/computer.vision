@@ -1,7 +1,7 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.SampleStatus;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.learning.domain.model.SampleStatus;
 
 import java.util.List;
 import java.util.Objects;

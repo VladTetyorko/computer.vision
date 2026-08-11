@@ -1,12 +1,12 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.DatasetUpload;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.SampleStatus;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.model.TrainingSampleId;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.learning.domain.model.DatasetUpload;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.SampleStatus;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.application.replay.ReplayCaptureSpec;
@@ -15,7 +15,7 @@ import com.drones.vision.application.scope.VisibilityScope;
 /**
  * Capture, correction/labeling and export of {@link TrainingSample}s (docs/plans/done/CV-TRAINING-PLAN.md
  * §2) — the operator-in-the-loop half of the CV model-improvement loop. One interface, one
- * implementation ({@link DefaultLabelingService}); {@link com.drones.vision.domain.model.Dataset}
+ * implementation ({@link DefaultLabelingService}); {@link com.drones.vision.learning.domain.model.Dataset}
  * CRUD lives in {@link DatasetService}.
  *
  * <h2>Scope (docs/plans/done/CV-TRAINING-PLAN.md Open Questions §4)</h2>
@@ -40,8 +40,8 @@ public interface LabelingService {
      * Captures a training sample from a stream's <b>current</b> raw frame and detections: reads
      * {@link com.drones.vision.application.stream.StreamService#latestRawFrame} (full-resolution, pre-overlay) and {@link
      * com.drones.vision.application.stream.StreamService#latestDetections}, maps every detection to a {@link
-     * com.drones.vision.domain.model.AnnotationSource#MODEL} annotation, and saves a new {@link
-     * com.drones.vision.domain.model.SampleStatus#PENDING} sample (+ its JPEG image) into {@code
+     * com.drones.vision.learning.domain.model.AnnotationSource#MODEL} annotation, and saves a new {@link
+     * com.drones.vision.learning.domain.model.SampleStatus#PENDING} sample (+ its JPEG image) into {@code
      * spec}'s dataset.
      *
      * @param spec   the stream to capture from and the dataset to add the sample to
@@ -62,11 +62,11 @@ public interface LabelingService {
      * instant (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) — the replay counterpart to {@link #capture}'s live
      * path. Pulls one decoded frame via {@link com.drones.vision.application.replay.ReplaySources#frames()} at {@code
      * usage.startedAt() + spec.atSeconds()}, and pre-fills suggested annotations from the nearest
-     * stored {@link com.drones.vision.domain.model.DetectionResult} within a ±2s window (server-side
+     * stored {@link com.drones.vision.perception.domain.model.DetectionResult} within a ±2s window (server-side
      * lookup — see {@link DefaultLabelingService}'s own javadoc for why), mapped to {@link
-     * com.drones.vision.domain.model.AnnotationSource#MODEL} annotations; nothing in the window
+     * com.drones.vision.learning.domain.model.AnnotationSource#MODEL} annotations; nothing in the window
      * yields an empty (never fabricated) annotation list. Saves a new {@link
-     * com.drones.vision.domain.model.SampleStatus#PENDING} sample (+ its JPEG image) into {@code
+     * com.drones.vision.learning.domain.model.SampleStatus#PENDING} sample (+ its JPEG image) into {@code
      * spec}'s dataset — identical shape to what {@link #capture} produces, so the existing sample
      * editor/labeling/upload path needs no changes.
      *
@@ -117,7 +117,7 @@ public interface LabelingService {
      * Confirms or corrects one sample: replaces its annotations and moves it to {@code
      * spec.status()} ({@link SampleStatus#LABELED} or {@link SampleStatus#DISCARDED}), stamping
      * {@code labeledBy}/{@code labeledAt}. Every annotation's label must be a member of the
-     * sample's dataset's {@link com.drones.vision.domain.model.Dataset#classes()} — the domain
+     * sample's dataset's {@link com.drones.vision.learning.domain.model.Dataset#classes()} — the domain
      * deliberately does not enforce this (see {@link TrainingSample}'s own javadoc), so it lives
      * here. May be called more than once on the same sample (re-correcting an already {@code
      * LABELED} sample, or reviving a {@code DISCARDED} one) — the only status transition this
@@ -140,7 +140,7 @@ public interface LabelingService {
     /**
      * Composes every {@link SampleStatus#LABELED} sample in a dataset into the frozen §5 YOLO
      * content (docs/plans/done/CV-TRAINING-PLAN.md §5: {@code data.yaml} + per-sample image/label entries) and
-     * ships it to the training host via {@link com.drones.vision.domain.port.out.DatasetUploadPort}
+     * ships it to the training host via {@link com.drones.vision.learning.domain.port.DatasetUploadPort}
      * (docs/plans/done/CV-TRAINING-V2-PLAN.md §4) — the replacement for the deleted manual export step.
      * {@link SampleStatus#PENDING}/{@link SampleStatus#DISCARDED} samples are skipped. Uploading the
      * same dataset again replaces whatever the training host had before (idempotent — "label more,

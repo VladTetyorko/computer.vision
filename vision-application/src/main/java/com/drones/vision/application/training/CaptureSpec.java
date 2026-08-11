@@ -1,7 +1,7 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.DatasetId;
-import com.drones.vision.domain.model.StreamId;
+import com.drones.vision.learning.domain.model.DatasetId;
+import com.drones.vision.kernel.StreamId;
 
 import java.util.Objects;
 

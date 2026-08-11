@@ -1,10 +1,10 @@
 package com.drones.vision.application.training;
 
-import com.drones.vision.domain.model.Annotation;
-import com.drones.vision.domain.model.BoundingBox;
-import com.drones.vision.domain.model.SampleImage;
-import com.drones.vision.domain.model.TrainingSample;
-import com.drones.vision.domain.port.out.DatasetUploadPort;
+import com.drones.vision.learning.domain.model.Annotation;
+import com.drones.vision.kernel.BoundingBox;
+import com.drones.vision.learning.domain.model.SampleImage;
+import com.drones.vision.learning.domain.model.TrainingSample;
+import com.drones.vision.learning.domain.port.DatasetUploadPort;
 
 import java.util.List;
 import java.util.Locale;
@@ -34,7 +34,7 @@ final class YoloDatasetWriter {
 
     /**
      * Builds the {@link DatasetUploadPort.ExportEntry} for one {@link
-     * com.drones.vision.domain.model.SampleStatus#LABELED} sample.
+     * com.drones.vision.learning.domain.model.SampleStatus#LABELED} sample.
      *
      * @param sample  the labeled sample being uploaded
      * @param image   the sample's stored image bytes

@@ -4,11 +4,11 @@ import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.asset.AssetSpec;
 import com.drones.vision.application.device.DeviceRegistration;
-import com.drones.vision.domain.model.Asset;
-import com.drones.vision.domain.model.Capability;
-import com.drones.vision.domain.model.CategoryId;
-import com.drones.vision.domain.model.PipelineConfig;
-import com.drones.vision.domain.model.StreamDescriptor;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.kernel.Capability;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.kernel.StreamDescriptor;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Resilience smoke test for docs/plans/done/MVP1-PLAN.md §C7 bullet 4's done criterion "killing the [CV]
  * service mid-stream leaves video/telemetry running": with {@code vision.cv.enabled=true} but
  * {@code vision.cv.endpoint} pointed at a port nothing is listening on, a {@code sim}-device
- * stream must still flow video to {@link com.drones.vision.domain.port.out.StreamPublisherPort}
+ * stream must still flow video to {@link com.drones.vision.perception.domain.port.StreamPublisherPort}
  * and must not crash the pipeline or the application context — proving a real, wired {@code
  * GrpcDetectionPort} degrades exactly like {@code NoopDetectionPort} once {@code
  * StreamPipeline}'s detection-outage/backoff policy (vision-application, docs/plans/done/MVP1-PLAN.md §C7

@@ -1,12 +1,12 @@
 package com.drones.vision.application.pipeline;
 
-import com.drones.vision.domain.model.Detection;
-import com.drones.vision.domain.model.DetectionResult;
-import com.drones.vision.domain.model.DetectorReason;
-import com.drones.vision.domain.model.TrackRef;
-import com.drones.vision.domain.model.TrackState;
-import com.drones.vision.domain.model.TrackingMode;
-import com.drones.vision.domain.model.TrackingTelemetry;
+import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.TrackRef;
+import com.drones.vision.perception.domain.model.TrackState;
+import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TrackingTelemetry;
 
 import java.time.Duration;
 import java.time.Instant;

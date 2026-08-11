@@ -1,6 +1,6 @@
 package com.drones.vision.adapter.persistence.entity;
 
-import com.drones.vision.domain.model.Membership;
+import com.drones.vision.identity.domain.model.Membership;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * JPA row for {@code users} — mirrors {@link com.drones.vision.domain.model.User} field-for-field
+ * JPA row for {@code users} — mirrors {@link com.drones.vision.identity.domain.model.User} field-for-field
  * (docs/plans/done/U-AUTH-PLAN.md, wave 3); {@link com.drones.vision.adapter.persistence.JpaUserRepository}
  * owns the mapping in both directions.
  *

@@ -1,9 +1,9 @@
 package com.drones.vision.application.map;
 
-import com.drones.vision.domain.model.LayerGrant;
-import com.drones.vision.domain.model.LayerId;
-import com.drones.vision.domain.model.LayerKind;
-import com.drones.vision.domain.model.MapLayer;
+import com.drones.vision.map.domain.model.LayerGrant;
+import com.drones.vision.map.domain.model.LayerId;
+import com.drones.vision.map.domain.model.LayerKind;
+import com.drones.vision.map.domain.model.MapLayer;
 
 import java.util.List;
 import com.drones.vision.application.map.MapAccessPolicy.Viewer;

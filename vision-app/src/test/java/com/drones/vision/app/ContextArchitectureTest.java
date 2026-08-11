@@ -35,6 +35,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ContextArchitectureTest {
 
     private static final String APPLICATION_ROOT = "com.drones.vision.application.";
+    private static final String VISION_ROOT = "com.drones.vision.";
+    private static final String KERNEL_ROOT = "com.drones.vision.kernel";
 
     /** Package (first segment under {@code application}) &rarr; bounded context it belongs to. */
     private static final Map<String, String> CONTEXT_OF_PACKAGE = Map.ofEntries(
@@ -84,13 +86,36 @@ class ContextArchitectureTest {
             // perception a sink, so the graph is already acyclic.
             "warehouse -> perception"));
 
+    /** The eight contexts, as they appear in {@code com.drones.vision.<context>.domain..}. */
+    private static final Set<String> CONTEXTS = Set.of(
+            "identity", "warehouse", "perception", "flight", "map", "learning", "events", "simulation");
+
+    /**
+     * Cross-context references between the <em>domain</em> models and ports, after the W1.5a
+     * package split. Same exact-match contract as {@link #DECLARED_EDGES}.
+     *
+     * <p>Acyclic, and deliberately so: {@code perception} and {@code events} used to point at each
+     * other until {@code EventRuleConfig} moved to the context that owns it (W1 §5 C4), and
+     * {@code StreamDescriptor} moving into the kernel (C5) removed half of perception's reach into
+     * warehouse. What remains is ports accepting a whole {@code Device} from another context — real
+     * but harmless coupling, narrowed later by C6.
+     */
+    private static final Set<String> DECLARED_DOMAIN_EDGES = new TreeSet<>(Set.of(
+            "events -> flight",
+            "events -> map",
+            "events -> perception",
+            "flight -> warehouse",
+            "learning -> perception",
+            "perception -> flight",
+            "perception -> warehouse"));
+
     private static JavaClasses classes;
 
     @BeforeAll
     static void importClasses() {
         classes = new ClassFileImporter()
                 .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-                .importPackages("com.drones.vision.application");
+                .importPackages("com.drones.vision");
     }
 
     @Test
@@ -143,6 +168,76 @@ class ContextArchitectureTest {
         assertThat(mutual)
                 .withFailMessage("Mutually dependent contexts cannot become Maven modules: %s", mutual)
                 .isEmpty();
+    }
+
+    @Test
+    void domainCrossContextReferencesMatchTheDeclaredSetExactly() {
+        Set<String> observed = new TreeSet<>();
+        for (JavaClass origin : classes) {
+            String from = domainContextOf(origin);
+            if (from == null || from.equals("kernel")) {
+                continue;
+            }
+            for (Dependency dependency : origin.getDirectDependenciesFromSelf()) {
+                String to = domainContextOf(dependency.getTargetClass());
+                if (to != null && !to.equals("kernel") && !to.equals(from)) {
+                    observed.add(from + " -> " + to);
+                }
+            }
+        }
+
+        Set<String> added = new TreeSet<>(observed);
+        added.removeAll(DECLARED_DOMAIN_EDGES);
+        Set<String> removed = new TreeSet<>(DECLARED_DOMAIN_EDGES);
+        removed.removeAll(observed);
+
+        assertThat(observed)
+                .withFailMessage("""
+                        Domain cross-context references changed (docs/plans/active/DOMAIN-SEPARATION-W1.md §4).
+
+                          new: %s
+                          gone (delete it from DECLARED_DOMAIN_EDGES): %s
+                        """, added.isEmpty() ? "none" : added, removed.isEmpty() ? "none" : removed)
+                .isEqualTo(DECLARED_DOMAIN_EDGES);
+    }
+
+    /**
+     * The shared kernel is the one package every context may depend on, which only works while it
+     * depends on none of them — otherwise it smuggles a context edge into all eight at once.
+     */
+    @Test
+    void kernelDependsOnNothingButItselfAndTheJdk() {
+        Set<String> leaks = new TreeSet<>();
+        for (JavaClass origin : classes) {
+            if (!"kernel".equals(domainContextOf(origin))) {
+                continue;
+            }
+            for (Dependency dependency : origin.getDirectDependenciesFromSelf()) {
+                String target = dependency.getTargetClass().getPackageName();
+                if (target.startsWith("com.drones.vision") && !target.startsWith(KERNEL_ROOT)) {
+                    leaks.add(origin.getSimpleName() + " -> " + dependency.getTargetClass().getName());
+                }
+            }
+        }
+        assertThat(leaks).withFailMessage("Shared kernel reached into a context: %s", leaks).isEmpty();
+    }
+
+    /** {@code com.drones.vision.<context>.domain..} &rarr; context; the kernel answers "kernel". */
+    private static String domainContextOf(JavaClass javaClass) {
+        String name = javaClass.getPackageName();
+        if (name.equals(KERNEL_ROOT) || name.startsWith(KERNEL_ROOT + ".")) {
+            return "kernel";
+        }
+        if (!name.startsWith(VISION_ROOT)) {
+            return null;
+        }
+        String rest = name.substring(VISION_ROOT.length());
+        int dot = rest.indexOf('.');
+        if (dot < 0) {
+            return null;
+        }
+        String candidate = rest.substring(0, dot);
+        return CONTEXTS.contains(candidate) && rest.substring(dot).startsWith(".domain") ? candidate : null;
     }
 
     private static String contextOf(JavaClass javaClass) {

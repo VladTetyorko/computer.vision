@@ -5,7 +5,7 @@ import com.drones.vision.api.dto.SetUserEnabledRequest;
 import com.drones.vision.api.dto.UserResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.application.identity.UserService;
-import com.drones.vision.domain.model.UserId;
+import com.drones.vision.kernel.UserId;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
