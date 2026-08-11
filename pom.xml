@@ -43,6 +43,8 @@
     </properties>
 
     <modules>
+        <module>vision-kernel</module>
+        <module>vision-platform</module>
         <module>vision-domain</module>
         <module>vision-application</module>
         <module>vision-proto</module>
@@ -55,6 +57,16 @@
     <dependencyManagement>
         <dependencies>
             <!-- Internal modules -->
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-kernel</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>vision-platform</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.drones</groupId>
                 <artifactId>vision-domain</artifactId>

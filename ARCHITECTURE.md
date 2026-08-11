@@ -58,7 +58,12 @@ The CV service is **replaceable**: the core only sees a `DetectionPort`. Later a
 
 ```
 vision/                                  (parent pom, dependency management)
-├── vision-domain/                       Pure domain model. NO framework deps, no Spring.
+├── vision-kernel/                       Shared kernel: ids + pure value objects. Depends on nothing
+│                                        but java.base. Universal — every bounded context may use it.
+├── vision-platform/                     Cross-cutting seams every context writes to: events, audit
+│                                        trail, visibility scope. Depends only on vision-kernel.
+├── vision-domain/                       Pure domain model, organized per bounded context. NO framework deps, no Spring.
+│                                        Depends on vision-kernel + vision-platform.
 │   ├── model/        Asset, Device, DeviceCategory, StreamDescriptor, VideoFrame,
 │   │                 Telemetry, Detection, DetectionQuery, LifecycleState,
 │   │                 AuditEntry, Ownership, AssetUsage, Event
@@ -114,7 +119,7 @@ vision/                                  (parent pom, dependency management)
 **The acting user is never a constructor dependency.** It varies per request, so it is resolved once at the API edge (`CurrentUser`, from the JWT once Spring Security lands) and passed down as a method parameter. Threading an `Ownership` through construction is what turned services into eight-argument classes.
 
 **Dependency rule (enforced with ArchUnit tests):**
-`vision-domain` ← `vision-application` ← adapters ← `vision-app`. Nothing points outward. Adapters never depend on each other — shared needs go into a port or the domain.
+`vision-kernel` ← `vision-platform` ← `vision-domain` ← `vision-application` ← adapters ← `vision-app`. Nothing points outward. Adapters never depend on each other — shared needs go into a port or the domain. `vision-kernel` and `vision-platform` are universal: every bounded context may depend on them, they never depend back (docs/plans/active/DOMAIN-SEPARATION-W1.md).
 
 ---
 

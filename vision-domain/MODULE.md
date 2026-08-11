@@ -7,24 +7,29 @@ per-bounded-context packages (docs/plans/active/DOMAIN-SEPARATION-W1.md, wave **
 context that owns it, inside this same Maven module, as a pure rename/directory move: zero behavior
 change, `./mvnw -B -pl vision-domain test` green before and after with an unchanged test count.
 
-A ninth, universal package joined the kernel in **W1.6a**: `com.drones.vision.platform` (see its own
-section below).
+A ninth, universal package joined the kernel in **W1.6a**: `com.drones.vision.platform`. **W1.7a**
+(docs/plans/active/DOMAIN-SEPARATION-W1.md §16) split both universal packages out of this module into
+their own Maven modules, `vision-kernel` and `vision-platform` — a pure `git mv`, no package rename,
+no import changes anywhere. This module's remaining `## Contexts`/`## API surface` sections cover only
+the eight bounded contexts; the kernel's and platform's own surfaces, rules and gotchas now live in
+`vision-kernel/MODULE.md` and `vision-platform/MODULE.md`.
 
 **Package shape:**
 
 ```
-com.drones.vision.kernel                    — shared kernel, 17 types, no aggregates
-com.drones.vision.platform                  — cross-cutting seams every context writes to, 10 types
 com.drones.vision.<context>.domain.model    — records/enums owned by that context
 com.drones.vision.<context>.domain.port     — that context's driven ports ("`.out`" suffix dropped)
 ```
 
+(`com.drones.vision.kernel` and `com.drones.vision.platform` are siblings in their own modules, not
+subpackages of this one — see their own `MODULE.md`s.)
+
 **Why `<context>` is the outermost segment, ahead of `domain`:** the context is the future Maven
-module. W1.6 extracts each context into its own `<context>-domain`/`<context>-application` module
-pair; filing the context first means that extraction is `git mv com/drones/vision/warehouse
-warehouse-domain/src/main/java/com/drones/vision/warehouse` — a directory move — not a repackage of
-every file. `domain` stays as an inner segment so a later `<context>-application` module can sit
-alongside it under the same `com.drones.vision.<context>` root. The `.out` suffix on ports is
+module. W1.7b extracts each context into its own `<context>` module holding both `.domain` and
+`.application`; filing the context first means that extraction is `git mv com/drones/vision/warehouse
+vision-warehouse/src/main/java/com/drones/vision/warehouse` — a directory move — not a repackage of
+every file. `domain` stays as an inner segment so the `<context>` module's `.application` package can
+sit alongside it under the same `com.drones.vision.<context>` root. The `.out` suffix on ports is
 dropped because there is still no `port.in` package to disambiguate against (see below) — it was
 never carrying information, just noise repeated 37 times.
 
@@ -33,15 +38,13 @@ implementation per area, which live in `vision-application`; their commands and 
 top-level records there. Driven `*Port` interfaces stay, because each genuinely has several
 implementations. See `.claude/skills/java-clean-code/SKILL.md`.
 
-**Depends on:** nothing but `java.base` (no third-party/framework imports anywhere in this module) · **Used by:** vision-application, all adapters, vision-app, vision-api
+**Depends on:** `vision-kernel`, `vision-platform` (no third-party/framework imports anywhere in this module) · **Used by:** vision-application, all adapters, vision-app, vision-api
 **Build/test:** `./mvnw -B -pl vision-domain test`
 
 ## Contexts
 
 | Context | Package root | Owns | Model | Port |
 |---|---|---|---|---|
-| *(kernel)* | `com.drones.vision.kernel` | ids + pure value objects every context may depend on — no aggregates, no behavior beyond `GeoProjection`'s pure math | 17 | — |
-| *(platform)* | `com.drones.vision.platform` | cross-cutting seams every context writes to — events, audit trail, visibility scope, and (W1.6b) the one live-update port every context raises an `Event` through | 8 | 3 |
 | warehouse | `com.drones.vision.warehouse.domain` | asset/device inventory, categories, discovered devices, asset usage (W1.6c) | 6 | 7 |
 | identity | `com.drones.vision.identity.domain` | users, groups, roles | 4 | 4 |
 | perception | `com.drones.vision.perception.domain` | video pipeline config, detection, tracking, feeds, debounced detection events (W1.6b) | 23 | 9 |
@@ -51,86 +54,37 @@ implementations. See `.claude/skills/java-clean-code/SKILL.md`.
 | events | `com.drones.vision.events.domain` | replay frame extraction — the platform's pure downstream reader (W1.6b): it reads flight/perception history for replay, nothing reads back into it | 0 | 1 |
 | **total** | | | **78** | **41** |
 
-78 + 41 + 17 (kernel) = **136 types**, unchanged by W1.6c since it only relocates existing types:
-`Telemetry`/`FlightState` (flight → kernel, both pure records with no ports and no aggregate
-references — the same standing as `GeoPosition`/`BoundingBox`) and `AssetUsage`/
+**78 + 41 = 119 types**, all this module now holds since **W1.7a** moved kernel (17 types) and
+platform (11 types) out to their own modules — see `vision-kernel/MODULE.md` and
+`vision-platform/MODULE.md` for their surfaces; this table covers only the eight bounded contexts.
+Unchanged by W1.6c, since it only relocates existing types between rows/modules without changing any
+context's own total: `Telemetry`/`FlightState` (flight → kernel) and `AssetUsage`/
 `AssetUsageRepositoryPort` (flight → warehouse, C9 — the record's four readers were already
-warehouse's) — see docs/plans/active/DOMAIN-SEPARATION-W1.md §15's W1.6c section for why. Before
-W1.6c the split was 80 + 41 + 15 (kernel), itself 132 before W1.6b (see below), so this wave moved
-2 types (Model) out of the context sum into the kernel and 2 types (1 Model, 1 Port) between two
-context rows without changing either total.
+warehouse's) — see docs/plans/active/DOMAIN-SEPARATION-W1.md §15's W1.6c section for why.
 
 `events` itself drops from 7 types (3 models + 4 ports) to 1 (0 models + 1 port,
 `ReplayFrameExtractionPort`) since W1.6b — see its own row above for why it still isn't zero) after
 the god-port `LiveUpdatePublisherPort` (events) was **deleted**, replaced by five per-context
 ports — `FleetLiveUpdatePort` (warehouse), `TelemetryLiveUpdatePort` (flight), `DetectionLiveUpdatePort`
-(perception), `MapLiveUpdatePort` (map), `EventLiveUpdatePort` (platform) — a net +4 ports; separately,
-`DetectionRepositoryPort`/`DetectionEvent`/`DetectionEventId`/`DetectionEventState`/
-`DetectionEventRepositoryPort` moved events → perception (3 models + 2 ports, filed by consumer not
-owner before this wave) — a wash for the model/port totals since they simply changed context, not
-count.
-docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a/W1.6b/W1.6c moves.
+(perception), `MapLiveUpdatePort` (map), `EventLiveUpdatePort` (platform, in its own module since
+W1.7a) — a net +4 ports; separately, `DetectionRepositoryPort`/`DetectionEvent`/`DetectionEventId`/
+`DetectionEventState`/`DetectionEventRepositoryPort` moved events → perception (3 models + 2 ports,
+filed by consumer not owner before this wave) — a wash for the model/port totals since they simply
+changed context, not count.
+docs/plans/active/DOMAIN-SEPARATION-W1.md §3 has the pre-W1.6a inventory; §15 has the W1.6a/W1.6b/W1.6c moves; §16 has W1.7a.
 `simulation` is one of the eight bounded contexts at the *application* layer
 (`ContextArchitectureTest`'s `CONTEXTS` set) but owns no domain types of its own — it only consumes
 perception's and warehouse's ports — so it has no package under this module.
 
-## Shared-kernel rule
+## Shared-kernel and platform rules
 
-The kernel is the one package every context's domain may depend on, and it only works as a shared
-dependency because the dependency is one-way. Two rules, both enforced by `vision-app`'s
-`ContextArchitectureTest` (`com.drones.vision.app.ContextArchitectureTest`):
-
-- **`kernelDependsOnNothingButItselfAndTheJdk`** — no type under `com.drones.vision.kernel` may
-  import any other `com.drones.vision.*` package. A single kernel→context import would smuggle that
-  context's coupling into all eight others at once, since everyone already depends on the kernel.
-- Every context's `domain.model`/`domain.port` may depend on the kernel freely (and does — every
-  typed id, `GeoPosition`, `Ownership`, `LifecycleState`, `Capability`, `StreamDescriptor`, etc. is
-  used across most contexts); the kernel never depends back.
-
-## Universal platform package (W1.6a)
-
-`com.drones.vision.platform` is a second universal package, flat like the kernel (no `.model`/`.port`
-subpackages — deliberately, to keep it tiny), holding the **cross-cutting seams every bounded context
-writes to**: `Event`/`EventType`/`EventPublisherPort` (fire-and-forget notifications), the `Audit*`
-family + `AuditTrailPort` (who changed what), and `VisibilityScope`/`AccessDeniedException` (what a
-request may see, and the 403 when it may not). None of these are one context's aggregate — they were
-previously filed by *first mover* (`events`, `identity`) rather than by owner, which is exactly what
-made `identity ↔ warehouse` a module cycle: `warehouse`'s services took an `AuditTrailPort` and a
-`VisibilityScope` constructor argument, both living inside `identity`, while `identity` itself read
-`warehouse.domain.model.Asset` for the reverse reason (docs/plans/active/DOMAIN-SEPARATION-W1.md §14's
-**C7** finding). Moving the seam to a package neither context owns breaks the cycle without picking a
-side.
-
-**The rule:** platform may depend on the kernel and the JDK, nothing else — enforced by
-`platformDependsOnNothingButTheKernel` (`ContextArchitectureTest`), the same shape as
-`kernelDependsOnNothingButItselfAndTheJdk`. A platform type that reached into a context would smuggle
-that context's coupling into all eight others at once, since everyone already depends on platform —
-this is the precise failure this wave fixes, so the new rule guards against reintroducing it.
-
-**`VisibilityScope` needed one signature change to qualify**: `includes(Asset)` (warehouse's
-aggregate) became `includes(AssetId, Ownership)` — both kernel types, and every call site already had
-an `Asset` in hand, so each became `scope.includes(asset.id(), asset.ownership())`. Its
-`maxGrantableRole()` method **moved out entirely**, to a private static method on
-`identity.application.DefaultUserService` (vision-application) — granting roles is user
-administration, not visibility, and that class was its only caller. `ScopeResolver`/
-`DefaultScopeResolver` (turning a `User` into a `VisibilityScope`) stay in `vision-application`'s
-`identity.application.scope` package — resolving a user to a scope is identity's job, only the scope
-*value* itself is universal.
-
-Kills `identity ↔ warehouse`: the four `warehouse -> identity` edges lived in `AuditTrailPort`/
-`VisibilityScope` constructor arguments and had no other cause, so once those two moved out, so did
-every one of `flight -> identity`, `learning -> identity` and `warehouse -> identity` — three edges,
-not the one the plan's own §15 anticipated (`identity -> warehouse` survives on a genuine, unrelated
-dependency: `DefaultAssignmentService`/`DefaultActivityService` reading `AssetRepositoryPort`
-directly). `map -> identity` also survives, for the same reason — `MapAccessPolicy.Viewer` carries a
-`Role`, an identity type platform never touched.
-
-**`platform` gained a port in W1.6b**: `EventLiveUpdatePort` (`void publishEvent(Event)`) — one of
-the five ports the former god-port `LiveUpdatePublisherPort` (`events`) split into
-(docs/plans/active/DOMAIN-SEPARATION-W1.md §15). Filed here rather than in any one bounded context
-because every context raises an `Event`, and `Event` itself already lives in `platform` as a
-cross-cutting seam (W1.6a) — the same reasoning that put `EventPublisherPort` here, applied to its
-live-update sibling.
+Every context's `domain.model`/`domain.port` may depend on `vision-kernel` and `vision-platform`
+freely (and does — every typed id, `GeoPosition`, `Ownership`, `LifecycleState`, `Capability`,
+`StreamDescriptor`, `Event`, `AuditTrailPort`, `VisibilityScope`, etc. is used across most contexts);
+neither kernel nor platform ever depends back into a context — enforced by `vision-app`'s
+`ContextArchitectureTest` (`kernelDependsOnNothingButItselfAndTheJdk`,
+`platformDependsOnNothingButTheKernel`). See `vision-kernel/MODULE.md` and `vision-platform/MODULE.md`
+for what each package owns and why the one-way rule matters.
 
 ## Cross-context domain edges
 
@@ -181,41 +135,10 @@ the shared kernel instead (W1 §5 **C5**), which is also why it halves what woul
 
 ## API surface
 
-Grouped by owning context, kernel first. Within each context, model then port, both in the
-same order the flat lists used before W1.5a (roughly alphabetical) — only the headings moved,
-no entry's text changed.
-
-### Shared kernel — `com.drones.vision.kernel`
-- `record AssetId(UUID value)` — `static random()`, `static of(String)`
-- `record BearingDistance(double bearingDegrees, double distanceMeters)` (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, Wave M1) — the output of `GeoProjection.bearingDistance`: initial bearing degrees [0,360) clockwise from true north, plus great-circle distance in meters (never negative); validated in its own compact ctor like every other record here, even though it's typically machine-constructed
-- `record BoundingBox(double x, double y, double width, double height)` — each component in [0,1]
-- `enum Capability` — VIDEO, TELEMETRY, PTZ, AUDIO
-- `record CategoryId(String slug)` — must match `[a-z0-9]+(-[a-z0-9]+)*`; no random-id factories (reference-data key, not a generated id)
-- `record DeviceId(UUID value)` — `static random()`, `static of(String)`
-- `record FlightState(String firmware, String mode, Boolean armed, Boolean failsafe, Integer gpsFixType, Integer satellites, Double hdop, Integer rssiPercent, List<String> armingBlockers)` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a; flight → kernel in **W1.6c**, docs/plans/active/DOMAIN-SEPARATION-W1.md §15 — a pure record naming nothing outside `java.util`, read by every context that reads `Telemetry`) — flight-controller-reported state decoded from ArduPilot/INAV/Betaflight/PX4 telemetry; every field except `armingBlockers` individually nullable (a decoder merges this incrementally as different MAVLink messages arrive — "unknown" and "known false/zero" must stay distinguishable field by field); `firmware` is `"ardupilot"`/`"generic"`/`"px4"`/`null`; `gpsFixType` (MAVLink `GPS_FIX_TYPE` ordinal) ∈[0,8] if present; `rssiPercent` ∈[0,100] if present; `satellites`/`hdop` ≥0 if present; `armingBlockers` non-null, defensively copied via `List.copyOf`, empty meaning "none currently known"; `static empty()` = all null + empty list
-- `record GeoPosition(double latitude, double longitude, Double altitudeMeters)` — lat [-90,90], lon [-180,180], altitude nullable
-- `final class GeoProjection` (docs/plans/done/TACTICAL-MARKS-PLAN.md §1, Wave M1) — pure, stateless geo-math; private ctor, static methods only (no interface — one implementation, no substitution point, per java-clean-code SKILL.md §1). Reuses `GeoPosition` for both input (drone pose) and output (a "ground point" is just a `GeoPosition` with `altitudeMeters=null`) — no second geo type. `EARTH_RADIUS_METERS = 6_371_000.0` (IUGG mean radius, used by both methods); `DEFAULT_DEPRESSION_DEGREES = 45.0` (documented guess — no gimbal telemetry exists to read a real value from). `static GeoPosition project(GeoPosition drone, double headingDegrees, double altitudeMeters, double depressionDegrees)` — estimates the ground point a drone's camera is looking at: slant ground range = `altitudeMeters / tan(depressionDegrees)`, then a spherical destination-point (great-circle forward) projection of that range from `drone` along `headingDegrees`; `depressionDegrees==90` (nadir) or `altitudeMeters==0` short-circuits to the drone's own ground position (range 0) rather than trusting `tan(90°)`'s floating-point behavior; `headingDegrees` normalized mod 360 (any finite value accepted, including negative/>360); throws `IllegalArgumentException` for `drone==null`, negative/non-finite `altitudeMeters`, `depressionDegrees` outside `(0,90]`, or non-finite `headingDegrees`; the returned position's `altitudeMeters` is always `null` (ground elevation unknown — no terrain model). `static BearingDistance bearingDistance(GeoPosition from, GeoPosition to)` — haversine distance (meters) + initial great-circle bearing (degrees, [0,360), clockwise from north); throws `IllegalArgumentException` on either argument `null`. Both methods clamp/wrap internal trig results (asin argument clamped to [-1,1], longitude wrapped across the antimeridian into `[-180,180]`) so no valid input can produce `NaN` or an out-of-range `GeoPosition`/`BearingDistance`. **This is an honest estimate, not a precise fix** — no gimbal orientation or camera-intrinsics data anywhere in the platform; a mark built from `project` is stamped `MarkSource.DETECTION` and stays draggable/editable so an operator can correct it on the map
-- `record GroupId(UUID value)` — `static random()`, `static of(String)`
-- `enum LifecycleState` — ACTIVE, DEACTIVATED, **DELETED (soft)**. Nothing is ever destroyed: a deleted asset/device is hidden from listings and refuses to stream, but its record, usages and telemetry survive and the removal is reversible. Transitions: ACTIVE⇄DEACTIVATED; ACTIVE|DEACTIVATED→DELETED; DELETED→DEACTIVATED (restore — never straight back to ACTIVE)
-- `record Ownership(UserId ownerId, GroupId groupId)`
-- `record StreamDescriptor(String protocol, URI uri, Map<String,String> options)` — **protocol must be lower-case** (ctor throws otherwise)
-- `record StreamId(UUID value)` — `static random()`, `static of(String)`
-- `record Telemetry(DeviceId deviceId, Instant at, Double latitude, Double longitude, Double altitudeMeters, Double headingDegrees, Double batteryPercent, Map<String,Double> extra, FlightState flightState)` (flight → kernel in **W1.6c**, docs/plans/active/DOMAIN-SEPARATION-W1.md §15 — a pure record naming only `DeviceId` (already kernel) and `FlightState`, with no ports and no aggregate references, read by five contexts: flight, perception's OSD, warehouse's stats, events' replay, map. Revisit if W2's wire DTOs make per-context divergence real, docs/plans/active/DOMAIN-SEPARATION-PLAN.md §9) — a telemetry sample from a device: position, attitude, battery state, and (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a) flight-controller-reported state; all Double fields and `flightState` nullable; an 8-arg convenience ctor defaults `flightState=null` so every pre-existing call site compiles unchanged
-- `record UsageId(UUID value)` — `static random()`, `static of(String)`
-- `record UserId(UUID value)` — `static random()`, `static of(String)`
-
-### Shared platform — `com.drones.vision.platform` (W1.6a; flat, no `.model`/`.port` split — see the module-level section above)
-- `class AccessDeniedException extends RuntimeException` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — thrown when a user's `VisibilityScope` forbids an operation on a resource that **does exist** — the command gate (`DefaultFlightCommandService`), the ≤-own-scope grant rule (`DefaultAssignmentService`), and the user/group management gates (`DefaultUserService`/`DefaultGroupService`), all `vision-application`. `vision-api` maps it to **403**. Deliberately distinct from the scoped *read*'s `NoSuchElementException` (404): reads hide existence, commands/grants/management honestly deny. Reused verbatim by the map package (`DefaultMapLayerService`/`DefaultMarkService`/`DefaultDrawingService`), even though those three gate on `MapAccessPolicy`/`Viewer`, not `VisibilityScope` — this type's contract is orthogonal to which scoping model produced the refusal
-- `enum AuditAction` — CREATED, UPDATED, DEACTIVATED, ACTIVATED, DELETED, RESTORED
-- `record AuditEntry(AuditId id, Instant occurredAt, UserId actor, AuditAction action, AuditTargetType targetType, String targetId, String summary, Map<String,String> details)` — immutable trail line; `static of(...)` stamps id + now; `details` carries `before → after` for edits
-- `record AuditId(UUID value)` — `static random()`, `static of(String)`
-- `enum AuditTargetType` — ASSET, DEVICE, **DATASET, MODEL** (docs/plans/done/CV-TRAINING-PLAN.md Wave T1 — a training dataset / a trained CV model version in the registry) — opaque `targetId` string, so new auditable kinds need no storage change
-- `AuditTrailPort`: `AuditEntry record(AuditEntry)` — append-only, never updated or deleted, not even when its target is soft-deleted; `List<AuditEntry> findRecent(int limit)`, `List<AuditEntry> findByTarget(AuditTargetType, String targetId, int limit)`, `List<AuditEntry> findByActor(UserId, int limit)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 7 — the "my activity" feed for one actor), all newest-first
-- `record Event(String id, StreamId streamId, Instant at, EventType type, String message, Map<String,String> attributes)` — **streamId nullable** (device-level events); `static of(StreamId,EventType,String)` generates id+now(); **not the same thing as `DetectionEvent`** (perception context, moved there W1.6b) — see that context's Gotchas
-- `EventLiveUpdatePort` (W1.6b, docs/plans/active/DOMAIN-SEPARATION-W1.md §15): `void publishEvent(Event)` — announces a domain `Event` live to a driving adapter; must not throw on ordinary delivery failure, must return quickly (mirrors `EventPublisherPort`'s own contract). One of five ports the former god-port `LiveUpdatePublisherPort` split into; the one filed in `platform` rather than a bounded context, since every context raises an `Event`
-- `EventPublisherPort`: `void publish(Event)` — must not throw on ordinary delivery failure; called on hot pipeline path, must return quickly
-- `enum EventType` — DETECTION, DEVICE_ONLINE, DEVICE_OFFLINE, STREAM_STARTED, STREAM_STOPPED, PIPELINE_ERROR, TRAINING, GEOFENCE_BREACH (docs/plans/done/OPS-CORE-PLAN.md §G — raised by `GeofenceMonitor`, vision-application, on a breach edge transition; attributes carry `{assetId, zoneId, zoneName, kind, direction}`, `streamId` always `null` since a breach is asset-scoped, not stream-scoped)
-- `record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assignedAssets)` (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 1) — what a request may see, resolved once per request by `vision-application`'s `ScopeResolver` and threaded into user-facing reads/commands. Nested `enum Kind {UNBOUNDED, GROUPS, ASSIGNED_ASSETS}`; three static factories — `unbounded()` (ADMIN/auth-off), `groups(Set<GroupId>)` (MANAGER), `assignedAssets(Set<AssetId>)` (PILOT); both sets defensively copied, null→empty. `boolean includes(AssetId, Ownership)` — **W1.6a signature**, was `includes(Asset)`: takes the asset's id and ownership rather than a whole `Asset` (warehouse's aggregate), the only two components the check ever used — `UNBOUNDED`→true, `GROUPS`→`groups.contains(ownership.groupId())`, `ASSIGNED_ASSETS`→`assignedAssets.contains(assetId)`; every call site already held an `Asset` in hand, so each became `scope.includes(asset.id(), asset.ownership())`. `boolean canManageOrg()` — true iff `UNBOUNDED`/`GROUPS`. `boolean includesGroup(GroupId)` — the group half of `includes`. **`maxGrantableRole()` is gone** — moved to a private static method on `DefaultUserService` (`vision-application`, its only caller): granting roles is user administration, not visibility, so it does not belong on the universal scope value
+Grouped by owning context. Within each context, model then port, both in the same order the flat
+lists used before W1.5a (roughly alphabetical) — only the headings moved, no entry's text changed.
+Kernel's and platform's own API surfaces (17 + 11 types) moved to `vision-kernel/MODULE.md` and
+`vision-platform/MODULE.md` in **W1.7a**.
 
 ### warehouse — `com.drones.vision.warehouse.domain.model`
 - `record Asset(AssetId id, String displayName, CategoryId category, Ownership ownership, Set<DeviceId> devices, Map<String,String> attributes, LifecycleState state)` — devices must be non-empty; 6-arg convenience ctor defaults `state=ACTIVE`; `isActive()`, `isDeleted()`, `withDevices(Set)`, `withAttributes(Map)`, `withDetails(String,CategoryId,Map)`, `withState(LifecycleState)` return copies
@@ -360,7 +283,7 @@ no entry's text changed.
 ## Conventions
 - **Validation:** every record validates in its compact constructor with manual `if (…) throw new IllegalArgumentException(…)` per field (no Bean Validation, no `Objects.requireNonNull` — that idiom is application-layer only).
 - **Defensive copies:** every `List`/`Set`/`Map` component is reassigned in the compact ctor via `List.copyOf`/`Set.copyOf`/`Map.copyOf`; `VideoFrame` reassigns `data` to `data.asReadOnlyBuffer()`.
-- **UUID id pattern:** `AssetId`/`DeviceId`/`DetectionEventId`/`GroupId`/`StreamId`/`UsageId`/`UserId`/`ZoneId` all wrap `UUID` with the same pair of factories — `random()` (`UUID.randomUUID()`) and `of(String)` (`UUID.fromString`, rethrows as `IllegalArgumentException`). `CategoryId` is the exception: a validated kebab-case `String` slug, not a UUID — categories are reference data with human-authored keys, not generated ids. `Event.id` is the other exception: a plain `String` (not a typed id), since `Event` is a fire-and-forget notification never looked up by id, unlike `DetectionEvent`, which is stored/upserted/queried by its own typed id.
+- **UUID id pattern:** this module's own typed ids — `DetectionEventId`, `ZoneId` — wrap `UUID` with the same pair of factories `vision-kernel`'s ids use: `random()` (`UUID.randomUUID()`) and `of(String)` (`UUID.fromString`, rethrows as `IllegalArgumentException`). `DetectionEvent`, unlike `vision-platform`'s `Event`, is stored/upserted/queried by its own typed id — see that module's Gotchas for the `Event`/`DetectionEvent` name-collision warning.
 - `with*`/`closed` copy methods (`Asset.withDevices/withAttributes`, `AssetUsage.closed/withPositions/withSampleCount`) return new record instances — records have no setters.
 - Enums (`Capability`, `EventType`, `PixelFormat`) are pure marker sets, no behavior.
 - Every port interface's javadoc documents **Contract** and **Threading**; ports with backpressure concerns (`VideoSourcePort`, `TelemetrySourcePort`) add a **Backpressure** section describing the latest-wins drop policy.
@@ -368,19 +291,22 @@ no entry's text changed.
 ## Gotchas
 - **`GeofenceZone.contains` is a planar approximation, not spherical geometry** (docs/plans/done/OPS-CORE-PLAN.md §G) — it treats longitude/latitude as plain Cartesian x/y and runs the standard ray-casting even-odd point-in-polygon test over them. This is accurate at the scale a geofence actually operates at (tens of meters to a few kilometers — the curvature error over such a small span is negligible), but it is **not** valid near the poles (meridian convergence badly distorts the planar assumption) or across the antimeridian (±180°, where longitude wraps to a discontinuity a planar test cannot see — a zone meant to span 179°→-179° would instead read as spanning nearly the whole globe the other way). No attempt is made to detect or reject a pathological polygon that spans either; zones are expected to be authored well away from both.
 - `VideoFrame.data()` never returns the buffer stored on the record — every call returns a fresh `data.duplicate()`, so two readers (or two calls from the same reader) never share position/limit/mark state, and writes always throw `ReadOnlyBufferException`.
-- `Event.streamId` is nullable — device-level events (`DEVICE_ONLINE`/`DEVICE_OFFLINE`) have no stream.
-- `StreamDescriptor.protocol` must already be lower-case; the compact ctor throws `IllegalArgumentException` if it isn't — callers cannot rely on normalization happening for them.
-- `CategoryId.slug` must match `[a-z0-9]+(-[a-z0-9]+)*` (lower-case-kebab), enforced here rather than left to callers, because slugs double as stable, human-readable reference-data keys.
 - `Asset.devices` must be non-empty — an asset with zero devices cannot be constructed at all.
 - `RecordingPort`'s method shape is identical to `StreamPublisherPort` (`streamStarted`/`publish`/`streamEnded`) but the two are deliberately separate interfaces/adapters (durable recording vs live viewer egress), enabled/disabled independently per stream.
 - `DetectionPort` itself applies no concurrency limit or queuing — `PipelineConfig.maxInFlightInferences` is enforced entirely by the caller (`vision-application`'s `StreamPipeline`), not this port.
 - `ScanRequest.methods()` (now in `vision-application`) empty means "all registered mechanisms", not "none".
 - `FeedSpec` has no null-defaulting convenience constructor for `options` (unlike some other records with a defaults ctor) — `StreamDescriptor` is the closest existing precedent for a `(protocol, URI, Map<String,String>)`-shaped record, and it validates (throws on `null` options) rather than defaulting, so `FeedSpec` follows that instead.
-- **`Event` and `DetectionEvent` are unrelated types despite the name overlap** (docs/plans/done/MVP2-PLAN.md §E, E-a) — `Event` is `EventPublisherPort`'s fire-and-forget, write-only notification (device online/offline, stream started/stopped, pipeline errors, raw per-frame detections), never persisted or queried back by anything today; `DetectionEvent` is a debounced, stored/upserted/queried "label X was seen for a while" record with a completely different shape (no `label`/`confidence`/`position` on `Event`, no `type`/`message`/`attributes` on `DetectionEvent`). There is no cheap way to serve `Event`s (e.g. `PIPELINE_ERROR`) through `DetectionEventRepositoryPort`/`GET /api/events` — see `vision-application`/`vision-api`'s MODULE.mds for the full reasoning and what a real fix needs.
+- **`DetectionEvent` (this module) and `vision-platform`'s `Event` are unrelated types despite the name overlap** (docs/plans/done/MVP2-PLAN.md §E, E-a) — `Event` is `EventPublisherPort`'s fire-and-forget, write-only notification, never persisted or queried back by anything today; `DetectionEvent` is a debounced, stored/upserted/queried "label X was seen for a while" record with a completely different shape (no `label`/`confidence`/`position` on `Event`, no `type`/`message`/`attributes` on `DetectionEvent`). There is no cheap way to serve `Event`s (e.g. `PIPELINE_ERROR`) through `DetectionEventRepositoryPort`/`GET /api/events` — see `vision-application`/`vision-api`'s MODULE.mds for the full reasoning and what a real fix needs.
 - **`ControlBinding#toMicros` ignores `centerMicros` entirely for `Source.BUTTON`** (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5) — a button's mapping is a straight 2-point line from `minMicros` (normalized 0, unpressed) to `maxMicros` (normalized 1, pressed); there is no third point to interpolate through, matching the plan's §5 table listing a literal "—" for button center/deadband. `ChannelMap.defaultMap()`'s aux bindings still set `centerMicros=minMicros` — that value exists only to satisfy `ControlBinding`'s `minMicros<=centerMicros<=maxMicros` invariant, not because it participates in the button's own math. A caller building a custom `BUTTON` binding can pick any valid `centerMicros`; it is inert.
 - **`ChannelMap#apply` never throws on missing input** — an unreported/`null`/short `axes` or `buttons` list simply reads as `0.0` (center for `AXIS`, unpressed for `BUTTON`) for whichever bindings' `sourceIndex` falls outside it; this is deliberate (a browser gamepad frame that doesn't yet report every axis/button must not crash the relay) and `apply` sizes its returned `RcChannels` to the highest `rcChannel` any binding targets (`Math.max(1, …)` if `bindings` is empty), `IGNORE`-filling every channel no binding covers.
 
 ## Status
+
+**W1.7a** (docs/plans/active/DOMAIN-SEPARATION-W1.md §16): `com.drones.vision.kernel` and
+`com.drones.vision.platform` moved out of this module into their own Maven modules, `vision-kernel`
+and `vision-platform` — a pure `git mv`, no package rename, no import changes anywhere in the repo.
+This module gained a compile dependency on both. See "Package shape" above and each new module's own
+`MODULE.md` for what moved.
 
 *The wave entries below predate the W1.5a package reorganization and reference the flat*
 *`com.drones.vision.domain.model` / `domain.port.out` packages by the names that were correct*

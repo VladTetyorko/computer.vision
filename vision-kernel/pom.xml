@@ -9,19 +9,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>vision-domain</artifactId>
-    <name>vision-domain</name>
-    <description>Pure domain model and ports. No framework dependencies (java.base only).</description>
+    <artifactId>vision-kernel</artifactId>
+    <name>vision-kernel</name>
+    <description>Shared kernel: ids and pure value objects every context may depend on. No framework dependencies (java.base only).</description>
 
     <dependencies>
-        <dependency>
-            <groupId>com.drones</groupId>
-            <artifactId>vision-kernel</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.drones</groupId>
-            <artifactId>vision-platform</artifactId>
-        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

@@ -14,7 +14,9 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 
 | Module | Path | Purpose |
 |---|---|---|
-| vision-domain | `vision-domain/` | Framework-free domain: models + ports (in/out) |
+| vision-kernel | `vision-kernel/` | Shared kernel: ids + pure value objects, no third-party deps, depends on nothing |
+| vision-platform | `vision-platform/` | Cross-cutting seams every context writes to (events, audit trail, visibility scope); depends only on vision-kernel |
+| vision-domain | `vision-domain/` | Framework-free domain: models + ports (in/out), per bounded context |
 | vision-application | `vision-application/` | Use-case services, StreamPipeline, UsageTracker |
 | vision-proto | `vision-proto/` | gRPC codegen from `proto/vision/v1/cv.proto` |
 | adapter-simulation | `adapters/adapter-simulation/` | Synthetic video + telemetry sources (`sim`) |

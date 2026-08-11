@@ -9,18 +9,14 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>vision-domain</artifactId>
-    <name>vision-domain</name>
-    <description>Pure domain model and ports. No framework dependencies (java.base only).</description>
+    <artifactId>vision-platform</artifactId>
+    <name>vision-platform</name>
+    <description>Cross-cutting seams every bounded context writes to: events, audit trail, visibility scope. Depends only on vision-kernel.</description>
 
     <dependencies>
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>vision-kernel</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.drones</groupId>
-            <artifactId>vision-platform</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
