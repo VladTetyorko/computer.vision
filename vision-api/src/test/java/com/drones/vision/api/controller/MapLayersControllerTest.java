@@ -2,12 +2,12 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.map.DrawingService;
-import com.drones.vision.application.map.LayerSpec;
-import com.drones.vision.application.map.LayerView;
-import com.drones.vision.application.map.MapLayerService;
-import com.drones.vision.application.mark.MarkService;
-import com.drones.vision.application.scope.AccessDeniedException;
+import com.drones.vision.map.application.DrawingService;
+import com.drones.vision.map.application.LayerSpec;
+import com.drones.vision.map.application.LayerView;
+import com.drones.vision.map.application.MapLayerService;
+import com.drones.vision.map.application.mark.MarkService;
+import com.drones.vision.identity.application.scope.AccessDeniedException;
 import com.drones.vision.map.domain.model.AccessLevel;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.map.domain.model.DrawKind;

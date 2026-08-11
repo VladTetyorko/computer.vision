@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.discovery.DiscoveryScanSpec;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanSpec;
 
 import java.time.Duration;
 import java.util.Set;

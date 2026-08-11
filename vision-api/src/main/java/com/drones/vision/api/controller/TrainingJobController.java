@@ -4,7 +4,7 @@ import com.drones.vision.api.dto.StartTrainingJobRequest;
 import com.drones.vision.api.dto.TrainingJobResponse;
 import com.drones.vision.api.dto.TrainingJobsResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.training.TrainingJobService;
+import com.drones.vision.learning.application.TrainingJobService;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.TrainingJobSpec;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -43,7 +43,7 @@ import com.drones.vision.api.security.CurrentUser;
  *
  * <p>Error mapping is entirely {@link TrainingJobService#start}'s own exceptions surfacing through
  * {@link ApiExceptionHandler}, plus this controller's own edge parse: {@link
- * com.drones.vision.application.scope.AccessDeniedException} (caller may not manage the organization, or
+ * com.drones.vision.identity.application.scope.AccessDeniedException} (caller may not manage the organization, or
  * the dataset is outside their scope) → 403; {@link java.util.NoSuchElementException} (unknown
  * dataset) → 404; {@link IllegalArgumentException} (a malformed dataset id; a malformed spec — blank
  * {@code baseModel} or non-positive {@code epochs}, {@link TrainingJobSpec}'s own

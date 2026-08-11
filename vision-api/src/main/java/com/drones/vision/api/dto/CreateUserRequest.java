@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.identity.UserSpec;
+import com.drones.vision.identity.application.UserSpec;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.identity.domain.model.Role;

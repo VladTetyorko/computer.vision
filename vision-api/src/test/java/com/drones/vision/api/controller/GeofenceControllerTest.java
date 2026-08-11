@@ -1,8 +1,8 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.geofence.GeofenceService;
-import com.drones.vision.application.geofence.GeofenceZoneSpec;
+import com.drones.vision.flight.application.geofence.GeofenceService;
+import com.drones.vision.flight.application.geofence.GeofenceZoneSpec;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.flight.domain.model.ZoneId;

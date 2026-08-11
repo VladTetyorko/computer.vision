@@ -1,7 +1,7 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.api.support.EnumParsing;
-import com.drones.vision.application.map.DrawingSpec;
+import com.drones.vision.map.application.DrawingSpec;
 import com.drones.vision.map.domain.model.DrawKind;
 import com.drones.vision.kernel.GeoPosition;
 

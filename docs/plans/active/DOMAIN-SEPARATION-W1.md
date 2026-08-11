@@ -186,8 +186,56 @@ nothing else can be in flight while every import in the repo moves.
       ArchUnit's three domain/application rules gained `..kernel..`.
       Verified: domain 518 · application 819 · api 551 · app 222 · adapters 366 — **identical counts
       to before the move**.
-- [ ] W1.5b application package reorganization → `com.drones.vision.<ctx>.application.*`
-- [ ] W1.6 Maven extraction
+- [x] **W1.5b application package reorganization** — 191 files into `com.drones.vision.<ctx>.application.*`,
+      references rewritten in 234. Collapse rule: a feature package folds into `<ctx>.application`
+      when its name equals the context (no `flight.application.flight`) or when it is the context's
+      only feature (no `events.application.replay`); otherwise the feature subpackage is kept.
+      Verified: domain 518 · application 819 · api 551 · app 223 · adapters 396, all green.
+- [ ] **W1.6 break the module cycles** — see §14, seven of them, newly visible
+- [ ] W1.7 Maven extraction
+
+---
+
+## 14. The module-level graph — what only became visible after W1.5b
+
+Until both layers lived under one per-context tree, the walls could only be checked **per layer**:
+application→application, and domain→domain. Both were acyclic, and this document said so. Neither
+could see an edge that crosses layers — warehouse's *application* reaching perception's *domain*.
+
+With `com.drones.vision.<ctx>.**` now holding both layers, `ContextArchitectureTest` measures the
+graph Maven will actually have to express. It has **26 edges and 7 cycles**:
+
+```
+events <-> flight      events <-> learning     events <-> map      events <-> perception
+flight <-> warehouse   identity <-> warehouse  perception <-> warehouse
+```
+
+Every one blocks extraction for *all* contexts, since a Maven module graph cannot contain a cycle.
+They are held as an exact-match burn-down (`DECLARED_CYCLES`) rather than hidden behind a disabled
+test. Measured causes, per cycle:
+
+| Cycle | Forward edge | Back edge | Root cause |
+|---|---|---|---|
+| events ↔ map | `LiveUpdatePublisherPort` → `MapEvent` | 4 map services → `LiveUpdatePublisherPort` | **C7** |
+| events ↔ perception | `LiveUpdatePublisherPort`/`DetectionRepositoryPort` → `DetectionResult`, `VideoFrame` | `StreamPipeline`, `DetectionEventEngine` → `EventPublisherPort`, `DetectionEvent` | **C7** |
+| events ↔ flight | `LiveUpdatePublisherPort` → `Telemetry`; replay → `AssetUsage` | `GeofenceMonitor` → `EventPublisherPort` | **C7** + **C9** |
+| identity ↔ warehouse | `VisibilityScope`, `DefaultAssignmentService` → `Asset` | warehouse → `AuditTrailPort`, `VisibilityScope` | **C7** |
+| events ↔ learning | `ReplayCaptureSpec` → `DatasetId` | `LabelingService` → `ReplayCaptureSpec` | **C8** |
+| flight ↔ warehouse | `FlightCommandPort`, `ManualControlLink` → `Device` | `DefaultAssetStatsService`, `DefaultFleetSummaryService` → `AssetUsage` | **C9** + **C6** |
+| perception ↔ warehouse | ports → `Device` (5×) | asset/device services → `StreamService`, `ActiveStream` | **C3** + **C6** |
+
+### New entries on the cycle-breaking list
+
+| # | Problem | Fix |
+|---|---|---|
+| **C7** | **Cross-cutting platform seams filed inside contexts.** `EventPublisherPort`, `LiveUpdatePublisherPort`, `AuditTrailPort` and `VisibilityScope` are written to by every context, yet live in `events`/`identity`. Worse, `LiveUpdatePublisherPort`'s signatures name `Telemetry`, `MapEvent`, `DetectionResult` and `DetectionEvent` — it is a **god-port that knows every context's payload**. This single problem causes **four of the seven cycles** | Move the genuinely generic seams (`EventPublisherPort`+`Event`+`EventType`, `AuditTrailPort`+`AuditEntry` family) into the kernel or a `platform` package; **split `LiveUpdatePublisherPort` per context** so each publishes its own updates — which is what the target architecture's U1/U2 split (DOMAIN-SEPARATION-PLAN §3) requires anyway. `VisibilityScope` needs its `Asset` reference removed before it can join them |
+| **C8** | `ReplayCaptureSpec` sits in `events` but exists to capture frames *for a dataset*, so it names `DatasetId` while learning names it right back | Move `ReplayCaptureSpec` to `learning` |
+| **C9** | **Split ownership of a flight session.** `AssetUsage` and its repository are `flight`; the services that read them (`DefaultAssetStatsService`, `DefaultFleetSummaryService`, `UsageService`) are `warehouse` | Decide one owner. A usage *is* a flight, so `flight` is the better home — the read services move with it, leaving warehouse to inventory only |
+
+**C7 is the finding worth taking away from W1**: the platform's three write-seams and one god-port
+are what actually bind the contexts together, far more than any business coupling. Splitting the
+live-update port per context is not extra work invented by this refactor — DOMAIN-SEPARATION-PLAN
+already requires it for scoped U1 delivery.
 
 ### Package scheme (fixed in W1.5a, applies to W1.5b and W1.6)
 

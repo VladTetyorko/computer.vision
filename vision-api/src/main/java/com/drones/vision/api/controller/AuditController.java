@@ -2,7 +2,7 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.AuditEntryResponse;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.scope.AccessDeniedException;
+import com.drones.vision.identity.application.scope.AccessDeniedException;
 import com.drones.vision.identity.domain.model.AuditTargetType;
 import com.drones.vision.identity.domain.port.AuditTrailPort;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * <h2>Management gate (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2)</h2>
  * {@link #list} exposes who-changed-what across the <em>whole fleet</em>, a cross-tenant
  * information leak once real users exist — so it is admission-gated on {@link
- * com.drones.vision.application.scope.VisibilityScope#canManageOrg()}, true for ADMIN
+ * com.drones.vision.identity.application.scope.VisibilityScope#canManageOrg()}, true for ADMIN
  * ({@code UNBOUNDED}) and MANAGER ({@code GROUPS}) scopes, false for PILOT ({@code
  * ASSIGNED_ASSETS}) or an unaffiliated caller, throwing {@link AccessDeniedException} (403 via
  * {@code ApiExceptionHandler}) otherwise. This mirrors the same ADMIN/MANAGER gate {@link

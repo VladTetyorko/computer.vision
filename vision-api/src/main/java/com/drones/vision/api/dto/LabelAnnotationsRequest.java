@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.training.LabelSpec;
+import com.drones.vision.learning.application.LabelSpec;
 import com.drones.vision.learning.domain.model.Annotation;
 import com.drones.vision.learning.domain.model.SampleStatus;
 
@@ -22,7 +22,7 @@ public record LabelAnnotationsRequest(String status, List<AnnotationRequest> ann
     /**
      * Maps this request to a {@link LabelSpec}.
      *
-     * @return the command record for {@link com.drones.vision.application.training.LabelingService#label}
+     * @return the command record for {@link com.drones.vision.learning.application.LabelingService#label}
      * @throws IllegalArgumentException if {@link #status()} is not {@code LABELED}/{@code
      *                                   DISCARDED} ({@link LabelSpec}'s own check, backstopping
      *                                   this class's own case-insensitive match), or any

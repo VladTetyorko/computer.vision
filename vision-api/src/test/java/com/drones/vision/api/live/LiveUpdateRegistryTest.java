@@ -2,12 +2,12 @@ package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
-import com.drones.vision.application.stream.ActiveStream;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetStatus;
-import com.drones.vision.application.asset.AssetSummary;
-import com.drones.vision.application.device.DeviceService;
-import com.drones.vision.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.ActiveStream;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.AssetStatus;
+import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.application.device.DeviceService;
+import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.map.domain.model.AccessLevel;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.warehouse.domain.model.Asset;

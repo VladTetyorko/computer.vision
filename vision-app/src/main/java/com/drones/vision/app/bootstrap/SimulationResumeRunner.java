@@ -1,6 +1,6 @@
 package com.drones.vision.app.bootstrap;
 
-import com.drones.vision.application.simulation.SimulationService;
+import com.drones.vision.simulation.application.SimulationService;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 

@@ -2,11 +2,11 @@ package com.drones.vision.app.bootstrap;
 
 import com.drones.vision.app.devsupport.InMemoryGroupRepository;
 import com.drones.vision.app.devsupport.InMemoryUserRepository;
-import com.drones.vision.application.identity.DefaultGroupService;
-import com.drones.vision.application.identity.DefaultUserService;
-import com.drones.vision.application.identity.GroupService;
-import com.drones.vision.application.identity.UserService;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.identity.application.DefaultGroupService;
+import com.drones.vision.identity.application.DefaultUserService;
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.UserService;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.identity.domain.port.PasswordHasherPort;

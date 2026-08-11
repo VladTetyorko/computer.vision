@@ -1,11 +1,11 @@
 package com.drones.vision.api.demo;
 
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetStatus;
-import com.drones.vision.application.asset.AssetSummary;
-import com.drones.vision.application.simulation.SimulatedAsset;
-import com.drones.vision.application.simulation.SimulationService;
-import com.drones.vision.application.simulation.SimulationSpec;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.AssetStatus;
+import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.simulation.application.SimulatedAsset;
+import com.drones.vision.simulation.application.SimulationService;
+import com.drones.vision.simulation.application.SimulationSpec;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;

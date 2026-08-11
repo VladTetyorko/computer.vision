@@ -2,11 +2,11 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.asset.AssetDetails;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetStatus;
-import com.drones.vision.application.asset.AssetSummary;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.warehouse.application.asset.AssetDetails;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.AssetStatus;
+import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetImage;

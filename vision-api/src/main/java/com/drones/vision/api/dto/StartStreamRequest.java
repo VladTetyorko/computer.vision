@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 

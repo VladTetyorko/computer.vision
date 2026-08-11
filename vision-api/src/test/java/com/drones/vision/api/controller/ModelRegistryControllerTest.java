@@ -1,9 +1,9 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.training.ModelRegistryService;
-import com.drones.vision.application.training.RegisteredModel;
+import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.learning.application.ModelRegistryService;
+import com.drones.vision.learning.application.RegisteredModel;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.kernel.Ownership;

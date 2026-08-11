@@ -9,7 +9,22 @@ Control-plane services orchestrating `vision-domain` ports: asset/device/stream 
 
 ## Package structure (docs/plans/active/LAYERING-REFACTOR-PLAN.md §4.1, Wave A)
 
-Feature-first, role-second: `com.drones.vision.application.<feature>` (14 feature packages) plus `pipeline`/`scope`. Each feature package holds its `XService`(+`DefaultXService`) and that feature's command/read-model records and package-private collaborators. Test packages mirror main 1:1.
+**Context-first, layer-second, feature-third** (docs/plans/active/DOMAIN-SEPARATION-W1.md, W1.5b): `com.drones.vision.<context>.application[.<feature>]`. The old flat `com.drones.vision.application.<feature>` root is gone. Each feature package still holds its `XService`(+`DefaultXService`), that feature's command/read-model records and package-private collaborators; test packages mirror main 1:1.
+
+The context is the outermost segment because **the context is the future Maven module** — W1.7 extraction is then a directory move, not a repackage.
+
+A feature package collapses straight into `<context>.application` when its name equals the context (no `flight.application.flight`) or when it is the context's only feature (no `events.application.replay`); otherwise it is kept:
+
+| Context | Packages |
+|---|---|
+| `warehouse.application` | `.asset` `.device` `.category` `.discovery` `.fleet` `.usage` |
+| `perception.application` | `.stream` `.pipeline` |
+| `flight.application` | flight commands + RC at the root, `.geofence` |
+| `identity.application` | users/groups/auth at the root, `.scope` |
+| `map.application` | layers/drawings at the root, `.mark` |
+| `learning.application` | (was `training`) |
+| `events.application` | (was `replay`) |
+| `simulation.application` | |
 
 **The `exception` package is gone** (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C1). A two-class package that both the perception and warehouse feature sets reached into was a cross-context edge with no owner; each exception now lives with the code that throws it — `UnsupportedProtocolException` in `stream`, `ProbeFailedException` in `device`.
 

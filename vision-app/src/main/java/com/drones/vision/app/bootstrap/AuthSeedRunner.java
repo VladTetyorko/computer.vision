@@ -1,10 +1,10 @@
 package com.drones.vision.app.bootstrap;
 
-import com.drones.vision.application.identity.GroupService;
-import com.drones.vision.application.identity.GroupSpec;
-import com.drones.vision.application.identity.UserService;
-import com.drones.vision.application.identity.UserSpec;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.GroupSpec;
+import com.drones.vision.identity.application.UserService;
+import com.drones.vision.identity.application.UserSpec;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.identity.domain.model.Role;

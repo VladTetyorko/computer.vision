@@ -9,9 +9,9 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
-import com.drones.vision.application.pipeline.TrackingStats;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.stream.UpdateOutcome;
+import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.kernel.DeviceId;
@@ -104,7 +104,7 @@ public class StreamController {
      *
      * <p>What the body says about {@code tracking} travels as its own patch rather than baked into
      * the config: the deployment's tracking seed ({@code vision.tracking.*}) is applied inside {@link
-     * StreamService#start(DeviceId, PipelineConfig, com.drones.vision.application.stream.TrackingConfigPatch)},
+     * StreamService#start(DeviceId, PipelineConfig, com.drones.vision.perception.application.stream.TrackingConfigPatch)},
      * so this endpoint, asset-level start and the simulation service all seed identically
      * (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
      *

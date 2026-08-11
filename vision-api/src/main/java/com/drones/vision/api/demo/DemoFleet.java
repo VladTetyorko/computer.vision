@@ -1,13 +1,13 @@
 package com.drones.vision.api.demo;
 
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.simulation.RouteMode;
-import com.drones.vision.application.simulation.SimulatedAsset;
-import com.drones.vision.application.simulation.SimulationService;
-import com.drones.vision.application.simulation.SimulationSpec;
-import com.drones.vision.application.simulation.SimulationTransport;
-import com.drones.vision.application.simulation.TelemetryPlan;
-import com.drones.vision.application.simulation.Waypoint;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.simulation.application.RouteMode;
+import com.drones.vision.simulation.application.SimulatedAsset;
+import com.drones.vision.simulation.application.SimulationService;
+import com.drones.vision.simulation.application.SimulationSpec;
+import com.drones.vision.simulation.application.SimulationTransport;
+import com.drones.vision.simulation.application.TelemetryPlan;
+import com.drones.vision.simulation.application.Waypoint;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.UserId;

@@ -1,9 +1,9 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.discovery.DiscoveryService;
-import com.drones.vision.application.discovery.DiscoveryScanSpec;
-import com.drones.vision.application.discovery.DiscoveryScanResult;
+import com.drones.vision.warehouse.application.discovery.DiscoveryService;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanSpec;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanResult;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.kernel.StreamDescriptor;

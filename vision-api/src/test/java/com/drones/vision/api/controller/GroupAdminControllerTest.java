@@ -1,8 +1,8 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.identity.GroupService;
-import com.drones.vision.application.identity.GroupSpec;
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.GroupSpec;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;

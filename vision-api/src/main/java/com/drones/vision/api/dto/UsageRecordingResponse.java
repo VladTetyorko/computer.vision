@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.replay.UsageRecording;
+import com.drones.vision.events.application.UsageRecording;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.net.URI;

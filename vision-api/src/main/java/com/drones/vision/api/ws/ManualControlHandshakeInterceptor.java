@@ -1,6 +1,6 @@
 package com.drones.vision.api.ws;
 
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.kernel.UserId;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.ServerHttpRequest;

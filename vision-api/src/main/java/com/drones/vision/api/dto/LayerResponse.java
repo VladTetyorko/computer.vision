@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.map.LayerView;
+import com.drones.vision.map.application.LayerView;
 import com.drones.vision.map.domain.model.AccessLevel;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.fasterxml.jackson.annotation.JsonInclude;

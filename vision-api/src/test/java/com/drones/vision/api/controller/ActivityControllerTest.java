@@ -3,7 +3,7 @@ package com.drones.vision.api.controller;
 import com.drones.vision.identity.domain.model.AuditAction;
 import com.drones.vision.identity.domain.model.AuditEntry;
 import com.drones.vision.identity.domain.model.AuditTargetType;
-import com.drones.vision.application.identity.ActivityService;
+import com.drones.vision.identity.application.ActivityService;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.Test;

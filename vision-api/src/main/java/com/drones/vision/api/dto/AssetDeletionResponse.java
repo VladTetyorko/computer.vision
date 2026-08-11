@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.asset.AssetDeletion;
+import com.drones.vision.warehouse.application.asset.AssetDeletion;
 
 /**
  * Response body for {@code DELETE /api/assets/{id}} (docs/main/CYCLES-PLAN.md §8's pinned contract).

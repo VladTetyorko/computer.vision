@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.identity.GroupSpec;
+import com.drones.vision.identity.application.GroupSpec;
 import com.drones.vision.kernel.GroupId;
 
 /**

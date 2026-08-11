@@ -1,9 +1,9 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.device.DeviceEdit;
-import com.drones.vision.application.device.DeviceRegistration;
-import com.drones.vision.application.device.DeviceService;
+import com.drones.vision.warehouse.application.device.DeviceEdit;
+import com.drones.vision.warehouse.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;

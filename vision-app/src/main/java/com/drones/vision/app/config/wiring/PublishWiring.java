@@ -47,7 +47,7 @@ public class PublishWiring {
 
     /**
      * Burns detection boxes/labels (and, once a telemetry input reaches {@code
-     * com.drones.vision.application.pipeline.StreamPipeline}, a telemetry OSD) onto published frames
+     * com.drones.vision.perception.application.pipeline.StreamPipeline}, a telemetry OSD) onto published frames
      * (docs/plans/done/MVP1-PLAN.md §C8 bullets 1-2). Threaded into {@code
      * ApplicationServiceWiring#streamService} below.
      */

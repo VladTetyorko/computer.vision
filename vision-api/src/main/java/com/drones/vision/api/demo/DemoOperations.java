@@ -1,11 +1,11 @@
 package com.drones.vision.api.demo;
 
-import com.drones.vision.application.geofence.GeofenceService;
-import com.drones.vision.application.geofence.GeofenceZoneSpec;
-import com.drones.vision.application.map.MapAccessPolicy.Viewer;
-import com.drones.vision.application.map.MapLayerService;
-import com.drones.vision.application.mark.MarkService;
-import com.drones.vision.application.mark.MarkSpec;
+import com.drones.vision.flight.application.geofence.GeofenceService;
+import com.drones.vision.flight.application.geofence.GeofenceZoneSpec;
+import com.drones.vision.map.application.MapAccessPolicy.Viewer;
+import com.drones.vision.map.application.MapLayerService;
+import com.drones.vision.map.application.mark.MarkService;
+import com.drones.vision.map.application.mark.MarkSpec;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.map.domain.model.LayerId;

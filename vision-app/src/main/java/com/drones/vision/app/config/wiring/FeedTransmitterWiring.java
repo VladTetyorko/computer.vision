@@ -8,7 +8,7 @@ import com.drones.vision.app.config.properties.VisionMjpegProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionRtspProperties;
-import com.drones.vision.application.pipeline.FeedTransmitterRegistry;
+import com.drones.vision.perception.application.pipeline.FeedTransmitterRegistry;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;

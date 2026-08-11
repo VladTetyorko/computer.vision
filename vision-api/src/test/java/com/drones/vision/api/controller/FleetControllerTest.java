@@ -1,11 +1,11 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.asset.AssetAttention;
-import com.drones.vision.application.category.CategoryCounts;
-import com.drones.vision.application.fleet.FleetSummary;
-import com.drones.vision.application.fleet.FleetSummaryService;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.warehouse.application.asset.AssetAttention;
+import com.drones.vision.warehouse.application.category.CategoryCounts;
+import com.drones.vision.warehouse.application.fleet.FleetSummary;
+import com.drones.vision.warehouse.application.fleet.FleetSummaryService;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.GroupId;

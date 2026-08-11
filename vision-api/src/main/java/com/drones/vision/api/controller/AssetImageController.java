@@ -2,8 +2,8 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.PayloadTooLargeException;
 import com.drones.vision.api.security.CurrentUser;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetImage;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;

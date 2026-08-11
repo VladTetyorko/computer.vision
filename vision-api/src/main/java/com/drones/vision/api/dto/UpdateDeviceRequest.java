@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.device.DeviceEdit;
+import com.drones.vision.warehouse.application.device.DeviceEdit;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.StreamDescriptor;
 

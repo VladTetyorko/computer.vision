@@ -1,13 +1,13 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.pipeline.TrackingStats;
-import com.drones.vision.application.stream.ActiveStream;
-import com.drones.vision.application.stream.PipelineConfigPatch;
-import com.drones.vision.application.stream.TrackingConfigPatch;
-import com.drones.vision.application.stream.StreamService;
-import com.drones.vision.application.stream.UnsupportedProtocolException;
-import com.drones.vision.application.stream.UpdateOutcome;
+import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.stream.ActiveStream;
+import com.drones.vision.perception.application.stream.PipelineConfigPatch;
+import com.drones.vision.perception.application.stream.TrackingConfigPatch;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
+import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.kernel.BoundingBox;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionQuery;

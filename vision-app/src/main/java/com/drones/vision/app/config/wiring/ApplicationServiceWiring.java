@@ -36,19 +36,19 @@ import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
 import com.drones.vision.app.events.LiveUpdateAuditTrail;
 import com.drones.vision.app.events.LiveUpdateDetectionEventRepository;
 import com.drones.vision.app.events.LiveUpdateEventPublisher;
-import com.drones.vision.application.asset.*;
-import com.drones.vision.application.category.*;
-import com.drones.vision.application.device.*;
-import com.drones.vision.application.fleet.*;
-import com.drones.vision.application.flight.*;
-import com.drones.vision.application.geofence.*;
-import com.drones.vision.application.map.*;
-import com.drones.vision.application.mark.*;
-import com.drones.vision.application.pipeline.*;
-import com.drones.vision.application.replay.*;
-import com.drones.vision.application.simulation.*;
-import com.drones.vision.application.stream.*;
-import com.drones.vision.application.usage.*;
+import com.drones.vision.warehouse.application.asset.*;
+import com.drones.vision.warehouse.application.category.*;
+import com.drones.vision.warehouse.application.device.*;
+import com.drones.vision.warehouse.application.fleet.*;
+import com.drones.vision.flight.application.*;
+import com.drones.vision.flight.application.geofence.*;
+import com.drones.vision.map.application.*;
+import com.drones.vision.map.application.mark.*;
+import com.drones.vision.perception.application.pipeline.*;
+import com.drones.vision.events.application.*;
+import com.drones.vision.simulation.application.*;
+import com.drones.vision.perception.application.stream.*;
+import com.drones.vision.warehouse.application.usage.*;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.ApplicationRunner;
@@ -340,7 +340,7 @@ public class ApplicationServiceWiring {
     /**
      * Maps {@link VisionApplicationProperties.Pipeline}/{@link VisionApplicationProperties.Extrapolation}
      * and {@link VisionTrackingProperties}' two read-model windows onto {@code
-     * com.drones.vision.application.pipeline.StreamPipelineSettings} — the two backoff
+     * com.drones.vision.perception.application.pipeline.StreamPipelineSettings} — the two backoff
      * pairs are bound in milliseconds but the settings record's own unit is nanoseconds, so this is
      * where the conversion happens, once.
      *

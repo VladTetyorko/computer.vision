@@ -2,7 +2,7 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.support.EnumParsing;
-import com.drones.vision.application.mark.MarkSpec;
+import com.drones.vision.map.application.mark.MarkSpec;
 import com.drones.vision.map.domain.model.Affiliation;
 import com.drones.vision.map.domain.model.MarkKind;
 

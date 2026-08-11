@@ -2,9 +2,9 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.LoginRequest;
 import com.drones.vision.api.dto.MeResponse;
-import com.drones.vision.application.identity.AuthService;
-import com.drones.vision.application.identity.GroupService;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.identity.application.AuthService;
+import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.identity.domain.model.User;
 import jakarta.servlet.http.HttpServletRequest;

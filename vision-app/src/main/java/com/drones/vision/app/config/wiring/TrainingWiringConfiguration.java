@@ -18,9 +18,9 @@ import com.drones.vision.adapter.cvgrpc.GrpcTrainingPort;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.config.properties.VisionTrainingProperties;
-import com.drones.vision.application.replay.*;
-import com.drones.vision.application.stream.*;
-import com.drones.vision.application.training.*;
+import com.drones.vision.events.application.*;
+import com.drones.vision.perception.application.stream.*;
+import com.drones.vision.learning.application.*;
 
 import io.grpc.ManagedChannel;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

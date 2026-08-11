@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.map.DrawingPatch;
+import com.drones.vision.map.application.DrawingPatch;
 
 import java.util.List;
 import java.util.Optional;

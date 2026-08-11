@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.discovery.DiscoveryScanResult;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanResult;
 
 import java.util.List;
 import java.util.Set;

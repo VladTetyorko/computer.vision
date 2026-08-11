@@ -1,9 +1,9 @@
 package com.drones.vision.app.security;
 
 import com.drones.vision.api.security.PrincipalResolver;
-import com.drones.vision.application.map.MapAccessPolicy;
-import com.drones.vision.application.scope.ScopeResolver;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.identity.application.scope.ScopeResolver;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.kernel.Ownership;

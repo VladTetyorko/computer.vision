@@ -1,8 +1,8 @@
 package com.drones.vision.app;
 
-import com.drones.vision.application.discovery.DiscoveryService;
-import com.drones.vision.application.discovery.DiscoveryScanSpec;
-import com.drones.vision.application.discovery.DiscoveryScanResult;
+import com.drones.vision.warehouse.application.discovery.DiscoveryService;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanSpec;
+import com.drones.vision.warehouse.application.discovery.DiscoveryScanResult;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

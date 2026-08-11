@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.pipeline.TrackingStats;
+import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.domain.model.TrackState;
 
 import java.util.Collections;

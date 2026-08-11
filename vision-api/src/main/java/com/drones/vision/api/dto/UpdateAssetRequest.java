@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.application.asset.AssetEdit;
+import com.drones.vision.warehouse.application.asset.AssetEdit;
 import com.drones.vision.kernel.CategoryId;
 
 import java.util.Map;

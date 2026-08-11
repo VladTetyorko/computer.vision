@@ -1,9 +1,9 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.scope.AccessDeniedException;
-import com.drones.vision.application.flight.FlightCommandService;
-import com.drones.vision.application.scope.VisibilityScope;
+import com.drones.vision.identity.application.scope.AccessDeniedException;
+import com.drones.vision.flight.application.FlightCommandService;
+import com.drones.vision.identity.application.scope.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.flight.domain.model.FlightCapability;

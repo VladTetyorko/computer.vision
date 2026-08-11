@@ -5,7 +5,7 @@ import com.drones.vision.api.dto.RegisterDeviceRequest;
 import com.drones.vision.api.dto.SetLifecycleStateRequest;
 import com.drones.vision.api.dto.UpdateDeviceRequest;
 import com.drones.vision.api.exception.ApiExceptionHandler;
-import com.drones.vision.application.device.DeviceService;
+import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import org.springframework.http.HttpStatus;

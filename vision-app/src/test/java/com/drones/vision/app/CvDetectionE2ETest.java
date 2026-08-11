@@ -1,9 +1,9 @@
 package com.drones.vision.app;
 
 import com.drones.vision.app.devsupport.DevPrincipal;
-import com.drones.vision.application.asset.AssetService;
-import com.drones.vision.application.asset.AssetSpec;
-import com.drones.vision.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.AssetSpec;
+import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * gRPC server, a {@code sim}-device stream's sampled frames actually reach the server as {@code
  * FrameRequest}s (proving {@link com.drones.vision.adapter.cvgrpc.GrpcDetectionPort} is wired all
  * the way from {@link WiringConfiguration} through {@link
- * com.drones.vision.application.pipeline.StreamPipeline}'s inference sampling), while video keeps flowing
+ * com.drones.vision.perception.application.pipeline.StreamPipeline}'s inference sampling), while video keeps flowing
  * to {@link com.drones.vision.perception.domain.port.StreamPublisherPort} the whole time. Stopping the
  * stream then proves session cleanup: {@link DetectionSessionCleanupEventPublisher} calls {@code
  * GrpcDetectionPort#streamEnded}, which half-closes the client's request stream, which the server
