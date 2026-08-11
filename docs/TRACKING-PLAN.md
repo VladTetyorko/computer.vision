@@ -1139,9 +1139,13 @@ the frozen contract; integrates last.
   stable `trackId`s across three frames, and the `GET …/tracks` endpoint reports them.
 - **Portability acceptance (§3.3): the `cv` extra resolves clean on aarch64.** There is no ARM CI in
   this repo, so do **not** promise a green ARM build — the criterion is a *resolution* check, which
-  needs no ARM hardware: `pip download --no-deps --platform manylinux2014_aarch64 --python-version
+  needs no ARM hardware: `pip download --no-deps --platform manylinux_2_28_aarch64 --python-version
   312 --only-binary=:all:` succeeds for every pinned member of the extra. Record the command and its
-  result in `cv-service/MODULE.md`. If someone has a Pi by then, an actual `pip install -e '.[cv]'`
+  result in `cv-service/MODULE.md`.
+  **Use `manylinux_2_28_aarch64`, not `manylinux2014_aarch64`** — T1 found that the 2014 tag silently
+  resolves torch back to **2.5.1** (87.6 MB), because 2.13.0 ships only a `manylinux_2_28` wheel. The
+  older tag therefore validates a *different torch than the one that actually installs*, which is
+  worse than not checking at all: a green result would be meaningless. If someone has a Pi by then, an actual `pip install -e '.[cv]'`
   + `python -m cv_service.grpc.server` smoke run supersedes it; until then this is the honest bound.
 - Run the §10 touchable-outcome checklist and record the **measured** CPU numbers in
   `cv-service/MODULE.md`.
