@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from cv_service.tracking.assign import AssignGates, AssignWeights
+from cv_service.tracking.memory import MemoryParams
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW, MODE_OFF, TrackingParams
 from cv_service.tracking.scheduler import (
     REASON_ALWAYS,
@@ -40,6 +41,7 @@ def params(mode: str, **overrides) -> TrackingParams:
         appearance_engine_id="",
         cost_weights=AssignWeights(),
         cost_gates=AssignGates(),
+        memory_params=MemoryParams(),
     )
     base.update(overrides)
     return TrackingParams(**base)

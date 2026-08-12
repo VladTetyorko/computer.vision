@@ -151,10 +151,12 @@ def _tracking_request_from_wire(
         min_hits=message.min_hits,
         lock=_lock_request_from_wire(message.lock) if message.HasField("lock") else None,
         # motion_engine_id (field 8, TRACKING-V2-PLAN wave C2), appearance_
-        # engine_id (field 9, wave C3). memory_ttl_millis (field 10) is also
-        # frozen on the wire but belongs to wave C4 -- not read here yet.
+        # engine_id (field 9, wave C3), memory_ttl_millis (field 10, wave C4
+        # -- `params.py`'s `resolve()` is what turns the `<=0` sentinel into
+        # a number, same as `verify_every_millis`/`max_age_frames` above).
         motion_engine_id=message.motion_engine_id,
         appearance_engine_id=message.appearance_engine_id,
+        memory_ttl_millis=message.memory_ttl_millis,
     )
 
 
@@ -190,6 +192,15 @@ def _tracked_detection(box: "object") -> "cv_pb2.Detection":
         box=cv_pb2.BoundingBox(
             x=box.box.x, y=box.box.y, width=box.box.width, height=box.box.height
         ),
+        # TRACKING-V2-PLAN wave C4 (fields 10/11) -- read from `TrackedBox`
+        # itself, not from `track`: a recovery is a fact about THIS FRAME,
+        # not about the persistent `Track`, and `box.identity_confidence`/
+        # `.dormant_millis` are already `0.0`/`0` on every frame that is not
+        # the exact one a recovery happened on (`session.py`'s `TrackedBox`
+        # docstring). Setting proto3 scalar zeros here is a no-op on the
+        # wire either way, so this needs no `track is not None` guard.
+        identity_confidence=box.identity_confidence,
+        dormant_millis=box.dormant_millis,
     )
     track = box.track
     if track is not None:

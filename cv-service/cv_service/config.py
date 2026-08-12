@@ -153,6 +153,23 @@ DEFAULT_TRACK_COST_GATE_MAX_COST = float("inf")
 # tunes it as its own separate constant.
 DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE = 0.25
 
+# TRACKING-V2-PLAN wave C4: `ObjectMemory`'s `MemoryParams` (`memory.py`),
+# resolved straight from `Settings` -- `resolve()` builds the dataclass
+# directly, same "no wire field for the rest of it" shape the cost weights/
+# gates above already use. Mirrors `MemoryParams`' OWN dataclass defaults
+# exactly (unlike the cost weights, where the dataclass default is a
+# deliberately inert "no appearance evidence" fallback for a bare
+# constructor call, `MemoryParams`' own defaults ARE already documented as
+# the considered production values -- "deliberately conservative: a wrong
+# recovery is worse than a missed one" -- so there is no reason to diverge).
+DEFAULT_TRACK_MEMORY_TTL_MILLIS = 30_000
+DEFAULT_TRACK_MEMORY_CAPACITY = 32
+DEFAULT_TRACK_MEMORY_GALLERY_SIZE = 4
+DEFAULT_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE = 0.45
+DEFAULT_TRACK_MEMORY_MAX_SPEED = 1.0
+DEFAULT_TRACK_MEMORY_BLEND_ALPHA = 0.7
+DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE = 0.35
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -325,6 +342,25 @@ def _parse_nonnegative_float(raw: Optional[str], default: float, var_name: str) 
     return value
 
 
+def _parse_int_allow_nonpositive(raw: Optional[str], default: int, var_name: str) -> int:
+    """Forgiving-parse for an int knob where `<=0` is a legitimate DISABLE
+    value, not a typo to guard against (TRACKING-V2-PLAN wave C4's
+    `CV_TRACK_MEMORY_TTL_MILLIS` -- see that constant's own comment on why
+    disabling the gallery is a deployment-layer decision).
+
+    Unlike `_parse_positive_int`, a non-positive parsed value is accepted
+    as-is rather than replaced by `default`; only genuinely non-numeric
+    input falls back, same "never raise" contract every parser here shares.
+    """
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid integer; using default %d", var_name, raw, default)
+        return default
+
+
 def _parse_engine_id(raw: Optional[str], default: str) -> str:
     """Unset/blank -> `default`; anything else passes through stripped.
 
@@ -378,6 +414,13 @@ class Settings:
     track_cost_gate_max_appearance: float = DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE
     track_cost_gate_max_cost: float = DEFAULT_TRACK_COST_GATE_MAX_COST
     track_cost_gate_high_confidence: float = DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE
+    track_memory_ttl_millis: int = DEFAULT_TRACK_MEMORY_TTL_MILLIS
+    track_memory_capacity: int = DEFAULT_TRACK_MEMORY_CAPACITY
+    track_memory_gallery_size: int = DEFAULT_TRACK_MEMORY_GALLERY_SIZE
+    track_memory_max_appearance_distance: float = DEFAULT_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE
+    track_memory_max_speed: float = DEFAULT_TRACK_MEMORY_MAX_SPEED
+    track_memory_blend_alpha: float = DEFAULT_TRACK_MEMORY_BLEND_ALPHA
+    track_memory_min_confidence: float = DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -481,5 +524,40 @@ class Settings:
                 os.environ.get("CV_TRACK_COST_GATE_HIGH_CONFIDENCE"),
                 DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE,
                 "CV_TRACK_COST_GATE_HIGH_CONFIDENCE",
+            ),
+            track_memory_ttl_millis=_parse_int_allow_nonpositive(
+                os.environ.get("CV_TRACK_MEMORY_TTL_MILLIS"),
+                DEFAULT_TRACK_MEMORY_TTL_MILLIS,
+                "CV_TRACK_MEMORY_TTL_MILLIS",
+            ),
+            track_memory_capacity=_parse_positive_int(
+                os.environ.get("CV_TRACK_MEMORY_CAPACITY"),
+                DEFAULT_TRACK_MEMORY_CAPACITY,
+                "CV_TRACK_MEMORY_CAPACITY",
+            ),
+            track_memory_gallery_size=_parse_positive_int(
+                os.environ.get("CV_TRACK_MEMORY_GALLERY_SIZE"),
+                DEFAULT_TRACK_MEMORY_GALLERY_SIZE,
+                "CV_TRACK_MEMORY_GALLERY_SIZE",
+            ),
+            track_memory_max_appearance_distance=_parse_unit_interval(
+                os.environ.get("CV_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE"),
+                DEFAULT_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE,
+                "CV_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE",
+            ),
+            track_memory_max_speed=_parse_nonnegative_float(
+                os.environ.get("CV_TRACK_MEMORY_MAX_SPEED"),
+                DEFAULT_TRACK_MEMORY_MAX_SPEED,
+                "CV_TRACK_MEMORY_MAX_SPEED",
+            ),
+            track_memory_blend_alpha=_parse_unit_interval(
+                os.environ.get("CV_TRACK_MEMORY_BLEND_ALPHA"),
+                DEFAULT_TRACK_MEMORY_BLEND_ALPHA,
+                "CV_TRACK_MEMORY_BLEND_ALPHA",
+            ),
+            track_memory_min_confidence=_parse_unit_interval(
+                os.environ.get("CV_TRACK_MEMORY_MIN_CONFIDENCE"),
+                DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE,
+                "CV_TRACK_MEMORY_MIN_CONFIDENCE",
             ),
         )

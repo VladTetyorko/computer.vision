@@ -17,12 +17,14 @@ from cv_service.tracking.engines.base import (
     Observation,
     Transform,
 )
+from cv_service.tracking.memory import MemoryParams, ObjectMemory
 from cv_service.tracking.params import MODE_ASSOCIATE, TrackingParams
 from cv_service.tracking.track import (
     STATE_COASTING,
     STATE_CONFIRMED,
     STATE_LOST,
     STATE_TENTATIVE,
+    RecoveredIdentity,
     TrackBook,
     observe_descriptor,
 )
@@ -50,6 +52,11 @@ def params(**overrides) -> TrackingParams:
         appearance_engine_id="",
         cost_weights=AssignWeights(),
         cost_gates=AssignGates(),
+        # TRACKING-V2-PLAN wave C4 -- also inert here: `TrackBook` never
+        # reads `TrackingParams.memory_params` itself (only `session.py`'s
+        # `_resolve_memory` does, to build the `ObjectMemory` this file
+        # wires in directly via `TrackBook(memory=...)`/`set_memory`).
+        memory_params=MemoryParams(),
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -391,3 +398,103 @@ def test_observe_descriptor_blends_rather_than_replaces():
     # Halfway between RED and BLUE, renormalized (Descriptor.blend's own
     # contract) -- not a straight replacement.
     assert born.descriptor.values == pytest.approx((0.5, 0.0, 0.5))
+
+
+# -- object memory wiring (TRACKING-V2-PLAN wave C4) -------------------------
+
+
+def test_a_track_is_never_remembered_when_no_memory_is_configured():
+    # The default -- `TrackBook(params())` with no `memory=` -- must stay a
+    # genuine no-op all the way through expiry (P5): no gallery exists, so
+    # nothing is even attempted.
+    book = TrackBook(params(min_hits=1, max_age_frames=1))
+    book.apply([seen("car")], 0.0, detector_ran=True)
+
+    for frame in range(1, 5):
+        book.apply([], float(frame), detector_ran=True)  # raises nothing
+
+    assert book.tracks == []
+
+
+def test_a_track_is_remembered_the_moment_it_is_actually_expired():
+    # `occlusion`'s own retention already recovers a SHORT gap without any
+    # gallery involved -- this proves the OTHER half: a track that survives
+    # long enough to hit `_expire()` is handed to memory first, not simply
+    # dropped. `max_age_frames=1` -> the book retires past 2 consecutive
+    # misses (`_LOST_RETENTION_MULTIPLIER`).
+    memory = ObjectMemory(MemoryParams())
+    book = TrackBook(params(min_hits=1, max_age_frames=1), memory=memory)
+    born = book.apply([seen("car", x=0.3, y=0.4)], 0.0, detector_ran=True)[0]
+
+    assert memory.size() == 0  # not yet -- still live/coasting/LOST
+
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    assert book.get(born.track_id) is None  # gone from the live book...
+    assert memory.size() == 1  # ...but remembered, not simply discarded
+    remembered = memory.identities()[0]
+    assert remembered.track_id == born.track_id
+    assert remembered.box.x == pytest.approx(0.3)
+    assert remembered.label == "car"
+
+
+def test_set_memory_swaps_the_gallery_a_book_hands_lost_tracks_to():
+    first, second = ObjectMemory(MemoryParams()), ObjectMemory(MemoryParams())
+    book = TrackBook(params(min_hits=1, max_age_frames=1), memory=first)
+    book.set_memory(second)
+    born = book.apply([seen("car")], 0.0, detector_ran=True)[0]
+
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    assert first.size() == 0
+    assert second.size() == 1
+    assert second.identities()[0].track_id == born.track_id
+
+
+def test_apply_books_a_recovery_under_the_remembered_id_and_skips_min_hits():
+    # The counterpart to `test_an_authoritative_observation_skips_the_min_
+    # hits_gate` above -- a recovery earns the same carve-out, for the same
+    # reason: it is not a fresh, ambiguous detection.
+    book = TrackBook(params(min_hits=5))
+    recovery = RecoveredIdentity(
+        track_id=42, first_seen=-10.0, descriptor=RED, velocity=(0.1, 0.2)
+    )
+
+    recovered = book.apply(
+        [seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery}
+    )[0]
+
+    assert recovered.track_id == 42
+    assert recovered.state == STATE_CONFIRMED
+    assert recovered.first_seen == pytest.approx(-10.0)
+    assert recovered.descriptor == RED
+    assert recovered.velocity_x == pytest.approx(0.1)
+    assert recovered.velocity_y == pytest.approx(0.2)
+
+
+def test_a_recovered_id_is_never_handed_out_again_by_the_counter():
+    book = TrackBook(params(min_hits=1))
+    recovery = RecoveredIdentity(track_id=100, first_seen=0.0)
+
+    book.apply([seen("x")], 0.0, detector_ran=True, recoveries={"x": recovery})
+    fresh = book.apply([seen("y")], 1.0, detector_ran=True)[0]
+
+    assert fresh.track_id > 100
+
+
+def test_recoveries_are_ignored_for_a_key_that_is_already_a_live_track():
+    # `recoveries` only ever applies to a genuinely NEW birth -- an update to
+    # an existing track must never be redirected onto a different id.
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("x")], 0.0, detector_ran=True)[0]
+
+    still_born = book.apply(
+        [seen("x")],
+        1.0,
+        detector_ran=True,
+        recoveries={"x": RecoveredIdentity(track_id=999, first_seen=0.0)},
+    )[0]
+
+    assert still_born.track_id == born.track_id

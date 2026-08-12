@@ -670,6 +670,77 @@ def clutter(seed: int = DEFAULT_SEED) -> Sequence:
     )
 
 
+# -- scenario: crowd_recall -------------------------------------------------
+#
+# The adversarial test for the dormant gallery, and the one `clutter` cannot
+# perform: `clutter` is short enough that no track ever reaches expiry, so its
+# gallery is never populated and its clean numbers say nothing about memory.
+#
+# A false recovery is worse than a missed one -- it puts the operator's
+# attention on the wrong object while telling them it is the right one -- so
+# what has to be tested is not "can it recover" but "can it be made to recover
+# WRONGLY". Hence three PAIRS of objects that share a colour: appearance alone
+# cannot tell a pair apart, and a gallery matching on appearance would have a
+# coin-flip between them. Every object then vanishes for long enough that its
+# track is deleted, and returns having continued its own motion -- so the only
+# thing separating the correct identity from its twin is where each one could
+# plausibly have got to.
+#
+# A swap inside a pair shows up directly as IDSW.
+
+CROWD_RECALL_FRAME_COUNT = 150
+CROWD_RECALL_GAP_START = 40
+CROWD_RECALL_GAP_FRAMES = 90
+CROWD_RECALL_SPEED = 0.0015
+CROWD_RECALL_LANES = (0.22, 0.50, 0.78)
+CROWD_RECALL_START_X = (0.08, 0.50)
+
+
+def crowd_recall(seed: int = DEFAULT_SEED) -> Sequence:
+    """Three same-coloured pairs, all hidden long enough for their tracks to
+    be deleted, all returning under their own continued motion -- so telling
+    a twin from its partner needs more than appearance."""
+    rng = Random(seed)
+    gap_end = CROWD_RECALL_GAP_START + CROWD_RECALL_GAP_FRAMES  # exclusive
+    specs = []
+    for lane_index, lane in enumerate(CROWD_RECALL_LANES):
+        for slot, start_x in enumerate(CROWD_RECALL_START_X):
+            specs.append((len(specs) + 1, start_x, lane, lane_index))
+    colors = {gt_id: _OBJECT_COLORS[lane_index % len(_OBJECT_COLORS)]
+              for gt_id, _x, _lane, lane_index in specs}
+
+    frames = []
+    for index in range(CROWD_RECALL_FRAME_COUNT):
+        hidden = CROWD_RECALL_GAP_START <= index < gap_end
+
+        def underlay(image: "np.ndarray", hidden=hidden) -> None:
+            if hidden:
+                _draw_bar(image, 0.0, 1.0, OCCLUSION_BAR_COLOR)
+
+        objects = tuple(
+            GroundTruthObject(
+                gt_id=gt_id,
+                label=OBJECT_LABEL,
+                box=_lane_box(
+                    start_x + CROWD_RECALL_SPEED * index,
+                    lane,
+                    rng.uniform(-POSITION_JITTER, POSITION_JITTER),
+                ),
+                visible=not hidden,
+            )
+            for gt_id, start_x, lane, _lane_index in specs
+        )
+        frames.append(_render_frame(index, objects, colors, underlay=underlay))
+    return Sequence(
+        name="crowd_recall",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
 SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "linear": linear,
     "occlusion": occlusion,
@@ -679,4 +750,5 @@ SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "pan_step": pan_step,
     "clutter": clutter,
     "long_occlusion": long_occlusion,
+    "crowd_recall": crowd_recall,
 }

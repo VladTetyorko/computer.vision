@@ -523,6 +523,137 @@ def test_appearance_off_never_asks_the_registry():
     assert registry.appearance_calls == 0
 
 
+# -- object memory (TRACKING-V2-PLAN wave C4) --------------------------------
+
+
+def test_a_track_that_expires_is_recovered_under_its_own_id_when_it_reappears():
+    # The session-level counterpart to `long_occlusion`'s harness row
+    # (`MODULE.md` "Wave C4"): `max_age_frames=1` retires a track past 2
+    # consecutive misses (`TrackBook`'s own retention multiplier), which is
+    # short enough to drive deterministically here without 90 frames.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=1)
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+    assert born.boxes[0].track.track_id == 1
+
+    for frame in range(1, 4):
+        run(subject, now_millis=frame * 1000.0, detections=[])
+    assert subject.tracks == []  # genuinely gone from the live book
+
+    recovered = run(subject, now_millis=4000.0, detections=[det("car", x=0.1)])
+
+    box = recovered.boxes[0]
+    assert box.track.track_id == 1  # the SAME id, not a fresh one
+    assert box.track.state == STATE_CONFIRMED  # min_hits was not re-earned
+    assert box.identity_confidence > 0.0
+    assert box.dormant_millis == pytest.approx(1000, abs=5)
+
+    # The NEXT frame is an ordinary re-match, not a recovery -- both fields
+    # must fall back to their zero value rather than staying "sticky".
+    again = run(subject, now_millis=4066.0, detections=[det("car", x=0.1)])
+    assert again.boxes[0].track.track_id == 1
+    assert again.boxes[0].identity_confidence == 0.0
+    assert again.boxes[0].dormant_millis == 0
+
+
+def test_a_track_expiring_under_one_associator_is_recovered_after_switching_to_cost():
+    # `TrackBook._retire` remembers regardless of which associator produced
+    # the track -- `bytetrack` (via `FakeAssociator`) never itself queries
+    # the gallery back, but the SAME book, and the SAME `ObjectMemory`
+    # instance, keep serving this stream across an `apply_config` engine
+    # switch. Proven end to end through public API only (`subject.tracks`/
+    # `outcome.boxes`), not by inspecting session internals.
+    registry = FakeRegistry(associator=FakeAssociator("bytetrack"))
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="bytetrack", min_hits=1, max_age_frames=1)
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+    assert born.boxes[0].track.track_id == 1
+
+    for frame in range(1, 4):
+        run(subject, now_millis=frame * 1000.0, detections=[])
+    assert subject.tracks == []
+
+    registry._associator = cost_engine  # the registry now serves `cost`
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=1)
+    )
+    recovered = run(subject, now_millis=4000.0, detections=[det("car", x=0.1)])
+
+    assert recovered.boxes[0].track.track_id == 1
+
+
+def test_a_different_object_arriving_in_the_gap_does_not_inherit_the_id():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=1)
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    for frame in range(1, 4):
+        run(subject, now_millis=frame * 1000.0, detections=[])
+
+    stranger = run(subject, now_millis=4000.0, detections=[det("person", x=0.1)])
+
+    box = stranger.boxes[0]
+    assert box.track.track_id == 2  # a fresh id -- #1 is not handed out
+    assert box.identity_confidence == 0.0
+    assert box.dormant_millis == 0
+
+
+def test_memory_disabled_deployment_wide_is_a_genuine_no_op():
+    # `CV_TRACK_MEMORY_TTL_MILLIS<=0` (here, `Settings` directly) is memory
+    # OFF fleet-wide -- a track that expires is gone for good, exactly the
+    # pre-wave-C4 behaviour, and a reappearance mints a fresh id.
+    settings = Settings(track_memory_ttl_millis=0)
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=1)
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    for frame in range(1, 4):
+        run(subject, now_millis=frame * 1000.0, detections=[])
+    assert subject.tracks == []
+
+    reborn = run(subject, now_millis=4000.0, detections=[det("car", x=0.1)])
+
+    box = reborn.boxes[0]
+    assert box.track.track_id == 2  # nothing was ever remembered
+    assert box.identity_confidence == 0.0
+
+
+def test_a_positive_request_ttl_overrides_the_deployment_default():
+    # A tiny per-request TTL means the identity has already expired from the
+    # GALLERY (not merely `TrackBook`) by the time the object reappears.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_ASSOCIATE,
+            engine_id="cost",
+            min_hits=1,
+            max_age_frames=1,
+            memory_ttl_millis=500,
+        )
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    for frame in range(1, 4):
+        run(subject, now_millis=frame * 1000.0, detections=[])  # retired at now=3000
+
+    # 4000 - 3000 = 1000ms dormant, already past the 500ms TTL.
+    stranger = run(subject, now_millis=4000.0, detections=[det("car", x=0.1)])
+
+    assert stranger.boxes[0].track.track_id == 2
+
+
 # -- FOLLOW -----------------------------------------------------------------
 
 

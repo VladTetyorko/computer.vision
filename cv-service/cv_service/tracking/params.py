@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from cv_service.tracking.assign import AssignGates, AssignWeights
+from cv_service.tracking.memory import MemoryParams
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cv_service.config import Settings
@@ -109,6 +110,17 @@ class TrackingRequest:
     # `motion_engine_id` above: "" = server default, "off" is a legitimate
     # resolved value, not a sentinel `resolve()` rewrites).
     appearance_engine_id: str = ""
+    # TRACKING-V2-PLAN wave C4 -- proto field 10, frozen at C0. `<=0 =
+    # server default` (`CV_TRACK_MEMORY_TTL_MILLIS`), the SAME sentinel
+    # shape as `verify_every_millis`/`max_age_frames` above -- a positive
+    # request value asks for that exact TTL, and `<=0` falls back to the
+    # deployment default. Unlike `motion_engine_id`/`appearance_engine_id`'s
+    # string `"off"`, there is no distinct value this int field could carry
+    # to mean "disable the gallery for THIS request only" as opposed to
+    # "use the deployment's own choice" -- disabling memory is therefore a
+    # DEPLOYMENT decision (`CV_TRACK_MEMORY_TTL_MILLIS<=0`, a legitimate
+    # resolved value, not a sentinel -- see `resolve()` below).
+    memory_ttl_millis: int = 0
 
 
 @dataclass(frozen=True)
@@ -157,6 +169,15 @@ class TrackingParams:
     # engine_id`'s own docstring draws.
     cost_weights: AssignWeights
     cost_gates: AssignGates
+    # TRACKING-V2-PLAN wave C4 addition. Built DIRECTLY by `resolve()`, same
+    # shape as `cost_weights`/`cost_gates` above -- `ttl_millis` is the one
+    # field with a wire sentinel to interpret (`memory_ttl_millis`, `Tracking
+    # Request` above); the rest come straight from `Settings` with no
+    # per-request override to fall back FROM. `ttl_millis <= 0` is memory
+    # DISABLED for this stream -- `session.py`'s `_resolve_memory` is what
+    # turns that into "no `ObjectMemory` is even constructed", never an
+    # empty gallery still being consulted every frame (P5).
+    memory_params: MemoryParams
 
     @property
     def active(self) -> bool:
@@ -285,5 +306,18 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             max_appearance=settings.track_cost_gate_max_appearance,
             max_cost=settings.track_cost_gate_max_cost,
             high_confidence=settings.track_cost_gate_high_confidence,
+        ),
+        memory_params=MemoryParams(
+            ttl_millis=(
+                request.memory_ttl_millis
+                if request.memory_ttl_millis > 0
+                else settings.track_memory_ttl_millis
+            ),
+            capacity=settings.track_memory_capacity,
+            gallery_size=settings.track_memory_gallery_size,
+            max_appearance_distance=settings.track_memory_max_appearance_distance,
+            max_speed=settings.track_memory_max_speed,
+            blend_alpha=settings.track_memory_blend_alpha,
+            min_confidence=settings.track_memory_min_confidence,
         ),
     )

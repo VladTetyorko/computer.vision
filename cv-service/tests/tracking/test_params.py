@@ -315,3 +315,103 @@ def test_garbage_cost_weight_and_gate_env_vars_fall_back_and_never_raise(monkeyp
     assert settings.track_cost_weight_appearance == Settings().track_cost_weight_appearance
     assert settings.track_cost_gate_min_iou == Settings().track_cost_gate_min_iou
     assert settings.track_cost_gate_max_cost == Settings().track_cost_gate_max_cost
+
+
+# -- wave C4 addition: memory_ttl_millis (proto field 10) + MemoryParams -----
+
+
+def test_a_non_positive_memory_ttl_request_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_memory_ttl_millis=9_000)
+
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, memory_ttl_millis=0), settings
+    )
+
+    assert resolved.memory_params.ttl_millis == 9_000
+
+
+def test_a_requested_memory_ttl_wins_over_the_deployment_default():
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, memory_ttl_millis=5_000), SETTINGS
+    )
+
+    assert resolved.memory_params.ttl_millis == 5_000
+
+
+def test_a_non_positive_deployment_ttl_is_a_legitimate_disabled_value():
+    # Unlike every other `<=0` sentinel in this module, a non-positive
+    # DEPLOYMENT default is not replaced by anything -- it is the operator's
+    # own choice to run with no gallery at all (`session.py`'s `_resolve_
+    # memory` is what turns this into a genuine no-op).
+    settings = dataclasses.replace(SETTINGS, track_memory_ttl_millis=0)
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.memory_params.ttl_millis == 0
+
+
+def test_resolve_builds_memory_params_from_settings():
+    settings = dataclasses.replace(
+        SETTINGS,
+        track_memory_capacity=8,
+        track_memory_gallery_size=2,
+        track_memory_max_appearance_distance=0.3,
+        track_memory_max_speed=0.5,
+        track_memory_blend_alpha=0.6,
+        track_memory_min_confidence=0.4,
+    )
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.memory_params.capacity == 8
+    assert resolved.memory_params.gallery_size == 2
+    assert resolved.memory_params.max_appearance_distance == 0.3
+    assert resolved.memory_params.max_speed == 0.5
+    assert resolved.memory_params.blend_alpha == 0.6
+    assert resolved.memory_params.min_confidence == 0.4
+
+
+def test_settings_read_the_memory_env_vars(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_MEMORY_TTL_MILLIS", "9000")
+    monkeypatch.setenv("CV_TRACK_MEMORY_CAPACITY", "16")
+    monkeypatch.setenv("CV_TRACK_MEMORY_GALLERY_SIZE", "6")
+    monkeypatch.setenv("CV_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE", "0.5")
+    monkeypatch.setenv("CV_TRACK_MEMORY_MAX_SPEED", "2.0")
+    monkeypatch.setenv("CV_TRACK_MEMORY_BLEND_ALPHA", "0.8")
+    monkeypatch.setenv("CV_TRACK_MEMORY_MIN_CONFIDENCE", "0.5")
+
+    settings = Settings.from_env()
+
+    assert settings.track_memory_ttl_millis == 9000
+    assert settings.track_memory_capacity == 16
+    assert settings.track_memory_gallery_size == 6
+    assert settings.track_memory_max_appearance_distance == 0.5
+    assert settings.track_memory_max_speed == 2.0
+    assert settings.track_memory_blend_alpha == 0.8
+    assert settings.track_memory_min_confidence == 0.5
+
+
+def test_a_negative_memory_ttl_env_var_disables_rather_than_falling_back(monkeypatch):
+    # `CV_TRACK_MEMORY_TTL_MILLIS` is the ONE knob in this file where a
+    # non-positive value is honoured, not replaced -- see `config.py`'s
+    # `_parse_int_allow_nonpositive`.
+    monkeypatch.setenv("CV_TRACK_MEMORY_TTL_MILLIS", "0")
+
+    assert Settings.from_env().track_memory_ttl_millis == 0
+
+
+def test_garbage_memory_env_vars_fall_back_and_never_raise(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_MEMORY_TTL_MILLIS", "soon")
+    monkeypatch.setenv("CV_TRACK_MEMORY_CAPACITY", "-4")
+    monkeypatch.setenv("CV_TRACK_MEMORY_MAX_APPEARANCE_DISTANCE", "1.5")
+    monkeypatch.setenv("CV_TRACK_MEMORY_MIN_CONFIDENCE", "not-a-number")
+
+    settings = Settings.from_env()
+
+    assert settings.track_memory_ttl_millis == Settings().track_memory_ttl_millis
+    assert settings.track_memory_capacity == Settings().track_memory_capacity
+    assert (
+        settings.track_memory_max_appearance_distance
+        == Settings().track_memory_max_appearance_distance
+    )
+    assert settings.track_memory_min_confidence == Settings().track_memory_min_confidence

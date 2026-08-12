@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Iterable, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 from cv_service.tracking.engines.base import (
     SOURCE_DETECTOR,
@@ -47,6 +47,12 @@ from cv_service.tracking.engines.base import (
     Transform,
 )
 from cv_service.tracking.params import TrackingParams
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, keeps this module's own
+    # import graph decoupled from `memory.py` at runtime (both are pure
+    # stdlib and importing it for real would be harmless, but `TrackBook`
+    # only ever needs a reference handed to it -- see `set_memory` below).
+    from cv_service.tracking.memory import ObjectMemory
 
 LOGGER = logging.getLogger("cv_service.tracking.track")
 
@@ -131,6 +137,24 @@ class Track:
     _confirmed: bool = field(default=False, repr=False)
 
 
+@dataclass(frozen=True)
+class RecoveredIdentity:
+    """What `apply()` needs to book an observation under a REMEMBERED id
+    instead of minting a fresh one (TRACKING-V2-PLAN wave C4).
+
+    Built by `session.py`'s `_run_cost_associate` from `ObjectMemory.claim()`
+    's return value -- `TrackBook` itself holds no knowledge of `ObjectMemory`
+    beyond the `_retire`-time hand-off (`set_memory`, below), so this small
+    value is the one place a recovery's INBOUND facts cross into the book,
+    mirroring how `Observation` is the one place a detection's facts do.
+    """
+
+    track_id: int
+    first_seen: float
+    descriptor: Optional[Descriptor] = None
+    velocity: "tuple[float, float]" = (0.0, 0.0)
+
+
 class TrackBook:
     """The per-stream `{key -> Track}` book and its state machine.
 
@@ -139,14 +163,30 @@ class TrackBook:
     new one via `retune` when the wire config changes.
     """
 
-    def __init__(self, params: TrackingParams) -> None:
+    def __init__(self, params: TrackingParams, *, memory: "Optional[ObjectMemory]" = None) -> None:
         self._params = params
         self._tracks: dict[object, Track] = {}
         self._next_id = 1
         self._epoch = 0
+        # TRACKING-V2-PLAN wave C4 -- see `set_memory`/`_retire` below.
+        self._memory = memory
 
     def retune(self, params: TrackingParams) -> None:
         self._params = params
+
+    def set_memory(self, memory: "Optional[ObjectMemory]") -> None:
+        """Adopt (or drop) the dormant gallery `_retire` hands LOST tracks to.
+
+        `StreamTrackingSession` owns the `ObjectMemory` instance and calls
+        this whenever it is (re)built or released -- lazily on first use and
+        on a genuine stop, the same build-once-lazily shape as its motion/
+        appearance engines (`_resolve_memory`/`_release_memory`). `None` is
+        the deployment- or request-disabled state (`TrackingParams.memory_
+        params.ttl_millis <= 0`) and is a completely normal value here, not
+        a not-yet-configured placeholder -- `_retire` below treats it as the
+        genuine no-op P5 requires.
+        """
+        self._memory = memory
 
     @property
     def tracks(self) -> list[Track]:
@@ -248,12 +288,21 @@ class TrackBook:
         now: float,
         *,
         detector_ran: bool,
+        recoveries: "Optional[dict[object, RecoveredIdentity]]" = None,
     ) -> list[Track]:
         """Book `observations` and age every track they did not touch.
 
         Returns the `Track` for each observation, in the same order, so the
         caller can put track facts back on the right box without re-matching
         geometry. `now` is a monotonic seconds timestamp.
+
+        `recoveries` (TRACKING-V2-PLAN wave C4) maps an observation's OWN
+        `key` to a `RecoveredIdentity` for the observations the caller has
+        already matched against the dormant gallery -- consulted ONLY when
+        `book_key` is not already tracked (a genuine new birth), so an
+        update to an existing live track is never affected by it. `None`/
+        absent is the overwhelming common case and costs one dict lookup per
+        new birth.
         """
         touched: set[object] = set()
         booked: list[Track] = []
@@ -261,7 +310,12 @@ class TrackBook:
             book_key = self._namespaced(observation.key)
             track = self._tracks.get(book_key)
             if track is None:
-                track = self._born(observation, now)
+                recovery = recoveries.get(observation.key) if recoveries else None
+                track = (
+                    self._adopt(observation, recovery, now)
+                    if recovery is not None
+                    else self._born(observation, now)
+                )
                 self._tracks[book_key] = track
             else:
                 self._observe(track, observation, now, detector_ran=detector_ran)
@@ -277,7 +331,7 @@ class TrackBook:
             track.age_frames += 1
             self._settle(track, now)
 
-        self._expire()
+        self._expire(now)
         return booked
 
     def _namespaced(self, key: object) -> object:
@@ -318,6 +372,67 @@ class TrackBook:
         # what makes a track read `age_frames == 0` on its birth frame
         # ("frames since this track was born", TRACKING-PLAN §4.A).
         track.age_frames = -1
+        return track
+
+    def _adopt(self, observation: Observation, recovery: RecoveredIdentity, now: float) -> Track:
+        """Book `observation` under a REMEMBERED identity instead of minting
+        one (TRACKING-V2-PLAN wave C4).
+
+        The counterpart to `_born()` for the one case `_born()` must never
+        handle: a detection `session.py` has already had `ObjectMemory.
+        match()` + `.claim()` judge, above threshold, to be the SAME object
+        as `recovery.track_id` -- an id THIS book itself retired earlier
+        (`_retire`, below). Calling `_born()` here would get two things
+        wrong at once: it mints a FRESH id from `self._next_id`, defeating
+        the entire point of the gallery (the operator no longer recognises
+        the number), and it leaves `recovery.track_id` sitting unclaimed for
+        `self._next_id` to eventually reach and collide with. Neither can
+        happen through this method -- `recovery.track_id` is used exactly as
+        given, and `_next_id` is bumped past it defensively (in practice
+        never a live branch: every id `ObjectMemory` ever hands back was
+        minted by THIS SAME monotonic counter, so `recovery.track_id <
+        self._next_id` already holds by construction -- the bump documents
+        that invariant rather than silently relying on it).
+
+        `_confirmed=True` outright: the same "does not serve the
+        anti-flicker gate" carve-out `Observation.authoritative` already
+        documents for FOLLOW's operator-chosen lock. An id the operator has
+        already seen CONFIRMED, then lost, then had handed back above the
+        gallery's own confidence floor, is not a fresh ambiguous detection
+        that must re-earn `min_hits` frames of evidence -- it is the SAME
+        evidence, continued. Forcing it back through TENTATIVE would render
+        the recovery as a guess for `min_hits` frames after the wire has
+        already reported it recovered (`Detection.identity_confidence`, on
+        this very frame) -- a worse UI than a fresh id, not a more honest
+        one.
+
+        `recovery.first_seen`/`.descriptor`/`.velocity` restore the
+        gallery's own record of this identity instead of starting cold:
+        `first_seen` keeps the ORIGINAL acquisition time (the track has been
+        "born" once, not once per recovery), `descriptor` seeds the EMA
+        `observe_descriptor` continues to blend rather than restarting it
+        from nothing, and `velocity` gives the very next frame's `predict()`
+        a real estimate instead of an assumed standstill.
+        """
+        track = Track(
+            track_id=recovery.track_id,
+            key=observation.key,
+            box=observation.box,
+            label=observation.label,
+            confidence=observation.confidence,
+            first_seen=recovery.first_seen,
+            last_seen=now,
+            last_confirmed=now,
+            source=observation.source,
+            hits=1 if observation.source == SOURCE_DETECTOR else 0,
+            velocity_x=recovery.velocity[0],
+            velocity_y=recovery.velocity[1],
+            descriptor=recovery.descriptor,
+            _confirmed=True,
+        )
+        track.age_frames = -1
+        if recovery.track_id >= self._next_id:
+            self._next_id = recovery.track_id + 1
         return track
 
     def _observe(
@@ -407,12 +522,48 @@ class TrackBook:
         else:
             track.state = STATE_COASTING
 
-    def _expire(self) -> None:
+    def _expire(self, now: float) -> None:
         limit = self._params.max_age_frames * _LOST_RETENTION_MULTIPLIER
         expired = [key for key, track in self._tracks.items() if track.misses > limit]
         for key in expired:
             # The id itself is never re-issued -- `_next_id` only ever grows.
-            del self._tracks[key]
+            self._retire(self._tracks.pop(key), now)
+
+    def _retire(self, track: Track, now: float) -> None:
+        """Hand `track` to the dormant gallery, if one is configured, right
+        before it stops existing (TRACKING-V2-PLAN wave C4).
+
+        This is the ONLY place a track leaves `self._tracks` for an "it
+        might come back" reason -- `_expire()` is its one caller (`forget_
+        keys()`'s full wipe is the OTHER, deliberate exception: tracking
+        going OFF has no "still coasting" state for anything to survive as,
+        so nothing is remembered there either). Before this wave, a track
+        that reached this point simply ceased to exist, which is the exact
+        defect the plan exists to close ("a track that is deleted without
+        being remembered is exactly the defect this wave removes"). Routing
+        every such removal through one private method -- rather than a bare
+        `del self._tracks[key]` inline in `_expire`'s loop -- is what makes
+        it structurally hard for a future deletion path to reintroduce that
+        defect: there is exactly one way to retire a track, and it always
+        offers memory first.
+
+        `self._memory` may be `None` -- memory disabled deployment- or
+        request-wide (`TrackingParams.memory_params.ttl_millis <= 0`,
+        `session.py`'s `_resolve_memory`) is the genuine no-op P5 requires:
+        no gallery object exists to consult, so this costs one attribute
+        check, never a call into an empty gallery.
+        """
+        if self._memory is None:
+            return
+        self._memory.remember(
+            track_id=track.track_id,
+            label=track.label,
+            box=track.box,
+            velocity=(track.velocity_x, track.velocity_y),
+            descriptor=track.descriptor,
+            now_millis=now * 1000.0,
+            first_seen_millis=track.first_seen * 1000.0,
+        )
 
 
 def observe_descriptor(
@@ -483,6 +634,7 @@ __all__ = [
     "STATE_LOST",
     "SOURCE_DETECTOR",
     "SOURCE_TRACKER",
+    "RecoveredIdentity",
     "Track",
     "TrackBook",
     "observation_for",

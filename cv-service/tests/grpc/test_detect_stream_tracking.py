@@ -667,6 +667,120 @@ def test_a_camera_pose_on_the_wire_reaches_the_session(clock):
     assert responses[0].motion_engine_id == "pose"
 
 
+# --- object memory (TRACKING-V2-PLAN wave C4) ----------------------------------
+
+
+class ScriptedDetector:
+    """Returns one pre-scripted list of `Detection`s per call, in order --
+    empty once the script runs out. Unlike `FakeDetector`'s fixed two boxes,
+    this lets a test control exactly what each frame sees, frame by frame."""
+
+    model_name = "scripted"
+
+    def __init__(self, script) -> None:
+        self._script = list(script)
+        self.calls = 0
+
+    def detect(self, **_kwargs):
+        detections = self._script[self.calls] if self.calls < len(self._script) else []
+        self.calls += 1
+        return detections, 0
+
+
+def _memory_config(**fields):
+    return tracking(
+        cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE,
+        engine_id="cost",
+        min_hits=1,
+        max_age_frames=2,
+        **fields,
+    )
+
+
+def test_a_recovered_track_keeps_its_id_and_reports_the_recovery_honestly(clock):
+    # The wire-level counterpart to `long_occlusion`'s harness row
+    # (`MODULE.md` "Wave C4"): a track that genuinely EXPIRES from
+    # `TrackBook` -- not merely coasts -- and later reappears must come back
+    # as the SAME `track_id`, with `identity_confidence`/`dormant_millis`
+    # (`Detection` wire fields 10/11) reporting the recovery honestly on
+    # that one frame and staying at their zero value on every other one.
+    # `max_age_frames=2` -> `_expire()`'s own limit is 4 consecutive misses,
+    # so 5 unseen frames (1-5) genuinely retire track #1 before frame 6
+    # brings it back.
+    detector = ScriptedDetector(
+        [
+            [Detection("car", 0.9, 0.40, 0.50, 0.10, 0.10)],  # frame 0: born as #1
+            [],
+            [],
+            [],
+            [],
+            [],  # frames 1-5: unseen -- misses climbs past the expiry limit
+            [Detection("car", 0.9, 0.41, 0.50, 0.10, 0.10)],  # frame 6: reappears
+        ]
+    )
+    subject = servicer(
+        detector=detector, tracker_registry=StubTrackerRegistry(associator=StubCostAssociator)
+    )
+    config = _memory_config()
+    session = servicers_module.StreamTrackingSession(
+        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+    )
+
+    responses = []
+    for frame in range(7):
+        clock.seconds = float(frame)
+        responses.append(subject._handle_request(frame_request(frame, config), session))
+
+    born = responses[0].detections[0]
+    assert born.track_id == 1
+    assert born.identity_confidence == 0.0
+    assert born.dormant_millis == 0
+
+    recovered = responses[6].detections
+    assert len(recovered) == 1
+    assert recovered[0].track_id == 1  # the SAME id, not a fresh one
+    assert recovered[0].track_state == cv_pb2.TrackState.TRACK_STATE_CONFIRMED
+    assert recovered[0].identity_confidence > 0.0
+    # Retired during frame 5 (clock.seconds == 5.0), recovered at frame 6
+    # (clock.seconds == 6.0): a 1-second gap.
+    assert recovered[0].dormant_millis == pytest.approx(1000, abs=5)
+
+
+def test_a_genuinely_different_object_in_the_gap_does_not_get_the_remembered_id(clock):
+    # The refusal case the plan calls out explicitly: a false recovery is
+    # worse than a missed one, so a different LABEL arriving during the gap
+    # must mint its own id, never borrow the dormant one.
+    detector = ScriptedDetector(
+        [
+            [Detection("car", 0.9, 0.40, 0.50, 0.10, 0.10)],  # frame 0: born as #1
+            [],
+            [],
+            [],
+            [],
+            [],  # frames 1-5: unseen
+            [Detection("person", 0.9, 0.41, 0.50, 0.10, 0.10)],  # frame 6: NOT the car
+        ]
+    )
+    subject = servicer(
+        detector=detector, tracker_registry=StubTrackerRegistry(associator=StubCostAssociator)
+    )
+    config = _memory_config()
+    session = servicers_module.StreamTrackingSession(
+        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+    )
+
+    responses = []
+    for frame in range(7):
+        clock.seconds = float(frame)
+        responses.append(subject._handle_request(frame_request(frame, config), session))
+
+    stranger = responses[6].detections
+    assert len(stranger) == 1
+    assert stranger[0].track_id == 2  # a FRESH id -- #1 is not handed out
+    assert stranger[0].identity_confidence == 0.0
+    assert stranger[0].dormant_millis == 0
+
+
 # --- degradation --------------------------------------------------------------
 
 

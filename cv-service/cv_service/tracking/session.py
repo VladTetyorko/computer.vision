@@ -81,6 +81,7 @@ from cv_service.tracking.engines.base import (
     Transform,
 )
 from cv_service.tracking.lock import LockArbiter
+from cv_service.tracking.memory import ObjectMemory, Recovery
 from cv_service.tracking.params import (
     MODE_ASSOCIATE,
     MODE_FOLLOW,
@@ -98,6 +99,7 @@ from cv_service.tracking.scheduler import (
 from cv_service.tracking.track import (
     STATE_LOST,
     STATE_TENTATIVE,
+    RecoveredIdentity,
     Track,
     TrackBook,
     observation_for,
@@ -131,12 +133,22 @@ class TrackedBox:
     `track is None` is the ONE spelling of untracked on this side of the
     wire; the servicer turns it into `track_id == 0` and leaves every other
     track field at its proto3 zero value (TRACKING-ORCHESTRATION §6 rule 2).
+
+    `identity_confidence`/`dormant_millis` (TRACKING-V2-PLAN wave C4,
+    `Detection` wire fields 10/11) live HERE, not on `Track`: a recovery is
+    an EVENT that happened on this one frame, not a property of the
+    identity that persists across many frames the way `track_id`/`state` do.
+    Both are `0.0`/`0` on every frame that is not the exact frame a track
+    was recovered on -- `_run_cost_associate` is the only place either is
+    ever set to something else.
     """
 
     label: str
     confidence: float
     box: Box
     track: Optional[Track] = None
+    identity_confidence: float = 0.0
+    dormant_millis: int = 0
 
 
 @dataclass(frozen=True)
@@ -207,6 +219,14 @@ class StreamTrackingSession:
         self._appearance_engine_id = ""
         self._appearance_resolved = False
         self._degraded_appearance_ids: set[str] = set()
+        # Dormant gallery (TRACKING-V2-PLAN wave C4) -- resolved lazily on
+        # the first ACTIVE frame regardless of mode/engine (unlike appearance
+        # above): `TrackBook._retire` must be able to remember a LOST track
+        # no matter which associator produced it, so this is built (or
+        # genuinely disabled) once near the top of `process()`, not only
+        # from within `_run_cost_associate` (`_resolve_memory` below).
+        self._memory: Optional[ObjectMemory] = None
+        self._memory_resolved = False
         # The last wire `TrackingConfig` message applied, held opaquely and
         # compared by equality (a protobuf `==`, no allocation) so the
         # restated-every-frame config costs one comparison per frame and
@@ -258,6 +278,21 @@ class StreamTrackingSession:
             # Same independence as motion above -- appearance is orthogonal
             # to which associator or SOT engine is active.
             self._release_appearance_extractor()
+        if self._params.memory_params != previous.memory_params:
+            # `MemoryParams` (TRACKING-V2-PLAN wave C4) is a value, so this
+            # is one dataclass `==` -- cheap, and it covers every knob
+            # (`ttl_millis` included) with one check. A gallery that is
+            # already built and STAYS enabled can adopt the new numbers in
+            # place (`ObjectMemory.retune`, itself immediate-capacity-
+            # enforcing); anything else -- not yet resolved, or the TTL
+            # crossing the enabled/disabled line in either direction --
+            # funnels through `_release_memory`, which is always safe to
+            # call (a no-op if nothing was built yet) and leaves the next
+            # active frame's `_resolve_memory` to decide fresh.
+            if self._memory is not None and self._params.memory_params.ttl_millis > 0:
+                self._memory.retune(self._params.memory_params)
+            else:
+                self._release_memory()
         if self._lock.apply(request.lock):
             self._followed = None
         if not self._params.active:
@@ -275,6 +310,12 @@ class StreamTrackingSession:
     ) -> FrameOutcome:
         """Run one frame through §3.1's sequence."""
         engine = self._resolve_engine()
+        # Resolved unconditionally, not only when `cost` is the serving
+        # associator (TRACKING-V2-PLAN wave C4): `TrackBook._retire` must be
+        # able to remember a LOST track regardless of mode/engine, so the
+        # book's own reference to the gallery has to be current before
+        # anything below could possibly expire one.
+        self._resolve_memory()
 
         state = SchedulerState(
             mode=self._params.mode,
@@ -448,19 +489,29 @@ class StreamTrackingSession:
                 )
             )
             observation_descriptors.append(target.descriptor)
+
+        # TRACKING-V2-PLAN wave C4: an unmatched target has no live candidate
+        # claiming it, but that is not the same question as "is this a
+        # BRAND-NEW object" -- it may be one this book itself retired
+        # earlier. Offered to the dormant gallery BEFORE `TrackBook.apply()`
+        # runs, so a match can be booked under the remembered id in the SAME
+        # call that books everything else, rather than as a second pass.
+        recoveries: "dict[object, RecoveredIdentity]" = {}
+        recovery_by_index: "dict[int, Recovery]" = {}
         for target_index in assignment.unmatched_targets:
             target = targets[target_index]
+            # A fresh, permanently-unique token: `cost` allocates no identity
+            # of its own (unlike `bytetrack`'s own key counter), so a
+            # brand-new candidate needs a key nothing else could ever
+            # collide with. `TrackBook._namespaced` only requires it be
+            # hashable and stable across frames (it becomes `track.key`,
+            # read back on the NEXT frame's `self._book.tracks` loop above)
+            # -- an `object()` sentinel satisfies both with no counter to
+            # manage. It also doubles as `recoveries`' own key, below.
+            key = object()
             observations.append(
                 Observation(
-                    # A fresh, permanently-unique token: `cost` allocates no
-                    # identity of its own (unlike `bytetrack`'s own key
-                    # counter), so a brand-new candidate needs a key nothing
-                    # else could ever collide with. `TrackBook._namespaced`
-                    # only requires it be hashable and stable across frames
-                    # (it becomes `track.key`, read back on the NEXT frame's
-                    # `self._book.tracks` loop above) -- an `object()`
-                    # sentinel satisfies both with no counter to manage.
-                    key=object(),
+                    key=key,
                     box=target.box,
                     label=target.label,
                     confidence=target.confidence,
@@ -468,8 +519,13 @@ class StreamTrackingSession:
                 )
             )
             observation_descriptors.append(target.descriptor)
+            recovered = self._attempt_recovery(target, now)
+            if recovered is not None:
+                identity, recovery = recovered
+                recoveries[key] = identity
+                recovery_by_index[target.det_index] = recovery
 
-        tracks = self._book.apply(observations, now, detector_ran=True)
+        tracks = self._book.apply(observations, now, detector_ran=True, recoveries=recoveries)
         for track, descriptor in zip(tracks, observation_descriptors):
             observe_descriptor(track, descriptor)
 
@@ -478,7 +534,61 @@ class StreamTrackingSession:
             for observation, track in zip(observations, tracks)
             if observation.det_index >= 0
         }
-        return [_box_for(detection, by_index.get(index)) for index, detection in enumerate(detections)]
+        return [
+            _box_for(
+                detection,
+                by_index.get(index),
+                identity_confidence=(
+                    recovery_by_index[index].confidence if index in recovery_by_index else 0.0
+                ),
+                dormant_millis=(
+                    recovery_by_index[index].dormant_millis if index in recovery_by_index else 0
+                ),
+            )
+            for index, detection in enumerate(detections)
+        ]
+
+    def _attempt_recovery(
+        self, target: Target, now: float
+    ) -> "Optional[tuple[RecoveredIdentity, Recovery]]":
+        """Offer one unmatched target to the dormant gallery, and claim it on
+        a hit (TRACKING-V2-PLAN wave C4).
+
+        `ObjectMemory.match()` is deliberately read-only (a candidate may
+        still lose to a better-scoring one this same frame, or simply not be
+        worth taking), so only a caller that has decided to TAKE the
+        recovery calls `.claim()`. `claim()` returning `None` here means a
+        same-frame race, not an error: TWO unmatched targets can each score
+        above threshold against the same dormant entry (a crowd is exactly
+        where this matters -- see `MODULE.md`'s clutter finding), and
+        `ObjectMemory` only pops an identity once. Whichever target's turn
+        comes first in `assignment.unmatched_targets` wins it; every other
+        target that would have matched the SAME identity falls back to a
+        fresh id on this call, exactly as if nothing had matched -- never a
+        forced double-claim of one operator-recognised number onto two
+        different objects.
+        """
+        memory = self._memory
+        if memory is None:
+            return None
+        recovery = memory.match(
+            box=target.box,
+            label=target.label,
+            descriptor=target.descriptor,
+            now_millis=now * 1000.0,
+        )
+        if recovery is None:
+            return None
+        identity = memory.claim(recovery.track_id)
+        if identity is None:
+            return None
+        recovered = RecoveredIdentity(
+            track_id=recovery.track_id,
+            first_seen=identity.first_seen_millis / 1000.0,
+            descriptor=identity.descriptor,
+            velocity=identity.velocity,
+        )
+        return recovered, recovery
 
     def _describe(
         self, extractor: Any, frame: FrameFn, boxes: Sequence[Box]
@@ -885,6 +995,50 @@ class StreamTrackingSession:
         self._appearance_engine_id = ""
         self._appearance_resolved = False
 
+    # -- object memory (TRACKING-V2-PLAN wave C4) ----------------------------
+
+    def _resolve_memory(self) -> Optional[ObjectMemory]:
+        """This stream's dormant gallery, built once memory is enabled.
+
+        Mirrors `_resolve_engine`'s shape -- NOT `_resolve_appearance_
+        extractor`'s -- deliberately: that one is reached only from `cost`'s
+        own path, but `TrackBook._retire` has to be able to remember a LOST
+        track regardless of which associator produced it, so this is called
+        unconditionally, once, near the top of `process()`. While `self.
+        _params.active` is False nothing is decided yet and the next active
+        frame tries again, the same early return `_resolve_engine` itself
+        uses. Once active, resolved exactly once: `TrackingParams.memory_
+        params.ttl_millis <= 0` (deployment or per-request choice, `params.
+        py`'s `resolve()`) means running with NO gallery at all --
+        `self._memory` stays `None`, and every call site downstream
+        (`TrackBook._retire`, `_attempt_recovery`) already treats `None` as
+        the genuine no-op P5 requires, never an empty object still being
+        consulted every frame.
+        """
+        if self._memory_resolved:
+            return self._memory
+        if not self._params.active:
+            return None
+        self._memory_resolved = True
+        if self._params.memory_params.ttl_millis > 0:
+            self._memory = ObjectMemory(self._params.memory_params)
+        self._book.set_memory(self._memory)
+        return self._memory
+
+    def _release_memory(self) -> None:
+        """Drop the current gallery so the next active frame rebuilds (or
+        stays off) from `TrackingParams.memory_params` as it stands then.
+
+        Called on a genuine stop (`_reset_state`) and whenever `memory_
+        params` changes to something `apply_config` cannot simply `.retune()`
+        in place -- same build-once-lazily shape as `_release_motion_
+        compensator`/`_release_appearance_extractor`. Safe to call when
+        nothing was ever built (both assignments are then no-ops).
+        """
+        self._memory = None
+        self._memory_resolved = False
+        self._book.set_memory(None)
+
     def _reset_engine(self, exc: BaseException) -> None:
         """An engine raised mid-frame: that frame loses its track facts, the
         engine is reset, and the stream continues (TRACKING-PLAN §5.I).
@@ -947,14 +1101,23 @@ class StreamTrackingSession:
         self._tracker_stalled = False
         self._release_motion_compensator()
         self._release_appearance_extractor()
+        self._release_memory()
 
 
-def _box_for(detection: Any, track: Optional[Track] = None) -> TrackedBox:
+def _box_for(
+    detection: Any,
+    track: Optional[Track] = None,
+    *,
+    identity_confidence: float = 0.0,
+    dormant_millis: int = 0,
+) -> TrackedBox:
     return TrackedBox(
         label=detection.label,
         confidence=detection.confidence,
         box=Box(detection.x, detection.y, detection.width, detection.height),
         track=track,
+        identity_confidence=identity_confidence,
+        dormant_millis=dormant_millis,
     )
 
 
