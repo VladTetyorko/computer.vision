@@ -43,6 +43,16 @@ discharged; M3/M5/M6 may proceed against the amended contract.
   many streams that box can serve, and OpenVINO IR was cited from `DEPLOY-GPU.md`, not reproduced.
 - **`anchor` drift is a floor, not a ceiling** — the spike had no independent camera oscillator.
   M9 must re-measure against a real H1 camera before the 100 ms budget is treated as settled.
+- **D12 (new, in the plan): `PullTelemetry` rides on `DetectionResult`, and M5 adds it.** M4 could
+  decode wire fields 16–21 but four of them had no domain home. Mapping M5 must implement and
+  document: `source_fps`→`sourceFps`, `achieved_fps`→`submittedFps`, `missed_deadlines`→
+  `missedDeadlines`, `dropped_frames`→`droppedInFlight` (the worker's latest-wins discards are the
+  pull analogue of the JVM's in-flight drops), `decode_millis`→the new `decodeMillisP50`.
+  `capture_skew_millis` has no read-model home — log it, do not widen the frozen §5.4.
+- **M7 has a hard compile dependency, not just wiring:** M4 grew `GrpcCvSettings`'s canonical
+  constructor by the new pull fields, and `vision-app`'s `CvWiring#toGrpcCvSettings` still calls the
+  old arity. `vision-app` will not compile until M7 updates it. Expected, but it means **no
+  reactor-wide build will pass until M7 lands** — keep every build scoped until then.
 - **Boxes-mode logic lives in `shared/player/detection-overlay-logic.ts`**, not `fly-logic.ts` as
   §8 M8 assumed — the wall tile needed the identical burn-in-aware cycle.
 
