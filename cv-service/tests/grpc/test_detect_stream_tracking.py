@@ -126,6 +126,49 @@ class StubFollower:
         pass
 
 
+class StubCostAssociator:
+    """`assign.CostAssociator`-shaped test double: no matches, every target
+    born fresh -- enough to prove the wire plumbing without needing the
+    real Hungarian solver (already brute-force-verified in
+    `tests/tracking/test_assign.py`)."""
+
+    engine_id = "cost"
+
+    def __init__(self) -> None:
+        self.retune_calls = 0
+
+    def retune(self, *, weights, gates):
+        self.retune_calls += 1
+
+    def assign(self, candidates, targets):
+        from cv_service.tracking.assign import Assignment
+
+        return Assignment(
+            unmatched_candidates=tuple(range(len(candidates))),
+            unmatched_targets=tuple(range(len(targets))),
+        )
+
+    def reset(self):
+        pass
+
+
+class StubAppearanceExtractor:
+    """`AppearanceExtractor` test double -- counts calls, describes nothing."""
+
+    engine_id = "stub-appearance"
+
+    def __init__(self) -> None:
+        self.describe_calls = 0
+
+    def describe(self, frame, boxes):
+        assert isinstance(frame, np.ndarray), "the appearance path must receive decoded pixels"
+        self.describe_calls += 1
+        return [None for _ in boxes]
+
+    def reset(self):
+        pass
+
+
 class StubCompensator:
     """`MotionCompensator` test double -- a fixed, distinguishable transform,
     no pixels touched (TRACKING-V2-PLAN wave C2)."""
@@ -145,11 +188,17 @@ class StubCompensator:
 
 class StubTrackerRegistry:
     def __init__(
-        self, *, associator=StubAssociator, follower=StubFollower, compensator=None
+        self,
+        *,
+        associator=StubAssociator,
+        follower=StubFollower,
+        compensator=None,
+        appearance=None,
     ) -> None:
         self._associator = associator
         self._follower = follower
         self._compensator = compensator
+        self._appearance = appearance
         self.created = []
 
     def associator(self, engine_id, *, max_age_frames):
@@ -175,6 +224,18 @@ class StubTrackerRegistry:
         if self._compensator is None:
             return None
         engine = self._compensator()
+        self.created.append(engine)
+        return engine.engine_id, engine
+
+    def appearance(self, engine_id):
+        # No appearance extractor by default (TRACKING-V2-PLAN wave C3),
+        # same reasoning as `compensator` above -- only reached at all when
+        # `_associator` builds a `cost` engine, which no test in this file
+        # does by default (`StubAssociator`'s own `engine_id` is `"stub-
+        # assoc"`).
+        if self._appearance is None:
+            return None
+        engine = self._appearance()
         self.created.append(engine)
         return engine.engine_id, engine
 
@@ -391,6 +452,40 @@ def test_the_tracker_update_never_acquires_the_inference_gate(clock):
     assert gate.acquisitions == 1
 
 
+def test_associate_with_cost_motion_and_appearance_never_acquires_the_inference_gate(clock):
+    # TRACKING-V2-PLAN wave C3's own P2 proof: `cost` gives ASSOCIATE a live
+    # motion compensator AND a live appearance extractor for the first time
+    # -- neither the ego-motion estimate nor the per-object histogram
+    # extraction may queue behind YOLO. ASSOCIATE has no duty cycle (every
+    # frame IS a detector pass), so the gate acquisition count must equal
+    # the frame count exactly -- one per detector pass, never one more from
+    # either new evidence path.
+    gate = RecordingGate()
+    subject = servicer(
+        gate=gate,
+        tracker_registry=StubTrackerRegistry(
+            associator=StubCostAssociator, compensator=StubCompensator, appearance=StubAppearanceExtractor
+        ),
+    )
+    config = tracking(
+        cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE,
+        engine_id="cost",
+        appearance_engine_id="stub-appearance",
+        min_hits=1,
+    )
+    session = servicers_module.StreamTrackingSession(
+        settings=Settings(), registry_provider=subject._resolve_tracker_registry
+    )
+
+    frame_count = 20
+    for frame in range(frame_count):
+        clock.seconds = frame / 15.0
+        response = subject._handle_request(frame_request(frame, config), session)
+        assert response.detector_ran is True
+
+    assert gate.acquisitions == frame_count
+
+
 def test_a_lock_applies_only_on_a_strictly_greater_seq(clock):
     subject = servicer()
     session = servicers_module.StreamTrackingSession(
@@ -489,8 +584,12 @@ def test_no_motion_compensator_reports_no_compensation_on_the_wire(clock):
 
 
 def test_associate_never_populates_motion_fields_on_the_wire(clock):
-    # ASSOCIATE is deliberately NOT compensated in this wave -- even with a
-    # compensator available, it must never be asked for one.
+    # `bytetrack` (or any non-`cost` associator) is deliberately NOT
+    # compensated (TRACKING-V2-PLAN wave C2's own reasoning, unchanged by
+    # wave C3): even with a compensator available, it must never be asked
+    # for one -- `StubAssociator`'s `engine_id` is `"stub-assoc"`, not
+    # `"cost"`. See `test_associate_with_cost_populates_motion_fields_on_
+    # the_wire` below for the wave C3 counterpart.
     subject = servicer(tracker_registry=StubTrackerRegistry(compensator=StubCompensator))
     config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, min_hits=1)
 
@@ -498,6 +597,51 @@ def test_associate_never_populates_motion_fields_on_the_wire(clock):
 
     assert responses[0].motion_engine_id == ""
     assert responses[0].motion_millis == 0
+
+
+def test_associate_with_cost_populates_motion_fields_on_the_wire(clock):
+    # TRACKING-V2-PLAN wave C3's keystone, at the wire: `cost`'s candidates
+    # ARE `TrackBook`'s own tracks, so ASSOCIATE now HAS a seam to warp --
+    # unlike `bytetrack` above.
+    subject = servicer(
+        tracker_registry=StubTrackerRegistry(associator=StubCostAssociator, compensator=StubCompensator)
+    )
+    config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, engine_id="cost", min_hits=1)
+
+    responses = drive(subject, [frame_request(0, config)])
+
+    assert responses[0].motion_engine_id == "stub-motion"
+
+
+def test_appearance_engine_id_on_the_wire_reaches_the_session(clock):
+    # An end-to-end plumbing check for the wire field TRACKING-V2-PLAN §2
+    # froze at C0 and this wave finally reads: `appearance_engine_id`
+    # (field 9) genuinely crosses from `FrameRequest.tracking` into
+    # `StreamTrackingSession`'s `cost` path and asks the registry for it --
+    # there is no dedicated wire field to assert on (appearance has no wire
+    # counterpart to `motion_millis`/`motion_engine_id` this wave), so the
+    # observable proof is the stub extractor actually being built and used.
+    built: list["StubAppearanceExtractor"] = []
+
+    def make_extractor():
+        extractor = StubAppearanceExtractor()
+        built.append(extractor)
+        return extractor
+
+    subject = servicer(
+        tracker_registry=StubTrackerRegistry(associator=StubCostAssociator, appearance=make_extractor)
+    )
+    config = tracking(
+        cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE,
+        engine_id="cost",
+        appearance_engine_id="stub-appearance",
+        min_hits=1,
+    )
+
+    drive(subject, [frame_request(0, config)])
+
+    assert len(built) == 1
+    assert built[0].describe_calls == 1
 
 
 def test_a_camera_pose_on_the_wire_reaches_the_session(clock):

@@ -13,7 +13,16 @@ import pytest
 
 from cv_service.config import Settings
 from cv_service.inference.detector import Detection
-from cv_service.tracking.engines.base import Box, CameraPose, Observation, Transform, TrackerUpdate
+from cv_service.tracking.assign import AssignGates, AssignWeights, CostAssociator
+from cv_service.tracking.engines.base import (
+    METRIC_HELLINGER,
+    Box,
+    CameraPose,
+    Descriptor,
+    Observation,
+    Transform,
+    TrackerUpdate,
+)
 from cv_service.tracking.params import (
     MODE_ASSOCIATE,
     MODE_FOLLOW,
@@ -95,13 +104,15 @@ class FakeFollower:
 
 
 class FakeRegistry:
-    def __init__(self, associator=None, follower=None, compensator=None):
+    def __init__(self, associator=None, follower=None, compensator=None, appearance=None):
         self._associator = associator
         self._follower = follower
         self._compensator = compensator
+        self._appearance = appearance
         self.associator_calls = 0
         self.follower_calls = 0
         self.compensator_calls = 0
+        self.appearance_calls = 0
 
     def associator(self, engine_id, *, max_age_frames):
         self.associator_calls += 1
@@ -124,6 +135,13 @@ class FakeRegistry:
         engine = self._compensator() if callable(self._compensator) else self._compensator
         return engine.engine_id, engine
 
+    def appearance(self, engine_id):
+        self.appearance_calls += 1
+        if self._appearance is None:
+            return None
+        engine = self._appearance() if callable(self._appearance) else self._appearance
+        return engine.engine_id, engine
+
 
 class FakeMotionCompensator:
     """`MotionCompensator` test double -- a fixed transform, no pixels needed."""
@@ -144,6 +162,27 @@ class FakeMotionCompensator:
             self.raise_on_next = False
             raise RuntimeError("motion compensator exploded")
         return self.transform
+
+    def reset(self):
+        pass
+
+
+class FakeAppearanceExtractor:
+    """`AppearanceExtractor` test double -- a fixed descriptor (or `None`),
+    no pixels needed."""
+
+    def __init__(self, engine_id="fake-appearance", *, descriptor=None):
+        self.engine_id = engine_id
+        self.descriptor = descriptor if descriptor is not None else Descriptor("fake", (1.0,), METRIC_HELLINGER)
+        self.describe_calls = 0
+        self.raise_on_next = False
+
+    def describe(self, frame, boxes):
+        self.describe_calls += 1
+        if self.raise_on_next:
+            self.raise_on_next = False
+            raise RuntimeError("appearance extractor exploded")
+        return [self.descriptor for _ in boxes]
 
     def reset(self):
         pass
@@ -173,6 +212,9 @@ class PoseOrFlowRegistry:
             return self.pose.engine_id, self.pose
         if engine_id == MOTION_ENGINE_FLOW:
             return self.flow.engine_id, self.flow
+        return None
+
+    def appearance(self, engine_id):
         return None
 
 
@@ -274,6 +316,211 @@ def test_a_detection_the_engine_did_not_identify_is_reported_untracked():
 
     assert outcome.boxes[0].track is not None
     assert outcome.boxes[1].track is None
+
+
+# -- ASSOCIATE via `cost` (TRACKING-V2-PLAN wave C3) -------------------------
+
+
+def cost_engine(**overrides) -> CostAssociator:
+    weights = overrides.pop("weights", AssignWeights())
+    gates = overrides.pop("gates", AssignGates())
+    return CostAssociator(weights=weights, gates=gates)
+
+
+def test_bytetrack_is_still_selectable_and_never_touches_motion_or_appearance():
+    # Acceptance: `bytetrack` remains fully working and selectable, and
+    # stays the no-appearance, no-compensation baseline -- neither the
+    # motion nor the appearance registry call is ever made for it.
+    registry = FakeRegistry(
+        associator=FakeAssociator("bytetrack"),
+        compensator=FakeMotionCompensator,
+        appearance=FakeAppearanceExtractor,
+    )
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="bytetrack", min_hits=1))
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert outcome.engine_id == "bytetrack"
+    assert outcome.boxes[0].track is not None
+    assert registry.compensator_calls == 0
+    assert registry.appearance_calls == 0
+    assert outcome.motion_engine_id == ""
+
+
+def test_cost_is_selectable_and_books_stable_ids_across_frames():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    ids = []
+    for frame in range(4):
+        outcome = run(subject, now_millis=frame * 66.0, detections=[det(), det("person", x=0.6)])
+        assert outcome.engine_id == "cost"
+        ids.append(sorted(box.track.track_id for box in outcome.boxes if box.track is not None))
+
+    assert ids == [[1, 2]] * 4
+
+
+def test_cost_births_a_new_track_for_an_unmatched_target():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    first = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+    second = run(subject, now_millis=66.0, detections=[det("car", x=0.1), det("bus", x=0.8, y=0.8)])
+
+    assert first.boxes[0].track.track_id == 1
+    assert sorted(box.track.track_id for box in second.boxes) == [1, 2]
+
+
+def test_an_unmatched_candidate_ages_toward_lost_instead_of_vanishing():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=2)
+    )
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
+
+    # The detector now sees nothing near the held track at all -- it should
+    # age (miss), not disappear outright or silently swap onto nothing.
+    for frame in range(1, 4):
+        run(subject, now_millis=frame * 66.0, detections=[])
+
+    assert subject.tracks[0].track_id == 1
+    assert subject.tracks[0].misses > 0
+
+
+def test_associate_with_cost_asks_for_a_motion_compensator():
+    # THE keystone this wave adds: `cost`'s candidates ARE the book's own
+    # tracks, so -- unlike `bytetrack` -- ego-motion compensation now has a
+    # seam to plug into for ASSOCIATE.
+    compensator = FakeMotionCompensator()
+    registry = FakeRegistry(associator=cost_engine, compensator=compensator)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    outcome = run(subject, now_millis=0.0, detections=[det()])
+
+    assert compensator.estimate_calls == 1
+    assert outcome.motion_engine_id == "fake-motion"
+
+
+def test_associate_with_cost_warps_the_book_before_matching():
+    # The end-to-end proof that C2's `TrackBook.warp()` now changes the
+    # ASSOCIATE DECISION for `cost`, not merely a coasting box's display: a
+    # static detection is only re-matched to its existing track because the
+    # candidate's PREDICTED+WARPED box, not its stale stored one, is what
+    # the cost function compares against.
+    compensator = FakeMotionCompensator(transform=Transform(c=0.2))
+    registry = FakeRegistry(associator=cost_engine, compensator=compensator)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(
+            mode=MODE_ASSOCIATE,
+            engine_id="cost",
+            min_hits=1,
+            # A tight IoU gate: only a WARPED candidate box can still
+            # satisfy it against a detection that shifted a whole 0.2 of
+            # frame width between frames.
+            redetect_iou_threshold=0.9,
+        )
+    )
+    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1, w=0.3, h=0.3)])
+    assert born.boxes[0].track.track_id == 1
+
+    # The SAME physical object, shifted by exactly the compensator's own
+    # transform -- i.e. what the camera moving by that much would produce.
+    shifted = run(subject, now_millis=66.0, detections=[det("car", x=0.3, y=0.1, w=0.3, h=0.3)])
+
+    assert shifted.boxes[0].track.track_id == 1
+
+
+def test_associate_with_cost_asks_for_an_appearance_extractor():
+    extractor = FakeAppearanceExtractor()
+    registry = FakeRegistry(associator=cost_engine, appearance=extractor)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det()])
+
+    assert extractor.describe_calls == 1
+
+
+def test_a_cost_track_accumulates_a_descriptor_from_detector_evidence():
+    extractor = FakeAppearanceExtractor(descriptor=Descriptor("fake", (1.0, 0.0), METRIC_HELLINGER))
+    registry = FakeRegistry(
+        associator=lambda: cost_engine(weights=AssignWeights(iou=1.0, appearance=0.5)),
+        appearance=extractor,
+    )
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    run(subject, now_millis=0.0, detections=[det()])
+
+    assert subject.tracks[0].descriptor == extractor.descriptor
+
+
+def test_no_appearance_extractor_active_never_decodes_a_frame():
+    calls = []
+    subject = session(FakeRegistry(associator=cost_engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    subject.process(
+        now_millis=0.0,
+        detect=detect_returning(det()),
+        frame=lambda: calls.append(1) or FRAME,
+    )
+
+    assert calls == []
+
+
+def test_a_raising_appearance_extractor_degrades_this_frame_without_killing_the_stream():
+    extractor = FakeAppearanceExtractor()
+    extractor.raise_on_next = True
+    registry = FakeRegistry(associator=cost_engine, appearance=extractor)
+    subject = session(registry)
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    degraded = run(subject, now_millis=0.0, detections=[det()])
+    assert degraded.boxes[0].track is not None  # association itself is unaffected
+
+    recovered = run(subject, now_millis=66.0, detections=[det("bus", x=0.8, y=0.8)])
+    assert extractor.describe_calls == 2
+    assert recovered.boxes[-1].track is not None
+
+
+def test_changing_the_appearance_engine_id_releases_the_extractor():
+    first = FakeAppearanceExtractor("fake-appearance-a")
+    second = FakeAppearanceExtractor("fake-appearance-b")
+    engines = iter([first, second])
+    registry = FakeRegistry(associator=cost_engine, appearance=lambda: next(engines))
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, appearance_engine_id="a")
+    )
+    run(subject, now_millis=0.0, detections=[det()])
+    assert first.describe_calls == 1
+
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, appearance_engine_id="b")
+    )
+    run(subject, now_millis=66.0, detections=[det()])
+
+    assert second.describe_calls == 1
+    assert first.describe_calls == 1  # the old extractor was never touched again
+
+
+def test_appearance_off_never_asks_the_registry():
+    registry = FakeRegistry(associator=cost_engine, appearance=FakeAppearanceExtractor)
+    subject = session(registry)
+    subject.apply_config(
+        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, appearance_engine_id="off")
+    )
+
+    run(subject, now_millis=0.0, detections=[det()])
+
+    assert registry.appearance_calls == 0
 
 
 # -- FOLLOW -----------------------------------------------------------------

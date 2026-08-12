@@ -97,6 +97,13 @@ def compute(result: ReplayResult) -> Metrics:
         for objects, outcome in zip(result.ground_truth_by_frame, result.outcomes)
     ]
     windows = _existence_windows(result.ground_truth_by_frame, result.scored_gt_ids)
+    visible_counts = _visible_frame_counts(result.ground_truth_by_frame, windows)
+    # An object that is never visible ANYWHERE in the clip is not a tracking
+    # outcome in either direction -- scoring it would charge a perfect
+    # tracker for missing something nothing could have seen. Dropped from the
+    # scored set rather than merely skipped, so `gt_object_count` keeps
+    # agreeing with MT + PT + ML.
+    windows = {gt_id: span for gt_id, span in windows.items() if visible_counts[gt_id] > 0}
 
     idsw = 0
     fragmentations = 0
@@ -109,7 +116,27 @@ def compute(result: ReplayResult) -> Metrics:
         fragmentations += object_fragmentations
         gap_edges.extend(object_gap_edges)
 
-        coverage = sum(1 for entry in timeline if entry is not None) / len(timeline)
+        # Denominator is the frames the object could actually BE tracked on,
+        # not every frame it exists in the scene. `_match_frame` already
+        # refuses to match an invisible object, so counting invisible frames
+        # below charged the tracker for failing to track something nothing
+        # could have seen. In `pan`, whose objects sweep through the frame
+        # and are visible for 14-33 of 70 frames, that made
+        # MOSTLY_TRACKED's 80% threshold UNREACHABLE -- a perfect tracker
+        # scored 0 of 4, and the row read as a tracking failure that no
+        # amount of work could ever have moved. Found while trying to move
+        # exactly that number.
+        visible_frames = visible_counts[gt_id]
+        matched_visible = sum(
+            1
+            for offset, entry in enumerate(timeline)
+            if entry is not None
+            and any(
+                obj.gt_id == gt_id and obj.visible
+                for obj in result.ground_truth_by_frame[start + offset]
+            )
+        )
+        coverage = matched_visible / visible_frames
         if coverage >= MOSTLY_TRACKED_COVERAGE:
             mostly_tracked += 1
         elif coverage < MOSTLY_LOST_COVERAGE:
@@ -193,6 +220,21 @@ def _match_frame(
 
 
 # -- per-object timelines -----------------------------------------------------
+
+
+def _visible_frame_counts(
+    ground_truth_by_frame: TypingSequence[TypingSequence[GroundTruthObject]],
+    windows: dict[int, tuple[int, int]],
+) -> dict[int, int]:
+    """`{gt_id: frames on which it could actually be seen}` -- the coverage
+    denominator. See `compute` for why it is not the window length."""
+    counts = {gt_id: 0 for gt_id in windows}
+    for gt_id, (start, end) in windows.items():
+        for frame_index in range(start, end + 1):
+            for obj in ground_truth_by_frame[frame_index]:
+                if obj.gt_id == gt_id and obj.visible:
+                    counts[gt_id] += 1
+    return counts
 
 
 def _existence_windows(

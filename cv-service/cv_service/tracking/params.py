@@ -36,6 +36,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Tuple
 
+from cv_service.tracking.assign import AssignGates, AssignWeights
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from cv_service.config import Settings
 
@@ -103,6 +105,10 @@ class TrackingRequest:
     # different engine, which is why `resolve()` below does not fold it into
     # the blank-sentinel branch the way `engine_id` is.
     motion_engine_id: str = ""
+    # TRACKING-V2-PLAN wave C3 -- proto field 9, frozen at C0 (same shape as
+    # `motion_engine_id` above: "" = server default, "off" is a legitimate
+    # resolved value, not a sentinel `resolve()` rewrites).
+    appearance_engine_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +139,24 @@ class TrackingParams:
     # `TrackerRegistry.compensator` and `StreamTrackingSession`'s
     # pose-unavailable-falls-back-to-flow policy).
     motion_engine_id: str
+    # TRACKING-V2-PLAN wave C3 addition. Same "not fully resolved here" shape
+    # as `motion_engine_id`: "off" is a legitimate resolved value, and
+    # deciding whether anything actually SERVES a non-off request is
+    # `session.py`'s `_resolve_appearance_extractor` (no live signal to check
+    # like `pose`'s `CameraPose`, so no fallback ladder -- constructibility
+    # IS availability here).
+    appearance_engine_id: str
+    # TRACKING-V2-PLAN wave C3 additions. Unlike every field above, these
+    # have no wire sentinel to interpret at all (§2's frozen diff adds none
+    # for cost weights/gates) -- `resolve()` builds the two frozen
+    # `assign.py` dataclasses directly from `Settings`, with no per-request
+    # override to fall back FROM. `session.py`'s `_run_cost_associate` is
+    # what may further zero `cost_weights.appearance` for a stream where no
+    # appearance extractor actually resolved -- that decision needs runtime
+    # state `resolve()` does not have, same division of labour `motion_
+    # engine_id`'s own docstring draws.
+    cost_weights: AssignWeights
+    cost_gates: AssignGates
 
     @property
     def active(self) -> bool:
@@ -245,5 +269,21 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             request.motion_engine_id.strip()
             if request.motion_engine_id
             else settings.track_motion_engine
+        ),
+        appearance_engine_id=(
+            request.appearance_engine_id.strip()
+            if request.appearance_engine_id
+            else settings.track_appearance_engine
+        ),
+        cost_weights=AssignWeights(
+            iou=settings.track_cost_weight_iou,
+            appearance=settings.track_cost_weight_appearance,
+            label=settings.track_cost_weight_label,
+        ),
+        cost_gates=AssignGates(
+            min_iou=settings.track_cost_gate_min_iou,
+            max_appearance=settings.track_cost_gate_max_appearance,
+            max_cost=settings.track_cost_gate_max_cost,
+            high_confidence=settings.track_cost_gate_high_confidence,
         ),
     )

@@ -214,8 +214,40 @@ def test_invisible_ground_truth_can_never_be_matched() -> None:
     outcomes = [_outcome({1: 1}) for _ in range(3)]
     metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1})))
 
-    assert metrics.mostly_lost == 1
     assert metrics.gap_count == 0  # never matched at all -- a leading/trailing non-gap
+    # ...and an object that is never visible ANYWHERE is not scored in either
+    # direction. It used to count as `mostly_lost`, which charged the tracker
+    # for missing something nothing could have seen.
+    assert metrics.mostly_lost == 0
+    assert metrics.gt_object_count == 0
+
+
+def test_coverage_is_measured_over_visible_frames_not_the_whole_window() -> None:
+    """The metric defect that made `pan`'s MOSTLY_TRACKED unreachable.
+
+    This object exists for ten frames and is visible for two, both of which
+    are tracked perfectly. That is 100% of what could be tracked, and it must
+    score as such -- under the old denominator it scored 20% and landed in
+    MOSTLY_LOST, so a perfect tracker read as a failure and no amount of work
+    could ever have moved the row.
+    """
+    gt = [[_gt(1, visible=index < 2)] for index in range(10)]
+    outcomes = [_outcome({1: 1} if index < 2 else {}) for index in range(10)]
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1})))
+
+    assert metrics.mostly_tracked == 1
+    assert metrics.mostly_lost == 0
+
+
+def test_every_scored_object_lands_in_exactly_one_coverage_bucket() -> None:
+    gt = [[_gt(1, visible=True), _gt(2, visible=index > 5)] for index in range(10)]
+    outcomes = [_outcome({1: 1}) for _ in range(10)]
+    metrics = compute(_result(gt, outcomes, gt_ids=frozenset({1, 2})))
+
+    assert (
+        metrics.mostly_tracked + metrics.partially_tracked + metrics.mostly_lost
+        == metrics.gt_object_count
+    )
 
 
 def test_cost_metrics_from_detector_ran_and_tracker_millis() -> None:

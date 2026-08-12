@@ -204,3 +204,114 @@ def test_a_blank_motion_engine_env_var_falls_back_to_flow(monkeypatch):
     monkeypatch.setenv("CV_TRACK_MOTION_ENGINE", "   ")
 
     assert Settings.from_env().track_motion_engine == Settings().track_motion_engine == "flow"
+
+
+# -- wave C3 addition: appearance_engine_id (proto field 9) ------------------
+
+
+def test_a_blank_appearance_engine_id_takes_the_deployment_default():
+    settings = dataclasses.replace(SETTINGS, track_appearance_engine="off")
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.appearance_engine_id == "off"
+
+
+def test_a_requested_appearance_engine_id_wins_over_the_deployment_default():
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, appearance_engine_id="histogram"),
+        dataclasses.replace(SETTINGS, track_appearance_engine="off"),
+    )
+
+    assert resolved.appearance_engine_id == "histogram"
+
+
+def test_an_explicit_appearance_off_passes_through_rather_than_falling_back():
+    settings = dataclasses.replace(SETTINGS, track_appearance_engine="histogram")
+
+    resolved = params_module.resolve(
+        TrackingRequest(mode=MODE_ASSOCIATE, appearance_engine_id="off"), settings
+    )
+
+    assert resolved.appearance_engine_id == "off"
+
+
+def test_settings_read_the_appearance_engine_env_var(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_APPEARANCE_ENGINE", "off")
+
+    assert Settings.from_env().track_appearance_engine == "off"
+
+
+def test_a_blank_appearance_engine_env_var_falls_back_to_the_default(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_APPEARANCE_ENGINE", "   ")
+
+    assert Settings.from_env().track_appearance_engine == Settings().track_appearance_engine
+
+
+# -- wave C3 addition: cost weights/gates (no wire field, Settings-only) -----
+
+
+def test_resolve_builds_cost_weights_and_gates_from_settings():
+    settings = dataclasses.replace(
+        SETTINGS,
+        track_cost_weight_iou=0.7,
+        track_cost_weight_appearance=0.3,
+        track_cost_weight_label=0.1,
+        track_cost_gate_min_iou=0.05,
+        track_cost_gate_max_appearance=0.55,
+        track_cost_gate_max_cost=3.0,
+        track_cost_gate_high_confidence=0.4,
+    )
+
+    resolved = params_module.resolve(TrackingRequest(mode=MODE_ASSOCIATE), settings)
+
+    assert resolved.cost_weights.iou == 0.7
+    assert resolved.cost_weights.appearance == 0.3
+    assert resolved.cost_weights.label == 0.1
+    assert resolved.cost_gates.min_iou == 0.05
+    assert resolved.cost_gates.max_appearance == 0.55
+    assert resolved.cost_gates.max_cost == 3.0
+    assert resolved.cost_gates.high_confidence == 0.4
+
+
+def test_settings_read_the_cost_weight_and_gate_env_vars(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_COST_WEIGHT_IOU", "0.6")
+    monkeypatch.setenv("CV_TRACK_COST_WEIGHT_APPEARANCE", "0.9")
+    monkeypatch.setenv("CV_TRACK_COST_WEIGHT_LABEL", "0.2")
+    monkeypatch.setenv("CV_TRACK_COST_GATE_MIN_IOU", "0.1")
+    monkeypatch.setenv("CV_TRACK_COST_GATE_MAX_APPEARANCE", "0.8")
+    monkeypatch.setenv("CV_TRACK_COST_GATE_MAX_COST", "5")
+    monkeypatch.setenv("CV_TRACK_COST_GATE_HIGH_CONFIDENCE", "0.5")
+
+    settings = Settings.from_env()
+
+    assert settings.track_cost_weight_iou == 0.6
+    assert settings.track_cost_weight_appearance == 0.9
+    assert settings.track_cost_weight_label == 0.2
+    assert settings.track_cost_gate_min_iou == 0.1
+    assert settings.track_cost_gate_max_appearance == 0.8
+    assert settings.track_cost_gate_max_cost == 5.0
+    assert settings.track_cost_gate_high_confidence == 0.5
+
+
+def test_a_gate_of_exactly_zero_is_honoured_not_rejected(monkeypatch):
+    # Unlike `CV_TRACK_IOU` (`_parse_unit_fraction`, which forbids 0 because
+    # it would silently mean "match anything" for a FOLLOW re-anchor), a
+    # cost gate's `0.0` is a normal "this gate is off" configuration.
+    monkeypatch.setenv("CV_TRACK_COST_GATE_MIN_IOU", "0")
+
+    assert Settings.from_env().track_cost_gate_min_iou == 0.0
+
+
+def test_garbage_cost_weight_and_gate_env_vars_fall_back_and_never_raise(monkeypatch):
+    monkeypatch.setenv("CV_TRACK_COST_WEIGHT_IOU", "not-a-number")
+    monkeypatch.setenv("CV_TRACK_COST_WEIGHT_APPEARANCE", "-1")
+    monkeypatch.setenv("CV_TRACK_COST_GATE_MIN_IOU", "1.5")
+    monkeypatch.setenv("CV_TRACK_COST_GATE_MAX_COST", "-2")
+
+    settings = Settings.from_env()
+
+    assert settings.track_cost_weight_iou == Settings().track_cost_weight_iou
+    assert settings.track_cost_weight_appearance == Settings().track_cost_weight_appearance
+    assert settings.track_cost_gate_min_iou == Settings().track_cost_gate_min_iou
+    assert settings.track_cost_gate_max_cost == Settings().track_cost_gate_max_cost

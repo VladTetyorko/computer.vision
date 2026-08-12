@@ -414,7 +414,18 @@ def pan(seed: int = DEFAULT_SEED) -> Sequence:
             jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
             box = _lane_box(x, spec.lane, jitter)
             objects.append(GroundTruthObject(gt_id=spec.gt_id, label=OBJECT_LABEL, box=box, visible=box.valid))
-        frames.append(_render_frame(index, objects, colors))
+
+        def underlay(image: "np.ndarray", camera_left=camera_left) -> None:
+            # World-fixed texture, added after this scenario was found unable
+            # to test its own claim: it renders the scene translating because
+            # the CAMERA moved, but on a flat field a global-motion estimator
+            # has nothing to track, so `flow` returned IDENTITY and the row
+            # read as "ego-motion compensation does not help" when in truth
+            # the scenario never presented any ego-motion evidence to
+            # estimate from.
+            _draw_world_texture(image, camera_left)
+
+        frames.append(_render_frame(index, objects, colors, underlay=underlay))
     return Sequence(
         name="pan", fps=DEFAULT_FPS, width=FRAME_WIDTH, height=FRAME_HEIGHT, frames=tuple(frames), primary_gt_id=1
     )
@@ -546,6 +557,63 @@ def pan_step(seed: int = DEFAULT_SEED) -> Sequence:
     )
 
 
+# -- scenario: clutter ------------------------------------------------------
+#
+# The scenario that decides whether `cost` may be the default. Every other
+# scenario has one to four objects, and a globally-optimal assignment is
+# trivially right when there is almost nothing to confuse it with. The risk
+# `cost` carries that `bytetrack` does not is precisely a CROWD: a solver that
+# minimises total cost can buy a cheap overall assignment out of individually
+# absurd pairs, and a permissive IoU gate is what lets it. Ten objects at
+# close spacing, several sharing a colour, is where that shows up if it is
+# going to.
+
+CLUTTER_FRAME_COUNT = 60
+CLUTTER_OBJECT_COUNT = 10
+CLUTTER_COLUMNS = 5
+CLUTTER_COLUMN_PITCH = 0.17
+CLUTTER_ROW_PITCH = 0.22
+CLUTTER_MARGIN = 0.06
+# Alternating directions, so neighbours converge and cross rather than
+# travelling in convoy -- a crowd moving in parallel is not a hard problem.
+CLUTTER_SPEED = 0.006
+
+
+def clutter(seed: int = DEFAULT_SEED) -> Sequence:
+    """Ten similarly-sized objects at close spacing, half of them sharing a
+    colour with a neighbour, moving in alternating directions so they
+    repeatedly converge and separate."""
+    rng = Random(seed)
+    colors = {
+        gt_id: _OBJECT_COLORS[(gt_id - 1) % len(_OBJECT_COLORS)]
+        for gt_id in range(1, CLUTTER_OBJECT_COUNT + 1)
+    }
+
+    frames = []
+    for index in range(CLUTTER_FRAME_COUNT):
+        objects = []
+        for gt_id in range(1, CLUTTER_OBJECT_COUNT + 1):
+            slot = gt_id - 1
+            column, row = slot % CLUTTER_COLUMNS, slot // CLUTTER_COLUMNS
+            direction = 1.0 if slot % 2 == 0 else -1.0
+            x = CLUTTER_MARGIN + column * CLUTTER_COLUMN_PITCH + direction * CLUTTER_SPEED * index
+            lane = CLUTTER_MARGIN + CLUTTER_ROW_PITCH * (row + 1)
+            jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+            box = _lane_box(x, lane, jitter)
+            objects.append(
+                GroundTruthObject(gt_id=gt_id, label=OBJECT_LABEL, box=box, visible=box.valid)
+            )
+        frames.append(_render_frame(index, tuple(objects), colors))
+    return Sequence(
+        name="clutter",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
 SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "linear": linear,
     "occlusion": occlusion,
@@ -553,4 +621,5 @@ SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "pan": pan,
     "dropout": dropout,
     "pan_step": pan_step,
+    "clutter": clutter,
 }

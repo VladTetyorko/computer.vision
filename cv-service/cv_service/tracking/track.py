@@ -38,7 +38,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
-from cv_service.tracking.engines.base import SOURCE_DETECTOR, SOURCE_TRACKER, Box, Observation, Transform
+from cv_service.tracking.engines.base import (
+    SOURCE_DETECTOR,
+    SOURCE_TRACKER,
+    Box,
+    Descriptor,
+    Observation,
+    Transform,
+)
 from cv_service.tracking.params import TrackingParams
 
 LOGGER = logging.getLogger("cv_service.tracking.track")
@@ -63,6 +70,15 @@ _LOST_RETENTION_MULTIPLIER = 2
 # own history, and the number an operator tunes is `max_age`, not this.
 _VELOCITY_SMOOTHING = 0.3
 
+# How much of a new appearance OBSERVATION to believe, mirroring `_VELOCITY_
+# SMOOTHING`'s reasoning exactly: one frame's descriptor is one crop under
+# one moment's lighting/pose, not the object's identity, so it nudges the
+# track's own signature rather than replacing it outright. Structural, not
+# an operator knob -- `CV_TRACK_COST_WEIGHT_APPEARANCE` tunes how much the
+# BLENDED descriptor counts toward the match cost, this tunes how fast it
+# updates.
+_DESCRIPTOR_SMOOTHING = 0.3
+
 
 def _blend(previous: float, measured: float) -> float:
     return _VELOCITY_SMOOTHING * measured + (1.0 - _VELOCITY_SMOOTHING) * previous
@@ -84,6 +100,16 @@ class Track:
     `_settle`'s wall-clock rule (review finding B7) and `predict.py`'s
     confidence decay ask "how long has it actually been since the detector
     last agreed this is the object" instead of "how long since any frame".
+
+    `descriptor` (TRACKING-V2-PLAN wave C3) is this track's own appearance
+    signature, EMA-updated by `observe_descriptor` below from DETECTOR
+    observations only -- the same evidence-vs-extrapolation rule `velocity_
+    x`/`velocity_y` already follow via `Observation.predicted` (see
+    `_observe`): blending a descriptor extracted from a PREDICTED box would
+    make the signature self-confirming exactly the way a velocity re-derived
+    from its own extrapolation would. `None` until the first detector-sourced
+    appearance evidence arrives, or forever on a stream with no appearance
+    extractor active.
     """
 
     track_id: int
@@ -101,6 +127,7 @@ class Track:
     age_frames: int = 0
     hits: int = 0
     misses: int = 0
+    descriptor: Optional[Descriptor] = None
     _confirmed: bool = field(default=False, repr=False)
 
 
@@ -388,6 +415,32 @@ class TrackBook:
             del self._tracks[key]
 
 
+def observe_descriptor(
+    track: Track, descriptor: Optional[Descriptor], *, alpha: float = _DESCRIPTOR_SMOOTHING
+) -> None:
+    """EMA `track`'s appearance signature toward a DETECTOR-sourced `descriptor`.
+
+    TRACKING-V2-PLAN wave C3. Lives here, not in `session.py`, for the same
+    reason `TrackBook.warp()` does: "nothing outside this module mutates a
+    `Track`" (this class's own docstring) means the mutation itself has to
+    happen inside a function this module defines, even when a caller outside
+    it (`session.py`'s `_run_cost_associate`) is the one deciding WHEN to
+    call it. `descriptor=None` is a no-op -- a box the appearance extractor
+    could not describe, or a stream with no extractor at all, must not erase
+    an already-accumulated signature on the strength of one missing frame.
+    """
+    if descriptor is None:
+        return
+    if track.descriptor is None:
+        track.descriptor = descriptor
+        return
+    # `Descriptor.blend(other, alpha)` returns `alpha*self + (1-alpha)*other`
+    # (`engines/base.py`) -- `alpha` here is the OLD signature's own weight,
+    # so `1.0 - alpha` recovers `_DESCRIPTOR_SMOOTHING`'s documented meaning
+    # ("how much of a NEW observation to believe").
+    track.descriptor = track.descriptor.blend(descriptor, 1.0 - alpha)
+
+
 def observation_for(
     detection: object,
     key: object,
@@ -433,5 +486,6 @@ __all__ = [
     "Track",
     "TrackBook",
     "observation_for",
+    "observe_descriptor",
     "iter_states",
 ]

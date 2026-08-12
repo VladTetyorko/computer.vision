@@ -8,13 +8,23 @@
       |- decision          scheduler.decide(now, state): PURE, before any pixel
       |- if run_detector:  detect()   <-- THE ONLY GATE ACQUISITION, and it is
       |                                    the servicer's callable, not ours
-      |- if FOLLOW:        motion.estimate(frame, pose) ONCE, before the mode
-      |                     branches -- ASSOCIATE is not compensated (C2)
+      |- if FOLLOW, or ASSOCIATE with `cost`: motion.estimate(frame, pose)
+      |                     ONCE, before the mode branches -- ASSOCIATE with
+      |                     `bytetrack` still never compensates (C2's own
+      |                     reasoning: that engine's state lives inside a
+      |                     third-party Kalman filter with no seam to warp;
+      |                     `cost`'s candidates ARE the book's own tracks, so
+      |                     C2's warp is what wave C3 gives ASSOCIATE a seam
+      |                     for)
       |- book.warp(transform)   EVERY live track, before ANYTHING reads one --
       |                     this is what makes a stalled track accumulate N
       |                     frames of camera motion instead of one frame's
       |                     worth read once (the coordinator's C2 fix)
-      |- ASSOCIATE:        associator.associate(dets, now)
+      |- ASSOCIATE `bytetrack`: associator.associate(dets, now)
+      |  ASSOCIATE `cost`:      Candidate per live track (warped+predicted,
+      |                     with its own descriptor) x Target per detection
+      |                     (with a fresh descriptor when appearance is
+      |                     active) -> CostAssociator.assign(...)
       |  FOLLOW:           re-anchor on best-IoU det (against the ALREADY-
       |                     warped held box), else tracker.update(frame)
       |                                   <-- NEVER TOUCHES THE GATE
@@ -52,6 +62,7 @@ nothing here imports `cv2` or `numpy`.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass
 from time import perf_counter
@@ -59,11 +70,13 @@ from typing import Any, Callable, Optional, Sequence
 
 from cv_service.tracking import lock as lock_module
 from cv_service.tracking import params as params_module
+from cv_service.tracking.assign import Candidate, CostAssociator, Target
 from cv_service.tracking.engines.base import (
     IDENTITY,
     SOURCE_TRACKER,
     Box,
     CameraPose,
+    Descriptor,
     Observation,
     Transform,
 )
@@ -82,7 +95,14 @@ from cv_service.tracking.scheduler import (
     DutyCycleScheduler,
     SchedulerState,
 )
-from cv_service.tracking.track import STATE_LOST, Track, TrackBook, observation_for
+from cv_service.tracking.track import (
+    STATE_LOST,
+    STATE_TENTATIVE,
+    Track,
+    TrackBook,
+    observation_for,
+    observe_descriptor,
+)
 
 LOGGER = logging.getLogger("cv_service.tracking.session")
 
@@ -98,6 +118,10 @@ FrameFn = Callable[[], Any]
 # value, the same division of labour `resolve()`'s own docstring draws
 # between "turn a sentinel into a value" and "decide what serves it".
 _MOTION_ENGINE_OFF = "off"
+
+# `TrackingParams.appearance_engine_id`'s equivalent (TRACKING-V2-PLAN wave
+# C3) -- same division of labour as `_MOTION_ENGINE_OFF` above.
+_APPEARANCE_ENGINE_OFF = "off"
 
 
 @dataclass(frozen=True)
@@ -130,9 +154,10 @@ class FrameOutcome:
     tracker_millis: int = 0
     engine_id: str = ""
     locked_track_id: int = 0
-    # TRACKING-V2-PLAN wave C2 -- 0 / "" on every frame this wave does not
-    # compensate (OFF, ASSOCIATE -- see the module docstring's "on ASSOCIATE"
-    # note -- and any FOLLOW frame where nothing was constructible).
+    # TRACKING-V2-PLAN wave C2/C3 -- 0 / "" on every frame this platform does
+    # not compensate: OFF always; ASSOCIATE unless `cost` is the resolved
+    # engine (see the module docstring); and any FOLLOW/`cost`-ASSOCIATE
+    # frame where nothing was constructible.
     motion_millis: int = 0
     motion_engine_id: str = ""
 
@@ -172,6 +197,16 @@ class StreamTrackingSession:
         self._motion_engine_id = ""
         self._motion_resolved = False
         self._degraded_motion_ids: set[str] = set()
+        # Appearance extractor (TRACKING-V2-PLAN wave C3) -- resolved lazily
+        # the first time `cost` actually asks for one (`_run_cost_associate`,
+        # only reached when `engine_id == "cost"`), same build-once shape as
+        # the motion compensator above but simpler: an extractor needs no
+        # live signal to check (no `pose`-style availability gate), so there
+        # is no fallback ladder, only "off" or "the one thing asked for".
+        self._appearance_engine: Any = None
+        self._appearance_engine_id = ""
+        self._appearance_resolved = False
+        self._degraded_appearance_ids: set[str] = set()
         # The last wire `TrackingConfig` message applied, held opaquely and
         # compared by equality (a protobuf `==`, no allocation) so the
         # restated-every-frame config costs one comparison per frame and
@@ -219,6 +254,10 @@ class StreamTrackingSession:
             # may switch `lk` <-> `ncc` without ever touching this), so it
             # is only rebuilt when ITS OWN wire field actually changes.
             self._release_motion_compensator()
+        if self._params.appearance_engine_id != previous.appearance_engine_id:
+            # Same independence as motion above -- appearance is orthogonal
+            # to which associator or SOT engine is active.
+            self._release_appearance_extractor()
         if self._lock.apply(request.lock):
             self._followed = None
         if not self._params.active:
@@ -261,20 +300,24 @@ class StreamTrackingSession:
 
         # Ego-motion, once per frame, before the mode branches.
         #
-        # ASSOCIATE is deliberately NOT compensated in this wave
-        # (TRACKING-V2-PLAN C2): its association state lives inside a
-        # third-party engine (`ByteTrackEngine`'s own Kalman filters) with no
-        # seam to warp, and this ultralytics version has no `STrack.
-        # multi_gmc` -- reaching into that library's internals one wave
-        # before C3 replaces the whole association core with `assign.py`'s
-        # `CostAssociator` (which cv-service owns, and where the same change
-        # is two lines) is not worth doing twice. Gating on FOLLOW here is
-        # also what keeps ASSOCIATE from ever decoding a frame it would
-        # otherwise have no reason to touch (see `_estimate_motion`).
+        # ASSOCIATE is compensated ONLY when `cost` is the resolved engine
+        # (TRACKING-V2-PLAN wave C3). `bytetrack` still never compensates --
+        # its association state lives inside a third-party engine
+        # (`ByteTrackEngine`'s own Kalman filters) with no seam to warp, and
+        # this ultralytics version has no `STrack.multi_gmc`, so warping
+        # `TrackBook`'s own copy of a `bytetrack` track would change nothing
+        # `bytetrack` itself reads. `cost`'s candidates ARE `TrackBook`'s own
+        # tracks (`_run_cost_associate`), which is exactly the seam this
+        # wave gives ASSOCIATE. Gating this precisely -- not on "ASSOCIATE"
+        # broadly -- is also what keeps the DEFAULT (`bytetrack`) ASSOCIATE
+        # path from paying a new per-frame frame-decode cost for a transform
+        # it could never use (see `_estimate_motion`'s own note).
         transform = IDENTITY
         motion_millis = 0
         motion_engine_id = ""
-        if self._params.mode == MODE_FOLLOW:
+        if self._params.mode == MODE_FOLLOW or (
+            self._params.mode == MODE_ASSOCIATE and self._engine_id == CostAssociator.engine_id
+        ):
             transform, motion_millis, motion_engine_id = self._estimate_motion(pose, frame, now)
 
         # Warp every LIVE track's stored state through this frame's
@@ -294,7 +337,7 @@ class StreamTrackingSession:
         if engine is None or self._params.mode == MODE_OFF:
             boxes = [_box_for(detection) for detection in (detections or [])]
         elif self._params.mode == MODE_ASSOCIATE:
-            boxes = self._run_associate(engine, detections or [], now)
+            boxes = self._run_associate(engine, detections or [], now, frame)
         elif decision.run_detector:
             boxes = self._follow_verify(engine, detections or [], frame, now)
         else:
@@ -315,7 +358,12 @@ class StreamTrackingSession:
 
     # -- mode A: associate --------------------------------------------------
 
-    def _run_associate(self, engine: Any, detections: Sequence[Any], now: float) -> list[TrackedBox]:
+    def _run_associate(
+        self, engine: Any, detections: Sequence[Any], now: float, frame: FrameFn
+    ) -> list[TrackedBox]:
+        if self._engine_id == CostAssociator.engine_id:
+            return self._run_cost_associate(engine, detections, now, frame)
+
         try:
             observations = engine.associate(detections, now)
         except Exception as exc:  # noqa: BLE001 - one bad frame, not a dead stream
@@ -329,6 +377,141 @@ class StreamTrackingSession:
             if observation.det_index >= 0
         }
         return [_box_for(detection, by_index.get(index)) for index, detection in enumerate(detections)]
+
+    def _run_cost_associate(
+        self, engine: CostAssociator, detections: Sequence[Any], now: float, frame: FrameFn
+    ) -> list[TrackedBox]:
+        """ASSOCIATE via `assign.CostAssociator`: the platform owns the match.
+
+        Unlike `bytetrack`, which holds its own Kalman state and only hands
+        the book finished observations to rename, `cost` has no state of its
+        own at all -- the CANDIDATES it ranks are `TrackBook`'s OWN live
+        tracks, predicted to `now` and (for ASSOCIATE, only when `cost` is
+        the resolved engine -- see `process()`) already ego-motion-warped
+        this frame. That is what makes this the one associator for which
+        TRACKING-V2-PLAN wave C2's `TrackBook.warp()` changes the
+        association DECISION rather than only what a coasting box displays.
+        """
+        extractor = self._resolve_appearance_extractor()
+        boxes = [Box(d.x, d.y, d.width, d.height) for d in detections]
+        descriptors = self._describe(extractor, frame, boxes)
+
+        targets = [
+            Target(
+                box=boxes[index],
+                label=detection.label,
+                confidence=detection.confidence,
+                descriptor=descriptors[index],
+                det_index=index,
+            )
+            for index, detection in enumerate(detections)
+        ]
+        candidates = [
+            Candidate(
+                key=track.key,
+                box=predict(track, now).box,
+                label=track.label,
+                descriptor=track.descriptor,
+                confirmed=track.state != STATE_TENTATIVE,
+            )
+            for track in self._book.tracks
+        ]
+
+        # No appearance extractor active on this stream -> pure geometry,
+        # never geometry plus a constant (`assign.py`'s own `test_appearance_
+        # is_ignored_entirely_when_it_is_not_weighted`): the configured
+        # weight is a deployment default for "when `cost` AND an appearance
+        # engine are both active", not a promise appearance always counts.
+        # Checked on the EXTRACTOR, not on whether this particular frame
+        # produced a descriptor -- a frame with no describable boxes must
+        # not be treated as "appearance is off for this stream", since
+        # `assign.py`'s own missing-descriptor handling (neutral 0.5, never
+        # a rejection) already covers that case correctly.
+        weights = self._params.cost_weights
+        if extractor is None and weights.appearance > 0.0:
+            weights = dataclasses.replace(weights, appearance=0.0)
+        engine.retune(weights=weights, gates=self._params.cost_gates)
+
+        assignment = engine.assign(candidates, targets)
+
+        observations: list[Observation] = []
+        observation_descriptors: list[Optional[Descriptor]] = []
+        for candidate_index, target_index in assignment.matches:
+            target = targets[target_index]
+            observations.append(
+                Observation(
+                    key=candidates[candidate_index].key,
+                    box=target.box,
+                    label=target.label,
+                    confidence=target.confidence,
+                    det_index=target.det_index,
+                )
+            )
+            observation_descriptors.append(target.descriptor)
+        for target_index in assignment.unmatched_targets:
+            target = targets[target_index]
+            observations.append(
+                Observation(
+                    # A fresh, permanently-unique token: `cost` allocates no
+                    # identity of its own (unlike `bytetrack`'s own key
+                    # counter), so a brand-new candidate needs a key nothing
+                    # else could ever collide with. `TrackBook._namespaced`
+                    # only requires it be hashable and stable across frames
+                    # (it becomes `track.key`, read back on the NEXT frame's
+                    # `self._book.tracks` loop above) -- an `object()`
+                    # sentinel satisfies both with no counter to manage.
+                    key=object(),
+                    box=target.box,
+                    label=target.label,
+                    confidence=target.confidence,
+                    det_index=target.det_index,
+                )
+            )
+            observation_descriptors.append(target.descriptor)
+
+        tracks = self._book.apply(observations, now, detector_ran=True)
+        for track, descriptor in zip(tracks, observation_descriptors):
+            observe_descriptor(track, descriptor)
+
+        by_index = {
+            observation.det_index: track
+            for observation, track in zip(observations, tracks)
+            if observation.det_index >= 0
+        }
+        return [_box_for(detection, by_index.get(index)) for index, detection in enumerate(detections)]
+
+    def _describe(
+        self, extractor: Any, frame: FrameFn, boxes: Sequence[Box]
+    ) -> "list[Optional[Descriptor]]":
+        """This frame's appearance descriptors, one per box, positionally.
+
+        `extractor` is already resolved by the caller (`_run_cost_associate`,
+        which also needs to know WHETHER one resolved to decide the cost
+        weight, not just what it returns) -- `None` for every box when it is
+        `None`, the common case until an operator opts BOTH `cost` and an
+        appearance engine in (see `config.py`'s `DEFAULT_TRACK_APPEARANCE_
+        ENGINE` note on why that default only matters once `cost` is already
+        chosen). Never decodes a frame unless an extractor actually
+        resolved, and never raises: a describing failure costs this frame's
+        appearance evidence, never the stream (P5), same posture `_estimate_
+        motion` already takes for a raising compensator.
+        """
+        if not boxes or extractor is None:
+            return [None] * len(boxes)
+        try:
+            described = extractor.describe(frame(), boxes)
+        except Exception as exc:  # noqa: BLE001 - a bad extractor costs accuracy, never the stream
+            if self._appearance_engine_id not in self._degraded_appearance_ids:
+                self._degraded_appearance_ids.add(self._appearance_engine_id)
+                LOGGER.warning(
+                    "appearance extractor %r raised (%s); this frame runs without appearance evidence",
+                    self._appearance_engine_id,
+                    exc,
+                )
+            self._appearance_engine = None
+            self._appearance_resolved = False
+            return [None] * len(boxes)
+        return list(described)
 
     # -- mode B: follow -----------------------------------------------------
 
@@ -574,20 +757,24 @@ class StreamTrackingSession:
         self._scheduler.retune(self._params)
         self._book.retune(self._params)
 
-    # -- ego-motion (TRACKING-V2-PLAN wave C2) -------------------------------
+    # -- ego-motion (TRACKING-V2-PLAN wave C2, wave C3 extends to ASSOCIATE) -
 
     def _estimate_motion(
         self, pose: CameraPose, frame: FrameFn, now: float
     ) -> "tuple[Transform, int, str]":
         """This frame's camera-motion transform, timed, plus who served it.
 
-        Only ever called for FOLLOW (see `process()`) -- resolving an engine
-        here is cheap (no pixels touched yet), but actually running `flow`
-        needs a decoded frame, and `frame()` is the servicer's MEMOIZED
-        loader, so calling it here costs nothing extra on the path that
-        already needs pixels for the SOT engine. `pose` engines ignore
-        `frame` entirely but are handed it anyway -- harmless, since it is
-        the same memoized call either way.
+        Called for FOLLOW always, and for ASSOCIATE only when `cost` is the
+        resolved engine (see `process()`) -- resolving a compensator here is
+        cheap (no pixels touched yet), but actually running `flow` needs a
+        decoded frame. For FOLLOW that frame decode is free: `frame()` is the
+        servicer's MEMOIZED loader and the SOT engine already needs pixels
+        this frame. For ASSOCIATE with `cost` it is a genuine NEW per-frame
+        cost that did not exist before wave C3 -- paid deliberately, only for
+        the one engine that can use the result, and reused (not re-decoded)
+        by `_describe`'s own `frame()` call in the same frame when appearance
+        is also active. `pose` engines ignore `frame` entirely but are handed
+        it anyway -- harmless, since it is the same memoized call either way.
         """
         engine = self._resolve_motion_compensator(pose)
         if engine is None:
@@ -661,6 +848,43 @@ class StreamTrackingSession:
         self._motion_engine_id = ""
         self._motion_resolved = False
 
+    # -- appearance (TRACKING-V2-PLAN wave C3) -------------------------------
+
+    def _resolve_appearance_extractor(self) -> Any:
+        """The appearance extractor serving this stream, built once.
+
+        Mirrors `_resolve_motion_compensator`'s build-once shape, but
+        simpler: an extractor needs no live signal to check like `pose`'s
+        `CameraPose` -- constructibility IS availability here, so there is
+        no fallback ladder, only "off" or the one thing actually asked for.
+        Only ever reached from `_run_cost_associate` (i.e. only when `cost`
+        is the resolved associator) -- `bytetrack` has no descriptor input to
+        feed, so a stream using it never resolves this and never decodes a
+        frame for appearance purposes either.
+        """
+        if self._appearance_resolved:
+            return self._appearance_engine
+        self._appearance_resolved = True
+
+        requested = self._params.appearance_engine_id
+        if requested == _APPEARANCE_ENGINE_OFF:
+            return None
+        registry = self._registry_provider()
+        if registry is None:
+            return None
+        created = registry.appearance(requested)
+        if created is None:
+            return None
+        self._appearance_engine_id, self._appearance_engine = created
+        return self._appearance_engine
+
+    def _release_appearance_extractor(self) -> None:
+        """Drop the current extractor so the next active `cost` frame
+        rebuilds from scratch."""
+        self._appearance_engine = None
+        self._appearance_engine_id = ""
+        self._appearance_resolved = False
+
     def _reset_engine(self, exc: BaseException) -> None:
         """An engine raised mid-frame: that frame loses its track facts, the
         engine is reset, and the stream continues (TRACKING-PLAN §5.I).
@@ -722,6 +946,7 @@ class StreamTrackingSession:
         self._box_invalid = False
         self._tracker_stalled = False
         self._release_motion_compensator()
+        self._release_appearance_extractor()
 
 
 def _box_for(detection: Any, track: Optional[Track] = None) -> TrackedBox:

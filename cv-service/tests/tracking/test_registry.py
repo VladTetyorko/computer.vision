@@ -14,6 +14,7 @@ import pytest
 from cv_service.config import Settings
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 from cv_service.tracking.registry import (
+    BUILTIN_APPEARANCES,
     BUILTIN_ASSOCIATORS,
     BUILTIN_COMPENSATORS,
     BUILTIN_FOLLOWERS,
@@ -22,6 +23,8 @@ from cv_service.tracking.registry import (
     TrackerRegistry,
     build_default_registry,
 )
+
+APPEARANCE_ENGINE_HISTOGRAM = "histogram"
 
 
 class FakeEngine:
@@ -42,12 +45,14 @@ def exploding(**_kwargs):
 
 def registry(**overrides) -> TrackerRegistry:
     base = dict(
-        associators={"bytetrack": factory("bytetrack")},
+        associators={"bytetrack": factory("bytetrack"), "cost": factory("cost")},
         followers={"lk": factory("lk"), "ncc": factory("ncc")},
         compensators={MOTION_ENGINE_FLOW: factory(MOTION_ENGINE_FLOW), MOTION_ENGINE_POSE: factory(MOTION_ENGINE_POSE)},
+        appearances={APPEARANCE_ENGINE_HISTOGRAM: factory(APPEARANCE_ENGINE_HISTOGRAM)},
         default_associate_id="bytetrack",
         default_follow_id="lk",
         default_motion_id=MOTION_ENGINE_FLOW,
+        default_appearance_id=APPEARANCE_ENGINE_HISTOGRAM,
     )
     base.update(overrides)
     return TrackerRegistry(**base)
@@ -56,7 +61,9 @@ def registry(**overrides) -> TrackerRegistry:
 def test_the_roster_reports_which_modes_each_engine_serves():
     assert registry().roster() == {
         "bytetrack": [MODE_ASSOCIATE],
+        "cost": [MODE_ASSOCIATE],
         "flow": ["MOTION_COMPENSATOR"],
+        "histogram": ["APPEARANCE_EXTRACTOR"],
         "lk": [MODE_FOLLOW],
         "ncc": [MODE_FOLLOW],
         "pose": ["MOTION_COMPENSATOR"],
@@ -118,7 +125,9 @@ def test_the_probe_drops_engines_that_cannot_be_constructed_here(caplog):
 
     assert roster == {
         "bytetrack": [MODE_ASSOCIATE],
+        "cost": [MODE_ASSOCIATE],
         "flow": ["MOTION_COMPENSATOR"],
+        "histogram": ["APPEARANCE_EXTRACTOR"],
         "lk": [MODE_FOLLOW],
         "pose": ["MOTION_COMPENSATOR"],
     }
@@ -133,7 +142,9 @@ def test_the_probe_drops_a_compensator_that_cannot_be_constructed_here(caplog):
 
     assert roster == {
         "bytetrack": [MODE_ASSOCIATE],
+        "cost": [MODE_ASSOCIATE],
         "flow": ["MOTION_COMPENSATOR"],
+        "histogram": ["APPEARANCE_EXTRACTOR"],
         "lk": [MODE_FOLLOW],
         "ncc": [MODE_FOLLOW],
     }
@@ -156,12 +167,14 @@ def test_the_probe_never_mutates_the_shared_builtin_rosters():
     before_associators = dict(BUILTIN_ASSOCIATORS)
     before_followers = dict(BUILTIN_FOLLOWERS)
     before_compensators = dict(BUILTIN_COMPENSATORS)
+    before_appearances = dict(BUILTIN_APPEARANCES)
 
     build_default_registry(Settings(), probe=True)
 
     assert BUILTIN_ASSOCIATORS == before_associators
     assert BUILTIN_FOLLOWERS == before_followers
     assert BUILTIN_COMPENSATORS == before_compensators
+    assert BUILTIN_APPEARANCES == before_appearances
 
 
 def test_a_default_that_itself_fails_still_serves_a_surviving_engine():
@@ -206,18 +219,21 @@ def test_an_unknown_compensator_id_falls_back_to_the_motion_default(caplog):
 
 
 def test_build_default_registry_takes_its_defaults_from_settings():
-    settings = dataclasses.replace(Settings(), track_follow_engine="ncc", track_motion_engine="pose")
+    settings = dataclasses.replace(
+        Settings(), track_follow_engine="ncc", track_motion_engine="pose", track_appearance_engine="off"
+    )
 
     subject = build_default_registry(settings, probe=False)
 
     assert subject.default_follow_id == "ncc"
     assert subject.default_associate_id == Settings().track_associate_engine
     assert subject.default_motion_id == "pose"
-    assert set(subject.roster()) == {"bytetrack", "lk", "ncc", "flow", "pose"}
+    assert subject.default_appearance_id == "off"
+    assert set(subject.roster()) == {"bytetrack", "cost", "lk", "ncc", "flow", "pose", "histogram"}
 
 
-@pytest.mark.parametrize("engine_id", ["bytetrack", "lk", "ncc", "flow", "pose"])
-def test_the_five_shipped_engines_are_advertised(engine_id):
+@pytest.mark.parametrize("engine_id", ["bytetrack", "cost", "lk", "ncc", "flow", "pose", "histogram"])
+def test_the_seven_shipped_engines_are_advertised(engine_id):
     assert engine_id in build_default_registry(Settings(), probe=False).roster()
 
 

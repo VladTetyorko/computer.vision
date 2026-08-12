@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import pytest
 
+from cv_service.tracking.assign import AssignGates, AssignWeights
 from cv_service.tracking.engines.base import (
+    METRIC_HELLINGER,
     SOURCE_DETECTOR,
     SOURCE_TRACKER,
     Box,
+    Descriptor,
     Observation,
     Transform,
 )
@@ -21,6 +24,7 @@ from cv_service.tracking.track import (
     STATE_LOST,
     STATE_TENTATIVE,
     TrackBook,
+    observe_descriptor,
 )
 
 
@@ -40,6 +44,12 @@ def params(**overrides) -> TrackingParams:
         track_max_age_millis=1_000_000,
         min_tracker_confidence=0.5,
         motion_engine_id="",
+        # TRACKING-V2-PLAN wave C3 -- inert here, `TrackBook` reads none of
+        # these (`assign.py`'s own `CostAssociator` does); included only
+        # because `TrackingParams` requires them.
+        appearance_engine_id="",
+        cost_weights=AssignWeights(),
+        cost_gates=AssignGates(),
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -335,3 +345,49 @@ def test_warp_never_touches_a_track_born_after_it():
 
     born = book.apply([seen("a", x=0.10)], 0.0, detector_ran=True)[0]
     assert born.box.x == pytest.approx(0.10)
+
+
+# -- descriptor (TRACKING-V2-PLAN wave C3) -----------------------------------
+
+RED = Descriptor("hist", (1.0, 0.0, 0.0), METRIC_HELLINGER)
+BLUE = Descriptor("hist", (0.0, 0.0, 1.0), METRIC_HELLINGER)
+
+
+def test_a_fresh_track_has_no_descriptor():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+
+    assert born.descriptor is None
+
+
+def test_observe_descriptor_sets_the_first_signature_outright():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+
+    observe_descriptor(born, RED)
+
+    assert born.descriptor == RED
+
+
+def test_observe_descriptor_is_a_no_op_for_none():
+    # A box the extractor could not describe must not erase an already
+    # accumulated signature on the strength of one missing frame.
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+    observe_descriptor(born, RED)
+
+    observe_descriptor(born, None)
+
+    assert born.descriptor == RED
+
+
+def test_observe_descriptor_blends_rather_than_replaces():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+    observe_descriptor(born, RED)
+
+    observe_descriptor(born, BLUE, alpha=0.5)
+
+    # Halfway between RED and BLUE, renormalized (Descriptor.blend's own
+    # contract) -- not a straight replacement.
+    assert born.descriptor.values == pytest.approx((0.5, 0.0, 0.5))

@@ -90,6 +90,58 @@ DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE = 0.5
 # fleet-wide without touching a single stream's request.
 DEFAULT_TRACK_MOTION_ENGINE = "flow"
 
+# TRACKING-V2-PLAN wave C3: which `AppearanceExtractor` a stream gets when
+# its `TrackingConfig.appearance_engine_id` is blank (proto field 9, frozen
+# at C0). Measured (see MODULE.md "Wave C3" for the harness table): `cost`
+# is NOT the `CV_TRACK_ASSOCIATE_ENGINE` default -- `bytetrack` never
+# resolves an appearance extractor at all (it has no descriptor input to
+# feed, see `session.py`'s `_run_cost_associate`) -- so this default only
+# matters to an operator who has already opted into `CV_TRACK_ASSOCIATE_
+# ENGINE=cost`. `"off"` disables appearance evidence outright, same shape as
+# `DEFAULT_TRACK_MOTION_ENGINE`'s "off".
+DEFAULT_TRACK_APPEARANCE_ENGINE = "histogram"
+
+# TRACKING-V2-PLAN wave C3: `assign.CostAssociator`'s cost weights and gates
+# (`AssignWeights`/`AssignGates`, `assign.py`), resolved straight from
+# `Settings` -- like `track_max_age_millis`/`min_tracker_confidence` before
+# them, TRACKING-V2-PLAN §2's frozen wire diff adds no per-request field for
+# any of these, so there is nothing to fall back FROM. `resolve()` builds the
+# two frozen dataclasses directly (`params.py`'s "the only place a sentinel
+# becomes a number", extended here to "and the only place these become an
+# `AssignWeights`/`AssignGates`").
+#
+# `appearance` defaults NON-zero so that opting into `cost` PLUS the default
+# `histogram` extractor actually does something -- `session.py`'s
+# `_run_cost_associate` is what zeroes this back to 0.0 for a stream where no
+# appearance extractor resolved (`"off"`, or nothing constructible), so a
+# `cost` stream with no appearance evidence still behaves as pure geometry
+# rather than geometry-plus-a-constant (see `assign.py`'s own
+# `test_appearance_is_ignored_entirely_when_it_is_not_weighted`).
+DEFAULT_TRACK_COST_WEIGHT_IOU = 1.0
+DEFAULT_TRACK_COST_WEIGHT_APPEARANCE = 0.5
+DEFAULT_TRACK_COST_WEIGHT_LABEL = 0.0
+# `min_iou=0.0`: no geometric gate by default -- `max_cost` and, once an
+# appearance engine is active, `max_appearance` are what bound a match; a
+# strict `min_iou` would forbid exactly the wide-displacement case ego-motion
+# compensation exists to recover (a warped candidate whose IoU with the true
+# box is still imperfect right after a stall).
+DEFAULT_TRACK_COST_GATE_MIN_IOU = 0.0
+# Above this Hellinger distance ([0, 1], 1 = no match) an appearance-weighted
+# pair is forbidden outright rather than merely penalised -- tuned so two
+# genuinely different objects (e.g. `crossing`'s red/green pair) gate out
+# even at moderate geometric ambiguity, while a colour shift from motion blur
+# or exposure does not.
+DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE = 0.6
+# No cap beyond the two gates above -- `AssignGates`' own default (`assign.
+# FORBIDDEN`, i.e. "never accept purely on cost, gates decide").
+DEFAULT_TRACK_COST_GATE_MAX_COST = float("inf")
+# The high/low confidence split for `CostAssociator`'s two-stage match
+# (`assign.py`'s own docstring: "high-confidence targets first, then low").
+# Matches `engines/bytetrack.py`'s own `_TRACK_HIGH_THRESH` so `cost` and
+# `bytetrack` draw the same low-confidence line even though each engine
+# tunes it as its own separate constant.
+DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE = 0.25
+
 _ENV_MAX_CONCURRENT_INFERENCES = "CV_MAX_CONCURRENT_INFERENCES"
 
 
@@ -221,6 +273,47 @@ def _parse_unit_fraction(raw: Optional[str], default: float, var_name: str) -> f
     return value
 
 
+def _parse_unit_interval(raw: Optional[str], default: float, var_name: str) -> float:
+    """Forgiving-parse for a `[0, 1]` gate/threshold knob where 0 is a
+    legitimate value (TRACKING-V2-PLAN wave C3's cost gates).
+
+    Deliberately NOT `_parse_unit_fraction`: that helper rejects `0.0`
+    because it backs `CV_TRACK_IOU`'s FOLLOW re-anchor threshold, where a
+    literal zero would silently mean "match anything" -- a functional bug.
+    A cost gate's `0.0` means "this gate is off", which is a normal,
+    intended configuration, not a typo to guard against.
+    """
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid number; using default %s", var_name, raw, default)
+        return default
+    if not 0.0 <= value <= 1.0:
+        LOGGER.warning(
+            "%s=%r must be a fraction in [0, 1]; using default %s", var_name, raw, default
+        )
+        return default
+    return value
+
+
+def _parse_nonnegative_float(raw: Optional[str], default: float, var_name: str) -> float:
+    """Forgiving-parse for an unbounded `>= 0` knob (a cost weight, or a cost
+    cap that may legitimately be very large or infinite)."""
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        LOGGER.warning("%s=%r is not a valid number; using default %s", var_name, raw, default)
+        return default
+    if value < 0.0:
+        LOGGER.warning("%s=%r must not be negative; using default %s", var_name, raw, default)
+        return default
+    return value
+
+
 def _parse_engine_id(raw: Optional[str], default: str) -> str:
     """Unset/blank -> `default`; anything else passes through stripped.
 
@@ -266,6 +359,14 @@ class Settings:
     track_max_age_millis: int = DEFAULT_TRACK_MAX_AGE_MILLIS
     track_min_tracker_confidence: float = DEFAULT_TRACK_MIN_TRACKER_CONFIDENCE
     track_motion_engine: str = DEFAULT_TRACK_MOTION_ENGINE
+    track_appearance_engine: str = DEFAULT_TRACK_APPEARANCE_ENGINE
+    track_cost_weight_iou: float = DEFAULT_TRACK_COST_WEIGHT_IOU
+    track_cost_weight_appearance: float = DEFAULT_TRACK_COST_WEIGHT_APPEARANCE
+    track_cost_weight_label: float = DEFAULT_TRACK_COST_WEIGHT_LABEL
+    track_cost_gate_min_iou: float = DEFAULT_TRACK_COST_GATE_MIN_IOU
+    track_cost_gate_max_appearance: float = DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE
+    track_cost_gate_max_cost: float = DEFAULT_TRACK_COST_GATE_MAX_COST
+    track_cost_gate_high_confidence: float = DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -331,5 +432,43 @@ class Settings:
             ),
             track_motion_engine=_parse_engine_id(
                 os.environ.get("CV_TRACK_MOTION_ENGINE"), DEFAULT_TRACK_MOTION_ENGINE
+            ),
+            track_appearance_engine=_parse_engine_id(
+                os.environ.get("CV_TRACK_APPEARANCE_ENGINE"), DEFAULT_TRACK_APPEARANCE_ENGINE
+            ),
+            track_cost_weight_iou=_parse_nonnegative_float(
+                os.environ.get("CV_TRACK_COST_WEIGHT_IOU"),
+                DEFAULT_TRACK_COST_WEIGHT_IOU,
+                "CV_TRACK_COST_WEIGHT_IOU",
+            ),
+            track_cost_weight_appearance=_parse_nonnegative_float(
+                os.environ.get("CV_TRACK_COST_WEIGHT_APPEARANCE"),
+                DEFAULT_TRACK_COST_WEIGHT_APPEARANCE,
+                "CV_TRACK_COST_WEIGHT_APPEARANCE",
+            ),
+            track_cost_weight_label=_parse_nonnegative_float(
+                os.environ.get("CV_TRACK_COST_WEIGHT_LABEL"),
+                DEFAULT_TRACK_COST_WEIGHT_LABEL,
+                "CV_TRACK_COST_WEIGHT_LABEL",
+            ),
+            track_cost_gate_min_iou=_parse_unit_interval(
+                os.environ.get("CV_TRACK_COST_GATE_MIN_IOU"),
+                DEFAULT_TRACK_COST_GATE_MIN_IOU,
+                "CV_TRACK_COST_GATE_MIN_IOU",
+            ),
+            track_cost_gate_max_appearance=_parse_unit_interval(
+                os.environ.get("CV_TRACK_COST_GATE_MAX_APPEARANCE"),
+                DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE,
+                "CV_TRACK_COST_GATE_MAX_APPEARANCE",
+            ),
+            track_cost_gate_max_cost=_parse_nonnegative_float(
+                os.environ.get("CV_TRACK_COST_GATE_MAX_COST"),
+                DEFAULT_TRACK_COST_GATE_MAX_COST,
+                "CV_TRACK_COST_GATE_MAX_COST",
+            ),
+            track_cost_gate_high_confidence=_parse_unit_interval(
+                os.environ.get("CV_TRACK_COST_GATE_HIGH_CONFIDENCE"),
+                DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE,
+                "CV_TRACK_COST_GATE_HIGH_CONFIDENCE",
             ),
         )

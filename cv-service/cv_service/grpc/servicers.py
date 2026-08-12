@@ -150,10 +150,11 @@ def _tracking_request_from_wire(
         max_age_frames=message.max_age_frames,
         min_hits=message.min_hits,
         lock=_lock_request_from_wire(message.lock) if message.HasField("lock") else None,
-        # motion_engine_id (field 8, TRACKING-V2-PLAN wave C2). appearance_
-        # engine_id/memory_ttl_millis (fields 9-10) are also frozen on the
-        # wire but belong to waves C3/C4 -- not read here yet.
+        # motion_engine_id (field 8, TRACKING-V2-PLAN wave C2), appearance_
+        # engine_id (field 9, wave C3). memory_ttl_millis (field 10) is also
+        # frozen on the wire but belongs to wave C4 -- not read here yet.
         motion_engine_id=message.motion_engine_id,
+        appearance_engine_id=message.appearance_engine_id,
     )
 
 
