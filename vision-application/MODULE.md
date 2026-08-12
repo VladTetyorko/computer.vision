@@ -247,7 +247,7 @@ Types below are grouped by service; see the Package structure table above for wh
 
 - **`DetectionRateWindow`** (package-private) + **`DetectionRate`** — the rate half of what `PipelineLatency` gives the cost half of (docs/plans/active/CV-RATE-CONTROL-PLAN.md §1). The first latency measurement found `effectiveFps` **7.58 against a configured 10** and could not say why: a completion rate cannot distinguish "the source never delivered a frame" from "the sample was thrown away at the in-flight bound", and those have opposite fixes.
   - `DetectionRateWindow(Duration window)` (defaults `Transport.PUSH`) / `DetectionRateWindow(Duration window, Transport transport)` (docs/plans/active/MEDIA-SOT-PLAN.md §7, wave M5) — `enum Transport { PUSH, PULL }`, fixed for the window's whole life; `void record(Outcome, long atNanos)` where `Outcome ∈ {SUBMITTED, DROPPED_IN_FLIGHT, DROPPED_OUTAGE}` (push mode only); `void recordMissedDeadlines(long)` (push mode only); `void recordPull(PullTelemetry, long atNanos)` (pull mode only — folds the worker's self-reported `sourceFps`/`achievedFps`/`droppedFrames`/`missedDeadlines` in as the **latest restatement**, cumulative counters, nothing to sum, plus a rolling `decodeMillis` sample for the P50; `StreamPipeline`'s pull driver calls this once per result carrying a non-null `pullTelemetry()`); `void clear()` (resets both push and pull state); `DetectionRate snapshot(double sourceFps, double targetFps, double demandFps)` — branches internally on `transport`: `PUSH` behaves exactly as before; `PULL` **ignores the `sourceFps` parameter** (the JVM-measured/assumed video rate is meaningless for a proxied stream that never flows through this JVM at all) and reports the worker's own `recordPull`-supplied figures instead; `targetFps`/`demandFps` still come from the caller (the Java rate controller runs unchanged in pull mode, §7).
-  - `record DetectionRate(Duration window, double sourceFps, double targetFps, double demandFps, double submittedFps, long submitted, long droppedInFlight, long droppedOutage, long missedDeadlines, String transport, double decodeMillisP50)` (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5 — 10th/11th components) + `long due()`, `double dropRatio()`; `static empty(Duration, double sourceFps, double targetFps)`; `static final String TRANSPORT_PUSH = "push"`, `TRANSPORT_PULL = "pull"`; a 9-arg convenience ctor defaults `transport=TRANSPORT_PUSH, decodeMillisP50=0.0` so every pre-existing call site (and `empty()`) compiles/reads unchanged. **Only who counts changes** (§7's own promise): `sourceFps`/`submittedFps`(=worker's `achieved_fps`)/`droppedInFlight`(=worker's `dropped_frames`, the pull analogue of a JVM in-flight drop)/`missedDeadlines` keep their meaning in pull mode, populated from `PullTelemetry` instead of the local sampler; `droppedOutage` is always `0` in pull mode (outage backoff is push-mode-only bookkeeping); `decodeMillisP50` is the median worker-reported `decode_millis` over the window, `0` in push mode.
+  - `record DetectionRate(Duration window, double sourceFps, double targetFps, double demandFps, double submittedFps, long submitted, long droppedInFlight, long droppedOutage, long missedDeadlines, String transport, double decodeMillisP50)` (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§7, wave M5 — 10th/11th components) + `long due()`, `double dropRatio()`; `static empty(Duration, double sourceFps, double targetFps)`; `static final String TRANSPORT_PUSH = "push"`, `TRANSPORT_PULL = "pull"`; a 9-arg convenience ctor defaults `transport=TRANSPORT_PUSH, decodeMillisP50=0.0` so every pre-existing call site (and `empty()`) compiles/reads unchanged. **Only who counts changes** (§7's own promise): `sourceFps`/`submittedFps`(=worker's `achieved_fps`)/`droppedInFlight`(=worker's `dropped_frames`, the pull analogue of a JVM in-flight drop)/`missedDeadlines` keep their meaning in pull mode, populated from `PullTelemetry` instead of the local sampler; `droppedOutage` is always `0` in pull mode (outage backoff is push-mode-only bookkeeping); `decodeMillisP50` is the median worker-reported `decode_millis` over the window, `0` in push mode. `submitted` in pull mode is counted by `recordPull` itself, not read off the wire (docs/conclusions/MEDIA-SOT-RESULTS.md §6 fix — see the dated entry below): one `recordPull` call is one arrived `DetectionResult`, cumulative since the stream started to match `droppedInFlight`'s own cumulative-not-windowed shape, so `due()`/`dropRatio()` compare two figures measured the same way.
   - **`missedDeadlines` is a running total, not windowed** — deliberately unlike every other counter here: a starving source produces *no events*, so there is nothing for a time window to age out. It answers "the source cannot feed this rate", which no amount of detector capacity would fix.
   - **A peer of `PipelineLatencyWindow`, not fields on it**: written on the source's `onNext` thread *before* a request leaves, versus a completion thread *after* a response lands. Merging them would serialize the video path against the completion path, and would leave the counters undefined for exactly the samples this exists to explain — the ones **never sent**, which have no round trip at all.
 
@@ -846,3 +846,36 @@ stream's `camera_pose` is therefore never set today; not required by this wave's
 for whoever wires telemetry-push into `StreamPipeline` next. `PipelineConfig#detectionEnabled()` toggling
 is likewise not specially wired for pull mode (the wire has no "pause" concept) — `maybeDetect`'s guard
 short-circuits unconditionally for a pull-mode pipeline regardless of this flag.
+
+## docs/conclusions/MEDIA-SOT-RESULTS.md §6 defect fixed (post-M9, `feat/media-sot`)
+
+M9 (a docs-only measurement wave) found pull mode reporting `submitted: 0, droppedInFlight: 1027,
+dropRatio: 1.0` against a healthy `submittedFps: 9.987` — `DetectionRateWindow.snapshotPull` hard-coded
+`submitted = 0L`, so `DetectionRate.dropRatio()` (`= (droppedInFlight + droppedOutage) / due()`) evaluated
+to exactly `1.0` whenever the worker reported any `droppedInFlight` at all, which in pull mode is the
+normal case (a 30fps source into a 10fps target reports `dropped_frames > 0` even when perfectly healthy —
+the cv-service half of this same fix, see `cv-service/MODULE.md`, stopped that field counting mere
+non-selection too). Fixed here: `DetectionRateWindow` gained a `pullSubmitted` field, incremented once per
+`recordPull` call — pull mode delivers exactly one `DetectionResult` per inferred frame, so every call
+already **is** one submission, nothing to read off the wire. Cumulative since the stream started (not
+windowed like push mode's `samples` deque), matching `pullDroppedFrames`'s own cumulative shape so
+`due()`/`dropRatio()` compare a numerator and denominator measured the same way; reset by `clear()` like
+every other pull-mode field. `snapshotPull` now passes `pullSubmitted` instead of the hard-coded `0L`; no
+other field, method signature, or push-mode behaviour changed.
+
+**Signature changes**: none public — `DetectionRateWindow` gains a new private field and one new line in
+an existing method; `DetectionRate`'s shape (already 11 components since M5) is unchanged, only what value
+`submitted()` carries in pull mode.
+
+**Tests**: `./mvnw -B -pl vision-domain,vision-application test` — all green. `DetectionRateWindowPullModeTest`
+gained the two M9 found missing (`dropRatioIsNearZeroForAHealthyPullStreamNotPinnedAtOne`: 300 `recordPull`
+calls with `droppedFrames=0` now reports `submitted=300`, `due()=300`, `dropRatio()=0.0`, not `1.0`;
+`dueAndDropRatioWeighSubmittedAgainstTheWorkersGenuineDrops`: 90 submissions against a worker-reported
+cumulative `droppedFrames=10` reports `due()=100`, `dropRatio()=0.10`) plus `submitted`/`dropRatio()`
+assertions added to every pre-existing pull-mode test that was silently passing without them — the exact
+gap M9 named: "`DetectionRateWindowPullModeTest` ... never asserts `dropRatio()` or the raw
+`submitted`/`due()` values."
+
+**Not touched, per the fix's own scope**: push mode (`snapshotPush`, `DetectionRateWindowTest`), `vision-app`/
+`vision-api`/adapters/`vision-web`, and `PipelineLatency`/`roundTripMillis*` (a different, already-correct
+metric M9's §6 did not flag).

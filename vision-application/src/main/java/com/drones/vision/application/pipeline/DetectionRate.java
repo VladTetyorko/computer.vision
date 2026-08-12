@@ -33,7 +33,15 @@ import java.util.Objects;
  *                         capacity-limited, not configuration-limited — the one comparison that
  *                         separates "raise the ceiling" from "shrink the round trip"
  * @param submittedFps     frames actually handed to the detection port per second, over the window
- * @param submitted        frames handed to the detection port in the window
+ * @param submitted        frames handed to the detection port in the window. In pull mode
+ *                         (docs/plans/active/MEDIA-SOT-PLAN.md &sect;7) this counts every {@code
+ *                         DetectionResult} received rather than a local sampler decision — pull mode
+ *                         delivers exactly one per inferred frame, so the count is direct, not derived
+ *                         — and is cumulative since the stream started rather than windowed, matching
+ *                         {@link #droppedInFlight} so {@link #due()}/{@link #dropRatio()} compare two
+ *                         figures measured the same way. Before docs/conclusions/MEDIA-SOT-RESULTS.md
+ *                         &sect;6's fix this was hard-coded {@code 0} in pull mode, which pinned {@link
+ *                         #dropRatio()} at {@code 1.0} for any pull stream reporting even one drop
  * @param droppedInFlight  samples discarded because {@code maxInFlightInferences} were outstanding —
  *                         the detector is slower than the requested rate. In pull mode (docs/plans/active/MEDIA-SOT-PLAN.md
  *                         &sect;7) this is the worker's own {@code dropped_frames} — the latest-wins
@@ -99,7 +107,11 @@ public record DetectionRate(Duration window, double sourceFps, double targetFps,
     /**
      * @return the fraction of served deadlines that were thrown away, in {@code [0,1]}; {@code 0}
      *         when nothing was due. The single number to watch: anything above zero means the
-     *         configured rate is not the delivered one.
+     *         configured rate is not the delivered one — in both transports, and meaning the same
+     *         thing in both (docs/conclusions/MEDIA-SOT-RESULTS.md &sect;6): frames the loop wanted to
+     *         infer and could not, over frames it wanted to infer. A source running faster than the
+     *         target rate is <b>not</b> counted here in either transport — that shows up as the gap
+     *         between {@link #sourceFps()} and {@link #submittedFps()} instead, never as a drop.
      */
     public double dropRatio() {
         long due = due();

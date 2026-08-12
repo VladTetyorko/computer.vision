@@ -360,6 +360,52 @@ those is a real choice, not an obvious default.
 
 ---
 
+### 6.1 Follow-up: the hard-coded zero was only half of it (fixed, `feat/media-sot`)
+
+The paragraph above is left as M9 wrote it — the `submitted = 0L` mechanism it found is real and was
+the visible half of the defect. Re-reading M9's own numbers turned up a second, deeper problem it did
+not diagnose: **the ratio.** 1027 `droppedInFlight` against `latency.samples: 300` in the same window is
+almost exactly 3:1 — and the rig was a 30 fps source against a 10 fps target, also almost exactly 3:1.
+That is not backlog. That is `cv-service`'s `dropped_frames` counting every frame the deadline sampler
+simply never selected because the source outran `target_fps` — downsampling working as designed, not a
+discard — alongside the genuine "the loop could not keep up" case D8 exists to catch. M9's claim that
+"`droppedInFlight` (1027) is real, wire-verified, climbing telemetry, exactly as D12 intended" therefore
+does not fully hold either: the *counting mechanism* was real and wire-verified, but the *number* it
+produced conflated two things that should never have shared one counter, so 1027 overstated genuine
+backlog loss by roughly 3×. Fixing only the JVM-side hard-coded zero (deriving `submitted` from
+`achieved_fps × window`, one of the three options this section's own §6 body offered) would have papered
+over that — `dropRatio` would have stopped reading `1.0`, but it would have settled on some other wrong
+number still inflated by non-selection, and would have meant something different in each transport,
+which is exactly what `dropRatio`'s own "the single number to watch" javadoc promises it does not.
+
+**Both halves fixed:**
+
+1. **`cv-service` (`cv_service/pull/loop.py`)** — `dropped_frames` now counts only overwrites that land
+   while a served frame is genuinely out for inference (`PullDecodeLoop._awaiting_consumer`, true from
+   the moment `frames()` yields a served frame until it is resumed for the next one — exactly the span
+   `servicers.py` spends inside `_handle_request`). An overwrite that happens while `frames()` is merely
+   polling for its next scheduled deadline — the ordinary case when the source is faster than
+   `target_fps` — is no longer counted. Two paired tests in `tests/pull/test_loop.py` pin this exactly:
+   a source faster than target, drained promptly, now measures `dropped_frames == 0` throughout; the
+   existing stalled-detector test (M0's scenario, 754 dropped over a 25 s/800 ms-stall run) still shows
+   the count climbing once a served frame is genuinely out with a busy caller. `proto/vision/v1/cv.proto`
+   field 19's comment was tightened to state this precisely — no field number, name, or type moved.
+2. **`vision-application` (`DetectionRateWindow`)** — `submitted` is now counted directly, not derived
+   and not hard-coded: pull mode delivers exactly one `DetectionResult` per inferred frame, so
+   `recordPull` increments a `pullSubmitted` counter on every call, cumulative since the stream started
+   (matching `droppedInFlight`'s own cumulative-not-windowed shape, so `due()`/`dropRatio()` compare two
+   figures measured the same way). `DetectionRateWindowPullModeTest` gained the assertions this section
+   named missing — `dropRatio()`, `due()`, and raw `submitted` are now exercised directly, including a
+   300-submission/zero-drop case (`dropRatio() == 0.0`) and a mixed case (90 submissions, a cumulative 10
+   drops, `dropRatio() == 0.10`).
+
+**Result**: a healthy pull stream — the exact `submittedFps: 9.987` scenario this section opened with —
+now reports `dropRatio` at or near `0.0`, matching what `submittedFps` already said. Full detail,
+including what `dropped_frames` counted before and after and where `submitted` is counted, is in
+`cv-service/MODULE.md`'s and `vision-application/MODULE.md`'s own dated entries for this fix.
+
+---
+
 ## 7. What stayed unmeasurable without a real camera
 
 Named explicitly, per this wave's own instruction not to fake these:

@@ -30,8 +30,10 @@ import java.util.Objects;
  * #recordMissedDeadlines} are the <b>push</b>-mode sampler's own counters and are never called by a
  * pull-mode pipeline (there is no local sampler in pull mode — the worker runs its own, ported,
  * deadline sampler); {@link #recordPull} is the pull-mode counterpart, folding the worker's
- * self-reported figures straight in rather than re-deriving them from local sampler decisions. {@link
- * #snapshot} reads whichever set applies.
+ * self-reported figures straight in rather than re-deriving them from local sampler decisions — except
+ * {@code submitted}, which {@link #recordPull} counts itself (docs/conclusions/MEDIA-SOT-RESULTS.md
+ * &sect;6): pull mode delivers exactly one {@code DetectionResult} per inferred frame, so every call is
+ * one submission, with nothing to read off the wire. {@link #snapshot} reads whichever set applies.
  *
  * <h2>Threading</h2>
  * Every method is {@code synchronized}: {@link #record}/{@link #recordPull} run on the source's
@@ -81,6 +83,20 @@ final class DetectionRateWindow {
     private volatile double pullAchievedFps = 0.0;
     private volatile long pullDroppedFrames = 0L;
     private volatile long pullMissedDeadlines = 0L;
+
+    /**
+     * {@code submitted}, pull mode's own way (docs/conclusions/MEDIA-SOT-RESULTS.md &sect;6): unlike
+     * {@code pullDroppedFrames}/{@code pullMissedDeadlines}, this is never a wire field — pull mode
+     * delivers exactly one {@code DetectionResult} per inferred frame, so every {@link #recordPull}
+     * call already <b>is</b> one submission. Cumulative since the stream started, not windowed, for
+     * the same reason {@code pullDroppedFrames} is not: it is compared directly against that
+     * worker-reported cumulative counter in {@link DetectionRate#due()}, and mixing a windowed
+     * numerator against a lifetime denominator would make {@link DetectionRate#dropRatio()} wrong in
+     * the other direction. Before this field existed, {@link #snapshotPull} hard-coded {@code 0L}
+     * here, which pinned {@code dropRatio()} at {@code 1.0} for any pull stream with even one
+     * legitimate worker-side drop — the defect this field fixes.
+     */
+    private volatile long pullSubmitted = 0L;
 
     /** Rolling {@code decode_millis} samples, windowed exactly like {@link #samples} (pull mode only). */
     private final Deque<DecodeSample> decodeMillisSamples = new ArrayDeque<>();
@@ -135,9 +151,15 @@ final class DetectionRateWindow {
      * {@code source_fps}/{@code achieved_fps}/{@code missed_deadlines}/{@code dropped_frames} are kept
      * as the worker's latest restatement (cumulative counters, not deltas — nothing to sum), while
      * {@code decode_millis} joins a rolling window for {@link DetectionRate#decodeMillisP50()}.
+     *
+     * <p>One call to this method <b>is</b> one submission (docs/conclusions/MEDIA-SOT-RESULTS.md
+     * &sect;6): pull mode delivers exactly one {@code DetectionResult} per inferred frame, and this is
+     * that result arriving, so {@code pullSubmitted} is counted here directly rather than derived from
+     * anything on the wire.
      */
     synchronized void recordPull(PullTelemetry telemetry, long atNanos) {
         Objects.requireNonNull(telemetry, "telemetry must not be null");
+        pullSubmitted++;
         pullSourceFps = telemetry.sourceFps();
         pullAchievedFps = telemetry.achievedFps();
         pullDroppedFrames = telemetry.droppedFrames();
@@ -172,6 +194,7 @@ final class DetectionRateWindow {
         pullAchievedFps = 0.0;
         pullDroppedFrames = 0L;
         pullMissedDeadlines = 0L;
+        pullSubmitted = 0L;
     }
 
     /**
@@ -207,7 +230,7 @@ final class DetectionRateWindow {
     }
 
     private DetectionRate snapshotPull(double targetFps, double demandFps) {
-        return new DetectionRate(window, pullSourceFps, targetFps, demandFps, pullAchievedFps, 0L,
+        return new DetectionRate(window, pullSourceFps, targetFps, demandFps, pullAchievedFps, pullSubmitted,
                 pullDroppedFrames, 0L, pullMissedDeadlines, DetectionRate.TRANSPORT_PULL, decodeMillisP50());
     }
 

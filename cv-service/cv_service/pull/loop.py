@@ -28,14 +28,27 @@ spike unchanged:
 
 **D8 (MEDIA-SOT-PLAN decision, CLAUDE.md rule 9).** The reader thread always
 overwrites the mailbox's single slot, never queues: a not-yet-consumed frame
-is replaced and counted as dropped, so the decode loop is always working
-with the NEWEST frame the source has produced, and a stalled consumer
-(inference) never makes it fall behind on wall-clock freshness -- it only
-ever loses frames it would have discarded as stale anyway. Every discard is
-counted (``dropped_frames``) and travels on the wire
+is replaced, so the decode loop is always working with the NEWEST frame the
+source has produced, and a stalled consumer (inference) never makes it fall
+behind on wall-clock freshness -- it only ever loses frames it would have
+discarded as stale anyway.
+
+**What ``dropped_frames`` counts, precisely (fixed post-MEDIA-SOT-RESULTS.md
+&sect;6).** Not every overwrite is a discard. Most of the time the source
+simply runs faster than ``target_fps`` -- the reader overwrites the mailbox
+several times between one served deadline and the next, and none of those
+intermediate frames was ever going to be selected; that is downsampling
+working as designed, visible instead as the gap between ``source_fps`` and
+``achieved_fps``. A frame only counts as genuinely **dropped** when it is
+overwritten while :meth:`PullDecodeLoop.frames` has already handed a served
+frame to its caller and is waiting for control back -- i.e. inference is
+busy and a fresher frame arrives before the caller returns for the next one.
+:attr:`PullDecodeLoop._awaiting_consumer` is exactly that window. Every such
+discard is counted (``dropped_frames``) and travels on the wire
 (``DetectionResponse.dropped_frames``, field 19) -- never silent (the
 standing CV-RATE-BUDGET.md lesson: an uncounted drop is how ``effectiveFps``
-sat at 7.58 against a configured 10 for a whole release).
+sat at 7.58 against a configured 10 for a whole release) -- but a discard
+the sampler never wanted in the first place is not miscounted as one either.
 
 Pure stdlib (``threading``, ``time``) -- no ``cv_pb2`` import (that
 translation belongs to ``grpc/servicers.py`` alone) and no ``cv2``/``numpy``
@@ -149,18 +162,23 @@ class _LatestOnlyMailbox:
     next network frame). This loop's consumer instead runs the deadline
     sampler on its own schedule and only wants to LOOK when a deadline is
     due, so it needs a non-blocking peek/take, not a blocking wait.
+
+    Purely mechanical -- it does not decide what counts as a genuine drop
+    (see the module docstring's D8 section and :class:`PullDecodeLoop`);
+    it only reports whether a ``put`` overwrote an unconsumed frame, and
+    lets the caller decide whether that overwrite matters.
     """
 
     def __init__(self) -> None:
         self._slot: Optional[PulledFrame] = None
         self._lock = threading.Lock()
-        self.dropped_frames = 0
 
-    def put(self, frame: PulledFrame) -> None:
+    def put(self, frame: PulledFrame) -> bool:
+        """Returns True when this overwrote a frame nobody had taken yet."""
         with self._lock:
-            if self._slot is not None:
-                self.dropped_frames += 1
+            overwritten = self._slot is not None
             self._slot = frame
+            return overwritten
 
     def take(self) -> Optional[PulledFrame]:
         with self._lock:
@@ -215,6 +233,20 @@ class PullDecodeLoop:
     one ``(frame, captured_at_millis, diagnostics)`` per SERVED sample
     deadline, until the source ends/stalls (raises :class:`PullStalledError`)
     or the caller's ``should_continue`` predicate turns false.
+
+    ``_awaiting_consumer`` marks the one window that separates a genuine
+    drop from ordinary downsampling (module docstring, D8 section): it is
+    True from the moment a served frame is handed to the caller (``yield``
+    in :meth:`frames`) until the caller comes back for the next one --
+    exactly the span the real caller (``InferenceServicer.DetectPulled``)
+    spends running inference synchronously before asking for another frame.
+    Any mailbox overwrite that lands inside that window is a frame the loop
+    genuinely could not keep up with; any overwrite outside it is just the
+    source running faster than ``target_fps``, which the sampler was never
+    going to select anyway. Set/cleared only by the consumer thread; read
+    (never written) by the reader thread -- the same lock-free, single-
+    writer cross-thread pattern ``_last_frame_monotonic``/``_error`` already
+    use in this class.
     """
 
     def __init__(
@@ -237,6 +269,8 @@ class PullDecodeLoop:
         self._stop_event = threading.Event()
         self._error: Optional[BaseException] = None
         self._last_frame_monotonic = time.monotonic()
+        self._dropped_frames = 0
+        self._awaiting_consumer = False
         self._reader = threading.Thread(target=self._read_loop, name="cv-pull-reader", daemon=True)
         self._reader.start()
 
@@ -265,7 +299,13 @@ class PullDecodeLoop:
                     return
                 self._last_frame_monotonic = time.monotonic()
                 self._source_rate.record(time.monotonic_ns())
-                self._mailbox.put(frame)
+                overwritten = self._mailbox.put(frame)
+                # Only a discard if it happened while a served frame was out
+                # for inference (see class docstring) -- an overwrite that
+                # lands while frames() is merely waiting for its next
+                # scheduled deadline is downsampling, not a drop.
+                if overwritten and self._awaiting_consumer:
+                    self._dropped_frames += 1
         except Exception as exc:  # noqa: BLE001 - surfaced to frames() below, never crashes the thread silently
             self._error = exc
 
@@ -309,11 +349,21 @@ class PullDecodeLoop:
             diagnostics = PullDiagnostics(
                 source_fps=round(self._source_rate.fps, 3),
                 achieved_fps=round(self._achieved_rate.fps, 3),
-                dropped_frames=self._mailbox.dropped_frames,
+                dropped_frames=self._dropped_frames,
                 missed_deadlines=self._sampler.missed_deadlines,
                 capture_skew_millis=capture_skew_millis,
             )
-            yield frame, captured_at_millis, diagnostics
+            # Open the "genuinely could not keep up" window (class docstring)
+            # for exactly as long as the caller has this frame -- the real
+            # caller (servicers.py) runs inference synchronously before
+            # coming back for the next one, so this span IS the inference
+            # cost. Overwrites the reader makes while we're sitting in
+            # sample_due()'s own poll-sleep, below, are never inside it.
+            self._awaiting_consumer = True
+            try:
+                yield frame, captured_at_millis, diagnostics
+            finally:
+                self._awaiting_consumer = False
 
         if self._error is not None:
             raise self._error

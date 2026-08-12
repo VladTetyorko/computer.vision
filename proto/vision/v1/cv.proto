@@ -200,10 +200,15 @@ message DetectionResponse {
   // Pull mode only (DetectPulled). All zero in push mode -- together these are the complete,
   // honest accounting of a decode-and-infer loop that now runs on another machine, where the
   // usual per-request round trip can no longer tell an operator what happened (MEDIA-SOT-PLAN §5.1, §7).
+  // `dropped_frames` (19) counts only frames the loop genuinely could not keep up with -- a served
+  // frame superseded while still out for inference, or backlog thrown away because the detector was
+  // busy (D8). It excludes frames the deadline sampler never selected because the source simply
+  // outran target_fps: that is downsampling working as designed, not a drop, and is already visible
+  // as the gap between `source_fps` and `achieved_fps` (docs/conclusions/MEDIA-SOT-RESULTS.md §6).
   int64 decode_millis       = 16;  // NEW -- local decode cost for the frame this response describes
   float source_fps          = 17;  // NEW -- measured rate of the pulled stream
   float achieved_fps        = 18;  // NEW -- measured rate at which this loop actually infers
-  int64 dropped_frames      = 19;  // NEW -- cumulative frames the latest-wins decode loop discarded (D8)
+  int64 dropped_frames      = 19;  // NEW -- cumulative frames genuinely dropped, not merely unselected (D8)
   int64 missed_deadlines    = 20;  // NEW -- cumulative sampler deadlines no frame arrived to serve
   int64 capture_skew_millis = 21;  // NEW -- worker's estimate of (local receipt - capture); 0 = unknown
 }

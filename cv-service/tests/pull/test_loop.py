@@ -79,6 +79,15 @@ def test_d8_dropped_frames_climb_while_served_frames_stay_fresh_under_a_stalled_
     monotonically, while the served frame's own recency (arrival-mode
     capture time, i.e. essentially "now" at consumption) never degrades --
     the decode loop is never working from a growing backlog.
+
+    The very first served frame legitimately reports `dropped_frames == 0`
+    here (docs/conclusions/MEDIA-SOT-RESULTS.md §6's fix): nothing has been
+    handed to a caller yet at that point, so every overwrite up to the first
+    serve is ordinary downsampling of the 200fps source into the 20fps
+    target, not a discard. The count only starts climbing once a served
+    frame is actually out with the (simulated, `time.sleep`-stalled) caller
+    -- see `test_dropped_frames_stays_zero_when_only_downsampling_happens`
+    below for the companion half of this same fix.
     """
     source = FakePullSource(interval_seconds=1.0 / 200.0)  # a fast, 200fps source
     loop = PullDecodeLoop(
@@ -106,12 +115,46 @@ def test_d8_dropped_frames_climb_while_served_frames_stay_fresh_under_a_stalled_
     # overwriting the mailbox's single slot throughout the stall, never
     # blocking on the slow consumer.
     assert dropped_over_time == sorted(dropped_over_time)
-    assert dropped_over_time[-1] > dropped_over_time[0] > 0
+    assert dropped_over_time[0] == 0
+    assert dropped_over_time[-1] > 0
+    assert dropped_over_time[-1] > dropped_over_time[1]
 
     # Every served frame was fresh (a few tens of ms old) at the moment it
     # was actually consumed -- NOT growing with the backlog, which is
     # exactly D8's "latest-wins, not oldest-queued" guarantee.
     assert all(age_ms < 200 for age_ms in served_ages_ms)
+
+
+def test_dropped_frames_stays_zero_when_only_downsampling_happens():
+    """Pins the other half of docs/conclusions/MEDIA-SOT-RESULTS.md §6's fix
+    (also the defect M9 found live: pull mode reporting `droppedInFlight:
+    1027` -- really just a 30fps source downsampled to a 10fps target --
+    against a healthy `dropRatio: 1.0`).
+
+    A source running faster than `target_fps`, drained promptly (no
+    artificial stall standing in for a busy detector -- the loop always has
+    a served frame ready and is never caught still holding one when the
+    next arrives), must report `dropped_frames == 0` throughout: every
+    frame the reader overwrites between deadlines was never selected by the
+    sampler in the first place, which is downsampling working as designed,
+    not a discard. Paired with the stalled-consumer test above, this is the
+    whole fix expressed as a test: non-selection must never be counted, and
+    genuine backlog must still be counted.
+    """
+    source = FakePullSource(interval_seconds=1.0 / 100.0)  # a 100fps source
+    loop = PullDecodeLoop(
+        source, target_fps=10.0, clock=CaptureClock(mode="arrival"), stall_timeout_millis=5000
+    )
+    try:
+        # Enough served deadlines to span several seconds' worth of the
+        # 10:1 source:target ratio -- if any non-selected frame were
+        # miscounted as dropped, it would show up well within this many.
+        items = _drain(loop, max_items=25)
+    finally:
+        loop.close()
+
+    assert len(items) == 25
+    assert all(diagnostics.dropped_frames == 0 for _frame, _captured_at, diagnostics in items)
 
 
 def test_source_stall_raises_pull_stalled_error():
