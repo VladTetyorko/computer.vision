@@ -91,31 +91,51 @@ flowchart LR
 
 | stage | cost | source |
 |---|---|---|
-| sampling wait @10 fps | **0–100 ms, mean 50** | `inferenceFps=10` |
-| downscale + JPEG encode (Java2D) | ~3–8 ms | **estimated, never measured** |
-| network out | ~1 ms LAN / 20–60 ms radio | **never measured** |
+| sampling wait @10 fps | 0–100 ms, mean 50 | `inferenceFps=10` |
+| downscale + JPEG encode (Java2D) | ~3–8 ms | estimated |
+| network out | ~1 ms LAN / 20–60 ms radio | estimated |
 | cv-service JPEG decode | 0.6–2.1 ms | measured, MODULE.md |
 | `yolo26n` detect @imgsz 416 | **22.8 ms** | measured |
 | ( `orion12l` instead ) | **~343 ms** | measured |
 | associate | 0.78 ms | measured |
-| network back + publish | ~11–40 ms | **never measured** |
+| network back + publish | ~11–40 ms | estimated |
 
-**Mean box age ≈ 90 ms on a LAN with `yolo26n`; ~240 ms worst case** (the box then sits on screen
-ageing for the full 100 ms sample interval). Over a radio link, or with `orion12l`, add 100–350 ms.
+**Estimate at the time of writing: ~90 ms mean box age on a LAN, ~240 ms worst case.**
 
-Converted through §2 at 30°/s yaw: **90 ms = 29 px of lag, 240 ms = 77 px** — 12% of frame width.
-That is a visibly trailing box, and it is exactly what you are seeing.
+### Measured, 2026-08-12 — and the estimate was optimistic
 
-### Finding: nothing in the system measures this
+`PipelineLatencyWindow` now exists, so these are readings rather than arithmetic. Localhost,
+`yolo26n.pt` @ imgsz 416, synthetic `sim` source, `ASSOCIATE`/`cost`, `inferenceFps=10`, 162 samples:
 
-`DetectionResult.inferenceLatency` is `response.getInferenceMillis()` — **cv-service's own compute
-time**, not the round trip. `tracker_millis` likewise. The wire echoes `timestamp_millis`, so
-capture→available is *derivable* and never derived. Every latency number in the repo is a
-per-stage server cost.
+| figure | measured |
+|---|---|
+| round trip p50 | **53.8 ms** |
+| round trip p95 | **76.5 ms** |
+| round trip max | **370.4 ms** |
+| update interval p50 | **131.9 ms** |
+| **effective fps** | **7.58** (configured: 10) |
+| **worst box age** | **208.4 ms** |
+| cv-service self-reported `inference_millis` p50 | **29 ms** |
 
-> This is the same failure `TRACKING-REVIEW.md` found for accuracy ("nothing measures it, so the
+Three things fall out, none of which were visible before:
+
+1. **The number the system used to report understates what an operator sees by ~7×.**
+   `inferenceLatency` said **29 ms**. The box on screen is up to **208 ms** old.
+2. **Roughly half the round trip is not inference.** 53.8 ms round trip against 29 ms of
+   inference leaves **~25 ms** of JPEG encode + gRPC + decode — *on loopback, with no network at
+   all*. Over a radio link that term grows and the inference term does not.
+3. **The stream does not run at the rate it is configured to.** `effectiveFps` is **7.58**, not 10,
+   and the update interval is **132 ms**, not 100. In-flight bounding (`maxInFlightInferences=2`)
+   against a 54 ms round trip caps throughput below the requested rate — so the configured
+   `inferenceFps` is an upper bound the pipeline silently misses by 24%.
+
+Converted through §2 at 30°/s yaw, 208 ms of box age is **67 px** of lag on a 640 px frame — 10% of
+frame width, on the most favourable deployment there is.
+
+> This was the same failure `TRACKING-REVIEW.md` found for accuracy ("nothing measures it, so the
 > complaint is unfalsifiable"), repeated one axis over. V2 built `tools/trackeval` and closed the
-> accuracy half. **The latency half is still open, and it is the half you are complaining about.**
+> accuracy half; the latency half is now closed too, and the first thing it did was prove the
+> estimate above too generous.
 
 ## 4. What we actually implement
 
@@ -147,36 +167,79 @@ pay for ByteTrack and run half of it.
 > the weak boxes for continuation, and apply the operator's 0.4 as a **presentation/event filter**
 > on confirmed tracks. Recall goes up, the operator's screen does not get noisier.
 
+### Measured, 2026-08-12 — the confidence split
+
+`tools/trackeval` could not judge this: it gave every synthetic detection a flat `confidence = 0.9`,
+so the low-confidence regime the split exists for was invisible. `--confidence-floor` /
+`--detect-threshold` now model falling confidence with apparent size and the threshold the detector
+runs at. On `small_target` (a 0.035-extent object, 35% of `reliable_size` → **modelled confidence
+0.380**):
+
+| detector threshold | MT | ML | track lifetime | outcome |
+|---|---|---|---|---|
+| **0.40** — where the operator's threshold used to land | 0 | **1** | n/a | **never tracked at all** |
+| **0.15** — `CV_DETECT_FLOOR` | **1** | 0 | **78 / 80 frames**, 2 gaps, 100% recovered | tracked |
+
+Same in `FOLLOW`: `ML=1` at 0.40, `MT=1` with an **80/80** lifetime at 0.15. Every other scenario is
+unchanged, because only `small_target` models degrading confidence.
+
+Two honest limits. The harness models the half of the change that decides *which boxes reach the
+associator*, not the response filter (`_reportable`) — that half has unit tests only. And `0.25`
+scores identically to `0.15` here, because 0.380 clears both: the case for `0.15` specifically is
+that it sits below the associators' `high_confidence = 0.25` split, which is what makes the
+two-stage match non-trivial, and **this scenario does not demonstrate that**.
+
 ## 5. Ranked gaps
 
-| # | Gap | Fixed by V2? | Cost |
-|---|---|---|---|
-| 1 | Hold rate fixed at 10/15 fps, never derived from motion | **No** | design |
-| 2 | No ego-motion compensation — the dominant error term | **Yes** (`flow`/`pose`) | merge V2 |
-| 3 | `CameraPose` never populated; IMU knows exactly what `flow` estimates badly | **No** | **~8 lines Java** |
-| 4 | One confidence for acquisition + continuation; ByteTrack's low pass dead | **No** | small |
-| 5 | Coast freezes instead of predicting; velocity computed, never read | **Yes** (`predict.py`) | merge V2 |
-| 6 | No object memory across occlusion | **Yes** (`memory.py`) | merge V2 |
-| 7 | FOLLOW is one target, human-triggered — never auto-promotes | **No** | design |
-| 8 | No end-to-end latency measurement anywhere | **No** | small |
-| 9 | Tracker runs across the network; transport costs 30–100× the tracker | **No** | architectural |
+| # | Gap | Status |
+|---|---|---|
+| 1 | Hold rate fixed at 10/15 fps, never derived from motion | **open** — next, and now measurable |
+| 2 | No ego-motion compensation | **done** — V2 merged (`flow`/`pose`) |
+| 3 | `CameraPose` never populated | **done** — yaw-only; see the defect below |
+| 4 | One confidence for acquisition + continuation | **done + measured** (§4) |
+| 5 | Coast freezes instead of predicting | **done** — V2 merged (`predict.py`) |
+| 6 | No object memory across occlusion | **done** — V2 merged (`memory.py`) |
+| 7 | FOLLOW is one target, human-triggered | **open** |
+| 8 | No end-to-end latency measurement | **done + measured** (§3) |
+| 9 | Tracker runs across the network | **open** — architectural, separate programme |
 
-## 6. Recommendation
+### The defect the measurement found
 
-**Order matters — measure first, or you will tune blind.**
+Gap 3 shipped with unit tests green and did **nothing** in a running app: `DefaultStreamService`
+built its telemetry supplier only when an `OverlayPort` was present, because the telemetry OSD was
+its only consumer when that code was written. A deployment with a configured field of view and no
+overlay therefore sent **zero** `CameraPose` messages.
 
-1. **Re-merge V2.** Gaps 2, 5, 6 are already built, tested (704 tests) and scored. Resetting it out
-   left the three cheapest wins on the floor.
-2. **Instrument latency** (gap 8). Derive capture→available from the echoed `timestamp_millis`,
-   report it beside `inferenceLatency`, surface it in the flow strip. Until this exists, "delayed"
-   stays an opinion.
-3. **Populate `CameraPose`** (gap 3) — ~8 lines, turns on `pose` compensation *and* pays for S2
-   geolocation. Highest value per line in the whole list.
-4. **Split the confidence** (gap 4) — detect low, filter at presentation.
-5. **Then** make the rate adaptive (gap 1): with pose available, compute predicted px/frame and
-   raise the sample rate only when displacement approaches the association budget. This is the
-   principled version of "spend resources not to lose it" — spend them *when the geometry says
-   you're about to*.
+No test could see it. `StreamPipelineTest` injects the supplier directly — *including* the test
+asserting that turning the telemetry OSD off must not disable compensation, which passes precisely
+because it never exercises the construction one layer up. It was found by pointing the app at a
+probe server and reading what actually arrived on the wire, and it is the fifth instance of this
+repo's recurring failure mode: **mechanism right, tests green, outcome wrong.**
 
-Gap 9 (tracker on-board, next to the camera) is the real end state and the existing portability
-invariants (P1/P2/P3) were written for it — but it is a separate program, not a fix.
+## 6. What was done, and what is next
+
+Steps 1–4 of the original recommendation are done and merged (`56c7354`), measure-first as planned:
+V2 re-merged, then the latency instrument, then `CameraPose`, then the confidence split — each with
+its outcome checked by running the real path rather than by reading a green suite.
+
+**Next, in order:**
+
+1. **Adaptive rate (gap 1).** Now unblocked in both senses: pose gives predicted px/frame, and
+   `PipelineLatency` gives the feedback signal. The principled form of "spend resources not to lose
+   it" — raise the sample rate only when displacement approaches the association budget of §2.
+   The measurement already argues for it: `effectiveFps` is 7.58 against a configured 10, so the
+   rate control loop currently has no idea what it is actually achieving.
+2. **Shrink the ~25 ms of non-inference round trip.** On loopback it is half the round trip and it
+   is pure overhead: JPEG encode on the Java side, decode on the Python side. A BGR24 path for
+   local deployments, or a smaller `detectWidth`, both target it directly.
+3. **Decode `motion_engine_id` Java-side.** V2 added the wire field and nothing reads it, so which
+   compensator served a frame is invisible from the operator's side — the same "built but not
+   surfaced" shape that made `CameraPose` dead for a release.
+4. **Per-asset field of view.** `camera-hfov-degrees` is one value per instance; a deployment
+   mixing lenses needs it on the asset.
+5. **MAVLink `ATTITUDE`.** Yaw-only captures the dominant term; pitch/roll would complete it, and
+   the decoder does not exist yet.
+
+Gap 7 (auto-promote to FOLLOW, multi-target) and gap 9 (tracker on-board, next to the camera) remain
+open and are design work, not fixes. The existing portability invariants (P1/P2/P3) were written for
+gap 9 — but it is a separate programme.
