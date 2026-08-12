@@ -557,6 +557,62 @@ def pan_step(seed: int = DEFAULT_SEED) -> Sequence:
     )
 
 
+# -- scenario: long_occlusion -----------------------------------------------
+#
+# The scenario that tests MEMORY rather than retention. `occlusion`'s gap is
+# short enough that the track never leaves `TrackBook` -- it ages, it coasts,
+# and the same entry is still sitting there when the object returns, so the id
+# survives without anything having had to remember it. That is a real and
+# useful behaviour, but it is not re-acquisition, and a scenario that cannot
+# tell the two apart cannot show whether an object memory works.
+#
+# So the gap here is deliberately longer than the book's own retention (the
+# LOST window times its retention multiplier) and shorter than the dormant
+# gallery's TTL: the track is genuinely gone by the time the object returns,
+# and the only thing that can hand back its id is something that remembered
+# it after it was deleted.
+
+LONG_OCCLUSION_FRAME_COUNT = 150
+LONG_OCCLUSION_GAP_START = 40
+LONG_OCCLUSION_GAP_FRAMES = 90
+LONG_OCCLUSION_LANE = 0.5
+LONG_OCCLUSION_TRAVEL_START = 0.10
+LONG_OCCLUSION_SPEED = 0.004
+
+
+def long_occlusion(seed: int = DEFAULT_SEED) -> Sequence:
+    """One object crossing at constant velocity, hidden for long enough that
+    its track expires from the book entirely, then reappearing -- so keeping
+    its id requires having remembered it, not merely having kept it."""
+    rng = Random(seed)
+    color = _OBJECT_COLORS[0]
+    gap_end = LONG_OCCLUSION_GAP_START + LONG_OCCLUSION_GAP_FRAMES  # exclusive
+
+    frames = []
+    for index in range(LONG_OCCLUSION_FRAME_COUNT):
+        hidden = LONG_OCCLUSION_GAP_START <= index < gap_end
+        x = LONG_OCCLUSION_TRAVEL_START + LONG_OCCLUSION_SPEED * index
+        jitter = rng.uniform(-POSITION_JITTER, POSITION_JITTER)
+        box = _lane_box(x, LONG_OCCLUSION_LANE, jitter)
+
+        def underlay(image: "np.ndarray", hidden=hidden) -> None:
+            if hidden:
+                _draw_bar(image, 0.0, 1.0, OCCLUSION_BAR_COLOR)
+
+        objects = (
+            GroundTruthObject(gt_id=1, label=OBJECT_LABEL, box=box, visible=not hidden),
+        )
+        frames.append(_render_frame(index, objects, {1: color}, underlay=underlay))
+    return Sequence(
+        name="long_occlusion",
+        fps=DEFAULT_FPS,
+        width=FRAME_WIDTH,
+        height=FRAME_HEIGHT,
+        frames=tuple(frames),
+        primary_gt_id=1,
+    )
+
+
 # -- scenario: clutter ------------------------------------------------------
 #
 # The scenario that decides whether `cost` may be the default. Every other
@@ -622,4 +678,5 @@ SCENARIOS: dict[str, Callable[[int], Sequence]] = {
     "dropout": dropout,
     "pan_step": pan_step,
     "clutter": clutter,
+    "long_occlusion": long_occlusion,
 }
