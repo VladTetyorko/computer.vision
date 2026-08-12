@@ -14,7 +14,7 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 | M0 | `cv-service/spikes/pull/` — measure, decide decoder + clock mode | — | **done — GO** |
 | M1 | `proto/vision/v1/cv.proto` + `vision-proto` | — | **done** |
 | M2 | `vision-domain` — `PulledDetectionPort`, `proxiesSource` | — | **done** |
-| M3 | `cv-service/cv_service/pull/` — the worker | M0, M1 | **ready** |
+| M3 | `cv-service/cv_service/pull/` — the worker | M0, M1 | **done** |
 | M4 | `adapters/adapter-cv-grpc` — Java pull port | M1, M2 | **done** |
 | M5 | `vision-application` + `vision-api` — pull-mode pipeline | M2, M4 | blocked |
 | M6 | `adapters/adapter-publish-hls` — proxy publisher + frame grab | M2 | **done** |
@@ -58,6 +58,14 @@ discharged; M3/M5/M6 may proceed against the amended contract.
   every on-demand start would time out. (2) A proxied source pointing at another path on the *same*
   mediamtx must use the container-internal RTSP port, not the host-mapped one; a wrong address
   fails silently as a readiness timeout, not a create error.
+- **M3 found a real constraint the contract does not mention:** OpenCV's
+  `OPENCV_FFMPEG_CAPTURE_OPTIONS` is **process-global and read at `open()`**, so `rtsp_transport`
+  cannot be set per connection. M3 serializes opens on a module lock and restores the previous
+  value. If a deployment ever needs two transports at once on one worker, that is the thing that
+  breaks first — and it is an argument for the PyAV fallback, not a bug in the loop.
+- **`CV_PULL_CLOCK_REANCHOR_THRESHOLD_MILLIS` (default 100 ms) is new**, added by M3: §5.1/§5.5 name
+  a re-anchor threshold but pin no number, so M3 reused the plan's own 10-minute drift gate as the
+  per-event trigger rather than inventing a second constant.
 - **`MediamtxLiveFrameGrabber` is built but not wired** into `StreamService` — M7 plumbing.
 - **Boxes-mode logic lives in `shared/player/detection-overlay-logic.ts`**, not `fly-logic.ts` as
   §8 M8 assumed — the wall tile needed the identical burn-in-aware cycle.
