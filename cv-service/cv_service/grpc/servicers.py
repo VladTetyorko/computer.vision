@@ -62,13 +62,14 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Optional
 
 import grpc
 
-from cv_service.config import DEFAULT_MAX_UPLOAD_BYTES, Settings
+from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_MAX_UPLOAD_BYTES, Settings
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
 from cv_service.tracking import params as tracking_params
 from cv_service.tracking.engines.base import Box, CameraPose
 from cv_service.tracking.registry import TrackerRegistry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
 from cv_service.tracking.sessions import SessionRegistry
+from cv_service.tracking.track import STATE_COASTING, STATE_CONFIRMED
 from cv_service.training import dataset, orchestrator, trainer
 from cv_service.training.marker import write_active_model
 
@@ -180,6 +181,13 @@ def _camera_pose_from_wire(message: "cv_pb2.CameraPose") -> CameraPose:
     )
 
 
+def _report_threshold_for(request: "cv_pb2.FrameRequest") -> float:
+    """The operator's threshold for this frame, with the detector's own default
+    standing in for an unset wire field -- the same `or DEFAULT_CONFIDENCE`
+    fallback `YoloDetector.detect` applies, kept in step deliberately."""
+    return request.confidence_threshold or DEFAULT_CONFIDENCE
+
+
 def _tracked_detection(box: "object") -> "cv_pb2.Detection":
     """One `TrackedBox` as a wire `Detection`.
 
@@ -215,8 +223,30 @@ def _tracked_detection(box: "object") -> "cv_pb2.Detection":
     return detection
 
 
+def _reportable(box: "object", report_threshold: float) -> bool:
+    """Whether one tracked box belongs in the response the operator sees.
+
+    The counterpart of the low detector floor (`cv_service/config.py`'s
+    `DEFAULT_DETECT_FLOOR`): the detector now emits weak boxes so the
+    associators' low-confidence stage has something to work with, and this is
+    where the operator's own `confidence_threshold` is applied instead.
+
+    A weak box survives on ONE ground -- it is carrying an identity that has
+    already been earned. `CONFIRMED`/`COASTING` mean the track cleared
+    `min_hits` detector confirmations, so "0.18, and it is the thing we have
+    been following for two seconds" is a different claim from "0.18, and it
+    just appeared". `TENTATIVE` deliberately does not qualify: that is exactly
+    the noise a lower floor produces more of, and letting it through would
+    trade a recall win for a screen full of flicker.
+    """
+    if box.confidence >= report_threshold:
+        return True
+    track = box.track
+    return track is not None and track.state in (STATE_CONFIRMED, STATE_COASTING)
+
+
 def _tracked_response(
-    request: "cv_pb2.FrameRequest", outcome: FrameOutcome
+    request: "cv_pb2.FrameRequest", outcome: FrameOutcome, report_threshold: float = 0.0
 ) -> "cv_pb2.DetectionResponse":
     """A `DetectionResponse` carrying this frame's tracking telemetry.
 
@@ -234,7 +264,11 @@ def _tracked_response(
         timestamp_millis=request.timestamp_millis,
         model_id=request.model_id,
         model_version=request.model_version,
-        detections=[_tracked_detection(box) for box in outcome.boxes or []],
+        detections=[
+            _tracked_detection(box)
+            for box in outcome.boxes or []
+            if _reportable(box, report_threshold)
+        ],
         inference_millis=outcome.inference_millis,
         tracker_millis=outcome.tracker_millis,
         detector_ran=outcome.detector_ran,
@@ -614,13 +648,15 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     # another machine's clock and can go backwards across a
                     # reconnect.
                     now_millis=time.monotonic() * 1000.0,
-                    detect=lambda roi=None: self._run_detector(request, roi, loader),
+                    detect=lambda roi=None: self._run_detector(
+                        request, roi, loader, self._detect_floor_for(request)
+                    ),
                     frame=loader,
                     pose=_camera_pose_from_wire(request.camera_pose),
                 )
                 if outcome.boxes is None:
                     return self._echo(request)
-                return _tracked_response(request, outcome)
+                return _tracked_response(request, outcome, _report_threshold_for(request))
 
             detections, inference_millis = self._run_detector(request)
             if detections is None:
@@ -656,6 +692,15 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             inference_millis=inference_millis,
         )
 
+    def _detect_floor_for(self, request: "cv_pb2.FrameRequest") -> float:
+        """The confidence the detector runs at for a tracking-ACTIVE frame.
+
+        `min` rather than a flat substitution: an operator who deliberately
+        asked for something LOWER than the floor must get what they asked for,
+        so the floor can only ever widen recall, never narrow it.
+        """
+        return min(self._settings.detect_floor, _report_threshold_for(request))
+
     def _sync_tracking(
         self, session: StreamTrackingSession, request: "cv_pb2.FrameRequest"
     ) -> bool:
@@ -679,6 +724,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         request: "cv_pb2.FrameRequest",
         roi: Optional[Box] = None,
         frame_loader: Optional[Callable[[], Any]] = None,
+        confidence: Optional[float] = None,
     ) -> tuple[Optional[list], int]:
         """One detector pass, full-frame or over a crop. **The only place
         `InferenceGate` is taken.**
@@ -699,9 +745,9 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         pays for a second decode.
         """
         if roi is not None:
-            return self._run_roi_detector(request, roi, frame_loader)
+            return self._run_roi_detector(request, roi, frame_loader, confidence)
         if self._registry is not None:
-            return self._detect_via_registry(request)
+            return self._detect_via_registry(request, confidence=confidence)
         self._warn_once_on_unknown_model(request.model_id)
         with self._inference_gate.acquire():
             return self._detector.detect(
@@ -709,7 +755,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 height=request.height,
                 encoding=cv_pb2.ImageEncoding.Name(request.encoding),
                 data=request.data,
-                confidence_threshold=request.confidence_threshold or None,
+                confidence_threshold=confidence or request.confidence_threshold or None,
             )
 
     def _run_roi_detector(
@@ -717,6 +763,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         request: "cv_pb2.FrameRequest",
         roi: Box,
         frame_loader: Optional[Callable[[], Any]],
+        confidence: Optional[float] = None,
     ) -> tuple[Optional[list], int]:
         """Crop the ALREADY-decoded frame to `roi`, run the SAME detector
         (single or registry-routed composite, whichever this servicer was
@@ -760,7 +807,8 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
 
         if self._registry is not None:
             detections, millis = self._detect_via_registry(
-                request, width=crop_width, height=crop_height, encoding=ENCODING_BGR24, data=data
+                request, width=crop_width, height=crop_height, encoding=ENCODING_BGR24, data=data,
+                confidence=confidence,
             )
         else:
             self._warn_once_on_unknown_model(request.model_id)
@@ -770,7 +818,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     height=crop_height,
                     encoding=ENCODING_BGR24,
                     data=data,
-                    confidence_threshold=request.confidence_threshold or None,
+                    confidence_threshold=confidence or request.confidence_threshold or None,
                 )
         if not detections:
             return detections, millis
@@ -816,6 +864,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         height: Optional[int] = None,
         encoding: Optional[str] = None,
         data: Optional[bytes] = None,
+        confidence: Optional[float] = None,
     ) -> tuple[Optional[list], int]:
         """Registry-routed counterpart of the explicit-`detector` branch above.
 
@@ -847,7 +896,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
             height=height if height is not None else request.height,
             encoding=encoding if encoding is not None else cv_pb2.ImageEncoding.Name(request.encoding),
             data=data if data is not None else request.data,
-            confidence_threshold=request.confidence_threshold or None,
+            confidence_threshold=confidence or request.confidence_threshold or None,
         )
         return detections, inference_millis
 

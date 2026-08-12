@@ -160,6 +160,32 @@ DEFAULT_TRACK_COST_GATE_MAX_COST = float("inf")
 # tunes it as its own separate constant.
 DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE = 0.25
 
+# The confidence the DETECTOR actually runs at while tracking is ACTIVE, as
+# opposed to the operator's `confidence_threshold`, which becomes a REPORTING
+# threshold (docs/conclusions/CV-RATE-BUDGET.md §4 "the confidence finding").
+#
+# Both associators split their match into a high- and a low-confidence stage --
+# `bytetrack`'s `_TRACK_LOW_THRESH`, `cost`'s `AssignGates.high_confidence`
+# above -- because a weak box that lands on a predicted position is strong
+# evidence of continuity even though it is weak evidence of existence. That
+# entire second stage was unreachable: the operator threshold was applied at
+# `model.predict(conf=)`, so no box below it was ever created and the low list
+# was always empty.
+#
+# Set BELOW `DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE` on purpose -- a floor at
+# or above the split would leave the low stage just as empty as before. Applies
+# only when tracking is active: with tracking OFF the operator threshold still
+# goes straight to the detector, keeping that path byte-identical (invariant P1).
+DEFAULT_DETECT_FLOOR = 0.15
+
+# The confidence a detector pass uses when the wire field is unset. NOT a CV_*
+# env knob -- it is inference behaviour, not deployment configuration -- but it
+# lives here rather than in `inference/detector.py` because `grpc/servicers.py`
+# now needs it too (to know what threshold to REPORT at), and that module must
+# stay importable without the `cv` extra, which importing `detector` would break.
+# `detector.py` re-exports it, exactly as it does DEFAULT_MODEL/DEFAULT_IMGSZ.
+DEFAULT_CONFIDENCE = 0.25
+
 # TRACKING-V2-PLAN wave C4: `ObjectMemory`'s `MemoryParams` (`memory.py`),
 # resolved straight from `Settings` -- `resolve()` builds the dataclass
 # directly, same "no wire field for the rest of it" shape the cost weights/
@@ -559,6 +585,7 @@ class Settings:
     track_cost_gate_max_appearance: float = DEFAULT_TRACK_COST_GATE_MAX_APPEARANCE
     track_cost_gate_max_cost: float = DEFAULT_TRACK_COST_GATE_MAX_COST
     track_cost_gate_high_confidence: float = DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE
+    detect_floor: float = DEFAULT_DETECT_FLOOR
     track_memory_ttl_millis: int = DEFAULT_TRACK_MEMORY_TTL_MILLIS
     track_memory_capacity: int = DEFAULT_TRACK_MEMORY_CAPACITY
     track_memory_gallery_size: int = DEFAULT_TRACK_MEMORY_GALLERY_SIZE
@@ -680,6 +707,11 @@ class Settings:
                 os.environ.get("CV_TRACK_COST_GATE_HIGH_CONFIDENCE"),
                 DEFAULT_TRACK_COST_GATE_HIGH_CONFIDENCE,
                 "CV_TRACK_COST_GATE_HIGH_CONFIDENCE",
+            ),
+            detect_floor=_parse_unit_interval(
+                os.environ.get("CV_DETECT_FLOOR"),
+                DEFAULT_DETECT_FLOOR,
+                "CV_DETECT_FLOOR",
             ),
             track_memory_ttl_millis=_parse_int_allow_nonpositive(
                 os.environ.get("CV_TRACK_MEMORY_TTL_MILLIS"),
