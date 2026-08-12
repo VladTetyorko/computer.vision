@@ -2,6 +2,7 @@ package com.drones.vision.application.pipeline;
 
 import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.AssetId;
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.Device;
@@ -26,6 +27,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -249,6 +251,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * that answers "what time is it" the same way twice, so latency gets its own.
      */
     private final LongSupplier latencyNanoSource;
+
+    /** @see StreamPipelineSettings#cameraHfovDegrees() — {@code 0} disables pose compensation. */
+    private final double cameraHfovDegrees;
 
     // Frame-cadence and detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
     // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
@@ -479,6 +484,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.telemetrySupplier = telemetrySupplier; // nullable: no telemetry-OSD input when absent
         this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
         Objects.requireNonNull(settings, "settings must not be null");
+        this.cameraHfovDegrees = settings.cameraHfovDegrees();
         this.assumedSourceFps = settings.assumedSourceFps();
         this.measuredFpsEwmaAlpha = settings.measuredFpsEwmaAlpha();
         this.warmupFrames = settings.warmupFrames();
@@ -744,7 +750,35 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * supplier never spams logs on every frame.
      */
     private Telemetry telemetrySampleFor() {
-        if (!config.overlayTelemetry() || telemetrySupplier == null) {
+        if (!config.overlayTelemetry()) {
+            return null;
+        }
+        return readTelemetry();
+    }
+
+    /**
+     * This frame's camera attitude for ego-motion compensation, or {@code null} when none can be
+     * built (docs/conclusions/CV-RATE-BUDGET.md &sect;5, gap 3).
+     *
+     * <p>Short-circuits on an unconfigured field of view <b>before</b> touching the supplier: with
+     * no optics described the attitude could not drive compensation anyway, so the default
+     * deployment pays nothing at all for this feature.
+     *
+     * <p>Deliberately not routed through {@link #telemetrySampleFor()}: that one is gated on {@link
+     * PipelineConfig#overlayTelemetry()}, which is a <i>presentation</i> switch. Turning the OSD off
+     * must not silently disable ego-motion compensation — they are unrelated concerns that happen to
+     * read the same supplier.
+     */
+    private CameraAttitude cameraAttitude() {
+        if (cameraHfovDegrees <= 0.0) {
+            return null;
+        }
+        return CameraAttitude.from(readTelemetry(), cameraHfovDegrees);
+    }
+
+    /** The telemetry supplier read once, with the shared failure latch; {@code null} when absent or failing. */
+    private Telemetry readTelemetry() {
+        if (telemetrySupplier == null) {
             return null;
         }
         try {
@@ -880,7 +914,14 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     private void submitDetection(VideoFrame frame, boolean isProbe) {
         long submittedAtNanos = latencyNanoSource.getAsLong();
-        detectionPort.detect(frame, config).whenComplete((result, error) -> {
+        // The three-argument form is taken ONLY when there is an attitude to send, so a port (or a
+        // test double) that never learned about attitude sees exactly the calls it saw before this
+        // feature existed. The additive contract holds at the call site, not just in the interface.
+        CameraAttitude attitude = cameraAttitude();
+        CompletionStage<DetectionResult> pending = attitude == null
+                ? detectionPort.detect(frame, config)
+                : detectionPort.detect(frame, config, attitude);
+        pending.whenComplete((result, error) -> {
             // Recorded before the closed/error branches below: a round trip that ended in a failure,
             // or arrived after close, still happened and is still the number worth seeing.
             pipelineLatency.record(submittedAtNanos, latencyNanoSource.getAsLong());

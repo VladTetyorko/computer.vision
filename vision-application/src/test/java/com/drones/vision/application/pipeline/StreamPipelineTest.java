@@ -4,6 +4,7 @@ import com.drones.vision.domain.model.AnnotatedFrame;
 import com.drones.vision.domain.model.AssetId;
 import com.drones.vision.domain.model.BoundingBox;
 import com.drones.vision.domain.model.Capability;
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DetectionSource;
@@ -45,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Flow;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -188,6 +190,94 @@ class StreamPipelineTest {
         return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher, null, null, null, null, null,
                 fixedFpsClock(30), StreamPipelineSettings.defaults(), latencyClock);
+    }
+
+    // --- camera attitude (docs/conclusions/CV-RATE-BUDGET.md §5, gap 3) ----------------------
+
+    private static StreamPipelineSettings settingsWithHfov(double hfovDegrees) {
+        StreamPipelineSettings base = StreamPipelineSettings.defaults();
+        return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(),
+                base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
+                base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
+                base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
+                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
+    }
+
+    private StreamPipeline attitudePipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
+                                             Supplier<Telemetry> telemetrySupplier,
+                                             StreamPipelineSettings settings) {
+        return new StreamPipeline(streamId, device, config, publisher, detectionPort, streamPublisherPort,
+                detectionRepositoryPort, eventPublisher, null, null, null, null, telemetrySupplier,
+                fixedFpsClock(30), settings, System::nanoTime);
+    }
+
+    private static Telemetry telemetryWithHeading(Double headingDegrees) {
+        return new Telemetry(DeviceId.random(), Instant.ofEpochMilli(4_242), 50.0, 30.0, 120.0,
+                headingDegrees, 80.0, Map.of());
+    }
+
+    @Test
+    void sendsTheCameraAttitudeWhenAFieldOfViewIsConfigured() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        attitudePipeline(publisher, config(60, 5), () -> telemetryWithHeading(137.5),
+                settingsWithHfov(62.0)).start();
+
+        ArgumentCaptor<CameraAttitude> captor = ArgumentCaptor.forClass(CameraAttitude.class);
+        verify(detectionPort).detect(any(), any(), captor.capture());
+        CameraAttitude sent = captor.getValue();
+        assertEquals(137.5, sent.yawDegrees());
+        assertEquals(62.0, sent.hfovDegrees());
+        assertEquals(Instant.ofEpochMilli(4_242), sent.at());
+        assertTrue(sent.known());
+    }
+
+    @Test
+    void takesTheTwoArgumentPortCallWhenNoFieldOfViewIsConfigured() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+        AtomicInteger supplierCalls = new AtomicInteger();
+
+        // defaults() carries hfov 0 -- the shipped configuration.
+        attitudePipeline(publisher, config(60, 5), () -> {
+            supplierCalls.incrementAndGet();
+            return telemetryWithHeading(137.5);
+        }, StreamPipelineSettings.defaults()).start();
+
+        verify(detectionPort).detect(any(), any());
+        verify(detectionPort, never()).detect(any(), any(), any());
+        assertEquals(0, supplierCalls.get(),
+                "an unconfigured field of view must short-circuit before touching the supplier");
+    }
+
+    @Test
+    void takesTheTwoArgumentPortCallWhenTelemetryCarriesNoHeading() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+
+        attitudePipeline(publisher, config(60, 5), () -> telemetryWithHeading(null),
+                settingsWithHfov(62.0)).start();
+
+        verify(detectionPort).detect(any(), any());
+        verify(detectionPort, never()).detect(any(), any(), any());
+    }
+
+    @Test
+    void turningTheTelemetryOsdOffDoesNotDisableEgoMotionCompensation() {
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(frame(0)));
+        when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(emptyResult(0)));
+        PipelineConfig base = config(60, 5);
+        PipelineConfig osdOff = new PipelineConfig(base.model(), base.confidenceThreshold(),
+                base.inferenceFps(), base.maxInFlightInferences(), false, base.labelFilter(),
+                base.eventRule(), base.overlayBurnIn(), base.detectionEnabled(), base.tracking());
+
+        attitudePipeline(publisher, osdOff, () -> telemetryWithHeading(137.5), settingsWithHfov(62.0)).start();
+
+        // overlayTelemetry is a PRESENTATION switch; compensation is a perception concern. They
+        // happen to read the same supplier and must not be coupled through it.
+        verify(detectionPort).detect(any(), any(), any());
     }
 
     /** Returns each scripted reading in order, then repeats the last one. */

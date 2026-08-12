@@ -1,5 +1,6 @@
 package com.drones.vision.adapter.cvgrpc;
 
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.StreamId;
@@ -100,6 +101,12 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
     @Override
     public CompletionStage<DetectionResult> detect(VideoFrame frame, PipelineConfig config) {
+        return detect(frame, config, null);
+    }
+
+    @Override
+    public CompletionStage<DetectionResult> detect(VideoFrame frame, PipelineConfig config,
+                                                    CameraAttitude attitude) {
         Objects.requireNonNull(frame, "frame must not be null");
         Objects.requireNonNull(config, "config must not be null");
 
@@ -109,7 +116,7 @@ public final class GrpcDetectionPort implements DetectionPort, AutoCloseable {
 
         FrameRequest request;
         try {
-            request = codec.encode(frame, config);
+            request = codec.encode(frame, config, attitude);
         } catch (IOException | RuntimeException e) {
             // Conversion (downscale/JPEG-encode) failure: fails only this frame's stage, exactly
             // like a malformed response does for one pending future -- no session is created or

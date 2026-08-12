@@ -86,10 +86,22 @@ public record StreamPipelineSettings(
         double extrapolationMatchGate,
         Duration trackingStatsWindow,
         Duration trackRetention,
-        TrackingConfigPatch trackingSeed) {
+        TrackingConfigPatch trackingSeed,
+        double cameraHfovDegrees) {
 
     /** @see #trackRetention() */
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
+
+    /**
+     * {@code 0} = the deployment has not described its camera's optics, which disables pose-based
+     * ego-motion compensation rather than inventing a scale for it (see {@code
+     * CameraAttitude#known()}). Deliberately not a plausible-looking guess such as 60&deg;: a wrong
+     * field of view produces a confidently wrong pixel shift, which is worse than no compensation at
+     * all, and the flow-based compensator still runs meanwhile.
+     *
+     * @see #cameraHfovDegrees()
+     */
+    public static final double DEFAULT_CAMERA_HFOV_DEGREES = 0.0;
 
     /**
      * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T3 added the two tracking
@@ -126,6 +138,24 @@ public record StreamPipelineSettings(
                 detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
                 sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
                 trackRetention, TrackingConfigPatch.NOTHING);
+    }
+
+    /**
+     * The canonical constructor before {@code cameraHfovDegrees} was added, kept as a convenience
+     * constructor defaulting it to {@link #DEFAULT_CAMERA_HFOV_DEGREES} — "the deployment has not
+     * described its optics", which disables pose compensation exactly as an absent value should.
+     * Same "N-1-arg convenience ctor" idiom as the two above.
+     */
+    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
+                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
+                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
+                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
+                                   double extrapolationMatchGate, Duration trackingStatsWindow,
+                                   Duration trackRetention, TrackingConfigPatch trackingSeed) {
+        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
+                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
+                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
+                trackRetention, trackingSeed, DEFAULT_CAMERA_HFOV_DEGREES);
     }
 
     public StreamPipelineSettings {
@@ -169,6 +199,10 @@ public record StreamPipelineSettings(
         }
         if (trackingSeed == null) {
             throw new IllegalArgumentException("trackingSeed must not be null; use TrackingConfigPatch.NOTHING");
+        }
+        if (!Double.isFinite(cameraHfovDegrees) || cameraHfovDegrees < 0.0 || cameraHfovDegrees >= 180.0) {
+            throw new IllegalArgumentException(
+                    "cameraHfovDegrees must be in [0, 180), was " + cameraHfovDegrees);
         }
     }
 

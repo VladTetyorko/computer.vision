@@ -351,7 +351,8 @@ public class ApplicationServiceWiring {
                 extrapolation.maxMillis(), extrapolation.matchGate(),
                 Duration.ofSeconds(tracking.statsWindowSeconds()),
                 Duration.ofSeconds(tracking.trackRetentionSeconds()),
-                TrackingWiring.streamStartTrackingSeed(tracking));
+                TrackingWiring.streamStartTrackingSeed(tracking),
+                pipeline.cameraHfovDegrees());
     }
 
     /**
