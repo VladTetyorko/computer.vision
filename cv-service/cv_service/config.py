@@ -58,8 +58,19 @@ _DATASET_DIRNAME = "datasets"
 # `TrackingConfig` -- `cv_service/tracking/params.py`'s `resolve()` is their
 # ONLY consumer, and this module stays the only place they are read from the
 # environment (the one-place rule, see this module's docstring). The values
-# are byte-identical to the defaults named in TRACKING-PLAN §4.A.
-DEFAULT_TRACK_ASSOCIATE_ENGINE = "bytetrack"
+# are byte-identical to the defaults named in TRACKING-PLAN §4.A, with one
+# deliberate exception recorded at the constant itself:
+# DEFAULT_TRACK_ASSOCIATE_ENGINE, which TRACKING-V2 wave C3 flipped.
+# `cost` rather than `bytetrack` since TRACKING-V2 wave C3, on measurement
+# rather than preference (the evidence is in MODULE.md's "Association
+# inversion" section): better on `crossing`, `occlusion` and `pan_step`,
+# equal on `linear`, `dropout`, `pan` and `clutter`, worse on nothing. The
+# one risk `cost` carries that `bytetrack` does not is a crowd -- a solver
+# minimising TOTAL cost can buy a cheap overall assignment out of
+# individually absurd pairs -- so `clutter` exists specifically to test that,
+# and both engines score IDSW 0 with every object mostly-tracked.
+# `bytetrack` remains fully supported and one env var away.
+DEFAULT_TRACK_ASSOCIATE_ENGINE = "cost"
 DEFAULT_TRACK_FOLLOW_ENGINE = "lk"
 DEFAULT_TRACK_VERIFY_MILLIS = 2000
 DEFAULT_TRACK_IOU = 0.3
