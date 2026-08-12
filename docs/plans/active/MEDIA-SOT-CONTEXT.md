@@ -13,7 +13,7 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 |---|---|---|---|
 | M0 | `cv-service/spikes/pull/` — measure, decide decoder + clock mode | — | pending |
 | M1 | `proto/vision/v1/cv.proto` + `vision-proto` | — | **done** |
-| M2 | `vision-domain` — `PulledDetectionPort`, `proxiesSource` | — | pending |
+| M2 | `vision-domain` — `PulledDetectionPort`, `proxiesSource` | — | **done** |
 | M3 | `cv-service/cv_service/pull/` — the worker | M0, M1 | blocked |
 | M4 | `adapters/adapter-cv-grpc` — Java pull port | M1, M2 | blocked |
 | M5 | `vision-application` + `vision-api` — pull-mode pipeline | M2, M4 | blocked |

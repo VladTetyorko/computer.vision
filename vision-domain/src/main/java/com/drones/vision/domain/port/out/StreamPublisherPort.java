@@ -126,4 +126,22 @@ public interface StreamPublisherPort {
     default Optional<URI> playbackUrl(StreamId streamId, Instant start, Duration duration) {
         return Optional.empty();
     }
+
+    /**
+     * Whether this publisher itself dials {@code device}'s source, rather than expecting the
+     * application layer to open a {@code VideoSourcePort} and hand it frames via {@link
+     * #publish(StreamId, VideoFrame)} (docs/plans/active/MEDIA-SOT-PLAN.md &sect;4, D3/D4 — a
+     * proxying publisher, e.g. one that points mediamtx's own Control API at the camera's RTSP
+     * URL, means no JVM ever decodes this stream's video for viewing).
+     *
+     * <p>Defaults to {@code false} — today's every implementation, including a no-op/dev-support
+     * one — so this method needed adding to exactly one interface and zero implementations.
+     *
+     * @param device the device whose stream is starting
+     * @return {@code true} if this publisher dials the source itself; {@code false} (the default)
+     *         if it expects to be fed frames via {@link #publish(StreamId, VideoFrame)}
+     */
+    default boolean proxiesSource(Device device) {
+        return false;
+    }
 }
