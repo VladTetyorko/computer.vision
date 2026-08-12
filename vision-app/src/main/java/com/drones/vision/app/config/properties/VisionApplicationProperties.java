@@ -71,7 +71,8 @@ public record VisionApplicationProperties(
         if (pipeline == null) {
             pipeline = new Pipeline(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS_INT,
                     Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA_DOUBLE, Pipeline.DEFAULT_WARMUP_FRAMES_INT,
-                    Pipeline.DEFAULT_MIN_MEASURED_FPS_DOUBLE, Pipeline.DEFAULT_MAX_MEASURED_FPS_DOUBLE, null, null);
+                    Pipeline.DEFAULT_MIN_MEASURED_FPS_DOUBLE, Pipeline.DEFAULT_MAX_MEASURED_FPS_DOUBLE, null, null,
+                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE);
         }
         if (extrapolation == null) {
             extrapolation = new Extrapolation(Extrapolation.DEFAULT_MAX_MILLIS_LONG,
@@ -148,6 +149,12 @@ public record VisionApplicationProperties(
      *                              video source in a {@code SupervisedPublisher} (1s&ndash;30s
      *                              default, deliberately different from {@code detectionBackoff} —
      *                              docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;2.3); defaulted as a whole when absent
+     * @param cameraHfovDegrees     the camera's horizontal field of view, which is what lets a
+     *                              telemetry attitude delta become a pixel shift for cv-service's
+     *                              {@code pose} ego-motion compensator
+     *                              (docs/conclusions/CV-RATE-BUDGET.md &sect;2). Default
+     *                              {@value #DEFAULT_CAMERA_HFOV_DEGREES} = unknown, which leaves
+     *                              pose compensation off rather than guessing a scale
      */
     public record Pipeline(@DefaultValue(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS) int assumedSourceFps,
                             @DefaultValue(Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA) double measuredFpsEwmaAlpha,
@@ -155,8 +162,11 @@ public record VisionApplicationProperties(
                             @DefaultValue(Pipeline.DEFAULT_MIN_MEASURED_FPS) double minMeasuredFps,
                             @DefaultValue(Pipeline.DEFAULT_MAX_MEASURED_FPS) double maxMeasuredFps,
                             Backoff detectionBackoff,
-                            Backoff sourceReopenBackoff) {
+                            Backoff sourceReopenBackoff,
+                            @DefaultValue(Pipeline.DEFAULT_CAMERA_HFOV_DEGREES) double cameraHfovDegrees) {
         static final String DEFAULT_ASSUMED_SOURCE_FPS = "30";
+        static final String DEFAULT_CAMERA_HFOV_DEGREES = "0.0";
+        static final double DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE = 0.0;
         static final String DEFAULT_MEASURED_FPS_EWMA_ALPHA = "0.2";
         static final String DEFAULT_WARMUP_FRAMES = "5";
         static final String DEFAULT_MIN_MEASURED_FPS = "1.0";

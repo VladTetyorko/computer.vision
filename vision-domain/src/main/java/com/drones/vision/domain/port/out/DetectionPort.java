@@ -1,5 +1,6 @@
 package com.drones.vision.domain.port.out;
 
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.PipelineConfig;
 import com.drones.vision.domain.model.VideoFrame;
@@ -48,4 +49,27 @@ public interface DetectionPort {
      *         exceptionally if inference could not be performed
      */
     CompletionStage<DetectionResult> detect(VideoFrame frame, PipelineConfig config);
+
+    /**
+     * Runs inference on a single frame, telling the detector where the camera was pointing.
+     *
+     * <p>Additive by default rather than a change to the two-argument form above, for the same
+     * reason the wire contract grows only by new fields: an implementation that has no use for
+     * attitude — every in-memory and test double in this repo — stays correct without being
+     * recompiled, and one that does (the gRPC adapter) overrides this method alone.
+     *
+     * <p>A {@code null} {@code attitude} is the normal state, not a degradation: it is what a
+     * stream with no telemetry, no heading, or no configured field of view supplies, and the
+     * detector falls back to whatever ego-motion estimation it can do from pixels alone.
+     *
+     * @param frame    the frame to run inference on
+     * @param config   model, threshold, and sampling configuration
+     * @param attitude where the camera was pointing at capture, or {@code null} when unknown
+     * @return a stage that completes with the detection result, or completes exceptionally if
+     *         inference could not be performed
+     */
+    default CompletionStage<DetectionResult> detect(VideoFrame frame, PipelineConfig config,
+                                                     CameraAttitude attitude) {
+        return detect(frame, config);
+    }
 }

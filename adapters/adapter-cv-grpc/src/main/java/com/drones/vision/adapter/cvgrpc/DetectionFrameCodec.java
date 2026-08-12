@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.cvgrpc;
 
 import com.drones.vision.domain.model.BoundingBox;
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DetectionSource;
@@ -16,6 +17,7 @@ import com.drones.vision.domain.model.TrackingConfig;
 import com.drones.vision.domain.model.TrackingMode;
 import com.drones.vision.domain.model.TrackingTelemetry;
 import com.drones.vision.domain.model.VideoFrame;
+import com.drones.vision.proto.v1.CameraPose;
 import com.drones.vision.proto.v1.DetectionResponse;
 import com.drones.vision.proto.v1.FrameRequest;
 import com.drones.vision.proto.v1.ImageEncoding;
@@ -110,6 +112,26 @@ final class DetectionFrameCodec {
      * @throws IOException              if the JPEG encoder fails
      */
     FrameRequest encode(VideoFrame frame, PipelineConfig config) throws IOException {
+        return encode(frame, config, null);
+    }
+
+    /**
+     * As {@link #encode(VideoFrame, PipelineConfig)}, additionally stamping the camera attitude so
+     * cv-service's {@code pose} ego-motion compensator has something to work with
+     * (docs/conclusions/CV-RATE-BUDGET.md &sect;5, gap 3).
+     *
+     * <p>A {@code null} or {@link CameraAttitude#known() unknown} attitude sets <b>no</b> {@code
+     * camera_pose} at all rather than a zeroed one — the wire's documented "absent = flow-based
+     * compensation only". A zeroed pose would be worse than absent: cv-service gates on {@code
+     * hfov_degrees > 0}, so it would be ignored anyway, at the cost of a submessage per frame.
+     *
+     * @param frame    the frame to send
+     * @param config   model, threshold, and tracking configuration
+     * @param attitude where the camera was pointing at capture, or {@code null} when unknown
+     * @throws IllegalArgumentException if {@code frame}'s {@link PixelFormat} is not sendable
+     * @throws IOException              if the JPEG encoder fails
+     */
+    FrameRequest encode(VideoFrame frame, PipelineConfig config, CameraAttitude attitude) throws IOException {
         ImageEncoding encoding = toImageEncoding(frame.format());
         if (encoding == null) {
             throw new IllegalArgumentException(
@@ -124,6 +146,10 @@ final class DetectionFrameCodec {
                 .setModelVersion(config.model().version())
                 .setConfidenceThreshold((float) config.confidenceThreshold())
                 .setTracking(toWireTrackingConfig(config.tracking()));
+
+        if (attitude != null && attitude.known()) {
+            builder.setCameraPose(toWireCameraPose(attitude));
+        }
 
         if (encoding == ImageEncoding.IMAGE_ENCODING_BGR24 && frame.width() > detectWidth) {
             return withDownscaledJpeg(builder, frame);
@@ -177,6 +203,23 @@ final class DetectionFrameCodec {
         // validation (caught per-response by DetectionStreamSession#onResponse).
         DetectorReason reason = detectorRan ? toDetectorReason(wireReason) : null;
         return new TrackingTelemetry(detectorRan, reason, Duration.ofMillis(trackerMillis), engineId, lockedTrackId);
+    }
+
+    /**
+     * Maps the domain attitude onto the wire message field-for-field. {@code vfov_degrees} passes
+     * {@code 0} straight through when the domain does not know it — the wire's own spelling of
+     * "derive it from the horizontal FOV and the frame aspect ratio", which is exactly what
+     * cv-service's {@code pose_gmc} does with it.
+     */
+    private static CameraPose toWireCameraPose(CameraAttitude attitude) {
+        return CameraPose.newBuilder()
+                .setYawDegrees((float) attitude.yawDegrees())
+                .setPitchDegrees((float) attitude.pitchDegrees())
+                .setRollDegrees((float) attitude.rollDegrees())
+                .setHfovDegrees((float) attitude.hfovDegrees())
+                .setVfovDegrees((float) attitude.vfovDegrees())
+                .setPoseTimestampMillis(attitude.at().toEpochMilli())
+                .build();
     }
 
     private static com.drones.vision.proto.v1.TrackingConfig toWireTrackingConfig(TrackingConfig tracking) {

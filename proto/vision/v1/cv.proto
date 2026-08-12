@@ -59,6 +59,27 @@ enum DetectorReason {
   DETECTOR_REASON_COASTED_OUT    = 6;  // (e) COASTING longer than max_age_frames
 }
 
+// Camera attitude at capture time (docs/plans/active/TRACKING-V2-PLAN.md §2).
+//
+// Feeds two consumers that need the same numbers: ego-motion compensation, which warps a track's
+// predicted box into the current frame before any IoU is computed (without it, a yawing aircraft
+// charges its own movement to the object and the track is reborn every slew), and, later, S2
+// fixed-camera geolocation.
+//
+// Every field is optional. `hfov_degrees == 0` means "unknown" and is the one field that gates the
+// whole message: with no FOV an attitude delta cannot be converted to a pixel shift, so cv-service
+// reports the pose compensator unavailable and degrades to flow-based estimation. An absent
+// CameraPose is therefore never an error -- it is the normal state of a client that has not been
+// taught to send one.
+message CameraPose {
+  float yaw_degrees           = 1;  // camera boresight heading, degrees
+  float pitch_degrees         = 2;  // positive up
+  float roll_degrees          = 3;
+  float hfov_degrees          = 4;  // 0 = unknown -> pose compensation disabled for this stream
+  float vfov_degrees          = 5;  // 0 = derive from hfov and the frame aspect ratio
+  int64 pose_timestamp_millis = 6;  // 0 = the same instant as the frame
+}
+
 // Which object FOLLOW mode should hold.
 //
 // Identified by `lock_seq`: cv-service applies a lock only when `lock_seq` is strictly
@@ -88,6 +109,9 @@ message TrackingConfig {
   int32  max_age_frames         = 5;  // unmatched frames before LOST;      <=0 = default (30)
   int32  min_hits               = 6;  // detector hits TENTATIVE -> CONFIRMED; <=0 = default (3)
   TargetLock lock               = 7;  // FOLLOW only; absent = no lock held
+  string motion_engine_id       = 8;  // NEW -- ego-motion compensator; "" = server default, "off" disables
+  string appearance_engine_id   = 9;  // NEW -- appearance descriptor;  "" = server default, "off" disables
+  int32  memory_ttl_millis      = 10; // NEW -- dormant-gallery TTL for re-acquisition; <=0 = server default
 }
 
 // ---------------------------------------------------------- CHANGED messages
@@ -106,6 +130,7 @@ message FrameRequest {
   string model_version         = 9;
   float confidence_threshold   = 10;
   TrackingConfig tracking      = 11;  // NEW -- absent => TRACKING_MODE_OFF
+  CameraPose camera_pose       = 12;  // NEW -- absent => flow-based ego-motion compensation only
 }
 
 // Normalized bounding box. Coordinates are in [0, 1] relative to frame
@@ -129,6 +154,8 @@ message Detection {
   float velocity_x        = 7;  // NEW -- normalized frame-WIDTHS per second (matches BoundingBox units)
   float velocity_y        = 8;  // NEW -- normalized frame-HEIGHTS per second
   int32 track_age_frames  = 9;  // NEW -- frames since this track was born
+  float identity_confidence = 10; // NEW -- >0 => this id was RECOVERED from memory, at this score; 0 => not a recovery
+  int64 dormant_millis      = 11; // NEW -- how long this identity was dormant before it was recovered; 0 => not a recovery
 }
 
 // Inference result for one frame.
@@ -145,6 +172,9 @@ message DetectionResponse {
   string tracker_engine_id     = 10;  // NEW -- engine that actually served this frame ("" = none)
   int64 locked_track_id        = 11;  // NEW -- FOLLOW: the track currently held (0 = none)
   DetectorReason detector_reason = 12; // NEW -- why the pass ran; UNSPECIFIED when it did not
+  bool   detector_roi      = 13;  // NEW -- the pass was a crop around a prediction, not a full frame
+  int64  motion_millis     = 14;  // NEW -- ego-motion estimation cost for this frame
+  string motion_engine_id  = 15;  // NEW -- compensator that served this frame ("" = none ran)
 }
 
 message TrainingJobSpec {

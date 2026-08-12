@@ -46,6 +46,8 @@ com.drones.vision.app
 | Record | Status | Prefix | Maps onto |
 |---|---|---|---|
 | `VisionApplicationProperties` | moved (Wave A) | `vision.application` | `vision-application`'s own settings records (`StreamPipelineSettings`, `ReplayServiceSettings`, `SimulationServiceSettings`) |
+
+`vision.application.pipeline.camera-hfov-degrees` (default `0.0` = unknown) is the newest key here and the only one that is a **physical** property rather than a tuning knob: it is the camera's horizontal field of view, the scale that turns a telemetry attitude delta into a pixel shift, and therefore what lets cv-service's `pose` ego-motion compensator run at all (docs/conclusions/CV-RATE-BUDGET.md §2). `0` ships deliberately rather than a plausible-looking `60`: a wrong FOV produces a confidently wrong pixel shift, which is worse than the `flow` fallback it would displace. It is **one value per instance, not per camera** — a deployment mixing lenses needs it lifted onto the asset, which is the recorded follow-up.
 | `VisionPersistenceProperties` | moved, unchanged | `vision.persistence` | `adapter-persistence`'s `PersistenceUnit` |
 | `VisionLiveProperties` | moved, unchanged | `vision.live` | selects `LiveUpdateRegistry` (vision-api) vs. `NoopLiveUpdatePublisher` |
 | `VisionTrainingProperties` | moved, unchanged | `vision.training` | gates `TrainingWiringConfiguration`'s whole bean cluster |

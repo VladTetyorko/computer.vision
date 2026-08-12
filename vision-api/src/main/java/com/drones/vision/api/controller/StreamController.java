@@ -4,6 +4,7 @@ import com.drones.vision.api.dto.ActiveStreamResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
+import com.drones.vision.api.dto.PipelineLatencyResponse;
 import com.drones.vision.api.dto.StreamTracksResponse;
 import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
@@ -228,8 +229,14 @@ public class StreamController {
         TrackingStats stats = streamService.trackingStats(id).orElse(null);
         TrackStatsResponse statsResponse =
                 stats == null || stats.lastDetectorReason() == null ? null : TrackStatsResponse.from(stats);
+        // Gated on having sampled anything at all, NOT on `stats`: a stream with tracking off
+        // reports latency and no stats, which is the combination this endpoint most needs to serve.
+        PipelineLatencyResponse latencyResponse = streamService.pipelineLatency(id)
+                .filter(latency -> latency.samples() > 0L)
+                .map(PipelineLatencyResponse::from)
+                .orElse(null);
         return new StreamTracksResponse(id.value().toString(), stats == null ? 0L : stats.lockedTrackId(), tracks,
-                statsResponse);
+                statsResponse, latencyResponse);
     }
 
     /**

@@ -109,6 +109,85 @@ def test_ncc_reports_no_match_when_the_target_is_gone():
     assert engine.update(unrelated) is None
 
 
+# --- lk: forward-backward rejection + corner re-seeding (review finding C3) --
+
+
+def test_lk_forward_backward_rejects_a_corner_that_does_not_round_trip(monkeypatch):
+    from cv_service.tracking.engines import lk as lk_module
+
+    points = np.array([[[10.0, 10.0]], [[50.0, 50.0]]], dtype=np.float32)
+    moved = np.array([[[12.0, 10.0]], [[55.0, 52.0]]], dtype=np.float32)
+    status = np.array([[1], [1]], dtype=np.uint8)
+    # Point 0 round-trips back to (almost) where it started; point 1 lands
+    # nowhere close -- it jumped onto something else and should be rejected.
+    back = np.array([[[10.1, 10.0]], [[90.0, 90.0]]], dtype=np.float32)
+    back_status = np.array([[1], [1]], dtype=np.uint8)
+    monkeypatch.setattr(
+        lk_module.cv2, "calcOpticalFlowPyrLK", lambda *a, **k: (back, back_status, None)
+    )
+    blank = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
+
+    kept = lk_module._forward_backward_inliers(blank, blank, points, moved, status)
+
+    assert list(kept) == [True, False]
+
+
+def test_lk_forward_backward_treats_a_failed_backward_pass_as_no_inliers(monkeypatch):
+    from cv_service.tracking.engines import lk as lk_module
+
+    points = np.array([[[10.0, 10.0]]], dtype=np.float32)
+    status = np.array([[1]], dtype=np.uint8)
+    monkeypatch.setattr(lk_module.cv2, "calcOpticalFlowPyrLK", lambda *a, **k: (None, None, None))
+    blank = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
+
+    kept = lk_module._forward_backward_inliers(blank, blank, points, points.copy(), status)
+
+    assert list(kept) == [False]
+
+
+def test_lk_reseeds_when_survivors_fall_below_half_the_initial_set():
+    from cv_service.tracking.engines.lk import _MAX_CORNERS, _reseeded
+
+    frame = scene()
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # A handful of survivors inside TARGET's box -- far below half of
+    # `_MAX_CORNERS` (40), so a reseed should top the set back up.
+    survivors = np.array([[[65.0, 85.0]], [[70.0, 90.0]], [[75.0, 95.0]]], dtype=np.float32)
+
+    topped_up = _reseeded(gray, TARGET, survivors)
+
+    assert len(topped_up) > len(survivors)
+    assert len(topped_up) <= _MAX_CORNERS
+
+
+def test_lk_reseed_keeps_the_survivors_when_the_box_is_too_small_to_mask():
+    from cv_service.tracking.engines.lk import _reseeded
+
+    frame = scene()
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    survivors = np.array([[[65.0, 85.0]]], dtype=np.float32)
+    degenerate = Box(0.5, 0.5, 0.0, 0.0)
+
+    topped_up = _reseeded(gray, degenerate, survivors)
+
+    assert len(topped_up) == len(survivors)
+
+
+def test_lk_survives_an_extended_run_without_starving_on_corner_decay():
+    from cv_service.tracking.engines.lk import LkFlowEngine
+
+    engine = LkFlowEngine()
+    assert engine.init(scene(), TARGET) is True
+
+    # A jittery (not one-directional) path exercises the forward-backward
+    # rejection and the reseed path repeatedly -- before this fix, `update`
+    # only ever culled its corner set, so a long enough run would eventually
+    # starve it below the floor and it would give up.
+    for step in range(1, 60):
+        update = engine.update(scene(dx=(step * 3) % 7, dy=(step * 5) % 7))
+        assert update is not None, f"engine starved at step {step}"
+
+
 # --- the associator -----------------------------------------------------------
 
 pytest.importorskip("ultralytics", reason="bytetrack needs the `cv` extra")

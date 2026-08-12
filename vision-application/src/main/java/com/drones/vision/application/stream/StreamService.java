@@ -13,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.application.asset.AssetService;
 import com.drones.vision.application.pipeline.StreamPipeline;
+import com.drones.vision.application.pipeline.PipelineLatency;
 import com.drones.vision.application.pipeline.TrackingStats;
 
 /**
@@ -149,6 +150,21 @@ public interface StreamService {
      *         report honestly; what the API renders for that case is its own decision
      */
     Optional<TrackingStats> trackingStats(StreamId streamId);
+
+    /**
+     * A running stream's wall-clock detection latency over the stats window
+     * (docs/conclusions/CV-RATE-BUDGET.md &sect;3) — exactly {@link StreamPipeline#pipelineLatency()}.
+     *
+     * <p>Unlike {@link #trackingStats(StreamId)} this is populated whatever the tracking mode is:
+     * latency is a property of the detection path, not of tracking, and the stream most likely to
+     * be under investigation for lag is often one with tracking off.
+     *
+     * @param streamId the stream to inspect
+     * @return the figures, or {@link Optional#empty()} if {@code streamId} is unknown or not running
+     *         on this instance — empty rather than zeroed, for the same reason as {@link
+     *         #trackingStats(StreamId)}
+     */
+    Optional<PipelineLatency> pipelineLatency(StreamId streamId);
 
     /**
      * Live-updates a running stream's detection config (docs/plans/done/CV-CONTROL-PLAN.md &sect;5,

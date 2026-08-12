@@ -1,10 +1,15 @@
 """`lk` -- the FOLLOW default: Lucas-Kanade sparse optical flow.
 
-`docs/plans/done/TRACKING-PLAN.md` §5.B. Tracks <=40 `goodFeaturesToTrack` corners
-inside the locked box with `cv2.calcOpticalFlowPyrLK`, then moves the box by
-the median corner translation and rescales it by the median radial expansion
-about the corner centroid. Core OpenCV `video` module only -- no ONNX
-assets, no contrib package, nothing x86- or CUDA-specific (invariant P1).
+`docs/plans/done/TRACKING-PLAN.md` §5.B, `docs/plans/active/TRACKING-V2-PLAN.md` wave
+C1 (review finding C3). Tracks <=40 `goodFeaturesToTrack` corners inside the
+locked box with `cv2.calcOpticalFlowPyrLK`, then moves the box by the median
+corner translation and rescales it by the median radial expansion about the
+corner centroid. A forward-backward round trip rejects corners that landed
+on the wrong thing (an occluder, the background), and the surviving set is
+topped back up once it thins past half of what `init()` started with, so the
+corner count no longer only ever decays toward the floor where the engine
+used to die. Core OpenCV `video` module only -- no ONNX assets, no contrib
+package, nothing x86- or CUDA-specific (invariant P1).
 
 Why this and not KCF/CSRT/MOSSE: **they do not exist here.** OpenCV 5 removed
 them and `cv2.legacy` is absent; the only `Tracker*` symbols this box has are
@@ -46,6 +51,23 @@ _MIN_TRACKED_CORNERS = 4
 # background can make the median radius say it did.
 _MIN_SCALE_STEP = 0.8
 _MAX_SCALE_STEP = 1.25
+# Below this fraction of the corner set `init()` started with, the survivors
+# are topped back up (review finding C3): without this, `update()` only ever
+# CULLS points and the count decays monotonically to `_MIN_TRACKED_CORNERS`,
+# where the engine dies for good no matter how trackable the target still
+# is. Half is deliberately generous -- re-seeding is cheap (one more
+# `goodFeaturesToTrack` call already scoped to a small masked box), so there
+# is no reason to wait until the engine is nearly starved.
+_RESEED_FRACTION = 0.5
+# Forward-backward round-trip tolerance, in pixels: a corner is trusted only
+# if tracking it forward (previous -> current) and then backward (current ->
+# previous) lands within this of where it started (Kalal et al.'s
+# Forward-Backward Error, the standard LK robustness check). A point that
+# jumped onto an occluder or the background rarely round-trips cleanly, so
+# this is what stops it being silently trusted into dragging the box off the
+# real target -- the status flag `calcOpticalFlowPyrLK` itself returns only
+# says "a match was found nearby", not "the match was correct".
+_FB_ERROR_MAX_PIXELS = 2.0
 
 
 class LkFlowEngine:
@@ -104,7 +126,7 @@ class LkFlowEngine:
         )
         if moved is None or status is None:
             return None
-        kept = status.reshape(-1) == 1
+        kept = _forward_backward_inliers(self._previous_gray, gray, self._points, moved, status)
         new_points = moved[kept]
         old_points = self._points[kept]
         if len(new_points) < _MIN_TRACKED_CORNERS:
@@ -128,11 +150,16 @@ class LkFlowEngine:
         )
         self._box = moved_box
         self._previous_gray = gray
-        self._points = new_points.reshape(-1, 1, 2).astype(np.float32)
+        if len(new_points) < self._initial_corners * _RESEED_FRACTION:
+            self._points = _reseeded(gray, moved_box, new_points)
+        else:
+            self._points = new_points.reshape(-1, 1, 2).astype(np.float32)
         # Confidence is the fraction of the original corner set still being
-        # followed: a target sliding behind an obstruction loses corners
-        # before it loses its box, so this is the earliest honest signal
-        # that the scheduler should spend a verify pass (trigger (b)).
+        # followed (unaffected by a reseed -- it stays the yardstick this
+        # LOCK started with, not whatever the point count was topped back up
+        # to): a target sliding behind an obstruction loses corners before it
+        # loses its box, so this is the earliest honest signal that the
+        # scheduler should spend a verify pass (trigger (b)).
         confidence = len(new_points) / float(self._initial_corners or 1)
         return TrackerUpdate(box=moved_box, confidence=min(confidence, 1.0))
 
@@ -155,6 +182,63 @@ def _pixel_bounds(box: Box, width: int, height: int) -> tuple[int, int, int, int
     x1 = max(x0, min(width, int(round((box.x + box.width) * width))))
     y1 = max(y0, min(height, int(round((box.y + box.height) * height))))
     return x0, y0, x1, y1
+
+
+def _forward_backward_inliers(
+    previous_gray: np.ndarray,
+    gray: np.ndarray,
+    points: np.ndarray,
+    moved: np.ndarray,
+    status: np.ndarray,
+) -> np.ndarray:
+    """Which of `points` survive a forward-then-backward round trip.
+
+    `calcOpticalFlowPyrLK`'s own `status` flag only means "a match was found
+    nearby" -- it says nothing about whether that match was the real target
+    or the background/an occluder behind it. Tracking `moved` back from
+    `gray` to `previous_gray` and checking it lands close to where `points`
+    started is the standard check for that (Kalal et al.'s Forward-Backward
+    Error): a corner that jumped onto the wrong thing rarely round-trips
+    cleanly, so this is what keeps such a corner from silently dragging the
+    box off the real target (review finding C3).
+    """
+    back, back_status, _err = cv2.calcOpticalFlowPyrLK(
+        gray, previous_gray, moved, None, winSize=_LK_WINDOW, maxLevel=_LK_PYRAMID_LEVELS
+    )
+    forward_ok = status.reshape(-1) == 1
+    if back is None or back_status is None:
+        return np.zeros_like(forward_ok)
+    backward_ok = back_status.reshape(-1) == 1
+    round_trip_error = np.linalg.norm((points - back).reshape(-1, 2), axis=1)
+    return forward_ok & backward_ok & (round_trip_error <= _FB_ERROR_MAX_PIXELS)
+
+
+def _reseeded(gray: np.ndarray, box: Box, surviving_points: np.ndarray) -> np.ndarray:
+    """Top `surviving_points` back up toward `_MAX_CORNERS`, masked to `box`.
+
+    Without this, `update()` only ever culls its corner set (dropped by the
+    status flag, now also by the forward-backward check above) and the count
+    decays monotonically toward `_MIN_TRACKED_CORNERS`, where the engine
+    dies no matter how trackable the target still is (review finding C3).
+    Masked to the CURRENT box -- not the box `init()` first saw -- so the
+    fresh corners describe where the target is now, not where it started.
+    """
+    height, width = gray.shape[:2]
+    x0, y0, x1, y1 = _pixel_bounds(box, width, height)
+    needed = _MAX_CORNERS - len(surviving_points)
+    if needed <= 0 or x1 - x0 < 2 or y1 - y0 < 2:
+        return surviving_points.reshape(-1, 1, 2).astype(np.float32)
+    mask = np.zeros(gray.shape, dtype=np.uint8)
+    mask[y0:y1, x0:x1] = 255
+    fresh = cv2.goodFeaturesToTrack(
+        gray, maxCorners=needed, qualityLevel=_CORNER_QUALITY, minDistance=_CORNER_MIN_DISTANCE, mask=mask
+    )
+    if fresh is None or len(fresh) == 0:
+        return surviving_points.reshape(-1, 1, 2).astype(np.float32)
+    combined = np.concatenate(
+        [surviving_points.reshape(-1, 2), fresh.reshape(-1, 2)], axis=0
+    )
+    return combined.reshape(-1, 1, 2).astype(np.float32)
 
 
 def _median_scale(old_points: np.ndarray, new_points: np.ndarray) -> float:

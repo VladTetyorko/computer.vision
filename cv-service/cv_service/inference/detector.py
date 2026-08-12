@@ -24,6 +24,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from cv_service.config import DEFAULT_CONFIDENCE as _DEFAULT_CONFIDENCE
 from cv_service.config import DEFAULT_IMGSZ, DEFAULT_MODEL, Settings
 
 LOGGER = logging.getLogger("cv_service.inference.detector")
@@ -42,7 +43,7 @@ ENCODING_BGR24 = "IMAGE_ENCODING_BGR24"
 # FrameRequest doesn't specify (or specifies 0, i.e. proto3's float default
 # for "unset") a confidence_threshold. Not a CV_* env knob -- purely an
 # inference-behavior default, out of cv_service.config's scope.
-DEFAULT_CONFIDENCE = 0.25
+DEFAULT_CONFIDENCE = _DEFAULT_CONFIDENCE
 
 
 class ModelUnavailableError(RuntimeError):

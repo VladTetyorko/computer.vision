@@ -1,21 +1,30 @@
 package com.drones.vision.adapter.cvgrpc;
 
+import com.drones.vision.domain.model.CameraAttitude;
 import com.drones.vision.domain.model.Detection;
 import com.drones.vision.domain.model.DetectionResult;
 import com.drones.vision.domain.model.DetectionSource;
 import com.drones.vision.domain.model.DetectorReason;
+import com.drones.vision.domain.model.PipelineConfig;
+import com.drones.vision.domain.model.PixelFormat;
 import com.drones.vision.domain.model.StreamId;
 import com.drones.vision.domain.model.TrackRef;
 import com.drones.vision.domain.model.TrackState;
 import com.drones.vision.domain.model.TrackingTelemetry;
+import com.drones.vision.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.BoundingBox;
+import com.drones.vision.proto.v1.CameraPose;
 import com.drones.vision.proto.v1.DetectionResponse;
+import com.drones.vision.proto.v1.FrameRequest;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.ByteBuffer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -46,6 +55,61 @@ class DetectionFrameCodecTest {
                 .setModelId("yolo26n.pt")
                 .setModelVersion("latest")
                 .setInferenceMillis(10);
+    }
+
+    // --- encode: camera pose (docs/conclusions/CV-RATE-BUDGET.md §5, gap 3) -------------------
+
+    private static VideoFrame smallBgrFrame() {
+        // 2x2 BGR24, well under detectWidth so encode takes the no-downscale path.
+        return new VideoFrame(STREAM_ID, 7L, CAPTURED_AT, 2, 2, PixelFormat.BGR24,
+                ByteBuffer.wrap(new byte[2 * 2 * 3]));
+    }
+
+    private static DetectionFrameCodec codec() {
+        return new DetectionFrameCodec(640, 0.8f);
+    }
+
+    @Test
+    void encodeStampsTheCameraPoseWhenAnAttitudeIsKnown() throws Exception {
+        CameraAttitude attitude = new CameraAttitude(137.5, -12.0, 3.0, 62.0, 35.0,
+                Instant.ofEpochMilli(1_234));
+
+        FrameRequest request = codec().encode(smallBgrFrame(), PipelineConfig.defaults(), attitude);
+
+        assertTrue(request.hasCameraPose());
+        CameraPose pose = request.getCameraPose();
+        assertEquals(137.5f, pose.getYawDegrees(), 1e-4);
+        assertEquals(-12.0f, pose.getPitchDegrees(), 1e-4);
+        assertEquals(3.0f, pose.getRollDegrees(), 1e-4);
+        assertEquals(62.0f, pose.getHfovDegrees(), 1e-4);
+        assertEquals(35.0f, pose.getVfovDegrees(), 1e-4);
+        assertEquals(1_234L, pose.getPoseTimestampMillis());
+    }
+
+    @Test
+    void encodeSetsNoCameraPoseWithoutAnAttitude() throws Exception {
+        FrameRequest request = codec().encode(smallBgrFrame(), PipelineConfig.defaults(), null);
+
+        // Absent, not zeroed: "absent = flow-based compensation only" is the wire's own contract.
+        assertFalse(request.hasCameraPose());
+    }
+
+    @Test
+    void encodeSetsNoCameraPoseWhenTheFieldOfViewIsUnknown() throws Exception {
+        CameraAttitude unusable = CameraAttitude.ofYaw(137.5, 0.0, Instant.ofEpochMilli(1_234));
+
+        FrameRequest request = codec().encode(smallBgrFrame(), PipelineConfig.defaults(), unusable);
+
+        // cv-service would ignore an hfov-less pose anyway (CameraPose.known); sending one would
+        // cost a submessage per frame for nothing.
+        assertFalse(request.hasCameraPose());
+    }
+
+    @Test
+    void theTwoArgEncodeRemainsPoseFree() throws Exception {
+        FrameRequest request = codec().encode(smallBgrFrame(), PipelineConfig.defaults());
+
+        assertFalse(request.hasCameraPose());
     }
 
     @Test

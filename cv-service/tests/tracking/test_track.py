@@ -7,14 +7,26 @@ from __future__ import annotations
 
 import pytest
 
-from cv_service.tracking.engines.base import SOURCE_DETECTOR, SOURCE_TRACKER, Box, Observation
+from cv_service.tracking.assign import AssignGates, AssignWeights
+from cv_service.tracking.engines.base import (
+    METRIC_HELLINGER,
+    SOURCE_DETECTOR,
+    SOURCE_TRACKER,
+    Box,
+    Descriptor,
+    Observation,
+    Transform,
+)
+from cv_service.tracking.memory import MemoryParams, ObjectMemory
 from cv_service.tracking.params import MODE_ASSOCIATE, TrackingParams
 from cv_service.tracking.track import (
     STATE_COASTING,
     STATE_CONFIRMED,
     STATE_LOST,
     STATE_TENTATIVE,
+    RecoveredIdentity,
     TrackBook,
+    observe_descriptor,
 )
 
 
@@ -23,9 +35,39 @@ def params(**overrides) -> TrackingParams:
         mode=MODE_ASSOCIATE,
         engine_id="e",
         verify_every_millis=2000,
+        reacquire_every_millis=250,
         redetect_iou_threshold=0.3,
         max_age_frames=3,
         min_hits=3,
+        # Effectively disabled by default -- this file's fake clock reuses
+        # the frame index as "seconds elapsed" purely for test convenience
+        # (up to ~30 "seconds" in some tests below), which is not meant to
+        # exercise the wall-clock LOST rule. Tests that DO exercise it
+        # override this explicitly with a small value.
+        track_max_age_millis=1_000_000,
+        min_tracker_confidence=0.5,
+        motion_engine_id="",
+        # TRACKING-V2-PLAN wave C3 -- inert here, `TrackBook` reads none of
+        # these (`assign.py`'s own `CostAssociator` does); included only
+        # because `TrackingParams` requires them.
+        appearance_engine_id="",
+        cost_weights=AssignWeights(),
+        cost_gates=AssignGates(),
+        # TRACKING-V2-PLAN wave C4 -- also inert here: `TrackBook` never
+        # reads `TrackingParams.memory_params` itself (only `session.py`'s
+        # `_resolve_memory` does, to build the `ObjectMemory` this file
+        # wires in directly via `TrackBook(memory=...)`/`set_memory`).
+        memory_params=MemoryParams(),
+        # TRACKING-V2-PLAN wave C5b -- also inert here: only `session.py`
+        # reads `follow_top_k`; included only because `TrackingParams`
+        # requires it.
+        follow_top_k=1,
+        # TRACKING-V2-PLAN wave C5c -- also inert here: only `session.py`'s
+        # `_roi_rescue` reads either; included only because `TrackingParams`
+        # requires them.
+        roi_enabled=False,
+        roi_crop_factor=4.0,
+        roi_min_iou=0.2,
     )
     base.update(overrides)
     return TrackingParams(**base)
@@ -129,6 +171,40 @@ def test_a_long_occlusion_goes_lost_then_retires_the_id():
     assert reborn.track_id != born.track_id
 
 
+# -- wall-clock ageing (review finding B7) -----------------------------------
+
+
+def test_wall_clock_declares_lost_even_while_misses_stays_at_zero():
+    # FOLLOW's own bug: `misses` only advances on a verify pass that ran and
+    # failed, so a long real-world gap with NO verify pass at all (nothing
+    # but tracker-only touches) could coast forever under the frame-based
+    # rule alone. `track_max_age_millis` is the wall-clock backstop.
+    book = TrackBook(params(min_hits=1, max_age_frames=1000, track_max_age_millis=500))
+    book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)
+
+    still_fresh = book.apply([seen("car", source=SOURCE_TRACKER)], 0.1, detector_ran=False)[0]
+    assert still_fresh.state == STATE_COASTING
+    assert still_fresh.misses == 0
+
+    stale = book.apply([seen("car", source=SOURCE_TRACKER)], 1.0, detector_ran=False)[0]
+
+    assert stale.state == STATE_LOST
+    assert stale.misses == 0  # the frame-based rule never had a chance to fire
+
+
+def test_the_frame_based_rule_still_fires_independently_of_the_wall_clock():
+    # The converse: a tight cadence can exhaust `max_age_frames` in well
+    # under `track_max_age_millis` -- ByteTrack's own `track_buffer`
+    # contract is unaffected by the new wall-clock rule.
+    book = TrackBook(params(min_hits=1, max_age_frames=2, track_max_age_millis=1_000_000))
+    book.apply([seen("car", authoritative=True)], 0.0, detector_ran=True)
+
+    for frame in range(1, 4):
+        book.apply([], float(frame) * 0.01, detector_ran=True)
+
+    assert book.get(1).state == STATE_LOST
+
+
 def test_a_tracker_only_frame_never_counts_as_a_miss():
     # This is what makes "FOLLOW runs the detector at the configured cadence
     # and no more" true: a duty-cycled frame did not ask the detector
@@ -183,3 +259,253 @@ def test_forget_keys_retires_tracks_without_re_issuing_ids():
 
     assert book.get(born.track_id) is None
     assert reborn.track_id > born.track_id
+
+
+# -- key epoch (review findings D1/D2) ---------------------------------------
+
+
+def test_bump_epoch_retires_no_track():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("engine-1"), seen("engine-2", x=0.5)], 0.0, detector_ran=True)
+
+    book.bump_epoch()
+
+    # Unlike `forget_keys`, nothing was retired -- both tracks are exactly
+    # as they were, same ids, still live.
+    assert [t.track_id for t in book.tracks] == [t.track_id for t in born]
+    assert book.get(born[0].track_id) is not None
+    assert book.get(born[1].track_id) is not None
+
+
+def test_bump_epoch_stops_a_re_issued_engine_key_from_resurrecting_the_old_track():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("engine-1")], 0.0, detector_ran=True)[0]
+
+    book.bump_epoch()
+    # The SAME raw engine key, re-issued by a just-restarted engine (its own
+    # numbering starts over from the beginning) -- must NOT attach to the
+    # old track.
+    reborn = book.apply([seen("engine-1")], 1.0, detector_ran=True)[0]
+
+    assert reborn.track_id != born.track_id
+    assert book.get(born.track_id) is not None  # the old one still lives too
+
+
+# -- ego-motion warp (TRACKING-V2-PLAN wave C2) ------------------------------
+
+
+def test_warp_moves_every_live_tracks_box():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.10), seen("b", x=0.50)], 0.0, detector_ran=True)
+    shift = Transform(c=0.01)  # +0.01 to x, everything else identity
+
+    book.warp(shift)
+
+    assert book.get(born[0].track_id).box.x == pytest.approx(0.11)
+    assert book.get(born[1].track_id).box.x == pytest.approx(0.51)
+
+
+def test_n_consecutive_identical_warps_move_a_track_by_n_steps_not_one():
+    # THE accumulation invariant the coordinator's fix exists for: a track
+    # nobody reads for N frames must still pick up N single-frame warps
+    # (matching N frames of real camera motion), not the ONE frame's worth
+    # a call site would see if warping only happened at read time. This is
+    # the direct, book-level proof; `tests/tracking/test_session.py` proves
+    # the same thing end to end through a stalled FOLLOW session.
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.10)], 0.0, detector_ran=True)[0]
+    step = Transform(c=0.01)
+
+    for _ in range(30):
+        book.warp(step)
+
+    assert book.get(born.track_id).box.x == pytest.approx(0.10 + 30 * 0.01)
+
+
+def test_warp_is_an_exact_no_op_for_identity():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a", x=0.10, y=0.20)], 0.0, detector_ran=True)[0]
+    original_box = born.box
+
+    book.warp(Transform())  # IDENTITY
+
+    assert book.get(born.track_id).box == original_box
+
+
+def test_warp_moves_velocity_by_the_linear_part_only():
+    # A rate has no position to translate -- `c`/`f` must NOT leak into it,
+    # only the rotation/scale part (`a`, `b`, `d`, `e`).
+    book = TrackBook(params(min_hits=1))
+    book.apply([seen("a", x=0.10, y=0.10)], 0.0, detector_ran=True)
+    moved = book.apply([seen("a", x=0.20, y=0.10)], 1.0, detector_ran=True)[0]
+    assert moved.velocity_x == pytest.approx(0.1)
+    assert moved.velocity_y == pytest.approx(0.0)
+
+    # A pure translation: velocity is unaffected (it already excludes c/f).
+    book.warp(Transform(c=0.5, f=0.5))
+    assert book.get(moved.track_id).velocity_x == pytest.approx(0.1)
+    assert book.get(moved.track_id).velocity_y == pytest.approx(0.0)
+
+    # A pure 2x scale (a=e=2, b=d=0, no translation): the rate scales too.
+    book.warp(Transform(a=2.0, e=2.0))
+    assert book.get(moved.track_id).velocity_x == pytest.approx(0.2)
+    assert book.get(moved.track_id).velocity_y == pytest.approx(0.0)
+
+
+def test_warp_never_touches_a_track_born_after_it():
+    # Ordering sanity: `warp()` only ever sees the tracks that exist AT THE
+    # TIME it is called -- a track born later in the same frame (e.g. a
+    # fresh re-anchor) is not retroactively shifted by a warp that already
+    # ran before it existed.
+    book = TrackBook(params(min_hits=1))
+
+    book.warp(Transform(c=0.5))  # nothing alive yet -- must not raise
+
+    born = book.apply([seen("a", x=0.10)], 0.0, detector_ran=True)[0]
+    assert born.box.x == pytest.approx(0.10)
+
+
+# -- descriptor (TRACKING-V2-PLAN wave C3) -----------------------------------
+
+RED = Descriptor("hist", (1.0, 0.0, 0.0), METRIC_HELLINGER)
+BLUE = Descriptor("hist", (0.0, 0.0, 1.0), METRIC_HELLINGER)
+
+
+def test_a_fresh_track_has_no_descriptor():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+
+    assert born.descriptor is None
+
+
+def test_observe_descriptor_sets_the_first_signature_outright():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+
+    observe_descriptor(born, RED)
+
+    assert born.descriptor == RED
+
+
+def test_observe_descriptor_is_a_no_op_for_none():
+    # A box the extractor could not describe must not erase an already
+    # accumulated signature on the strength of one missing frame.
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+    observe_descriptor(born, RED)
+
+    observe_descriptor(born, None)
+
+    assert born.descriptor == RED
+
+
+def test_observe_descriptor_blends_rather_than_replaces():
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("a")], 0.0, detector_ran=True)[0]
+    observe_descriptor(born, RED)
+
+    observe_descriptor(born, BLUE, alpha=0.5)
+
+    # Halfway between RED and BLUE, renormalized (Descriptor.blend's own
+    # contract) -- not a straight replacement.
+    assert born.descriptor.values == pytest.approx((0.5, 0.0, 0.5))
+
+
+# -- object memory wiring (TRACKING-V2-PLAN wave C4) -------------------------
+
+
+def test_a_track_is_never_remembered_when_no_memory_is_configured():
+    # The default -- `TrackBook(params())` with no `memory=` -- must stay a
+    # genuine no-op all the way through expiry (P5): no gallery exists, so
+    # nothing is even attempted.
+    book = TrackBook(params(min_hits=1, max_age_frames=1))
+    book.apply([seen("car")], 0.0, detector_ran=True)
+
+    for frame in range(1, 5):
+        book.apply([], float(frame), detector_ran=True)  # raises nothing
+
+    assert book.tracks == []
+
+
+def test_a_track_is_remembered_the_moment_it_is_actually_expired():
+    # `occlusion`'s own retention already recovers a SHORT gap without any
+    # gallery involved -- this proves the OTHER half: a track that survives
+    # long enough to hit `_expire()` is handed to memory first, not simply
+    # dropped. `max_age_frames=1` -> the book retires past 2 consecutive
+    # misses (`_LOST_RETENTION_MULTIPLIER`).
+    memory = ObjectMemory(MemoryParams())
+    book = TrackBook(params(min_hits=1, max_age_frames=1), memory=memory)
+    born = book.apply([seen("car", x=0.3, y=0.4)], 0.0, detector_ran=True)[0]
+
+    assert memory.size() == 0  # not yet -- still live/coasting/LOST
+
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    assert book.get(born.track_id) is None  # gone from the live book...
+    assert memory.size() == 1  # ...but remembered, not simply discarded
+    remembered = memory.identities()[0]
+    assert remembered.track_id == born.track_id
+    assert remembered.box.x == pytest.approx(0.3)
+    assert remembered.label == "car"
+
+
+def test_set_memory_swaps_the_gallery_a_book_hands_lost_tracks_to():
+    first, second = ObjectMemory(MemoryParams()), ObjectMemory(MemoryParams())
+    book = TrackBook(params(min_hits=1, max_age_frames=1), memory=first)
+    book.set_memory(second)
+    born = book.apply([seen("car")], 0.0, detector_ran=True)[0]
+
+    for frame in range(1, 4):
+        book.apply([], float(frame), detector_ran=True)
+
+    assert first.size() == 0
+    assert second.size() == 1
+    assert second.identities()[0].track_id == born.track_id
+
+
+def test_apply_books_a_recovery_under_the_remembered_id_and_skips_min_hits():
+    # The counterpart to `test_an_authoritative_observation_skips_the_min_
+    # hits_gate` above -- a recovery earns the same carve-out, for the same
+    # reason: it is not a fresh, ambiguous detection.
+    book = TrackBook(params(min_hits=5))
+    recovery = RecoveredIdentity(
+        track_id=42, first_seen=-10.0, descriptor=RED, velocity=(0.1, 0.2)
+    )
+
+    recovered = book.apply(
+        [seen("x")], 3.0, detector_ran=True, recoveries={"x": recovery}
+    )[0]
+
+    assert recovered.track_id == 42
+    assert recovered.state == STATE_CONFIRMED
+    assert recovered.first_seen == pytest.approx(-10.0)
+    assert recovered.descriptor == RED
+    assert recovered.velocity_x == pytest.approx(0.1)
+    assert recovered.velocity_y == pytest.approx(0.2)
+
+
+def test_a_recovered_id_is_never_handed_out_again_by_the_counter():
+    book = TrackBook(params(min_hits=1))
+    recovery = RecoveredIdentity(track_id=100, first_seen=0.0)
+
+    book.apply([seen("x")], 0.0, detector_ran=True, recoveries={"x": recovery})
+    fresh = book.apply([seen("y")], 1.0, detector_ran=True)[0]
+
+    assert fresh.track_id > 100
+
+
+def test_recoveries_are_ignored_for_a_key_that_is_already_a_live_track():
+    # `recoveries` only ever applies to a genuinely NEW birth -- an update to
+    # an existing track must never be redirected onto a different id.
+    book = TrackBook(params(min_hits=1))
+    born = book.apply([seen("x")], 0.0, detector_ran=True)[0]
+
+    still_born = book.apply(
+        [seen("x")],
+        1.0,
+        detector_ran=True,
+        recoveries={"x": RecoveredIdentity(track_id=999, first_seen=0.0)},
+    )[0]
+
+    assert still_born.track_id == born.track_id

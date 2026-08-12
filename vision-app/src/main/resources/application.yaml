@@ -331,6 +331,19 @@ vision:
     #     source-reopen-backoff:
     #       initial-ms: 1000
     #       max-ms: 30000
+    #     The camera's HORIZONTAL field of view in degrees. This is the scale that turns a telemetry
+    #     attitude delta into a pixel shift, which is what lets cv-service's `pose` ego-motion
+    #     compensator run at all (docs/conclusions/CV-RATE-BUDGET.md §2): at 640 px across 60 deg, a
+    #     30 deg/s yaw moves the whole scene 32 px between frames at 10 fps, while a 15 m/s vehicle at
+    #     200 m contributes about 4 -- so on a moving platform the camera, not the target, is what
+    #     breaks association.
+    #     0 = UNKNOWN, and that is the shipped default: with no value here no CameraPose is sent and
+    #     cv-service falls back to estimating ego-motion from pixels (`flow`). Deliberately not a
+    #     plausible-looking guess such as 60 -- a wrong FOV produces a confidently wrong pixel shift,
+    #     which is worse than no compensation at all. Set it to your actual lens.
+    #     One value per instance, not per camera: a deployment mixing lenses needs this lifted onto
+    #     the asset, which is the follow-up this default is deliberately conservative for.
+    #     camera-hfov-degrees: 0.0
     #   DetectionExtrapolator's smoothing tunables (how far past the latest completed result's capture
     #   time it extrapolates, and the max normalized box-center distance for a same-label match).
     #   extrapolation:

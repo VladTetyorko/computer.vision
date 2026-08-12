@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+from cv_service.tracking.assign import AssignGates, AssignWeights
+from cv_service.tracking.memory import MemoryParams
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW, MODE_OFF, TrackingParams
 from cv_service.tracking.scheduler import (
     REASON_ALWAYS,
@@ -27,9 +29,26 @@ def params(mode: str, **overrides) -> TrackingParams:
         mode=mode,
         engine_id="e",
         verify_every_millis=2000,
+        reacquire_every_millis=250,
         redetect_iou_threshold=0.3,
         max_age_frames=30,
         min_hits=3,
+        # None of these fields are read by `DutyCycleScheduler` -- `TrackBook`
+        # and `StreamTrackingSession` are the only consumers -- so any value
+        # is inert here; included only because `TrackingParams` requires it.
+        track_max_age_millis=3000,
+        min_tracker_confidence=0.5,
+        motion_engine_id="",
+        appearance_engine_id="",
+        cost_weights=AssignWeights(),
+        cost_gates=AssignGates(),
+        memory_params=MemoryParams(),
+        # TRACKING-V2-PLAN wave C5b -- inert here too, same reason.
+        follow_top_k=1,
+        # TRACKING-V2-PLAN wave C5c -- inert here too, same reason.
+        roi_enabled=False,
+        roi_crop_factor=4.0,
+        roi_min_iou=0.2,
     )
     base.update(overrides)
     return TrackingParams(**base)
