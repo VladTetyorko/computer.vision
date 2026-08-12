@@ -1,4 +1,5 @@
 import type { Detection, DetectionResult } from '../../core/api/models';
+import type { Transport } from './player-recovery';
 
 /**
  * Pure logic behind the client-side vector detection overlay (docs/main/CYCLES-PLAN.md §11, CD-b item
@@ -9,6 +10,53 @@ import type { Detection, DetectionResult } from '../../core/api/models';
 
 /** The per-tile toggle's three states — see `shouldDrawOverlay`'s doc comment for what each means. */
 export type BoxesMode = 'overlay' | 'burned' | 'off';
+
+// --- Burn-in awareness (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) --------------------------------
+// The client used to claim `'burned'` unconditionally — every reader of `ActiveStream#burnedIn`
+// funnels through the three functions below so "the video may render nothing" is a single, tested
+// rule rather than three ad hoc `?? true`/`!== false` checks scattered across the facades that own
+// a `BoxesMode` signal (`CockpitFacade`, `LiveFacade`, `WallTile`).
+
+/** Every mode a stream whose video actually carries burned-in boxes may offer. */
+const BOXES_CYCLE_WITH_BURN_IN: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
+/** Once a stream is confirmed burn-in-free, offering `'burned'` would draw nothing and read as a
+ *  choice rather than an absence — dropped from both the cycle and the default. */
+const BOXES_CYCLE_WITHOUT_BURN_IN: readonly BoxesMode[] = ['overlay', 'off'];
+
+/**
+ * Whether this stream's video itself carries burned-in boxes — `undefined` (a pre-M5 backend, which
+ * never sends `ActiveStream#burnedIn`/`StartStreamResult#burnedIn` at all) means `true`, matching
+ * `PipelineConfig.overlayBurnIn`'s own server-side default and, therefore, every deployment's actual
+ * behaviour today (MEDIA-SOT-PLAN.md D1). Only an explicit `false` means the picture is clean.
+ */
+export function resolveBurnedIn(burnedIn: boolean | undefined): boolean {
+  return burnedIn !== false;
+}
+
+/** The `BoxesMode`s worth offering for a stream with this burned-in state — see the two cycle
+ *  constants' own doc comments. */
+export function boxesModeCycle(burnedIn: boolean | undefined): readonly BoxesMode[] {
+  return resolveBurnedIn(burnedIn) ? BOXES_CYCLE_WITH_BURN_IN : BOXES_CYCLE_WITHOUT_BURN_IN;
+}
+
+/** The mode a fresh stream selection should start from — `'burned'` (today's default, unchanged)
+ *  unless this stream is confirmed burn-in-free, in which case `'overlay'` is the only mode that
+ *  actually shows anything. */
+export function defaultBoxesMode(burnedIn: boolean | undefined): BoxesMode {
+  return resolveBurnedIn(burnedIn) ? 'burned' : 'overlay';
+}
+
+/** `B` (Fly) / the wall tile's own toggle button cycle through whichever modes {@link boxesModeCycle}
+ *  offers for `burnedIn`, in order. `burnedIn` defaults to `undefined` (today's full three-mode
+ *  cycle) so every pre-existing call site — including this app's own unit tests — keeps working
+ *  unchanged. A `current` no longer present in the cycle (a stale `'burned'` read the instant
+ *  `burnedIn` resolves `false` out from under it) restarts from the cycle's first entry rather than
+ *  throwing or standing still. */
+export function cycleBoxesMode(current: BoxesMode, burnedIn?: boolean): BoxesMode {
+  const cycle = boxesModeCycle(burnedIn);
+  const index = cycle.indexOf(current);
+  return index === -1 ? cycle[0] : cycle[(index + 1) % cycle.length];
+}
 
 /**
  * How much slack (in units of "one detection batch interval") to tolerate beyond the raw latency
@@ -72,6 +120,32 @@ function averageBatchIntervalMs(results: readonly DetectionResult[]): number {
     }
   }
   return count > 0 ? sum / count : 0;
+}
+
+/**
+ * The latency figure {@link selectDetectionResult} should sync boxes against, given which transport
+ * is actually attached (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8).
+ *
+ * HLS keeps its existing behaviour exactly: `behindLiveSeconds` (`shared/player/player.ts`'s own
+ * measured live-edge distance) passes through unchanged.
+ *
+ * WHEP used to hard-pin `behindLiveSeconds` to `0` for this purpose — a real number, not `null`, but
+ * one that ignores the glass-to-glass delay a live WebRTC track genuinely has (~0.2–0.5s, MEDIA-SOT-
+ * PLAN.md §6's own measurement), which made boxes **lead** the picture by that much. This function
+ * is the fix: for `'webrtc'`, the already-measured `getStats()`-derived figure
+ * (`player-recovery.ts#estimateWhepLatencySeconds` — half the round-trip time plus the jitter term,
+ * i.e. the same number the latency badge already shows) is used instead. `null` (not yet measured —
+ * e.g. the first tick or two right after attach, before a candidate-pair report has carried a round-
+ * trip time) degrades to `0` rather than blocking the overlay outright: `0` is what
+ * `selectDetectionResult` has always treated as "near-zero latency", the same fallback a `null`
+ * `behindLiveSeconds` already gets there.
+ */
+export function overlaySyncLatencySeconds(
+  transport: Transport,
+  behindLiveSeconds: number | null,
+  whepLatencySeconds: number | null,
+): number | null {
+  return transport === 'webrtc' ? (whepLatencySeconds ?? 0) : behindLiveSeconds;
 }
 
 /**
@@ -256,4 +330,30 @@ export function trackTrails(
     }
   }
   return byTrack;
+}
+
+// --- HiDPI canvas backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) -----------------------------
+// The overlay canvas used to size its backing store 1:1 with its CSS box (`canvas.width =
+// video.clientWidth`), so every box/trail/label drew at 1 device pixel per CSS pixel — soft/blurry on
+// any HiDPI display, quietly undercutting the reason the client overlay exists at all ("crisp boxes
+// at any bitrate", `shared/player/player.ts`'s own class doc). The fix is backing-store-only: the CSS
+// box size (and therefore `letterboxRect`'s own math, and hit-testing off
+// `canvas.getBoundingClientRect()`) never changes, only how many physical pixels each CSS pixel maps
+// to — `shared/player/player.ts#redrawOverlay` applies this via `ctx.setTransform(devicePixelRatio,
+// ...)` right after resizing, so every existing draw call keeps working in CSS-pixel coordinates
+// unmodified.
+
+/** A canvas's backing-store size (device pixels) for a given CSS box size and `devicePixelRatio` —
+ *  `Math.round` because `canvas.width`/`height` are integers and a fractional DPR (e.g. Windows'
+ *  125% → `1.25`) would otherwise silently truncate instead of rounding to the nearest pixel. */
+export function canvasBackingSize(
+  cssWidth: number,
+  cssHeight: number,
+  devicePixelRatio: number,
+): { readonly width: number; readonly height: number } {
+  const ratio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return {
+    width: Math.round(cssWidth * ratio),
+    height: Math.round(cssHeight * ratio),
+  };
 }

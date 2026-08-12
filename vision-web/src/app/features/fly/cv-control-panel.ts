@@ -6,6 +6,7 @@ import { ToastService } from '../../core/toast.service';
 import { SidePanel } from '../../shared/ui/side-panel';
 import type { DetectionResult, StreamTracksResponse, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
+import { resolveBurnedIn } from '../../shared/player/detection-overlay-logic';
 import {
   DEFAULT_FOLLOW_FPS,
   DEFAULT_VERIFY_EVERY_MILLIS,
@@ -121,6 +122,16 @@ export class CvControlPanel {
   /** Emitted when the operator picks a different boxes rendering mode — the host (`fly.ts`/`fly.html`)
    * owns the actual signal and writes it back via `facade.boxesMode.set($event)`. */
   readonly boxesModeChange = output<BoxesMode>();
+
+  /** Whether this stream's video actually carries burned-in boxes (`CockpitFacade`'s own
+   * `facade.stream()?.burnedIn`, docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — `undefined` (no
+   * stream yet, or a pre-M5 backend that never sends the field) keeps today's three-way toggle. Gates
+   * {@link showBurnedInOption}: once a stream is confirmed burn-in-free, offering "Burned in" would
+   * be a control that visibly does nothing when clicked. */
+  readonly burnedIn = input<boolean | undefined>(undefined);
+  /** `cv-control-panel.html`'s own "Boxes rendering" segmented control — see {@link burnedIn}'s doc
+   * comment. */
+  protected readonly showBurnedInOption = computed(() => resolveBurnedIn(this.burnedIn()));
 
   /** Whether the drawer is open — driven by the host's `PanelState` (`fly.ts`'s `panels`), not this
    * component's own state (docs/plans/done/UI-REDESIGN-PLAN.md D-E). */

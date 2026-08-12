@@ -1,6 +1,7 @@
-import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, linkedSignal, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { BoxesMode, Transport } from '../../shared/player/player';
+import { defaultBoxesMode, resolveBurnedIn } from '../../shared/player/detection-overlay-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
@@ -75,11 +76,6 @@ export class LiveFacade {
   /** The player's own live transport (docs/plans/done/MVP2-PLAN.md §L / §U3), piped into `StreamInfoPanel` too. */
   readonly transport = signal<Transport>('hls');
 
-  /** Per-tile "boxes: overlay/burned/off" toggle (docs/main/CYCLES-PLAN.md §11 item 6) — defaults to
-   * `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s own
-   * `boxesMode` input default matches for the same reason). */
-  readonly boxesMode = signal<BoxesMode>('burned');
-
   readonly device = computed(() => {
     const deviceId = this.deviceIdSignal();
     return deviceId === undefined ? undefined : this.fleet.device(deviceId);
@@ -89,6 +85,24 @@ export class LiveFacade {
     return deviceId === undefined ? undefined : this.fleet.streamFor(deviceId);
   });
   readonly live = computed(() => this.stream() !== undefined);
+
+  /** `stream()#burnedIn` projected to a primitive (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) —
+   * see `CockpitFacade#streamBurnedIn`'s identical doc comment for why a primitive, not the whole
+   * `stream()` object, gates `boxesMode`'s `linkedSignal` below. */
+  private readonly streamBurnedIn = computed(() => this.stream()?.burnedIn);
+
+  /** Per-tile "boxes: overlay/burned/off" toggle (docs/main/CYCLES-PLAN.md §11 item 6) — defaults to
+   * `'burned'`, not `'overlay'` (per direct user request — `shared/player/player.ts`'s own
+   * `boxesMode` input default matches for the same reason) **unless this stream is confirmed
+   * burn-in-free**, in which case `'overlay'` is the only mode that shows anything
+   * (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — see `CockpitFacade#boxesMode`'s identical
+   * `linkedSignal` doc comment for the full reasoning. */
+  readonly boxesMode = linkedSignal<BoxesMode>(() => defaultBoxesMode(this.streamBurnedIn()));
+
+  /** `live.html`'s own "Burned" button — hidden once {@link streamBurnedIn} is confirmed `false`
+   * (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8), same reasoning as
+   * `CvControlPanel#showBurnedInOption`. */
+  readonly showBurnedInOption = computed(() => resolveBurnedIn(this.streamBurnedIn()));
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) ---------------------------------
   // `explicitlyStopped` is this page's own Stop action; `hasBeenLive` tracks whether *this page

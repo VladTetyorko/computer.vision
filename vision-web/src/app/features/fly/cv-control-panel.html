@@ -268,23 +268,32 @@
     <!-- ---- Boxes rendering — merged in from the former standalone `layers` drawer (per direct user
          request); a client-side rendering preference (`FlyPage`'s `facade.boxesMode`), not part of
          the `PipelineSettings` wire contract, so it round-trips via {@link boxesMode}/
-         {@link boxesModeChange} rather than `SettingsStore`. -->
+         {@link boxesModeChange} rather than `SettingsStore`. "Burned in" is omitted entirely once
+         {@link burnedIn} is confirmed `false` (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) — offering a
+         tab that draws nothing would read as a choice, not an absence. -->
     <section class="cv-section">
       <span class="label">Boxes (shortcut: B)</span>
       <div class="segmented" role="tablist" aria-label="Detection boxes rendering">
         <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'overlay'" [attr.aria-selected]="boxesMode() === 'overlay'" (click)="boxesModeChange.emit('overlay')">
           Overlay
         </button>
-        <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesModeChange.emit('burned')">
-          Burned in
-        </button>
+        @if (showBurnedInOption()) {
+          <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'burned'" [attr.aria-selected]="boxesMode() === 'burned'" (click)="boxesModeChange.emit('burned')">
+            Burned in
+          </button>
+        }
         <button type="button" role="tab" class="btn" [class.active]="boxesMode() === 'off'" [attr.aria-selected]="boxesMode() === 'off'" (click)="boxesModeChange.emit('off')">
           Off
         </button>
       </div>
       <p class="muted hint">
-        Overlay draws boxes on top of the video; burned-in draws them into the picture itself; off
-        hides them entirely. Detection still runs the same either way.
+        @if (showBurnedInOption()) {
+          Overlay draws boxes on top of the video; burned-in draws them into the picture itself; off
+          hides them entirely. Detection still runs the same either way.
+        } @else {
+          This stream's video carries no burned-in boxes — overlay draws them on top instead; off
+          hides them entirely. Detection still runs the same either way.
+        }
       </p>
     </section>
 

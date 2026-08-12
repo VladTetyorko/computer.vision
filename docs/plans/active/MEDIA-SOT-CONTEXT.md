@@ -19,7 +19,7 @@ Waves commit onto this branch with disjoint file scopes. One commit per wave.
 | M5 | `vision-application` + `vision-api` — pull-mode pipeline | M2, M4 | blocked |
 | M6 | `adapters/adapter-publish-hls` — proxy publisher + frame grab | M2 | blocked |
 | M7 | `vision-app` + `docker-compose.yml` — wiring, flags | M5, M6 | blocked |
-| M8 | `vision-web` — client overlay truth + WHEP box timing | M1 | pending |
+| M8 | `vision-web` — client overlay truth + WHEP box timing | M1 | **done** |
 | M9 | `docs/` — measure, amend CV-SCALE §S5 | M7, M8 | blocked |
 
 ## 2. Gate

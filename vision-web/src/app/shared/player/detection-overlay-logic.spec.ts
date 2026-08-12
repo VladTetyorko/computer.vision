@@ -3,10 +3,16 @@ import {
   DEFAULT_BOX_COLOR,
   DEFAULT_MODEL_KEY,
   TRAIL_WINDOW_MS,
+  boxesModeCycle,
+  canvasBackingSize,
+  cycleBoxesMode,
+  defaultBoxesMode,
   detectionModelKey,
   distinctModelKeys,
   formatDetectionLabel,
   modelHue,
+  overlaySyncLatencySeconds,
+  resolveBurnedIn,
   selectDetectionResult,
   shouldDrawOverlay,
   trackHue,
@@ -91,6 +97,107 @@ describe('shouldDrawOverlay', () => {
   it('never draws in burned or off mode', () => {
     expect(shouldDrawOverlay('burned', true)).toBe(false);
     expect(shouldDrawOverlay('off', true)).toBe(false);
+  });
+});
+
+// --- Burn-in awareness (docs/plans/active/MEDIA-SOT-PLAN.md §5.4/§8 wave M8) ---------------------------------
+// D1's "defaults reproduce today's behaviour exactly": every deployment this app talks to today
+// never sends `burnedIn` at all (a pre-M5 backend), so `undefined` is by far the most load-bearing
+// case in this whole group — it must behave byte-identically to the pre-wave M8 code.
+
+describe('resolveBurnedIn', () => {
+  it('treats an absent field as burned-in (dev-parity default, D1)', () => {
+    expect(resolveBurnedIn(undefined)).toBe(true);
+  });
+
+  it('trusts an explicit true', () => {
+    expect(resolveBurnedIn(true)).toBe(true);
+  });
+
+  it('only an explicit false means the picture is clean', () => {
+    expect(resolveBurnedIn(false)).toBe(false);
+  });
+});
+
+describe('boxesModeCycle', () => {
+  it('offers the full three-mode cycle when burned-in (including undefined, the pre-M5 default)', () => {
+    expect(boxesModeCycle(undefined)).toEqual(['overlay', 'burned', 'off']);
+    expect(boxesModeCycle(true)).toEqual(['overlay', 'burned', 'off']);
+  });
+
+  it('drops burned from the cycle once a stream is confirmed burn-in-free', () => {
+    expect(boxesModeCycle(false)).toEqual(['overlay', 'off']);
+  });
+});
+
+describe('defaultBoxesMode', () => {
+  it('defaults to burned when burned-in (including undefined — dev parity, D1)', () => {
+    expect(defaultBoxesMode(undefined)).toBe('burned');
+    expect(defaultBoxesMode(true)).toBe('burned');
+  });
+
+  it('defaults to overlay once a stream is confirmed burn-in-free — burned would show nothing', () => {
+    expect(defaultBoxesMode(false)).toBe('overlay');
+  });
+});
+
+describe('cycleBoxesMode', () => {
+  it('cycles overlay -> burned -> off -> overlay when burnedIn is omitted (byte-identical to before wave M8)', () => {
+    expect(cycleBoxesMode('overlay')).toBe('burned');
+    expect(cycleBoxesMode('burned')).toBe('off');
+    expect(cycleBoxesMode('off')).toBe('overlay');
+  });
+
+  it('cycles the same three-step loop for an explicitly burned-in stream', () => {
+    expect(cycleBoxesMode('overlay', true)).toBe('burned');
+    expect(cycleBoxesMode('burned', true)).toBe('off');
+    expect(cycleBoxesMode('off', true)).toBe('overlay');
+  });
+
+  it('skips burned for a confirmed burn-in-free stream — overlay <-> off only', () => {
+    expect(cycleBoxesMode('overlay', false)).toBe('off');
+    expect(cycleBoxesMode('off', false)).toBe('overlay');
+  });
+
+  it('a stale burned reading (burnedIn just resolved false out from under it) restarts from the front of the cycle', () => {
+    expect(cycleBoxesMode('burned', false)).toBe('overlay');
+  });
+});
+
+// --- WHEP-aware overlay sync latency (docs/plans/active/MEDIA-SOT-PLAN.md §6/§8 wave M8) ---------------------
+
+describe('overlaySyncLatencySeconds', () => {
+  it('HLS keeps behindLive unchanged, including null', () => {
+    expect(overlaySyncLatencySeconds('hls', 1.5, null)).toBe(1.5);
+    expect(overlaySyncLatencySeconds('hls', null, 0.3)).toBeNull();
+  });
+
+  it('WHEP uses the measured whepLatencySeconds instead of the old hard-pinned 0', () => {
+    expect(overlaySyncLatencySeconds('webrtc', 0, 0.35)).toBe(0.35);
+  });
+
+  it('WHEP degrades an unmeasured latency (null) to 0, not to behindLive', () => {
+    expect(overlaySyncLatencySeconds('webrtc', 0, null)).toBe(0);
+  });
+});
+
+// --- HiDPI canvas backing store (docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8) -------------------------------
+
+describe('canvasBackingSize', () => {
+  it('is a 1:1 pass-through at devicePixelRatio 1 — no behavior change on a standard display', () => {
+    expect(canvasBackingSize(640, 360, 1)).toEqual({ width: 640, height: 360 });
+  });
+
+  it('scales the backing store by devicePixelRatio on a HiDPI display', () => {
+    expect(canvasBackingSize(640, 360, 2)).toEqual({ width: 1280, height: 720 });
+  });
+
+  it('rounds a fractional ratio (e.g. Windows 125% scaling) to the nearest device pixel', () => {
+    expect(canvasBackingSize(640, 360, 1.25)).toEqual({ width: 800, height: 450 });
+  });
+
+  it('treats a zero or negative ratio as 1 rather than collapsing the backing store to nothing', () => {
+    expect(canvasBackingSize(640, 360, 0)).toEqual({ width: 640, height: 360 });
   });
 });
 

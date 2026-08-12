@@ -1,6 +1,5 @@
 import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition } from '../../core/api/models';
 import { formatDuration } from '../../core/stream-info-logic';
-import type { BoxesMode } from '../../shared/player/player';
 
 /**
  * Re-exported from `core/telemetry/telemetry-logic.ts`, which is now its canonical home
@@ -9,6 +8,15 @@ import type { BoxesMode } from '../../shared/player/player';
  * own existing `trackingIdChanged` import site keeps working verbatim.
  */
 export { trackingIdChanged } from '../../core/telemetry/telemetry-logic';
+
+/**
+ * Re-exported from `shared/player/detection-overlay-logic.ts`, its canonical home since
+ * docs/plans/active/MEDIA-SOT-PLAN.md §8 wave M8 — `WallTile`'s own per-tile cycle button needed the
+ * identical burnedIn-aware cycle, so the function (plus its `BOXES_CYCLE` constant) moved there
+ * rather than staying duplicated. Kept here too so `CockpitFacade`'s existing import site, and this
+ * file's own `cycleBoxesMode` tests, keep working verbatim.
+ */
+export { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 
 /**
  * Pure, Angular-free logic behind `FlyPage` (docs/plans/done/MVP3-PLAN.md §C-b) — split out so picker
@@ -76,14 +84,6 @@ export function latestFinishedUsage(usages: readonly AssetUsage[]): AssetUsage |
  */
 export function isWatchMode(param: string | undefined): boolean {
   return param === '1';
-}
-
-/** `B` cycles the same three states the mouse buttons already offer, in the same left-to-right order. */
-const BOXES_CYCLE: readonly BoxesMode[] = ['overlay', 'burned', 'off'];
-
-export function cycleBoxesMode(current: BoxesMode): BoxesMode {
-  const index = BOXES_CYCLE.indexOf(current);
-  return BOXES_CYCLE[(index + 1) % BOXES_CYCLE.length];
 }
 
 /** How many rows the events ticker overlay shows at once — glanceable, not a full feed (see the Wall rail for that). */
