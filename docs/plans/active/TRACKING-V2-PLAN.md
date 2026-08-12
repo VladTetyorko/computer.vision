@@ -289,6 +289,53 @@ no Java source edits.
 
 ---
 
+## 5b. Status — all waves delivered (2026-08-12)
+
+Branch `feat/tracking-v2`, 15 commits, **704 tests green**, **zero Java source files changed**
+(`adapters/adapter-cv-grpc` re-verified compiling against the extended proto).
+
+| Wave | Delivered |
+|---|---|
+| C0 | Wire frozen additively; `Transform`/`Descriptor`/`CameraPose` + two protocols; `tools/trackeval` |
+| C1 | Predict-on-coast, confidence trigger, LK re-seed + forward–backward, key epoch, wall-clock LOST |
+| C2 | `flow` + `pose` compensation, warping track STATE per frame |
+| C3 | Association inverted into `assign.py`; histogram appearance; `cost` made default on evidence |
+| C4 | Dormant gallery, recovery, `identity_confidence`/`dormant_millis` on the wire |
+| C5 | Re-acquisition bound, session registry by `stream_id`, multi-target FOLLOW (K=1), ROI re-detection |
+
+Final scoreboard, every default, ASSOCIATE:
+
+```
+scenario         IDSW   FM   MT     recovery
+clutter           0      0   10/10  n/a
+crossing          0      0    2/2   n/a
+crowd_recall      0      6    6/6   100%
+dropout           0      4    1/1   100%
+linear            0      0    3/3   n/a
+long_occlusion    0      1    1/1   100%
+occlusion         0      1    1/1   100%
+pan               0      0    4/4   n/a
+pan_step          0      2    2/2   100%
+small_target      0      2    1/1   100%
+```
+
+Zero id switches everywhere; 100% recovery wherever there is a gap.
+
+**Open, deliberately not done.** `follow_top_k` ships at 1 — flipping it needs FOLLOW scoring in the
+harness that is multi-target-aware. `CameraPose` is consumed but never populated: an ~8-line change in
+`DetectionFrameCodec` (Java) turns `pose` compensation on and pays for S2 geolocation at the same
+time. ASSOCIATE's sample rate is unchanged at 10 fps (D1). None of it is blocked on cv-service.
+
+**What the harness cost, and what it caught.** Five defects in the measurement apparatus itself,
+every one of which made the system look *worse or unchanged*, never better: a flat background so
+ego-motion had nothing to estimate from; `Settings()` instead of `Settings.from_env()`, so every A/B
+run silently compared a setting against itself; a coverage denominator that punished not tracking an
+invisible object, making one target unreachable by any amount of work; an RNG draw that re-rolled
+unrelated scenarios; and detector doubles indexed by call count. Measurement infrastructure fails
+toward false pessimism — safer than the alternative, still wrong.
+
+---
+
 ## 6. Invariants every wave must preserve
 
 - **P1** `TRACKING_MODE_OFF` stays byte-identical to the pre-T1 service.
